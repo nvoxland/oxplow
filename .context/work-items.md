@@ -32,6 +32,21 @@ There are two writers, one schema:
   small and oxplow's own need nothing new, and the projection is one
   upsert from one event type.
 
+## Reading them in the UI
+
+`apps/desktop/src/workItems.ts` (P6.E1a) is the UI's one read path:
+`v_work_item` joined to `v_task` for oxplow's own fields (thread,
+`sort_index`, priority, author, note count), scoped to a thread, the
+backlog or everything, in list order; each read returns its `reads` so a
+page re-runs with `useRerunOnChange`. Writes are `work_item.*` commands
+(`transitionWorkItem`, `reorderWorkItem`, `moveWorkItem`). `modelIds.ts`
+converts the models' integer ids to the UI's `thr3` / `tsk42`.
+
+The **Board** (`page:board`, `components/Board/WorkBoard.tsx`) shows
+items as cards in one column per canonical state (archived tasks left
+out). Drag a card to a column, or right-click → Move To, to transition
+it; another provider's items are shown but move in that provider.
+
 ## The capability
 
 `oxplow_domain::work_items`:

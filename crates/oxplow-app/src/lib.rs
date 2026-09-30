@@ -1030,6 +1030,8 @@ impl Services {
             commands::work_item::create_command(work_items.clone()),
             commands::work_item::link_command(work_items.clone()),
             commands::work_item::comment_command(work_items.clone()),
+            commands::work_item::reorder_command(work_items.clone()),
+            commands::work_item::move_command(work_items.clone()),
             commands::effort::open_command(work_items.clone()),
             commands::effort::close_command(work_items.clone()),
         ] {

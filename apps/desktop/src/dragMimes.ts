@@ -31,8 +31,12 @@ export const CONTEXT_REF_MIME = "application/x-oxplow-context-ref";
 /** Rail HUD section reorder. */
 export const RAIL_SECTION_DRAG_MIME = "application/x-oxplow-rail-section";
 
+/** A work item card on the Board, carrying its ref (`work_item:oxplow:tsk4`). */
+export const WORK_ITEM_DRAG_MIME = "application/x-oxplow-work-item";
+
 /** Every MIME above, for invariant checks. Extend when adding one. */
 export const ALL_DRAG_MIMES = [
+  WORK_ITEM_DRAG_MIME,
   TASK_DRAG_MIME,
   CONTEXT_REF_MIME,
   RAIL_SECTION_DRAG_MIME,

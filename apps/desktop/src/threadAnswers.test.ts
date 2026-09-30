@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 
 import type { AcpToolCall } from "./api.js";
-import { answerOfTool, answersFromRows, threadRowId } from "./threadAnswers.js";
+import { threadRowId } from "./modelIds.js";
+import { answerOfTool, answersFromRows } from "./threadAnswers.js";
 
 const call = (over: Partial<AcpToolCall>): AcpToolCall => ({
   id: "t1",

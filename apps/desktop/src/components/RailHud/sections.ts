@@ -66,6 +66,7 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
       badge: opts.backlogReadyCount > 0 ? opts.backlogReadyCount : undefined,
     },
     { id: "archived", label: "Archived", ref: archivedRef(), category: "Work" },
+    { id: "board", label: "Board", ref: indexRef("board"), category: "Work", keywords: "kanban columns state work items" },
     { id: "files", label: "Files", ref: indexRef("files"), category: "Code" },
     { id: "git-dashboard", label: "Git", ref: gitDashboardRef(), category: "Git" },
     { id: "git-history", label: "Git History", ref: indexRef("git-history"), category: "Git" },

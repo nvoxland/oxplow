@@ -5,6 +5,7 @@
  * `useRerunOnChange`; each answer re-runs itself through `runAnswer`.
  */
 import { querySql, runCommand, type AcpToolCall, type SqlCell } from "./api.js";
+import { threadRowId } from "./modelIds.js";
 import type { Reads } from "./tauri-bridge/generated/bindings.js";
 
 export interface AnswerRow {
@@ -15,11 +16,6 @@ export interface AnswerRow {
   lens: string | null;
   /** The lens it was kept as (`lens.keep`), once it was. */
   keptLens: string | null;
-}
-
-/** A thread id (`thr12`) as its row id in the models. */
-export function threadRowId(threadId: string): number {
-  return Number(threadId.replace(/^thr/, ""));
 }
 
 const ANSWERS_SQL = `SELECT ref, title, lens, kept_lens FROM v_thread_answer

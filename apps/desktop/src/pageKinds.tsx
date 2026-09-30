@@ -18,6 +18,7 @@ import {
   Archive,
   BarChart3,
   BookOpen,
+  Columns3,
   CheckCheck,
   CheckSquare,
   Copy,
@@ -104,6 +105,8 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Database;
     case "catalog":
       return BookOpen;
+    case "board":
+      return Columns3;
 
     // Literal-id index pages (kind === id).
     case "agent":

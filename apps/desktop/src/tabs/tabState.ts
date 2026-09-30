@@ -63,7 +63,8 @@ export type RoutePageKind =
   | "custom-dashboard"
   | "dashboards"
   | "explore-data"
-  | "catalog";
+  | "catalog"
+  | "board";
 
 export type PageKind = EntityPageKind | RoutePageKind;
 

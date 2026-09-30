@@ -131,6 +131,7 @@ import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { ExploreDataPage } from "./pages/ExploreDataPage.js";
 import { CatalogPage } from "./pages/CatalogPage.js";
+import { BoardPage } from "./pages/BoardPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
@@ -2870,6 +2871,12 @@ export function App() {
           render: () => <DashboardsIndexPage onOpenPage={nav.navOpen} />,
         };
       },
+      board: (ref, nav) => ({
+        id: ref.id,
+        label: "Board",
+        closable: true,
+        render: () => <BoardPage threadId={selectedThreadId ?? null} onOpenPage={nav.navOpen} />,
+      }),
       catalog: (ref, nav) => ({
         id: ref.id,
         label: "Catalog",

@@ -527,6 +527,233 @@ pub fn comment_command(registry: WorkItemsRegistry) -> Command {
     .expect("work_item.comment registers")
 }
 
+pub const REORDER: &str = "work_item.reorder";
+pub const MOVE: &str = "work_item.move";
+
+/// `work_item.reorder`: put an item before or after another in its own
+/// list (neither: at its end).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemReorderInput {
+    /// The task's ref (`work_item:oxplow:tsk42`).
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    /// Put it just before this item of the same list.
+    #[serde(default)]
+    pub before: Option<String>,
+    /// Put it just after this item of the same list.
+    #[serde(default)]
+    pub after: Option<String>,
+}
+
+/// Which list `work_item.move` takes an item to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveTo {
+    /// The project-wide backlog.
+    Backlog,
+    /// A thread's list (`thr3`).
+    Thread(String),
+}
+
+impl MoveTo {
+    fn thread(&self) -> Result<Option<ThreadId>, CommandError> {
+        match self {
+            MoveTo::Backlog => Ok(None),
+            MoveTo::Thread(raw) => {
+                raw.parse::<ThreadId>()
+                    .map(Some)
+                    .map_err(|e| CommandError::Invalid {
+                        field: Some("/to/thread".into()),
+                        message: format!("{e}"),
+                    })
+            }
+        }
+    }
+
+    fn of(thread: Option<ThreadId>) -> Self {
+        thread.map_or(MoveTo::Backlog, |t| MoveTo::Thread(t.to_string()))
+    }
+}
+
+/// `work_item.move`: take an item to another list — its end, or next to
+/// an item there.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemMoveInput {
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    pub to: MoveTo,
+    #[serde(default)]
+    pub before: Option<String>,
+    #[serde(default)]
+    pub after: Option<String>,
+}
+
+/// The place `before` / `after` name (at most one).
+fn placement(
+    registry: &WorkItemsRegistry,
+    before: &Option<String>,
+    after: &Option<String>,
+) -> Result<oxplow_db::task_store::Placement, CommandError> {
+    use oxplow_db::task_store::Placement;
+    match (before, after) {
+        (Some(_), Some(_)) => Err(CommandError::Invalid {
+            field: Some("/after".into()),
+            message: "give `before` or `after`, not both".into(),
+        }),
+        (Some(b), None) => Ok(Placement::Before(oxplow_task(registry, b, "/before")?)),
+        (None, Some(a)) => Ok(Placement::After(oxplow_task(registry, a, "/after")?)),
+        (None, None) => Ok(Placement::End),
+    }
+}
+
+/// `before` / `after` for a place (the inverse's input).
+fn neighbour(place: oxplow_db::task_store::Placement) -> (Option<String>, Option<String>) {
+    use oxplow_db::task_store::Placement;
+    match place {
+        Placement::End => (None, None),
+        Placement::Before(t) => (Some(work_item_ref(t)), None),
+        Placement::After(t) => (None, Some(work_item_ref(t))),
+    }
+}
+
+/// Place the task in `dest`'s list, refusing a thread that doesn't exist
+/// and an effort the actor may not claim.
+fn place(
+    ctx: &TxCtx<'_>,
+    id: TaskId,
+    dest: Option<ThreadId>,
+    at: oxplow_db::task_store::Placement,
+) -> Result<oxplow_db::task_store::Placed, CommandError> {
+    if let Some(thread) = dest {
+        use rusqlite::OptionalExtension;
+        let exists: Option<i64> = ctx
+            .conn
+            .query_row(
+                "SELECT 1 FROM threads WHERE id = ?1",
+                [thread.value()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| CommandError::Failed {
+                message: e.to_string(),
+            })?;
+        if exists.is_none() {
+            return Err(CommandError::Invalid {
+                field: Some("/to".into()),
+                message: format!("no thread `{thread}`"),
+            });
+        }
+    }
+    let placed =
+        oxplow_db::task_store::place_task_tx(ctx.conn, &ctx.events, id, dest, at, Timestamp::now())
+            .map_err(|e| match e {
+                oxplow_domain::DomainError::NotFound => CommandError::Invalid {
+                    field: Some("/ref".into()),
+                    message: format!("no work item {}", work_item_ref(id)),
+                },
+                oxplow_domain::DomainError::Invalid(message) => CommandError::Invalid {
+                    field: None,
+                    message,
+                },
+                other => CommandError::from(other),
+            })?;
+    ctx.claim(
+        placed.from_thread != dest
+            && dest.is_some()
+            && placed.task.status == TaskStatus::InProgress,
+        &format!("moving {id}, which is in progress, onto a thread"),
+    )?;
+    Ok(placed)
+}
+
+fn place_spec(name: &str, summary: &str, schema: serde_json::Value) -> CommandSpec {
+    CommandSpec {
+        name: name.into(),
+        summary: summary.into(),
+        input_schema: schema,
+        invokers: Invokers::ALL,
+        confirm: Confirm::Never,
+        undoable: true,
+        lifecycle: Lifecycle::Stable,
+        atomicity: Atomicity::Tx,
+        effect: oxplow_domain::CommandEffect::Record,
+    }
+}
+
+pub fn reorder_command(registry: WorkItemsRegistry) -> Command {
+    let spec = place_spec(
+        REORDER,
+        "Put a task before or after another in its own list (neither: at its end).",
+        serde_json::to_value(schemars::schema_for!(WorkItemReorderInput))
+            .expect("schema serializes"),
+    );
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+        let input: WorkItemReorderInput = parse(input)?;
+        let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
+        let at = placement(&registry, &input.before, &input.after)?;
+        let current = oxplow_db::task_store::get_task_tx(ctx.conn, id)
+            .map_err(CommandError::from)?
+            .map(|t| t.thread_id);
+        let Some(list) = current else {
+            return Err(CommandError::Invalid {
+                field: Some("/ref".into()),
+                message: format!("no work item `{}`", input.item_ref),
+            });
+        };
+        let placed = place(ctx, id, list, at)?;
+        let (before, after) = neighbour(placed.from_place);
+        Ok(HandlerOutput {
+            result: serde_json::to_value(&placed.task).expect("Task serializes"),
+            inverse: Some(CommandCall {
+                name: REORDER.into(),
+                input: serde_json::to_value(WorkItemReorderInput {
+                    item_ref: input.item_ref,
+                    before,
+                    after,
+                })
+                .expect("input serializes"),
+            }),
+            events: Vec::new(),
+            after_commit: None,
+        })
+    }));
+    Command::new(spec, handler).expect("work_item.reorder registers")
+}
+
+pub fn move_command(registry: WorkItemsRegistry) -> Command {
+    let spec = place_spec(
+        MOVE,
+        "Move a task to a thread's list or the backlog (at the end, or before/after an item \
+         there); an in-progress task's effort moves with it.",
+        serde_json::to_value(schemars::schema_for!(WorkItemMoveInput)).expect("schema serializes"),
+    );
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+        let input: WorkItemMoveInput = parse(input)?;
+        let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
+        let at = placement(&registry, &input.before, &input.after)?;
+        let placed = place(ctx, id, input.to.thread()?, at)?;
+        let (before, after) = neighbour(placed.from_place);
+        Ok(HandlerOutput {
+            result: serde_json::to_value(&placed.task).expect("Task serializes"),
+            inverse: Some(CommandCall {
+                name: MOVE.into(),
+                input: serde_json::to_value(WorkItemMoveInput {
+                    item_ref: input.item_ref,
+                    to: MoveTo::of(placed.from_thread),
+                    before,
+                    after,
+                })
+                .expect("input serializes"),
+            }),
+            events: Vec::new(),
+            after_commit: None,
+        })
+    }));
+    Command::new(spec, handler).expect("work_item.move registers")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1023,5 +1250,199 @@ mod tests {
             .unwrap()
             .len();
         assert_eq!(before, after);
+    }
+
+    /// A list's task refs in order: a thread's, or the backlog's.
+    async fn list_order(
+        fx: &crate::test_fixtures::EffortFixture,
+        thread: Option<ThreadId>,
+    ) -> Vec<String> {
+        let rows = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT id FROM v_task WHERE thread_id = ?1 OR (?1 IS NULL AND thread_id IS NULL) ORDER BY sort_index, created_at",
+                vec![match thread {
+                    Some(t) => oxplow_db::SqlCell::Int(t.value()),
+                    None => oxplow_db::SqlCell::Null(()),
+                }],
+                None,
+            )
+            .await
+            .unwrap();
+        rows.rows
+            .iter()
+            .map(|r| match &r[0] {
+                oxplow_db::SqlCell::Int(n) => work_item_ref(TaskId::new(*n)),
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    }
+
+    async fn file_on(
+        fx: &crate::test_fixtures::EffortFixture,
+        title: &str,
+        thread: Option<ThreadId>,
+    ) -> String {
+        let mut input = json!({ "title": title });
+        if let Some(t) = thread {
+            input["thread"] = json!(t.to_string());
+        }
+        fx.svc
+            .commands
+            .run(&Actor::Human, CREATE, input, false)
+            .await
+            .unwrap()
+            .result["ref"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// P6.E1a: `work_item.reorder` places an item before or after another
+    /// in its own list; undo puts it back where it was.
+    #[tokio::test]
+    async fn reorder_places_an_item_and_undo_puts_it_back() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let t = work_item_ref(fx.task);
+        let a = file_on(&fx, "a", Some(fx.thread)).await;
+        let b = file_on(&fx, "b", Some(fx.thread)).await;
+        let c = file_on(&fx, "c", Some(fx.thread)).await;
+        assert_eq!(
+            list_order(&fx, Some(fx.thread)).await,
+            vec![t.clone(), a.clone(), b.clone(), c.clone()]
+        );
+
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                REORDER,
+                json!({ "ref": c, "before": a }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            list_order(&fx, Some(fx.thread)).await,
+            vec![t.clone(), c.clone(), a.clone(), b.clone()]
+        );
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                REORDER,
+                json!({ "ref": t, "after": b }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            list_order(&fx, Some(fx.thread)).await,
+            vec![c.clone(), a.clone(), b.clone(), t.clone()]
+        );
+
+        fx.svc
+            .commands
+            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            list_order(&fx, Some(fx.thread)).await,
+            vec![a.clone(), b.clone(), c.clone(), t.clone()]
+        );
+
+        // The anchor must be in the same list, and there's at most one.
+        let other = file_on(&fx, "elsewhere", None).await;
+        for input in [
+            json!({ "ref": a, "before": other }),
+            json!({ "ref": a, "before": b, "after": c }),
+        ] {
+            let err = fx
+                .svc
+                .commands
+                .run(&Actor::Human, REORDER, input.clone(), false)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, CommandError::Invalid { .. }),
+                "{input}: {err:?}"
+            );
+        }
+    }
+
+    /// `work_item.move` takes an item to another list (its end, or next to
+    /// an item there), moving its effort's claim with it; undo brings it
+    /// back to its place.
+    #[tokio::test]
+    async fn move_takes_an_item_to_another_list_and_undo_brings_it_back() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let t = work_item_ref(fx.task);
+        let a = file_on(&fx, "a", Some(fx.thread)).await;
+        let x = file_on(&fx, "x", None).await;
+        let y = file_on(&fx, "y", None).await;
+
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                MOVE,
+                json!({ "ref": t, "to": "backlog", "before": y }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            list_order(&fx, None).await,
+            vec![x.clone(), t.clone(), y.clone()]
+        );
+        assert_eq!(list_order(&fx, Some(fx.thread)).await, vec![a.clone()]);
+        // Its in-progress claim closed with the move.
+        let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
+        let executed = out.event_id.clone().unwrap();
+        assert!(events
+            .iter()
+            .any(|e| e.envelope.cause.as_ref() == Some(&executed)
+                && e.envelope.event_type == "effort.closed"));
+
+        fx.svc
+            .commands
+            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            list_order(&fx, Some(fx.thread)).await,
+            vec![t.clone(), a.clone()]
+        );
+        assert_eq!(list_order(&fx, None).await, vec![x.clone(), y.clone()]);
+
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                MOVE,
+                json!({ "ref": x, "to": { "thread": fx.thread.to_string() } }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            list_order(&fx, Some(fx.thread)).await,
+            vec![t.clone(), a.clone(), x.clone()]
+        );
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                MOVE,
+                json!({ "ref": y, "to": { "thread": "thr999" } }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("thr999"), "{err}");
     }
 }

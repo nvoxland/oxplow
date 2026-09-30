@@ -132,28 +132,11 @@ impl SqliteTaskStore {
             .db
             .transaction(move |tx| {
                 let ev = EventCtx::system(&schemas, "task_service");
-                let now = Timestamp::now();
-                let mut item = get_task_tx(tx, id)?.ok_or(DomainError::NotFound)?;
+                let item = get_task_tx(tx, id)?.ok_or(DomainError::NotFound)?;
                 if item.thread_id == dest {
                     return Ok(item);
                 }
-                item.thread_id = dest;
-                item.sort_index = next_sort_index_tx(tx, dest)?;
-                item.updated_at = now;
-                if update_task_tx(tx, &item).map_err(crate::database::map_sql_err)? == 0 {
-                    return Err(DomainError::NotFound);
-                }
-                log_edited_tx(tx, &ev, &item, vec!["thread".to_string()])?;
-                let work_item = work_item_ref(id);
-                if let Some(open) = crate::effort_store::find_open_for_work_item_tx(tx, &work_item)
-                    .map_err(crate::database::map_sql_err)?
-                {
-                    crate::effort_store::finish_tx(tx, &ev, open.id, None, None, now, false)?;
-                }
-                if let (Some(thread), TaskStatus::InProgress) = (dest, item.status) {
-                    crate::effort_store::start_tx(tx, &ev, &work_item, thread, None, now, false)?;
-                }
-                Ok(item)
+                Ok(place_task_tx(tx, &ev, id, dest, Placement::End, Timestamp::now())?.task)
             })
             .await?;
         Ok(moved)
@@ -443,6 +426,119 @@ pub fn next_sort_index_tx(
         |r| r.get(0),
     )
     .map_err(crate::database::map_sql_err)
+}
+
+/// Where in a list a task goes: its end, or next to another task there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    End,
+    Before(TaskId),
+    After(TaskId),
+}
+
+/// What [`place_task_tx`] did: the task as it now stands, and where it
+/// was (its list, and a neighbour there) — what an undo puts back.
+#[derive(Debug, Clone)]
+pub struct Placed {
+    pub task: Task,
+    pub from_thread: Option<ThreadId>,
+    pub from_place: Placement,
+}
+
+/// A list's live task ids in order: a thread's, or the backlog's (`None`).
+fn list_ids_tx(
+    conn: &rusqlite::Connection,
+    thread: Option<ThreadId>,
+) -> Result<Vec<TaskId>, DomainError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id FROM task WHERE thread_id IS ?1 AND deleted_at IS NULL
+             ORDER BY sort_index ASC, created_at ASC",
+        )
+        .map_err(crate::database::map_sql_err)?;
+    let ids = stmt
+        .query_map(params![thread.map(|t| t.value())], |r| r.get::<_, i64>(0))
+        .map_err(crate::database::map_sql_err)?
+        .collect::<rusqlite::Result<Vec<i64>>>()
+        .map_err(crate::database::map_sql_err)?;
+    Ok(ids.into_iter().map(TaskId::new).collect())
+}
+
+/// Put task `id` in `dest`'s list (`None` = the backlog) at `place`,
+/// renumbering that list's `sort_index` — the core of `work_item.reorder`
+/// (the same list) and `work_item.move` (another). A move takes the task's
+/// claim with it: an open effort closes, and an `in_progress` task landing
+/// on a thread opens one there. Logs `work_item.edited` (`thread` for a
+/// move, `position` within a list). `place` must name a task in that list.
+pub fn place_task_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    id: TaskId,
+    dest: Option<ThreadId>,
+    place: Placement,
+    now: Timestamp,
+) -> Result<Placed, DomainError> {
+    let mut item = get_task_tx(conn, id)?.ok_or(DomainError::NotFound)?;
+    let from_thread = item.thread_id;
+    let from_list = list_ids_tx(conn, from_thread)?;
+    let at = from_list.iter().position(|t| *t == id);
+    let from_place = match at {
+        Some(i) if i > 0 => Placement::After(from_list[i - 1]),
+        Some(i) if i + 1 < from_list.len() => Placement::Before(from_list[i + 1]),
+        _ => Placement::End,
+    };
+    let mut list: Vec<TaskId> = list_ids_tx(conn, dest)?
+        .into_iter()
+        .filter(|t| *t != id)
+        .collect();
+    let index = match place {
+        Placement::End => list.len(),
+        Placement::Before(other) | Placement::After(other) => {
+            let i = list.iter().position(|t| *t == other).ok_or_else(|| {
+                DomainError::Invalid(format!("{other} isn't in the list {id} is going to"))
+            })?;
+            if matches!(place, Placement::After(_)) {
+                i + 1
+            } else {
+                i
+            }
+        }
+    };
+    list.insert(index, id);
+    for (i, t) in list.iter().enumerate() {
+        if *t != id {
+            conn.execute(
+                "UPDATE task SET sort_index = ?2 WHERE id = ?1 AND sort_index != ?2",
+                params![t.value(), i as i64],
+            )
+            .map_err(crate::database::map_sql_err)?;
+        }
+    }
+    let moved = dest != from_thread;
+    item.thread_id = dest;
+    item.sort_index = index as i64;
+    item.updated_at = now;
+    if update_task_tx(conn, &item).map_err(crate::database::map_sql_err)? == 0 {
+        return Err(DomainError::NotFound);
+    }
+    let field = if moved { "thread" } else { "position" };
+    log_edited_tx(conn, ev, &item, vec![field.to_string()])?;
+    if moved {
+        let work_item = work_item_ref(id);
+        if let Some(open) = crate::effort_store::find_open_for_work_item_tx(conn, &work_item)
+            .map_err(crate::database::map_sql_err)?
+        {
+            crate::effort_store::finish_tx(conn, ev, open.id, None, None, now, false)?;
+        }
+        if let (Some(thread), TaskStatus::InProgress) = (dest, item.status) {
+            crate::effort_store::start_tx(conn, ev, &work_item, thread, None, now, false)?;
+        }
+    }
+    Ok(Placed {
+        task: item,
+        from_thread,
+        from_place,
+    })
 }
 
 /// Move task `id` to `to` at `now`, reading the row in the same
