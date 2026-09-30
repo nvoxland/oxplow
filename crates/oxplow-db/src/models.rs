@@ -335,8 +335,9 @@ pub fn view_columns(conn: &Connection, view: &str) -> Result<Vec<(String, String
     Ok(cols)
 }
 
-/// Drop every model's view (before the migrations run). A database from
-/// before the registry has none recorded.
+/// Drop every compiled model's view (before the migrations run). An
+/// extension's entity views stay: they are made when its sources sync,
+/// not at open. A database from before the registry has none recorded.
 pub fn drop_all(conn: &Connection) -> Result<(), DomainError> {
     let has_registry: bool = conn
         .query_row(
@@ -348,9 +349,21 @@ pub fn drop_all(conn: &Connection) -> Result<(), DomainError> {
     if !has_registry {
         return Ok(());
     }
+    // Before V109 every registered model was compiled.
+    let has_kind: bool = conn
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('model') WHERE name = 'kind')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(map_sql_err)?;
     let views: Vec<String> = {
         let mut st = conn
-            .prepare("SELECT view FROM model")
+            .prepare(if has_kind {
+                "SELECT view FROM model WHERE kind = 'sql'"
+            } else {
+                "SELECT view FROM model"
+            })
             .map_err(map_sql_err)?;
         let rows = st
             .query_map([], |r| r.get::<_, String>(0))
@@ -385,7 +398,7 @@ pub fn compile(
     let models = ordered(resolve(&tx, sources, view_of)?)?;
     let previous: Vec<String> = {
         let mut st = tx
-            .prepare("SELECT view FROM model WHERE owner = ?1")
+            .prepare("SELECT view FROM model WHERE owner = ?1 AND kind = 'sql'")
             .map_err(map_sql_err)?;
         let rows = st
             .query_map([owner], |r| r.get::<_, String>(0))
@@ -398,8 +411,11 @@ pub fn compile(
         tx.execute_batch(&format!("DROP VIEW IF EXISTS {}", quote(view)))
             .map_err(map_sql_err)?;
     }
-    tx.execute("DELETE FROM model WHERE owner = ?1", [owner])
-        .map_err(map_sql_err)?;
+    tx.execute(
+        "DELETE FROM model WHERE owner = ?1 AND kind = 'sql'",
+        [owner],
+    )
+    .map_err(map_sql_err)?;
     let now = ts_to_string(oxplow_domain::Timestamp::now());
     for m in &models {
         let decl = &m.source.decl;

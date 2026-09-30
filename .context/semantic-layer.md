@@ -152,6 +152,18 @@ one transaction:
 - records `model` (view, name, owner, version, description, compiled
   SQL), `model_input` (`ref` | `source`) — V105.
 
+**Who owns a view** is the registry's answer (P4.9, V109): `model.kind`
+is `sql` (compiled from a model file at every open — `drop_all` drops
+only these) or `entity` (an extension's synced entity, created by
+`ext_source_store::write_entity` when its source runs and kept across
+opens). An entity view is registered with its extension as owner and its
+`ext__<ext>__<entity>` table as a `source` input, so lineage and
+subscriptions see it. `write_entity` replaces a view only when the
+registry says it is that extension's entity — core's or another
+extension's is refused naming the owner — and recreates a missing view
+without dropping its table. `drop_extension` drops the extension's views
+by the registry. V109 registered the entity views synced before it.
+
 Declared tests (`not_null`, `unique`, `accepted_values`,
 `relationships`, `sql` returning failing rows) run through
 `models::run_tests` and record `model_test` (`passed` / `failed` /

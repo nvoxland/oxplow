@@ -10,7 +10,9 @@
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
-use crate::database::map_sql_err;
+use rusqlite::{params, OptionalExtension};
+
+use crate::database::{map_sql_err, ts_to_string};
 use crate::semantic_layer::SqlCell;
 use crate::Database;
 
@@ -189,23 +191,27 @@ impl SqliteExtSourceStore {
         self.db
             .call_mut(move |conn| {
                 let tx = conn.transaction().map_err(map_sql_err)?;
-                let owned: Vec<(String, String)> = {
-                    let mut st = tx
-                        // Exact substring, not LIKE: `_` is a LIKE wildcard, so
-                        // `ext__gh__` would match `ext__gh_extra__` (tsk368).
-                        .prepare("SELECT type, name FROM sqlite_master WHERE (type = 'view' AND instr(sql, ?1) > 0) OR (type = 'table' AND substr(name, 1, length(?1)) = ?1)")
-                        .map_err(map_sql_err)?;
+                let names = |sql: &str, param: &str| -> Result<Vec<String>, DomainError> {
+                    let mut st = tx.prepare(sql).map_err(map_sql_err)?;
                     let rows = st
-                        .query_map([&prefix], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+                        .query_map([param], |r| r.get::<_, String>(0))
                         .map_err(map_sql_err)?;
-                    rows.collect::<rusqlite::Result<_>>().map_err(map_sql_err)?
+                    rows.collect::<rusqlite::Result<_>>().map_err(map_sql_err)
                 };
-                for (_, name) in owned.iter().filter(|(k, _)| k == "view") {
-                    tx.execute_batch(&format!("DROP VIEW IF EXISTS {}", quote(name)))
+                // Its views, from the registry: entities and SQL models alike.
+                for view in names("SELECT view FROM model WHERE owner = ?1", &ext)? {
+                    tx.execute_batch(&format!("DROP VIEW IF EXISTS {}", quote(&view)))
                         .map_err(map_sql_err)?;
                 }
-                for (_, name) in owned.iter().filter(|(k, _)| k == "table") {
-                    tx.execute_batch(&format!("DROP TABLE IF EXISTS {}", quote(name)))
+                tx.execute("DELETE FROM model WHERE owner = ?1", [&ext])
+                    .map_err(map_sql_err)?;
+                // Its tables. An exact prefix, not LIKE: `_` is a LIKE
+                // wildcard, so `ext__gh__` would match `ext__gh_extra__` (tsk368).
+                for table in names(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, length(?1)) = ?1",
+                    &prefix,
+                )? {
+                    tx.execute_batch(&format!("DROP TABLE IF EXISTS {}", quote(&table)))
                         .map_err(map_sql_err)?;
                 }
                 tx.execute("DELETE FROM ext_source_state WHERE extension = ?1", [&ext])
@@ -266,8 +272,42 @@ fn validate_table(t: &EntityTable) -> Result<(), DomainError> {
     Ok(())
 }
 
-/// (Re)create the table + view when the declared shape changed, then
-/// replace the rows.
+/// Record an entity view as its extension's model: owner, how it's made
+/// (`entity`), and the table it reads.
+fn register_entity(
+    tx: &rusqlite::Transaction<'_>,
+    t: &EntityTable,
+    table: &str,
+    select: &str,
+) -> Result<(), DomainError> {
+    let now = ts_to_string(oxplow_domain::Timestamp::now());
+    tx.execute(
+        "INSERT INTO model (view, name, owner, version, description, sql, compiled_at, kind)
+         VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, 'entity')
+         ON CONFLICT (view) DO UPDATE SET sql = excluded.sql, compiled_at = excluded.compiled_at",
+        params![
+            t.view,
+            t.entity,
+            t.extension,
+            format!(
+                "Entity synced by the `{}` extension's sources.",
+                t.extension
+            ),
+            select,
+            now
+        ],
+    )
+    .map_err(map_sql_err)?;
+    tx.execute(
+        "INSERT OR IGNORE INTO model_input (view, input, kind) VALUES (?1, ?2, 'source')",
+        params![t.view, table],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
+}
+
+/// (Re)create the view when it's new or the declared shape changed (the
+/// table too, for a new shape), then write the rows.
 fn write_entity(
     tx: &rusqlite::Transaction<'_>,
     t: &EntityTable,
@@ -278,27 +318,38 @@ fn write_entity(
         EntityWrite::Upsert { rows, deleted } => (rows, Some(deleted)),
     };
     let table = table_name(t);
-    // A view name that exists but doesn't read our table belongs to core
-    // or another extension: refuse rather than replace it.
-    let existing_view: Option<String> = tx
+    // The registry says who owns a view (P4.9): only this extension's own
+    // entity may be replaced; any other view by that name is refused.
+    let owner: Option<(String, String)> = tx
         .query_row(
-            "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = ?1",
+            "SELECT owner, kind FROM model WHERE view = ?1",
+            [&t.view],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    let view_exists: bool = tx
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = ?1)",
             [&t.view],
             |r| r.get(0),
         )
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            other => Err(other),
-        })
         .map_err(map_sql_err)?;
-    if let Some(sql) = &existing_view {
-        if !sql.contains(&table) {
+    match &owner {
+        Some((o, kind)) if o == &t.extension && kind == "entity" => {}
+        Some((o, _)) => {
             return Err(DomainError::Invalid(format!(
-                "`{}` is already defined by oxplow or another extension; rename the entity",
+                "`{}` belongs to `{o}`; rename the entity",
                 t.view
-            )));
+            )))
         }
+        None if view_exists => {
+            return Err(DomainError::Invalid(format!(
+                "`{}` is already defined; rename the entity",
+                t.view
+            )))
+        }
+        None => {}
     }
     let current: Vec<(String, String, i64)> = {
         let mut st = tx
@@ -320,7 +371,8 @@ fn write_entity(
         .iter()
         .map(|(c, ty)| (c.clone(), ty.sql().to_string(), i64::from(c == &t.key)))
         .collect();
-    if current != wanted || existing_view.is_none() {
+    let registered = owner.is_some() && view_exists;
+    if current != wanted || !registered {
         let cols = t
             .columns
             .iter()
@@ -333,16 +385,22 @@ fn write_entity(
             .map(|(c, _)| quote(c))
             .collect::<Vec<_>>()
             .join(", ");
-        tx.execute_batch(&format!(
-            "DROP VIEW IF EXISTS {view};
-             DROP TABLE IF EXISTS {table};
-             CREATE TABLE {table} ({cols}, PRIMARY KEY ({key}));
-             CREATE VIEW {view} AS SELECT {names} FROM {table};",
-            view = quote(&t.view),
-            table = quote(&table),
-            key = quote(&t.key),
-        ))
-        .map_err(map_sql_err)?;
+        let select = format!("SELECT {names} FROM {}", quote(&table));
+        tx.execute_batch(&format!("DROP VIEW IF EXISTS {}", quote(&t.view)))
+            .map_err(map_sql_err)?;
+        if current != wanted {
+            // The shape changed: the stored rows go with it.
+            tx.execute_batch(&format!(
+                "DROP TABLE IF EXISTS {table};
+                 CREATE TABLE {table} ({cols}, PRIMARY KEY ({key}));",
+                table = quote(&table),
+                key = quote(&t.key),
+            ))
+            .map_err(map_sql_err)?;
+        }
+        tx.execute_batch(&format!("CREATE VIEW {} AS {select}", quote(&t.view)))
+            .map_err(map_sql_err)?;
+        register_entity(tx, t, &table, &select)?;
     }
     match deleted {
         // Replace: the run's rows are the whole entity.
@@ -406,6 +464,119 @@ mod tests {
 
     fn rows(v: serde_json::Value) -> Vec<Vec<SqlCell>> {
         serde_json::from_value(v).unwrap()
+    }
+
+    async fn registered(db: &Database) -> Vec<(String, String, String, String)> {
+        db.read(|tx| {
+            let mut st = tx
+                .prepare(
+                    "SELECT m.view, m.owner, m.kind, coalesce(group_concat(i.input), '')
+                     FROM model m LEFT JOIN model_input i ON i.view = m.view
+                     WHERE m.owner <> 'core' GROUP BY m.view ORDER BY m.view",
+                )
+                .map_err(map_sql_err)?;
+            let rows = st
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                .map_err(map_sql_err)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(map_sql_err)?;
+            Ok(rows)
+        })
+        .await
+        .unwrap()
+    }
+
+    /// P4.9 (tsk494): an entity view is a model its extension owns — in the
+    /// registry with its table as input, so lineage and subscriptions see
+    /// it; kept across the open that recompiles the SQL models; gone with
+    /// its extension. Another extension, or a core view, can't take the name.
+    #[tokio::test]
+    async fn an_entity_view_is_a_model_its_extension_owns() {
+        let db = Database::in_memory();
+        let store = SqliteExtSourceStore::new(db.clone());
+        let t = pr_table(&[("number", StoredType::Integer), ("title", StoredType::Text)]);
+        store
+            .replace_rows(vec![(t.clone(), rows(json!([[1, "one"]])))])
+            .await
+            .unwrap();
+        assert_eq!(
+            registered(&db).await,
+            vec![(
+                "v_my_gh_pr".to_string(),
+                "my-gh".to_string(),
+                "entity".to_string(),
+                "ext__my_gh__pr".to_string()
+            )]
+        );
+        // A second extension whose view name would collide.
+        let other = EntityTable {
+            extension: "my".into(),
+            entity: "gh_pr".into(),
+            view: "v_my_gh_pr".into(),
+            key: "number".into(),
+            columns: vec![("number".into(), StoredType::Integer)],
+        };
+        let err = store
+            .replace_rows(vec![(other, rows(json!([[1]])))])
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("belongs to `my-gh`"), "{err}");
+        // A core model's view.
+        let core = EntityTable {
+            extension: "effort".into(),
+            entity: "file".into(),
+            view: "v_effort_file".into(),
+            key: "path".into(),
+            columns: vec![("path".into(), StoredType::Text)],
+        };
+        let err = store
+            .replace_rows(vec![(core, rows(json!([["a"]])))])
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("belongs to `core`"), "{err}");
+        // The open that recompiles models keeps it.
+        db.call_mut(|conn| {
+            crate::models::drop_all(conn)?;
+            crate::models::compile_core(conn)
+        })
+        .await
+        .unwrap();
+        let sl = SemanticLayer::new(db.clone());
+        assert!(sl
+            .query_sql("SELECT * FROM v_my_gh_pr", vec![], None)
+            .await
+            .is_ok());
+        store.drop_extension("my-gh").await.unwrap();
+        assert!(registered(&db).await.is_empty());
+    }
+
+    /// V109: an entity view made before the registry is registered as its
+    /// extension's model — found through the extension's source state —
+    /// so the next write sees it as its own.
+    #[test]
+    fn v109_registers_existing_entity_views() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::migrate_to_for_tests(&mut conn, 108);
+        conn.execute_batch(
+            "INSERT INTO ext_source_state (extension, source_id, status, last_run_at)
+               VALUES ('my-gh', 'prs', 'ok', '2026-01-01T00:00:00Z');
+             CREATE TABLE ext__my_gh__pr (number INTEGER, PRIMARY KEY (number));
+             CREATE VIEW v_my_gh_pr AS SELECT number FROM ext__my_gh__pr;",
+        )
+        .unwrap();
+        crate::database::migrate_and_compile(&mut conn).unwrap();
+        let row: (String, String, String) = conn
+            .query_row(
+                "SELECT m.owner, m.kind, i.input FROM model m JOIN model_input i USING (view)
+                 WHERE m.view = 'v_my_gh_pr'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            ("my-gh".into(), "entity".into(), "ext__my_gh__pr".into())
+        );
     }
 
     #[tokio::test]
@@ -620,7 +791,7 @@ mod tests {
         };
         let err = store.replace_rows(vec![(t, vec![])]).await.unwrap_err();
         assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("already defined")),
+            matches!(err, DomainError::Invalid(ref m) if m.contains("belongs to `core`")),
             "{err:?}"
         );
         // The core view still works.

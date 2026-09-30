@@ -1,2 +1,2 @@
-SELECT view, name, owner, version, description, sql, compiled_at
+SELECT view, name, owner, kind, version, description, sql, compiled_at
 FROM source('model')

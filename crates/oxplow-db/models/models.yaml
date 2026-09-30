@@ -717,12 +717,13 @@
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
 - name: model
-  version: 1
+  version: 2
   description: "Models: every published view, as compiled at this open — core ones and each extension's. Read a model's columns in `v_model_column`, what it reads in `v_model_lineage` and its declared tests' results in `v_model_test`."
   columns:
     - { name: view, type: TEXT, doc: "The view to query (`v_task`)." }
     - { name: name, type: TEXT, doc: "The model's name within its owner (`task`)." }
     - { name: owner, type: TEXT, doc: "`core`, or the extension that declares it." }
+    - { name: kind, type: TEXT, doc: "`sql` (compiled from a model file) or `entity` (an extension's synced entity)." }
     - { name: version, type: INTEGER, doc: "Contract version: a change to the columns bumps it." }
     - { name: description, type: TEXT, doc: "What the view holds." }
     - { name: sql, type: TEXT, doc: "The SELECT the view was compiled from, references resolved." }
