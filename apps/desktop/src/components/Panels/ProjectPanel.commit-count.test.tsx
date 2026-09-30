@@ -21,11 +21,11 @@ const SUMMARY = { modified: 1, added: 0, deleted: 0, renamed: 0, untracked: 1, t
 // Five indexed files — more than the 2 changed — so a button bound to the
 // file count would read "Commit (5)" and fail the assertion below.
 const FILES = [
-  { path: "a.ts", git_status: "modified" },
-  { path: "b.ts", git_status: "untracked" },
-  { path: "c.ts", git_status: null },
-  { path: "d.ts", git_status: null },
-  { path: "e.ts", git_status: null },
+  { path: "a.ts", status: "modified" },
+  { path: "b.ts", status: "untracked" },
+  { path: "c.ts", status: null },
+  { path: "d.ts", status: null },
+  { path: "e.ts", status: null },
 ];
 
 mock.module("../../tauri-bridge/transport.js", () => ({

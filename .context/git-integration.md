@@ -266,18 +266,26 @@ the renderer paints first, and the `BackgroundTaskIndicator` shows
 each scan settles. Filesystem events start arriving once the cache
 walk completes.
 
-## GitService — the singleton
+## GitService — the git-native facade, shrinking
 
-Every read of git state and every mutating git op routes through
-`oxplow_app::git_service::GitService`, held on `Services` as
-`Arc<GitService>`. One per app, not per stream.
+Core reaches version control through the **VCS capability**
+(`oxplow_domain::vcs::Vcs`, provider `oxplow_app::vcs::GitProvider`) —
+see [vcs.md](./vcs.md). `GitService` is what remains of the old
+singleton: stream-taking reads and mutations the desktop's git-shaped
+RPCs still call, deleted RPC by RPC through P5 (B4–B7). Three things
+already left it (P5.B1):
+
+- **Routing** — stream → worktree is `WorktreeRouter`
+  (`Services.worktrees`), a memo over the stream store.
+- **File I/O** — list/read/write/create/rename/delete is
+  `WorkspaceFiles` (`Services.workspace_files`); it isn't git.
+- **Branch reconciliation** — `BranchReconciler`
+  (`Services.branch_reconciler`, spawned at boot).
 
 **It is a thin facade.** Every read shells out live via
 `tokio::task::spawn_blocking(oxplow_git::*)`; every write delegates to
 the matching `oxplow_git::*` op and then emits the renderer-facing
-`OxplowEvent`. There is no shared mutable cache. The only state the
-service keeps is a `HashMap<StreamId, PathBuf>` routing table
-(`worktrees`) maintained by `register/deregister`.
+`OxplowEvent`. There is no shared mutable cache.
 
 ### Why no cache
 
@@ -291,39 +299,24 @@ broke snapshot capture's commit-record path.
 
 The wrapped `oxplow_git::*` ops are sub-10ms libgit2 calls. The cache
 wasn't worth the correctness cost. If a future profile shows a real
-hotspot, **add caching inside the facade** (per-method memo, request
-coalescer, whatever) — never let cached state leak through the API.
-Callers must not be able to tell whether anything is cached.
-
-### Lifecycle hooks
-
-`GitService::register(stream_id, worktree)` and `deregister(stream_id)`
-are called from the stream lifecycle commands (`create_worktree`,
-`adopt_worktree`, `delete_stream`, `archive_stream`) so the routing
-table stays in sync with the stream list. At boot, `GitService::spawn`
-seeds itself from `streams.list()` asynchronously — readers against
-unseeded streams fall back to the project root via `resolve_repo_dir`.
-
-A small bus listener subscribes to `GitRefsChanged` for one purpose
-only: re-running `reconcile_branch` so the per-stream `branch` field
-in the stream record follows the live HEAD. That's persistent state
-in the stream record (used by the bottom-bar branch chip and agent
-prompts), not a cache.
+hotspot, **add caching inside the provider** — never let cached state
+leak through the API. Callers must not be able to tell whether anything
+is cached.
 
 ### Mutating ops emit events
 
 `commit_all`, `add_path`, `restore_path`, `fetch`, `pull`,
 `pull_remote_into_current`, `push`, `push_current_to`, `merge`,
-`rebase`, `rename_branch`, `delete_branch`, `append_to_gitignore`,
-plus the `*_workspace_*` write ops, all pass through to `oxplow_git::*`
-and emit `OxplowEvent::WorkspaceChanged` (always) plus
-`GitRefsChanged` (when the op may have moved HEAD or any ref).
+`rebase`, `rename_branch`, `delete_branch`, `append_to_gitignore` pass
+through to `oxplow_git::*` and emit `OxplowEvent::WorkspaceChanged`
+(always) plus `GitRefsChanged` (when the op may have moved HEAD or any
+ref). `WorkspaceFiles`' writes emit `WorkspaceChanged` the same way.
 Subscribers refetch on receipt; no cache is being invalidated because
 there is no cache.
 
 ### Stream-scoped destructive ops require a resolvable stream
 
-Most reads resolve their worktree via `resolve_repo_dir(stream_id)`,
+Reads resolve their worktree via `WorktreeRouter::resolve(stream_id)`,
 which treats an absent or unparseable `stream_id` as "use the project
 root" (the primary worktree). For **destructive** stream-scoped ops —
 `commit_all`, `merge`, `rebase` — that silent fallback is a footgun:
@@ -333,14 +326,14 @@ arriving as `None`) would run the op against the PRIMARY worktree and
 get a misleading `{"success":true,"stdout":"Already up to date."}` on
 the wrong branch.
 
-So those three ops resolve via `resolve_stream_worktree_strict`
-instead, which **errors** when `stream_id` is absent, syntactically
-invalid, or names an unknown stream — never falling back to primary.
-The UI is unaffected (its `api.ts` wrappers always pass a concrete
-stream id, and the primary stream is itself a registered stream row);
-the guard exists for MCP/scripted/future callers. To run one of these
-ops against the primary worktree, pass the primary stream's id
-explicitly — `None` is rejected on purpose.
+So those ops resolve via `WorktreeRouter::resolve_strict` instead,
+which **errors** when `stream_id` is absent, syntactically invalid, or
+names an unknown stream — never falling back to primary. The UI is
+unaffected (its `api.ts` wrappers always pass a concrete stream id, and
+the primary stream is itself a stream row); the guard exists for
+MCP/scripted/future callers. To run one of these ops against the
+primary worktree, pass the primary stream's id explicitly — `None` is
+rejected on purpose.
 
 ### Smart conflict auto-resolution (the IntelliJ magic-wand pass)
 
@@ -606,6 +599,7 @@ return the same data — direct is just one less hop.
 
 ## Related
 
+- [vcs.md](./vcs.md) — the VCS capability core reads git through.
 - [data-model.md](./data-model.md) — schema overview, including the
   `page_ref` table the commit indexer writes into.
 - [agent-model.md](./agent-model.md) — Stop-hook pipeline (no commit

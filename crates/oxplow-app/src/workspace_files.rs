@@ -1,26 +1,25 @@
-//! Workspace-files surface — list/read/write/create/rename/delete
-//! files inside the project root, with path-traversal protection.
+//! A workspace's files (`.context/vcs.md`): list, read, write, create,
+//! rename and delete under a stream's workspace, with path-traversal
+//! protection, annotated with the VCS's status. Plain file I/O — no VCS
+//! call beyond `status` — so it lives beside the router, not in a
+//! provider. A write announces `WorkspaceChanged` for its stream.
 //!
-//! Direct port of `src/git/workspace-files.ts`. Path resolution
-//! always happens through `resolve_workspace_path`, which rejects
-//! anything that escapes the project root after canonicalization.
+//! Every path resolves through `resolve_workspace_path`, which rejects
+//! anything that escapes the root.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-pub enum GitFileStatus {
-    Modified,
-    Added,
-    Deleted,
-    Renamed,
-    Untracked,
-}
+use oxplow_domain::vcs::{FileStatus, Vcs};
+use oxplow_domain::StreamId;
+
+use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
+use crate::worktrees::WorktreeRouter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
@@ -30,11 +29,12 @@ pub enum WorkspaceEntryKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceEntry {
     pub name: String,
     pub path: String,
     pub kind: WorkspaceEntryKind,
-    pub git_status: Option<GitFileStatus>,
+    pub status: Option<FileStatus>,
     pub has_changes: bool,
 }
 
@@ -45,19 +45,10 @@ pub struct WorkspaceFile {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceIndexedFile {
     pub path: String,
-    pub git_status: Option<GitFileStatus>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct WorkspaceStatusSummary {
-    pub modified: u32,
-    pub added: u32,
-    pub deleted: u32,
-    pub renamed: u32,
-    pub untracked: u32,
-    pub total: u32,
+    pub status: Option<FileStatus>,
 }
 
 #[derive(Debug, Error)]
@@ -72,14 +63,154 @@ pub enum WorkspaceError {
     AlreadyExists,
 }
 
+/// A stream's files. Held in `Services` as `workspace_files`.
+pub struct WorkspaceFiles {
+    router: Arc<WorktreeRouter>,
+    vcs: Arc<dyn Vcs>,
+    events: EventBus,
+}
+
+impl WorkspaceFiles {
+    pub fn new(router: Arc<WorktreeRouter>, vcs: Arc<dyn Vcs>, events: EventBus) -> Self {
+        Self {
+            router,
+            vcs,
+            events,
+        }
+    }
+
+    /// Path → status for the workspace; empty when it isn't under
+    /// version control.
+    async fn statuses(&self, root: &Path) -> HashMap<String, FileStatus> {
+        self.vcs
+            .status(root)
+            .await
+            .map(|s| s.entries.into_iter().map(|e| (e.path, e.status)).collect())
+            .unwrap_or_default()
+    }
+
+    fn announce(&self, stream_id: Option<&str>) {
+        if let Some(id) = stream_id.and_then(StreamId::try_from_str) {
+            self.events.emit(OxplowEvent::WorkspaceChanged {
+                stream_id: id,
+                change_kind: WorkspaceChangeKind::Updated,
+                path: String::new(),
+            });
+        }
+    }
+
+    async fn blocking<R: Send + 'static>(
+        f: impl FnOnce() -> Result<R, WorkspaceError> + Send + 'static,
+    ) -> Result<R, WorkspaceError> {
+        tokio::task::spawn_blocking(f)
+            .await
+            .map_err(|e| WorkspaceError::Io(std::io::Error::other(e.to_string())))?
+    }
+
+    pub async fn list_entries(
+        &self,
+        stream_id: Option<&str>,
+        relative_path: String,
+    ) -> Result<Vec<WorkspaceEntry>, WorkspaceError> {
+        let root = self.router.resolve(stream_id).await;
+        let statuses = self.statuses(&root).await;
+        Self::blocking(move || list_workspace_entries(&root, &relative_path, &statuses)).await
+    }
+
+    /// Every file, pruned by `filter` (the project's `generated:`
+    /// exclusions), which also bounds the walk.
+    pub async fn list_files(
+        &self,
+        stream_id: Option<&str>,
+        filter: oxplow_fs_watch::WorkspaceFilter,
+    ) -> Result<Vec<WorkspaceIndexedFile>, WorkspaceError> {
+        let root = self.router.resolve(stream_id).await;
+        let statuses = self.statuses(&root).await;
+        Self::blocking(move || {
+            list_workspace_files(&root, &statuses, "", &|path| {
+                filter.ignore(Path::new(path), false)
+            })
+        })
+        .await
+    }
+
+    pub async fn read(
+        &self,
+        stream_id: Option<&str>,
+        relative_path: String,
+    ) -> Result<WorkspaceFile, WorkspaceError> {
+        let root = self.router.resolve(stream_id).await;
+        Self::blocking(move || read_workspace_file(&root, &relative_path)).await
+    }
+
+    pub async fn write(
+        &self,
+        stream_id: Option<&str>,
+        relative_path: String,
+        content: String,
+    ) -> Result<WorkspaceFile, WorkspaceError> {
+        let root = self.router.resolve(stream_id).await;
+        let out =
+            Self::blocking(move || write_workspace_file(&root, &relative_path, &content)).await?;
+        self.announce(stream_id);
+        Ok(out)
+    }
+
+    pub async fn create_file(
+        &self,
+        stream_id: Option<&str>,
+        relative_path: String,
+        content: String,
+    ) -> Result<WorkspaceFile, WorkspaceError> {
+        let root = self.router.resolve(stream_id).await;
+        let out =
+            Self::blocking(move || create_workspace_file(&root, &relative_path, &content)).await?;
+        self.announce(stream_id);
+        Ok(out)
+    }
+
+    pub async fn create_directory(
+        &self,
+        stream_id: Option<&str>,
+        relative_path: String,
+    ) -> Result<String, WorkspaceError> {
+        let root = self.router.resolve(stream_id).await;
+        Self::blocking(move || create_workspace_directory(&root, &relative_path)).await
+    }
+
+    pub async fn rename(
+        &self,
+        stream_id: Option<&str>,
+        from_path: String,
+        to_path: String,
+    ) -> Result<(String, String), WorkspaceError> {
+        let root = self.router.resolve(stream_id).await;
+        let out =
+            Self::blocking(move || rename_workspace_path(&root, &from_path, &to_path)).await?;
+        self.announce(stream_id);
+        Ok(out)
+    }
+
+    pub async fn delete(
+        &self,
+        stream_id: Option<&str>,
+        relative_path: String,
+    ) -> Result<String, WorkspaceError> {
+        let root = self.router.resolve(stream_id).await;
+        let out = Self::blocking(move || delete_workspace_path(&root, &relative_path)).await?;
+        self.announce(stream_id);
+        Ok(out)
+    }
+}
+
 /// List the immediate children of `root_dir + relative_path`,
 /// excluding `.git/`. Directories sort before files; otherwise
-/// alphabetical. `git_statuses` annotates files (and propagates into
+/// alphabetical. `statuses` annotates files (and propagates into
 /// `has_changes` for directories that contain changed descendants).
 pub fn list_workspace_entries(
     root_dir: &Path,
     relative_path: &str,
-    git_statuses: &HashMap<String, GitFileStatus>,
+    statuses: &HashMap<String, FileStatus>,
 ) -> Result<Vec<WorkspaceEntry>, WorkspaceError> {
     let dir = resolve_workspace_path(root_dir, relative_path)?;
     let mut entries: Vec<WorkspaceEntry> = Vec::new();
@@ -95,20 +226,20 @@ pub fn list_workspace_entries(
             WorkspaceEntryKind::File
         };
         let path = normalize_relative_path(relative_path, &name);
-        let git_status = if matches!(kind, WorkspaceEntryKind::File) {
-            git_statuses.get(&path).copied()
+        let status = if matches!(kind, WorkspaceEntryKind::File) {
+            statuses.get(&path).copied()
         } else {
             None
         };
         let has_changes = match kind {
-            WorkspaceEntryKind::Directory => has_descendant_changes(&path, git_statuses),
-            WorkspaceEntryKind::File => git_status.is_some(),
+            WorkspaceEntryKind::Directory => has_descendant_changes(&path, statuses),
+            WorkspaceEntryKind::File => status.is_some(),
         };
         entries.push(WorkspaceEntry {
             name,
             path,
             kind,
-            git_status,
+            status,
             has_changes,
         });
     }
@@ -134,7 +265,7 @@ pub fn list_workspace_entries(
 /// index this" is the `generated:` list.
 pub fn list_workspace_files(
     root_dir: &Path,
-    git_statuses: &HashMap<String, GitFileStatus>,
+    statuses: &HashMap<String, FileStatus>,
     relative_path: &str,
     ignore: &dyn Fn(&str) -> bool,
 ) -> Result<Vec<WorkspaceIndexedFile>, WorkspaceError> {
@@ -151,11 +282,11 @@ pub fn list_workspace_files(
             continue;
         }
         if entry.file_type()?.is_dir() {
-            files.extend(list_workspace_files(root_dir, git_statuses, &path, ignore)?);
+            files.extend(list_workspace_files(root_dir, statuses, &path, ignore)?);
         } else {
             files.push(WorkspaceIndexedFile {
                 path: path.clone(),
-                git_status: git_statuses.get(&path).copied(),
+                status: statuses.get(&path).copied(),
             });
         }
     }
@@ -259,28 +390,9 @@ pub fn delete_workspace_path(
     Ok(path)
 }
 
-pub fn summarize_git_statuses(
-    git_statuses: &HashMap<String, GitFileStatus>,
-) -> WorkspaceStatusSummary {
-    let mut s = WorkspaceStatusSummary::default();
-    for status in git_statuses.values() {
-        match status {
-            GitFileStatus::Modified => s.modified += 1,
-            GitFileStatus::Added => s.added += 1,
-            GitFileStatus::Deleted => s.deleted += 1,
-            GitFileStatus::Renamed => s.renamed += 1,
-            GitFileStatus::Untracked => s.untracked += 1,
-        }
-        s.total += 1;
-    }
-    s
-}
-
-fn has_descendant_changes(path: &str, git_statuses: &HashMap<String, GitFileStatus>) -> bool {
+fn has_descendant_changes(path: &str, statuses: &HashMap<String, FileStatus>) -> bool {
     let prefix = format!("{path}/");
-    git_statuses
-        .keys()
-        .any(|p| p == path || p.starts_with(&prefix))
+    statuses.keys().any(|p| p == path || p.starts_with(&prefix))
 }
 
 fn normalize_relative_path(base: &str, name: &str) -> String {
@@ -470,7 +582,7 @@ mod tests {
         // list (the `ignore` closure) is the single source of truth for
         // exclusions. A gitignored-but-not-generated path stays visible.
         let dir = tempdir().unwrap();
-        git2::Repository::init(dir.path()).unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
         write_workspace_file(dir.path(), ".gitignore", "dist/\nsecret.log\n").unwrap();
         create_workspace_directory(dir.path(), "dist").unwrap();
         write_workspace_file(dir.path(), "dist/bundle.js", "").unwrap();
@@ -486,26 +598,12 @@ mod tests {
     }
 
     #[test]
-    fn summarize_counts_each_status() {
-        let mut statuses = HashMap::new();
-        statuses.insert("a".into(), GitFileStatus::Modified);
-        statuses.insert("b".into(), GitFileStatus::Modified);
-        statuses.insert("c".into(), GitFileStatus::Added);
-        statuses.insert("d".into(), GitFileStatus::Untracked);
-        let s = summarize_git_statuses(&statuses);
-        assert_eq!(s.modified, 2);
-        assert_eq!(s.added, 1);
-        assert_eq!(s.untracked, 1);
-        assert_eq!(s.total, 4);
-    }
-
-    #[test]
     fn directory_with_changed_descendant_has_changes_flag() {
         let dir = tempdir().unwrap();
         std::fs::create_dir(dir.path().join("a")).unwrap();
         std::fs::write(dir.path().join("a/b.txt"), "").unwrap();
         let mut statuses = HashMap::new();
-        statuses.insert("a/b.txt".into(), GitFileStatus::Modified);
+        statuses.insert("a/b.txt".into(), FileStatus::Modified);
         let entries = list_workspace_entries(dir.path(), "", &statuses).unwrap();
         let a = entries.iter().find(|e| e.name == "a").unwrap();
         assert!(a.has_changes);

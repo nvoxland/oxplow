@@ -59,8 +59,8 @@ async fn report_for(svc: &Services, rules: Vec<ZoneRuleConfig>) -> Result<ZoneRe
         )
     };
     let files = svc
-        .git
-        .list_workspace_files(None, filter)
+        .workspace_files
+        .list_files(None, filter)
         .await
         .map_err(|e| e.to_string())?;
 

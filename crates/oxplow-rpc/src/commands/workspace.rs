@@ -1,8 +1,9 @@
 //! Cores for the `workspace` command module. Populated by the
 //! oxplow-tauri-ipc -> oxplow-rpc migration; see crate docs.
 
+use oxplow_app::workspace_files::{WorkspaceEntry, WorkspaceFile, WorkspaceIndexedFile};
 use oxplow_app::Services;
-use oxplow_git::{WorkspaceEntry, WorkspaceFile, WorkspaceIndexedFile, WorkspaceStatusSummary};
+use oxplow_git::WorkspaceStatusSummary;
 use oxplow_tree_source::TreeVersion;
 
 use crate::error::IpcError;
@@ -25,8 +26,8 @@ pub async fn read_file(
 ) -> Result<Option<String>, IpcError> {
     match version {
         TreeVersion::Disk => match svc
-            .git
-            .read_workspace_file(stream_id.as_deref(), relative_path)
+            .workspace_files
+            .read(stream_id.as_deref(), relative_path)
             .await
         {
             Ok(file) => Ok(Some(file.content)),
@@ -76,8 +77,8 @@ pub async fn list_workspace_entries(
     stream_id: Option<String>,
     relative_path: String,
 ) -> Result<Vec<WorkspaceEntry>, IpcError> {
-    svc.git
-        .list_workspace_entries(stream_id.as_deref(), relative_path)
+    svc.workspace_files
+        .list_entries(stream_id.as_deref(), relative_path)
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
 }
@@ -103,8 +104,8 @@ pub async fn list_workspace_files(
             })
             .unwrap_or_default()
     };
-    svc.git
-        .list_workspace_files(stream_id.as_deref(), filter)
+    svc.workspace_files
+        .list_files(stream_id.as_deref(), filter)
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
 }
@@ -114,8 +115,8 @@ pub async fn read_workspace_file(
     stream_id: Option<String>,
     relative_path: String,
 ) -> Result<WorkspaceFile, IpcError> {
-    svc.git
-        .read_workspace_file(stream_id.as_deref(), relative_path)
+    svc.workspace_files
+        .read(stream_id.as_deref(), relative_path)
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
 }
@@ -126,8 +127,8 @@ pub async fn write_workspace_file(
     relative_path: String,
     content: String,
 ) -> Result<WorkspaceFile, IpcError> {
-    svc.git
-        .write_workspace_file(stream_id.as_deref(), relative_path, content)
+    svc.workspace_files
+        .write(stream_id.as_deref(), relative_path, content)
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
 }
@@ -138,8 +139,8 @@ pub async fn create_workspace_file(
     relative_path: String,
     content: String,
 ) -> Result<WorkspaceFile, IpcError> {
-    svc.git
-        .create_workspace_file(stream_id.as_deref(), relative_path, content)
+    svc.workspace_files
+        .create_file(stream_id.as_deref(), relative_path, content)
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
 }
@@ -149,8 +150,8 @@ pub async fn create_workspace_directory(
     stream_id: Option<String>,
     relative_path: String,
 ) -> Result<String, IpcError> {
-    svc.git
-        .create_workspace_directory(stream_id.as_deref(), relative_path)
+    svc.workspace_files
+        .create_directory(stream_id.as_deref(), relative_path)
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
 }
@@ -161,8 +162,8 @@ pub async fn rename_workspace_path(
     from_path: String,
     to_path: String,
 ) -> Result<(String, String), IpcError> {
-    svc.git
-        .rename_workspace_path(stream_id.as_deref(), from_path, to_path)
+    svc.workspace_files
+        .rename(stream_id.as_deref(), from_path, to_path)
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
 }
@@ -172,8 +173,8 @@ pub async fn delete_workspace_path(
     stream_id: Option<String>,
     relative_path: String,
 ) -> Result<String, IpcError> {
-    svc.git
-        .delete_workspace_path(stream_id.as_deref(), relative_path)
+    svc.workspace_files
+        .delete(stream_id.as_deref(), relative_path)
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
 }

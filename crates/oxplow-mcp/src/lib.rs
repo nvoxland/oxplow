@@ -1295,7 +1295,7 @@ impl OxplowMcp {
                        person on this machine has approved its current script."
     )]
     async fn list_sources(&self) -> Result<CallToolResult, McpError> {
-        let root = self.services.git.resolve_repo_dir(None).await;
+        let root = self.services.worktrees.resolve(None).await;
         let list = oxplow_app::source_runner::list_sources(
             &oxplow_app::source_runner::Sources::of(&self.services, &root),
         )
@@ -1357,8 +1357,8 @@ impl OxplowMcp {
         check_optional_stream("preview_source", p.stream_id.as_deref())?;
         let root = self
             .services
-            .git
-            .resolve_repo_dir(p.stream_id.as_deref())
+            .worktrees
+            .resolve(p.stream_id.as_deref())
             .await;
         let preview = oxplow_app::source_runner::preview_source(
             &oxplow_app::source_runner::Sources::of(&self.services, &root),
@@ -1604,8 +1604,8 @@ impl OxplowMcp {
         check_optional_stream("review_extension", p.stream_id.as_deref())?;
         let root = self
             .services
-            .git
-            .resolve_repo_dir(p.stream_id.as_deref())
+            .worktrees
+            .resolve(p.stream_id.as_deref())
             .await;
         let layer = self.services.sql.clone();
         let review = match (p.git_url.as_deref(), p.name.as_deref()) {
@@ -1657,8 +1657,8 @@ impl OxplowMcp {
         check_optional_stream("install_extension", p.stream_id.as_deref())?;
         let root = self
             .services
-            .git
-            .resolve_repo_dir(p.stream_id.as_deref())
+            .worktrees
+            .resolve(p.stream_id.as_deref())
             .await;
         let ext = tokio::task::spawn_blocking(move || {
             oxplow_app::extensions::install_extension(
@@ -1687,8 +1687,8 @@ impl OxplowMcp {
         check_optional_stream("update_extension", p.stream_id.as_deref())?;
         let root = self
             .services
-            .git
-            .resolve_repo_dir(p.stream_id.as_deref())
+            .worktrees
+            .resolve(p.stream_id.as_deref())
             .await;
         let name = p.name.clone();
         let ext = tokio::task::spawn_blocking(move || {
@@ -1725,8 +1725,8 @@ impl OxplowMcp {
         check_optional_stream("list_extensions", params.0.stream_id.as_deref())?;
         let root = self
             .services
-            .git
-            .resolve_repo_dir(params.0.stream_id.as_deref())
+            .worktrees
+            .resolve(params.0.stream_id.as_deref())
             .await;
         let listed = self
             .services
@@ -1748,8 +1748,8 @@ impl OxplowMcp {
         check_optional_stream("list_lenses", params.0.stream_id.as_deref())?;
         let root = self
             .services
-            .git
-            .resolve_repo_dir(params.0.stream_id.as_deref())
+            .worktrees
+            .resolve(params.0.stream_id.as_deref())
             .await;
         let lenses: Vec<oxplow_app::extensions::Lens> = self
             .services
@@ -1770,8 +1770,8 @@ impl OxplowMcp {
         check_optional_stream("get_lens", p.stream_id.as_deref())?;
         let root = self
             .services
-            .git
-            .resolve_repo_dir(p.stream_id.as_deref())
+            .worktrees
+            .resolve(p.stream_id.as_deref())
             .await;
         let lens = self
             .services
@@ -1793,8 +1793,8 @@ impl OxplowMcp {
         check_optional_stream("run_lens", p.stream_id.as_deref())?;
         let root = self
             .services
-            .git
-            .resolve_repo_dir(p.stream_id.as_deref())
+            .worktrees
+            .resolve(p.stream_id.as_deref())
             .await;
         let overrides = p
             .params
@@ -1832,8 +1832,8 @@ impl OxplowMcp {
         check_optional_stream("run_lens_action", p.stream_id.as_deref())?;
         let root = self
             .services
-            .git
-            .resolve_repo_dir(p.stream_id.as_deref())
+            .worktrees
+            .resolve(p.stream_id.as_deref())
             .await;
         let overrides = p
             .params
@@ -1872,8 +1872,8 @@ impl OxplowMcp {
         check_optional_stream("validate_extension", p.stream_id.as_deref())?;
         let root = self
             .services
-            .git
-            .resolve_repo_dir(p.stream_id.as_deref())
+            .worktrees
+            .resolve(p.stream_id.as_deref())
             .await;
         let report = oxplow_sdk::check(
             &root,
@@ -4397,8 +4397,8 @@ impl OxplowMcp {
         let p = params.0;
         let file = self
             .services
-            .git
-            .read_workspace_file(Some(p.stream_id.as_str()), p.path.clone())
+            .workspace_files
+            .read(Some(p.stream_id.as_str()), p.path.clone())
             .await
             .map_err(|e| internal(e.to_string()))?;
         let units: Vec<serde_json::Value> = oxplow_code_metrics::list_units(&p.path, &file.content)

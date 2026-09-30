@@ -21,6 +21,7 @@ pub mod task;
 pub mod thread;
 pub mod time;
 pub mod tree_diff;
+pub mod vcs;
 
 pub use agent::AgentKind;
 pub use commands::{

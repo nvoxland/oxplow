@@ -32,7 +32,7 @@ pub struct LocalBlameEntry {
 }
 
 pub fn local_blame(repo: &Path, path: &str, disk_text: &str) -> Vec<LocalBlameEntry> {
-    let git = git_blame(repo, path);
+    let git = git_blame(repo, "HEAD", path).unwrap_or_default();
     let line_count = disk_text.split('\n').count() as u32;
     let mut out = Vec::with_capacity(line_count as usize);
     for line_no in 1..=line_count {
@@ -62,19 +62,18 @@ pub struct BlameLine {
     pub summary: String,
 }
 
-pub fn git_blame(repo: &Path, path: &str) -> Vec<BlameLine> {
-    if !crate::repo::is_git_repo(repo) {
-        return vec![];
-    }
-    let output = match Command::new("git")
-        .args(["blame", "--porcelain", "HEAD", "--", path])
+/// Who last changed each line of `path` as of `rev`. An error carries
+/// git's own message (an unknown revision, a path not in it).
+pub fn git_blame(repo: &Path, rev: &str, path: &str) -> Result<Vec<BlameLine>, String> {
+    let output = Command::new("git")
+        .args(["blame", "--porcelain", rev, "--", path])
         .current_dir(repo)
         .output()
-    {
-        Ok(o) if o.status.success() => o,
-        _ => return vec![],
-    };
-    parse_porcelain(&String::from_utf8_lossy(&output.stdout))
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(parse_porcelain(&String::from_utf8_lossy(&output.stdout)))
 }
 
 #[derive(Default, Clone)]
@@ -196,7 +195,7 @@ mod tests {
             .current_dir(dir.path())
             .output()
             .unwrap();
-        let lines = git_blame(dir.path(), "a.txt");
+        let lines = git_blame(dir.path(), "HEAD", "a.txt").unwrap();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].author, "Tester");
     }

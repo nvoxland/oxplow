@@ -1,10 +1,48 @@
 //! `git status`-like inspection via libgit2. Returns a path → status
-//! map shaped to feed `workspace::list_workspace_entries`.
+//! map (and the status counts the rail shows).
 
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::workspace::GitFileStatus;
+use serde::{Deserialize, Serialize};
+use specta::Type;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum GitFileStatus {
+    Modified,
+    Added,
+    Deleted,
+    Renamed,
+    Untracked,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct WorkspaceStatusSummary {
+    pub modified: u32,
+    pub added: u32,
+    pub deleted: u32,
+    pub renamed: u32,
+    pub untracked: u32,
+    pub total: u32,
+}
+
+pub fn summarize_git_statuses(
+    git_statuses: &HashMap<String, GitFileStatus>,
+) -> WorkspaceStatusSummary {
+    let mut s = WorkspaceStatusSummary::default();
+    for status in git_statuses.values() {
+        match status {
+            GitFileStatus::Modified => s.modified += 1,
+            GitFileStatus::Added => s.added += 1,
+            GitFileStatus::Deleted => s.deleted += 1,
+            GitFileStatus::Renamed => s.renamed += 1,
+            GitFileStatus::Untracked => s.untracked += 1,
+        }
+        s.total += 1;
+    }
+    s
+}
 
 /// Map every changed/untracked path under `repo_path` to its
 /// classification. Fast-path: empty map if not a git repo.
@@ -276,6 +314,20 @@ pub fn head_commit_sha(repo_path: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn summarize_counts_each_status() {
+        let mut statuses = HashMap::new();
+        statuses.insert("a".into(), GitFileStatus::Modified);
+        statuses.insert("b".into(), GitFileStatus::Modified);
+        statuses.insert("c".into(), GitFileStatus::Added);
+        statuses.insert("d".into(), GitFileStatus::Untracked);
+        let s = summarize_git_statuses(&statuses);
+        assert_eq!(s.modified, 2);
+        assert_eq!(s.added, 1);
+        assert_eq!(s.untracked, 1);
+        assert_eq!(s.total, 4);
+    }
+
     use super::*;
     use tempfile::tempdir;
 

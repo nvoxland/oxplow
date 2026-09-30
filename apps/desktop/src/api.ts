@@ -433,14 +433,6 @@ export interface BranchRef {
 
 export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
 
-export interface WorkspaceEntry {
-  name: string;
-  path: string;
-  kind: "file" | "directory";
-  gitStatus: GitFileStatus | null;
-  hasChanges: boolean;
-}
-
 export interface WorkspaceFile {
   path: string;
   content: string;
@@ -455,12 +447,13 @@ export interface WorkspaceRenameResult {
   toPath: string;
 }
 
-export interface WorkspaceIndexedFile {
-  path: string;
-  gitStatus: GitFileStatus | null;
-}
-
 import type { WorkspaceStatusSummary } from "./tauri-bridge/index.js";
+import type {
+  FileStatus,
+  WorkspaceEntry,
+  WorkspaceIndexedFile,
+} from "./tauri-bridge/generated/bindings.js";
+export type { FileStatus, WorkspaceEntry, WorkspaceIndexedFile };
 import type { InstalledLspPackage, LspServerListing } from "./tauri-bridge/generated/bindings.js";
 export type { InstalledLspPackage, LspServerListing };
 export type { WorkspaceStatusSummary };
@@ -2353,7 +2346,7 @@ export function subscribeSnapshotEvents(
 export async function listWorkspaceEntries(streamId: string, path = ""): Promise<WorkspaceEntry[]> {
   return unwrap(
     await commands.listWorkspaceEntries(streamId || null, path),
-  ) as unknown as WorkspaceEntry[];
+  );
 }
 
 export async function listWorkspaceFiles(streamId: string): Promise<{
@@ -2364,13 +2357,7 @@ export async function listWorkspaceFiles(streamId: string): Promise<{
     commands.listWorkspaceFiles(streamId || null),
     getWorkspaceStatusSummary(streamId),
   ]);
-  // The wire row is snake_case (`git_status`); map it onto our camelCase
-  // `WorkspaceIndexedFile`. Without this, `f.gitStatus` is always
-  // `undefined`, so `f.gitStatus !== null` matched every file and the
-  // Uncommitted filter showed the whole tree (tsk211).
-  const rows = unwrap(filesRes) as unknown as Array<{ path: string; git_status: GitFileStatus | null }>;
-  const files: WorkspaceIndexedFile[] = rows.map((r) => ({ path: r.path, gitStatus: r.git_status }));
-  return { files, summary };
+  return { files: unwrap(filesRes), summary };
 }
 
 export async function readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile> {

@@ -22,6 +22,7 @@ pub mod attribution;
 pub mod background_task;
 pub mod blob_store;
 pub mod boot;
+pub mod branch_reconciler;
 pub mod bundled_extensions;
 pub mod change_analysis;
 pub mod churn;
@@ -101,10 +102,15 @@ pub mod token_usage;
 pub mod tool_call_reactors;
 pub mod tool_calls;
 pub mod turn_snapshots;
+pub mod vcs;
+#[cfg(test)]
+pub mod vcs_conformance;
 pub mod wiki_drift;
 pub mod wiki_pages;
 pub mod wiki_pages_watch;
+pub mod workspace_files;
 pub mod workspace_watch;
+pub mod worktrees;
 pub mod zones_service;
 
 pub use agent_prompt::{
@@ -542,6 +548,15 @@ pub struct Services {
     /// every mutating git op routes through here so we can layer
     /// caching in one place. See `git_service.rs`.
     pub git: Arc<git_service::GitService>,
+    /// The VCS capability (`.context/vcs.md`): git, as a provider.
+    pub vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
+    /// Which directory each stream works in.
+    pub worktrees: Arc<worktrees::WorktreeRouter>,
+    /// A stream's files: list, read, write.
+    pub workspace_files: Arc<workspace_files::WorkspaceFiles>,
+    /// Keeps `stream.branch` equal to the checked-out branch; spawned at
+    /// boot.
+    pub branch_reconciler: Arc<branch_reconciler::BranchReconciler>,
     /// Per-thread cursor for the rail's "Recently finished" section.
     /// Entries whose timestamp is `<= cursor` are filtered out. Keyed
     /// by thread id; entries with no thread (global view) live under
@@ -562,7 +577,7 @@ impl Services {
             advisories: self.advisories.clone(),
             effort_store: self.effort_store.clone(),
             thread_store: self.thread_store.clone(),
-            git: self.git.clone(),
+            worktrees: self.worktrees.clone(),
             approvals: self.approvals.clone(),
             extension_catalog: self.extension_catalog.clone(),
             db: self.db.clone(),
@@ -765,11 +780,23 @@ impl Services {
             output_activity.clone(),
         );
         let blobs = blob_store::BlobStore::new(layout.state_dir.join("snapshots"));
-        let git = git_service::GitService::spawn(
+        let vcs: Arc<dyn oxplow_domain::vcs::Vcs> = Arc::new(vcs::GitProvider);
+        let worktrees = Arc::new(worktrees::WorktreeRouter::new(
             layout.project_dir.clone(),
             stream_store.clone(),
+        ));
+        let workspace_files = Arc::new(workspace_files::WorkspaceFiles::new(
+            worktrees.clone(),
+            vcs.clone(),
             event_bus.clone(),
-        );
+        ));
+        let branch_reconciler = Arc::new(branch_reconciler::BranchReconciler::new(
+            worktrees.clone(),
+            vcs.clone(),
+            stream_store.clone(),
+            event_bus.clone(),
+        ));
+        let git = git_service::GitService::new(worktrees.clone(), event_bus.clone());
 
         // Snapshot capture singleton — owned here so anything in
         // Services can request snapshots (e.g. TaskService stamps
@@ -987,7 +1014,7 @@ impl Services {
                 advisories: advisories.clone(),
                 effort_store: effort_store.clone(),
                 thread_store: thread_store.clone(),
-                git: git.clone(),
+                worktrees: worktrees.clone(),
                 approvals: approvals.clone(),
                 extension_catalog: extension_catalog.clone(),
                 db: db.clone(),
@@ -1068,6 +1095,10 @@ impl Services {
             recovery: recovery_svc,
             events: event_bus,
             git,
+            vcs,
+            worktrees,
+            workspace_files,
+            branch_reconciler,
             finished_cleared_at: Arc::new(RwLock::new(std::collections::HashMap::new())),
         })
     }

@@ -11,7 +11,7 @@ use crate::error::IpcError;
 /// Every declared source with its last run state and whether this
 /// machine has approved its current entry script.
 pub async fn list_sources(svc: &Services) -> Result<Vec<SourceListing>, IpcError> {
-    let root = svc.git.resolve_repo_dir(None).await;
+    let root = svc.worktrees.resolve(None).await;
     Ok(source_runner::list_sources(&Sources::of(svc, &root)).await?)
 }
 
@@ -37,7 +37,7 @@ pub async fn set_source_credential(
     name: String,
     value: Option<String>,
 ) -> Result<(), IpcError> {
-    let root = svc.git.resolve_repo_dir(None).await;
+    let root = svc.worktrees.resolve(None).await;
     Ok(source_runner::set_source_credential(
         &Sources::of(svc, &root),
         &extension,
@@ -66,7 +66,7 @@ pub async fn list_project_programs(
 
 /// The primary worktree's extensions, whose advisories are approved here.
 async fn shared_extensions(svc: &Services) -> Vec<oxplow_app::extensions::Extension> {
-    let root = svc.git.resolve_repo_dir(None).await;
+    let root = svc.worktrees.resolve(None).await;
     svc.extension_catalog.get(&root).to_vec()
 }
 

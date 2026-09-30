@@ -31,9 +31,6 @@ pub async fn create_worktree(
         .streams
         .create_worktree(&req.slug, req.title, req.branch, req.branch_source)
         .await?;
-    svc.git
-        .register(&stream.id, std::path::PathBuf::from(&stream.worktree_path))
-        .await;
     // Spin up the per-stream snapshot capture service + its fs-watch
     // and git-refs listeners so edits in the new worktree start
     // landing in `file_snapshot` immediately.
@@ -60,9 +57,6 @@ pub async fn adopt_worktree(svc: &Services, req: AdoptWorktreeRequest) -> Result
         .streams
         .adopt_worktree(std::path::PathBuf::from(&req.path), req.title)
         .await?;
-    svc.git
-        .register(&stream.id, std::path::PathBuf::from(&stream.worktree_path))
-        .await;
     if let Some(capture) = svc.snapshot_captures.register(&stream) {
         capture.spawn_watcher();
         capture.spawn_git_refs_listener();
@@ -102,7 +96,7 @@ pub async fn archive_stream(
     svc.streams.archive_stream(&id, delete_worktree).await?;
     // Drop the stream's file rows from the search index.
     let _ = svc.search_store.purge_stream(&id.to_string()).await;
-    svc.git.deregister(&id).await;
+    svc.worktrees.forget(&id).await;
     svc.snapshot_captures.unregister(&id);
     svc.events.emit(OxplowEvent::StreamsChanged);
     Ok(())

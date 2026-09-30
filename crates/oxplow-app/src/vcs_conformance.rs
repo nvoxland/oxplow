@@ -1,0 +1,164 @@
+//! The VCS capability's contract (P5, `.context/target-architecture.md`
+//! §6.2, `.context/vcs.md`), as checks any provider must pass. Each
+//! check takes a `&dyn Vcs` and a fresh workspace, so a second provider
+//! runs the same list; the tests at the bottom run it against git. Test
+//! code: the module compiles under `cfg(test)` only.
+//!
+//! 1. **Round-trip** — what a commit captured reads back from the store,
+//!    whatever the working tree holds now.
+//! 3. **Status** — added, modified, deleted and untracked paths show;
+//!    a commit leaves the workspace clean.
+//! 5. **Head and log** — the head resolves to the last commit, which the
+//!    log lists first.
+//! 6. **Blame** — each line names the revision that last changed it.
+//!
+//! (2, diffs, and 7, the snapshot↔revision mapping, join with `Trees`.)
+
+use std::path::Path;
+
+use oxplow_domain::vcs::{CommitRequest, FileStatus, LogQuery, Vcs};
+
+fn write(ws: &Path, path: &str, body: &str) {
+    std::fs::write(ws.join(path), body).unwrap();
+}
+
+async fn commit(p: &dyn Vcs, ws: &Path, message: &str) -> String {
+    p.commit(
+        ws,
+        CommitRequest {
+            message: message.into(),
+            include_untracked: true,
+        },
+    )
+    .await
+    .unwrap()
+}
+
+/// 1. A commit reads back what it captured, whatever the working tree
+///    holds now.
+pub async fn a_commit_reads_back_what_it_captured(p: &dyn Vcs, ws: &Path) {
+    write(ws, "a.txt", "one\n");
+    let first = commit(p, ws, "first").await;
+    write(ws, "a.txt", "two\n");
+    let files = p.files_at(ws, &first).await.unwrap();
+    let id = files.get("a.txt").expect("a.txt is in the commit");
+    let bytes = p.read_object(ws, id).await.unwrap().expect("the object");
+    assert_eq!(bytes, b"one\n");
+    assert_eq!(*id, p.object_id_of(b"one\n"), "ids are content addresses");
+    assert_ne!(p.object_id_of(b"two\n"), *id);
+}
+
+/// 3. Status shows each kind of change, and a commit clears it.
+pub async fn status_reports_edits_and_is_clean_after_commit(p: &dyn Vcs, ws: &Path) {
+    write(ws, "kept.txt", "kept\n");
+    write(ws, "gone.txt", "gone\n");
+    commit(p, ws, "base").await;
+    write(ws, "kept.txt", "changed\n");
+    std::fs::remove_file(ws.join("gone.txt")).unwrap();
+    write(ws, "new.txt", "new\n");
+    let status = p.status(ws).await.unwrap();
+    let entries: Vec<(&str, FileStatus)> = status
+        .entries
+        .iter()
+        .map(|e| (e.path.as_str(), e.status))
+        .collect();
+    assert_eq!(
+        entries,
+        vec![
+            ("gone.txt", FileStatus::Deleted),
+            ("kept.txt", FileStatus::Modified),
+            ("new.txt", FileStatus::Untracked),
+        ]
+    );
+    assert_eq!(status.in_progress, None);
+    commit(p, ws, "all of it").await;
+    assert!(p.status(ws).await.unwrap().entries.is_empty());
+}
+
+/// 5. The head resolves to the last commit, first in the log.
+pub async fn head_resolves_and_the_log_walks_newest_first(p: &dyn Vcs, ws: &Path) {
+    write(ws, "a.txt", "1\n");
+    let first = commit(p, ws, "first").await;
+    write(ws, "a.txt", "2\n");
+    let second = commit(p, ws, "second").await;
+    let head = p.head(ws).await.unwrap();
+    assert_eq!(head.revision.as_deref(), Some(second.as_str()));
+    assert!(head.branch.is_some(), "a fresh workspace is on a branch");
+    assert_eq!(p.resolve(ws, "HEAD").await.unwrap(), second);
+    assert_eq!(p.resolve(ws, &second[..8]).await.unwrap(), second);
+    assert!(p.resolve(ws, "no-such-rev").await.is_err());
+    let log = p
+        .log(
+            ws,
+            LogQuery {
+                limit: Some(2),
+                all: false,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        log.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        vec![second.as_str(), first.as_str()]
+    );
+    assert_eq!(log[0].subject, "second");
+    assert_eq!(log[0].parents, vec![first.clone()]);
+    let detail = p.revision(ws, &second).await.unwrap().unwrap();
+    assert_eq!(detail.files.len(), 1);
+    assert_eq!(detail.files[0].path, "a.txt");
+    assert_eq!(detail.files[0].status, FileStatus::Modified);
+}
+
+/// 6. Blame names the revision that last changed each line.
+pub async fn blame_attributes_lines_to_their_revision(p: &dyn Vcs, ws: &Path) {
+    write(ws, "a.txt", "one\n");
+    let first = commit(p, ws, "first").await;
+    write(ws, "a.txt", "one\ntwo\n");
+    let second = commit(p, ws, "second").await;
+    let lines = p.blame(ws, "a.txt", &second).await.unwrap();
+    assert_eq!(
+        lines
+            .iter()
+            .map(|l| (l.line, l.revision.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(1, first.as_str()), (2, second.as_str())]
+    );
+    // At the first revision, only its line exists.
+    assert_eq!(p.blame(ws, "a.txt", &first).await.unwrap().len(), 1);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vcs::GitProvider;
+
+    fn workspace() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        dir
+    }
+
+    #[tokio::test]
+    async fn git_a_commit_reads_back_what_it_captured() {
+        let ws = workspace();
+        a_commit_reads_back_what_it_captured(&GitProvider, ws.path()).await;
+    }
+
+    #[tokio::test]
+    async fn git_status_reports_edits_and_is_clean_after_commit() {
+        let ws = workspace();
+        status_reports_edits_and_is_clean_after_commit(&GitProvider, ws.path()).await;
+    }
+
+    #[tokio::test]
+    async fn git_head_resolves_and_the_log_walks_newest_first() {
+        let ws = workspace();
+        head_resolves_and_the_log_walks_newest_first(&GitProvider, ws.path()).await;
+    }
+
+    #[tokio::test]
+    async fn git_blame_attributes_lines_to_their_revision() {
+        let ws = workspace();
+        blame_attributes_lines_to_their_revision(&GitProvider, ws.path()).await;
+    }
+}

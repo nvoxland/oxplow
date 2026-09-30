@@ -21,7 +21,6 @@ pub mod smart_merge;
 pub mod status;
 pub mod sync;
 pub mod tree;
-pub mod workspace;
 mod worktree;
 
 pub use ast_merge::{
@@ -40,7 +39,9 @@ pub use branch_ops::{
     append_to_gitignore, delete_branch, detect_default_branch, get_ahead_behind,
     get_commits_ahead_of, rename_branch, restore_path, AheadBehind, BranchOpError,
 };
-pub use conflict::{get_repo_conflict_state, GitOperationKind, RepoConflictState};
+pub use conflict::{
+    get_repo_conflict_state, list_conflicted_paths, GitOperationKind, RepoConflictState,
+};
 pub use divergence::{compute_divergence, Divergence, MergeReadiness};
 pub use log::{
     get_commit_detail, get_git_log, CommitDetail, CommitDetailFile, GitLogCommit, GitLogOptions,
@@ -52,24 +53,18 @@ pub use refs::{
     RefOption, RemoteBranchEntry,
 };
 pub use refs_watch::{GitRefsWatcher, RefsChangeEvent};
-pub use repo::{detect_current_branch, is_git_repo, is_git_worktree};
+pub use repo::{detect_current_branch, is_git_repo, is_git_worktree, resolve_revision};
 pub use smart_merge::{auto_resolve_conflicts, merge3, merge3_str, tokenize, AutoResolveReport};
 pub use status::{
     clean_head_blob_oids, head_commit_sha, list_git_statuses, read_blob, status_for_path,
-    GitCleanBaseline,
+    summarize_git_statuses, GitCleanBaseline, GitFileStatus, WorkspaceStatusSummary,
 };
 pub use sync::{
-    add_path, cherry_pick, commit_all, fetch, merge, pull, pull_remote_into_current, push,
-    push_current_to, rebase, revert, search_workspace_text, GitOpResult, TextSearchHit,
+    add_path, checkout_branch, cherry_pick, commit, fetch, merge, pull, pull_remote_into_current,
+    push, push_current_to, rebase, revert, search_workspace_text, take_conflict_side, GitOpResult,
+    TextSearchHit,
 };
 pub use tree::{diff_commits, git_blob_oid, tree_at_commit};
-pub use workspace::{
-    create_workspace_directory, create_workspace_file, delete_workspace_path,
-    list_workspace_entries, list_workspace_files, read_workspace_file, rename_workspace_path,
-    summarize_git_statuses, write_workspace_file, GitFileStatus, WorkspaceEntry,
-    WorkspaceEntryKind, WorkspaceError, WorkspaceFile, WorkspaceIndexedFile,
-    WorkspaceStatusSummary,
-};
 pub use worktree::{
     ensure_worktree, list_adoptable_worktrees, list_existing_worktrees, EnsureWorktreeError,
     GitWorktreeEntry,

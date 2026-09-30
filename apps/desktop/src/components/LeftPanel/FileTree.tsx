@@ -1,4 +1,4 @@
-import type { GitFileStatus, WorkspaceEntry, WorkspaceIndexedFile } from "../../api.js";
+import type { FileStatus, WorkspaceEntry, WorkspaceIndexedFile } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import { basename, StatusBadge, type ContextMenuTarget } from "./shared.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
@@ -65,7 +65,7 @@ export function ChangedFilesSection({
         <FileRow
           key={file.path}
           path={file.path}
-          gitStatus={file.gitStatus}
+          status={file.status}
           active={selectedFilePath === file.path}
           onClick={(e: React.MouseEvent | React.KeyboardEvent) => {
             const newTab =
@@ -107,7 +107,7 @@ export function TreeEntries({
   // Siblings for file-row navigation: every file at this directory
   // level. Directories don't participate (they're not destinations).
   const siblingEntries = entries
-    .filter((e) => e.kind === "file" && e.gitStatus !== "deleted")
+    .filter((e) => e.kind === "file" && e.status !== "deleted")
     .map((e) => ({ ref: fileRef(e.path), label: e.path }));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: "100%", width: "max-content" }}>
@@ -208,7 +208,7 @@ function TreeEntryRow({
     siblings,
   });
   const isFile = entry.kind === "file";
-  const isOpenable = isFile && entry.gitStatus !== "deleted";
+  const isOpenable = isFile && entry.status !== "deleted";
   return (
     <div
       data-testid={`file-tree-entry-${entry.path}`}
@@ -299,9 +299,9 @@ function TreeEntryRow({
         style={{
           flex: 1,
           whiteSpace: "nowrap",
-          textDecoration: entry.gitStatus === "deleted" ? "line-through" : undefined,
+          textDecoration: entry.status === "deleted" ? "line-through" : undefined,
           color:
-            entry.gitStatus === "deleted"
+            entry.status === "deleted"
               ? "var(--muted)"
               : insideGenerated
                 ? "var(--muted)"
@@ -326,20 +326,20 @@ function TreeEntryRow({
           GEN
         </span>
       ) : null}
-      {entry.hasChanges || entry.gitStatus ? <StatusBadge status={entry.gitStatus} /> : null}
+      {entry.hasChanges || entry.status ? <StatusBadge status={entry.status} /> : null}
     </div>
   );
 }
 
 function FileRow({
   path,
-  gitStatus,
+  status,
   active,
   onClick,
   onOpenMenu,
 }: {
   path: string;
-  gitStatus: GitFileStatus | null;
+  status: FileStatus | null;
   active: boolean;
   onClick(e: React.MouseEvent | React.KeyboardEvent): void;
   onOpenMenu(target: ContextMenuTarget | null): void;
@@ -393,7 +393,7 @@ function FileRow({
     >
       <PageKindIcon kind="file" size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
       <span style={{ flex: 1, whiteSpace: "nowrap" }}>{path}</span>
-      {gitStatus ? <StatusBadge status={gitStatus} /> : null}
+      {status ? <StatusBadge status={status} /> : null}
     </div>
   );
 }

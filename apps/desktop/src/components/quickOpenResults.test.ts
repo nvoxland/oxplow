@@ -31,7 +31,7 @@ function page(id: string, label: string, category: PageCategory = "Work"): PageD
 }
 
 function file(path: string): WorkspaceIndexedFile {
-  return { path, gitStatus: "clean" } as WorkspaceIndexedFile;
+  return { path, status: "clean" } as WorkspaceIndexedFile;
 }
 
 function group(

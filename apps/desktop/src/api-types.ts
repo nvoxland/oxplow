@@ -202,22 +202,9 @@ export interface TextSearchHit {
 
 // ---- Workspace ----
 
-export interface WorkspaceEntry {
-  name: string;
-  path: string;
-  kind: "file" | "directory";
-  gitStatus: GitFileStatus | null;
-  hasChanges: boolean;
-}
-
 export interface WorkspaceFile {
   path: string;
   content: string;
-}
-
-export interface WorkspaceIndexedFile {
-  path: string;
-  gitStatus: GitFileStatus | null;
 }
 
 export interface WorkspacePathChange {

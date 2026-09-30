@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { Thread, GitFileStatus } from "../../api.js";
+import type { Thread, FileStatus } from "../../api.js";
 
 export interface ContextMenuTarget {
   path: string;
@@ -104,7 +104,7 @@ export function InlineBadge({ children }: { children: ReactNode }) {
   );
 }
 
-export function StatusBadge({ status }: { status: GitFileStatus | null }) {
+export function StatusBadge({ status }: { status: FileStatus | null }) {
   const color = statusColor(status);
   return (
     <span style={{ color, fontSize: 11, flexShrink: 0 }}>
@@ -113,18 +113,20 @@ export function StatusBadge({ status }: { status: GitFileStatus | null }) {
   );
 }
 
-export function shortStatus(status: GitFileStatus): string {
+export function shortStatus(status: FileStatus): string {
   switch (status) {
     case "modified": return "M";
     case "added": return "A";
     case "deleted": return "D";
     case "renamed": return "R";
     case "untracked": return "U";
+    case "conflicted": return "C";
   }
 }
 
-export function statusColor(status: GitFileStatus | null): string {
+export function statusColor(status: FileStatus | null): string {
   switch (status) {
+    case "conflicted": return "#f87171";
     case "modified": return "#fcd34d";
     case "added": return "#86efac";
     case "deleted": return "#fca5a5";

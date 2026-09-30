@@ -45,6 +45,14 @@ pub fn detect_current_branch(path: impl AsRef<Path>) -> Option<String> {
     head.shorthand().ok().map(|s| s.to_string())
 }
 
+/// The full commit id `rev` names (a sha or its prefix, a branch, a tag,
+/// `HEAD`).
+pub fn resolve_revision(path: impl AsRef<Path>, rev: &str) -> Result<String, git2::Error> {
+    let repo = git2::Repository::open(path.as_ref())?;
+    let commit = repo.revparse_single(rev)?.peel_to_commit()?;
+    Ok(commit.id().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

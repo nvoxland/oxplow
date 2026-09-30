@@ -120,7 +120,7 @@ pub struct AdvisoryDeps {
     pub advisories: std::sync::Arc<AdvisoryRunner>,
     pub effort_store: std::sync::Arc<oxplow_db::SqliteEffortStore>,
     pub thread_store: std::sync::Arc<oxplow_db::SqliteThreadStore>,
-    pub git: std::sync::Arc<crate::git_service::GitService>,
+    pub worktrees: std::sync::Arc<crate::worktrees::WorktreeRouter>,
     pub approvals: std::sync::Arc<crate::exec_consent::ApprovalStore>,
     pub extension_catalog: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
     pub db: oxplow_db::Database,
@@ -152,7 +152,7 @@ pub async fn for_thread(
         Ok(Some(t)) => Some(t.stream_id.to_string()),
         _ => None,
     };
-    let root = svc.git.resolve_repo_dir(stream_id.as_deref()).await;
+    let root = svc.worktrees.resolve(stream_id.as_deref()).await;
     let extensions = consented(&svc.approvals, &svc.extension_catalog.get(&root));
     let layer = svc.sql.clone();
     let hits = svc

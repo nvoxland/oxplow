@@ -642,7 +642,7 @@ pub async fn ensure_change(
                     .await
                     .ok_or_else(|| invalid("no primary stream".into()))?,
             };
-            let root = svc.git.resolve_repo_dir(Some(&sid.to_string())).await;
+            let root = svc.worktrees.resolve(Some(&sid.to_string())).await;
             let repo = git2::Repository::open(&root).map_err(|e| invalid(format!("git: {e}")))?;
             let commit = repo
                 .revparse_single(&sha)
@@ -764,7 +764,7 @@ pub async fn ensure_change(
         id: row.id,
     };
     svc.change_store.set_status(row.id, "running", None).await?;
-    let root = svc.git.resolve_repo_dir(Some(&stream.to_string())).await;
+    let root = svc.worktrees.resolve(Some(&stream.to_string())).await;
     let dup_head = head.0.clone();
     let result = compute(svc, &root, base.0, head.0).await;
     drop(running);

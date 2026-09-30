@@ -85,12 +85,34 @@ pub fn revert(repo: &Path, commit: &str) -> std::io::Result<GitOpResult> {
     run(&["revert", "--no-edit", commit], repo)
 }
 
-pub fn commit_all(repo: &Path, message: &str) -> std::io::Result<GitOpResult> {
-    let staged = run(&["add", "-A"], repo)?;
+/// Stage the workspace's changes — untracked files too when
+/// `include_untracked` — and commit them.
+pub fn commit(repo: &Path, message: &str, include_untracked: bool) -> std::io::Result<GitOpResult> {
+    let staged = run(&["add", if include_untracked { "-A" } else { "-u" }], repo)?;
     if !staged.success {
         return Ok(staged);
     }
     run(&["commit", "-m", message], repo)
+}
+
+/// Switch the workspace to branch `name`, creating it at the current
+/// head when `create`.
+pub fn checkout_branch(repo: &Path, name: &str, create: bool) -> std::io::Result<GitOpResult> {
+    if create {
+        run(&["checkout", "-b", name], repo)
+    } else {
+        run(&["checkout", name], repo)
+    }
+}
+
+/// Settle a conflicted path by taking one side whole and staging it.
+pub fn take_conflict_side(repo: &Path, path: &str, ours: bool) -> std::io::Result<GitOpResult> {
+    let side = if ours { "--ours" } else { "--theirs" };
+    let taken = run(&["checkout", side, "--", path], repo)?;
+    if !taken.success {
+        return Ok(taken);
+    }
+    run(&["add", "--", path], repo)
 }
 
 pub fn add_path(repo: &Path, path: &str) -> std::io::Result<GitOpResult> {
@@ -196,7 +218,7 @@ mod tests {
         let dir = tempdir().unwrap();
         init_repo(dir.path());
         std::fs::write(dir.path().join("a.txt"), "hello").unwrap();
-        let r = commit_all(dir.path(), "initial").unwrap();
+        let r = commit(dir.path(), "initial", true).unwrap();
         assert!(r.success, "stderr: {}", r.stderr);
     }
 

@@ -14,7 +14,7 @@ use crate::error::IpcError;
 /// The worktree whose `oxplow/extensions/` a call reads: the stream's,
 /// or the primary's when `stream_id` is omitted.
 async fn root(svc: &Services, stream_id: Option<&str>) -> std::path::PathBuf {
-    svc.git.resolve_repo_dir(stream_id).await
+    svc.worktrees.resolve(stream_id).await
 }
 
 /// Every project extension in the stream's worktree (primary when

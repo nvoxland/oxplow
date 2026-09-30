@@ -2415,6 +2415,9 @@ export type FileSnapshot = {
 	content_hash: string | null,
 };
 
+// How a path differs from the head, or how a revision changed it.
+export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "untracked" | "conflicted";
+
 /**
  *  A fact predicate on a `metrics:` spec (the `filter:` block) — the config
  *  mirror of the engine's `FactFilter` (epic tsk12). A conjunctive predicate
@@ -2531,8 +2534,6 @@ export type GeneratedConfig = {
 	exclude?: string[],
 	include?: string[],
 };
-
-export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
 
 export type GitLogCommit = {
 	sha: string,
@@ -4499,8 +4500,8 @@ export type WorkspaceEntry = {
 	name: string,
 	path: string,
 	kind: WorkspaceEntryKind,
-	git_status: GitFileStatus | null,
-	has_changes: boolean,
+	status: FileStatus | null,
+	hasChanges: boolean,
 };
 
 export type WorkspaceEntryKind = "file" | "directory";
@@ -4512,7 +4513,7 @@ export type WorkspaceFile = {
 
 export type WorkspaceIndexedFile = {
 	path: string,
-	git_status: GitFileStatus | null,
+	status: FileStatus | null,
 };
 
 export type WorkspaceStatusSummary = {

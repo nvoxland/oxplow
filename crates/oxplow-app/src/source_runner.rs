@@ -230,7 +230,7 @@ pub fn spawn_scheduler(state: std::sync::Arc<crate::Services>) {
         // Stay out of boot's way.
         tokio::time::sleep(Duration::from_secs(30)).await;
         loop {
-            let root = state.git.resolve_repo_dir(None).await;
+            let root = state.worktrees.resolve(None).await;
             let ctx = Sources::of(&state, &root);
             if let Ok(listings) = list_sources(&ctx).await {
                 let now = oxplow_domain::Timestamp::now().unix_ms();
@@ -814,7 +814,7 @@ pub async fn sync_source(
     source_id: &str,
     reviewed: Option<&str>,
 ) -> Result<SourceRunReport, RunSourceError> {
-    let root = svc.git.resolve_repo_dir(None).await;
+    let root = svc.worktrees.resolve(None).await;
     let result = run_source(&Sources::of(svc, &root), extension, source_id, reviewed).await;
     if result.as_ref().map_or_else(|e| e.ran(), |_| true) {
         svc.events.emit(crate::OxplowEvent::SourceSynced {

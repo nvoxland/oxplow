@@ -1,0 +1,534 @@
+//! The git provider of the VCS capability (`oxplow_domain::vcs::Vcs`,
+//! `.context/vcs.md`): the trait over `oxplow_git`, stateless and
+//! path-based. libgit2 and the git CLI block, so every call runs under
+//! `spawn_blocking`.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use async_trait::async_trait;
+use oxplow_domain::vcs::{
+    BlameLine, Branch, CommitRequest, ConflictChoice, Divergence, FileStatus, Head, InProgressOp,
+    LogQuery, MergeReadiness, ObjectId, OpOutcome, RemoteBranch, RevisionDetail, RevisionFile,
+    RevisionInfo, StatusEntry, Vcs, VcsError, VcsFeatures, VcsWorkspace, WorkspaceStatus,
+};
+use oxplow_domain::FileChange;
+
+/// Git, as the VCS provider.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GitProvider;
+
+/// Run `f` on the blocking pool; a panicked task is a failure, not a
+/// crash of the caller.
+async fn blocking<R: Send + 'static>(
+    f: impl FnOnce() -> Result<R, VcsError> + Send + 'static,
+) -> Result<R, VcsError> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| VcsError::Failed(format!("git call didn't finish: {e}")))?
+}
+
+fn repo_check(ws: &Path) -> Result<(), VcsError> {
+    if git2::Repository::open(ws).is_ok() {
+        Ok(())
+    } else {
+        Err(VcsError::NotARepository(ws.display().to_string()))
+    }
+}
+
+fn info(c: oxplow_git::GitLogCommit) -> RevisionInfo {
+    RevisionInfo {
+        id: c.sha,
+        short_id: c.short_sha,
+        author: c.author,
+        email: c.email,
+        time: c.timestamp_secs,
+        subject: c.subject,
+        parents: c.parents,
+    }
+}
+
+fn outcome(ws: &Path, r: oxplow_git::GitOpResult) -> OpOutcome {
+    let log = [r.stdout.trim(), r.stderr.trim()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    OpOutcome {
+        success: r.success,
+        log,
+        conflicts: oxplow_git::list_conflicted_paths(ws),
+        auto_resolved: r.auto_resolved,
+    }
+}
+
+/// A CLI step that must succeed; its output is the error otherwise.
+fn cli(r: std::io::Result<oxplow_git::GitOpResult>) -> Result<oxplow_git::GitOpResult, VcsError> {
+    let r = r.map_err(|e| VcsError::Failed(e.to_string()))?;
+    if r.success {
+        Ok(r)
+    } else {
+        let msg = if r.stderr.trim().is_empty() {
+            r.stdout.trim()
+        } else {
+            r.stderr.trim()
+        };
+        Err(VcsError::Failed(msg.to_string()))
+    }
+}
+
+/// A merge-like op, then oxplow's smart merge over what it left
+/// conflicted.
+fn with_auto_resolve(ws: &Path, mut r: oxplow_git::GitOpResult) -> OpOutcome {
+    if !r.success {
+        r.auto_resolved = oxplow_git::auto_resolve_conflicts(ws).resolved.len() as u32;
+    }
+    outcome(ws, r)
+}
+
+fn branch_err(e: oxplow_git::BranchOpError) -> VcsError {
+    VcsError::Failed(e.to_string())
+}
+
+#[async_trait]
+impl Vcs for GitProvider {
+    fn rev_kind(&self) -> &'static str {
+        "git"
+    }
+
+    fn features(&self) -> VcsFeatures {
+        VcsFeatures {
+            isolated_workspaces: true,
+            remotes: true,
+            // `diff` compares content trees (`oxplow_domain::diff_trees`).
+            rename_detection: false,
+        }
+    }
+
+    async fn detect(&self, root: &Path) -> bool {
+        let root = root.to_path_buf();
+        blocking(move || Ok(oxplow_git::is_git_repo(&root)))
+            .await
+            .unwrap_or(false)
+    }
+
+    async fn head(&self, ws: &Path) -> Result<Head, VcsError> {
+        let ws = ws.to_path_buf();
+        blocking(move || {
+            repo_check(&ws)?;
+            Ok(Head {
+                revision: oxplow_git::head_commit_sha(&ws),
+                branch: oxplow_git::detect_current_branch(&ws),
+            })
+        })
+        .await
+    }
+
+    async fn resolve(&self, ws: &Path, rev: &str) -> Result<String, VcsError> {
+        let (ws, rev) = (ws.to_path_buf(), rev.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            oxplow_git::resolve_revision(&ws, &rev).map_err(|_| VcsError::UnknownRevision(rev))
+        })
+        .await
+    }
+
+    async fn log(&self, ws: &Path, query: LogQuery) -> Result<Vec<RevisionInfo>, VcsError> {
+        let ws = ws.to_path_buf();
+        blocking(move || {
+            repo_check(&ws)?;
+            let log = oxplow_git::get_git_log(
+                &ws,
+                oxplow_git::GitLogOptions {
+                    limit: query.limit.map(|n| n as usize),
+                    all: query.all,
+                },
+            );
+            Ok(log.commits.into_iter().map(info).collect())
+        })
+        .await
+    }
+
+    async fn revision(&self, ws: &Path, rev: &str) -> Result<Option<RevisionDetail>, VcsError> {
+        let id = match self.resolve(ws, rev).await {
+            Ok(id) => id,
+            Err(VcsError::UnknownRevision(_)) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let ws = ws.to_path_buf();
+        blocking(move || {
+            Ok(
+                oxplow_git::get_commit_detail(&ws, &id).map(|d| RevisionDetail {
+                    info: RevisionInfo {
+                        id: d.sha,
+                        short_id: d.short_sha,
+                        author: d.author,
+                        email: d.email,
+                        time: d.timestamp_secs,
+                        subject: d.subject,
+                        parents: d.parents,
+                    },
+                    body: d.body,
+                    files: d
+                        .files
+                        .into_iter()
+                        .map(|f| RevisionFile {
+                            status: match f.status.as_str() {
+                                "added" | "copied" => FileStatus::Added,
+                                "deleted" => FileStatus::Deleted,
+                                "renamed" => FileStatus::Renamed,
+                                _ => FileStatus::Modified,
+                            },
+                            path: f.path,
+                            additions: f.additions,
+                            deletions: f.deletions,
+                        })
+                        .collect(),
+                }),
+            )
+        })
+        .await
+    }
+
+    async fn revisions_between(
+        &self,
+        ws: &Path,
+        base: &str,
+        head: &str,
+        limit: u32,
+    ) -> Result<Vec<RevisionInfo>, VcsError> {
+        let base = self.resolve(ws, base).await?;
+        let head = self.resolve(ws, head).await?;
+        let ws = ws.to_path_buf();
+        blocking(move || {
+            Ok(
+                oxplow_git::get_commits_ahead_of(&ws, &base, &head, limit as usize)
+                    .into_iter()
+                    .map(info)
+                    .collect(),
+            )
+        })
+        .await
+    }
+
+    async fn file_history(
+        &self,
+        ws: &Path,
+        path: &str,
+        limit: u32,
+    ) -> Result<Vec<RevisionInfo>, VcsError> {
+        let (ws, path) = (ws.to_path_buf(), path.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            Ok(oxplow_git::list_file_commits(&ws, &path, limit as usize)
+                .into_iter()
+                .map(info)
+                .collect())
+        })
+        .await
+    }
+
+    async fn files_at(&self, ws: &Path, rev: &str) -> Result<BTreeMap<String, ObjectId>, VcsError> {
+        let (ws, rev) = (ws.to_path_buf(), rev.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            let tree = oxplow_git::tree_at_commit(&ws, &rev)
+                .map_err(|_| VcsError::UnknownRevision(rev))?;
+            Ok(tree.into_iter().map(|(p, id)| (p, ObjectId(id))).collect())
+        })
+        .await
+    }
+
+    async fn read_object(&self, ws: &Path, id: &ObjectId) -> Result<Option<Vec<u8>>, VcsError> {
+        let (ws, id) = (ws.to_path_buf(), id.0.clone());
+        blocking(move || {
+            repo_check(&ws)?;
+            Ok(oxplow_git::read_blob(&ws, &id))
+        })
+        .await
+    }
+
+    fn object_id_of(&self, bytes: &[u8]) -> ObjectId {
+        ObjectId(oxplow_git::git_blob_oid(bytes).unwrap_or_default())
+    }
+
+    async fn diff(&self, ws: &Path, a: &str, b: &str) -> Result<Vec<FileChange>, VcsError> {
+        let (ws, a, b) = (ws.to_path_buf(), a.to_string(), b.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            oxplow_git::diff_commits(&ws, &a, &b).map_err(|e| VcsError::Failed(e.to_string()))
+        })
+        .await
+    }
+
+    async fn status(&self, ws: &Path) -> Result<WorkspaceStatus, VcsError> {
+        let ws = ws.to_path_buf();
+        blocking(move || {
+            repo_check(&ws)?;
+            let conflicted = oxplow_git::list_conflicted_paths(&ws);
+            let mut entries: Vec<StatusEntry> = oxplow_git::list_git_statuses(&ws)
+                .into_iter()
+                .filter(|(p, _)| !conflicted.contains(p))
+                .map(|(path, s)| StatusEntry {
+                    path,
+                    status: match s {
+                        oxplow_git::GitFileStatus::Added => FileStatus::Added,
+                        oxplow_git::GitFileStatus::Modified => FileStatus::Modified,
+                        oxplow_git::GitFileStatus::Deleted => FileStatus::Deleted,
+                        oxplow_git::GitFileStatus::Renamed => FileStatus::Renamed,
+                        oxplow_git::GitFileStatus::Untracked => FileStatus::Untracked,
+                    },
+                })
+                .chain(conflicted.iter().map(|p| StatusEntry {
+                    path: p.clone(),
+                    status: FileStatus::Conflicted,
+                }))
+                .collect();
+            entries.sort_by(|a, b| a.path.cmp(&b.path));
+            let in_progress =
+                oxplow_git::get_repo_conflict_state(&ws)
+                    .operation
+                    .map(|op| match op {
+                        oxplow_git::GitOperationKind::Merge => InProgressOp::Merge,
+                        oxplow_git::GitOperationKind::Rebase => InProgressOp::Rebase,
+                        oxplow_git::GitOperationKind::CherryPick => InProgressOp::CherryPick,
+                        oxplow_git::GitOperationKind::Revert => InProgressOp::Revert,
+                    });
+            Ok(WorkspaceStatus {
+                entries,
+                in_progress,
+            })
+        })
+        .await
+    }
+
+    async fn branches(&self, ws: &Path) -> Result<Vec<Branch>, VcsError> {
+        let ws = ws.to_path_buf();
+        blocking(move || {
+            repo_check(&ws)?;
+            let default = oxplow_git::detect_default_branch(&ws);
+            Ok(oxplow_git::list_branches(&ws)
+                .into_iter()
+                .map(|b| Branch {
+                    is_default: b.remote.is_none() && default.as_deref() == Some(&b.name),
+                    name: b.name,
+                    remote: b.remote,
+                    head: b.head,
+                })
+                .collect())
+        })
+        .await
+    }
+
+    async fn divergence(&self, ws: &Path, base: &str, head: &str) -> Result<Divergence, VcsError> {
+        let (ws, base, head) = (ws.to_path_buf(), base.to_string(), head.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            let d = oxplow_git::compute_divergence(&ws, &base, &head);
+            Ok(Divergence {
+                ahead: d.ahead,
+                behind: d.behind,
+                overlapping_files: d.overlapping_files,
+                readiness: match d.readiness {
+                    oxplow_git::MergeReadiness::AlreadyIntegrated => {
+                        MergeReadiness::AlreadyIntegrated
+                    }
+                    oxplow_git::MergeReadiness::Clean => MergeReadiness::Clean,
+                    oxplow_git::MergeReadiness::Conflict => MergeReadiness::Conflict,
+                },
+            })
+        })
+        .await
+    }
+
+    async fn blame(&self, ws: &Path, path: &str, rev: &str) -> Result<Vec<BlameLine>, VcsError> {
+        let (ws, path, rev) = (ws.to_path_buf(), path.to_string(), rev.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            let lines = oxplow_git::git_blame(&ws, &rev, &path).map_err(VcsError::Failed)?;
+            Ok(lines
+                .into_iter()
+                .map(|l| BlameLine {
+                    line: l.line,
+                    revision: l.sha,
+                    author: l.author,
+                    email: l.author_mail,
+                    time: l.author_time,
+                    summary: l.summary,
+                })
+                .collect())
+        })
+        .await
+    }
+
+    async fn commit(&self, ws: &Path, req: CommitRequest) -> Result<String, VcsError> {
+        let ws = ws.to_path_buf();
+        blocking(move || {
+            repo_check(&ws)?;
+            cli(oxplow_git::commit(&ws, &req.message, req.include_untracked))?;
+            oxplow_git::head_commit_sha(&ws)
+                .ok_or_else(|| VcsError::Failed("the commit left no head".into()))
+        })
+        .await
+    }
+
+    async fn stage(&self, ws: &Path, paths: &[String]) -> Result<(), VcsError> {
+        let (ws, paths) = (ws.to_path_buf(), paths.to_vec());
+        blocking(move || {
+            repo_check(&ws)?;
+            for p in &paths {
+                cli(oxplow_git::add_path(&ws, p))?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    async fn discard(&self, ws: &Path, paths: &[String]) -> Result<(), VcsError> {
+        let (ws, paths) = (ws.to_path_buf(), paths.to_vec());
+        blocking(move || {
+            repo_check(&ws)?;
+            for p in &paths {
+                oxplow_git::restore_path(&ws, p).map_err(|e| VcsError::Failed(e.to_string()))?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    async fn fetch(&self, ws: &Path, remote: Option<&str>) -> Result<OpOutcome, VcsError> {
+        let (ws, remote) = (ws.to_path_buf(), remote.map(str::to_string));
+        blocking(move || {
+            repo_check(&ws)?;
+            let r = oxplow_git::fetch(&ws, remote.as_deref())
+                .map_err(|e| VcsError::Failed(e.to_string()))?;
+            Ok(outcome(&ws, r))
+        })
+        .await
+    }
+
+    async fn pull(&self, ws: &Path, from: Option<RemoteBranch>) -> Result<OpOutcome, VcsError> {
+        let ws = ws.to_path_buf();
+        blocking(move || {
+            repo_check(&ws)?;
+            let r = match &from {
+                Some(rb) => oxplow_git::pull_remote_into_current(&ws, &rb.remote, &rb.branch),
+                None => oxplow_git::pull(&ws),
+            }
+            .map_err(|e| VcsError::Failed(e.to_string()))?;
+            Ok(with_auto_resolve(&ws, r))
+        })
+        .await
+    }
+
+    async fn push(&self, ws: &Path, to: Option<RemoteBranch>) -> Result<OpOutcome, VcsError> {
+        let ws = ws.to_path_buf();
+        blocking(move || {
+            repo_check(&ws)?;
+            let r = match &to {
+                Some(rb) => oxplow_git::push_current_to(&ws, &rb.remote, &rb.branch),
+                None => oxplow_git::push(&ws),
+            }
+            .map_err(|e| VcsError::Failed(e.to_string()))?;
+            Ok(outcome(&ws, r))
+        })
+        .await
+    }
+
+    async fn merge(&self, ws: &Path, rev: &str) -> Result<OpOutcome, VcsError> {
+        let (ws, rev) = (ws.to_path_buf(), rev.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            let r = oxplow_git::merge(&ws, &rev).map_err(|e| VcsError::Failed(e.to_string()))?;
+            Ok(with_auto_resolve(&ws, r))
+        })
+        .await
+    }
+
+    async fn checkout_branch(&self, ws: &Path, name: &str, create: bool) -> Result<(), VcsError> {
+        let (ws, name) = (ws.to_path_buf(), name.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            cli(oxplow_git::checkout_branch(&ws, &name, create)).map(|_| ())
+        })
+        .await
+    }
+
+    async fn rename_branch(&self, ws: &Path, from: &str, to: &str) -> Result<(), VcsError> {
+        let (ws, from, to) = (ws.to_path_buf(), from.to_string(), to.to_string());
+        blocking(move || oxplow_git::rename_branch(&ws, &from, &to).map_err(branch_err)).await
+    }
+
+    async fn delete_branch(&self, ws: &Path, name: &str, force: bool) -> Result<(), VcsError> {
+        let (ws, name) = (ws.to_path_buf(), name.to_string());
+        blocking(move || oxplow_git::delete_branch(&ws, &name, force).map_err(branch_err)).await
+    }
+
+    async fn resolve_conflict(
+        &self,
+        ws: &Path,
+        path: &str,
+        choice: ConflictChoice,
+    ) -> Result<(), VcsError> {
+        let (ws, path) = (ws.to_path_buf(), path.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            match choice {
+                ConflictChoice::Ours | ConflictChoice::Theirs => cli(
+                    oxplow_git::take_conflict_side(&ws, &path, choice == ConflictChoice::Ours),
+                )
+                .map(|_| ()),
+                ConflictChoice::Auto => {
+                    let report = oxplow_git::auto_resolve_conflicts(&ws);
+                    if report.resolved.contains(&path)
+                        || !oxplow_git::list_conflicted_paths(&ws).contains(&path)
+                    {
+                        Ok(())
+                    } else {
+                        Err(VcsError::Failed(format!(
+                            "{path}: the edits overlap; choose a side"
+                        )))
+                    }
+                }
+            }
+        })
+        .await
+    }
+
+    async fn create_workspace(
+        &self,
+        repo: &Path,
+        at: &Path,
+        branch: &str,
+        from: &str,
+    ) -> Result<(), VcsError> {
+        let (repo, at): (PathBuf, PathBuf) = (repo.to_path_buf(), at.to_path_buf());
+        let (branch, from) = (branch.to_string(), from.to_string());
+        blocking(move || {
+            oxplow_git::ensure_worktree(&repo, &at, &branch, &from).map_err(|e| match e {
+                oxplow_git::EnsureWorktreeError::NotRepo(p) => {
+                    VcsError::NotARepository(p.display().to_string())
+                }
+                e => VcsError::Failed(e.to_string()),
+            })
+        })
+        .await
+    }
+
+    async fn list_workspaces(&self, repo: &Path) -> Result<Vec<VcsWorkspace>, VcsError> {
+        let repo = repo.to_path_buf();
+        blocking(move || {
+            repo_check(&repo)?;
+            Ok(oxplow_git::list_existing_worktrees(&repo)
+                .into_iter()
+                .map(|w| VcsWorkspace {
+                    path: w.path,
+                    branch: w.branch,
+                    head: w.head_sha,
+                    is_main: w.is_main,
+                })
+                .collect())
+        })
+        .await
+    }
+}

@@ -176,7 +176,7 @@ export function ProjectPanel({
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => {
         void loadWorkspaceIndex();
-        // WorkspaceEntry.hasChanges and .gitStatus are baked in at loadDir
+        // WorkspaceEntry.hasChanges and .status are baked in at loadDir
         // time. Ancestor dirs of committed files never receive a workspace
         // fs-watch event, so without reloading them here their stale yellow
         // dots linger after the commit clears git status.
@@ -203,11 +203,11 @@ export function ProjectPanel({
   const [scopedDeletions, setScopedDeletions] = useState<Set<string>>(() => new Set());
   const rootEntries = useMemo(() => entriesByDir[""] ?? [], [entriesByDir]);
   const uncommittedPaths = useMemo(
-    () => indexedFiles.filter((f) => f.gitStatus !== null).map((f) => f.path),
+    () => indexedFiles.filter((f) => f.status !== null).map((f) => f.path),
     [indexedFiles],
   );
   const uncommittedDeletions = useMemo(
-    () => new Set(indexedFiles.filter((f) => f.gitStatus === "deleted").map((f) => f.path)),
+    () => new Set(indexedFiles.filter((f) => f.status === "deleted").map((f) => f.path)),
     [indexedFiles],
   );
 
@@ -324,7 +324,7 @@ export function ProjectPanel({
         name,
         path,
         kind: "file",
-        gitStatus: "deleted",
+        status: "deleted",
         hasChanges: true,
       };
       const list = out[parent] ?? [];
@@ -346,7 +346,7 @@ export function ProjectPanel({
             name: dirName,
             path: dir,
             kind: "directory",
-            gitStatus: null,
+            status: null,
             hasChanges: true,
           });
           siblingList.sort((a, b) => a.name.localeCompare(b.name));
@@ -622,7 +622,7 @@ export function ProjectPanel({
   }
 
   const isUntracked = contextMenu?.kind === "file"
-    && indexedFiles.some((f) => f.path === contextMenu.path && f.gitStatus === "untracked");
+    && indexedFiles.some((f) => f.path === contextMenu.path && f.status === "untracked");
   const isDirMarkedGenerated = contextMenu?.kind === "directory"
     && generated.includes(contextMenu.name);
   const contextMenuItems: MenuItem[] = contextMenu
@@ -851,7 +851,7 @@ export function ProjectPanel({
         <CommitDialog
           streamId={stream.id}
           pathCount={uncommittedPaths.length}
-          untrackedCount={indexedFiles.filter((f) => f.gitStatus === "untracked").length}
+          untrackedCount={indexedFiles.filter((f) => f.status === "untracked").length}
           onClose={() => setCommitDialogOpen(false)}
           onComplete={(result) => {
             setCommitDialogOpen(false);

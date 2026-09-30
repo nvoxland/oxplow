@@ -24,205 +24,43 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use oxplow_domain::stores::StreamStore;
-use oxplow_domain::{StreamId, Timestamp};
+use oxplow_domain::StreamId;
 use oxplow_git::{
-    detect_current_branch, AheadBehind, BlameLine, BranchChanges, BranchRef, ChangeScopes,
-    CommitDetail, CommitRefLabel, Divergence, GitFileStatus, GitLogCommit, GitLogOptions,
-    GitLogResult, GitOpResult, GitWorktreeEntry, GroupedGitRefs, LocalBlameEntry,
-    RemoteBranchEntry, RepoConflictState, TextSearchHit, WorkspaceEntry, WorkspaceFile,
-    WorkspaceIndexedFile, WorkspaceStatusSummary,
+    AheadBehind, BlameLine, BranchChanges, BranchRef, ChangeScopes, CommitDetail, CommitRefLabel,
+    Divergence, GitFileStatus, GitLogCommit, GitLogOptions, GitLogResult, GitOpResult,
+    GitWorktreeEntry, GroupedGitRefs, LocalBlameEntry, RemoteBranchEntry, RepoConflictState,
+    TextSearchHit, WorkspaceStatusSummary,
 };
-use tokio::sync::RwLock;
-use tracing::{debug, warn};
+use tracing::warn;
 
 use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
+use crate::worktrees::WorktreeRouter;
 
 /// Singleton handle. Held inside `Services` as `Arc<GitService>`.
+/// Routing a stream to its worktree is the router's; file I/O is
+/// `WorkspaceFiles`'; the branch reconciler is its own service.
 pub struct GitService {
-    project_dir: PathBuf,
-    streams: Arc<dyn StreamStore>,
+    router: Arc<WorktreeRouter>,
     events: EventBus,
-    /// stream_id → worktree path. The only mutable state we keep —
-    /// it's a routing table, not a cache. `register/deregister`
-    /// maintain it as streams come and go.
-    worktrees: Arc<RwLock<HashMap<StreamId, PathBuf>>>,
 }
 
 impl GitService {
-    /// Build the service. Existing streams are seeded asynchronously
-    /// from `streams.list()` so callers don't have to await; reads
-    /// against unseeded streams fall back to the project root via
-    /// `resolve_repo_dir`.
-    ///
-    /// A small bus listener is spawned to keep the per-stream `branch`
-    /// field reconciled against the live HEAD whenever refs move.
-    /// That's persistent state in the stream record — not a cache.
-    pub fn spawn(
-        project_dir: PathBuf,
-        streams: Arc<dyn StreamStore>,
-        events: EventBus,
-    ) -> Arc<Self> {
-        let svc = Arc::new(Self {
-            project_dir,
-            streams: streams.clone(),
-            events: events.clone(),
-            worktrees: Arc::new(RwLock::new(HashMap::new())),
-        });
-
-        // Reconcile-branch listener.
-        Self::spawn_branch_reconciler(svc.clone());
-
-        // Seed known streams + reconcile each one's branch from HEAD.
-        let seed_svc = svc.clone();
-        tokio::spawn(async move {
-            if let Ok(rows) = streams.list().await {
-                for s in rows {
-                    let path = resolve_worktree(&seed_svc.project_dir, &s.worktree_path);
-                    seed_svc.register(&s.id, path.clone()).await;
-                    seed_svc.reconcile_branch(&s.id, &path).await;
-                }
-            }
-        });
-
-        svc
+    pub fn new(router: Arc<WorktreeRouter>, events: EventBus) -> Arc<Self> {
+        Arc::new(Self { router, events })
     }
 
-    pub fn project_dir(&self) -> &Path {
-        &self.project_dir
+    fn project_dir(&self) -> PathBuf {
+        self.router.project_dir().to_path_buf()
     }
 
-    /// Resolve a stream id (or `None` → project root) to a worktree
-    /// path.
-    pub async fn resolve_repo_dir(&self, stream_id: Option<&str>) -> PathBuf {
-        let Some(id) = stream_id else {
-            return self.project_dir.clone();
-        };
-        let Some(id) = StreamId::try_from_str(id) else {
-            return self.project_dir.clone();
-        };
-        let map = self.worktrees.read().await;
-        if let Some(p) = map.get(&id) {
-            return p.clone();
-        }
-        drop(map);
-        // Stream may exist in the store but not yet registered (e.g.
-        // an IPC call landing before boot finished seeding). Look it
-        // up directly so we still hand back a useful path.
-        if let Ok(rows) = self.streams.list().await {
-            if let Some(s) = rows.into_iter().find(|s| s.id == id) {
-                return resolve_worktree(&self.project_dir, &s.worktree_path);
-            }
-        }
-        self.project_dir.clone()
-    }
-
-    /// Resolve a stream id to its worktree path for a **stream-scoped
-    /// destructive op** (merge / rebase / commit_all), erroring rather
-    /// than silently falling back to the primary worktree.
-    ///
-    /// `resolve_repo_dir` treats an absent or unresolvable `stream_id`
-    /// as "use the project root". That's fine for reads and for ops
-    /// that genuinely default to primary, but for a merge/rebase/commit
-    /// it's a footgun: a caller that meant stream B but sent a field
-    /// that didn't bind (e.g. snake_case `stream_id` where the wire
-    /// field is camelCase `streamId`, so it arrives as `None`) would
-    /// run the op against the PRIMARY worktree and get a misleading
-    /// "Already up to date" success on the wrong branch. These ops must
-    /// name a stream that actually resolves; anything else is an error.
-    async fn resolve_stream_worktree_strict(
-        &self,
-        stream_id: Option<&str>,
-    ) -> std::io::Result<PathBuf> {
-        let Some(id_str) = stream_id else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "this git operation is stream-scoped and requires a stream id; \
-                 refusing to fall back to the primary worktree",
-            ));
-        };
-        let Some(id) = StreamId::try_from_str(id_str) else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("{id_str:?} is not a valid stream id"),
-            ));
-        };
-        {
-            let map = self.worktrees.read().await;
-            if let Some(p) = map.get(&id) {
-                return Ok(p.clone());
-            }
-        }
-        // Not yet registered (e.g. an IPC call landing before boot
-        // finished seeding) — look the stream up directly before giving
-        // up, mirroring `resolve_repo_dir`.
-        if let Ok(rows) = self.streams.list().await {
-            if let Some(s) = rows.into_iter().find(|s| s.id == id) {
-                return Ok(resolve_worktree(&self.project_dir, &s.worktree_path));
-            }
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("no stream found for id {id_str:?}"),
-        ))
-    }
-
-    /// Register a stream's worktree with the service. Idempotent.
-    pub async fn register(&self, stream_id: &StreamId, worktree: PathBuf) {
-        let mut map = self.worktrees.write().await;
-        map.insert(*stream_id, worktree);
-    }
-
-    /// Drop a stream from the service. Used when a stream is deleted.
-    pub async fn deregister(&self, stream_id: &StreamId) {
-        let mut map = self.worktrees.write().await;
-        map.remove(stream_id);
-    }
-
-    fn spawn_branch_reconciler(svc: Arc<Self>) {
-        let mut rx = svc.events.subscribe();
-        tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(OxplowEvent::GitRefsChanged { stream_id }) => {
-                        let path = svc.resolve_repo_dir(Some(&stream_id.to_string())).await;
-                        svc.reconcile_branch(&stream_id, &path).await;
-                    }
-                    Ok(_) => {}
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        });
-    }
-
-    /// Compare the worktree's live HEAD against the Stream record's
-    /// stored `branch` and persist the new value if they diverged.
-    ///
-    /// External `git checkout`s — run while oxplow is off, or run from
-    /// a terminal during a session — never touch the Stream record on
-    /// their own; without this step the bottom-bar branch chip and any
-    /// other consumer of `stream.branch` keep showing the branch the
-    /// stream was created on.
-    async fn reconcile_branch(&self, stream_id: &StreamId, worktree: &Path) {
-        let Some(detected) = detect_current_branch(worktree) else {
-            return;
-        };
-        let Ok(Some(mut stored)) = self.streams.get(stream_id).await else {
-            return;
-        };
-        if stored.branch == detected {
-            return;
-        }
-        stored.branch = detected.clone();
-        stored.branch_ref = format!("refs/heads/{detected}");
-        stored.updated_at = Timestamp::now();
-        if let Err(e) = self.streams.upsert(&stored).await {
-            warn!(stream_id = %stream_id, error = %e, "failed to persist reconciled branch");
-            return;
-        }
-        debug!(stream_id = %stream_id, branch = %detected, "reconciled stream branch from HEAD");
-        self.events.emit(OxplowEvent::StreamsChanged);
+    /// The worktree of a **stream-scoped destructive op** (merge /
+    /// rebase / commit), refusing rather than falling back to the
+    /// primary (`WorktreeRouter::resolve_strict`).
+    async fn strict(&self, stream_id: Option<&str>) -> std::io::Result<PathBuf> {
+        self.router
+            .resolve_strict(stream_id)
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))
     }
 
     /// Emit the renderer-facing events for a write that touched
@@ -247,7 +85,7 @@ impl GitService {
     // ---------------------------------------------------------------
 
     pub async fn status_summary(&self, stream_id: Option<&str>) -> WorkspaceStatusSummary {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || {
             let map = oxplow_git::list_git_statuses(&path);
             oxplow_git::summarize_git_statuses(&map)
@@ -257,14 +95,14 @@ impl GitService {
     }
 
     pub async fn statuses(&self, stream_id: Option<&str>) -> HashMap<String, GitFileStatus> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::list_git_statuses(&path))
             .await
             .unwrap_or_default()
     }
 
     pub async fn branches_for(&self, stream_id: Option<&str>) -> Vec<BranchRef> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::list_branches(path))
             .await
             .unwrap_or_default()
@@ -273,14 +111,14 @@ impl GitService {
     /// `list_branches` against the project root — used by the shared
     /// branch picker that doesn't sit inside a specific stream.
     pub async fn list_branches_project(&self) -> Vec<BranchRef> {
-        let path = self.project_dir.clone();
+        let path = self.project_dir();
         tokio::task::spawn_blocking(move || oxplow_git::list_branches(path))
             .await
             .unwrap_or_default()
     }
 
     pub async fn conflict_state(&self, stream_id: Option<&str>) -> RepoConflictState {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::get_repo_conflict_state(&path))
             .await
             .expect("conflict_state join")
@@ -292,7 +130,7 @@ impl GitService {
         base: String,
         head: String,
     ) -> AheadBehind {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::get_ahead_behind(&path, &base, &head))
             .await
             .expect("ahead_behind join")
@@ -307,7 +145,7 @@ impl GitService {
         base: String,
         head: String,
     ) -> Divergence {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::compute_divergence(&path, &base, &head))
             .await
             .expect("divergence join")
@@ -317,7 +155,7 @@ impl GitService {
     /// Returns `None` when the directory isn't a git repo or HEAD
     /// is unborn.
     pub async fn head_commit_sha(&self, stream_id: Option<&str>) -> Option<String> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::head_commit_sha(&path))
             .await
             .ok()
@@ -325,21 +163,21 @@ impl GitService {
     }
 
     pub async fn change_scopes(&self, stream_id: Option<&str>) -> ChangeScopes {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::get_change_scopes(&path))
             .await
             .expect("change_scopes join")
     }
 
     pub async fn branch_changes(&self, stream_id: Option<&str>, base_ref: String) -> BranchChanges {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::list_branch_changes(&path, &base_ref))
             .await
             .expect("branch_changes join")
     }
 
     pub async fn git_log(&self, stream_id: Option<&str>, opts: GitLogOptions) -> GitLogResult {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::get_git_log(&path, opts))
             .await
             .expect("git_log join")
@@ -350,7 +188,7 @@ impl GitService {
         stream_id: Option<&str>,
         sha: String,
     ) -> Option<CommitDetail> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::get_commit_detail(&path, &sha))
             .await
             .unwrap_or(None)
@@ -363,7 +201,7 @@ impl GitService {
         head: String,
         limit: usize,
     ) -> Vec<GitLogCommit> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || {
             oxplow_git::get_commits_ahead_of(&path, &base, &head, limit)
         })
@@ -372,10 +210,12 @@ impl GitService {
     }
 
     pub async fn blame(&self, stream_id: Option<&str>, path: String) -> Vec<BlameLine> {
-        let dir = self.resolve_repo_dir(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::git_blame(&dir, &path))
-            .await
-            .unwrap_or_default()
+        let dir = self.router.resolve(stream_id).await;
+        tokio::task::spawn_blocking(move || {
+            oxplow_git::git_blame(&dir, "HEAD", &path).unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default()
     }
 
     pub async fn local_blame(
@@ -384,7 +224,7 @@ impl GitService {
         path: String,
         disk_text: String,
     ) -> Vec<LocalBlameEntry> {
-        let dir = self.resolve_repo_dir(stream_id).await;
+        let dir = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::local_blame(&dir, &path, &disk_text))
             .await
             .unwrap_or_default()
@@ -396,14 +236,14 @@ impl GitService {
         path: String,
         limit: usize,
     ) -> Vec<GitLogCommit> {
-        let dir = self.resolve_repo_dir(stream_id).await;
+        let dir = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::list_file_commits(&dir, &path, limit))
             .await
             .unwrap_or_default()
     }
 
     pub async fn read_file_at_ref(&self, r#ref: String, path: String) -> Option<String> {
-        let project = self.project_dir.clone();
+        let project = self.project_dir();
         tokio::task::spawn_blocking(move || oxplow_git::read_file_at_ref(&project, &r#ref, &path))
             .await
             .unwrap_or(None)
@@ -415,14 +255,14 @@ impl GitService {
         query: String,
         limit: Option<usize>,
     ) -> Vec<TextSearchHit> {
-        let dir = self.resolve_repo_dir(stream_id).await;
+        let dir = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::search_workspace_text(&dir, &query, limit))
             .await
             .unwrap_or_default()
     }
 
     pub async fn list_all_refs(&self) -> GroupedGitRefs {
-        let path = self.project_dir.clone();
+        let path = self.project_dir();
         tokio::task::spawn_blocking(move || oxplow_git::list_all_refs(&path))
             .await
             .expect("list_all_refs join")
@@ -435,28 +275,28 @@ impl GitService {
         &self,
         shas: Vec<String>,
     ) -> std::collections::HashMap<String, Vec<CommitRefLabel>> {
-        let path = self.project_dir.clone();
+        let path = self.project_dir();
         tokio::task::spawn_blocking(move || oxplow_git::resolve_commit_ref_labels(&path, &shas))
             .await
             .unwrap_or_default()
     }
 
     pub async fn list_recent_remote_branches(&self, limit: usize) -> Vec<RemoteBranchEntry> {
-        let path = self.project_dir.clone();
+        let path = self.project_dir();
         tokio::task::spawn_blocking(move || oxplow_git::list_recent_remote_branches(&path, limit))
             .await
             .unwrap_or_default()
     }
 
     pub async fn list_existing_worktrees(&self) -> Vec<GitWorktreeEntry> {
-        let path = self.project_dir.clone();
+        let path = self.project_dir();
         tokio::task::spawn_blocking(move || oxplow_git::list_existing_worktrees(&path))
             .await
             .unwrap_or_default()
     }
 
     pub async fn list_adoptable_worktrees(&self, registered: Vec<String>) -> Vec<GitWorktreeEntry> {
-        let path = self.project_dir.clone();
+        let path = self.project_dir();
         tokio::task::spawn_blocking(move || {
             oxplow_git::list_adoptable_worktrees(&path, &registered)
         })
@@ -465,134 +305,10 @@ impl GitService {
     }
 
     pub async fn detect_default_branch(&self) -> Option<String> {
-        let path = self.project_dir.clone();
+        let path = self.project_dir();
         tokio::task::spawn_blocking(move || oxplow_git::detect_default_branch(&path))
             .await
             .unwrap_or(None)
-    }
-
-    // ---------------------------------------------------------------
-    // Workspace-file pass-throughs.
-    // ---------------------------------------------------------------
-
-    pub async fn list_workspace_entries(
-        &self,
-        stream_id: Option<&str>,
-        relative_path: String,
-    ) -> Result<Vec<WorkspaceEntry>, oxplow_git::WorkspaceError> {
-        let root = self.resolve_repo_dir(stream_id).await;
-        let statuses = self.statuses(stream_id).await;
-        tokio::task::spawn_blocking(move || {
-            oxplow_git::list_workspace_entries(&root, &relative_path, &statuses)
-        })
-        .await
-        .expect("workspace entries join")
-    }
-
-    /// `filter` carries the project's `generated:` exclusions (built by
-    /// the caller from config) — excluded directories are pruned from
-    /// the walk, keeping build/vendor trees out of the quick-open index.
-    pub async fn list_workspace_files(
-        &self,
-        stream_id: Option<&str>,
-        filter: oxplow_fs_watch::WorkspaceFilter,
-    ) -> Result<Vec<WorkspaceIndexedFile>, oxplow_git::WorkspaceError> {
-        let root = self.resolve_repo_dir(stream_id).await;
-        let statuses = self.statuses(stream_id).await;
-        tokio::task::spawn_blocking(move || {
-            oxplow_git::list_workspace_files(&root, &statuses, "", &|path| {
-                filter.ignore(std::path::Path::new(path), false)
-            })
-        })
-        .await
-        .expect("workspace files join")
-    }
-
-    pub async fn read_workspace_file(
-        &self,
-        stream_id: Option<&str>,
-        relative_path: String,
-    ) -> Result<WorkspaceFile, oxplow_git::WorkspaceError> {
-        let root = self.resolve_repo_dir(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::read_workspace_file(&root, &relative_path))
-            .await
-            .expect("read workspace file join")
-    }
-
-    pub async fn write_workspace_file(
-        &self,
-        stream_id: Option<&str>,
-        relative_path: String,
-        content: String,
-    ) -> Result<WorkspaceFile, oxplow_git::WorkspaceError> {
-        let root = self.resolve_repo_dir(stream_id).await;
-        let result = tokio::task::spawn_blocking(move || {
-            oxplow_git::write_workspace_file(&root, &relative_path, &content)
-        })
-        .await
-        .expect("write workspace file join")?;
-        self.announce_write(stream_id_from(stream_id).as_ref(), false);
-        Ok(result)
-    }
-
-    pub async fn create_workspace_file(
-        &self,
-        stream_id: Option<&str>,
-        relative_path: String,
-        content: String,
-    ) -> Result<WorkspaceFile, oxplow_git::WorkspaceError> {
-        let root = self.resolve_repo_dir(stream_id).await;
-        let result = tokio::task::spawn_blocking(move || {
-            oxplow_git::create_workspace_file(&root, &relative_path, &content)
-        })
-        .await
-        .expect("create workspace file join")?;
-        self.announce_write(stream_id_from(stream_id).as_ref(), false);
-        Ok(result)
-    }
-
-    pub async fn create_workspace_directory(
-        &self,
-        stream_id: Option<&str>,
-        relative_path: String,
-    ) -> Result<String, oxplow_git::WorkspaceError> {
-        let root = self.resolve_repo_dir(stream_id).await;
-        tokio::task::spawn_blocking(move || {
-            oxplow_git::create_workspace_directory(&root, &relative_path)
-        })
-        .await
-        .expect("create workspace dir join")
-    }
-
-    pub async fn rename_workspace_path(
-        &self,
-        stream_id: Option<&str>,
-        from_path: String,
-        to_path: String,
-    ) -> Result<(String, String), oxplow_git::WorkspaceError> {
-        let root = self.resolve_repo_dir(stream_id).await;
-        let result = tokio::task::spawn_blocking(move || {
-            oxplow_git::rename_workspace_path(&root, &from_path, &to_path)
-        })
-        .await
-        .expect("rename workspace path join")?;
-        self.announce_write(stream_id_from(stream_id).as_ref(), false);
-        Ok(result)
-    }
-
-    pub async fn delete_workspace_path(
-        &self,
-        stream_id: Option<&str>,
-        relative_path: String,
-    ) -> Result<String, oxplow_git::WorkspaceError> {
-        let root = self.resolve_repo_dir(stream_id).await;
-        let result = tokio::task::spawn_blocking(move || {
-            oxplow_git::delete_workspace_path(&root, &relative_path)
-        })
-        .await
-        .expect("delete workspace path join")?;
-        self.announce_write(stream_id_from(stream_id).as_ref(), false);
-        Ok(result)
     }
 
     // ---------------------------------------------------------------
@@ -604,8 +320,8 @@ impl GitService {
         stream_id: Option<&str>,
         message: String,
     ) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_stream_worktree_strict(stream_id).await?;
-        let result = run_blocking(move || oxplow_git::commit_all(&path, &message)).await?;
+        let path = self.strict(stream_id).await?;
+        let result = run_blocking(move || oxplow_git::commit(&path, &message, true)).await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
     }
@@ -615,7 +331,7 @@ impl GitService {
         stream_id: Option<&str>,
         relpath: String,
     ) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         let result = run_blocking(move || oxplow_git::add_path(&path, &relpath)).await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), false);
         Ok(result)
@@ -626,7 +342,7 @@ impl GitService {
         stream_id: Option<&str>,
         relpath: String,
     ) -> std::io::Result<()> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         run_blocking(move || oxplow_git::restore_path(&path, &relpath)).await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), false);
         Ok(())
@@ -637,14 +353,14 @@ impl GitService {
         stream_id: Option<&str>,
         remote: Option<String>,
     ) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         let result = run_blocking(move || oxplow_git::fetch(&path, remote.as_deref())).await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
     }
 
     pub async fn pull(&self, stream_id: Option<&str>) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         let result = run_blocking(move || oxplow_git::pull(&path)).await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
@@ -656,7 +372,7 @@ impl GitService {
         remote: String,
         branch: String,
     ) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         let result =
             run_blocking(move || oxplow_git::pull_remote_into_current(&path, &remote, &branch))
                 .await?;
@@ -665,7 +381,7 @@ impl GitService {
     }
 
     pub async fn push(&self, stream_id: Option<&str>) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         let result = run_blocking(move || oxplow_git::push(&path)).await?;
         // Push doesn't change local refs but ahead/behind shifts.
         self.announce_write(stream_id_from(stream_id).as_ref(), true);
@@ -678,7 +394,7 @@ impl GitService {
         remote: String,
         branch: String,
     ) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         let result =
             run_blocking(move || oxplow_git::push_current_to(&path, &remote, &branch)).await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), true);
@@ -690,7 +406,7 @@ impl GitService {
         stream_id: Option<&str>,
         source: String,
     ) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_stream_worktree_strict(stream_id).await?;
+        let path = self.strict(stream_id).await?;
         let result =
             run_blocking(move || Ok(with_auto_resolve(oxplow_git::merge(&path, &source)?, &path)))
                 .await?;
@@ -703,7 +419,7 @@ impl GitService {
         stream_id: Option<&str>,
         onto: String,
     ) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_stream_worktree_strict(stream_id).await?;
+        let path = self.strict(stream_id).await?;
         let result =
             run_blocking(move || Ok(with_auto_resolve(oxplow_git::rebase(&path, &onto)?, &path)))
                 .await?;
@@ -720,7 +436,7 @@ impl GitService {
         stream_id: Option<&str>,
         commit: String,
     ) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_stream_worktree_strict(stream_id).await?;
+        let path = self.strict(stream_id).await?;
         let result = run_blocking(move || {
             Ok(with_auto_resolve(
                 oxplow_git::cherry_pick(&path, &commit)?,
@@ -739,7 +455,7 @@ impl GitService {
         stream_id: Option<&str>,
         commit: String,
     ) -> std::io::Result<GitOpResult> {
-        let path = self.resolve_stream_worktree_strict(stream_id).await?;
+        let path = self.strict(stream_id).await?;
         let result = run_blocking(move || {
             Ok(with_auto_resolve(
                 oxplow_git::revert(&path, &commit)?,
@@ -756,7 +472,7 @@ impl GitService {
         from: String,
         to: String,
     ) -> Result<(), oxplow_git::BranchOpError> {
-        let path = self.project_dir.clone();
+        let path = self.project_dir();
         run_blocking_branch(move || oxplow_git::rename_branch(&path, &from, &to)).await?;
         self.broadcast_refs_change_all().await;
         Ok(())
@@ -767,7 +483,7 @@ impl GitService {
         branch: String,
         force: bool,
     ) -> Result<(), oxplow_git::BranchOpError> {
-        let path = self.project_dir.clone();
+        let path = self.project_dir();
         run_blocking_branch(move || oxplow_git::delete_branch(&path, &branch, force)).await?;
         self.broadcast_refs_change_all().await;
         Ok(())
@@ -778,7 +494,7 @@ impl GitService {
         stream_id: Option<&str>,
         entry: String,
     ) -> std::io::Result<()> {
-        let path = self.resolve_repo_dir(stream_id).await;
+        let path = self.router.resolve(stream_id).await;
         run_blocking(move || oxplow_git::append_to_gitignore(&path, &entry)).await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), false);
         Ok(())
@@ -788,28 +504,20 @@ impl GitService {
     /// every registered stream so per-stream subscribers (snapshot
     /// capture, history panel, branch picker) all refresh.
     async fn broadcast_refs_change_all(&self) {
-        let ids: Vec<StreamId> = {
-            let map = self.worktrees.read().await;
-            map.keys().cloned().collect()
-        };
-        for id in ids {
-            self.events
-                .emit(OxplowEvent::GitRefsChanged { stream_id: id });
+        match self.router.all().await {
+            Ok(all) => {
+                for (id, _) in all {
+                    self.events
+                        .emit(OxplowEvent::GitRefsChanged { stream_id: id });
+                }
+            }
+            Err(error) => warn!(%error, "couldn't list the streams to announce a refs change"),
         }
     }
 }
 
 fn stream_id_from(s: Option<&str>) -> Option<StreamId> {
     s.and_then(StreamId::try_from_str)
-}
-
-fn resolve_worktree(project_dir: &Path, recorded: &str) -> PathBuf {
-    let raw = PathBuf::from(recorded);
-    if raw.is_absolute() {
-        raw
-    } else {
-        project_dir.join(raw)
-    }
 }
 
 /// After a long-running git op (merge / rebase / cherry-pick / revert)
@@ -856,7 +564,8 @@ where
 mod tests {
     use super::*;
     use oxplow_db::{Database, SqliteStreamStore};
-    use oxplow_domain::{Stream, StreamKind};
+    use oxplow_domain::stores::StreamStore;
+    use oxplow_domain::{Stream, StreamKind, Timestamp};
     use std::process::Command as Cmd;
 
     fn run_git(dir: &Path, args: &[&str]) {
@@ -940,8 +649,10 @@ mod tests {
             .await
             .unwrap();
 
-        let svc = GitService::spawn(p.to_path_buf(), store, EventBus::new());
-        svc.register(&stream_id, sib.clone()).await;
+        let svc = GitService::new(
+            Arc::new(WorktreeRouter::new(p.to_path_buf(), store)),
+            EventBus::new(),
+        );
         (svc, sib, stream_id, primary, wt_parent)
     }
 
@@ -1053,8 +764,10 @@ mod tests {
             .await
             .unwrap();
 
-        let svc = GitService::spawn(p.to_path_buf(), store, EventBus::new());
-        svc.register(&stream_id, sib.clone()).await;
+        let svc = GitService::new(
+            Arc::new(WorktreeRouter::new(p.to_path_buf(), store)),
+            EventBus::new(),
+        );
         (svc, sib, stream_id, primary, wt_parent)
     }
 

@@ -554,7 +554,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     <PageKindIcon kind="file" size={14} style={{ color: "var(--text-secondary)" }} />
                   </span>
                   <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{result.file.path}</span>
-                  <span style={{ color: "var(--muted)", fontSize: 11 }}>{shortStatus(result.file.gitStatus)}</span>
+                  <span style={{ color: "var(--muted)", fontSize: 11 }}>{shortStatus(result.file.status)}</span>
                 </button>
               );
             })
@@ -570,7 +570,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   );
 }
 
-function shortStatus(status: WorkspaceIndexedFile["gitStatus"]): string {
+function shortStatus(status: WorkspaceIndexedFile["status"]): string {
   switch (status) {
     case "modified":
       return "M";
@@ -582,6 +582,8 @@ function shortStatus(status: WorkspaceIndexedFile["gitStatus"]): string {
       return "R";
     case "untracked":
       return "U";
+    case "conflicted":
+      return "C";
     default:
       return "";
   }

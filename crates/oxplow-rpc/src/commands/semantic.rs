@@ -36,7 +36,7 @@ pub async fn list_data_entities(
 ) -> Result<Vec<oxplow_app::semantic_catalog::DataEntity>, IpcError> {
     // Extension-declared entities come from the primary worktree (their
     // data is project-global).
-    let root = svc.git.resolve_repo_dir(None).await;
+    let root = svc.worktrees.resolve(None).await;
     Ok(
         oxplow_app::semantic_catalog::data_entities(&svc.sql, &svc.extension_catalog, &root)
             .await?,
