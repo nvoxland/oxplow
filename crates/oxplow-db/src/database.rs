@@ -1367,6 +1367,77 @@ mod tests {
         }
     }
 
+    /// tsk561: before V115, archiving a done task cleared `completed_at`,
+    /// so V115's backfill called it `canceled`. V122 restores `done` from
+    /// the event log: the task's last archive came from `done`; its
+    /// completion is the `done` transition before it.
+    #[test]
+    fn v122_restores_done_then_archived_tasks_from_the_event_log() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(121))
+            .run(&mut conn)
+            .unwrap();
+        let t = |n: u32| format!("2026-01-0{n}T00:00:00.000000Z");
+        let mut sql = String::new();
+        for id in 1..=4 {
+            sql += &format!(
+                "INSERT INTO task (id, title, status, priority, created_by, created_at, updated_at)
+                   VALUES ({id}, 't{id}', 'archived', 'medium', 'agent', '{a}', '{a}');
+                 INSERT INTO work_item (ref, provider, title, state, native_state, native,
+                                        created_at, updated_at)
+                   VALUES ('work_item:oxplow:tsk{id}', 'oxplow', 't{id}', 'canceled', 'archived',
+                           json_object('priority', 'medium', 'completed_at', NULL), '{a}', '{a}');",
+                a = t(1)
+            );
+        }
+        // tsk1: done, then archived. tsk2: archived from ready. tsk3: done,
+        // reopened, then archived. tsk4: no history.
+        let moves = [
+            (1, "in_progress", "done", 2),
+            (1, "done", "archived", 3),
+            (2, "ready", "archived", 3),
+            (3, "in_progress", "done", 2),
+            (3, "done", "ready", 3),
+            (3, "ready", "archived", 4),
+        ];
+        for (i, (task, from, to, day)) in moves.iter().enumerate() {
+            sql += &format!(
+                "INSERT INTO event_log (id, type, v, at, source, subject, payload)
+                   VALUES ('e{i}', 'work_item.transitioned', 1, '{at}', 'test', '[]',
+                           json_object('work_item', 'work_item:oxplow:tsk{task}',
+                                       'from', '{from}', 'to', '{to}'));",
+                at = t(*day)
+            );
+        }
+        conn.execute_batch(&sql).unwrap();
+
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(122))
+            .run(&mut conn)
+            .unwrap();
+        let rows: Vec<(i64, Option<String>, String, Option<String>)> = conn
+            .prepare(
+                "SELECT t.id, t.completed_at, w.state, json_extract(w.native, '$.completed_at')
+                 FROM task t JOIN work_item w ON w.ref = 'work_item:oxplow:tsk' || t.id
+                 ORDER BY t.id",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (1, Some(t(2)), "done".into(), Some(t(2))),
+                (2, None, "canceled".into(), None),
+                (3, None, "canceled".into(), None),
+                (4, None, "canceled".into(), None),
+            ]
+        );
+    }
+
     /// P3.2 (tsk472): V102 only adds — every agent-activity row survives,
     /// nudges written before it count as delivered, and the new anchors
     /// and uniqueness are in place.

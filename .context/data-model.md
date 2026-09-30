@@ -413,7 +413,10 @@ the `task` row by `task_store::project_work_item_tx`, which every task
 write calls in its own transaction (insert, field update, status,
 soft delete) — the two never disagree. Mapping: `ready` → `todo`;
 `archived` → `done` when `completed_at` is set, else `canceled`; the rest
-by name. `native` carries priority, thread, sort index, author and
+by name. (Archiving keeps `completed_at`; before V115 it cleared it, so
+V122 restored it — and `done` — for every task whose last archive the
+event log shows came `from: done`. Tasks archived before the event log
+existed have no record and stay `canceled`.) `native` carries priority, thread, sort index, author and
 `completed_at`. A task deleted by a cascade (its thread or stream
 deleted outright) never passes through the store, so a trigger
 (`work_item_follows_task_delete`) deletes its row. `v_work_item`'s own
