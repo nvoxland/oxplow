@@ -14,7 +14,6 @@ use oxplow_domain::vcs::{
     RemoteBranch, RevisionDetail, RevisionFile, RevisionGraph, RevisionInfo, StatusEntry, Tag, Vcs,
     VcsError, VcsFeatures, VcsWorkspace, WorkspaceStatus,
 };
-use oxplow_domain::FileChange;
 
 /// Git, as the VCS provider.
 #[derive(Debug, Clone, Copy, Default)]
@@ -462,15 +461,6 @@ impl Vcs for GitProvider {
             }
         });
         Ok(Box::new(watcher))
-    }
-
-    async fn diff(&self, ws: &Path, a: &str, b: &str) -> Result<Vec<FileChange>, VcsError> {
-        let (ws, a, b) = (ws.to_path_buf(), a.to_string(), b.to_string());
-        blocking(move || {
-            repo_check(&ws)?;
-            oxplow_git::diff_commits(&ws, &a, &b).map_err(|e| VcsError::Failed(e.to_string()))
-        })
-        .await
     }
 
     async fn status(&self, ws: &Path) -> Result<WorkspaceStatus, VcsError> {

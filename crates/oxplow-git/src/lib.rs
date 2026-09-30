@@ -56,7 +56,7 @@ pub use sync::{
     add_path, checkout_branch, cherry_pick, commit, fetch, merge, pull, pull_remote_into_current,
     push, push_current_to, rebase, revert, take_conflict_side, GitOpResult,
 };
-pub use tree::{diff_commits, git_blob_oid, tree_at_commit};
+pub use tree::{git_blob_oid, tree_at_commit};
 pub use worktree::{
     ensure_worktree, list_adoptable_worktrees, list_existing_worktrees, remove_worktree,
     EnsureWorktreeError, GitWorktreeEntry,

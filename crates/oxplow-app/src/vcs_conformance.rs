@@ -57,7 +57,8 @@ pub async fn a_commit_reads_back_what_it_captured(p: &dyn Vcs, ws: &Path) {
     assert_eq!(objects.read(&objects.id_of(b"never stored")), None);
 }
 
-/// 2. Two revisions diff to what changed, deletions included.
+/// 2. Two revisions' trees differ by what changed, deletions included
+///    (the diff itself is `Trees`', over `files_at`).
 pub async fn two_revisions_diff_to_what_changed(p: &dyn Vcs, ws: &Path) {
     write(ws, "kept.txt", "same\n");
     write(ws, "edited.txt", "v1\n");
@@ -67,7 +68,16 @@ pub async fn two_revisions_diff_to_what_changed(p: &dyn Vcs, ws: &Path) {
     write(ws, "new.txt", "hi\n");
     std::fs::remove_file(ws.join("gone.txt")).unwrap();
     let second = commit(p, ws, "second").await;
-    let changes = p.diff(ws, &first, &second).await.unwrap();
+    let tree = |rev: String| async move {
+        p.files_at(ws, &rev)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(path, id)| (path, id.0))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let (a, b) = (tree(first.clone()).await, tree(second.clone()).await);
+    let changes = oxplow_domain::diff_trees(&a, &b);
     assert_eq!(
         changes
             .iter()
@@ -79,7 +89,7 @@ pub async fn two_revisions_diff_to_what_changed(p: &dyn Vcs, ws: &Path) {
             ("new.txt", ChangeStatus::Added),
         ]
     );
-    assert!(p.diff(ws, &second, &second).await.unwrap().is_empty());
+    assert!(oxplow_domain::diff_trees(&b, &b).is_empty());
 }
 
 /// 1b. The clean baseline vouches for a committed, untouched file by its

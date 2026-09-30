@@ -14,7 +14,7 @@ provider stays testable against a tempdir.
 - **Revisions:** `head`, `resolve` (a branch, a short id, `HEAD` → the
   full id), `log`, `revision` (message and changed files),
   `revisions_between`, `file_history`.
-- **Trees:** `files_at(rev)` (path → `ObjectId`), `diff(a, b)`,
+- **Trees:** `files_at(rev)` (path → `ObjectId`),
   `object_store(ws)` — a synchronous `ObjectStore` (`read(id)`,
   `id_of(bytes)`: the id without writing it) — and
   `clean_baseline(ws)`, a synchronous `CleanBaseline` that vouches, by
@@ -55,7 +55,8 @@ re-exported from `oxplow_app::vcs`).
 that runs each call under `spawn_blocking`. `Services.vcs` holds it as
 `Arc<dyn Vcs>`. Notes:
 
-- `diff` compares content trees (`oxplow_domain::diff_trees`), so
+- There is no provider diff: `Trees::diff` compares `files_at` trees
+  (`oxplow_domain::diff_trees`), one mechanism for every pair, so
   `rename_detection` is `false`: a rename is a delete plus an add.
 - `merge` and `pull` run oxplow's smart merge over what they left
   conflicted (see [smart-merge.md](./smart-merge.md)); `OpOutcome`
@@ -112,9 +113,11 @@ Snapshots read their blobs from the blob store and VCS-backed rows
 through the object store; the working tree reuses the head's object id
 for a file `status` calls clean and hashes the rest (`ObjectStore::id_of`). Every side honours the workspace filter
 (`generated:` plus `.gitignore`) — the working-tree corpus no longer has
-its own skip list. Two VCS revisions diff through `Vcs::diff`; two
-snapshots settle un-hashed rows first (`resolve_for_compare`); a mixed
-pair normalizes the snapshot side into VCS ids.
+its own skip list. Two VCS revisions diff like any other pair — their
+filtered `files_at` trees through `diff_trees` (a provider-side diff
+used to skip the filter, tsk552); two snapshots settle un-hashed rows
+first (`resolve_for_compare`); a mixed pair normalizes the snapshot side
+into VCS ids.
 
 The neutral RPCs are `read_at { streamId, path, revision }`, `files_at`
 and `diff { streamId, from, to }` (UI), and MCP `read_at`; they replaced

@@ -18,8 +18,6 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::FileChange;
-
 /// A content address in the provider's object store (a git blob oid).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Type)]
 #[serde(transparent)]
@@ -361,8 +359,6 @@ pub trait Vcs: Send + Sync {
         ws: &Path,
         on_change: Box<dyn Fn() + Send + Sync>,
     ) -> Result<Box<dyn Send>, VcsError>;
-    /// What changed from `a` to `b`, sorted by path.
-    async fn diff(&self, ws: &Path, a: &str, b: &str) -> Result<Vec<FileChange>, VcsError>;
 
     // --- status, branches, blame ---
     async fn status(&self, ws: &Path) -> Result<WorkspaceStatus, VcsError>;

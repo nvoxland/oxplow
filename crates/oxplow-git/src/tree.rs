@@ -11,8 +11,6 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use oxplow_domain::{diff_trees, FileChange};
-
 /// The content tree of `rev` (any revspec libgit2 resolves — sha,
 /// branch, tag): `path -> blob oid`. Walks the commit's tree
 /// recursively; blobs only (sub-trees are traversed, submodules
@@ -50,22 +48,11 @@ pub fn git_blob_oid(bytes: &[u8]) -> Option<String> {
         .map(|oid| oid.to_string())
 }
 
-/// Content diff between two commits via the shared comparison.
-pub fn diff_commits(
-    repo_path: impl AsRef<Path>,
-    before_rev: &str,
-    after_rev: &str,
-) -> Result<Vec<FileChange>, git2::Error> {
-    let repo_path = repo_path.as_ref();
-    let before = tree_at_commit(repo_path, before_rev)?;
-    let after = tree_at_commit(repo_path, after_rev)?;
-    Ok(diff_trees(&before, &after))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use oxplow_domain::ChangeStatus;
+    use oxplow_domain::FileChange;
     use std::process::Command as Cmd;
     use tempfile::tempdir;
 
@@ -95,7 +82,7 @@ mod tests {
     }
 
     #[test]
-    fn diff_commits_classifies_add_modify_delete() {
+    fn two_commits_trees_differ_by_add_modify_delete() {
         let dir = tempdir().unwrap();
         let p = dir.path();
         init_repo(p);
@@ -110,7 +97,10 @@ mod tests {
         std::fs::write(p.join("sub/new.txt"), "new").unwrap(); // added (nested)
         let c2 = commit_all(p, "second");
 
-        let changes = diff_commits(p, &c1, &c2).unwrap();
+        let changes = oxplow_domain::diff_trees(
+            &tree_at_commit(p, &c1).unwrap(),
+            &tree_at_commit(p, &c2).unwrap(),
+        );
         assert_eq!(
             changes,
             vec![
@@ -142,15 +132,5 @@ mod tests {
         // computes — so git_blob_oid must equal it.
         let written = repo.blob(bytes).unwrap().to_string();
         assert_eq!(git_blob_oid(bytes), Some(written));
-    }
-
-    #[test]
-    fn identical_commits_have_no_changes() {
-        let dir = tempdir().unwrap();
-        let p = dir.path();
-        init_repo(p);
-        std::fs::write(p.join("a.txt"), "a").unwrap();
-        let c1 = commit_all(p, "only");
-        assert!(diff_commits(p, &c1, &c1).unwrap().is_empty());
     }
 }

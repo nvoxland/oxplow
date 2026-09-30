@@ -216,14 +216,6 @@ impl Trees {
             c.iter().map(|(p, c)| (p.clone(), c.id.clone())).collect()
         };
         let (before, after, changes) = match (from, to) {
-            // Two VCS revisions: the provider's own diff.
-            (Some(fr @ Revision::Vcs { kind: ka, rev: a }), Revision::Vcs { kind: kb, rev: b }) => {
-                let (a, b) = (self.vcs_rev(ka, a)?, self.vcs_rev(kb, b)?);
-                let changes = self.vcs.diff(ws, a, b).await?;
-                let (before, _) = self.cells(ws, fr).await?;
-                let (after, _) = self.cells(ws, to).await?;
-                (before, after, changes)
-            }
             // Two snapshots: settle un-hashed VCS-backed rows first, so
             // equal bytes compare equal.
             (Some(Revision::Snapshot(a)), Revision::Snapshot(b)) => {
@@ -736,5 +728,31 @@ mod tests {
             .filter(|e| e.status == FileStatus::Deleted)
             .collect();
         assert!(deleted.is_empty(), "{deleted:?}");
+    }
+
+    /// tsk552: a diff between two commits honours the workspace filter
+    /// like every other pair — an excluded path isn't reported.
+    #[tokio::test]
+    async fn a_commit_diff_leaves_out_filtered_paths() {
+        let f = services_with_effort().await;
+        let ws = f.svc.layout.project_dir.clone();
+        f.svc.config.write().unwrap().generated.exclude = vec!["dist".into()];
+        std::fs::create_dir_all(ws.join("dist")).unwrap();
+        std::fs::write(ws.join("dist/app.js"), "v1\n").unwrap();
+        std::fs::write(ws.join("src.txt"), "a\n").unwrap();
+        let c1 = commit_all(&ws, "c1");
+        std::fs::write(ws.join("dist/app.js"), "v2\n").unwrap();
+        std::fs::write(ws.join("src.txt"), "b\n").unwrap();
+        let c2 = commit_all(&ws, "c2");
+        let d = f
+            .svc
+            .trees
+            .diff(&ws, Some(&Revision::git(c1)), &Revision::git(c2))
+            .await
+            .unwrap();
+        assert_eq!(
+            by_path(&d),
+            BTreeMap::from([("src.txt", (FileStatus::Modified, 1, 1))])
+        );
     }
 }
