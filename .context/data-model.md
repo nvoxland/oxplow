@@ -433,7 +433,9 @@ snapshot saying what the collection covered. Read as `v_symbol` /
 ### `ai_result` — recorded AI computations (`crates/oxplow-db/src/ai_result_store.rs`, migration `V118__ai_result.sql`, P5.E1)
 
 A `classify` / `score` / `summarize` / `extract` result, `UNIQUE
-(input_hash, model, prompt_version)`, with its `op`, `role`, first
+(input_hash, provider, model, prompt_version)` (the provider since V121,
+which rebuilt the table taking each row's provider from its `ai_call`),
+with its `op`, `role`, first
 `caller`, `output_json`, tokens and the computing `ai_call_id`; a
 concurrent duplicate keeps the first (`ON CONFLICT DO NOTHING`). The
 same migration adds `ai_call.input_hash`. Read as `v_ai_result`; see

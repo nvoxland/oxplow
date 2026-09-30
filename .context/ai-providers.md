@@ -140,10 +140,11 @@ ai:
 
 `crates/oxplow-app/src/ai_compute.rs`, `Services.ai_compute`. A model
 computation oxplow asks for is **recorded**: kept in `ai_result`
-(`v_ai_result`, V118) by `UNIQUE (input_hash, model, prompt_version)`,
+(`v_ai_result`, V118; the provider joined the key in V121) by
+`UNIQUE (input_hash, provider, model, prompt_version)`,
 where `input_hash = sha256(canonical JSON of { op, args })` (object keys
 sorted, so argument order doesn't matter). Asking again for the same
-thing — same input, same model, same prompt — reads the recorded result:
+thing — same input, same provider and model, same prompt — reads the recorded result:
 `Recorded { value, cached: true, ai_call_id, input_tokens,
 output_tokens }`, and **no call and no `ai_call` row** are made. A miss
 calls, then records (a concurrent duplicate keeps the first). A failed
@@ -158,8 +159,10 @@ or unusable answer is never recorded. Tokens only; no cost.
 
 Changing an op's prompt means bumping its version constant: old results
 stay (for their version) and new ones are computed. The model is the
-role's model *now* (`AiService::model_for`), so reassigning a role
-computes afresh. `AiService::complete_as` / `decide_as` take a
+role's provider and model *now* (`AiService::binding_for`), so
+reassigning a role computes afresh — to another model, or to another
+provider serving the same model name (a local and a hosted `llama3.1`
+are two computations, tsk560). `AiService::complete_as` / `decide_as` take a
 `CallSite { caller, input_hash }`, so the computing call's `ai_call` row
 carries the hash, and return its row id; plain `complete` / `decide`
 record `input_hash` NULL.

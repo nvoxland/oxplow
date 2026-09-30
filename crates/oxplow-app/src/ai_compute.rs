@@ -1,7 +1,7 @@
 //! Recorded AI computations (P5.E1, `.context/ai-providers.md` "Recorded
 //! computations"): `classify`, `score`, `summarize` and `extract`, each
-//! kept in `ai_result` by the hash of its input, the model and the op's
-//! prompt version. Asking again for the same thing reads the recorded
+//! kept in `ai_result` by the hash of its input, the provider, the model
+//! and the op's prompt version. Asking again for the same thing reads the recorded
 //! result — no call, no `ai_call` row — so a computation is paid for once
 //! and reads stay deterministic. Tokens only; there is no cost.
 //!
@@ -140,12 +140,12 @@ impl AiCompute {
         F: FnOnce(String) -> Fut,
         Fut: std::future::Future<Output = Result<(T, i64, i64, Option<i64>), AiComputeError>>,
     {
-        let model = self.ai.model_for(op.role)?;
+        let binding = self.ai.binding_for(op.role)?;
         let hash = input_hash(op.name, &op.args);
         let storage = |e: oxplow_domain::DomainError| AiComputeError::Storage(e.to_string());
         if let Some(hit) = self
             .results
-            .get(&hash, &model, op.prompt_version)
+            .get(&hash, &binding.provider, &binding.model, op.prompt_version)
             .await
             .map_err(storage)?
         {
@@ -162,7 +162,8 @@ impl AiCompute {
         self.results
             .insert(NewAiResult {
                 input_hash: hash,
-                model,
+                provider: binding.provider,
+                model: binding.model,
                 prompt_version: op.prompt_version.into(),
                 op: op.name.into(),
                 role: crate::ai_service::role_name(op.role),
@@ -437,11 +438,16 @@ mod tests {
     use crate::ai_service::{ProviderConfig, ProviderKind, RoleBinding};
 
     async fn with_model(svc: &crate::Services, role: Role, reply: Value) {
+        with_provider(svc, role, "m", reply).await
+    }
+
+    /// Bind `role` to model `x` served by provider `provider`.
+    async fn with_provider(svc: &crate::Services, role: Role, provider: &str, reply: Value) {
         let (base, _) = oxplow_ai::testing::mock("/chat/completions", 200, reply).await;
         svc.ai
             .save_provider(
                 ProviderConfig {
-                    id: "m".into(),
+                    id: provider.into(),
                     kind: ProviderKind::OpenaiCompatible,
                     base_url: Some(base),
                 },
@@ -452,7 +458,7 @@ mod tests {
             .set_role(
                 role,
                 Some(RoleBinding {
-                    provider: "m".into(),
+                    provider: provider.into(),
                     model: "x".into(),
                 }),
             )
@@ -524,6 +530,49 @@ mod tests {
             .await
             .unwrap();
         assert!(!other.cached);
+        assert_eq!(calls(&fx.svc).await.len(), 2);
+    }
+
+    /// A result is the provider's as well as the model's: rebinding a role
+    /// to another provider serving the same model name computes afresh.
+    #[tokio::test]
+    async fn another_provider_of_the_same_model_computes_afresh() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        with_provider(&fx.svc, Role::Summarize, "local", chat("local says")).await;
+        let local = fx
+            .svc
+            .ai_compute
+            .summarize("test", "t", None)
+            .await
+            .unwrap();
+        assert_eq!(local.value, "local says");
+        with_provider(&fx.svc, Role::Summarize, "hosted", chat("hosted says")).await;
+        let hosted = fx
+            .svc
+            .ai_compute
+            .summarize("test", "t", None)
+            .await
+            .unwrap();
+        assert!(!hosted.cached);
+        assert_eq!(hosted.value, "hosted says");
+        fx.svc
+            .ai
+            .set_role(
+                Role::Summarize,
+                Some(RoleBinding {
+                    provider: "local".into(),
+                    model: "x".into(),
+                }),
+            )
+            .unwrap();
+        let again = fx
+            .svc
+            .ai_compute
+            .summarize("test", "t", None)
+            .await
+            .unwrap();
+        assert!(again.cached);
+        assert_eq!(again.value, "local says");
         assert_eq!(calls(&fx.svc).await.len(), 2);
     }
 

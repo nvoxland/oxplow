@@ -372,12 +372,12 @@ impl AiService {
         Ok((result?, call_id))
     }
 
-    /// The model `role` is bound to now (what a recorded result is keyed
-    /// by), without calling it.
-    pub fn model_for(&self, role: Role) -> Result<String, AiServiceError> {
+    /// The provider and model `role` is bound to now (what a recorded
+    /// result is keyed by), without calling it.
+    pub fn binding_for(&self, role: Role) -> Result<RoleBinding, AiServiceError> {
         self.config()?
             .resolve(role)
-            .map(|(_, b)| b.model.clone())
+            .map(|(_, b)| b.clone())
             .ok_or_else(|| AiServiceError::NotConfigured(role_name(role)))
     }
 
