@@ -19,6 +19,9 @@ import {
   BarChart3,
   BookOpen,
   Columns3,
+  TriangleAlert,
+  ListTree,
+  Braces,
   CheckCheck,
   CheckSquare,
   Copy,
@@ -107,6 +110,12 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return BookOpen;
     case "board":
       return Columns3;
+    case "problems":
+      return TriangleAlert;
+    case "symbols":
+      return ListTree;
+    case "symbol":
+      return Braces;
 
     // Literal-id index pages (kind === id).
     case "agent":

@@ -15,3 +15,9 @@ export function threadIdOf(row: number): string {
 export function taskIdOf(row: number): string {
   return `tsk${row}`;
 }
+
+/** A stream id (`str2`) as its row id in the models. */
+export function streamRowId(streamId: string): number {
+  return Number(streamId.replace(/^str/, ""));
+}
+

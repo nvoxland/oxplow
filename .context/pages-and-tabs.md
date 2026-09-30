@@ -145,8 +145,10 @@ on 2026-09-28) — see the decision in [refs.md](./refs.md).
 | commit | `commit:<sha>` | `commit:abc1234` |
 | metric | `metric:<key>` | `metric:oxplow.coverage.abs_pct` |
 | lens | `lens:<extension>/<slug>[?param=value…]` (params sorted; `lensRef(id, params)`) | `lens:review/waiting-on-me`, `lens:oxplow-analytics/effort-tests?effort_id=12` |
+| symbols | `page:symbols[?path=<p>]` — one file's outline, or the project's symbols (filtered) | `page:symbols?path=src/lib.rs` |
+| symbol | `symbol:<path>/<name>@snap:<id>` (`v_symbol.ref`, `symbolRef(ref)`) — never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it through `v_symbol` and opens its file at the name's line (`openSymbol`, P6.E3) | `symbol:src/lib.rs/Widget::spin@snap:12` |
 | agent | `page:agent` (`AGENT_TAB_ID`) | `page:agent` |
-| index routes | `page:<kind>` — `tasks`, `done-work`, `backlog`, `archived`, `wiki-index`, `files`, `comments`, `local-history(-full\|-by-commit-full)`, `git-history`, `git-dashboard`, `uncommitted-changes`, `hook-events`, `terminal`, `settings`, `metrics-recorded`, `dashboards`, `explore-data`, `catalog`, `board`, `closed-threads`, `new-stream`, `new-task` | `page:tasks` |
+| index routes | `page:<kind>` — `tasks`, `done-work`, `backlog`, `archived`, `wiki-index`, `files`, `comments`, `local-history(-full\|-by-commit-full)`, `git-history`, `git-dashboard`, `uncommitted-changes`, `hook-events`, `terminal`, `settings`, `metrics-recorded`, `dashboards`, `explore-data`, `catalog`, `board`, `problems`, `closed-threads`, `new-stream`, `new-task` | `page:tasks` |
 | diff | `page:diff?path=<p>&left=<ver>&right=<ver>[&label=<l>]` (versions `disk` / `ref:<x>` / `snap:<id>`; `diffRef(spec)` / `computeDiffId(spec)` — `revealLine` is not in the id, so re-clicking reuses the tab) | `page:diff?path=src/a.ts&left=ref:abc&right=disk` |
 | diff-view | `page:diff-view?snapshot=<N>` \| `?effort=<effortId>` \| `?start=<tok>&end=<tok>` (endpoint tokens `s<snapshotId>` / `c<sha>` / `w` / `none`) | `page:diff-view?effort=eff42` |
 | duplicate-block | `page:duplicate-block?left=<p>&left_lines=<a>-<b>&left_at=<ver>&right=…` | `page:duplicate-block?left=a.rs&left_lines=1-5&left_at=disk&right=b.rs&right_lines=9-13&right_at=ref:abc` |

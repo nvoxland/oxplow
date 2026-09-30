@@ -133,6 +133,9 @@ import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { ExploreDataPage } from "./pages/ExploreDataPage.js";
 import { CatalogPage } from "./pages/CatalogPage.js";
 import { BoardPage } from "./pages/BoardPage.js";
+import { ProblemsPage } from "./pages/ProblemsPage.js";
+import { SymbolsPage } from "./pages/SymbolsPage.js";
+import { resolveSymbol } from "./codeIntel.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
@@ -635,6 +638,20 @@ export function App() {
     mutateFileSession(stream.id, (s) => setLoadedFileContent(s, path, file.content));
     activateFileTab();
     logUi("info", "opened file", { streamId: stream.id, path });
+  }
+
+  /** A `symbol:` ref opens its file at the symbol's line (`v_symbol`). */
+  async function openSymbol(ref: string) {
+    try {
+      const at = await resolveSymbol(ref);
+      if (!at) {
+        recordOpError({ label: "Open symbol", message: `${ref} isn't a known symbol now (the file changed, or its language server isn't running).` });
+        return;
+      }
+      await handleNavigateToLocation({ path: at.path, line: at.line, column: at.col });
+    } catch (e) {
+      recordOpError({ label: "Open symbol", message: e instanceof Error ? e.message : String(e) });
+    }
   }
 
   async function handleNavigateToLocation(target: EditorNavigationTarget) {
@@ -1803,6 +1820,9 @@ export function App() {
       case "agent":
         setCenterActive(AGENT_TAB_ID);
         return;
+      case "symbol":
+        void openSymbol((ref.payload as { ref: string }).ref);
+        return;
       case "file": {
         const payload = ref.payload as {
           path?: string;
@@ -1891,6 +1911,11 @@ export function App() {
     siblings?: import("./tabs/PageNavigationContext.js").NavSiblings,
   ) => {
     if (!selectedThreadId) return;
+    // A symbol isn't a page: it opens its file at its line.
+    if (ref.kind === "symbol") {
+      handleOpenPage(ref);
+      return;
+    }
     const existing = threadPageTabs[selectedThreadId] ?? [];
     const idx = existing.findIndex((t) => t.id === currentTabId);
     if (idx < 0) {
@@ -2790,6 +2815,23 @@ export function App() {
           render: () => <DashboardsIndexPage onOpenPage={nav.navOpen} />,
         };
       },
+      problems: (ref, nav) => ({
+        id: ref.id,
+        label: "Problems",
+        closable: true,
+        render: () => (stream ? <ProblemsPage streamId={stream.id} onOpenPage={nav.navOpen} /> : null),
+      }),
+      symbols: (ref, nav) => {
+        const path = (ref.payload as { path?: string | null } | null)?.path ?? null;
+        return {
+          id: ref.id,
+          label: path ? `Symbols — ${path.split("/").pop()}` : "Symbols",
+          closable: true,
+          render: () => (stream ? <SymbolsPage streamId={stream.id} path={path} onOpenPage={nav.navOpen} /> : null),
+        };
+      },
+      // A symbol opens its file at its line (openSymbol); it's never a tab.
+      symbol: () => null,
       board: (ref, nav) => ({
         id: ref.id,
         label: "Board",

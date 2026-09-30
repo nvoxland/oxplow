@@ -174,6 +174,25 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
 - **RPC**: `lsp_request` / `lsp_notify` stay for Monaco's LSP bridge (a real
   LSP client); nothing else in the UI reads the servers yet.
 
+## Pages (P6.E3)
+
+The desktop reads code intelligence from the models (`apps/desktop/src/codeIntel.ts`):
+
+- **Problems** (`page:problems`, `ProblemsPage.tsx`) — the stream's
+  `v_diagnostic` rows by file (files with errors first, then warnings),
+  a severity filter with counts; a problem opens its file at its line.
+  It re-reads when `v_diagnostic` changes.
+- **Symbols** (`page:symbols[?path=]`, `SymbolsPage.tsx`) — `v_symbol`
+  nested under each symbol's `container` (`symbolTree`): one file's
+  outline, or every file's symbols matching a name filter. A symbol opens
+  its file at its name's line.
+- **`symbol:` refs** (a wikilink, an Ask, an answer) open the same way:
+  `openSymbol` looks the ref up in `v_symbol`; a symbol that's gone (its
+  file changed, or no server is running) is reported, not opened.
+
+Both pages are in the launcher under Code. References and hover stay
+live (the MCP `code_*` tools and the editor) — no model holds them.
+
 ## Testing
 
 The python fake-server pattern is the way to test session behavior — a

@@ -195,7 +195,8 @@ export type IndexKind =
   | "dashboards"
   | "explore-data"
   | "catalog"
-  | "board";
+  | "board"
+  | "problems";
 
 export function indexRef(kind: IndexKind): TabRef {
   return route(kind);
@@ -262,6 +263,17 @@ export function duplicateBlockRef(payload: DuplicateBlockPayload): TabRef {
     right_lines: `${payload.rightStart}-${payload.rightEnd}`,
     right_at: payload.rightVersion,
   });
+}
+
+/** A symbol (`symbol:<path>/<name>@snap:<id>`, `v_symbol.ref`): opening
+ *  it opens its file at the symbol's line (P6.E3). */
+export function symbolRef(ref: string): TabRef {
+  return { id: ref, kind: "symbol", payload: { ref } };
+}
+
+/** The Symbols page: one file's outline, or (no `path`) the project's. */
+export function symbolsRef(path: string | null = null): TabRef {
+  return path ? route("symbols", { path }, { path }) : route("symbols", { path: null });
 }
 
 export function wikiFreshnessRef(slug: string): TabRef {
@@ -483,6 +495,8 @@ const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> 
   "explore-data": () => indexRef("explore-data"),
   catalog: () => indexRef("catalog"),
   board: () => indexRef("board"),
+  problems: () => indexRef("problems"),
+  symbols: (p) => symbolsRef(p.get("path")),
   "git-dashboard": () => gitDashboardRef(),
   "uncommitted-changes": () => uncommittedChangesRef(),
   "new-stream": () => newStreamRef(),
@@ -577,6 +591,8 @@ export function refFromTabId(id: string): TabRef | null {
       return effortDiffRef(canonical.id);
     case "turn":
       return turnRef(canonical.id);
+    case "symbol":
+      return symbolRef(id);
     case "lens":
       return lensRefFromTail(id.slice("lens:".length));
     case "page": {
@@ -605,6 +621,7 @@ export function pageKindOf(tabId: string): PageKind | null {
     "snapshot",
     "effort",
     "turn",
+    "symbol",
   ];
   return entity.includes(canonical.kind) ? (canonical.kind as PageKind) : null;
 }

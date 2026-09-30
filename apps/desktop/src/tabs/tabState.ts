@@ -27,7 +27,9 @@ export type EntityPageKind =
   // A capture, an effort and an agent turn render as their diff (P2.11).
   | "snapshot"
   | "effort"
-  | "turn";
+  | "turn"
+  // Opens its file at the symbol's line; never a tab of its own (P6.E3).
+  | "symbol";
 
 export type RoutePageKind =
   | "agent"
@@ -64,7 +66,9 @@ export type RoutePageKind =
   | "dashboards"
   | "explore-data"
   | "catalog"
-  | "board";
+  | "board"
+  | "problems"
+  | "symbols";
 
 export type PageKind = EntityPageKind | RoutePageKind;
 
