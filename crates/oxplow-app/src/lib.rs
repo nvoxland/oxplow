@@ -28,6 +28,7 @@ pub mod change_analysis;
 pub mod churn;
 pub mod co_change;
 pub mod code_analysis;
+pub mod code_intel;
 pub mod code_quality_runner;
 pub mod collection;
 pub mod commands;
@@ -61,6 +62,8 @@ pub mod knowledge_conformance;
 pub mod lens_actions;
 pub mod link_check;
 pub mod lsp_diagnostics;
+#[cfg(test)]
+mod lsp_fake;
 pub mod lsp_installer;
 pub mod lsp_sessions;
 pub mod metric_bucket;
@@ -539,6 +542,8 @@ pub struct Services {
     /// Reads a captured file's bytes from whichever store holds them.
     pub snapshot_content: snapshot_content::SnapshotContent,
     pub lsp_sessions: lsp_sessions::LspSessionManager,
+    /// Code intelligence from the language servers (`.context/lsp.md`).
+    pub code_intel: Arc<dyn oxplow_domain::code_intel::CodeIntelligence>,
     /// Write guard, filing and the Stop directive, shared by every agent
     /// transport (the hook route, ACP).
     pub agent_policy: Arc<agent_policy::AgentPolicy>,
@@ -803,6 +808,12 @@ impl Services {
             layout.project_dir.clone(),
             stream_store.clone(),
         ));
+        let code_intel: Arc<dyn oxplow_domain::code_intel::CodeIntelligence> =
+            Arc::new(code_intel::LspProvider::new(
+                lsp.clone(),
+                worktrees.clone(),
+                (*diagnostic_store).clone(),
+            ));
         let workspace_files = Arc::new(workspace_files::WorkspaceFiles::new(
             worktrees.clone(),
             vcs.clone(),
@@ -1137,6 +1148,7 @@ impl Services {
             agent_panes,
             blobs,
             snapshot_content,
+            code_intel,
             lsp_sessions: lsp,
             agent_policy,
             agent_context: Arc::new(agent_context::AgentContext::default()),

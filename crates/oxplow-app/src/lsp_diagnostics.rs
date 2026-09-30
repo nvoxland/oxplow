@@ -1,10 +1,12 @@
 //! Persists what the language servers publish (`textDocument/publishDiagnostics`)
 //! into `lsp_diagnostic`, so the semantic layer can read it as
 //! `v_diagnostic`. Diagnostics are live state: the table is cleared at boot
-//! and a server's rows are cleared when it (re)starts or stops. Emits a
-//! debounced [`OxplowEvent::DiagnosticsChanged`] so lenses re-run. See
-//! `.context/semantic-layer.md`.
+//! and a server's rows are cleared when it (re)starts or stops. Debounced,
+//! it emits [`OxplowEvent::DiagnosticsChanged`] so lenses re-run and logs
+//! `code.diagnostics.changed@1` once per changed file with its counts
+//! after the burst. See `.context/lsp.md`, `.context/semantic-layer.md`.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
 
@@ -86,8 +88,9 @@ async fn stream_of(svc: &Services, stream_id: &str) -> Option<(i64, std::path::P
         .map(|s| (s.id.value(), std::path::PathBuf::from(&s.worktree_path)))
 }
 
-/// Apply one session event. Returns the stream whose diagnostics changed.
-pub async fn apply(svc: &Services, event: LspSessionEvent) -> Option<i64> {
+/// Apply one session event. Returns the stream whose diagnostics changed
+/// and the files that changed.
+pub async fn apply(svc: &Services, event: LspSessionEvent) -> Option<(i64, Vec<String>)> {
     match event {
         LspSessionEvent::ServerNotification {
             stream_id,
@@ -99,13 +102,13 @@ pub async fn apply(svc: &Services, event: LspSessionEvent) -> Option<i64> {
             let (path, rows) = parse_publish(&params, &worktree)?;
             if let Err(e) = svc
                 .diagnostic_store
-                .replace_file(id, language, path, rows)
+                .replace_file(id, language, path.clone(), rows)
                 .await
             {
                 tracing::warn!(error = %e, "storing LSP diagnostics failed");
                 return None;
             }
-            Some(id)
+            Some((id, vec![path]))
         }
         LspSessionEvent::SessionStatus {
             stream_id,
@@ -116,8 +119,8 @@ pub async fn apply(svc: &Services, event: LspSessionEvent) -> Option<i64> {
             // Restarted / Crashed / Stopped: what it said no longer holds
             // (a restarted server republishes as files reopen).
             let (id, _) = stream_of(svc, &stream_id).await?;
-            svc.diagnostic_store.clear_server(id, language).await.ok()?;
-            Some(id)
+            let paths = svc.diagnostic_store.clear_server(id, language).await.ok()?;
+            Some((id, paths))
         }
         _ => None,
     }
@@ -130,19 +133,20 @@ pub fn spawn(svc: std::sync::Arc<Services>) {
         if let Err(e) = svc.diagnostic_store.clear_all().await {
             tracing::warn!(error = %e, "clearing LSP diagnostics at boot failed");
         }
-        // The stream with unannounced changes, and when to announce them.
-        // The deadline is fixed by the first change, so a server that
-        // publishes continuously can't starve the event.
-        let mut pending: Option<(i64, tokio::time::Instant)> = None;
+        // The stream with unannounced changes, when to announce them, and
+        // the files that changed. The deadline is fixed by the first
+        // change, so a server that publishes continuously can't starve the
+        // announcement.
+        let mut pending: Option<(i64, tokio::time::Instant, BTreeSet<String>)> = None;
         loop {
-            let event = match pending {
-                Some((stream_id, deadline)) => {
-                    match tokio::time::timeout_at(deadline, rx.recv()).await {
+            let event = match &pending {
+                Some((_, deadline, _)) => {
+                    match tokio::time::timeout_at(*deadline, rx.recv()).await {
                         Ok(e) => e,
                         Err(_) => {
-                            pending = None;
-                            svc.events
-                                .emit(OxplowEvent::DiagnosticsChanged { stream_id });
+                            if let Some((stream_id, _, paths)) = pending.take() {
+                                announce(&svc, stream_id, paths).await;
+                            }
                             continue;
                         }
                     }
@@ -151,18 +155,22 @@ pub fn spawn(svc: std::sync::Arc<Services>) {
             };
             match event {
                 Ok(e) => {
-                    let Some(id) = apply(&svc, e).await else {
+                    let Some((id, paths)) = apply(&svc, e).await else {
                         continue;
                     };
-                    match pending {
-                        Some((p, _)) if p == id => {}
+                    match &mut pending {
+                        Some((p, _, pending_paths)) if *p == id => pending_paths.extend(paths),
                         // A second stream in the window: announce the first now.
-                        Some((p, _)) => {
-                            svc.events
-                                .emit(OxplowEvent::DiagnosticsChanged { stream_id: p });
-                            pending = Some((id, tokio::time::Instant::now() + DEBOUNCE));
+                        _ => {
+                            if let Some((p, _, pending_paths)) = pending.take() {
+                                announce(&svc, p, pending_paths).await;
+                            }
+                            pending = Some((
+                                id,
+                                tokio::time::Instant::now() + DEBOUNCE,
+                                paths.into_iter().collect(),
+                            ));
                         }
-                        None => pending = Some((id, tokio::time::Instant::now() + DEBOUNCE)),
                     }
                 }
                 Err(RecvError::Lagged(_)) => continue,
@@ -170,6 +178,40 @@ pub fn spawn(svc: std::sync::Arc<Services>) {
             }
         }
     });
+}
+
+/// Announce a stream's changed diagnostics: the in-memory event, and
+/// `code.diagnostics.changed@1` per file with its counts now.
+async fn announce(svc: &Services, stream_id: i64, paths: BTreeSet<String>) {
+    use oxplow_domain::events::schema::{CodeDiagnosticsChanged, CodeDiagnosticsChangedV1};
+    let stream = oxplow_domain::StreamId::new(stream_id);
+    for path in paths {
+        let counts = match svc.diagnostic_store.counts(stream_id, path.clone()).await {
+            Ok(counts) => counts,
+            Err(e) => {
+                tracing::warn!(error = %e, path, "reading diagnostic counts failed");
+                continue;
+            }
+        };
+        let env = oxplow_domain::Envelope::typed::<CodeDiagnosticsChanged>(
+            oxplow_domain::refs::build::system_source("lsp_diagnostics"),
+            &CodeDiagnosticsChangedV1 {
+                stream: format!("stream:{stream}"),
+                path: path.clone(),
+                counts,
+            },
+        )
+        .with_anchors(oxplow_domain::Anchors {
+            stream_id: Some(stream),
+            ..oxplow_domain::Anchors::default()
+        })
+        .with_subject([format!("file:{path}")]);
+        if let Err(e) = svc.event_log_store.append(env).await {
+            tracing::warn!(error = %e, path, "logging code.diagnostics.changed failed");
+        }
+    }
+    svc.events
+        .emit(OxplowEvent::DiagnosticsChanged { stream_id });
 }
 
 #[cfg(test)]
@@ -298,6 +340,20 @@ mod tests {
         wait.await;
         publisher.abort();
         assert_eq!(count().await, serde_json::json!([["src/a.rs", "error", 1]]));
+        let logged = || async {
+            svc.event_log_store
+                .read_after(0, 1000)
+                .await
+                .unwrap()
+                .into_iter()
+                .filter(|e| e.envelope.event_type == "code.diagnostics.changed")
+                .map(|e| e.envelope.payload)
+                .collect::<Vec<_>>()
+        };
+        let first = logged().await;
+        assert_eq!(first[0]["path"], "src/a.rs");
+        assert_eq!(first[0]["stream"], format!("stream:{}", stream.id));
+        assert_eq!(first[0]["counts"]["error"], 1);
 
         let wait = changed(&mut events);
         svc.lsp_sessions
@@ -309,5 +365,9 @@ mod tests {
             });
         wait.await;
         assert_eq!(count().await, serde_json::json!([]));
+        // The server's reports went with it, and the log says so.
+        let last = logged().await.pop().unwrap();
+        assert_eq!(last["path"], "src/a.rs");
+        assert_eq!(last["counts"]["error"], 0);
     }
 }

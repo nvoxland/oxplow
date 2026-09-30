@@ -587,37 +587,61 @@ pub struct ListDeadLettersParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LspPositionParams {
-    pub stream_id: String,
-    pub language: String,
-    pub uri: String,
-    pub line: u32,
-    pub character: u32,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LspDiagnosticsParams {
-    pub stream_id: String,
-    pub language: String,
-    pub uri: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LspInstallParams {
     /// Mason-registry package name (e.g. "rust-analyzer", "gopls",
     /// "typescript-language-server").
     pub package_name: String,
 }
 
+/// A place in a stream's file (`code_*` tools). Line and column are
+/// 1-based, like editors and `v_diagnostic`.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LspWorkspaceSymbolParams {
+pub struct CodePositionParams {
     pub stream_id: String,
-    /// Language server to query (picks the per-language session, e.g.
-    /// "rust", "typescript", "go").
+    /// Workspace-relative path (`src/lib.rs`).
+    pub path: String,
+    /// 1-based.
+    pub line: u32,
+    /// 1-based.
+    pub col: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CodeReferencesParams {
+    pub stream_id: String,
+    pub path: String,
+    pub line: u32,
+    pub col: u32,
+    /// Include the declaration itself (default true).
+    #[serde(default)]
+    pub include_declaration: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CodeFileParams {
+    pub stream_id: String,
+    /// Workspace-relative path.
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CodeWorkspaceSymbolsParams {
+    pub stream_id: String,
+    /// The language server to ask (`rust`, `typescript`, `python`, …).
     pub language: String,
-    /// Symbol name query (fuzzy, server-defined). Empty lists all the
-    /// server is willing to return.
+    /// Symbol name query (fuzzy, server-defined); empty lists what the
+    /// server returns.
     pub query: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CodeCallHierarchyParams {
+    pub stream_id: String,
+    pub path: String,
+    pub line: u32,
+    pub col: u32,
+    /// `incoming` (who calls the symbol) or `outgoing` (what it calls).
+    pub direction: oxplow_domain::code_intel::CallDirection,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -625,19 +649,6 @@ pub struct ListCodeUnitsParams {
     pub stream_id: String,
     /// Repo-relative path of the file to list units for.
     pub path: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LspCallHierarchyParams {
-    pub stream_id: String,
-    pub language: String,
-    pub uri: String,
-    pub line: u32,
-    pub character: u32,
-    /// "incoming" (callers of the symbol at this position) or "outgoing"
-    /// (the symbols it calls). Anything other than "incoming" is treated
-    /// as outgoing.
-    pub direction: String,
 }
 
 /// A dimension-equality filter for the metric reads.
@@ -4113,124 +4124,158 @@ impl OxplowMcp {
         json_result(&edges)
     }
 
-    #[tool(description = "LSP textDocument/definition for a position in a file.")]
-    async fn lsp_definition(
+    #[tool(
+        description = "Where the symbol at a position is defined — typed locations \
+                       (`{ path, range: { start: { line, col }, end } }`, 1-based; paths \
+                       workspace-relative, absolute outside it), from the file's language \
+                       server. See `lsp_list_servers` for coverage."
+    )]
+    async fn code_definition(
         &self,
-        params: Parameters<LspPositionParams>,
+        params: Parameters<CodePositionParams>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
-            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
-        let resp = proxy
-            .request(
-                "textDocument/definition",
-                serde_json::json!({
-                    "textDocument": { "uri": p.uri },
-                    "position": { "line": p.line, "character": p.character },
-                }),
-            )
-            .await
-            .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            resp.to_string(),
-        )]))
-    }
-
-    #[tool(description = "LSP textDocument/hover for a position in a file.")]
-    async fn lsp_hover(
-        &self,
-        params: Parameters<LspPositionParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
-            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
-        let resp = proxy
-            .request(
-                "textDocument/hover",
-                serde_json::json!({
-                    "textDocument": { "uri": p.uri },
-                    "position": { "line": p.line, "character": p.character },
-                }),
-            )
-            .await
-            .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            resp.to_string(),
-        )]))
-    }
-
-    #[tool(description = "LSP textDocument/references for a position in a file.")]
-    async fn lsp_references(
-        &self,
-        params: Parameters<LspPositionParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
-            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
-        let resp = proxy
-            .request(
-                "textDocument/references",
-                serde_json::json!({
-                    "textDocument": { "uri": p.uri },
-                    "position": { "line": p.line, "character": p.character },
-                    "context": { "includeDeclaration": true },
-                }),
-            )
-            .await
-            .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            resp.to_string(),
-        )]))
+        let at = code_position(
+            &params.0.stream_id,
+            &params.0.path,
+            params.0.line,
+            params.0.col,
+        )?;
+        json_result(
+            &self
+                .services
+                .code_intel
+                .definition(&at)
+                .await
+                .map_err(code_err)?,
+        )
     }
 
     #[tool(
-        description = "LSP textDocument/documentSymbol — list the symbols (functions, classes, \
-                       methods, modules, …) declared in a file, language-agnostically via its \
-                       language server. Returns the server's DocumentSymbol[] / \
-                       SymbolInformation[] tree. Works for any configured LSP language (not just \
-                       the tree-sitter-analysed ones); run lsp_list_servers first to confirm \
-                       coverage."
+        description = "Every reference to the symbol at a position (typed locations, \
+                       1-based), the declaration included unless `include_declaration` is \
+                       false."
     )]
-    async fn lsp_document_symbols(
+    async fn code_references(
         &self,
-        params: Parameters<LspDiagnosticsParams>,
+        params: Parameters<CodeReferencesParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
-            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
-        let resp = proxy
-            .request(
-                "textDocument/documentSymbol",
-                serde_json::json!({ "textDocument": { "uri": p.uri } }),
-            )
-            .await
-            .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            resp.to_string(),
-        )]))
+        let at = code_position(&p.stream_id, &p.path, p.line, p.col)?;
+        json_result(
+            &self
+                .services
+                .code_intel
+                .references(&at, p.include_declaration.unwrap_or(true))
+                .await
+                .map_err(code_err)?,
+        )
     }
 
     #[tool(
-        description = "LSP workspace/symbol — search symbols across the whole project by name \
-                       (fuzzy, server-defined), language-agnostically via the language server. \
-                       Returns SymbolInformation[] / WorkspaceSymbol[]. An empty query lists all \
-                       the server is willing to return. Use to find a definition by name without \
-                       a file/position."
+        description = "The hover for a position — the symbol's type/signature and docs, as \
+                       markdown (`{ contents, range }`), or null."
     )]
-    async fn lsp_workspace_symbols(
+    async fn code_hover(
         &self,
-        params: Parameters<LspWorkspaceSymbolParams>,
+        params: Parameters<CodePositionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let at = code_position(
+            &params.0.stream_id,
+            &params.0.path,
+            params.0.line,
+            params.0.col,
+        )?;
+        json_result(
+            &self
+                .services
+                .code_intel
+                .hover(&at)
+                .await
+                .map_err(code_err)?,
+        )
+    }
+
+    #[tool(
+        description = "The symbols a file declares (functions, classes, methods, modules, …) \
+                       via its language server — each `{ name, kind, container, location }`, \
+                       nested ones naming their container. Covers any configured LSP \
+                       language; `list_code_units` is the offline tree-sitter counterpart."
+    )]
+    async fn code_symbols(
+        &self,
+        params: Parameters<CodeFileParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let stream = code_stream(&params.0.stream_id)?;
+        json_result(
+            &self
+                .services
+                .code_intel
+                .document_symbols(stream, &params.0.path)
+                .await
+                .map_err(code_err)?,
+        )
+    }
+
+    #[tool(
+        description = "Find symbols across the workspace by name (fuzzy, server-defined) from \
+                       one language's server — typed symbols with their locations. Use to find \
+                       a definition by name without a file/position."
+    )]
+    async fn code_workspace_symbols(
+        &self,
+        params: Parameters<CodeWorkspaceSymbolsParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
-            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
-        let resp = proxy
-            .request("workspace/symbol", serde_json::json!({ "query": p.query }))
-            .await
-            .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            resp.to_string(),
-        )]))
+        let stream = code_stream(&p.stream_id)?;
+        json_result(
+            &self
+                .services
+                .code_intel
+                .workspace_symbols(stream, &p.language, &p.query)
+                .await
+                .map_err(code_err)?,
+        )
+    }
+
+    #[tool(
+        description = "The symbol at a position's callers (`direction: incoming`) or callees \
+                       (`outgoing`): each `{ symbol, at }` — the caller/callee and where the \
+                       calls are. [] when the position has no call-hierarchy item."
+    )]
+    async fn code_call_hierarchy(
+        &self,
+        params: Parameters<CodeCallHierarchyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let at = code_position(&p.stream_id, &p.path, p.line, p.col)?;
+        json_result(
+            &self
+                .services
+                .code_intel
+                .call_hierarchy(&at, p.direction)
+                .await
+                .map_err(code_err)?,
+        )
+    }
+
+    #[tool(
+        description = "What the language servers last reported for a file — typed \
+                       diagnostics (`severity`, `message`, `source`, `code`, `range`, \
+                       1-based). Every file's are `v_diagnostic` in query_sql."
+    )]
+    async fn code_diagnostics(
+        &self,
+        params: Parameters<CodeFileParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let stream = code_stream(&params.0.stream_id)?;
+        json_result(
+            &self
+                .services
+                .code_intel
+                .diagnostics(stream, &params.0.path)
+                .await
+                .map_err(code_err)?,
+        )
     }
 
     #[tool(
@@ -4238,7 +4283,7 @@ impl OxplowMcp {
                        languages that have them, e.g. Go/Java) the package — via oxplow's \
                        built-in tree-sitter analysis. Deterministic and offline; works for the \
                        bundled languages (Rust, TS/TSX, JS, Python, Go, Java, C, C++, Clojure, \
-                       C#). Complements lsp_document_symbols (which covers any LSP language). \
+                       C#). Complements code_symbols (which covers any LSP language). \
                        Each unit: kind, name, containerPath, startLine, endLine. Empty for \
                        unsupported / unparseable files."
     )]
@@ -4269,75 +4314,9 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "LSP call hierarchy — for the symbol at a position, list its callers \
-                       (direction=\"incoming\") or callees (direction=\"outgoing\"), \
-                       language-agnostically via the language server. Runs \
-                       prepareCallHierarchy then incoming/outgoingCalls on the first resolved \
-                       item. Returns CallHierarchyIncomingCall[] / CallHierarchyOutgoingCall[], \
-                       or [] when the position has no call-hierarchy item."
-    )]
-    async fn lsp_call_hierarchy(
-        &self,
-        params: Parameters<LspCallHierarchyParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
-            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
-        let prepared = proxy
-            .request(
-                "textDocument/prepareCallHierarchy",
-                serde_json::json!({
-                    "textDocument": { "uri": p.uri },
-                    "position": { "line": p.line, "character": p.character },
-                }),
-            )
-            .await
-            .map_err(|e| internal(e.to_string()))?;
-        let Some(item) = prepared.as_array().and_then(|a| a.first()).cloned() else {
-            return Ok(CallToolResult::success(vec![ContentBlock::text(
-                "[]".to_string(),
-            )]));
-        };
-        let method = if p.direction.eq_ignore_ascii_case("incoming") {
-            "callHierarchy/incomingCalls"
-        } else {
-            "callHierarchy/outgoingCalls"
-        };
-        let calls = proxy
-            .request(method, serde_json::json!({ "item": item }))
-            .await
-            .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            calls.to_string(),
-        )]))
-    }
-
-    #[tool(description = "LSP textDocument/diagnostic — pulls the latest diagnostics for a file.")]
-    async fn lsp_diagnostics(
-        &self,
-        params: Parameters<LspDiagnosticsParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
-            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
-        let resp = proxy
-            .request(
-                "textDocument/diagnostic",
-                serde_json::json!({
-                    "textDocument": { "uri": p.uri },
-                }),
-            )
-            .await
-            .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            resp.to_string(),
-        )]))
-    }
-
-    #[tool(
         description = "List every configured language server (.oxplow/project.yaml + Mason-installed): \
                        languageId, command, source, binary presence, running streams. Use to \
-                       check what LSP coverage exists before lsp_hover/definition/references, \
+                       check what LSP coverage exists before code_hover/definition/references, \
                        and to verify an lsp_install_server took effect."
     )]
     async fn lsp_list_servers(&self) -> Result<CallToolResult, McpError> {
@@ -4424,34 +4403,41 @@ async fn worktree_for_thread(
         .map(|s| std::path::PathBuf::from(s.worktree_path))
 }
 
-async fn resolve_lsp_proxy(
-    services: &Services,
+fn code_stream(stream_id: &str) -> Result<StreamId, McpError> {
+    expect_id_kind("code", "stream_id", stream_id, ID_STREAM)?;
+    StreamId::try_from_str(stream_id)
+        .ok_or_else(|| McpError::invalid_params(format!("`{stream_id}` is not a stream id"), None))
+}
+
+fn code_position(
     stream_id: &str,
-    language: &str,
-) -> Result<std::sync::Arc<oxplow_app::LspProxy>, McpError> {
-    expect_id_kind("lsp", "stream_id", stream_id, ID_STREAM)?;
-    let stream = services
-        .streams
-        .list_streams()
-        .await
-        .map_err(|e| internal(e.to_string()))?
-        .into_iter()
-        .find(|s| s.id.to_string() == stream_id)
-        .ok_or_else(|| McpError::invalid_params(format!("stream not found: {stream_id}"), None))?;
-    let cwd = std::path::PathBuf::from(&stream.worktree_path);
-    services
-        .lsp_sessions
-        .ensure(stream_id, language, cwd)
-        .await
-        .map_err(|e| match e {
-            // Self-describing (suggested Mason package + fix paths) and
-            // caller-fixable — surface as invalid_params so the agent
-            // sees the message instead of a generic internal error.
-            e @ oxplow_app::lsp_sessions::LspSessionError::NoConfig(_) => {
-                McpError::invalid_params(e.to_string(), None)
-            }
-            e => internal(e.to_string()),
-        })
+    path: &str,
+    line: u32,
+    col: u32,
+) -> Result<oxplow_domain::code_intel::Position, McpError> {
+    if line == 0 || col == 0 {
+        return Err(McpError::invalid_params(
+            "line and col are 1-based".to_string(),
+            None,
+        ));
+    }
+    Ok(oxplow_domain::code_intel::Position {
+        stream: code_stream(stream_id)?,
+        path: path.to_string(),
+        line,
+        col,
+    })
+}
+
+/// A missing server is the caller's to fix (install or configure one);
+/// the message says how.
+fn code_err(e: oxplow_domain::code_intel::CodeIntelError) -> McpError {
+    match e {
+        oxplow_domain::code_intel::CodeIntelError::NoProvider(m) => {
+            McpError::invalid_params(m, None)
+        }
+        other => internal(other.to_string()),
+    }
 }
 
 /// Tools that only READ state — annotated `read_only_hint` so a client can
@@ -4508,14 +4494,14 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "list_outbound",
     "list_dead_letters",
     "list_commands",
-    "lsp_definition",
-    "lsp_hover",
-    "lsp_references",
-    "lsp_document_symbols",
-    "lsp_workspace_symbols",
+    "code_definition",
+    "code_hover",
+    "code_references",
+    "code_symbols",
+    "code_workspace_symbols",
     "list_code_units",
-    "lsp_call_hierarchy",
-    "lsp_diagnostics",
+    "code_call_hierarchy",
+    "code_diagnostics",
     "lsp_list_servers",
 ];
 
@@ -5894,12 +5880,11 @@ mod tests {
             .id
             .to_string();
         let err = server
-            .lsp_hover(Parameters(LspPositionParams {
+            .code_hover(Parameters(CodePositionParams {
                 stream_id,
-                language: "rust".into(),
-                uri: "file:///x.rs".into(),
-                line: 0,
-                character: 0,
+                path: "src/x.rs".into(),
+                line: 1,
+                col: 1,
             }))
             .await
             .unwrap_err();

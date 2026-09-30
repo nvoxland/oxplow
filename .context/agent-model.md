@@ -1331,9 +1331,11 @@ intermediate `ready` step.
     `list_backlinks`/`list_outbound`'s `source_label` is just
     `resolve_ref(...).title`.
 
-**LSP tools** (`crates/oxplow-mcp/src/lib.rs`): `lsp_definition`,
-`lsp_hover`, `lsp_references`, `lsp_diagnostics` run against the same
-shared backend sessions the editor uses (`.context/lsp.md`). When no
+**Code tools** (`crates/oxplow-mcp/src/lib.rs`): `code_definition`,
+`code_references`, `code_hover`, `code_symbols`,
+`code_workspace_symbols`, `code_call_hierarchy`, `code_diagnostics` —
+typed answers from the code-intelligence capability, over the same
+shared language-server sessions the editor uses (`.context/lsp.md`). When no
 server is configured for a language, the error is self-describing — it
 names the suggested Mason package and both fix paths. The agent can fix
 it itself: `lsp_install_server({ package_name })` installs from the

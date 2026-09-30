@@ -284,6 +284,30 @@ impl LspSessionManager {
         let _ = self.events.send(event);
     }
 
+    /// The configured (or installed) language whose extensions cover
+    /// `path`, if any.
+    pub fn language_for_path(&self, path: &str) -> Option<String> {
+        let ext = std::path::Path::new(path)
+            .extension()?
+            .to_str()?
+            .to_string();
+        let covers = |c: &LspServerConfig| {
+            c.extensions
+                .iter()
+                .any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(&ext))
+        };
+        if let Ok(cfg) = self.config.read() {
+            if let Some(s) = cfg.lsp_servers.iter().find(|s| covers(s)) {
+                return Some(s.language_id.clone());
+            }
+        }
+        self.installed
+            .list()
+            .into_iter()
+            .find(|e| covers(&e.config))
+            .map(|e| e.config.language_id)
+    }
+
     fn find_server_config(&self, language: &str) -> Option<LspServerConfig> {
         if let Ok(cfg) = self.config.read() {
             if let Some(s) = cfg.lsp_servers.iter().find(|s| s.language_id == language) {
@@ -868,72 +892,8 @@ mod tests {
         }))
     }
 
-    /// Fake LSP server: answers initialize (echoing the client
-    /// capabilities back inside the result so tests can assert on
-    /// them), echoes "ping" notifications as "pong", asks
-    /// `workspace/configuration` when poked with "askConfig" and
-    /// reports the answer back via an "answeredConfig" notification.
     fn fake_server_config(language: &str) -> LspServerConfig {
-        let script = r#"
-import sys, json
-
-def read_message():
-    headers = b""
-    while b"\r\n\r\n" not in headers:
-        ch = sys.stdin.buffer.read(1)
-        if not ch:
-            return None
-        headers += ch
-    length = 0
-    for line in headers.split(b"\r\n"):
-        if line.lower().startswith(b"content-length:"):
-            length = int(line.split(b":", 1)[1].strip())
-    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
-
-def write_message(payload):
-    body = json.dumps(payload).encode("utf-8")
-    sys.stdout.buffer.write(b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n")
-    sys.stdout.buffer.write(body)
-    sys.stdout.buffer.flush()
-
-opened = []
-while True:
-    msg = read_message()
-    if msg is None:
-        break
-    method = msg.get("method")
-    if "id" in msg and method == "initialize":
-        write_message({"jsonrpc": "2.0", "id": msg["id"], "result": {
-            "capabilities": {"completionProvider": {"triggerCharacters": ["."]}},
-            "clientCapabilities": msg["params"]["capabilities"],
-        }})
-    elif "id" in msg and method == "shutdown":
-        write_message({"jsonrpc": "2.0", "id": msg["id"], "result": None})
-    elif method == "exit":
-        break
-    elif method == "die":
-        sys.exit(1)
-    elif method == "ping":
-        write_message({"jsonrpc": "2.0", "method": "pong", "params": msg.get("params")})
-    elif method == "askConfig":
-        write_message({"jsonrpc": "2.0", "id": 7, "method": "workspace/configuration",
-                       "params": {"items": [{"section": "a"}, {"section": "b"}]}})
-    elif method == "askApplyEdit":
-        write_message({"jsonrpc": "2.0", "id": 9, "method": "workspace/applyEdit",
-                       "params": {"label": "do it", "edit": {"changes": {}}}})
-    elif method == "textDocument/didOpen":
-        opened.append(msg["params"]["textDocument"])
-    elif method == "listOpened":
-        write_message({"jsonrpc": "2.0", "method": "openedDocs", "params": {"docs": opened}})
-    elif "id" in msg and "method" not in msg:
-        write_message({"jsonrpc": "2.0", "method": "answeredConfig", "params": {"result": msg.get("result")}})
-"#;
-        LspServerConfig {
-            language_id: language.into(),
-            extensions: vec![],
-            command: "python3".into(),
-            args: vec!["-c".into(), script.to_string()],
-        }
+        crate::lsp_fake::config(language, &[])
     }
 
     fn manager_with_fake(language: &str) -> LspSessionManager {

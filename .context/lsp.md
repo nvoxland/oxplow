@@ -96,29 +96,51 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   subscribes to the session broadcast and stores every
   `publishDiagnostics` in `lsp_diagnostic`, read as `v_diagnostic`
   (see `.context/semantic-layer.md`). Cleared at boot and per server on
-  restart/crash/stop; emits a debounced `DiagnosticsChanged`.
-- **MCP**: `lsp_hover` / `lsp_definition` / `lsp_references` /
-  `lsp_diagnostics` / `lsp_document_symbols` / `lsp_workspace_symbols` /
-  `lsp_call_hierarchy` in `crates/oxplow-mcp/src/lib.rs`, riding the same
-  sessions. The two **symbol** tools (tsk324) expose the LSP-native,
-  language-agnostic "list the functions/classes/modules in this file"
-  (`textDocument/documentSymbol`) and "find a symbol by name across the
-  project" (`workspace/symbol`) — they work for **any** configured LSP
-  language, not just the tree-sitter-analysed set, so they're the generic
-  structure source the language-plugin epic (tsk320) builds the unit surface
-  on. `lsp_call_hierarchy` (tsk326) is the call graph: for a position it runs
-  `textDocument/prepareCallHierarchy` then `callHierarchy/incomingCalls`
-  (callers) or `outgoingCalls` (callees) on the first resolved item.
-  Each new MCP tool must also be registered in the surface-parity manifest
-  (`crates/oxplow-surface-parity/src/lib.rs`) or its parity test fails.
+  restart/crash/stop. Debounced per stream, it emits `DiagnosticsChanged`
+  and logs **`code.diagnostics.changed@1 { stream, path, counts }`** once
+  per changed file with its counts after the burst (a crash logs the
+  files it cleared, at zero) — the durable record, on the event log.
+- **Code intelligence (P5.C5)**: `oxplow_domain::code_intel::CodeIntelligence`
+  — `definition`, `references`, `hover`, `document_symbols`,
+  `workspace_symbols`, `call_hierarchy`, `diagnostics`, `rename` — over
+  typed values (`Position { stream, path, line, col }`, `Location`,
+  `Symbol { name, kind, container, location }`, `Call`, `Diagnostic`,
+  `WorkspaceEdit`), 1-based and workspace-relative.
+  **`LspProvider`** (`crates/oxplow-app/src/code_intel.rs`,
+  `Services.code_intel`) is the one place that builds `textDocument/*`
+  requests and maps the LSP's variants (`Location` / `LocationLink`,
+  `DocumentSymbol` trees / `SymbolInformation`, `MarkupContent` /
+  `MarkedString`, 0-based positions, URIs) to them. A file's language is
+  the configured server whose `extensions` cover it
+  (`LspSessionManager::language_for_path`); an uncovered file's error
+  names the server to install (by the extension's language). Diagnostics
+  are what the servers published (`lsp_diagnostic`), not a pull. `rename`
+  returns the edits; nothing applies them. Subscribing to diagnostics is
+  the event log's `code.diagnostics.changed`.
+- **MCP**: `code_definition`, `code_references`, `code_hover`,
+  `code_symbols`, `code_workspace_symbols`, `code_call_hierarchy`,
+  `code_diagnostics` — thin calls into `Services.code_intel`, taking
+  `{ stream_id, path, line, col }` (1-based) and answering typed JSON.
+  They replaced the seven `lsp_*` tools that each built raw LSP requests.
+  `lsp_list_servers` / `lsp_install_server` stay (provider-native). The
+  symbol tools work for **any** configured LSP language, not just the
+  tree-sitter set; the call hierarchy runs `prepareCallHierarchy` then
+  incoming/outgoing calls on the first item. Each MCP tool is registered
+  in the surface-parity manifest (`crates/oxplow-surface-parity/src/lib.rs`).
   `workspace.symbol` and `textDocument.callHierarchy` are declared in
-  `client_capabilities()`; keep the declared set + the pump's auto-answers in
-  lockstep.
+  `client_capabilities()`; keep the declared set + the pump's auto-answers
+  in lockstep.
+- **RPC**: `lsp_request` / `lsp_notify` stay for Monaco's LSP bridge (a real
+  LSP client); nothing else in the UI reads the servers yet.
 
 ## Testing
 
-The python fake-server pattern (`oxplow-lsp/src/proxy.rs` tests and
-`lsp_sessions.rs` tests) is the way to test session behavior — a real
-subprocess speaking framed JSON-RPC, no mocks. The daemon has a WS
+The python fake-server pattern is the way to test session behavior — a
+real subprocess speaking framed JSON-RPC, no mocks. The shared one is
+`crates/oxplow-app/src/lsp_fake.rs` (`lsp_fake::config(language,
+extensions)`): initialize, the session pokes, `die`, `publish` (it
+publishes what it's sent), and fixed answers to definition, references,
+hover, document/workspace symbols, the call hierarchy and rename — what
+`code_intel` tests against. The daemon has a WS
 test asserting `LspSessionEvent` reaches the `lsp` frame
 (`emit_event_for_tests` is the injection seam).

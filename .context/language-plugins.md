@@ -82,8 +82,8 @@ language" is served two ways, both keyed off the registry's `unit_kinds`:
   emitted when the language declares `UnitKind::Package` (Go, Java). Exposed to
   the agent as the **`list_code_units`** MCP tool. Works for the 11 bundled
   languages.
-- **LSP (any server-backed language)** — the `lsp_document_symbols` /
-  `lsp_workspace_symbols` MCP tools (tsk324) return the server's symbol tree
+- **LSP (any server-backed language)** — the `code_symbols` /
+  `code_workspace_symbols` MCP tools return the server's symbols
   for *any* configured LSP language, not just the tree-sitter set. See
   `.context/lsp.md`.
 

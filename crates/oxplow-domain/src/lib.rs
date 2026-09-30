@@ -6,6 +6,7 @@
 //! no IO, no async runtime usage, and no platform-specific code.
 
 pub mod agent;
+pub mod code_intel;
 pub mod commands;
 pub mod comment;
 pub mod error;

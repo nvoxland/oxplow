@@ -1,0 +1,1 @@
+{ "stream": "stream:str1", "path": "src/lib.rs", "counts": { "error": 2, "warning": 1, "information": 0, "hint": 0 } }

@@ -141,6 +141,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<KnowledgePageDeleted>()
             .expect("core type registers");
+        r.register::<CodeDiagnosticsChanged>()
+            .expect("core type registers");
         r
     }
 
@@ -982,6 +984,37 @@ impl EventType for WorkItemRecorded {
     type Payload = WorkItemRecordedV1;
 }
 
+/// How many diagnostics of each severity a file has.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticCounts {
+    pub error: u32,
+    pub warning: u32,
+    pub information: u32,
+    pub hint: u32,
+}
+
+/// `code.diagnostics.changed@1`: what a file's language servers report
+/// about it changed (a publish, or a server gone and its reports with
+/// it). Logged debounced, once per file per burst, with the counts after
+/// it; `v_diagnostic` has the rows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CodeDiagnosticsChangedV1 {
+    /// `stream:<id>`.
+    pub stream: String,
+    /// Workspace-relative.
+    pub path: String,
+    pub counts: DiagnosticCounts,
+}
+
+pub struct CodeDiagnosticsChanged;
+impl EventType for CodeDiagnosticsChanged {
+    const TYPE: &'static str = "code.diagnostics.changed";
+    const V: u32 = 1;
+    type Payload = CodeDiagnosticsChangedV1;
+}
+
 /// `knowledge.page.written@1`: a knowledge page's row and edges were
 /// restated from its body — by `knowledge.write_page` / `link` /
 /// `resync`, or by the wiki watcher after a hand edit
@@ -1068,6 +1101,7 @@ mod tests {
                 ("agent.turn.ended", 1),
                 ("agent.turn.ended", 2),
                 ("agent.turn.started", 1),
+                ("code.diagnostics.changed", 1),
                 ("command.executed", 1),
                 ("config.changed", 1),
                 ("effect.result", 1),

@@ -23,6 +23,8 @@ pub struct DiagnosticRow {
     pub end_col: i64,
 }
 
+pub use oxplow_domain::events::schema::DiagnosticCounts;
+
 #[derive(Clone)]
 pub struct SqliteDiagnosticStore {
     db: Database,
@@ -67,15 +69,97 @@ impl SqliteDiagnosticStore {
             .await
     }
 
-    /// Drop one server's diagnostics for a stream (it restarted or stopped).
-    pub async fn clear_server(&self, stream_id: i64, language: String) -> Result<(), DomainError> {
+    /// Drop one server's diagnostics for a stream (it restarted or
+    /// stopped); the paths that had some.
+    pub async fn clear_server(
+        &self,
+        stream_id: i64,
+        language: String,
+    ) -> Result<Vec<String>, DomainError> {
         self.db
-            .call(move |c| {
-                c.execute(
-                    "DELETE FROM lsp_diagnostic WHERE stream_id = ?1 AND language = ?2",
-                    rusqlite::params![stream_id, language],
-                )
-                .map(|_| ())
+            .transaction(move |tx| {
+                let mut stmt = tx
+                    .prepare(
+                        "DELETE FROM lsp_diagnostic WHERE stream_id = ?1 AND language = ?2
+                         RETURNING path",
+                    )
+                    .map_err(map_sql_err)?;
+                let mut paths = stmt
+                    .query_map(rusqlite::params![stream_id, language], |r| {
+                        r.get::<_, String>(0)
+                    })
+                    .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                    .map_err(map_sql_err)?;
+                paths.sort();
+                paths.dedup();
+                Ok(paths)
+            })
+            .await
+    }
+
+    /// One file's diagnostics in a stream, every server's, by position.
+    pub async fn list_file(
+        &self,
+        stream_id: i64,
+        path: String,
+    ) -> Result<Vec<DiagnosticRow>, DomainError> {
+        self.db
+            .read(move |tx| {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT severity, message, source, code, line, col, end_line, end_col
+                         FROM lsp_diagnostic WHERE stream_id = ?1 AND path = ?2
+                         ORDER BY line, col, message",
+                    )
+                    .map_err(map_sql_err)?;
+                stmt.query_map(rusqlite::params![stream_id, path], |r| {
+                    Ok(DiagnosticRow {
+                        severity: r.get(0)?,
+                        message: r.get(1)?,
+                        source: r.get(2)?,
+                        code: r.get(3)?,
+                        line: r.get(4)?,
+                        col: r.get(5)?,
+                        end_line: r.get(6)?,
+                        end_col: r.get(7)?,
+                    })
+                })
+                .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                .map_err(map_sql_err)
+            })
+            .await
+    }
+
+    /// How many diagnostics of each severity one file has in a stream.
+    pub async fn counts(
+        &self,
+        stream_id: i64,
+        path: String,
+    ) -> Result<DiagnosticCounts, DomainError> {
+        self.db
+            .read(move |tx| {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT severity, count(*) FROM lsp_diagnostic
+                         WHERE stream_id = ?1 AND path = ?2 GROUP BY severity",
+                    )
+                    .map_err(map_sql_err)?;
+                let mut counts = DiagnosticCounts::default();
+                let rows = stmt
+                    .query_map(rusqlite::params![stream_id, path], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?))
+                    })
+                    .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                    .map_err(map_sql_err)?;
+                for (severity, n) in rows {
+                    match severity.as_str() {
+                        "error" => counts.error = n,
+                        "warning" => counts.warning = n,
+                        "information" => counts.information = n,
+                        _ => counts.hint = n,
+                    }
+                }
+                Ok(counts)
             })
             .await
     }

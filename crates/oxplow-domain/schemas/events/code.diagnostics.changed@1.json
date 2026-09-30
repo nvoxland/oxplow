@@ -1,0 +1,60 @@
+{
+  "$defs": {
+    "DiagnosticCounts": {
+      "additionalProperties": false,
+      "description": "How many diagnostics of each severity a file has.",
+      "properties": {
+        "error": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hint": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "information": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "warning": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "error",
+        "warning",
+        "information",
+        "hint"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`code.diagnostics.changed@1`: what a file's language servers report\nabout it changed (a publish, or a server gone and its reports with\nit). Logged debounced, once per file per burst, with the counts after\nit; `v_diagnostic` has the rows.",
+  "properties": {
+    "counts": {
+      "$ref": "#/$defs/DiagnosticCounts"
+    },
+    "path": {
+      "description": "Workspace-relative.",
+      "type": "string"
+    },
+    "stream": {
+      "description": "`stream:<id>`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stream",
+    "path",
+    "counts"
+  ],
+  "title": "CodeDiagnosticsChangedV1",
+  "type": "object"
+}
