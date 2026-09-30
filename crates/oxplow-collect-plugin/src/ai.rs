@@ -9,11 +9,13 @@
 //!
 //! The script runs on a worker thread; the oracle is synchronous (the app
 //! blocks on its async computation there). The time a script waits on the
-//! oracle doesn't count against its sandbox budget ([`AiHost::clock`]).
+//! oracle doesn't count against its sandbox budget's `timeout`, though it
+//! does count against its `ceiling`; once the sandbox gives up, the host
+//! makes no more calls ([`AiHost::clock`]).
 
 use std::sync::Arc;
 
-use crate::runtime::PauseClock;
+use crate::runtime::RunClock;
 
 use serde_json::Value;
 
@@ -32,8 +34,9 @@ pub trait AiOracle: Send + Sync {
 #[derive(starlark::any::ProvidesStaticType)]
 pub struct AiHost {
     oracle: Arc<dyn AiOracle>,
-    /// Paused while the script waits on the oracle.
-    clock: Arc<PauseClock>,
+    /// Paused while the script waits on the oracle; stopped when the
+    /// sandbox gives up.
+    clock: Arc<RunClock>,
 }
 
 impl AiHost {
@@ -44,13 +47,16 @@ impl AiHost {
         }
     }
 
-    /// The time spent waiting on the oracle, shared with the sandbox so
-    /// its budget leaves it out.
-    pub fn clock(&self) -> Arc<PauseClock> {
+    /// The run's clock, shared with the sandbox: its budget leaves the
+    /// oracle's time out, and it stops the clock when it gives up.
+    pub fn clock(&self) -> Arc<RunClock> {
         self.clock.clone()
     }
 
-    fn timed<T>(&self, f: impl FnOnce(&dyn AiOracle) -> T) -> T {
+    fn timed<T>(&self, f: impl FnOnce(&dyn AiOracle) -> Result<T, String>) -> Result<T, String> {
+        if self.clock.stopped() {
+            return Err("the run ran out of time; no more model calls".into());
+        }
         self.clock.paused(|| f(&*self.oracle))
     }
 }
@@ -245,5 +251,34 @@ def transform(input):
         .unwrap();
         assert_eq!(out["label"], "a");
         assert!(clock.total() >= Duration::from_millis(300));
+    }
+
+    /// Oracle time is left out of the budget, but not out of the ceiling:
+    /// a per-row loop of model calls stops at the ceiling, and once the
+    /// sandbox has given up, the detached worker makes no more calls.
+    #[test]
+    fn a_run_past_its_ceiling_stops_calling_the_oracle() {
+        let oracle = Arc::new(Scripted {
+            delay: Duration::from_millis(50),
+            ..Scripted::default()
+        });
+        let host = Arc::new(AiHost::new(oracle.clone()));
+        let clock = host.clock();
+        let budget = SandboxBudget::with_timeout(Duration::from_secs(5))
+            .with_ceiling(Duration::from_millis(300));
+        let script = "def transform(input):\n    for i in range(100):\n        ai_classify(str(i), ['a'])\n    return {}\n";
+        let h = host.clone();
+        let started = std::time::Instant::now();
+        let err = run_sandboxed_excluding(&budget, &clock, move || {
+            run_starlark_with_ai(script, &json!({}), &h)
+        })
+        .unwrap_err();
+        assert!(matches!(err, crate::CollectError::Timeout), "{err:?}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        let at_timeout = oracle.asked.lock().unwrap().len();
+        std::thread::sleep(Duration::from_millis(400));
+        let later = oracle.asked.lock().unwrap().len();
+        assert!(later <= at_timeout + 1, "{at_timeout} then {later}");
+        assert!(later < 100);
     }
 }

@@ -48,8 +48,17 @@ use crate::{CollectError, CollectorKind, CollectorOutput, MetricReport};
 /// caller start another.
 #[derive(Debug, Clone, Copy)]
 pub struct SandboxBudget {
+    /// The script's own time: what it spends outside a [`RunClock`] pause.
     pub timeout: Duration,
+    /// Wall-clock time, paused time (a collector's model calls) included:
+    /// the budget that stops a per-row loop of `ai_*` calls from running
+    /// for hours and holding up every scheduled source behind it.
+    pub ceiling: Duration,
 }
+
+/// The default [`SandboxBudget::ceiling`]. A run past it keeps the model
+/// answers it recorded (`ai_result`), so its next run gets further.
+const CEILING: Duration = Duration::from_secs(600);
 
 impl Default for SandboxBudget {
     fn default() -> Self {
@@ -70,6 +79,7 @@ impl Default for SandboxBudget {
             // this number is to stop a genuinely infinite script — 120s, same
             // ceiling gauges got.
             timeout: Duration::from_secs(120),
+            ceiling: CEILING,
         }
     }
 }
@@ -77,7 +87,15 @@ impl Default for SandboxBudget {
 impl SandboxBudget {
     /// A budget with a custom timeout (used by tests to exercise overrun).
     pub fn with_timeout(timeout: Duration) -> Self {
-        SandboxBudget { timeout }
+        SandboxBudget {
+            timeout,
+            ceiling: CEILING.max(timeout),
+        }
+    }
+
+    /// This budget with a custom ceiling.
+    pub fn with_ceiling(self, ceiling: Duration) -> Self {
+        SandboxBudget { ceiling, ..self }
     }
 }
 
@@ -104,17 +122,31 @@ pub fn run_sandboxed<F>(budget: &SandboxBudget, f: F) -> Result<Value, CollectEr
 where
     F: FnOnce() -> Result<Value, CollectError> + Send + 'static,
 {
-    run_sandboxed_excluding(budget, &PauseClock::default(), f)
+    run_sandboxed_excluding(budget, &RunClock::default(), f)
 }
 
-/// Time a script spends waiting on something outside it (a collector's
-/// `ai_*` calls): the calls it has finished, and the one in flight.
+/// A sandboxed run as the script's host sees it: the time the script
+/// spends waiting on something outside it (a collector's `ai_*` calls —
+/// the calls it has finished, and the one in flight), and whether the
+/// sandbox has given up on it, after which the host refuses to call out
+/// (a detached worker must not keep making paid model calls).
 #[derive(Debug, Default)]
-pub struct PauseClock {
+pub struct RunClock {
     state: std::sync::Mutex<(Duration, Option<std::time::Instant>)>,
+    stopped: std::sync::atomic::AtomicBool,
 }
 
-impl PauseClock {
+impl RunClock {
+    /// The sandbox gave up on the run.
+    pub fn stop(&self) {
+        self.stopped
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn stopped(&self) -> bool {
+        self.stopped.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     /// Run `f` with the clock paused.
     pub fn paused<T>(&self, f: impl FnOnce() -> T) -> T {
         self.lock().1 = Some(std::time::Instant::now());
@@ -137,11 +169,12 @@ impl PauseClock {
     }
 }
 
-/// [`run_sandboxed`], leaving out of the budget the time `clock` was
-/// paused (see [`PauseClock`]).
+/// [`run_sandboxed`], leaving out of `budget.timeout` the time `clock`
+/// was paused, but not out of `budget.ceiling`; on giving up it stops
+/// `clock` (see [`RunClock`]).
 pub fn run_sandboxed_excluding<F>(
     budget: &SandboxBudget,
-    clock: &PauseClock,
+    clock: &RunClock,
     f: F,
 ) -> Result<Value, CollectError>
 where
@@ -153,9 +186,10 @@ where
     });
     let started = std::time::Instant::now();
     loop {
-        let deadline = started + budget.timeout + clock.total();
+        let deadline = (started + budget.timeout + clock.total()).min(started + budget.ceiling);
         let now = std::time::Instant::now();
         if now >= deadline {
+            clock.stop();
             return Err(CollectError::Timeout);
         }
         // Wake at least every 50ms to see more paused time.

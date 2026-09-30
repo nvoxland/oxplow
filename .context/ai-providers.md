@@ -176,8 +176,13 @@ which blocks the script's worker thread on the runtime and asks
 `AiCompute` as caller `source:<ext>/<id>` — so every answer is a
 recorded computation (the same question on the same text is one call,
 ever). The time a script waits on the oracle is left out of its sandbox
-budget (`PauseClock`, the in-flight call included;
-`run_sandboxed_excluding`). A gauge or a report parser runs without an
+`timeout` (`RunClock`, the in-flight call included;
+`run_sandboxed_excluding`) but not out of its `ceiling` (10 min of wall
+clock, model time included), so a per-row loop of calls can't run for
+hours and hold up every scheduled source behind it. When the sandbox
+gives up it stops the `RunClock`, and the detached worker's next `ai_*`
+call is refused — no paid calls after a timeout. A run cut off keeps
+what it recorded, so its next run gets further (tsk559). A gauge or a report parser runs without an
 `AiHost`, and the builtins refuse: "`ai_classify` is available in
 collectors only". Lenses never call a model when they render; they read
 what collectors recorded. The extension skill's example classifies each
