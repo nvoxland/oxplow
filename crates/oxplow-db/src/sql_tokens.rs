@@ -301,6 +301,58 @@ pub fn string_literal(text: &str) -> Option<String> {
     }
 }
 
+/// The names of the common table expressions `sql` defines, at any depth
+/// (`WITH a AS (…)`, `b(x) AS MATERIALIZED (…)`), lowercased and unquoted.
+/// SQLite names a CTE — not the view around it — as the accessor of the
+/// reads inside it, so the authorizer uses these to tell the statement's
+/// own reads from a view's.
+pub fn cte_names(sql: &str) -> Result<std::collections::BTreeSet<String>, DomainError> {
+    let tokens = tokenize(sql)?;
+    let sig: Vec<&Token<'_>> = significant(&tokens).collect();
+    let mut out = std::collections::BTreeSet::new();
+    for i in 0..sig.len() {
+        let name = match sig[i].kind {
+            TokenKind::Word => sig[i].text.to_string(),
+            TokenKind::QuotedIdent => {
+                let t = sig[i].text;
+                t[1..t.len() - 1].replace("\"\"", "\"")
+            }
+            _ => continue,
+        };
+        let mut j = i + 1;
+        // An optional column list.
+        if sig.get(j).is_some_and(|t| t.is_punct('(')) {
+            let mut depth = 0;
+            while let Some(t) = sig.get(j) {
+                if t.is_punct('(') {
+                    depth += 1;
+                } else if t.is_punct(')') {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            j += 1;
+        }
+        if !sig.get(j).is_some_and(|t| t.is_word("AS")) {
+            continue;
+        }
+        j += 1;
+        while sig
+            .get(j)
+            .is_some_and(|t| t.is_word("NOT") || t.is_word("MATERIALIZED"))
+        {
+            j += 1;
+        }
+        if sig.get(j).is_some_and(|t| t.is_punct('(')) {
+            out.insert(name.to_lowercase());
+        }
+    }
+    Ok(out)
+}
+
 /// 1-based line and column of byte `offset` in `sql`.
 pub fn line_col(sql: &str, offset: usize) -> (usize, usize) {
     let before = &sql[..offset.min(sql.len())];
@@ -398,5 +450,20 @@ mod tests {
         let (line, col) = line_col(sql, found[1].start);
         assert_eq!((line, col), (2, 8));
         assert!(calls("SELECT ref('a'", "ref").is_err());
+    }
+
+    #[test]
+    fn cte_names_are_the_statements_own() {
+        let names = cte_names(
+            "WITH a AS (SELECT 1), \"B c\"(x, y) AS MATERIALIZED (SELECT 2, 3),
+             d AS NOT MATERIALIZED (SELECT 4)
+             SELECT CAST(x AS INTEGER) AS n FROM a, (WITH inner_one AS (SELECT 5) SELECT * FROM inner_one)",
+        )
+        .unwrap();
+        assert_eq!(
+            names.into_iter().collect::<Vec<_>>(),
+            vec!["a", "b c", "d", "inner_one"]
+        );
+        assert!(cte_names("SELECT x AS y FROM t").unwrap().is_empty());
     }
 }

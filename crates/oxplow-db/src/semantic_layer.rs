@@ -235,7 +235,7 @@ impl SemanticLayer {
                     } else {
                         Access::Enforce
                     };
-                    let session = ReadSession::open(conn, access)?;
+                    let session = ReadSession::open(conn, access, &query.sql)?;
                     {
                         let stmt = conn
                             .prepare(&query.sql)
@@ -413,14 +413,25 @@ pub(crate) struct ReadSession<'c> {
     tables: std::collections::HashSet<String>,
     /// Table → the models that read it, to point a refused read at them.
     readers: std::collections::HashMap<String, Vec<String>>,
+    /// The statement's own CTEs (lowercased): a read in one of them is
+    /// the statement's; in any other view or CTE, a view's.
+    own_ctes: std::collections::BTreeSet<String>,
 }
 
 impl<'c> ReadSession<'c> {
+    /// Watch the reads of `sql` (about to be prepared on `conn`).
     pub(crate) fn open(
         conn: &'c rusqlite::Connection,
         access: Access,
+        sql: &str,
     ) -> Result<Self, DomainError> {
         let views = view_names(conn)?;
+        // A read's accessor is the view or CTE it happened in. Any accessor
+        // but one of the statement's own CTEs is inside a view — a view's
+        // own CTEs included — so a model built on CTEs reads, while the
+        // statement's own reads stay checked. (A statement CTE sharing a
+        // name with a view's refuses more, never less.)
+        let own_ctes = crate::sql_tokens::cte_names(sql)?;
         let mut tables = schema_names(conn, "table")?;
         tables.extend(
             [
@@ -434,7 +445,8 @@ impl<'c> ReadSession<'c> {
         let readers = source_readers(conn)?;
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Seen::default()));
         let sink = seen.clone();
-        let (views_c, tables_c) = (views.clone(), tables.clone());
+        let tables_c = tables.clone();
+        let own_c = own_ctes.clone();
         // Tables read inside a view so far (SQLite reports a view's own
         // reads before a `count(*)`'s empty-column read of its base table).
         let mut under: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -451,7 +463,9 @@ impl<'c> ReadSession<'c> {
                             Some("temp") => format!("temp.{table_name}"),
                             _ => table_name.to_string(),
                         };
-                        let in_view = ctx.accessor.is_some_and(|a| views_c.contains(a));
+                        let in_view = ctx
+                            .accessor
+                            .is_some_and(|a| !own_c.contains(&a.to_lowercase()));
                         if in_view {
                             under.insert(table.clone());
                         }
@@ -491,7 +505,17 @@ impl<'c> ReadSession<'c> {
             views,
             tables,
             readers,
+            own_ctes,
         })
+    }
+
+    /// Whether a read with this accessor happened inside a view: the
+    /// accessor is a view, or a CTE the statement didn't define (a view's
+    /// own CTE).
+    fn nested(&self, accessor: &Option<String>) -> bool {
+        accessor
+            .as_ref()
+            .is_some_and(|a| !self.own_ctes.contains(&a.to_lowercase()))
     }
 
     /// Why the authorizer refused the statement, if it did: the read
@@ -538,6 +562,8 @@ impl<'c> ReadSession<'c> {
             // accessor).
             if let Some(view) = accessor.as_ref().filter(|a| self.views.contains(*a)) {
                 models.insert(view.clone());
+            }
+            if self.nested(accessor) {
                 under.insert(table.clone());
             }
         }
@@ -546,7 +572,7 @@ impl<'c> ReadSession<'c> {
             .iter()
             .filter(|(table, column, accessor)| {
                 self.tables.contains(table)
-                    && !accessor.as_ref().is_some_and(|a| self.views.contains(a))
+                    && !self.nested(accessor)
                     && !(column.is_empty() && under.contains(table))
             })
             .map(|(table, _, _)| table.clone())
@@ -569,7 +595,7 @@ impl<'c> ReadSession<'c> {
         std::collections::BTreeSet<String>,
     ) {
         let seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
-        let is_view = |a: &Option<String>| a.as_ref().is_some_and(|a| self.views.contains(a));
+        let is_view = |a: &Option<String>| self.nested(a);
         let mut views = std::collections::BTreeSet::new();
         let mut nested = std::collections::HashSet::new();
         let mut under = std::collections::HashSet::new();
@@ -701,7 +727,7 @@ fn run_read_only(
     } else {
         Access::Enforce
     };
-    let session = ReadSession::open(conn, access)?;
+    let session = ReadSession::open(conn, access, &query.sql)?;
     let mut stmt = conn
         .prepare(&query.sql)
         .map_err(|e| session.refusal().unwrap_or_else(|| invalid(e)))?;
@@ -1011,6 +1037,22 @@ mod tests {
         sl.query_sql("SELECT x FROM scratch", vec![], None)
             .await
             .unwrap();
+        // A model built on a CTE reads fine: SQLite names the CTE, not the
+        // view, as the accessor of the reads inside it (P4.11).
+        db.call(|c| {
+            c.execute_batch(
+                "CREATE VIEW v_cte_probe AS WITH live AS (SELECT title FROM task) SELECT title FROM live",
+            )
+        })
+        .await
+        .unwrap();
+        let out = sl
+            .query_sql("SELECT title FROM v_cte_probe ORDER BY title", vec![], None)
+            .await
+            .unwrap();
+        assert_eq!(out.rows.len(), 2);
+        assert_eq!(out.reads.models, vec!["v_cte_probe".to_string()]);
+        assert!(out.reads.tables.is_empty(), "{:?}", out.reads.tables);
         // Raw reads the table, and says so.
         let out = sl
             .run(SqlQuery::new("SELECT count(*) FROM task").raw(true))
