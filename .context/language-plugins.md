@@ -21,8 +21,11 @@ oxplow know about language X?"*:
 | `analysis_spec()` | → its `LanguageSpec` node tables in `spec.rs` |
 
 `for_language(lang)` looks up the bundle; `mason_suggestion(language_id)`
-resolves an LSP id through the registry (analysis languages) then a small
-LSP-only table (lua/json/yaml/…); `language_for_path(path)` scans the
+resolves an LSP id through the registry (analysis languages) then the
+`LSP_ONLY` table (lua/json/yaml/…: ids, Mason package, extensions);
+`lsp_extensions(language_id)` answers the files an LSP id covers the same
+way — what an installed (Mason) server matches files by, since it has no
+configured `extensions` (tsk556); `language_for_path(path)` scans the
 registry's `extensions`.
 
 ## One `Language`, several spec tables (the key design rule)

@@ -189,6 +189,46 @@ pub fn language_for_path(path: &str) -> Option<Language> {
         .map(|p| p.language)
 }
 
+/// LSP-only languages — no static-analysis grammar, so no registry entry:
+/// their LSP ids, the curated Mason package, and the files they cover.
+const LSP_ONLY: &[(&[&str], &str, &[&str])] = &[
+    (&["lua"], "lua-language-server", &["lua"]),
+    (&["json"], "json-lsp", &["json", "jsonc"]),
+    (&["yaml"], "yaml-language-server", &["yaml", "yml"]),
+    (&["html"], "html-lsp", &["html", "htm"]),
+    (&["css"], "css-lsp", &["css"]),
+    (&["bash", "shell"], "bash-language-server", &["sh", "bash"]),
+    (&["ruby"], "ruby-lsp", &["rb"]),
+    (&["zig"], "zls", &["zig"]),
+];
+
+fn lsp_only(
+    language_id: &str,
+) -> Option<&'static (
+    &'static [&'static str],
+    &'static str,
+    &'static [&'static str],
+)> {
+    let id = language_id.trim().to_ascii_lowercase();
+    LSP_ONLY
+        .iter()
+        .find(|(ids, _, _)| ids.contains(&id.as_str()))
+}
+
+/// The file extensions an LSP `languageId` covers: the registry's for an
+/// analysis language (the single source of truth), the LSP-only table's
+/// otherwise; empty when oxplow doesn't know the language. What an
+/// installed server — which has no configured `extensions` — matches
+/// files by.
+pub fn lsp_extensions(language_id: &str) -> Vec<&'static str> {
+    if let Some(lang) = language_from_lsp_id(language_id) {
+        return for_language(lang).extensions.to_vec();
+    }
+    lsp_only(language_id)
+        .map(|(_, _, exts)| exts.to_vec())
+        .unwrap_or_default()
+}
+
 /// The curated Mason package suggestion for an LSP `languageId`. Resolves
 /// analysis languages through the registry (the bundle's `lsp_mason_package`)
 /// and falls back to a small table of **LSP-only** languages oxplow doesn't
@@ -201,23 +241,23 @@ pub fn mason_suggestion(language_id: &str) -> Option<&'static str> {
             return Some(pkg);
         }
     }
-    // LSP-only languages — no static analysis grammar, so no registry entry.
-    match language_id.trim().to_ascii_lowercase().as_str() {
-        "lua" => Some("lua-language-server"),
-        "json" => Some("json-lsp"),
-        "yaml" => Some("yaml-language-server"),
-        "html" => Some("html-lsp"),
-        "css" => Some("css-lsp"),
-        "bash" | "shell" => Some("bash-language-server"),
-        "ruby" => Some("ruby-lsp"),
-        "zig" => Some("zls"),
-        _ => None,
-    }
+    lsp_only(language_id).map(|(_, pkg, _)| *pkg)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// tsk556: the files an LSP language id covers — from the registry for
+    /// an analysis language, from the LSP-only table otherwise.
+    #[test]
+    fn lsp_ids_know_their_extensions() {
+        assert!(lsp_extensions("rust").contains(&"rs"));
+        assert!(lsp_extensions("typescript").contains(&"ts"));
+        assert!(lsp_extensions("yaml").contains(&"yml"));
+        assert!(lsp_extensions("lua").contains(&"lua"));
+        assert!(lsp_extensions("nope").is_empty());
+    }
 
     const ALL: &[Language] = &[
         Language::Rust,

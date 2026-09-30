@@ -111,7 +111,9 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   requests and maps the LSP's variants (`Location` / `LocationLink`,
   `DocumentSymbol` trees / `SymbolInformation`, `MarkupContent` /
   `MarkedString`, 0-based positions, URIs) to them. A file's language is
-  the configured server whose `extensions` cover it
+  the configured server whose `extensions` cover it — an installed
+  (Mason) server's come from the language registry
+  (`plugin::lsp_extensions`, set when it is registered; tsk556)
   (`LspSessionManager::language_for_path`); an uncovered file's error
   names the server to install (by the extension's language). Diagnostics
   are what the servers published (`lsp_diagnostic`), not a pull. `rename`
