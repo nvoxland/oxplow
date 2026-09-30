@@ -77,7 +77,8 @@ pub struct EffortFile {
     pub closest_vcs_rev: Option<String>,
     /// `true` when `local_snapshot_id`'s snapshot is byte-equal to
     /// `closest_vcs_rev` (clean worktree at capture, or
-    /// auto-resolved later by `set_snapshot_git_commit`).
+    /// set later when the snapshot is stamped with a revision — a take on
+    /// a clean head, or a head move; `stamp_revision_tx`).
     pub vcs_rev_exact: bool,
 }
 

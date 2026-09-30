@@ -138,21 +138,6 @@ impl Trees {
         self.snapshots.get_snapshot_revision(snapshot).await
     }
 
-    /// The snapshots whose trees equal VCS revision `rev` (resolved in
-    /// `ws` first, so `git:HEAD` and a short id work), oldest first.
-    pub async fn snapshots_at(&self, ws: &Path, rev: &Revision) -> Result<Vec<i64>, DomainError> {
-        let Revision::Vcs { kind, rev } = rev else {
-            return Err(invalid(format!("`{rev}` isn't a VCS revision")));
-        };
-        let full = self.vcs.resolve(ws, self.vcs_rev(kind, rev)?).await?;
-        self.snapshots
-            .snapshots_at(&Revision::Vcs {
-                kind: kind.clone(),
-                rev: full,
-            })
-            .await
-    }
-
     /// Every file in `rev`, sorted.
     pub async fn files_at(&self, ws: &Path, rev: &Revision) -> Result<Vec<String>, DomainError> {
         Ok(self.cells(ws, rev).await?.0.into_keys().collect())
@@ -556,14 +541,6 @@ mod tests {
         let clean = take(capture.clone()).await;
         let rev = Revision::git(head);
         assert_eq!(trees.revision_of(clean).await.unwrap(), Some(rev.clone()));
-        assert_eq!(trees.snapshots_at(&ws, &rev).await.unwrap(), vec![clean]);
-        assert_eq!(
-            trees
-                .snapshots_at(&ws, &Revision::git("HEAD"))
-                .await
-                .unwrap(),
-            vec![clean]
-        );
         let d = trees
             .diff(&ws, Some(&Revision::Snapshot(clean)), &rev)
             .await

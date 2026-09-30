@@ -26,6 +26,10 @@ pub trait StreamStore: Send + Sync {
     /// otherwise the explicit id is inserted / updated in place. Returns
     /// the effective id.
     async fn upsert(&self, stream: &Stream) -> Result<StreamId, DomainError>;
+    /// Record the branch `id`'s workspace has checked out (`branch`,
+    /// `branch_ref`, `updated_at` only — nothing else a concurrent write
+    /// may have changed). Whether the stream exists.
+    async fn set_branch(&self, id: &StreamId, branch: &str) -> Result<bool, DomainError>;
     async fn delete(&self, id: &StreamId) -> Result<(), DomainError>;
     /// Soft-delete: stamp `archived_at` so the row drops out of
     /// `list()` but stays referenced from history (efforts, snapshots,

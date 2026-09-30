@@ -107,6 +107,22 @@ impl StreamStore for SqliteStreamStore {
             .await
     }
 
+    async fn set_branch(&self, id: &StreamId, branch: &str) -> Result<bool, DomainError> {
+        let (id, branch) = (id.value(), branch.to_string());
+        let now = crate::database::ts_to_string(Timestamp::now());
+        self.db
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE streams SET branch = ?2, branch_ref = 'refs/heads/' || ?2,
+                                        updated_at = ?3
+                     WHERE id = ?1",
+                    params![id, branch, now],
+                )
+                .map(|n| n > 0)
+            })
+            .await
+    }
+
     async fn upsert(&self, stream: &Stream) -> Result<StreamId, DomainError> {
         let stream = stream.clone();
         self.db
@@ -269,6 +285,24 @@ mod tests {
         store.upsert(&s).await.unwrap();
         let got = store.get(&s.id).await.unwrap().unwrap();
         assert_eq!(got, s);
+    }
+
+    /// tsk573: recording the branch a stream checked out writes only the
+    /// branch — a concurrent rename (read before, written after) stays.
+    #[tokio::test]
+    async fn set_branch_writes_only_the_branch() {
+        let store = SqliteStreamStore::new(Database::in_memory());
+        let s = primary();
+        store.upsert(&s).await.unwrap();
+        let mut renamed = s.clone();
+        renamed.title = "Renamed".into();
+        store.upsert(&renamed).await.unwrap();
+        assert!(store.set_branch(&s.id, "elsewhere").await.unwrap());
+        let got = store.get(&s.id).await.unwrap().unwrap();
+        assert_eq!(got.title, "Renamed");
+        assert_eq!(got.branch, "elsewhere");
+        assert_eq!(got.branch_ref, "refs/heads/elsewhere");
+        assert!(!store.set_branch(&StreamId::new(99), "x").await.unwrap());
     }
 
     #[tokio::test]

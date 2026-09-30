@@ -1611,20 +1611,6 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// The snapshots whose trees equal `revision`, oldest first.
-    pub async fn snapshots_at(&self, revision: &Revision) -> Result<Vec<i64>, DomainError> {
-        let revision = revision.to_string();
-        self.db
-            .call(move |conn| {
-                let mut st = conn.prepare(
-                    "SELECT id FROM snapshot WHERE revision = ?1 ORDER BY created_at, id",
-                )?;
-                let rows = st.query_map(params![revision], |r| r.get(0))?;
-                rows.collect()
-            })
-            .await
-    }
-
     /// **Fixture seeding** (tests): pin a snapshot to a revision (with
     /// the exact-pin cascade). Production stamps a new snapshot in
     /// [`Self::record_take`] and a head move in [`Self::record_head_moved`].
@@ -3177,8 +3163,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_snapshot_git_commit_cascades_to_file_refs() {
-        // When `set_snapshot_git_commit` lands on a snapshot, every
+    async fn a_revision_stamp_cascades_to_file_refs() {
+        // When a revision is stamped on a snapshot, every
         // `effort_file` and `page_ref` row pointing at that
         // snapshot must pick up the sha and flip
         // `vcs_rev_exact` to 1. We bypass the domain stores

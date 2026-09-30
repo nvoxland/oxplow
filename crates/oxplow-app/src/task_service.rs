@@ -1144,8 +1144,8 @@ impl TaskService {
     /// and resolve its closest git commit. Falls back to a 0
     /// snapshot id when neither end nor start is set (rare —
     /// only happens for an effort opened without a snapshot pin and
-    /// no snapshot service attached). The cascade in
-    /// `set_snapshot_git_commit` will retroactively flip
+    /// no snapshot service attached). Stamping the snapshot with a
+    /// revision later (`stamp_revision_tx`) retroactively flips
     /// `vcs_rev_exact` to true if a commit lands on the chosen
     /// snapshot later.
     pub async fn resolve_effort_file_version(

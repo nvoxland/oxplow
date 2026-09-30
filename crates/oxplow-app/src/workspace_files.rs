@@ -133,14 +133,24 @@ impl WorkspaceFiles {
         Self::blocking(move || list_workspace_entries(&root, &relative_path, &statuses)).await
     }
 
-    /// Every file, pruned by `filter` (the project's `generated:`
-    /// exclusions), which also bounds the walk.
+    /// The filter for `root`: the project's `generated:` lists and that
+    /// workspace's own `.gitignore`s — a stream's, not the primary's.
+    fn filter_for(
+        root: &Path,
+        generated: &oxplow_config::GeneratedConfig,
+    ) -> oxplow_fs_watch::WorkspaceFilter {
+        oxplow_fs_watch::WorkspaceFilter::for_project(root, &generated.exclude, &generated.include)
+    }
+
+    /// Every file, pruned by the stream's filter ([`Self::filter_for`]),
+    /// which also bounds the walk.
     pub async fn list_files(
         &self,
         stream_id: Option<&str>,
-        filter: oxplow_fs_watch::WorkspaceFilter,
+        generated: &oxplow_config::GeneratedConfig,
     ) -> Result<Vec<WorkspaceIndexedFile>, WorkspaceError> {
         let root = self.router.resolve(stream_id).await;
+        let filter = Self::filter_for(&root, generated);
         let statuses = self.statuses(&root).await;
         Self::blocking(move || {
             list_workspace_files(&root, &statuses, "", &|path| {
@@ -150,16 +160,17 @@ impl WorkspaceFiles {
         .await
     }
 
-    /// Lines containing `query` across the files `filter` keeps
-    /// ([`search_workspace_text`]).
+    /// Lines containing `query` across the files the stream's filter
+    /// keeps ([`search_workspace_text`]).
     pub async fn search_text(
         &self,
         stream_id: Option<&str>,
-        filter: oxplow_fs_watch::WorkspaceFilter,
+        generated: &oxplow_config::GeneratedConfig,
         query: String,
         limit: usize,
     ) -> Result<Vec<TextSearchHit>, WorkspaceError> {
         let root = self.router.resolve(stream_id).await;
+        let filter = Self::filter_for(&root, generated);
         Self::blocking(move || {
             search_workspace_text(&root, &query, limit, &|path| {
                 filter.ignore(Path::new(path), false)
@@ -616,6 +627,51 @@ mod tests {
             assert!(matches!(r, Err(WorkspaceError::NoStream(_))), "{stream:?}");
         }
         assert!(!primary.join("leak.txt").exists());
+    }
+
+    /// tsk573: a stream's file list and text search honour its own
+    /// workspace's `.gitignore`, not the primary's.
+    #[tokio::test]
+    async fn a_streams_files_follow_its_own_ignores() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let other = tempdir().unwrap();
+        std::fs::write(other.path().join(".gitignore"), "local.txt\n").unwrap();
+        std::fs::write(other.path().join("local.txt"), "needle\n").unwrap();
+        std::fs::write(other.path().join("kept.txt"), "needle\n").unwrap();
+        let path = other.path().display().to_string();
+        fx.svc
+            .db
+            .transaction(move |c| {
+                c.execute(
+                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
+                                          worktree_path, created_at, updated_at)
+                     VALUES (77, 'worktree', 'w', 'w', 'r', 'r', ?1,
+                             '2026-09-30T00:00:00.000000Z', '2026-09-30T00:00:00.000000Z')",
+                    [path.clone()],
+                )
+                .map(|_| ())
+                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap();
+        let generated = oxplow_config::GeneratedConfig::default();
+        let files = fx
+            .svc
+            .workspace_files
+            .list_files(Some("str77"), &generated)
+            .await
+            .unwrap();
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"kept.txt"), "{paths:?}");
+        assert!(!paths.contains(&"local.txt"), "{paths:?}");
+        let hits = fx
+            .svc
+            .workspace_files
+            .search_text(Some("str77"), &generated, "needle".into(), 10)
+            .await
+            .unwrap();
+        let hit_paths: Vec<&str> = hits.iter().map(|h| h.path.as_str()).collect();
+        assert_eq!(hit_paths, vec!["kept.txt"]);
     }
 
     #[test]

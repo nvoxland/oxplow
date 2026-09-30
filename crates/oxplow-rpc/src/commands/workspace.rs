@@ -19,20 +19,14 @@ pub async fn list_workspace_entries(
         .map_err(|e| IpcError::internal(e.to_string()))
 }
 
-/// The project's workspace filter — the same exclusions as
-/// fs-watch and snapshots (the `generated:` list and `.gitignore`). It
-/// keeps node_modules/dist junk out of quick-open and text search, and
-/// bounds the walk (a vendor tree is hundreds of thousands of entries).
-fn workspace_filter(svc: &Services) -> oxplow_fs_watch::WorkspaceFilter {
-    let cfg = svc.config.read();
-    cfg.as_ref()
-        .map(|c| {
-            oxplow_fs_watch::WorkspaceFilter::for_project(
-                &svc.layout.project_dir,
-                &c.generated.exclude,
-                &c.generated.include,
-            )
-        })
+/// The project's `generated:` lists; the stream's workspace adds its own
+/// `.gitignore`s (`WorkspaceFiles::filter_for`) — the same exclusions as
+/// fs-watch and snapshots. It keeps node_modules/dist junk out of
+/// quick-open and text search, and bounds the walk.
+fn generated(svc: &Services) -> oxplow_config::GeneratedConfig {
+    svc.config
+        .read()
+        .map(|c| c.generated.clone())
         .unwrap_or_default()
 }
 
@@ -47,7 +41,7 @@ pub async fn search_workspace_text(
     svc.workspace_files
         .search_text(
             stream_id.as_deref(),
-            workspace_filter(svc),
+            &generated(svc),
             query,
             limit.unwrap_or(200).clamp(1, 1000),
         )
@@ -60,7 +54,7 @@ pub async fn list_workspace_files(
     stream_id: Option<String>,
 ) -> Result<Vec<WorkspaceIndexedFile>, IpcError> {
     svc.workspace_files
-        .list_files(stream_id.as_deref(), workspace_filter(svc))
+        .list_files(stream_id.as_deref(), &generated(svc))
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
 }

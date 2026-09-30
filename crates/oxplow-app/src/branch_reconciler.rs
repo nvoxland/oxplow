@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use oxplow_domain::stores::StreamStore;
 use oxplow_domain::vcs::Vcs;
-use oxplow_domain::{StreamId, Timestamp};
+use oxplow_domain::StreamId;
 use tracing::{debug, warn};
 
 use crate::events::{EventBus, OxplowEvent};
@@ -76,16 +76,15 @@ impl BranchReconciler {
         let Some(detected) = head.branch else {
             return;
         };
-        let Ok(Some(mut stored)) = self.streams.get(stream_id).await else {
+        let Ok(Some(stored)) = self.streams.get(stream_id).await else {
             return;
         };
         if stored.branch == detected {
             return;
         }
-        stored.branch = detected.clone();
-        stored.branch_ref = format!("refs/heads/{detected}");
-        stored.updated_at = Timestamp::now();
-        if let Err(e) = self.streams.upsert(&stored).await {
+        // Only the branch: a whole-row write could undo a rename made
+        // since the read.
+        if let Err(e) = self.streams.set_branch(stream_id, &detected).await {
             warn!(stream_id = %stream_id, error = %e, "failed to persist reconciled branch");
             return;
         }

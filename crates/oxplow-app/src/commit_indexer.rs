@@ -224,10 +224,19 @@ pub async fn refresh(svc: &crate::Services) -> usize {
         )
         .await;
     }
-    let checkouts: Vec<(i64, String)> = streams
-        .into_iter()
-        .map(|s| (s.id.value(), s.branch))
-        .collect();
+    // Which stream has a branch checked out is its workspace's head —
+    // not the stream row, which the branch reconciler updates later.
+    let mut checkouts: Vec<(i64, String)> = Vec::new();
+    for s in &streams {
+        let ws = svc.worktrees.resolve(Some(&s.id.to_string())).await;
+        if let Ok(oxplow_domain::vcs::Head {
+            branch: Some(branch),
+            ..
+        }) = svc.vcs.head(&ws).await
+        {
+            checkouts.push((s.id.value(), branch));
+        }
+    }
     refresh_refs(&*svc.vcs, &primary, &checkouts, &svc.git_store).await;
     n
 }
@@ -450,6 +459,21 @@ mod tests {
                  SELECT c.subject FROM v_commit c JOIN reach USING (sha) ORDER BY c.subject")
             .await,
             serde_json::json!([["base"], ["init"], ["only on the side branch"]])
+        );
+
+        // tsk573: a checkout the stream's row doesn't know yet (the branch
+        // reconciler hasn't run): the branch a workspace has checked out
+        // is its stream's, read from the workspace's head.
+        git(&side_dir, &["checkout", "-q", "-b", "b5-moved"]);
+        refresh(svc).await;
+        let side_id = side.id.value();
+        assert_eq!(
+            q(
+                "SELECT name, stream_id FROM v_branch WHERE kind = 'local' AND name LIKE 'b5-%'
+               ORDER BY name"
+            )
+            .await,
+            serde_json::json!([["b5-moved", side_id], ["b5-side", null]])
         );
     }
 

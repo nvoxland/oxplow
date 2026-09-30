@@ -50,17 +50,15 @@ pub async fn zone_report(svc: &Services) -> Result<ZoneReport, String> {
 }
 
 async fn report_for(svc: &Services, rules: Vec<ZoneRuleConfig>) -> Result<ZoneReport, String> {
-    let filter = {
-        let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
-        oxplow_fs_watch::WorkspaceFilter::for_project(
-            &svc.layout.project_dir,
-            &cfg.generated.exclude,
-            &cfg.generated.include,
-        )
-    };
+    let generated = svc
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .generated
+        .clone();
     let files = svc
         .workspace_files
-        .list_files(None, filter)
+        .list_files(None, &generated)
         .await
         .map_err(|e| e.to_string())?;
 

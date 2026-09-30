@@ -165,7 +165,11 @@ commit times are whole seconds and clocks skew, so a time order can list
 a rebase's parent before its child and break the graph's lanes (tsk565;
 the dashboard finds the head commit by sha, not as the first row); the
 branch picker, compare list and new-stream form read `v_branch` /
-`v_tag`. A `v_branch.name` is the branch's local name for both kinds
+`v_tag`. `v_branch.stream_id` is the stream whose workspace has the
+branch checked out, read from that workspace's head at each refresh —
+not the stream row, which the branch reconciler updates after (it
+writes only `branch`/`branch_ref`, `StreamStore::set_branch`, so a
+rename in between stays; tsk573). A `v_branch.name` is the branch's local name for both kinds
 (a remote-tracking branch's remote is its own column), so the picker
 checks out and shows `name` as is (`pickedBranch`, tsk567). What is computed stays live: `vcs_divergence`,
 `vcs_revisions_between`, `vcs_file_history` (the index keeps 500
@@ -224,8 +228,8 @@ clean and both head reads agree (`clean_revision`, tsk554) — a commit
 in between leaves the snapshot unstamped rather than paired with the
 wrong head. The git-refs listener re-stamps the latest snapshot's
 revision when the head moves onto an unchanged tree (`vcs.head.moved`).
-`Trees::revision_of(snapshot)` and `Trees::snapshots_at(ws, rev)` map the
-two ways (`git:HEAD` and short ids resolve first).
+`Trees::revision_of(snapshot)` maps a snapshot to its revision (the
+reverse lookup, `snapshots_at`, had no caller and went; tsk573).
 
 Capture reads git only through the capability: the sweep's clean files
 come from `Vcs::clean_baseline` and are stored by object id (storage
@@ -297,6 +301,9 @@ was deleted with its tests.
 - **Workspace context** asks `detect` and the default branch from
   `branches()`.
 - **Text search** is `WorkspaceFiles::search_text`, no longer `git grep`.
+  It and `list_files` take the project's `generated:` lists and build
+  the filter from the stream's own workspace (`filter_for`), so a
+  worktree stream honours its own `.gitignore`s (tsk573).
 - **Co-change** reads the commit index (`crate::co_change`,
   [git-integration.md](./git-integration.md) "Commit indexer").
 - **Metric visibility** asks `revision_graph` (it had opened libgit2
