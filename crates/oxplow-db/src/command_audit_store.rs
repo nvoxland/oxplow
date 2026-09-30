@@ -63,6 +63,9 @@ pub struct CommandAudit {
     pub input: Value,
     pub outcome: Outcome,
     pub error: Option<String>,
+    /// What the run returned (a successful run's result); `None` for a
+    /// refused or failed one.
+    pub result: Option<Value>,
     /// The `command.executed` event, once appended.
     pub event_id: Option<EventId>,
     /// The call that undoes this run, when the command is undoable.
@@ -81,6 +84,7 @@ pub struct NewCommandAudit {
     pub input: Value,
     pub outcome: Outcome,
     pub error: Option<String>,
+    pub result: Option<Value>,
     pub inverse: Option<CommandCall>,
 }
 
@@ -92,8 +96,9 @@ pub fn insert_tx(conn: &Connection, row: &NewCommandAudit) -> Result<i64, Domain
         .map(|c| serde_json::to_string(c).expect("CommandCall serializes"));
     conn.execute(
         "INSERT INTO command_audit
-           (at, command, actor_kind, actor_id, thread_id, input_json, outcome, error, inverse_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+           (at, command, actor_kind, actor_id, thread_id, input_json, outcome, error, inverse_json,
+            result_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             ts_to_string(Timestamp::now()),
             row.command,
@@ -104,6 +109,9 @@ pub fn insert_tx(conn: &Connection, row: &NewCommandAudit) -> Result<i64, Domain
             outcome_str(row.outcome),
             row.error,
             inverse,
+            row.result
+                .as_ref()
+                .map(|r| serde_json::to_string(r).expect("result serializes")),
         ],
     )
     .map_err(map_sql_err)?;
@@ -145,6 +153,7 @@ fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandAudit> {
     let outcome: String = row.get("outcome")?;
     let input: String = row.get("input_json")?;
     let inverse: Option<String> = row.get("inverse_json")?;
+    let result: Option<String> = row.get("result_json")?;
     let event_id: Option<String> = row.get("event_id")?;
     Ok(CommandAudit {
         id: row.get("id")?,
@@ -157,6 +166,10 @@ fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandAudit> {
             .map_err(|e| conv(DomainError::Storage(format!("input json: {e}"))))?,
         outcome: parse_outcome(&outcome).map_err(conv)?,
         error: row.get("error")?,
+        result: result
+            .map(|s| serde_json::from_str(&s))
+            .transpose()
+            .map_err(|e| conv(DomainError::Storage(format!("result json: {e}"))))?,
         event_id: event_id.map(EventId),
         inverse: inverse
             .map(|s| serde_json::from_str(&s))
@@ -233,6 +246,7 @@ mod tests {
                             input: json!({"id": "tsk1", "to": "done"}),
                             outcome: Outcome::Ok,
                             error: None,
+                            result: Some(json!({"id": "tsk1"})),
                             inverse: Some(CommandCall {
                                 name: "work_item.transition".into(),
                                 input: json!({"id": "tsk1", "to": "ready"}),
@@ -250,6 +264,7 @@ mod tests {
                             input: json!({"id": "tsk1", "to": "ready"}),
                             outcome: Outcome::Ok,
                             error: None,
+                            result: None,
                             inverse: None,
                         },
                     )?;
@@ -266,6 +281,7 @@ mod tests {
         assert_eq!(row.outcome, Outcome::Ok);
         assert_eq!(row.event_id, Some(event));
         assert_eq!(row.inverse.as_ref().unwrap().input["to"], "ready");
+        assert_eq!(row.result, Some(json!({"id": "tsk1"})));
         assert_eq!(row.undone_by, Some(undo_id));
         // Newest first; a second undo of the same row is refused.
         let recent = store.list_recent(10).await.unwrap();
@@ -290,6 +306,7 @@ mod tests {
                     input: json!({}),
                     outcome: Outcome::Denied,
                     error: Some("lenses may not run config.set".into()),
+                    result: None,
                     inverse: None,
                 },
             )

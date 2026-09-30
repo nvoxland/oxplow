@@ -1,5 +1,5 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
-import type { Reads, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
+import type { OpOutcome, Reads, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
 import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
 export { onRemoteReconnect, triggerRemoteResync };
@@ -85,15 +85,6 @@ export type { DataEntity, Extension, ExtensionReview, Lens, LensRun, LensViz, Ne
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: unknown }): T {
   if (result.status === "ok") return result.data;
   throw new Error(ipcErrorMessage(result.error));
-}
-
-/// Synthesize a success-shaped GitOpResult for void-returning Tauri
-/// commands (gitAddPath / gitRestorePath / gitAppendToGitignore).
-/// Renderer code expects a {success, stdout, stderr, status} shape
-/// to decide whether to surface a toast. Since these commands either
-/// succeed or throw, success here is unconditional.
-function synthOk(): import("./tauri-bridge/index.js").GitOpResult {
-  return { success: true, stdout: "", stderr: "", status: 0 };
 }
 
 /// Pure slug derivation: lowercase ASCII alphanumerics, runs of any
@@ -285,7 +276,7 @@ let cachedBridge: DesktopBridge | null = null;
 export type { OxplowEvent } from "./api-types.js";
 // Use the tauri-specta-generated shapes directly for the
 // snake_case-native bindings (CommitDetail, GitLogCommit,
-// RemoteBranchEntry, GitOpResult, BlameLine, …). The api-types
+// RemoteBranchEntry, BlameLine, …). The api-types
 // camelCase legacy definitions were drifting from runtime shape
 // and only existed because the original Electron build wrapped
 // them in adapters; nothing converts shape today.
@@ -295,7 +286,7 @@ export type { OxplowEvent } from "./api-types.js";
 // stay on the api-types camelCase legacy shape until their consumers
 // are migrated.
 export type {
-  GitOpResult,
+  OpOutcome,
   RemoteBranchEntry,
   MergeReadiness,
 } from "./tauri-bridge/index.js";
@@ -925,34 +916,18 @@ export async function resolveCommitRefLabels(
   return unwrap(await commands.gitResolveCommitRefLabels(shas));
 }
 
-export async function renameGitBranch(
-  from: string,
-  to: string,
-): Promise<import("./tauri-bridge/index.js").GitOpResult> {
-  unwrap(await commands.renameBranch(from, to));
-  return synthOk();
-}
-
-export async function deleteGitBranch(
-  branch: string,
-  options?: { force?: boolean },
-): Promise<import("./tauri-bridge/index.js").GitOpResult> {
-  unwrap(await commands.deleteBranch(branch, options?.force ?? false));
-  return synthOk();
-}
-
 /**
  * Long-running git ops are kickoff-style — the IPC promise resolves
  * immediately with a `taskId` once the BackgroundTaskStore row is
  * registered, and the actual work runs in the background. Each
  * renderer-side wrapper also exposes an `awaitDone` promise that
  * resolves with the final `BackgroundTask` (status, error, and
- * `result` payload — typically a `GitOpResult`). Pattern:
+ * `result` payload — the command's `OpOutcome`). Pattern:
  *
- *     const { taskId, awaitDone } = await gitRebaseOnto(...);
+ *     const { taskId, awaitDone } = await gitRebase(...);
  *     // mark UI pending using taskId / a label
  *     const task = await awaitDone;
- *     // task.result is the GitOpResult
+ *     // task.result is the OpOutcome
  *
  * Callers that don't need the final result can ignore `awaitDone`;
  * any other surface watching `subscribeBackgroundTaskEvents` still
@@ -968,16 +943,16 @@ function attachAwait(taskId: string): GitOpKickoff {
 }
 
 /// Wrap a synchronous Tauri git op inside a real BackgroundTask
-/// row so `awaitDone` resolves with the actual GitOpResult and the
+/// row so `awaitDone` resolves with the actual OpOutcome and the
 /// shared "in-flight task" subscribers stay accurate. Without
-/// this, the renderer's kickoff pattern (gitPush / gitPull etc.)
+/// this, the renderer's kickoff pattern (vcsPush / vcsPull etc.)
 /// would race a never-completing fake task and the result would
 /// land in the void.
 async function runAsBackgroundTask(
   label: string,
   kind: import("./tauri-bridge/index.js").BackgroundTaskKind,
   detail: string | null,
-  op: () => Promise<import("./tauri-bridge/index.js").GitOpResult>,
+  op: () => Promise<OpOutcome>,
 ): Promise<GitOpKickoff> {
   const task = unwrap(await commands.startBackgroundTask(kind, label, detail));
   const taskId = task.id;
@@ -999,29 +974,29 @@ async function runAsBackgroundTask(
   return attachAwait(taskId);
 }
 
-export async function gitMergeInto(streamId: string, other: string): Promise<GitOpKickoff> {
-  return runAsBackgroundTask(`Merge ${other}`, "git", `merge ${other}`, async () =>
-    unwrap(await commands.gitMergeInto(streamId, other)),
+export async function vcsMerge(streamId: string, rev: string, confirmed: boolean): Promise<GitOpKickoff> {
+  return runAsBackgroundTask(`Merge ${rev}`, "git", `merge ${rev}`, () =>
+    runVcs("vcs.merge", { stream: streamId, rev }, confirmed),
   );
 }
 
-export async function gitRebaseOnto(streamId: string, onto: string): Promise<GitOpKickoff> {
-  return runAsBackgroundTask(`Rebase onto ${onto}`, "git", `rebase ${onto}`, async () =>
-    unwrap(await commands.gitRebaseOnto(streamId, onto)),
+export async function gitRebase(streamId: string, onto: string, confirmed: boolean): Promise<GitOpKickoff> {
+  return runAsBackgroundTask(`Rebase onto ${onto}`, "git", `rebase ${onto}`, () =>
+    runVcs("git.rebase", { stream: streamId, rev: onto }, confirmed),
   );
 }
 
-export async function gitCherryPick(streamId: string, commit: string): Promise<GitOpKickoff> {
-  const short = commit.slice(0, 7);
-  return runAsBackgroundTask(`Cherry-pick ${short}`, "git", `cherry-pick ${short}`, async () =>
-    unwrap(await commands.gitCherryPick(streamId, commit)),
+export async function gitCherryPick(streamId: string, rev: string): Promise<GitOpKickoff> {
+  const short = rev.slice(0, 7);
+  return runAsBackgroundTask(`Cherry-pick ${short}`, "git", `cherry-pick ${short}`, () =>
+    runVcs("git.cherry_pick", { stream: streamId, rev }),
   );
 }
 
-export async function gitRevert(streamId: string, commit: string): Promise<GitOpKickoff> {
-  const short = commit.slice(0, 7);
-  return runAsBackgroundTask(`Revert ${short}`, "git", `revert ${short}`, async () =>
-    unwrap(await commands.gitRevert(streamId, commit)),
+export async function gitRevert(streamId: string, rev: string, confirmed: boolean): Promise<GitOpKickoff> {
+  const short = rev.slice(0, 7);
+  return runAsBackgroundTask(`Revert ${short}`, "git", `revert ${short}`, () =>
+    runVcs("git.revert", { stream: streamId, rev }, confirmed),
   );
 }
 
@@ -1103,8 +1078,23 @@ export async function createStream(input:
   }
 }
 
-export async function checkoutStreamBranch(streamId: string, branch: string): Promise<Stream> {
-  return unwrap(await commands.checkoutStreamBranch(streamId, branch));
+/** Switch the stream's workspace to `branch` (`create` makes it at the
+ *  head first). The branch reconciler records it on the stream. */
+export async function vcsCheckoutBranch(streamId: string, branch: string, create = false): Promise<OpOutcome> {
+  return runVcs("vcs.checkout_branch", { stream: streamId, name: branch, create });
+}
+
+export async function vcsRenameBranch(streamId: string, from: string, to: string): Promise<OpOutcome> {
+  return runVcs("vcs.rename_branch", { stream: streamId, from, to });
+}
+
+export async function vcsDeleteBranch(
+  streamId: string,
+  name: string,
+  force: boolean,
+  confirmed: boolean,
+): Promise<OpOutcome> {
+  return runVcs("vcs.delete_branch", { stream: streamId, name, force }, confirmed);
 }
 
 export async function getThreadState(streamId: string): Promise<ThreadState> {
@@ -1330,64 +1320,59 @@ export async function searchWorkspaceText(
   ) as unknown as import("./api-types.js").TextSearchHit[];
 }
 
-export async function gitRestorePath(
-  streamId: string,
-  path: string,
-): Promise<import("./tauri-bridge/index.js").GitOpResult> {
-  unwrap(await commands.restorePath(streamId, path));
-  return synthOk();
+/** Throw away the workspace's changes to `paths` — destructive, so the
+ *  person has confirmed. */
+export async function vcsDiscard(streamId: string, paths: string[], confirmed: boolean): Promise<OpOutcome> {
+  return runVcs("vcs.discard", { stream: streamId, paths }, confirmed);
 }
 
-export async function gitAddPath(
-  streamId: string,
-  path: string,
-): Promise<import("./tauri-bridge/index.js").GitOpResult> {
-  unwrap(await commands.gitAddPath(streamId, path));
-  return synthOk();
+export async function vcsStage(streamId: string, paths: string[]): Promise<OpOutcome> {
+  return runVcs("vcs.stage", { stream: streamId, paths });
 }
 
-export async function gitAppendToGitignore(
-  streamId: string,
-  path: string,
-): Promise<import("./tauri-bridge/index.js").GitOpResult> {
-  unwrap(await commands.appendToGitignore(streamId, path));
-  return synthOk();
+/** Append a pattern to the workspace's `.gitignore`. */
+export async function gitIgnore(streamId: string, entry: string): Promise<OpOutcome> {
+  return runVcs("git.ignore", { stream: streamId, entry });
 }
 
-export async function gitPush(
-  streamId: string,
-  _options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string },
-): Promise<GitOpKickoff> {
-  return runAsBackgroundTask("Push", "git", "git push", async () =>
-    unwrap(await commands.gitPush(streamId)),
+/** A remote branch to push to or pull from; omitted = the upstream. */
+export interface RemoteBranchTarget {
+  remote: string;
+  branch: string;
+}
+
+export async function vcsPush(streamId: string, to?: RemoteBranchTarget): Promise<GitOpKickoff> {
+  const where = to ? ` ${to.remote} ${to.branch}` : "";
+  return runAsBackgroundTask(to ? `Push to ${to.remote}/${to.branch}` : "Push", "git", `push${where}`, () =>
+    runVcs("vcs.push", { stream: streamId, ...to }),
   );
 }
 
-export async function gitPull(
-  streamId: string,
-  _options?: { rebase?: boolean; remote?: string; branch?: string },
-): Promise<GitOpKickoff> {
-  return runAsBackgroundTask("Pull", "git", "git pull", async () =>
-    unwrap(await commands.gitPull(streamId)),
+export async function vcsPull(streamId: string, from?: RemoteBranchTarget): Promise<GitOpKickoff> {
+  const where = from ? ` ${from.remote} ${from.branch}` : "";
+  return runAsBackgroundTask(from ? `Pull ${from.remote}/${from.branch}` : "Pull", "git", `pull${where}`, () =>
+    runVcs("vcs.pull", { stream: streamId, ...from }),
   );
 }
 
-export async function gitFetch(
-  streamId: string,
-  options?: { remote?: string; prune?: boolean; all?: boolean },
-): Promise<GitOpKickoff> {
-  const remote = options?.remote ?? null;
-  return runAsBackgroundTask("Fetch", "git", `git fetch${remote ? ` ${remote}` : ""}`, async () =>
-    unwrap(await commands.gitFetch(streamId, remote)),
+export async function vcsFetch(streamId: string, remote?: string): Promise<GitOpKickoff> {
+  return runAsBackgroundTask("Fetch", "git", `fetch${remote ? ` ${remote}` : ""}`, () =>
+    runVcs("vcs.fetch", { stream: streamId, remote: remote ?? null }),
   );
 }
 
-export async function gitCommitAll(
+/** Commit the stream's changes; `revision` is the new one (`git:<sha>`). */
+export async function vcsCommit(
   streamId: string,
   message: string,
-  _options?: { includeUntracked?: boolean; paths?: string[] },
-): Promise<import("./tauri-bridge/index.js").GitOpResult & { sha?: string }> {
-  return unwrap(await commands.gitCommitAll(streamId, message));
+  includeUntracked = true,
+): Promise<{ success: boolean; revision: string }> {
+  const outcome = await runCommand("vcs.commit", {
+    stream: streamId,
+    message,
+    include_untracked: includeUntracked,
+  });
+  return outcome.result as { success: boolean; revision: string };
 }
 
 export async function listRecentRemoteBranches(
@@ -1395,32 +1380,6 @@ export async function listRecentRemoteBranches(
   limit?: number,
 ): Promise<import("./tauri-bridge/index.js").RemoteBranchEntry[]> {
   return unwrap(await commands.gitListRecentRemoteBranches(limit ?? null));
-}
-
-export async function gitPushCurrentTo(
-  streamId: string,
-  remote: string,
-  branch: string,
-): Promise<GitOpKickoff> {
-  return runAsBackgroundTask(
-    `Push to ${remote}/${branch}`,
-    "git",
-    `git push ${remote} ${branch}`,
-    async () => unwrap(await commands.gitPushCurrentTo(streamId, remote, branch)),
-  );
-}
-
-export async function gitPullRemoteIntoCurrent(
-  streamId: string,
-  remote: string,
-  branch: string,
-): Promise<GitOpKickoff> {
-  return runAsBackgroundTask(
-    `Pull ${remote}/${branch} into current`,
-    "git",
-    `git pull ${remote} ${branch}`,
-    async () => unwrap(await commands.gitPullRemoteIntoCurrent(streamId, remote, branch)),
-  );
 }
 
 export type WikiPageSummary = import("./api-types.js").WikiPageSummary;
@@ -1898,6 +1857,13 @@ export async function listMetricCatalog(): Promise<MetricRows<MetricCatalogEntry
  *  `NEEDS_CONFIRMATION`, so ask and call again. */
 export async function runCommand(name: string, input: unknown, confirmed = false): Promise<CommandOutcome> {
   return unwrap(await commands.runCommand(name, input, confirmed));
+}
+
+/** Run a `vcs.*` / `git.*` command (P5.B6) and return its `OpOutcome`.
+ *  A destructive one is refused `NEEDS_CONFIRMATION` unless the caller
+ *  asked the person first and passes `confirmed`. */
+async function runVcs(name: string, input: unknown, confirmed = false): Promise<OpOutcome> {
+  return (await runCommand(name, input, confirmed)).result as OpOutcome;
 }
 
 /** Undo the run recorded as `auditId`, as the person. */

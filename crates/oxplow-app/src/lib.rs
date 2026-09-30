@@ -802,7 +802,7 @@ impl Services {
             stream_store.clone(),
             event_bus.clone(),
         ));
-        let git = git_service::GitService::new(worktrees.clone(), event_bus.clone());
+        let git = git_service::GitService::new(worktrees.clone());
         let trees = Arc::new(trees::Trees::new(
             vcs.clone(),
             snapshot_store.clone(),
@@ -954,6 +954,14 @@ impl Services {
         commands
             .register(commands::work_item::command())
             .expect("core commands register");
+        for command in commands::vcs::commands(commands::vcs::VcsTarget {
+            vcs: vcs.clone(),
+            git: vcs::GitProvider,
+            worktrees: worktrees.clone(),
+            events: event_bus.clone(),
+        }) {
+            commands.register(command).expect("vcs commands register");
+        }
         for command in [
             commands::work_item::update_command(),
             commands::work_item::create_command(),
@@ -1317,7 +1325,25 @@ mod tests {
         let services = Services::in_memory(dir.path()).unwrap();
         assert_eq!(
             services.commands.external_commands(),
-            vec!["metric.rebuild".to_string(), "metric.run".to_string()]
+            [
+                "git.cherry_pick",
+                "git.ignore",
+                "git.rebase",
+                "git.revert",
+                "metric.rebuild",
+                "metric.run",
+                "vcs.checkout_branch",
+                "vcs.commit",
+                "vcs.delete_branch",
+                "vcs.discard",
+                "vcs.fetch",
+                "vcs.merge",
+                "vcs.pull",
+                "vcs.push",
+                "vcs.rename_branch",
+                "vcs.resolve_conflict",
+                "vcs.stage",
+            ]
         );
     }
 }

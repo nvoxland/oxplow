@@ -1,4 +1,4 @@
-import { checkoutStreamBranch } from "../api.js";
+import { vcsCheckoutBranch } from "../api.js";
 import type { Stream } from "../tauri-bridge/index.js";
 import { BackgroundTaskIndicator } from "./BackgroundTaskIndicator.js";
 import { BranchPicker, type PickedRef } from "./BranchPicker.js";
@@ -32,8 +32,9 @@ export function StatusBar({ stream, gitEnabled, onOpenPage, onDismissOpError, on
   async function handlePick(target: PickedRef) {
     if (!stream) return;
     // Tags and remote refs are checked out via their local-name form; git will
-    // create a tracking branch / detached HEAD as appropriate.
-    await checkoutStreamBranch(stream.id, target.name);
+    // create a tracking branch / detached HEAD as appropriate. The branch
+    // reconciler records the new branch on the stream.
+    await vcsCheckoutBranch(stream.id, target.name);
   }
 
   return (

@@ -121,7 +121,7 @@ shape cannot catch loss of content.** New reconstruction logic needs a test
 that asserts specific bytes SURVIVE, not just that the result parses.
 
 `AutoResolveReport` gained an `ast_resolved: u32` counter: AST-resolved
-paths go into the same `resolved` Vec (so `GitOpResult.auto_resolved =
+paths go into the same `resolved` Vec (so `OpOutcome.auto_resolved =
 resolved.len()` already surfaces them in the toast/HUD — no parallel
 path), and `ast_resolved` records how many of those came from the AST
 tier specifically. The flagship case the wiring unlocks: both sides add a

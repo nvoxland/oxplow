@@ -221,7 +221,7 @@ pub struct RemoteBranch {
 }
 
 /// How to settle one conflicted path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConflictChoice {
     /// Keep the workspace's side.

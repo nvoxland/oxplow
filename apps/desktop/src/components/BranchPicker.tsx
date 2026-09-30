@@ -1,6 +1,6 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { deleteGitBranch, gitMergeInto, gitRebaseOnto, renameGitBranch, type BranchRef, type GroupedGitRefs } from "../api.js";
+import { gitRebase, vcsDeleteBranch, vcsMerge, vcsRenameBranch, type BranchRef, type GroupedGitRefs } from "../api.js";
 import { readRefGroups } from "../vcsHistory.js";
 import { awaitGitOp, gitOpErrorMessage } from "../git-op.js";
 import { ContextMenu } from "./ContextMenu.js";
@@ -33,6 +33,15 @@ interface Props {
   streamId?: string | null;
   onPick(target: PickedRef): void | Promise<void>;
   buttonStyle?: CSSProperties;
+}
+
+type Confirming =
+  | { kind: "delete"; branch: string; force: boolean; message: string }
+  | { kind: "merge" | "rebase"; other: string; message: string };
+
+function confirmLabel(c: Confirming): string {
+  if (c.kind === "delete") return c.force ? "Force delete" : "Delete";
+  return c.kind === "merge" ? "Merge" : "Rebase";
 }
 
 /**
@@ -71,7 +80,9 @@ export function BranchPicker({
   const [popoverCoords, setPopoverCoords] = useState<CSSProperties>({});
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; branch: BranchRef } | null>(null);
   const [renaming, setRenaming] = useState<{ from: string; value: string } | null>(null);
-  const [deleting, setDeleting] = useState<{ branch: string; force: boolean; message: string } | null>(null);
+  // A destructive branch op waiting on the person's inline confirmation
+  // (delete, merge and rebase are `Confirm::Destructive` commands).
+  const [confirming, setConfirming] = useState<Confirming | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -115,7 +126,7 @@ export function BranchPicker({
       // Don't auto-close while a secondary UI (context menu, rename, delete
       // confirmation) is open on top of the popover — those render outside
       // popRef but are semantically part of this picker.
-      if (contextMenu || renaming || deleting) return;
+      if (contextMenu || renaming || confirming) return;
       setOpen(false);
     }
     window.addEventListener("keydown", onKey);
@@ -125,7 +136,7 @@ export function BranchPicker({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousedown", onDocClick);
     };
-  }, [open, contextMenu, renaming, deleting]);
+  }, [open, contextMenu, renaming, confirming]);
 
   function openBranchMenu(event: ReactMouseEvent, branch: BranchRef) {
     event.preventDefault();
@@ -160,9 +171,9 @@ export function BranchPicker({
     setBusy(true);
     setError(null);
     try {
-      const result = await renameGitBranch(renaming.from, to);
-      if (!result.success) setError((result.stderr || result.stdout || "rename failed").trim());
-      else await refresh();
+      if (!streamId) { setError("No stream selected"); return; }
+      await vcsRenameBranch(streamId, renaming.from, to);
+      await refresh();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -176,7 +187,7 @@ export function BranchPicker({
     setBusy(true);
     setError(null);
     try {
-      const result = await awaitGitOp(await gitMergeInto(streamId, other));
+      const result = await awaitGitOp(await vcsMerge(streamId, other, true));
       if (!result.success) setError(gitOpErrorMessage(result, "merge failed"));
       else { await refresh(); setOpen(false); }
     } catch (e) {
@@ -191,7 +202,7 @@ export function BranchPicker({
     setBusy(true);
     setError(null);
     try {
-      const result = await awaitGitOp(await gitRebaseOnto(streamId, onto));
+      const result = await awaitGitOp(await gitRebase(streamId, onto, true));
       if (!result.success) setError(gitOpErrorMessage(result, "rebase failed"));
       else { await refresh(); setOpen(false); }
     } catch (e) {
@@ -201,34 +212,36 @@ export function BranchPicker({
     }
   }
 
-  async function handleDelete() {
-    if (!deleting) return;
+  async function handleDelete(branch: string, force: boolean) {
+    if (!streamId) { setError("No stream selected"); return; }
     setBusy(true);
     setError(null);
     try {
-      const result = await deleteGitBranch(deleting.branch, { force: deleting.force });
-      if (!result.success) {
-        const msg = (result.stderr || result.stdout || "").trim();
-        // Git signals "not fully merged" when refusing -d; offer a force path.
-        if (!deleting.force && /not fully merged|is not fully merged/i.test(msg)) {
-          setDeleting({
-            branch: deleting.branch,
-            force: true,
-            message: `Branch "${deleting.branch}" is not fully merged. Delete anyway (will discard unmerged commits)?`,
-          });
-          return;
-        }
-        setError(msg || "delete failed");
-      } else {
-        await refresh();
-      }
+      await vcsDeleteBranch(streamId, branch, force, true);
+      await refresh();
     } catch (e) {
-      setError(String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      // Git refuses `-d` on an unmerged branch; offer the force path.
+      if (!force && /not fully merged/i.test(msg)) {
+        setConfirming({
+          kind: "delete",
+          branch,
+          force: true,
+          message: `Branch "${branch}" is not fully merged. Delete anyway (will discard unmerged commits)?`,
+        });
+        return;
+      }
+      setError(msg);
     } finally {
       setBusy(false);
-      if (!deleting.force) setDeleting(null);
-      else setDeleting(null);
     }
+  }
+
+  function runConfirmed(c: Confirming) {
+    setConfirming(null);
+    if (c.kind === "delete") void handleDelete(c.branch, c.force);
+    else if (c.kind === "merge") void handleMerge(c.other);
+    else void handleRebase(c.other);
   }
 
   async function toggle() {
@@ -348,7 +361,7 @@ export function BranchPicker({
               style={inputStyle}
             />
           </div>
-          {deleting ? (
+          {confirming ? (
             <div
               style={{
                 display: "flex",
@@ -360,15 +373,15 @@ export function BranchPicker({
                 fontSize: "var(--text-xs)",
               }}
             >
-              <span style={{ flex: 1, color: "var(--fg)" }}>{deleting.message}</span>
+              <span style={{ flex: 1, color: "var(--fg)" }}>{confirming.message}</span>
               <InlineConfirm
-                triggerLabel={deleting.force ? "Force delete" : "Delete"}
-                confirmLabel={deleting.force ? "Force delete" : "Delete"}
-                onConfirm={() => { void handleDelete(); }}
+                triggerLabel={confirmLabel(confirming)}
+                confirmLabel={confirmLabel(confirming)}
+                onConfirm={() => runConfirmed(confirming)}
               />
               <button
                 type="button"
-                onClick={() => setDeleting(null)}
+                onClick={() => setConfirming(null)}
                 style={dialogButtonStyle}
               >
                 Dismiss
@@ -484,13 +497,21 @@ export function BranchPicker({
                 id: "branch.merge",
                 label: currentBranch ? `Merge "${other}" into "${currentBranch}"` : `Merge "${other}" into current`,
                 enabled: !busy && !isCurrent && !!streamId && !!currentBranch,
-                run: () => { void handleMerge(other); },
+                run: () => setConfirming({
+                  kind: "merge",
+                  other,
+                  message: `Merge "${other}" into "${currentBranch}"?`,
+                }),
               },
               {
                 id: "branch.rebase",
                 label: currentBranch ? `Rebase "${currentBranch}" onto "${other}"` : `Rebase current onto "${other}"`,
                 enabled: !busy && !isCurrent && !!streamId && !!currentBranch,
-                run: () => { void handleRebase(other); },
+                run: () => setConfirming({
+                  kind: "rebase",
+                  other,
+                  message: `Rebase "${currentBranch}" onto "${other}"? Its commits are rewritten.`,
+                }),
               },
               {
                 id: "branch.rename",
@@ -502,7 +523,8 @@ export function BranchPicker({
                 id: "branch.delete",
                 label: "Delete",
                 enabled: !busy && isLocal && !isCurrent,
-                run: () => setDeleting({
+                run: () => setConfirming({
+                  kind: "delete",
                   branch: b.name,
                   force: false,
                   message: `Delete branch "${b.name}"?`,

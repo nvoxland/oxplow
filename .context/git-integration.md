@@ -271,9 +271,10 @@ walk completes.
 Core reaches version control through the **VCS capability**
 (`oxplow_domain::vcs::Vcs`, provider `oxplow_app::vcs::GitProvider`) —
 see [vcs.md](./vcs.md). `GitService` is what remains of the old
-singleton: stream-taking reads and mutations the desktop's git-shaped
-RPCs still call, deleted RPC by RPC through P5 (B4–B7). Three things
-already left it (P5.B1):
+singleton: git-native reads the desktop still calls (change scopes,
+workspace text search, commit ref labels, recent remote branches, the
+default branch), folded into the provider in P5.B7. Everything else
+left it:
 
 - **Routing** — stream → worktree is `WorktreeRouter`
   (`Services.worktrees`), a memo over the stream store.
@@ -281,11 +282,12 @@ already left it (P5.B1):
   `WorkspaceFiles` (`Services.workspace_files`); it isn't git.
 - **Branch reconciliation** — `BranchReconciler`
   (`Services.branch_reconciler`, spawned at boot).
+- **Mutations** — the `vcs.*` / `git.*` bus commands
+  (`commands/vcs.rs`, P5.B6).
 
 **It is a thin facade.** Every read shells out live via
-`tokio::task::spawn_blocking(oxplow_git::*)`; every write delegates to
-the matching `oxplow_git::*` op and then emits the renderer-facing
-`OxplowEvent`. There is no shared mutable cache.
+`tokio::task::spawn_blocking(oxplow_git::*)`. There is no shared
+mutable cache.
 
 ### Why no cache
 
@@ -303,65 +305,51 @@ hotspot, **add caching inside the provider** — never let cached state
 leak through the API. Callers must not be able to tell whether anything
 is cached.
 
-### Mutating ops emit events
+### Mutations announce what they changed
 
-`commit_all`, `add_path`, `restore_path`, `fetch`, `pull`,
-`pull_remote_into_current`, `push`, `push_current_to`, `merge`,
-`rebase`, `rename_branch`, `delete_branch`, `append_to_gitignore` pass
-through to `oxplow_git::*` and emit `OxplowEvent::WorkspaceChanged`
-(always) plus `GitRefsChanged` (when the op may have moved HEAD or any
-ref). `WorkspaceFiles`' writes emit `WorkspaceChanged` the same way.
-Subscribers refetch on receipt; no cache is being invalidated because
-there is no cache.
+A `vcs.*` / `git.*` command emits `OxplowEvent::WorkspaceChanged` for
+its stream (always) plus `GitRefsChanged` when it may have moved HEAD
+or a ref — for every stream when the refs are shared (fetch, push,
+branch rename or delete). `WorkspaceFiles`' writes emit
+`WorkspaceChanged` the same way. Subscribers refetch on receipt; no
+cache is being invalidated because there is no cache.
 
-### Stream-scoped destructive ops require a resolvable stream
+### Stream-scoped mutations require a resolvable stream
 
 Reads resolve their worktree via `WorktreeRouter::resolve(stream_id)`,
 which treats an absent or unparseable `stream_id` as "use the project
-root" (the primary worktree). For **destructive** stream-scoped ops —
-`commit_all`, `merge`, `rebase` — that silent fallback is a footgun:
-a caller that meant stream B but sent a field that didn't bind (e.g.
-snake_case `stream_id` where the wire field is camelCase `streamId`,
-arriving as `None`) would run the op against the PRIMARY worktree and
-get a misleading `{"success":true,"stdout":"Already up to date."}` on
-the wrong branch.
+root" (the primary worktree). For a **mutation** that silent fallback is
+a footgun: a caller that meant stream B but sent a field that didn't
+bind would run a merge against the PRIMARY worktree and get a
+misleading "Already up to date." on the wrong branch.
 
-So those ops resolve via `WorktreeRouter::resolve_strict` instead,
-which **errors** when `stream_id` is absent, syntactically invalid, or
-names an unknown stream — never falling back to primary. The UI is
-unaffected (its `api.ts` wrappers always pass a concrete stream id, and
-the primary stream is itself a stream row); the guard exists for
-MCP/scripted/future callers. To run one of these ops against the
-primary worktree, pass the primary stream's id explicitly — `None` is
-rejected on purpose.
+So every VCS command takes a required `stream` and resolves it via
+`WorktreeRouter::resolve_strict`, which **errors** when it is invalid or
+names an unknown stream — never falling back to primary. To act on the
+primary worktree, pass the primary stream's id.
 
 ### Smart conflict auto-resolution (the IntelliJ magic-wand pass)
 
-After a long-running git op leaves conflicts, `GitService::merge`,
-`rebase`, `cherry_pick`, and `revert` run a **smart-merge pass** via the
-shared `with_auto_resolve` helper (only when the git op reported
-`!success`): `oxplow_git::auto_resolve_conflicts(worktree)`
+After a git op leaves conflicts, the git provider's `merge`, `pull`,
+`rebase`, `cherry_pick` and `revert` run a **smart-merge pass** via
+`with_auto_resolve` (`crates/oxplow-app/src/vcs/git.rs`; only when git
+reported `!success`): `oxplow_git::auto_resolve_conflicts(worktree)`
 (`crates/oxplow-git/src/smart_merge.rs`). The number of files it
-cleanly resolved is folded into `GitOpResult.auto_resolved` so the UI
-can report "N conflicts auto-resolved". The pass is
-**operation-agnostic** — it reads whatever unmerged paths sit in the
-index regardless of which op produced them, and only resolves the
-current step's conflicts; it never `--continue`s a paused
-rebase/cherry-pick (the user/UI drives continuation, per the usability
-rules). All four — `merge` / `rebase` / `cherry_pick` / `revert` — are
-now fully wired: each has an `oxplow_git` op, a `GitService` method, an
-`oxplow-rpc` core (`git_merge_into` / `git_rebase_onto` /
-`git_cherry_pick` / `git_revert`) registered in the `rpc_dispatch!`
-registry (which also generates the Tauri adapter) and a generated FE
-binding. The
-cherry-pick / revert UI entry point lives on the **commit page**
-(`GitCommitPage`): two `InlineConfirm` action buttons in the commit
-metadata card (`data-testid` `commit-actions`, triggers
-`commit-cherry-pick` / `commit-revert`) run against the active stream's
-worktree and fold the `auto_resolved` count into the success toast via
-`gitOpOutcomeMessage` (`apps/desktop/src/git-op.ts`). Both are
-destructive working-tree mutations, so they confirm inline per
-[usability.md](./usability.md); failures record an op-error and offer a
+cleanly resolved is `OpOutcome.auto_resolved`, and the paths still
+conflicted are `OpOutcome.conflicts`, so the UI can report "N conflicts
+auto-resolved". The pass is **operation-agnostic** — it reads whatever
+unmerged paths sit in the index regardless of which op produced them,
+and only resolves the current step's conflicts; it never `--continue`s
+a paused rebase/cherry-pick (the user/UI drives continuation, per the
+usability rules). The provider's tests in `vcs/git.rs` pin it for a
+merge, a rebase and a cherry-pick, and that a true overlap stays
+conflicted. The cherry-pick / revert UI entry point lives on the
+**commit page** (`GitCommitPage`): two `InlineConfirm` action buttons in
+the commit metadata card (`data-testid` `commit-actions`, triggers
+`commit-cherry-pick` / `commit-revert`) run `git.cherry_pick` /
+`git.revert` against the active stream and fold the `auto_resolved`
+count into the success toast via `gitOpOutcomeMessage`
+(`apps/desktop/src/git-op.ts`); failures record an op-error and offer a
 "Show details" toast.
 
 Why it exists: git's merge driver is **line-based**, so two edits to
@@ -429,16 +417,9 @@ All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:
   never resolve an abbreviation. Trust it only for `sha.len() == 40`; route
   everything shorter through `repo.revparse_single`, which expands against
   the object DB. Same rule applies anywhere else a sha is turned into an OID.
-- `gitPush` / `gitPull` / `gitMerge` / `gitRebase` ship sync wrappers
-  plus async siblings `gitPushAsync` / `gitPullAsync` / `gitMergeAsync` /
-  `gitRebaseAsync` (and a `gitFetchAsync` helper) backed by
-  `child_process.execFile` + `promisify`. The runtime IPC handlers
-  use the async variants so the main process stays responsive during
-  the network or merge work, and they register a row with the
-  `BackgroundTaskStore` so the bottom-bar `BackgroundTaskIndicator`
-  shows progress. The sync wrappers stay around for code paths that
-  haven't been promoted yet (e.g. `gitCommitAll`'s internal calls,
-  unit tests).
+- Push, pull, fetch, merge and rebase are long: the desktop runs each
+  command inside a `BackgroundTaskStore` row (`runAsBackgroundTask` in
+  `api.ts`) so the bottom-bar `BackgroundTaskIndicator` shows progress.
 - History and branch lists read the models (`v_commit`, `v_branch`,
   `v_tag`; P5.B5, [vcs.md](./vcs.md)); ahead/behind, divergence,
   commits-ahead and a file's history stay live on `vcs_divergence`,
@@ -469,13 +450,12 @@ All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:
   `git for-each-ref --sort=-committerdate refs/remotes` and returns
   `RemoteBranchEntry[]` (filters out `<remote>/HEAD`). Drives the
   dashboard's recent-remote-branches card.
-- `gitPushCurrentTo` / `gitPushCurrentToAsync(projectDir, remote, branch)`
-  — runs `git push <remote> HEAD:refs/heads/<branch>`. Refspec push;
-  never touches any local working dir. The runtime IPC handler uses
-  the async variant + `BackgroundTaskStore`.
-- `gitPullRemoteIntoCurrent(projectDir, remote, branch)` — fetches
-  `<remote>/<branch>` then merges it into the current branch of
-  `projectDir`. Fetch failure short-circuits the merge.
+- `vcs.push` / `vcs.pull` with `remote` + `branch` push the current
+  branch to `<remote>/<branch>` (`git push <remote> HEAD:refs/heads/<branch>`,
+  a refspec push that never touches another working dir) and pull
+  `<remote>/<branch>` into it (fetch, then merge; a failed fetch
+  short-circuits the merge). The dashboard's remote-branches card runs
+  both.
 
 ### Cross-worktree push: deliberately unsupported
 

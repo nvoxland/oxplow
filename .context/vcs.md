@@ -29,8 +29,8 @@ provider stays testable against a tempdir.
 - **Mutations:** `commit`, `stage`, `discard`, `fetch`, `pull`, `push`,
   `merge`, `checkout_branch`, `rename_branch`, `delete_branch`,
   `resolve_conflict(path, Ours | Theirs | Auto)`. They run only through
-  the `vcs.*` bus commands (P5.B6), which announce the change: a provider
-  emits nothing.
+  the `vcs.*` bus commands (below), which announce the change: a
+  provider emits nothing.
 - **Feature `isolated_workspaces`:** `create_workspace`,
   `list_workspaces` — what backs streams.
 
@@ -152,6 +152,39 @@ commits per head; a file's full history can be older),
 (the "Compare with…" list it fed had been casting a grouped object to a
 flat list; it now reads `readRefOptions`).
 
+## Mutations are commands (P5.B6)
+
+Every change to a repository is a bus command (`commands/vcs.rs`,
+table in [commands.md](./commands.md)): `vcs.commit`, `vcs.stage`,
+`vcs.discard`, `vcs.fetch`, `vcs.pull`, `vcs.push`, `vcs.merge`,
+`vcs.checkout_branch`, `vcs.rename_branch`, `vcs.delete_branch`,
+`vcs.resolve_conflict`, and git's own `git.rebase`, `git.cherry_pick`,
+`git.revert`, `git.ignore` (inherent methods on `GitProvider`). They are
+`External` (the VCS isn't the bus's to roll back), a person's only,
+not undoable, and name their `stream` (`WorktreeRouter::resolve_strict`).
+Discard, merge, branch delete, rebase and revert are `Destructive`. The
+audit row keeps the returned `OpOutcome`, so a merge's conflicts are on
+record. The desktop runs them with `runCommand` through `api.ts`
+wrappers (`vcsMerge`, `vcsPush`, `gitRebase`, …); a destructive one
+passes `confirmed` only from behind the person's own confirmation
+(the branch picker's and commit page's inline confirms, the Files
+panel's rollback confirm, the dashboard's), and an unconfirmed call is
+refused `NEEDS_CONFIRMATION`. Long ones still run inside a background
+task row (`GitOpKickoff`), whose result is the `OpOutcome`;
+`apps/desktop/src/git-op.ts` normalizes it. `OpOutcome` is exported to
+the bindings by `specta_builder().typ`, since no RPC returns it.
+
+Deleted with them: the `git_*` mutation RPCs (`git_commit_all`,
+`git_add_path`, `restore_path`, `append_to_gitignore`, `git_fetch`,
+`git_pull`, `git_pull_remote_into_current`, `git_push`,
+`git_push_current_to`, `git_merge_into`, `git_rebase_onto`,
+`git_cherry_pick`, `git_revert`), `rename_branch`, `delete_branch`,
+`checkout_stream_branch` (which shelled `git checkout` itself; the
+branch reconciler now records a checkout, so
+`StreamService::record_branch_checkout` went too), `GitService`'s
+mutations, and the Push/Pull dialog's force, set-upstream and rebase
+checkboxes, which the old RPCs had never passed on.
+
 ## Snapshots and revisions
 
 A snapshot taken on a clean workspace *is* its head revision:
@@ -204,8 +237,8 @@ files left it in B3.
 
 ## Still git-shaped (P5 B6–B7)
 
-`GitService` keeps its mutations until they move to `vcs.*` commands
-(B6); the rest of
-`NOT_YET_ON_VCS` moves in B7. Commit-id columns outside snapshots
+`GitService` keeps only git-native reads (change scopes, text search,
+ref labels, recent remote branches, the default branch); it and the
+rest of `NOT_YET_ON_VCS` move in B7. Commit-id columns outside snapshots
 (`closest_git_version`, `git_version_exact`, `v_commit`) keep their
 names until then.

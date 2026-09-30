@@ -364,12 +364,6 @@ async fn vcs_branches_include_the_default_branch() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn delete_unknown_branch_errors() {
-    let app = TestApp::build();
-    let _ = commands::generated::delete_branch(app.state(), "no-such-branch".into(), false).await;
-}
-
 // ---- git read commands ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -424,19 +418,6 @@ async fn git_list_commands_return_empty_for_fresh_repo() {
     let _ = commands::generated::vcs_list_adoptable_workspaces(s.clone())
         .await
         .unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn git_local_mutations_over_primary_worktree() {
-    let app = TestApp::build();
-    let s = app.state();
-    // Append a gitignore entry, stage it, commit it — all local, no remote.
-    let _ = commands::generated::append_to_gitignore(s.clone(), None, "target/".into()).await;
-    let _ = commands::generated::git_add_path(s.clone(), None, ".gitignore".into()).await;
-    let _ = commands::generated::git_commit_all(s.clone(), None, "add gitignore".into()).await;
-    let _ = commands::generated::restore_path(s.clone(), None, ".gitignore".into()).await;
-    let _ = commands::generated::git_merge_into(s.clone(), None, "HEAD".into()).await;
-    let _ = commands::generated::git_rebase_onto(s.clone(), None, "HEAD".into()).await;
 }
 
 // ---- stream commands ----

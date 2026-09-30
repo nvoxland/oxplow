@@ -20,6 +20,55 @@ use oxplow_domain::FileChange;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GitProvider;
 
+/// Git's own operations, beyond the VCS capability: history rewriting
+/// and `.gitignore`. The `git.*` commands (`commands/vcs.rs`) run
+/// them.
+impl GitProvider {
+    /// Replay the workspace's branch onto `onto`; oxplow's smart merge
+    /// then settles the conflicts it can.
+    pub async fn rebase(&self, ws: &Path, onto: &str) -> Result<OpOutcome, VcsError> {
+        let (ws, onto) = (ws.to_path_buf(), onto.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            let r = oxplow_git::rebase(&ws, &onto).map_err(|e| VcsError::Failed(e.to_string()))?;
+            Ok(with_auto_resolve(&ws, r))
+        })
+        .await
+    }
+
+    pub async fn cherry_pick(&self, ws: &Path, rev: &str) -> Result<OpOutcome, VcsError> {
+        let (ws, rev) = (ws.to_path_buf(), rev.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            let r =
+                oxplow_git::cherry_pick(&ws, &rev).map_err(|e| VcsError::Failed(e.to_string()))?;
+            Ok(with_auto_resolve(&ws, r))
+        })
+        .await
+    }
+
+    pub async fn revert(&self, ws: &Path, rev: &str) -> Result<OpOutcome, VcsError> {
+        let (ws, rev) = (ws.to_path_buf(), rev.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            let r = oxplow_git::revert(&ws, &rev).map_err(|e| VcsError::Failed(e.to_string()))?;
+            Ok(with_auto_resolve(&ws, r))
+        })
+        .await
+    }
+
+    /// Append `entry` to the workspace's `.gitignore` (once).
+    pub async fn ignore(&self, ws: &Path, entry: &str) -> Result<(), VcsError> {
+        let (ws, entry) = (ws.to_path_buf(), entry.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            oxplow_git::append_to_gitignore(&ws, &entry)
+                .map_err(|e| VcsError::Failed(e.to_string()))
+        })
+        .await
+    }
+}
+
 /// The object database of the repository at `.0` (any of its worktrees).
 struct GitObjects(PathBuf);
 
@@ -582,5 +631,121 @@ impl Vcs for GitProvider {
                 .collect())
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("spawn git");
+        assert!(
+            out.status.success(),
+            "git {args:?} in {dir:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    fn write_commit(dir: &Path, contents: &str, message: &str) {
+        std::fs::write(dir.join("cfg.txt"), contents).unwrap();
+        git(dir, &["add", "-A"]);
+        git(dir, &["commit", "-q", "-m", message]);
+    }
+
+    /// A repo on `main` and a `feature` worktree beside it that each
+    /// committed a different version of the one line in `cfg.txt`, so
+    /// bringing main into feature conflicts line-wise. Returns the
+    /// primary checkout, the feature worktree, and their tempdirs.
+    fn diverged(
+        base: &str,
+        main: &str,
+        feature: &str,
+    ) -> (PathBuf, PathBuf, [tempfile::TempDir; 2]) {
+        let primary = tempfile::tempdir().unwrap();
+        let p = primary.path();
+        git(p, &["init", "-q", "--initial-branch=main"]);
+        git(p, &["config", "user.email", "test@example.com"]);
+        git(p, &["config", "user.name", "test"]);
+        write_commit(p, base, "base");
+        git(p, &["branch", "feature"]);
+        let parent = tempfile::tempdir().unwrap();
+        let wt = parent.path().join("feature-wt");
+        git(
+            p,
+            &["worktree", "add", "-q", wt.to_str().unwrap(), "feature"],
+        );
+        write_commit(p, main, "main edit");
+        write_commit(&wt, feature, "feature edit");
+        (p.to_path_buf(), wt, [primary, parent])
+    }
+
+    fn conflicted(ws: &Path) -> usize {
+        oxplow_git::get_repo_conflict_state(ws).conflicted_count as usize
+    }
+
+    #[tokio::test]
+    async fn a_merge_auto_resolves_edits_to_different_words_of_one_line() {
+        let (_p, wt, _dirs) = diverged(
+            "alpha beta gamma\n",
+            "ALPHA beta gamma\n",
+            "alpha beta GAMMA\n",
+        );
+        let out = GitProvider.merge(&wt, "main").await.unwrap();
+        assert_eq!(out.auto_resolved, 1, "{}", out.log);
+        assert!(out.conflicts.is_empty(), "{:?}", out.conflicts);
+        assert_eq!(
+            std::fs::read_to_string(wt.join("cfg.txt")).unwrap(),
+            "ALPHA beta GAMMA\n"
+        );
+        assert_eq!(conflicted(&wt), 0);
+    }
+
+    #[tokio::test]
+    async fn a_merge_leaves_a_true_overlap_conflicted() {
+        let (_p, wt, _dirs) = diverged(
+            "let timeout = 10;\n",
+            "let timeout = 20;\n",
+            "let timeout = 30;\n",
+        );
+        let out = GitProvider.merge(&wt, "main").await.unwrap();
+        assert_eq!(out.auto_resolved, 0);
+        assert_eq!(out.conflicts, vec!["cfg.txt".to_string()]);
+        assert!(std::fs::read_to_string(wt.join("cfg.txt"))
+            .unwrap()
+            .contains("<<<<<<<"));
+        assert_eq!(conflicted(&wt), 1);
+    }
+
+    #[tokio::test]
+    async fn rebase_and_cherry_pick_auto_resolve_the_same_way() {
+        let (_p, wt, _dirs) = diverged(
+            "alpha beta gamma\n",
+            "ALPHA beta gamma\n",
+            "alpha beta GAMMA\n",
+        );
+        let out = GitProvider.rebase(&wt, "main").await.unwrap();
+        assert_eq!(out.auto_resolved, 1, "{}", out.log);
+        assert_eq!(
+            std::fs::read_to_string(wt.join("cfg.txt")).unwrap(),
+            "ALPHA beta GAMMA\n"
+        );
+        assert_eq!(conflicted(&wt), 0);
+
+        let (p, wt, _dirs) = diverged(
+            "alpha beta gamma\n",
+            "ALPHA beta gamma\n",
+            "alpha beta GAMMA\n",
+        );
+        let main = git(&p, &["rev-parse", "main"]);
+        let out = GitProvider.cherry_pick(&wt, &main).await.unwrap();
+        assert_eq!(out.auto_resolved, 1, "{}", out.log);
+        assert_eq!(conflicted(&wt), 0);
     }
 }

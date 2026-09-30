@@ -136,18 +136,6 @@ export interface RefOption {
   [extra: string]: any;
 }
 
-export interface GitOpResult {
-  ok: boolean;
-  message?: string;
-  stdout?: string;
-  stderr?: string;
-  exitCode?: number;
-  signal?: string;
-  sha?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
-}
-
 export interface GitWorktreeEntry {
   path: string;
   branch: string;

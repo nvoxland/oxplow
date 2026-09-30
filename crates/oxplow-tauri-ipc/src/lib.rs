@@ -79,12 +79,14 @@ fn shell_commands_module() -> String {
 /// Build the tauri-specta `Builder` registering every oxplow command.
 /// Also exports `OxplowEvent` itself so the renderer derives its
 /// event-kind union from the generated type instead of hand-
-/// maintaining one (the "camelcase trap"), and `AcpEvent` (the
-/// `acp:event` payload) for the same reason.
+/// maintaining one (the "camelcase trap"), `AcpEvent` (the
+/// `acp:event` payload) for the same reason, and `OpOutcome` — what the
+/// `vcs.*` / `git.*` bus commands return, which no RPC names.
 pub fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .typ::<OxplowEvent>()
         .typ::<oxplow_app::acp::session::AcpEvent>()
+        .typ::<oxplow_domain::vcs::OpOutcome>()
         .commands(collect_commands![
             // app
             commands::generated::app_version,
@@ -100,7 +102,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::switch_stream,
             commands::generated::rename_stream,
             commands::generated::set_stream_prompt,
-            commands::generated::checkout_stream_branch,
             commands::generated::reorder_streams,
             // threads
             commands::generated::list_threads,
@@ -218,22 +219,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::get_blob_storage_bytes,
             commands::generated::restore_file_snapshot,
             // branch
-            commands::generated::rename_branch,
-            commands::generated::delete_branch,
             // git
-            commands::generated::append_to_gitignore,
-            commands::generated::restore_path,
-            commands::generated::git_fetch,
-            commands::generated::git_pull,
-            commands::generated::git_pull_remote_into_current,
-            commands::generated::git_push,
-            commands::generated::git_push_current_to,
-            commands::generated::git_merge_into,
-            commands::generated::git_rebase_onto,
-            commands::generated::git_cherry_pick,
-            commands::generated::git_revert,
-            commands::generated::git_commit_all,
-            commands::generated::git_add_path,
             commands::generated::git_resolve_commit_ref_labels,
             commands::generated::git_list_recent_remote_branches,
             commands::generated::read_at,

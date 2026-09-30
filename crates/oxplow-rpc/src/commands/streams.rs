@@ -180,35 +180,6 @@ pub async fn reorder_streams(svc: &Services, order: Vec<StreamId>) -> Result<(),
     Ok(())
 }
 
-pub async fn checkout_stream_branch(
-    svc: &Services,
-    id: StreamId,
-    branch: String,
-) -> Result<Stream, IpcError> {
-    use oxplow_domain::stores::StreamStore;
-    let store = oxplow_db::SqliteStreamStore::new(svc.db.clone());
-    let stream = store.get(&id).await?.ok_or_else(IpcError::not_found)?;
-    let path = std::path::PathBuf::from(&stream.worktree_path);
-    let branch_for_blocking = branch.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("git")
-            .args(["checkout", &branch_for_blocking])
-            .current_dir(&path)
-            .output()
-    })
-    .await
-    .map_err(|e| IpcError::internal(e.to_string()))?
-    .map_err(|e| IpcError::internal(e.to_string()))?;
-    if !result.status.success() {
-        return Err(IpcError::internal(
-            String::from_utf8_lossy(&result.stderr).into_owned(),
-        ));
-    }
-    let updated = svc.streams.record_branch_checkout(&id, branch).await?;
-    svc.events.emit(OxplowEvent::StreamsChanged);
-    Ok(updated)
-}
-
 #[cfg(test)]
 mod tests {
     #[tokio::test]

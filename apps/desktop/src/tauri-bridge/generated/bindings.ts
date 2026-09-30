@@ -122,11 +122,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	checkoutStreamBranch: (id: StreamId, branch: string) => typedError<Stream, IpcError>(__TAURI_INVOKE("checkout_stream_branch", { id, branch })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	reorderStreams: (order: StreamId[]) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_streams", { order })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -688,81 +683,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	restoreFileSnapshot: (fileSnapshotId: number) => typedError<null, IpcError>(__TAURI_INVOKE("restore_file_snapshot", { fileSnapshotId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	renameBranch: (from: string, to: string) => typedError<null, IpcError>(__TAURI_INVOKE("rename_branch", { from, to })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	deleteBranch: (branch: string, force: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("delete_branch", { branch, force })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	appendToGitignore: (streamId: string | null, entry: string) => typedError<null, IpcError>(__TAURI_INVOKE("append_to_gitignore", { streamId, entry })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	restorePath: (streamId: string | null, path: string) => typedError<null, IpcError>(__TAURI_INVOKE("restore_path", { streamId, path })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	gitFetch: (streamId: string | null, remote: string | null) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_fetch", { streamId, remote })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	gitPull: (streamId: string | null) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_pull", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	gitPullRemoteIntoCurrent: (streamId: string | null, remote: string, branch: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_pull_remote_into_current", { streamId, remote, branch })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	gitPush: (streamId: string | null) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_push", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	gitPushCurrentTo: (streamId: string | null, remote: string, branch: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_push_current_to", { streamId, remote, branch })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	gitMergeInto: (streamId: string | null, source: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_merge_into", { streamId, source })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	gitRebaseOnto: (streamId: string | null, onto: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_rebase_onto", { streamId, onto })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	gitCherryPick: (streamId: string | null, commit: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_cherry_pick", { streamId, commit })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	gitRevert: (streamId: string | null, commit: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_revert", { streamId, commit })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	gitCommitAll: (streamId: string | null, message: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_commit_all", { streamId, message })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	gitAddPath: (streamId: string | null, path: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_add_path", { streamId, path })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2483,26 +2403,6 @@ export type GeneratedConfig = {
 	include?: string[],
 };
 
-/**
- *  Result of a git sync operation.
- * 
- *  `success` is true iff the underlying `git` exited 0. `stdout` /
- *  `stderr` are captured verbatim; the UI surfaces them in a toast or
- *  the operation log.
- */
-export type GitOpResult = {
-	success: boolean,
-	stdout: string,
-	stderr: string,
-	status: number | null,
-	/**
-	 *  Number of files the smart-merge pass auto-resolved after git left
-	 *  them conflicted (0 for non-merge ops). Lets the UI report
-	 *  "N conflicts auto-resolved".
-	 */
-	auto_resolved?: number,
-};
-
 // Where a stream's workspace is.
 export type HeadInfo = {
 	// The head revision; `None` before the first commit.
@@ -3072,6 +2972,19 @@ export type NewLens = {
 };
 
 export type NoteId = string;
+
+/**
+ *  What a mutation did. `log` is the provider's own account (a CLI's
+ *  output) for the person to read.
+ */
+export type OpOutcome = {
+	success: boolean,
+	log: string,
+	// Paths still conflicted after the operation.
+	conflicts: string[],
+	// Conflicts oxplow's smart merge resolved on its own.
+	auto_resolved: number,
+};
 
 export type OxplowConfig = {
 	/**

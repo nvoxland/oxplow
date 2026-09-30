@@ -2,7 +2,8 @@ import { LensSlots } from "../lens/LensSlots.js";
 import { useChange } from "../lens/useChange.js";
 import { useCallback, useState } from "react";
 import type { DiffEntry, Stream } from "../api.js";
-import { gitCommitAll } from "../api.js";
+import { vcsCommit } from "../api.js";
+import { opErrorOf, settleGitOp } from "../git-op.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { indexRef, opErrorRef } from "../tabs/pageRefs.js";
@@ -47,19 +48,12 @@ export function UncommittedChangesPage({
     if (fileCount === 0) return;
     setCommitting(true);
     try {
-      const allPaths = changed.files.map((f) => f.path);
-      const result = await gitCommitAll(streamId, message, {
-        paths: allPaths,
-        includeUntracked: hasUntracked,
+      const result = await settleGitOp(async () => {
+        const { revision } = await vcsCommit(streamId, message, hasUntracked);
+        return { success: true, log: `Committed ${revision}`, conflicts: [], auto_resolved: 0 };
       });
       if (!result.success) {
-        const errorId = recordOpError({
-          label: "Commit all changes",
-          command: `git commit -am "${message.trim()}"`,
-          stderr: result.stderr ?? "",
-          stdout: result.stdout ?? "",
-          exitCode: result.status ?? null,
-        });
+        const errorId = recordOpError(opErrorOf("Commit all changes", "commit", result));
         onOpenPage(opErrorRef(errorId), { newTab: true });
       } else {
         setCommitMessage("");

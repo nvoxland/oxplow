@@ -20,10 +20,9 @@ import {
   deleteWorkspacePath,
   getCurrentStream,
   getWorkspaceContext,
-  gitPull,
-  gitPush,
+  vcsPull,
+  vcsPush,
   type GitOpKickoff,
-  type GitOpResult,
   desktopBridge,
   listStreams,
   listWorkspaceEntries,
@@ -84,6 +83,7 @@ import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { showToast } from "./components/toastStore.js";
+import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
 import { subscribeUiError } from "./ui-error.js";
@@ -1333,19 +1333,10 @@ export function App() {
       command: string,
       action: () => Promise<GitOpKickoff>,
     ) => {
-      const { awaitDone } = await action();
-      const task = await awaitDone;
-      const result = task?.result as GitOpResult | undefined;
-      if (result && result.success) return;
+      const result = await awaitGitOp(await action());
+      if (result.success) return;
       // Surfaces globally (toast + status-bar indicator) via recordOpError.
-      recordOpError({
-        label,
-        command,
-        stderr: result?.stderr ?? task?.error ?? "",
-        stdout: result?.stdout ?? "",
-        exitCode: result?.status ?? null,
-        blankFailure: !result || (!result.stderr && !result.stdout && result.status == null),
-      });
+      recordOpError(opErrorOf(label, command, result));
     },
     [],
   );
@@ -1416,11 +1407,11 @@ export function App() {
     },
     pullChanges() {
       if (!stream || !workspaceContext.gitEnabled) return;
-      void runGitMenuOp("Pull", "git pull", () => gitPull(stream.id));
+      void runGitMenuOp("Pull", "pull", () => vcsPull(stream.id));
     },
     pushChanges() {
       if (!stream || !workspaceContext.gitEnabled) return;
-      void runGitMenuOp("Push", "git push", () => gitPush(stream.id));
+      void runGitMenuOp("Push", "push", () => vcsPush(stream.id));
     },
     openProject() {
       void pickAndOpenProject(false);

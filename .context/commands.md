@@ -51,7 +51,8 @@ A command is a typed operation named `<capability|plugin>.<verb>`
    the preview and asks the person, who runs the command.
 5. **Run and record in one transaction**: the handler, a `command_audit`
    row (`crates/oxplow-db/src/command_audit_store.rs`: actor, input,
-   outcome, inverse), `command.executed@1` in the event log pointing at
+   outcome, the handler's `result` — V114, so a run's answer, such as a
+   merge's conflicts, stays readable after the fact — and inverse), `command.executed@1` in the event log pointing at
    the audit row, the handler's domain events (with `cause` = the
    executed event, and the actor's thread/stream — `Actor::anchors()` —
    filled into any anchor the handler left empty), and the audit row's
@@ -137,7 +138,8 @@ retries reaches the caller, as `Busy` (RPC `BUSY`). An **`External`**
 handler (P5.A1) is an async call against a system the bus doesn't own —
 a VCS, a provider process, a gauge script — whose state can't join the
 bus's transaction; the bus audits it after it returns (a failure to
-record is logged, never reported as the run failing). It is the right
+record is logged, never reported as the run failing); its audit row
+holds the handler's `result` like a `Tx` run's. It is the right
 kind for exactly those commands, not a shortcut: `CommandBus::
 external_commands()` is pinned by `the_external_commands_are_the_reviewed_ones`,
 and adding one means naming its system in the summary. Registering a
@@ -157,6 +159,7 @@ is a second command of the same name.
 | `metric.enable { keys, enabled }` | `Tx`: turns metrics on or off — computes the new `metrics:` list with `MetricsService::apply_metric_enabled` (a bundled gauge is off until a `use:` names it; a producer/plugin metric is on until an `enabled: false` marker) and hands it to `config.set`'s core; an unknown key (not in `metric_catalog`) is refused | undoable (restores the prior list); logs `config.changed@1 { key: metrics, … }`; the reseed follows `ConfigChanged` |
 | `metric.record { key, value, subject?, dims?, stream? }` | `Tx` over `fact_store::record_facts_tx` (`commands/metric.rs`, P4.8) | not undoable. An asserted fact on the metric's source measure, stamped to match its filter, anchored to the stream's latest snapshot; the fact and the audit commit together. A formula or `count` metric, an unknown key, or another stream (for an agent) is refused. After commit: clears the fact memo, emits `MetricSamplesChanged` for the measure |
 | `metric.run { key, stream? }` / `metric.rebuild { force }` | `External` over `MetricsService::run_metric_by_key` / `rebuild_baseline` | not undoable. Run one gauge now, or every gauge's whole-tree baseline. They drive snapshot captures and gauge scripts, which own their own transactions |
+| `vcs.commit` / `vcs.stage` / `vcs.discard` / `vcs.fetch` / `vcs.pull` / `vcs.push` / `vcs.merge` / `vcs.checkout_branch` / `vcs.rename_branch` / `vcs.delete_branch` / `vcs.resolve_conflict`; `git.rebase` / `git.cherry_pick` / `git.revert` / `git.ignore` | `External` over the `Vcs` trait (`git.*`: the git provider's own ops) (`commands/vcs.rs`, P5.B6) | a person's only (`human`; agents run `git` in their terminal), not undoable. Each takes the `stream` it acts on, resolved strictly (an unknown stream is refused, never the primary's). `vcs.discard`, `vcs.merge`, `vcs.delete_branch`, `git.rebase` and `git.revert` are `Destructive` (confirmed). The result — and the audit row's — is the VCS's `OpOutcome { success, log, conflicts, auto_resolved }` (`vcs.commit`: `{ success, revision }`). After a run the stream's `WorkspaceChanged` (and `GitRefsChanged`; every stream's after a fetch, push, rename or delete) is announced. See [vcs.md](./vcs.md) |
 | `metric.scaffold { key, title?, language?, glob? }` | `Tx`, `Read` | a starter gauge script and the measure + gauge + metric entries; writes nothing (the agent adds the entries with `config.set`) |
 
 **Callers.** Every task edit or status change made for someone is a

@@ -257,18 +257,6 @@ pub const MANIFEST: &[Capability] = &[
     both("vcs_branches"),
     // ---- agent_todo: git reads/mutations still on Bash (deferred) ----
     todo("search_workspace_text"),
-    todo("restore_path"),
-    todo("git_fetch"),
-    todo("git_pull"),
-    todo("git_pull_remote_into_current"),
-    todo("git_push"),
-    todo("git_push_current_to"),
-    todo("git_merge_into"),
-    todo("git_rebase_onto"),
-    todo("git_cherry_pick"),
-    todo("git_revert"),
-    todo("git_commit_all"),
-    todo("git_add_path"),
     // ---- snapshots / local history: reads + restore mirrored to MCP (Child 3) ----
     both("list_snapshots_for_stream"),
     both("list_snapshot_ops"),
@@ -299,7 +287,6 @@ pub const MANIFEST: &[Capability] = &[
     both("switch_stream"),
     both("rename_stream"),
     // checkout stays on Bash — subprocess logic lives in the IPC command layer.
-    todo("checkout_stream_branch"),
     // ---- ui-only: app / misc ----
     ui("log_ui"),
     // ---- ui-only: streams ----
@@ -372,10 +359,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_wiki_slugs_for_snapshots"),
     ui("get_blob_storage_bytes"),
     // ---- ui-only: branches (remote/ref presentation) ----
-    ui("rename_branch"),
-    ui("delete_branch"),
     // ---- ui-only: git (presentation / worktree / remote helpers) ----
-    ui("append_to_gitignore"),
     ui("git_resolve_commit_ref_labels"),
     ui("git_list_recent_remote_branches"),
     ui("vcs_list_adoptable_workspaces"),

@@ -196,8 +196,6 @@ macro_rules! oxplow_command_table {
                 log_ui => $crate::commands::app::log_ui { entry: $crate::commands::app::UiLogEntry } -> (),
                 // streams
                 // branch
-                rename_branch => $crate::commands::branch::rename_branch { from: String, to: String } -> (),
-                delete_branch => $crate::commands::branch::delete_branch { branch: String, force: bool } -> (),
                 // threads
                 list_threads => $crate::commands::threads::list_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 create_thread => $crate::commands::threads::create_thread { req: $crate::commands::threads::CreateThreadRequest } -> ::oxplow_domain::Thread,
@@ -334,19 +332,6 @@ macro_rules! oxplow_command_table {
                 record_usage => $crate::commands::usage::record_usage { kind: String, payload_json: String } -> ::oxplow_db::UsageEvent,
                 list_recent_usage_rollup => $crate::commands::usage::list_recent_usage_rollup { kind: String, stream_id: Option<String>, limit: u32 } -> Vec<::oxplow_db::UsageRollup>,
                 // git
-                append_to_gitignore => $crate::commands::git::append_to_gitignore { stream_id: Option<String>, entry: String } -> (),
-                restore_path => $crate::commands::git::restore_path { stream_id: Option<String>, path: String } -> (),
-                git_fetch => $crate::commands::git::git_fetch { stream_id: Option<String>, remote: Option<String> } -> ::oxplow_git::GitOpResult,
-                git_pull => $crate::commands::git::git_pull { stream_id: Option<String> } -> ::oxplow_git::GitOpResult,
-                git_pull_remote_into_current => $crate::commands::git::git_pull_remote_into_current { stream_id: Option<String>, remote: String, branch: String } -> ::oxplow_git::GitOpResult,
-                git_push => $crate::commands::git::git_push { stream_id: Option<String> } -> ::oxplow_git::GitOpResult,
-                git_push_current_to => $crate::commands::git::git_push_current_to { stream_id: Option<String>, remote: String, branch: String } -> ::oxplow_git::GitOpResult,
-                git_merge_into => $crate::commands::git::git_merge_into { stream_id: Option<String>, source: String } -> ::oxplow_git::GitOpResult,
-                git_rebase_onto => $crate::commands::git::git_rebase_onto { stream_id: Option<String>, onto: String } -> ::oxplow_git::GitOpResult,
-                git_cherry_pick => $crate::commands::git::git_cherry_pick { stream_id: Option<String>, commit: String } -> ::oxplow_git::GitOpResult,
-                git_revert => $crate::commands::git::git_revert { stream_id: Option<String>, commit: String } -> ::oxplow_git::GitOpResult,
-                git_commit_all => $crate::commands::git::git_commit_all { stream_id: Option<String>, message: String } -> ::oxplow_git::GitOpResult,
-                git_add_path => $crate::commands::git::git_add_path { stream_id: Option<String>, path: String } -> ::oxplow_git::GitOpResult,
                 git_resolve_commit_ref_labels => $crate::commands::git::git_resolve_commit_ref_labels { shas: Vec<String> } -> ::std::collections::HashMap<String, Vec<::oxplow_git::CommitRefLabel>>,
                 git_list_recent_remote_branches => $crate::commands::git::git_list_recent_remote_branches { limit: Option<usize> } -> Vec<::oxplow_git::RemoteBranchEntry>,
                 git_change_scopes => $crate::commands::git::git_change_scopes { stream_id: Option<String> } -> ::oxplow_git::ChangeScopes,
@@ -429,7 +414,6 @@ macro_rules! oxplow_command_table {
                 rename_stream => $crate::commands::streams::rename_stream { req: $crate::commands::streams::RenameStreamRequest } -> ::oxplow_domain::Stream,
                 set_stream_prompt => $crate::commands::streams::set_stream_prompt { req: $crate::commands::streams::SetStreamPromptRequest } -> ::oxplow_domain::Stream,
                 reorder_streams => $crate::commands::streams::reorder_streams { order: Vec<::oxplow_domain::StreamId> } -> (),
-                checkout_stream_branch => $crate::commands::streams::checkout_stream_branch { id: ::oxplow_domain::StreamId, branch: String } -> ::oxplow_domain::Stream,
             }
         }
     };

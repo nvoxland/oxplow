@@ -3,7 +3,7 @@ import { useChange } from "../lens/useChange.js";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RevisionDetail, Stream, ThreadWorkState } from "../api.js";
 import { gitCherryPick, gitRevert, vcsRevision } from "../api.js";
-import { awaitGitOp, gitOpErrorMessage, gitOpOutcomeMessage } from "../git-op.js";
+import { awaitGitOp, gitOpErrorMessage, gitOpOutcomeMessage, opErrorOf } from "../git-op.js";
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { InlineConfirm } from "../components/InlineConfirm.js";
@@ -109,9 +109,11 @@ export function GitCommitPage({
       if (!stream) return;
       const short = sha.slice(0, 7);
       const label = `${op === "cherry-pick" ? "Cherry-pick" : "Revert"} ${short}`;
-      const command = `git ${op === "cherry-pick" ? "cherry-pick" : "revert --no-edit"} ${short}`;
+      const command = `${op} ${short}`;
+      // Both buttons are inline confirms, so the (destructive) revert
+      // runs confirmed.
       const kickoff =
-        op === "cherry-pick" ? await gitCherryPick(stream.id, sha) : await gitRevert(stream.id, sha);
+        op === "cherry-pick" ? await gitCherryPick(stream.id, sha) : await gitRevert(stream.id, sha, true);
       const result = await awaitGitOp(kickoff);
       if (result.success) {
         showToast({ message: gitOpOutcomeMessage(label, result) });
@@ -119,11 +121,7 @@ export function GitCommitPage({
       }
       // Surfaces globally (toast + status-bar indicator) via recordOpError.
       recordOpError({
-        label,
-        command,
-        stderr: result.stderr,
-        stdout: result.stdout,
-        exitCode: result.status,
+        ...opErrorOf(label, command, result),
         message: gitOpErrorMessage(result, `${label} failed`),
       });
     },

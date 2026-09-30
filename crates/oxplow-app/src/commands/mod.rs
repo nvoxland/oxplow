@@ -18,6 +18,7 @@
 pub mod config_commands;
 pub mod effort;
 pub mod metric;
+pub mod vcs;
 pub mod work_item;
 
 use std::collections::BTreeMap;
@@ -556,6 +557,7 @@ impl CommandBus {
             input: input.clone(),
             outcome,
             error,
+            result: None,
             inverse: None,
         };
         if let Err(e) = self
@@ -583,7 +585,7 @@ impl CommandBus {
         let (actor_c, spec_c, input_c) = (actor.clone(), spec.clone(), input.clone());
         let schemas = self.log.schemas().clone();
         let shadow = HandlerOutput {
-            result: Value::Null,
+            result: out.result.clone(),
             inverse: out.inverse.clone(),
             events: out.events.clone(),
             after_commit: None,
@@ -717,6 +719,7 @@ fn record_tx(
             input: input.clone(),
             outcome: Outcome::Ok,
             error: None,
+            result: Some(out.result.clone()),
             inverse: inverse.clone(),
         },
     )?;

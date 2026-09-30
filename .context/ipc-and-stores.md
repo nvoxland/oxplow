@@ -189,19 +189,18 @@ comparisons through the neutral RPCs ([vcs.md](./vcs.md)):
   `RevisionInfo[]` for pairwise commit-diff displays.
 - `listRecentRemoteBranches(streamId, limit?)` —
   `RemoteBranchEntry[]` sorted by committer date.
-- `gitPushCurrentTo(streamId, remote, branch)` — refspec push of
-  HEAD into `<remote>/<branch>`. Wraps the async git helper and opens
-  a `BackgroundTaskStore` row.
-- `gitPullRemoteIntoCurrent(streamId, remote, branch)` — fetch +
-  merge, also background-task wrapped.
+- `vcsPush(streamId, { remote, branch })` / `vcsPull(streamId, { remote,
+  branch })` — the `vcs.push` / `vcs.pull` commands aimed at a remote
+  branch (a refspec push of HEAD; fetch + merge), each run inside a
+  `BackgroundTaskStore` row.
 - `listSiblingWorktrees(streamId)` — every git worktree of this repo
   except the one backing `streamId`. Used by the dashboard's
   worktrees card. Distinct from `listAdoptableWorktrees`, which
   returns only worktrees NOT yet tracked as oxplow streams (used by
   the new-stream adoption flow).
 
-The cross-worktree merge action reuses the existing `gitMergeInto`
-IPC method; no new method is needed because merging only ever runs in
+The cross-worktree merge action is the `vcs.merge` command (`vcsMerge`);
+nothing more is needed because merging only ever runs in
 the *current* stream's working dir. See
 [git-integration.md](./git-integration.md) for the rationale on why
 no symmetric "push commits into another worktree" IPC exists.
@@ -358,11 +357,10 @@ a row, optionally `update(id, patch)` for progress ticks, then
 determinate work or `null` for indeterminate (animated stripes in the
 UI). Active producers:
 
-- **Git pull/push/merge/rebase** — `runtime.gitPull` /
-  `runtime.gitPush` / `runtime.gitMergeInto` / `runtime.gitRebaseOnto`
-  use `gitPullAsync` / `gitPushAsync` / `gitMergeAsync` /
-  `gitRebaseAsync` from `crates/oxplow-git/src/lib.rs` so the main process doesn't
-  block during the network or merge work. Indeterminate.
+- **VCS pull/push/fetch/merge/rebase/cherry-pick/revert** — the
+  desktop's `runAsBackgroundTask` (`api.ts`) opens a row, runs the
+  `vcs.*` / `git.*` command, and completes the row with its `OpOutcome`
+  (or fails it with the refusal). Indeterminate.
 - **Code-quality scans** — `runtime.runCodeQualityScan` opens a row in
   parallel with the existing `code-quality.scanned` event flow. The
   scan-status strip in CodeQualityPanel keeps its panel-local spinner;
@@ -399,9 +397,9 @@ LRU-capped) so the renderer's `awaitBackgroundTask` can still read the
 final `result` / `error` even if the 4s grace window expired between
 the "ended" event and the IPC re-fetch. Without this, fast git ops
 that succeed silently could surface a blank op-error page (no stderr,
-no stdout, no exitCode) — see the diagnostics fields on `GitOpResult`
-(`args`, `projectDir`, `durationMs`, `signal`, `blankFailure`) which
-flow into `OpError` and the OpErrorPage when something does fail.
+no stdout, no exitCode) — `opErrorOf` (`git-op.ts`) flags a failure
+whose `OpOutcome` carries neither a log nor conflicts as
+`blankFailure`, which flows into `OpError` and the OpErrorPage.
 
 Adding a new producer: don't widen the union — extend
 `BackgroundTaskKind` and pick the most relevant existing kind, or add

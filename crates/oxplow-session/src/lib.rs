@@ -398,28 +398,6 @@ impl StreamService {
         Ok(s)
     }
 
-    /// Update the stream's recorded branch + branch_ref to reflect a
-    /// successful checkout. Doesn't itself run the checkout — the
-    /// caller (typically the git-ops layer) does that and then asks
-    /// us to record the new state.
-    pub async fn record_branch_checkout(
-        &self,
-        id: &StreamId,
-        branch: impl Into<String>,
-    ) -> Result<Stream, SessionError> {
-        let mut s = self
-            .streams
-            .get(id)
-            .await?
-            .ok_or(SessionError::Storage(DomainError::NotFound))?;
-        let branch = branch.into();
-        s.branch = branch.clone();
-        s.branch_ref = format!("refs/heads/{branch}");
-        s.updated_at = Timestamp::now();
-        self.streams.upsert(&s).await?;
-        Ok(s)
-    }
-
     /// Archive a stream and every thread under it. Soft-delete via
     /// `archived_at` — the rows stay in the DB so closed efforts,
     /// snapshots, and page_visit attribution don't dangle, but the

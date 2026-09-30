@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { GitOpResult, MergeReadiness, RemoteBranchEntry, RevisionInfo, Stream, StatusCounts } from "../api.js";
+import type { MergeReadiness, OpOutcome, RemoteBranchEntry, RevisionInfo, Stream, StatusCounts } from "../api.js";
 import {
   countStatus,
   vcsDivergence,
@@ -7,13 +7,11 @@ import {
   vcsRevision,
   vcsRevisionsBetween,
   vcsStatus,
-  gitFetch,
-  gitMergeInto,
-  gitRebaseOnto,
-  gitPull,
-  gitPullRemoteIntoCurrent,
-  gitPush,
-  gitPushCurrentTo,
+  gitRebase,
+  vcsFetch,
+  vcsMerge,
+  vcsPull,
+  vcsPush,
   listAgentStatuses,
   listRecentRemoteBranches,
   listStreams,
@@ -29,6 +27,7 @@ import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, indexRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
 import { recordOpError } from "../components/opErrorsStore.js";
+import { awaitGitOp, gitOpErrorMessage, opErrorOf } from "../git-op.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { Card, cardLinkButton } from "../components/Card.js";
 import { CommitGraphTable, indexRefsBySha, type CommitStats } from "../components/History/CommitGraphTable.js";
@@ -330,35 +329,17 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         if (!ok) return;
       }
       addPending(label);
-      let task: import("../api.js").BackgroundTask | null = null;
+      let result: OpOutcome;
       try {
-        const { awaitDone } = await action();
-        task = await awaitDone;
+        result = await awaitGitOp(await action());
       } finally {
         removePending(label);
       }
-      const result = task?.result as GitOpResult | undefined;
-      if (!result || !result.success) {
-        // The failure surfaces globally (toast + status-bar indicator) via
-        // recordOpError — no per-site toast. Refresh either way so any
-        // partial progress (e.g. fast-forward that landed before a
-        // post-step failed) is reflected.
-        recordOpError({
-          label,
-          command,
-          stderr: result?.stderr ?? task?.error ?? "",
-          stdout: result?.stdout ?? "",
-          exitCode: result?.status ?? null,
-          args: undefined,
-          durationMs: undefined,
-          signal: null,
-          blankFailure:
-            !result || (!result.stderr && !result.stdout && result.status == null),
-        });
-        void refresh();
-      } else {
-        void refresh();
-      }
+      // A failure surfaces globally (toast + status-bar indicator) via
+      // recordOpError — no per-site toast. Refresh either way so any
+      // partial progress is reflected.
+      if (!result.success) recordOpError(opErrorOf(label, command, result));
+      void refresh();
     },
     [refresh, onOpenPage, addPending, removePending],
   );
@@ -366,16 +347,14 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
   const runUnconfirmed = useCallback(
     async (label: string, action: () => Promise<import("../api.js").GitOpKickoff>) => {
       addPending(label);
-      let task: import("../api.js").BackgroundTask | null = null;
+      let result: OpOutcome;
       try {
-        const { awaitDone } = await action();
-        task = await awaitDone;
+        result = await awaitGitOp(await action());
       } finally {
         removePending(label);
       }
-      const result = task?.result as GitOpResult | undefined;
-      if (!result || !result.success) {
-        window.alert(`${label} failed:\n${result?.stderr || task?.error || "git error"}`);
+      if (!result.success) {
+        window.alert(`${label} failed:\n${gitOpErrorMessage(result, "error")}`);
       } else {
         void refresh();
       }
@@ -412,19 +391,19 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
               onPush={() =>
                 runOp(
                   "Push",
-                  `git push${data.branchHeader.branch ? ` origin ${data.branchHeader.branch}` : ""}`,
-                  () => gitPush(streamId),
+                  "push",
+                  () => vcsPush(streamId),
                   { confirm: true },
                 )
               }
               onPullUpstream={() =>
                 runOp(
                   "Pull",
-                  `git pull${data.branchHeader.branch ? ` origin ${data.branchHeader.branch}` : ""}`,
-                  () => gitPull(streamId),
+                  "pull",
+                  () => vcsPull(streamId),
                 )
               }
-              onFetch={() => runUnconfirmed("Fetch", () => gitFetch(streamId))}
+              onFetch={() => runUnconfirmed("Fetch", () => vcsFetch(streamId))}
               isPending={isPending}
             />
 
@@ -449,15 +428,17 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
               onMerge={(branch) =>
                 runOp(
                   `Merge ${branch} into current`,
-                  `git merge ${branch}`,
-                  () => gitMergeInto(streamId, branch),
+                  `merge ${branch}`,
+                  () => vcsMerge(streamId, branch, true),
+                  { confirm: true },
                 )
               }
               onRebase={(branch) =>
                 runOp(
                   `Rebase current onto ${branch}`,
-                  `git rebase ${branch}`,
-                  () => gitRebaseOnto(streamId, branch),
+                  `rebase ${branch}`,
+                  () => gitRebase(streamId, branch, true),
+                  { confirm: true },
                 )
               }
               isPending={isPending}
@@ -469,8 +450,9 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
               onMerge={(branch) =>
                 runOp(
                   `Merge ${branch} into ${data.branchHeader.branch ?? "current"}`,
-                  `git merge ${branch}`,
-                  () => gitMergeInto(streamId, branch),
+                  `merge ${branch}`,
+                  () => vcsMerge(streamId, branch, true),
+                  { confirm: true },
                 )
               }
               isPending={isPending}
@@ -482,15 +464,15 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
               onPull={(remote, branch) =>
                 runOp(
                   `Pull ${remote}/${branch} into current`,
-                  `git fetch ${remote} ${branch} && git merge ${remote}/${branch}`,
-                  () => gitPullRemoteIntoCurrent(streamId, remote, branch),
+                  `pull ${remote} ${branch}`,
+                  () => vcsPull(streamId, { remote, branch }),
                 )
               }
               onPush={(remote, branch) =>
                 runOp(
                   `Push current → ${remote}/${branch}`,
-                  `git push ${remote} HEAD:refs/heads/${branch}`,
-                  () => gitPushCurrentTo(streamId, remote, branch),
+                  `push ${remote} ${branch}`,
+                  () => vcsPush(streamId, { remote, branch }),
                   { confirm: true },
                 )
               }

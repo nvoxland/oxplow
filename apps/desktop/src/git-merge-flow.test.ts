@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import type { OpOutcome } from "./api.js";
 
 // End-to-end check of a UI-initiated background git op (the branch
 // picker's "Merge X into Y"). The merge runs through
@@ -9,8 +10,10 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 // no-op — using string `bg-` ids throughout (the flow never touches
 // `get_task`).
 //
-// We override only `listen` on the transport module and only the five
-// background-task/merge commands on the bindings module, spreading the
+// The merge is the `vcs.merge` bus command (P5.B6), so `runCommand` is
+// what the op calls. We override only `listen` on the transport module
+// and only the background-task commands and `runCommand` on the bindings
+// module, spreading the
 // real modules so no other export is dropped for sibling test files.
 
 type Handler = (e: { payload: unknown }) => void;
@@ -31,18 +34,18 @@ interface BgRow {
 const realTransport = await import("./tauri-bridge/transport.js");
 const realBindings = await import("./tauri-bridge/generated/bindings.js");
 
-describe("gitMergeInto — UI-initiated background git op", () => {
+describe("vcsMerge — UI-initiated background VCS op", () => {
   let handlers: Handler[];
   let bgTasks: Map<string, BgRow>;
-  let mergeCalls: Array<[unknown, unknown]>;
-  let mergeOutcome: { success: boolean; stdout: string; stderr: string; status: number | null };
+  let runs: Array<[string, unknown, boolean]>;
+  let mergeOutcome: OpOutcome;
   let api: typeof import("./api.js");
 
   beforeEach(async () => {
     handlers = [];
     bgTasks = new Map();
-    mergeCalls = [];
-    mergeOutcome = { success: true, stdout: "Merge made by 'ort'.", stderr: "", status: 0 };
+    runs = [];
+    mergeOutcome = { success: true, log: "Merge made by 'ort'.", conflicts: [], auto_resolved: 0 };
     let seq = 0;
 
     const emit = (payload: unknown) => {
@@ -79,9 +82,18 @@ describe("gitMergeInto — UI-initiated background git op", () => {
           });
           return { status: "ok", data: bgTasks.get(id) };
         },
-        gitMergeInto: async (streamId: unknown, source: unknown) => {
-          mergeCalls.push([streamId, source]);
-          return { status: "ok", data: mergeOutcome };
+        runCommand: async (name: string, input: unknown, confirmed: boolean) => {
+          runs.push([name, input, confirmed]);
+          if (!confirmed) {
+            return {
+              status: "error",
+              error: { code: "NEEDS_CONFIRMATION", message: `\`${name}\` needs confirmation`, cause: null },
+            };
+          }
+          return {
+            status: "ok",
+            data: { result: mergeOutcome, audit_id: 1, event_id: null, inverse: null },
+          };
         },
         completeBackgroundTask: async (id: string, resultJson: string | null) => {
           const t = bgTasks.get(id)!;
@@ -110,15 +122,15 @@ describe("gitMergeInto — UI-initiated background git op", () => {
     mock.restore();
   });
 
-  test("invokes git_merge_into with the stream id and resolves the kickoff with the op result", async () => {
+  test("runs vcs.merge for the stream, confirmed, and resolves the kickoff with its outcome", async () => {
     const { awaitGitOp } = await import("./git-op.js");
-    const result = await awaitGitOp(await api.gitMergeInto("str1", "feature"));
+    const result = await awaitGitOp(await api.vcsMerge("str1", "feature", true));
 
-    // The git op actually ran (not silently dropped) with the right args.
-    expect(mergeCalls).toEqual([["str1", "feature"]]);
-    // …and its result propagated back through the background-task row.
+    // The op actually ran (not silently dropped) with the right input.
+    expect(runs).toEqual([["vcs.merge", { stream: "str1", rev: "feature" }, true]]);
+    // …and its outcome propagated back through the background-task row.
     expect(result.success).toBe(true);
-    expect(result.stdout).toContain("Merge made");
+    expect(result.log).toContain("Merge made");
 
     // The background-task id is a string (`bg-*`), so nothing in this
     // flow ever hands a numeric id to a string-typed command.
@@ -127,13 +139,20 @@ describe("gitMergeInto — UI-initiated background git op", () => {
     expect(id.startsWith("bg-")).toBe(true);
   });
 
-  test("surfaces a failed merge instead of swallowing it", async () => {
-    mergeOutcome = { success: false, stdout: "", stderr: "CONFLICT (content)", status: 1 };
+  test("surfaces a conflicted merge instead of swallowing it", async () => {
+    mergeOutcome = { success: false, log: "CONFLICT (content)", conflicts: ["a.ts"], auto_resolved: 0 };
     const { awaitGitOp, gitOpErrorMessage } = await import("./git-op.js");
-    const result = await awaitGitOp(await api.gitMergeInto("str1", "feature"));
+    const result = await awaitGitOp(await api.vcsMerge("str1", "feature", true));
 
-    expect(mergeCalls).toEqual([["str1", "feature"]]);
     expect(result.success).toBe(false);
-    expect(gitOpErrorMessage(result, "merge failed")).toContain("CONFLICT");
+    expect(gitOpErrorMessage(result, "merge failed")).toBe("Conflicts in a.ts");
+  });
+
+  test("an unconfirmed merge is refused and the task fails with the reason", async () => {
+    const { awaitGitOp, gitOpErrorMessage } = await import("./git-op.js");
+    const result = await awaitGitOp(await api.vcsMerge("str1", "feature", false));
+
+    expect(result.success).toBe(false);
+    expect(gitOpErrorMessage(result, "merge failed")).toContain("needs confirmation");
   });
 });

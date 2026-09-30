@@ -4,12 +4,12 @@ import {
   diffRevisions,
   vcsMergeBase,
   getChangeScopes,
-  gitAddPath,
-  gitAppendToGitignore,
-  gitCommitAll,
-  gitPull,
-  gitPush,
-  gitRestorePath,
+  gitIgnore,
+  vcsCommit,
+  vcsDiscard,
+  vcsPull,
+  vcsPush,
+  vcsStage,
   vcsFileHistory,
   listWorkspaceEntries,
   listWorkspaceFiles,
@@ -19,7 +19,7 @@ import {
   subscribeWorkspaceEvents,
   type ChangeScopes,
   type RevisionInfo,
-  type GitOpResult,
+  type OpOutcome,
   type RefOption,
   type Stream,
   type TextSearchHit,
@@ -35,7 +35,7 @@ import { ContextMenu } from "../ContextMenu.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
 import { requestCommentCompose } from "../../comment-compose-bus.js";
-import { awaitGitOp } from "../../git-op.js";
+import { awaitGitOp, settleGitOp } from "../../git-op.js";
 import { composeForElement } from "../Comments/useDomAnnotations.js";
 import { InlineConfirm } from "../InlineConfirm.js";
 import { Slideover } from "../Slideover.js";
@@ -378,7 +378,7 @@ export function ProjectPanel({
     refs: RefOption[] | null;
     loading: boolean;
   } | null>(null);
-  const [opResult, setOpResult] = useState<{ title: string; result: GitOpResult } | null>(null);
+  const [opResult, setOpResult] = useState<{ title: string; result: OpOutcome } | null>(null);
   const [pushPullDialog, setPushPullDialog] = useState<"push" | "pull" | null>(null);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
 
@@ -590,7 +590,7 @@ export function ProjectPanel({
             message: `Rollback ${path} to HEAD? Uncommitted changes will be lost.`,
             confirmLabel: "Rollback",
             run: async () => {
-              const result = await gitRestorePath(currentStream.id, path);
+              const result = await settleGitOp(() => vcsDiscard(currentStream.id, [path], true));
               setOpResult({ title: `Rollback ${path}`, result });
             },
           });
@@ -599,13 +599,13 @@ export function ProjectPanel({
         }
         case "git-add": {
           if (!stream) return;
-          const result = await gitAddPath(stream.id, contextMenu.path);
+          const result = await settleGitOp(() => vcsStage(stream.id, [contextMenu.path]));
           setOpResult({ title: `git add ${contextMenu.path}`, result });
           break;
         }
         case "git-gitignore": {
           if (!stream) return;
-          const result = await gitAppendToGitignore(stream.id, contextMenu.path);
+          const result = await settleGitOp(() => gitIgnore(stream.id, contextMenu.path));
           setOpResult({ title: `Add ${contextMenu.path} to .gitignore`, result });
           break;
         }
@@ -874,7 +874,7 @@ export function ProjectPanel({
         />
       ) : null}
       {opResult ? (
-        <GitOpResultModal
+        <OpOutcomeModal
           title={opResult.title}
           result={opResult.result}
           onClose={() => setOpResult(null)}
@@ -1101,19 +1101,14 @@ function PushPullDialog({
   kind: "push" | "pull";
   streamId: string;
   onClose(): void;
-  onComplete(result: GitOpResult): void;
+  onComplete(result: OpOutcome): void;
 }) {
-  const [force, setForce] = useState(false);
-  const [setUpstream, setSetUpstream] = useState(false);
-  const [rebase, setRebase] = useState(false);
   const [running, setRunning] = useState(false);
 
   const run = async () => {
     setRunning(true);
     const result = await awaitGitOp(
-      kind === "push"
-        ? await gitPush(streamId, { force, setUpstream })
-        : await gitPull(streamId, { rebase }),
+      kind === "push" ? await vcsPush(streamId) : await vcsPull(streamId),
     );
     setRunning(false);
     onComplete(result);
@@ -1143,23 +1138,11 @@ function PushPullDialog({
         onSubmit={(e) => { e.preventDefault(); void run(); }}
         style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: "var(--text-xs)" }}
       >
-        {kind === "push" ? (
-          <>
-            <label style={modalCheckboxStyle}>
-              <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-              Force push (with lease)
-            </label>
-            <label style={modalCheckboxStyle}>
-              <input type="checkbox" checked={setUpstream} onChange={(e) => setSetUpstream(e.target.checked)} />
-              Set upstream to current remote/branch
-            </label>
-          </>
-        ) : (
-          <label style={modalCheckboxStyle}>
-            <input type="checkbox" checked={rebase} onChange={(e) => setRebase(e.target.checked)} />
-            Rebase instead of merge
-          </label>
-        )}
+        <div style={{ color: "var(--muted)" }}>
+          {kind === "push"
+            ? "Push the stream's branch to its upstream."
+            : "Pull the stream's upstream into its branch."}
+        </div>
         {/* Hidden submit so Enter form-submit works. */}
         <button type="submit" style={{ display: "none" }} aria-hidden="true" tabIndex={-1} disabled={running}>submit</button>
       </form>
@@ -1178,7 +1161,7 @@ function CommitDialog({
   pathCount: number;
   untrackedCount: number;
   onClose(): void;
-  onComplete(result: GitOpResult): void;
+  onComplete(result: OpOutcome): void;
 }) {
   const [message, setMessage] = useState("");
   const [running, setRunning] = useState(false);
@@ -1192,7 +1175,10 @@ function CommitDialog({
   const run = async () => {
     if (!canSubmit) return;
     setRunning(true);
-    const result = await gitCommitAll(streamId, trimmed, { includeUntracked });
+    const result = await settleGitOp(async () => {
+      const { revision } = await vcsCommit(streamId, trimmed, includeUntracked);
+      return { success: true, log: `Committed ${revision}`, conflicts: [], auto_resolved: 0 };
+    });
     setRunning(false);
     onComplete(result);
   };
@@ -1271,19 +1257,21 @@ function CommitDialog({
   );
 }
 
-function GitOpResultModal({ title, result, onClose }: { title: string; result: GitOpResult; onClose(): void }) {
+function OpOutcomeModal({ title, result, onClose }: { title: string; result: OpOutcome; onClose(): void }) {
   const colour = result.success ? "#86efac" : "#f87171";
   return (
     <Slideover open onClose={onClose} title={title} testId="git-op-result-slideover">
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={{ color: colour, fontSize: "var(--text-xs)", fontWeight: 600 }}>
-          {result.success ? "Success" : `Failed (exit ${result.status ?? "?"})`}
+          {result.success ? "Success" : "Failed"}
         </div>
-        {result.stdout ? (
-          <pre style={modalPreStyle}>{result.stdout}</pre>
+        {result.conflicts.length > 0 ? (
+          <pre style={{ ...modalPreStyle, color: "#f87171" }}>
+            {`Conflicts:\n${result.conflicts.join("\n")}`}
+          </pre>
         ) : null}
-        {result.stderr ? (
-          <pre style={{ ...modalPreStyle, color: "#f87171" }}>{result.stderr}</pre>
+        {result.log ? (
+          <pre style={{ ...modalPreStyle, color: result.success ? undefined : "#f87171" }}>{result.log}</pre>
         ) : null}
       </div>
     </Slideover>
@@ -1315,7 +1303,6 @@ const modalInputStyle = {
   padding: "4px 6px",
   fontSize: "var(--text-xs)",
 } as const;
-const modalCheckboxStyle = { display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" } as const;
 const modalBtnStyle = {
   border: "1px solid var(--border)",
   background: "var(--bg-2)",
