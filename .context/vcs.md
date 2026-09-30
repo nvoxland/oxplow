@@ -165,7 +165,9 @@ commit times are whole seconds and clocks skew, so a time order can list
 a rebase's parent before its child and break the graph's lanes (tsk565;
 the dashboard finds the head commit by sha, not as the first row); the
 branch picker, compare list and new-stream form read `v_branch` /
-`v_tag`. What is computed stays live: `vcs_divergence`,
+`v_tag`. A `v_branch.name` is the branch's local name for both kinds
+(a remote-tracking branch's remote is its own column), so the picker
+checks out and shows `name` as is (`pickedBranch`, tsk567). What is computed stays live: `vcs_divergence`,
 `vcs_revisions_between`, `vcs_file_history` (the index keeps 500
 commits per head; a file's full history can be older),
 `vcs_list_adoptable_workspaces`, and for agents `vcs_log` /

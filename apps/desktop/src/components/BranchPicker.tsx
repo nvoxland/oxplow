@@ -35,6 +35,13 @@ interface Props {
   buttonStyle?: CSSProperties;
 }
 
+/** What picking `branch` hands `onPick`. A branch's name is already its
+ *  local name for both kinds (`v_branch.name`; a remote-tracking
+ *  branch's remote is separate), so it checks out under that name. */
+export function pickedBranch(branch: BranchRef): PickedRef {
+  return { kind: "branch", name: branch.name, branch };
+}
+
 type Confirming =
   | { kind: "delete"; branch: string; force: boolean; message: string }
   | { kind: "merge" | "rebase"; other: string; message: string };
@@ -284,11 +291,10 @@ export function BranchPicker({
   }, [expanded, q]);
 
   async function pickBranch(branch: BranchRef) {
-    const localName = branch.kind === "local" ? branch.name : branch.name.split("/").slice(1).join("/");
     try {
       setBusy(true);
       setError(null);
-      await onPick({ kind: "branch", name: localName, branch });
+      await onPick(pickedBranch(branch));
       setOpen(false);
     } catch (e) {
       setError(String(e));
@@ -594,8 +600,6 @@ function RemoteGroup({ remote, branches, busy, onPick, onOpenMenu, forceOpen }: 
         <span style={{ color: "var(--muted)", fontSize: 10 }}>{branches.length}</span>
       </button>
       {isOpen ? branches.map((b) => {
-        // Strip the "<remote>/" prefix for display — the group header already shows the remote.
-        const display = b.name.startsWith(`${remote}/`) ? b.name.slice(remote.length + 1) : b.name;
         return (
           <RowButton
             key={b.ref}
@@ -603,7 +607,7 @@ function RemoteGroup({ remote, branches, busy, onPick, onOpenMenu, forceOpen }: 
             disabled={busy}
             current={false}
             icon="⎇"
-            name={display}
+            name={b.name}
             indent={30}
             showChevron={!!onOpenMenu}
           />
