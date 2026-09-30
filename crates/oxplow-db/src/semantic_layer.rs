@@ -42,6 +42,9 @@ pub struct Reads {
     /// as `temp.<name>`); sorted, distinct. A physical table here is what
     /// the read contract refuses once enforced (P4.3).
     pub tables: Vec<String>,
+    /// Metric measures a `metric_grid()` read (P4.5), filled by the SQL
+    /// gateway; sorted, distinct.
+    pub measures: Vec<String>,
 }
 
 /// One read-only query: its SQL, parameters, row cap and time budget.
@@ -55,6 +58,22 @@ pub struct SqlQuery {
     /// Read physical tables too (the person's explorer, never an agent or
     /// a lens): the reads are still recorded, none is refused.
     pub raw: bool,
+    /// Scope to one stream — what the SQL gateway computes a
+    /// `metric_grid()`'s series over (a lens passes its `:stream_id`).
+    pub stream: Option<i64>,
+    /// Temp tables this query reads, created and filled on its connection
+    /// before it runs and dropped after, on every path (the gateway's
+    /// `metric_grid()` points, P4.5).
+    pub temp: Vec<TempTable>,
+}
+
+/// A temp table a query reads: its name, column names (untyped — SQLite
+/// keeps each value's own type) and rows.
+#[derive(Debug, Clone)]
+pub struct TempTable {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<SqlCell>>,
 }
 
 /// A query's parameters.
@@ -75,7 +94,15 @@ impl SqlQuery {
             limit: None,
             timeout: DEFAULT_TIMEOUT,
             raw: false,
+            stream: None,
+            temp: Vec::new(),
         }
+    }
+
+    /// Scope to one stream (see [`SqlQuery::stream`]).
+    pub fn stream(mut self, stream: Option<i64>) -> Self {
+        self.stream = stream;
+        self
     }
 
     /// Read physical tables too (see [`SqlQuery::raw`]).
@@ -218,15 +245,26 @@ impl SemanticLayer {
     /// what it would read. Metric, dimension and extension config use this
     /// to reject a bad SQL fragment up front.
     pub async fn check(&self, sql: &str) -> Result<Reads, DomainError> {
-        crate::sql_tokens::check_single_read(sql)?;
-        let sql = sql.to_string();
+        self.check_with(SqlQuery::new(sql)).await
+    }
+
+    /// [`Self::check`] for a whole query: its temp tables exist while it
+    /// compiles, and `raw` records rather than refuses.
+    pub async fn check_with(&self, query: SqlQuery) -> Result<Reads, DomainError> {
+        crate::sql_tokens::check_single_read(&query.sql)?;
         self.db
             .call(move |conn| {
                 Ok((|| {
-                    let session = ReadSession::open(conn, Access::Enforce)?;
+                    let _temp = TempTables::create(conn, &query.temp)?;
+                    let access = if query.raw {
+                        Access::Record
+                    } else {
+                        Access::Enforce
+                    };
+                    let session = ReadSession::open(conn, access)?;
                     {
                         let stmt = conn
-                            .prepare(&sql)
+                            .prepare(&query.sql)
                             .map_err(|e| session.refusal().unwrap_or_else(|| invalid(e)))?;
                         if !stmt.readonly() {
                             return Err(read_only_only());
@@ -533,6 +571,7 @@ impl<'c> ReadSession<'c> {
         Reads {
             models: models.into_iter().collect(),
             tables: tables.into_iter().collect(),
+            measures: Vec::new(),
         }
     }
 
@@ -605,6 +644,60 @@ fn cell(v: rusqlite::types::ValueRef<'_>) -> SqlCell {
     }
 }
 
+/// A query's temp tables on its connection, dropped with this guard.
+struct TempTables<'c> {
+    conn: &'c rusqlite::Connection,
+    names: Vec<String>,
+}
+
+impl<'c> TempTables<'c> {
+    fn create(conn: &'c rusqlite::Connection, tables: &[TempTable]) -> Result<Self, DomainError> {
+        let quote = |n: &str| format!("\"{}\"", n.replace('"', "\"\""));
+        let mut guard = Self {
+            conn,
+            names: Vec::new(),
+        };
+        for t in tables {
+            let cols: Vec<String> = t.columns.iter().map(|c| quote(c)).collect();
+            conn.execute_batch(&format!(
+                "CREATE TEMP TABLE {} ({})",
+                quote(&t.name),
+                cols.join(", ")
+            ))
+            .map_err(crate::database::map_sql_err)?;
+            guard.names.push(t.name.clone());
+            let marks = vec!["?"; t.columns.len()].join(", ");
+            let mut insert = conn
+                .prepare(&format!(
+                    "INSERT INTO temp.{} VALUES ({marks})",
+                    quote(&t.name)
+                ))
+                .map_err(crate::database::map_sql_err)?;
+            for row in &t.rows {
+                let vals: Vec<rusqlite::types::Value> = row.iter().map(SqlCell::to_sql).collect();
+                insert
+                    .execute(rusqlite::params_from_iter(vals))
+                    .map_err(crate::database::map_sql_err)?;
+            }
+        }
+        Ok(guard)
+    }
+}
+
+impl Drop for TempTables<'_> {
+    fn drop(&mut self) {
+        for name in &self.names {
+            let sql = format!(
+                "DROP TABLE IF EXISTS temp.\"{}\"",
+                name.replace('"', "\"\"")
+            );
+            if let Err(e) = self.conn.execute_batch(&sql) {
+                tracing::error!(error = %e, "query_sql: could not drop a temp table");
+            }
+        }
+    }
+}
+
 /// Prepare under the recording authorizer, then execute under `PRAGMA
 /// query_only` with an interrupt timer. The [`ReadSession`] restores the
 /// pooled connection on every path.
@@ -617,6 +710,9 @@ fn run_read_only(
         .unwrap_or(DEFAULT_ROW_LIMIT)
         .clamp(1, MAX_ROW_LIMIT);
     let timeout = query.timeout;
+    // Temp tables first — creating them is a write — then the read
+    // session; locals drop in reverse, so the session ends before they go.
+    let _temp = TempTables::create(conn, &query.temp)?;
     let access = if query.raw {
         Access::Record
     } else {
@@ -939,6 +1035,47 @@ mod tests {
         assert_eq!(out.reads.tables, vec!["task".to_string()]);
         // A refusal leaves the connection writable.
         db.call(|c| c.execute("UPDATE task SET title = 'x' WHERE id = 1", []))
+            .await
+            .unwrap();
+    }
+
+    /// P4.5a (tsk490): a query's temp tables exist for it alone — created
+    /// and filled on its connection, read like a model, gone afterwards
+    /// even when the query fails.
+    #[tokio::test]
+    async fn temp_tables_live_for_one_query() {
+        let (db, sl) = seeded().await;
+        let grid = TempTable {
+            name: "grid_t".into(),
+            columns: vec!["bucket".into(), "n".into()],
+            rows: vec![
+                vec![SqlCell::Text("2026-01-01".into()), SqlCell::Int(3)],
+                vec![SqlCell::Text("2026-01-02".into()), SqlCell::Real(1.5)],
+            ],
+        };
+        let mut q = SqlQuery::new("SELECT bucket, n FROM temp.grid_t ORDER BY bucket");
+        q.temp.push(grid.clone());
+        let out = sl.run(q).await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            json!([["2026-01-01", 3], ["2026-01-02", 1.5]])
+        );
+        assert_eq!(out.reads.tables, vec!["temp.grid_t".to_string()]);
+        let mut failing = SqlQuery::new("SELECT nope FROM temp.grid_t");
+        failing.temp.push(grid);
+        assert!(sl.run(failing).await.is_err());
+        let left: i64 = db
+            .call(|c| {
+                c.query_row(
+                    "SELECT count(*) FROM sqlite_temp_master WHERE name = 'grid_t'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
+        db.call(|c| c.execute("UPDATE task SET title = 'w' WHERE id = 1", []))
             .await
             .unwrap();
     }

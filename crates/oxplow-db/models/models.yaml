@@ -755,3 +755,19 @@
     - { name: state, type: TEXT, doc: "`passed`, `failed` (rows break it) or `error` (it didn't run)." }
     - { name: detail, type: TEXT, doc: "How many rows broke it, or the error; NULL when passed." }
     - { name: ran_at, type: TEXT, doc: "RFC 3339 time it ran." }
+- name: dimension
+  version: 1
+  description: "Dimensions: what metrics can be sliced by — `metric_grid('<bucket>', '<dimension>')` groups by one of these keys (P4.5)."
+  columns:
+    - { name: key, type: TEXT, doc: "The dimension key, e.g. `zone`; `oxplow.*` keys are built in." }
+    - { name: label, type: TEXT, doc: "Display name." }
+    - { name: value_type, type: TEXT, doc: "`categorical`, `numeric`, `temporal` or `entity-ref`." }
+    - { name: subject_kind, type: TEXT, doc: "For an `entity-ref` dimension, the kind of thing it refers to." }
+    - { name: vocabulary_json, type: TEXT, doc: "The controlled set of values, as a JSON array; NULL when open." }
+    - { name: scope, type: TEXT, doc: "`built-in`, `global` or `project`." }
+    - { name: promoted, type: INTEGER, doc: "1 when facts carry it as a column (fast to group by), else 0." }
+    - { name: entity_json, type: TEXT, doc: "For an entity dimension, the view and expression it slices (`{\"view\", \"expr\"}`)." }
+    - { name: extension, type: TEXT, doc: "The extension that declared it; NULL for core." }
+  tests:
+    - { not_null: key }
+    - { unique: key }

@@ -85,7 +85,7 @@ pub use reasoning_store::{NewClaim, NewDecision, SqliteReasoningStore};
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use semantic_layer::{
     Reads, SchemaColumn, SchemaEntity, SchemaRelation, SemanticLayer, SqlCell, SqlParams, SqlQuery,
-    SqlQueryResult,
+    SqlQueryResult, TempTable,
 };
 pub use snapshot_tree::{ContentHasher, SnapshotTree, TreeEntry};
 pub use stream_store::SqliteStreamStore;

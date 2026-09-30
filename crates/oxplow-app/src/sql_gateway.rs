@@ -7,24 +7,53 @@
 //! app joins them — the metric function (P4.5) and model freshness
 //! (P4.6).
 
-use oxplow_db::{Database, Reads, SemanticLayer, SqlCell, SqlQuery, SqlQueryResult};
+use oxplow_db::{Database, Reads, SemanticLayer, SqlCell, SqlQuery, SqlQueryResult, TempTable};
 use oxplow_domain::DomainError;
 
 #[derive(Clone)]
 pub struct SqlGateway {
     layer: SemanticLayer,
+    /// What `metric_grid()` reads metrics through; `None` for a gateway
+    /// that serves the engine itself (its entity metrics).
+    engine: Option<std::sync::Arc<crate::metric_engine::MetricEngine>>,
 }
 
 impl SqlGateway {
     pub fn new(db: Database) -> Self {
         Self {
             layer: SemanticLayer::new(db),
+            engine: None,
         }
     }
 
-    /// Run one read-only query; the result says what it read.
-    pub async fn run(&self, query: SqlQuery) -> Result<SqlQueryResult, DomainError> {
-        self.layer.run(query).await
+    /// Read metrics in SQL through `engine` (`metric_grid()`, P4.5).
+    pub fn with_engine(mut self, engine: crate::metric_engine::MetricEngine) -> Self {
+        self.engine = Some(std::sync::Arc::new(engine));
+        self
+    }
+
+    /// Run one read-only query; the result says what it read. A
+    /// `metric_grid()` query has its metrics' series read first — before
+    /// any connection is taken — and runs against them as a temp table.
+    pub async fn run(&self, mut query: SqlQuery) -> Result<SqlQueryResult, DomainError> {
+        let Some(plan) = crate::metric_grid::plan(&query.sql)? else {
+            return self.layer.run(query).await;
+        };
+        // Boxed: the engine reads entity metrics through a gateway, so
+        // this future contains another `run`.
+        let grid =
+            Box::pin(plan.materialize(&query.sql, self.engine()?, query.stream, true)).await?;
+        query.sql = grid.sql;
+        query.temp.push(grid.table);
+        let mut out = self.layer.run(query).await?;
+        out.reads.measures = grid.measures;
+        Ok(out)
+    }
+
+    fn engine(&self) -> Result<&crate::metric_engine::MetricEngine, DomainError> {
+        self.engine.as_deref().ok_or_else(|| {
+            DomainError::Invalid("metric_grid() isn't available here (no metric engine)".into())
+        })
     }
 
     /// [`Self::run`] with positional parameters — the short form.
@@ -41,7 +70,20 @@ impl SqlGateway {
     /// Check a query compiles as a read, without running it; say what it
     /// would read.
     pub async fn check(&self, sql: &str) -> Result<Reads, DomainError> {
-        self.layer.check(sql).await
+        let Some(plan) = crate::metric_grid::plan(sql)? else {
+            return self.layer.check(sql).await;
+        };
+        // The metrics are resolved (and their dimension checked) but not
+        // read; the query compiles against an empty grid.
+        let grid = Box::pin(plan.materialize(sql, self.engine()?, None, false)).await?;
+        let mut q = SqlQuery::new(grid.sql).limit(Some(1));
+        q.temp.push(TempTable {
+            rows: Vec::new(),
+            ..grid.table
+        });
+        let mut reads = self.layer.check_with(q).await?;
+        reads.measures = grid.measures;
+        Ok(reads)
     }
 
     /// The name of every view in the database.

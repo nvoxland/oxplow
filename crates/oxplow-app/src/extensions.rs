@@ -1397,11 +1397,18 @@ async fn execute(
     }
     let named: Vec<(String, SqlCell)> =
         params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    // A lens's `:stream_id` is the stream its metrics (`metric_grid()`)
+    // are read over.
+    let stream = match params.get("stream_id") {
+        Some(SqlCell::Int(id)) => Some(*id),
+        _ => None,
+    };
     let result = layer
         .run(
             oxplow_db::SqlQuery::new(&lens.query)
                 .named(named)
-                .limit(None),
+                .limit(None)
+                .stream(stream),
         )
         .await
         .map_err(|e| match e {

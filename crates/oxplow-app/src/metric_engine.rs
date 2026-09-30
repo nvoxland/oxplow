@@ -1947,6 +1947,11 @@ impl MetricEngine {
     /// Empty for a formula metric (no source measure) or an unknown measure.
     /// Errors on an aggregation the engine can't yet compute or a malformed
     /// `filter_json`.
+    /// The metric spec `key`, if there is one.
+    pub async fn spec(&self, key: &str) -> Result<Option<MetricSpec>, DomainError> {
+        self.facts.get_spec(key).await
+    }
+
     pub async fn series_for_spec(
         &self,
         spec: &MetricSpec,

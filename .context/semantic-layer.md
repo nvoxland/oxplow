@@ -166,6 +166,44 @@ each one's columns and types equal the migration view it replaced),
 migrations and compiled after them at every writable open; a read-only
 open (`oxplow plugin check`) uses what the last open compiled.
 
+## Metrics in SQL (P4.5)
+
+A query reads metrics as columns of a grid:
+
+```sql
+SELECT bucket, zone, MEASURE('oxplow.coverage.abs_pct')
+FROM metric_grid('day', 'zone')
+```
+
+- `metric_grid('<day|week|month>'[, '<dimension>'])` — exactly one per
+  query; its rows are `bucket` (the bucket's start date, `YYYY-MM-DD`),
+  the dimension column when given, and one column per `MEASURE('<metric
+  key>')` the query names (keys in `v_metric_spec`, dimensions in
+  `v_dimension`).
+- **The engine stays the one authority** on what a metric means: each
+  `MEASURE` is `MetricEngine::series_for_spec_read` for that spec, bucketed
+  and grouped — its aggregation, temporal fold, filter, scale and the cube
+  all apply, so a week of a complete measure is its last capture, not a
+  SQL sum. SQL then filters, joins and aggregates the grid like any table.
+- **How** (`crates/oxplow-app/src/metric_grid.rs`, in the SQL gateway):
+  the tokenizer finds the calls; every series is read **before** any
+  connection is taken (the engine holds its own pool permits — it runs on
+  the one-connection in-memory database); the points become
+  `SqlQuery.temp` — `temp."metric_grid_1"` — created and filled on the
+  query's connection before the authorizer and `query_only` go on and
+  dropped after, on every path; `metric_grid(…)` and each `MEASURE(…)` are
+  rewritten to the table and its `"measure:<key>"` columns. The result's
+  `reads.measures` lists the measures behind it (what a subscription
+  watches, P4.6). `check` resolves the metrics and compiles against an
+  empty grid.
+- The series are scoped to `SqlQuery.stream` — a lens passes its
+  `:stream_id`.
+- Errors name the `MEASURE`: an unknown key, a dimension the metric can't
+  be grouped by, a formula metric (refused, not empty), and a gateway with
+  no engine.
+- `grid_rows_equal_the_engine_series` holds the grid to the engine's
+  series for every metric, by bucket and by dimension.
+
 ## The `v_*` contract (current)
 
 Every shipped entity is exposed as a stable **read-only SQL view**. They

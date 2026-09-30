@@ -61,6 +61,7 @@ pub mod lsp_sessions;
 pub mod metric_bucket;
 pub mod metric_cube;
 pub mod metric_engine;
+pub mod metric_grid;
 pub mod metric_visibility;
 pub mod metrics_service;
 pub mod net_sandbox;
@@ -669,6 +670,7 @@ impl Services {
         ));
         let metric_engine = metric_engine::MetricEngine::new(SqliteFactStore::new(db.clone()))
             .with_visibility(metric_visibility.clone());
+        let sql = sql.with_engine(metric_engine.clone());
         let attribution_store = Arc::new(oxplow_db::SqliteAttributionStore::new(db.clone()));
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let dashboard_store = Arc::new(oxplow_db::SqliteDashboardStore::new(db.clone()));

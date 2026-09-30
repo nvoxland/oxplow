@@ -3648,6 +3648,11 @@ export type Reads = {
 	 *  the read contract refuses once enforced (P4.3).
 	 */
 	tables: string[],
+	/**
+	 *  Metric measures a `metric_grid()` read (P4.5), filled by the SQL
+	 *  gateway; sorted, distinct.
+	 */
+	measures: string[],
 };
 
 // A recent-projects row plus a freshness flag for the UI.

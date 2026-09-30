@@ -2134,13 +2134,16 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Run ONE read-only SQL statement (`SELECT`/`WITH`) over the semantic \
-                       layer's `v_*` views — the same data lenses and the UI read. Joins across \
-                       views are fine (e.g. v_task ⋈ v_effort ⋈ v_fact). Positional params \
-                       `?1`, `?2`, … bind from `params`. Returns `{columns, rows, truncated}`; \
-                       rows are positional arrays. Writes, PRAGMA, ATTACH and multiple \
-                       statements are rejected; queries time out after 5s. See \
-                       `describe_schema` for tables and column meanings."
+        description = "Run ONE read-only SQL statement (`SELECT`/`WITH`) over the published \
+                       models — the `v_*` views lenses and the UI read (`v_model` lists them; \
+                       physical tables are refused). Joins across views are fine. Metrics read \
+                       as columns of a grid: `SELECT bucket, zone, MEASURE('<metric key>') FROM \
+                       metric_grid('day'|'week'|'month'[, '<dimension>'])` (keys in \
+                       v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … \
+                       bind from `params`. Returns `{columns, rows, truncated, reads}`; rows are \
+                       positional arrays. Writes, PRAGMA, ATTACH and multiple statements are \
+                       rejected; queries time out after 5s. See `describe_schema` for column \
+                       meanings."
     )]
     async fn query_sql(
         &self,
