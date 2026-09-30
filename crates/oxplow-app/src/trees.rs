@@ -175,7 +175,7 @@ impl Trees {
             },
             Revision::Vcs { kind, rev } => {
                 let rev = self.vcs_rev(kind, rev)?;
-                match self.vcs.files_at(ws, rev).await?.remove(path) {
+                match self.vcs.object_at(ws, rev, path).await? {
                     Some(id) => Source::Object(id),
                     None => return Ok(None),
                 }

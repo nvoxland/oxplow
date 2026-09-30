@@ -55,6 +55,21 @@ pub async fn a_commit_reads_back_what_it_captured(p: &dyn Vcs, ws: &Path) {
     assert_eq!(*id, objects.id_of(b"one\n"), "ids are content addresses");
     assert_ne!(objects.id_of(b"two\n"), *id);
     assert_eq!(objects.read(&objects.id_of(b"never stored")), None);
+    // One path, without walking the tree: the same id; nothing for a
+    // directory or a missing path (tsk553).
+    std::fs::create_dir_all(ws.join("dir")).unwrap();
+    write(ws, "dir/b.txt", "b\n");
+    let second = commit(p, ws, "second").await;
+    assert_eq!(
+        p.object_at(ws, &first, "a.txt").await.unwrap(),
+        Some(id.clone())
+    );
+    assert_eq!(
+        p.object_at(ws, &second, "dir/b.txt").await.unwrap(),
+        Some(objects.id_of(b"b\n"))
+    );
+    assert_eq!(p.object_at(ws, &second, "dir").await.unwrap(), None);
+    assert_eq!(p.object_at(ws, &first, "nope.txt").await.unwrap(), None);
 }
 
 /// 2. Two revisions' trees differ by what changed, deletions included

@@ -14,7 +14,10 @@ provider stays testable against a tempdir.
 - **Revisions:** `head`, `resolve` (a branch, a short id, `HEAD` → the
   full id), `log`, `revision` (message and changed files),
   `revisions_between`, `file_history`.
-- **Trees:** `files_at(rev)` (path → `ObjectId`),
+- **Trees:** `files_at(rev)` (path → `ObjectId`), `object_at(rev,
+  path)` (one path lookup — git's `tree.get_path` — what `Trees::read_at`
+  uses, so reading one file at a revision never walks the whole tree;
+  tsk553),
   `object_store(ws)` — a synchronous `ObjectStore` (`read(id)`,
   `id_of(bytes)`: the id without writing it) — and
   `clean_baseline(ws)`, a synchronous `CleanBaseline` that vouches, by

@@ -430,6 +430,22 @@ impl Vcs for GitProvider {
         .await
     }
 
+    async fn object_at(
+        &self,
+        ws: &Path,
+        rev: &str,
+        path: &str,
+    ) -> Result<Option<ObjectId>, VcsError> {
+        let (ws, rev, path) = (ws.to_path_buf(), rev.to_string(), path.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            oxplow_git::blob_at(&ws, &rev, &path)
+                .map(|id| id.map(ObjectId))
+                .map_err(|_| VcsError::UnknownRevision(rev))
+        })
+        .await
+    }
+
     fn object_store(&self, ws: &Path) -> Arc<dyn ObjectStore> {
         Arc::new(GitObjects(ws.to_path_buf()))
     }

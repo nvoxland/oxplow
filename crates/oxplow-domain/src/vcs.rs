@@ -340,6 +340,14 @@ pub trait Vcs: Send + Sync {
     // --- trees ---
     /// Every file at `rev`: path → object id.
     async fn files_at(&self, ws: &Path, rev: &str) -> Result<BTreeMap<String, ObjectId>, VcsError>;
+    /// The file at `path` in `rev` — one lookup, not a tree walk; `None`
+    /// for a missing path or a directory.
+    async fn object_at(
+        &self,
+        ws: &Path,
+        rev: &str,
+        path: &str,
+    ) -> Result<Option<ObjectId>, VcsError>;
     /// The object store behind `ws` (every workspace of one repository
     /// shares it). Synchronous: snapshot capture and content hashing read
     /// it from blocking threads.

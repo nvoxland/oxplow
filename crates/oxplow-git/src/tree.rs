@@ -36,6 +36,25 @@ pub fn tree_at_commit(
     Ok(out)
 }
 
+/// The blob at `path` in `rev`'s tree — a path lookup, not a walk;
+/// `None` for a missing path or a directory.
+pub fn blob_at(
+    repo_path: impl AsRef<Path>,
+    rev: &str,
+    path: &str,
+) -> Result<Option<String>, git2::Error> {
+    let repo = git2::Repository::open(repo_path.as_ref())?;
+    let tree = repo.revparse_single(rev)?.peel_to_commit()?.tree()?;
+    match tree.get_path(Path::new(path)) {
+        Ok(entry) if entry.kind() == Some(git2::ObjectType::Blob) => {
+            Ok(Some(entry.id().to_string()))
+        }
+        Ok(_) => Ok(None),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// The git blob oid a byte slice would hash to, *without* writing it to
 /// the odb. Lets snapshot-store content (xxh3-keyed) and live
 /// working-tree bytes be normalized into the same git-oid identity
