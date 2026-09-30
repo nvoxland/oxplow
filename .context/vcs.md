@@ -209,8 +209,11 @@ checkboxes, which the old RPCs had never passed on.
 A snapshot taken on a clean workspace *is* its head revision:
 `snapshot.revision` (V112, was `git_commit`) holds it as a `Revision`
 string (`git:<sha>`), and `snapshot.branch` (was `git_branch`) the
-branch. `SnapshotCaptureService::clean_head` asks `Vcs::head` +
-`Vcs::status`; the git-refs listener re-stamps the latest snapshot's
+branch. `SnapshotCaptureService::clean_head` reads `Vcs::head`,
+`Vcs::status`, then `Vcs::head` again, and stamps only when the tree is
+clean and both head reads agree (`clean_revision`, tsk554) — a commit
+in between leaves the snapshot unstamped rather than paired with the
+wrong head. The git-refs listener re-stamps the latest snapshot's
 revision when the head moves onto an unchanged tree (`vcs.head.moved`).
 `Trees::revision_of(snapshot)` and `Trees::snapshots_at(ws, rev)` map the
 two ways (`git:HEAD` and short ids resolve first).

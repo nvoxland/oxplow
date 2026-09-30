@@ -431,15 +431,21 @@ impl SnapshotCaptureService {
     /// clean at it (so a snapshot's tree equals that revision).
     async fn clean_head(&self) -> (Option<String>, Option<Revision>) {
         let (vcs, ws) = (&self.inner.vcs, &self.inner.project_dir);
-        let Ok(head) = vcs.head(ws).await else {
+        let Ok(before) = vcs.head(ws).await else {
             return (None, None);
         };
         let clean = vcs.status(ws).await.is_ok_and(|s| s.entries.is_empty());
-        let revision = head.revision.filter(|_| clean).map(|rev| Revision::Vcs {
-            kind: vcs.rev_kind().into(),
-            rev,
-        });
-        (head.branch, revision)
+        // A commit between the reads would pair this tree with the wrong
+        // head: read it again, and stamp only when it held still.
+        let after = vcs.head(ws).await.ok().and_then(|h| h.revision);
+        let revision =
+            clean_revision(before.revision.as_deref(), clean, after.as_deref()).map(|rev| {
+                Revision::Vcs {
+                    kind: vcs.rev_kind().into(),
+                    rev: rev.to_string(),
+                }
+            });
+        (before.branch, revision)
     }
 
     /// The version triple for a file ref pinned to `snapshot_id` in this
@@ -1786,8 +1792,34 @@ impl SnapshotCaptureService {
     }
 }
 
+/// The revision a clean take is stamped with: the head, but only when it
+/// was the same before and after the status check found the tree clean.
+fn clean_revision<'a>(
+    before: Option<&'a str>,
+    clean: bool,
+    after: Option<&'a str>,
+) -> Option<&'a str> {
+    before.filter(|b| clean && after == Some(*b))
+}
+
 #[cfg(test)]
 mod tests {
+
+    /// tsk554: a snapshot is stamped with the head only when the head
+    /// read before the status check and the one after it agree — a commit
+    /// in between leaves it unstamped rather than stamped wrong.
+    #[test]
+    fn a_revision_is_stamped_only_when_the_head_held_still() {
+        use super::clean_revision;
+        assert_eq!(clean_revision(Some("A"), true, Some("A")), Some("A"));
+        assert_eq!(
+            clean_revision(Some("A"), true, Some("B")),
+            None,
+            "committed in between"
+        );
+        assert_eq!(clean_revision(Some("A"), false, Some("A")), None, "dirty");
+        assert_eq!(clean_revision(None, true, None), None, "no commit yet");
+    }
     use super::*;
     use oxplow_db::Database;
     use tempfile::tempdir;
