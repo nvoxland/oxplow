@@ -23,6 +23,7 @@ import { IpcCallError, ipcErrorCode, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
   CatalogPrompt,
+  EffectiveSetting,
   PanelPlacement,
   ChangeRow,
   ChangeTarget,
@@ -666,6 +667,11 @@ export async function promptCatalog(streamId: string | null): Promise<CatalogPro
   return unwrap(await commands.promptCatalog(streamId));
 }
 
+/** Every setting with its value and where it comes from (P6.H1). */
+export async function effectiveConfig(): Promise<EffectiveSetting[]> {
+  return unwrap(await commands.effectiveConfig());
+}
+
 /** The person's left-nav layout: each panel's order, and whether it's
  *  hidden or collapsed (P6.G1). */
 export async function getPanelLayout(): Promise<PanelPlacement[]> {
@@ -970,14 +976,6 @@ export async function setAgentModel(
   model: string | null,
 ): Promise<import("./api-types.js").OxplowConfig> {
   return unwrap(await commands.setAgentModel(agent, model)) as unknown as import("./api-types.js").OxplowConfig;
-}
-
-export async function setSnapshotRetentionDays(days: number): Promise<import("./api-types.js").OxplowConfig> {
-  return unwrap(await commands.setSnapshotRetentionDays(days)) as unknown as import("./api-types.js").OxplowConfig;
-}
-
-export async function setSnapshotMaxFileBytes(bytes: number): Promise<import("./api-types.js").OxplowConfig> {
-  return unwrap(await commands.setSnapshotMaxFileBytes(bytes)) as unknown as import("./api-types.js").OxplowConfig;
 }
 
 export type CommitRefLabel = import("./tauri-bridge/generated/bindings.js").CommitRefLabel;

@@ -968,9 +968,6 @@ struct RawConfig {
     /// Enabled agent implementations, in priority order; the first is the default for new threads.
     #[serde(default)]
     agents: Option<Vec<AgentKind>>,
-    /// Legacy single-agent form of `agents`.
-    #[serde(default)]
-    agent: Option<AgentKind>,
     /// Display name; defaults to the project directory's basename.
     #[serde(rename = "projectName", default)]
     project_name: Option<String>,
@@ -1225,80 +1222,104 @@ pub fn write_project_config(
 /// `fallback_name` is the project name that needs no `projectName` key.
 /// Pure — `write_project_config` adds the file's unknown keys and writes.
 pub fn render_project_config(config: &OxplowConfig, fallback_name: &str) -> serde_yaml::Mapping {
-    let mut doc = serde_yaml::Mapping::new();
-    if config.agents != vec![AgentKind::default()] {
-        doc.insert(
-            "agents".into(),
-            serde_yaml::to_value(&config.agents).expect("agents serialize"),
-        );
-    }
-    if !config.project_name.is_empty() && config.project_name != fallback_name {
-        doc.insert("projectName".into(), config.project_name.clone().into());
-    }
-    if !config.agent_prompt_append.is_empty() {
-        doc.insert(
-            "agentPromptAppend".into(),
-            config.agent_prompt_append.clone().into(),
-        );
-    }
-    if config.snapshot_retention_days != DEFAULT_SNAPSHOT_RETENTION_DAYS {
-        doc.insert(
-            "snapshotRetentionDays".into(),
-            config.snapshot_retention_days.into(),
-        );
-    }
-    if config.metric_retention_days != DEFAULT_METRIC_RETENTION_DAYS {
-        doc.insert(
-            "metricRetentionDays".into(),
-            config.metric_retention_days.into(),
-        );
-    }
-    if config.metric_detail_max_per_producer != DEFAULT_METRIC_DETAIL_MAX_PER_PRODUCER {
-        doc.insert(
-            "metricDetailMaxPerProducer".into(),
-            config.metric_detail_max_per_producer.into(),
-        );
-    }
-    if config.metric_detail_retention_days != DEFAULT_METRIC_DETAIL_RETENTION_DAYS {
-        doc.insert(
-            "metricDetailRetentionDays".into(),
-            config.metric_detail_retention_days.into(),
-        );
-    }
-    if !config.generated.exclude.is_empty() || !config.generated.include.is_empty() {
-        doc.insert(
-            "generated".into(),
-            serde_yaml::to_value(&config.generated).expect("generated paths serialize"),
-        );
-    }
-    if config.snapshot_max_file_bytes != DEFAULT_SNAPSHOT_MAX_FILE_BYTES {
-        doc.insert(
-            "snapshotMaxFileBytes".into(),
-            config.snapshot_max_file_bytes.into(),
-        );
-    }
-    if config.snapshot_turn_budget_ms != DEFAULT_SNAPSHOT_TURN_BUDGET_MS {
-        doc.insert(
-            "snapshotTurnBudgetMs".into(),
-            config.snapshot_turn_budget_ms.into(),
-        );
-    }
-    if config.symbols_max_files_per_snapshot != DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT {
-        doc.insert(
-            "symbolsMaxFilesPerSnapshot".into(),
-            config.symbols_max_files_per_snapshot.into(),
-        );
-    }
-    if config.inject_session_context != DEFAULT_INJECT_SESSION_CONTEXT {
-        doc.insert(
-            "injectSessionContext".into(),
-            config.inject_session_context.into(),
-        );
-    }
-    if let Some(tint) = &config.icon_tint {
-        doc.insert("iconTint".into(), tint.as_str().into());
-    }
-    if !config.lsp_servers.is_empty() {
+    config_entries(config, fallback_name)
+        .into_iter()
+        .filter(|e| e.set)
+        .map(|e| (serde_yaml::Value::String(e.key.into()), e.value))
+        .collect()
+}
+
+/// One project key's value in `config`, and whether the file sets it
+/// (else it is the default — and `value` is what that default is).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfigEntry {
+    pub key: &'static str,
+    pub value: serde_yaml::Value,
+    pub set: bool,
+}
+
+/// Every key the project file can hold, with the value `config` gives it —
+/// the file's, or the default — and whether that differs from the default
+/// (P6.H1: the effective-config view shows both). `render_project_config`
+/// is the set ones.
+pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigEntry> {
+    let mut out = Vec::new();
+    let mut put = |key: &'static str, value: serde_yaml::Value, set: bool| {
+        out.push(ConfigEntry { key, value, set });
+    };
+    put(
+        "agents",
+        serde_yaml::to_value(&config.agents).expect("agents serialize"),
+        config.agents != vec![AgentKind::default()],
+    );
+    put(
+        "projectName",
+        if config.project_name.is_empty() {
+            fallback_name.into()
+        } else {
+            config.project_name.clone().into()
+        },
+        !config.project_name.is_empty() && config.project_name != fallback_name,
+    );
+    put(
+        "agentPromptAppend",
+        config.agent_prompt_append.clone().into(),
+        !config.agent_prompt_append.is_empty(),
+    );
+    put(
+        "snapshotRetentionDays",
+        config.snapshot_retention_days.into(),
+        config.snapshot_retention_days != DEFAULT_SNAPSHOT_RETENTION_DAYS,
+    );
+    put(
+        "metricRetentionDays",
+        config.metric_retention_days.into(),
+        config.metric_retention_days != DEFAULT_METRIC_RETENTION_DAYS,
+    );
+    put(
+        "metricDetailMaxPerProducer",
+        config.metric_detail_max_per_producer.into(),
+        config.metric_detail_max_per_producer != DEFAULT_METRIC_DETAIL_MAX_PER_PRODUCER,
+    );
+    put(
+        "metricDetailRetentionDays",
+        config.metric_detail_retention_days.into(),
+        config.metric_detail_retention_days != DEFAULT_METRIC_DETAIL_RETENTION_DAYS,
+    );
+    put(
+        "generated",
+        serde_yaml::to_value(&config.generated).expect("generated paths serialize"),
+        !config.generated.exclude.is_empty() || !config.generated.include.is_empty(),
+    );
+    put(
+        "snapshotMaxFileBytes",
+        config.snapshot_max_file_bytes.into(),
+        config.snapshot_max_file_bytes != DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
+    );
+    put(
+        "snapshotTurnBudgetMs",
+        config.snapshot_turn_budget_ms.into(),
+        config.snapshot_turn_budget_ms != DEFAULT_SNAPSHOT_TURN_BUDGET_MS,
+    );
+    put(
+        "symbolsMaxFilesPerSnapshot",
+        config.symbols_max_files_per_snapshot.into(),
+        config.symbols_max_files_per_snapshot != DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT,
+    );
+    put(
+        "injectSessionContext",
+        config.inject_session_context.into(),
+        config.inject_session_context != DEFAULT_INJECT_SESSION_CONTEXT,
+    );
+    put(
+        "iconTint",
+        config
+            .icon_tint
+            .as_ref()
+            .map_or(serde_yaml::Value::Null, |t| t.as_str().into()),
+        config.icon_tint.is_some(),
+    );
+    {
         let mut lsp = serde_yaml::Mapping::new();
         let servers: Vec<_> = config
             .lsp_servers
@@ -1321,18 +1342,14 @@ pub fn render_project_config(config: &OxplowConfig, fallback_name: &str) -> serd
             })
             .collect();
         lsp.insert("servers".into(), serde_yaml::Value::Sequence(servers));
-        doc.insert("lsp".into(), serde_yaml::Value::Mapping(lsp));
+        put(
+            "lsp",
+            serde_yaml::Value::Mapping(lsp),
+            !config.lsp_servers.is_empty(),
+        );
     }
-
-    let c = &config.collection;
-    if c.test_command.is_some()
-        || c.fast_test_command.is_some()
-        || !c.reports.is_empty()
-        || !c.test_run_patterns.is_empty()
-        || !c.analysis_run_patterns.is_empty()
-        || c.agent_hint.is_some()
-        || !c.plugins.is_empty()
     {
+        let c = &config.collection;
         let mut col = serde_yaml::Mapping::new();
         if let Some(v) = &c.test_command {
             col.insert("testCommand".into(), v.clone().into());
@@ -1398,81 +1415,80 @@ pub fn render_project_config(config: &OxplowConfig, fallback_name: &str) -> serd
                 .collect();
             col.insert("plugins".into(), serde_yaml::Value::Sequence(plugins));
         }
-        doc.insert("collection".into(), serde_yaml::Value::Mapping(col));
+        let set = !col.is_empty();
+        put("collection", serde_yaml::Value::Mapping(col), set);
     }
-
-    if !config.metrics.is_empty() {
-        let metrics: Vec<_> = config.metrics.iter().map(minimal_yaml).collect();
-        doc.insert("metrics".into(), serde_yaml::Value::Sequence(metrics));
-    }
-
-    if !config.gauges.is_empty() {
-        let gauges: Vec<_> = config.gauges.iter().map(minimal_yaml).collect();
-        doc.insert("gauges".into(), serde_yaml::Value::Sequence(gauges));
-    }
-
-    if !config.measures.is_empty() {
-        let measures: Vec<_> = config.measures.iter().map(minimal_yaml).collect();
-        doc.insert("measures".into(), serde_yaml::Value::Sequence(measures));
-    }
-
-    if !config.dimensions.is_empty() {
-        let dimensions: Vec<_> = config
-            .dimensions
-            .iter()
-            .map(dimension_entry_to_yaml)
-            .collect();
-        doc.insert("dimensions".into(), serde_yaml::Value::Sequence(dimensions));
-    }
-
-    if !config.zones.is_empty() {
-        doc.insert(
-            "zones".into(),
-            serde_yaml::to_value(&config.zones).expect("zones serialize"),
-        );
-    }
-
-    if !config.agent_models.is_empty() {
-        doc.insert(
-            "agentModels".into(),
-            serde_yaml::to_value(&config.agent_models).expect("agent models serialize"),
-        );
-    }
-
-    if !config.acp_agents.is_empty() {
-        doc.insert(
-            "acpAgents".into(),
-            serde_yaml::to_value(&config.acp_agents).expect("acp agents serialize"),
-        );
-    }
-
-    if !config.extension_instances.is_empty() {
-        doc.insert(
-            "extensionInstances".into(),
-            serde_yaml::to_value(&config.extension_instances)
-                .expect("extension instances serialize"),
-        );
-    }
-
-    if !config.extensions_disabled.is_empty() {
+    put(
+        "metrics",
+        serde_yaml::Value::Sequence(config.metrics.iter().map(minimal_yaml).collect()),
+        !config.metrics.is_empty(),
+    );
+    put(
+        "gauges",
+        serde_yaml::Value::Sequence(config.gauges.iter().map(minimal_yaml).collect()),
+        !config.gauges.is_empty(),
+    );
+    put(
+        "measures",
+        serde_yaml::Value::Sequence(config.measures.iter().map(minimal_yaml).collect()),
+        !config.measures.is_empty(),
+    );
+    put(
+        "dimensions",
+        serde_yaml::Value::Sequence(
+            config
+                .dimensions
+                .iter()
+                .map(dimension_entry_to_yaml)
+                .collect(),
+        ),
+        !config.dimensions.is_empty(),
+    );
+    put(
+        "zones",
+        serde_yaml::to_value(&config.zones).expect("zones serialize"),
+        !config.zones.is_empty(),
+    );
+    put(
+        "agentModels",
+        serde_yaml::to_value(&config.agent_models).expect("agent models serialize"),
+        !config.agent_models.is_empty(),
+    );
+    put(
+        "acpAgents",
+        serde_yaml::to_value(&config.acp_agents).expect("acp agents serialize"),
+        !config.acp_agents.is_empty(),
+    );
+    put(
+        "extensionInstances",
+        serde_yaml::to_value(&config.extension_instances).expect("extension instances serialize"),
+        !config.extension_instances.is_empty(),
+    );
+    {
         let mut ext = serde_yaml::Mapping::new();
         ext.insert(
             "disabled".into(),
             serde_yaml::to_value(&config.extensions_disabled).expect("disabled serialize"),
         );
-        doc.insert("extensions".into(), serde_yaml::Value::Mapping(ext));
+        put(
+            "extensions",
+            serde_yaml::Value::Mapping(ext),
+            !config.extensions_disabled.is_empty(),
+        );
     }
-
-    if !config.ai_roles.is_empty() {
+    {
         let mut ai = serde_yaml::Mapping::new();
         ai.insert(
             "roles".into(),
             serde_yaml::to_value(&config.ai_roles).expect("ai roles serialize"),
         );
-        doc.insert("ai".into(), serde_yaml::Value::Mapping(ai));
+        put(
+            "ai",
+            serde_yaml::Value::Mapping(ai),
+            !config.ai_roles.is_empty(),
+        );
     }
-
-    doc
+    out
 }
 
 /// Write a **global** metrics manifest (`global_config_dir()/metrics/<name>.yaml`)
@@ -1709,16 +1725,7 @@ fn validate_acp_agents(raw: Vec<AcpAgentConfig>) -> Result<Vec<AcpAgentConfig>, 
 }
 
 fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigError> {
-    let agents = match (raw.agents, raw.agent) {
-        (Some(_), Some(_)) => {
-            return Err(ConfigError::Invalid(
-                "configure either agents or the legacy agent key, not both".into(),
-            ));
-        }
-        (agents, legacy_agent) => {
-            validate_agents(agents.or_else(|| legacy_agent.map(|agent| vec![agent])))?
-        }
-    };
+    let agents = validate_agents(raw.agents)?;
 
     let project_name = match raw.project_name {
         Some(name) => {
@@ -3460,29 +3467,13 @@ dimensions:
         );
     }
 
+    /// The single-`agent` form is gone: `agents` is the one key.
     #[test]
-    fn loads_legacy_agent_as_single_enabled_agent() {
+    fn the_old_single_agent_key_is_refused() {
         let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "agent: codex\nprojectName: explicit-name\n",
-        )
-        .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.agents, vec![AgentKind::Codex]);
-        assert_eq!(cfg.project_name, "explicit-name");
-    }
-
-    #[test]
-    fn rejects_agents_and_legacy_agent_together() {
-        let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "agent: claude\nagents: [claude, codex]\n",
-        )
-        .unwrap();
-        let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("not both")));
+        std::fs::write(cfg_path(dir.path()), "agent: codex\n").unwrap();
+        let err = load_project_config(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("agent"), "{err}");
     }
 
     #[test]

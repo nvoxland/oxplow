@@ -323,12 +323,6 @@ async fn config_setters_round_trip() {
     commands::generated::set_agent_prompt_append(app.state(), "be concise".into())
         .await
         .unwrap();
-    commands::generated::set_snapshot_retention_days(app.state(), 30)
-        .await
-        .unwrap();
-    commands::generated::set_snapshot_max_file_bytes(app.state(), 1_000_000)
-        .await
-        .unwrap();
     commands::generated::set_generated(
         app.state(),
         oxplow_config::GeneratedConfig {

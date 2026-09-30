@@ -23,7 +23,6 @@ use crate::{
 /// programs or steers agents must be listed here (a test enforces it).
 pub const HUMAN_ONLY_KEYS: &[&str] = &[
     "agents",
-    "agent",
     "agentModels",
     "acpAgents",
     "extensionInstances",
@@ -144,6 +143,31 @@ pub fn with_key(
 
 #[cfg(test)]
 mod tests {
+
+    /// P6.H1: the effective-config view lists every key the file schema
+    /// knows, each with a value (its default when unset).
+    #[test]
+    fn every_schema_key_has_an_effective_value() {
+        let config = crate::default_config("demo".into());
+        let entries: std::collections::BTreeSet<&str> = crate::config_entries(&config, "demo")
+            .iter()
+            .map(|e| e.key)
+            .collect();
+        let keys: std::collections::BTreeSet<String> =
+            config_keys().into_iter().map(|k| k.key).collect();
+        let entries: std::collections::BTreeSet<String> =
+            entries.into_iter().map(str::to_string).collect();
+        assert_eq!(entries, keys);
+        let retention = crate::config_entries(&config, "demo")
+            .into_iter()
+            .find(|e| e.key == "snapshotRetentionDays")
+            .unwrap();
+        assert!(!retention.set);
+        assert_eq!(
+            retention.value,
+            serde_yaml::Value::from(crate::DEFAULT_SNAPSHOT_RETENTION_DAYS)
+        );
+    }
     use super::*;
     use serde_json::json;
 

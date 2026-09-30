@@ -52,20 +52,6 @@ pub async fn set_agents(svc: &Services, agents: Vec<AgentKind>) -> Result<Oxplow
     set_key(svc, "agents", Some(value_of(&agents))).await
 }
 
-pub async fn set_snapshot_retention_days(
-    svc: &Services,
-    days: u32,
-) -> Result<OxplowConfig, IpcError> {
-    set_key(svc, "snapshotRetentionDays", Some(json!(days))).await
-}
-
-pub async fn set_snapshot_max_file_bytes(
-    svc: &Services,
-    bytes: u64,
-) -> Result<OxplowConfig, IpcError> {
-    set_key(svc, "snapshotMaxFileBytes", Some(json!(bytes))).await
-}
-
 /// Set (or clear, with `None`/blank) the launch-model override for one
 /// agent — `agentModels.<agent>` in .oxplow/project.yaml. Only opencode consumes
 /// the override today.
@@ -183,8 +169,6 @@ mod tests {
                 "set_agent_model",
                 json!({ "agent": "opencode", "model": "m1" }),
             ),
-            ("set_snapshot_retention_days", json!({ "days": 9 })),
-            ("set_snapshot_max_file_bytes", json!({ "bytes": 2048 })),
             (
                 "set_generated",
                 json!({ "generated": { "exclude": ["dist"], "include": [] } }),
@@ -212,21 +196,12 @@ mod tests {
                 "agents",
                 "agentPromptAppend",
                 "agentModels",
-                "snapshotRetentionDays",
-                "snapshotMaxFileBytes",
                 "generated",
                 "extensions",
             ]
         );
         let file = std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap();
-        for expected in [
-            "codex",
-            "Be brief.",
-            "m1",
-            "snapshotRetentionDays: 9",
-            "dist",
-            "oxplow-analytics",
-        ] {
+        for expected in ["codex", "Be brief.", "m1", "dist", "oxplow-analytics"] {
             assert!(file.contains(expected), "{expected} missing from:\n{file}");
         }
         // Clearing a value unsets its key.
@@ -242,14 +217,5 @@ mod tests {
             audited_config_sets(&svc).await.last().unwrap().1,
             "agentModels"
         );
-    }
-
-    #[tokio::test]
-    async fn set_snapshot_retention_days_round_trips_arg() {
-        let (svc, _dir) = services();
-        let out = crate::dispatch("set_snapshot_retention_days", json!({ "days": 7 }), &svc)
-            .await
-            .unwrap();
-        assert_eq!(out.get("snapshotRetentionDays"), Some(&json!(7)));
     }
 }

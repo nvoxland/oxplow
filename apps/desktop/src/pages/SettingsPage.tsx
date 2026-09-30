@@ -1,15 +1,17 @@
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import {
+  effectiveConfig,
   getConfig,
   setAgentModel,
   setAgents,
   setAgentPromptAppend,
-  setGenerated,
-  setSnapshotMaxFileBytes,
-  setSnapshotRetentionDays,
+  subscribeOxplowEvents,
   type AgentKind,
 } from "../api.js";
+import { insertIntoAgent } from "../agent-input-bus.js";
+import type { EffectiveSetting } from "../tauri-bridge/generated/bindings.js";
+import { askToChange, groupSettings, matchesSearch, valueText } from "./settingsModel.js";
 import { Page } from "../tabs/Page.js";
 import { LspServersSection } from "../components/LspServersSection.js";
 import { ExtensionsSection } from "../components/ExtensionsSection.js";
@@ -26,20 +28,18 @@ export interface SettingsPageProps {
 }
 
 /**
- * Settings rendered as a full page rather than a modal. Saves apply
- * immediately to .oxplow/project.yaml (server side), so there's no lost-edit-on-stray-
- * click risk; the slideover/modal-bag of tradeoffs doesn't apply here.
+ * Settings as a view (P6.H1): every setting that shapes this project —
+ * its value and where it comes from (default, your global config, the
+ * project, an extension) — searchable, each with Ask the Agent to Change
+ * This. Direct controls remain below only for what only a person may set
+ * (agents, AI, language servers, extensions, integrations, programs).
  */
 export function SettingsPage({ onClose }: SettingsPageProps) {
   const [promptAppend, setPromptAppend] = useState("");
   const [agents, setAgentsState] = useState<AgentKind[]>(["claude"]);
   const [opencodeModel, setOpencodeModel] = useState("");
-  const [retentionDays, setRetentionDays] = useState("7");
-  const [maxFileMiB, setMaxFileMiB] = useState("5");
-  const [generatedText, setGeneratedText] = useState("");
-  // The textarea edits `generated.exclude`; preserve any `include`
-  // overrides set in .oxplow/project.yaml across a save.
-  const [generatedInclude, setGeneratedInclude] = useState<string[]>([]);
+  const [settings, setSettings] = useState<EffectiveSetting[]>([]);
+  const [search, setSearch] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,10 +54,6 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         setPromptAppend(config.agentPromptAppend ?? "");
         setAgentsState(config.agents?.length ? config.agents : ["claude"]);
         setOpencodeModel(config.agentModels?.opencode ?? "");
-        setRetentionDays(String(config.snapshotRetentionDays));
-        setMaxFileMiB((config.snapshotMaxFileBytes / (1024 * 1024)).toString());
-        setGeneratedText((config.generated?.exclude ?? []).join("\n"));
-        setGeneratedInclude(config.generated?.include ?? []);
         setLoaded(true);
       })
       .catch((e) => {
@@ -66,37 +62,29 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       });
   }, []);
 
+  // The view re-reads when the config changes, whoever changed it.
+  useEffect(() => {
+    const load = () =>
+      void effectiveConfig()
+        .then(setSettings)
+        .catch((e) => setError(String(e)));
+    load();
+    return subscribeOxplowEvents((event) => {
+      if (event.kind === "configChanged") load();
+    });
+  }, []);
+
   async function handleSave() {
     setSaving(true);
     setError(null);
     setSavedMessage(null);
     try {
-      const days = Number(retentionDays);
-      if (!Number.isFinite(days) || days < 0) {
-        throw new Error("Snapshot retention days must be a non-negative number.");
-      }
-      const miB = Number(maxFileMiB);
-      if (!Number.isFinite(miB) || miB <= 0) {
-        throw new Error("Snapshot max file size must be a positive number.");
-      }
-      const bytes = Math.floor(miB * 1024 * 1024);
-      if (bytes < 1024) {
-        throw new Error("Snapshot max file size must be at least 1 KiB.");
-      }
-      const entries = generatedText
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-
       if (agents.length === 0) {
         throw new Error("Enable at least one agent.");
       }
       await setAgents(agents);
       await setAgentModel("opencode", opencodeModel.trim() || null);
       await setAgentPromptAppend(promptAppend);
-      await setSnapshotRetentionDays(days);
-      await setSnapshotMaxFileBytes(bytes);
-      await setGenerated({ exclude: entries, include: generatedInclude });
       setSavedMessage("Saved. Agent prompt applies to newly-started sessions.");
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
@@ -117,8 +105,33 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         ) : null
       }
     >
-      <div style={{ padding: "20px 24px", maxWidth: 720 }}>
-        <Section title="Agents">
+      <div style={{ padding: "20px 24px", maxWidth: 820 }}>
+        <Section title="Every Setting">
+          <Hint>
+            What shapes this project, where each value comes from, and Ask the Agent to Change This. A setting only a
+            person may change asks you to confirm when the agent changes it — or change it yourself below.
+          </Hint>
+          <input
+            data-testid="settings-search"
+            placeholder="Search settings"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setSearch("");
+            }}
+            style={{ ...numberInputStyle, width: "100%", marginBottom: 10 }}
+          />
+          {groupSettings(settings.filter((s) => matchesSearch(s, search))).map((g) => (
+            <div key={g.title} data-testid={`settings-group-${g.title}`} style={{ marginBottom: 12 }}>
+              <div style={groupTitleStyle}>{g.title}</div>
+              {g.settings.map((s) => (
+                <SettingRow key={s.key} setting={s} />
+              ))}
+            </div>
+          ))}
+        </Section>
+
+        <Section title="Agents" id="settings-agents">
           <Hint>
             Enabled agents for this project. The first enabled agent is the default for new threads.
           </Hint>
@@ -159,61 +172,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           />
         </Section>
 
-        <Section title="File Snapshots">
-          <Hint>
-            Snapshots capture the project's files around every agent turn so history and diffs stay
-            available after branches change.
-          </Hint>
-          <Field
-            label="Retention (days)"
-            hint="0 disables pruning. Latest per-stream snapshot is always kept."
-            input={
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={retentionDays}
-                onChange={(event) => setRetentionDays(event.target.value)}
-                disabled={!loaded || saving}
-                style={numberInputStyle}
-              />
-            }
-          />
-          <Field
-            label="Max file size (MiB)"
-            hint='Files larger than this get a stat-only entry (diffs show "oversize").'
-            input={
-              <input
-                type="number"
-                min={0.001}
-                step={0.5}
-                value={maxFileMiB}
-                onChange={(event) => setMaxFileMiB(event.target.value)}
-                disabled={!loaded || saving}
-                style={numberInputStyle}
-              />
-            }
-          />
-        </Section>
-
-        <Section title="Generated Directories">
-          <Hint>
-            Directory names (one per line, matched at any path segment) excluded from fs-watch,
-            snapshot tracking, and the quick-open file index. Added on top of the built-in
-            exclusions (.git, .oxplow). The quick-open index also skips .gitignore&apos;d paths
-            automatically; list build dirs here so fs-watch and snapshots skip them too.
-          </Hint>
-          <textarea
-            value={generatedText}
-            onChange={(event) => setGeneratedText(event.target.value)}
-            disabled={!loaded || saving}
-            rows={5}
-            placeholder={"e.g.\ncoverage\n.cache"}
-            style={{ ...textareaStyle, minHeight: 100 }}
-          />
-        </Section>
-
-        <Section title="Language Servers">
+        <Section title="Language Servers" id="settings-lsp">
           <Hint>
             Servers come from <code>.oxplow/project.yaml</code> (<code>lsp.servers</code>) or one-click
             installs from the Mason registry (landed in <code>.oxplow/lsp/</code>). Changes apply
@@ -222,7 +181,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           <LspServersSection />
         </Section>
 
-        <Section title="Extensions">
+        <Section title="Extensions" id="settings-extensions">
           <Hint>
             Extensions add lenses (pages you or your agent build over oxplow&apos;s data). They live in{" "}
             <code>oxplow/extensions/</code> and are ordinary project files: commit them to share with your
@@ -240,7 +199,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           <DataSection />
         </Section>
 
-        <Section title="Integrations">
+        <Section title="Integrations" id="settings-integrations">
           <Hint>
             Outside systems (an issue tracker, say) that extensions connect through a provider program. Each
             instance&apos;s config is saved in <code>.oxplow/project.yaml</code> for your team; approving and running
@@ -252,7 +211,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 
         <SettingsSlotSections section={(title, body) => <Section title={title}>{body}</Section>} />
 
-        <Section title="AI">
+        <Section title="AI" id="settings-ai">
           <Hint>
             Models oxplow itself can call: for summaries, typed questions, and extensions. Your coding agents
             are separate. Providers and roles are saved for all your projects; keys go to your OS keychain,
@@ -350,9 +309,87 @@ function AgentPicker({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+/** Where a person-only setting's direct control is, if the page has one. */
+function controlFor(key: string): string | null {
+  if (["agents", "agentModels", "acpAgents", "agentPromptAppend"].includes(key)) return "settings-agents";
+  if (key === "ai" || key.startsWith("ai.")) return "settings-ai";
+  if (key === "lsp") return "settings-lsp";
+  if (key === "extensions") return "settings-extensions";
+  if (key === "extensionInstances") return "settings-integrations";
+  return null;
+}
+
+const ORIGIN_LABEL: Record<EffectiveSetting["origin"], string> = {
+  default: "default",
+  global: "your global config",
+  project: "project",
+  extension: "extension",
+};
+
+function SettingRow({ setting: s }: { setting: EffectiveSetting }) {
+  const control = s.humanOnly ? controlFor(s.key) : null;
   return (
-    <section style={{ marginBottom: 28 }}>
+    <div data-testid={`setting-${s.key}`} style={settingRowStyle}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <code style={{ fontSize: "var(--text-sm)" }}>{s.key}</code>
+        <span data-testid={`setting-origin-${s.key}`} style={originChipStyle} title="Where the value comes from">
+          {ORIGIN_LABEL[s.origin]}
+          {s.extension ? `: ${s.extension}` : ""}
+        </span>
+        {s.humanOnly ? <span style={hintInlineStyle}>yours to set</span> : null}
+        <span style={{ flex: 1 }} />
+        {control ? (
+          <button
+            type="button"
+            style={linkButtonStyle}
+            onClick={() => document.getElementById(control)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          >
+            Change It Here
+          </button>
+        ) : null}
+        <button
+          type="button"
+          data-testid={`setting-ask-${s.key}`}
+          style={linkButtonStyle}
+          title="Put a request to change this in the agent's input (it isn't sent)"
+          onClick={() => insertIntoAgent(askToChange(s))}
+        >
+          Ask the Agent to Change This
+        </button>
+      </div>
+      <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--text-primary)", marginTop: 2 }}>
+        {valueText(s.value)}
+      </div>
+      {s.doc ? <div style={hintInlineStyle}>{s.doc}</div> : null}
+    </div>
+  );
+}
+
+const groupTitleStyle: CSSProperties = { fontWeight: 600, fontSize: "var(--text-sm)", margin: "6px 0 4px" };
+const settingRowStyle: CSSProperties = {
+  padding: "6px 8px",
+  borderBottom: "1px solid var(--border-subtle)",
+};
+const originChipStyle: CSSProperties = {
+  fontSize: 10,
+  padding: "1px 6px",
+  borderRadius: 8,
+  border: "1px solid var(--border-subtle)",
+  color: "var(--text-secondary)",
+};
+const hintInlineStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-secondary)" };
+const linkButtonStyle: CSSProperties = {
+  background: "none",
+  border: "none",
+  padding: 0,
+  color: "var(--accent)",
+  cursor: "pointer",
+  fontSize: "var(--text-xs)",
+};
+
+function Section({ title, id, children }: { title: string; id?: string; children: React.ReactNode }) {
+  return (
+    <section id={id} style={{ marginBottom: 28 }}>
       <h2
         style={{
           fontSize: 11,

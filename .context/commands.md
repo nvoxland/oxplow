@@ -116,6 +116,28 @@ value came back as an "extra" over the one just written). Adding a field
 to `RawConfig` makes it managed, documented and settable at once.
 `set_zones` is gone (tsk392): `zones` is just a key.
 
+**Every key has an entry** (P6.H1): `oxplow_config::config_entries`
+gives each key its value — the file's, or the default's — and whether the
+file sets it; `render_project_config` is the set ones, and a test holds
+the entries to exactly the schema's keys. The single-agent `agent` key is
+gone: `agents` is the one key (an old file's `agent:` is refused as an
+unknown field).
+
+**Settings is a view** (`crates/oxplow-app/src/effective_config.rs`, UI
+RPC `effective_config`): one `EffectiveSetting { key, doc, value, origin,
+extension?, humanOnly, schema }` per project key (`project` when the file
+sets it, else `default` with the default's value), per AI role
+(`ai.roles.<role>`: `project` when the project overrides it, `global`
+from `ai.yaml`, `default` when unbound; person-only), and per metric and
+dimension from the global manifests (`global`) and enabled extensions
+(`extension`). `SettingsPage` lists them grouped and searchable
+(`pages/settingsModel.ts`), each with **Ask the Agent to Change This**
+(a prompt naming the key, its doc and its value, inserted, never sent) —
+a person-only key's `config.set` asks the person to confirm. Direct
+controls remain only for person-only settings (agents, AI, language
+servers, extensions, integrations, programs); `set_snapshot_retention_days`
+and `set_snapshot_max_file_bytes` went with their editors.
+
 `CommandBus::list(actor)` is the specs that actor may run —
 `list_commands` for the agent, the launcher for the human.
 
@@ -158,7 +180,7 @@ is a second command of the same name.
 | `work_item.link { ref, target, link_type, thread? }` / `work_item.comment { ref, body }` | `Tx` over `task_satellite::create_link_tx` / `add_task_note_tx` (`commands/work_item.rs`, P5.C2) | all invokers; not undoable. A typed link (made in `thread`, the caller's by default) or a note on the task, with its `page_ref` edges, logging `work_item.linked@1` / `work_item.commented@1` caused by the run. They replaced MCP `link_tasks`. |
 | `effort.open { work_item, thread? }` / `effort.close { effort, summary? }` | `Tx` over `effort_store::start_tx` / `finish_tx` (`commands/effort.rs`, P2.6.4) | all invokers; not undoable. For a work item whose provider doesn't open its own effort (`work_item:linear:ENG-12`): a registered provider declaring `in_progress_opens_effort` — oxplow's tasks, whose effort follows their status — is refused; an unregistered provider's item takes one. `thread` defaults to the caller's and must be its stream's working (active) thread; an agent may name only a thread in its own stream (and close only its stream's efforts). A second open on the same item is refused naming the open effort. Logs `effort.opened` / `effort.closed` caused by the run; the snapshot pin is the effort-lifecycle pump consumer's. |
 | `config.list_keys {}` / `config.get { key }` | `Tx` (read-only) over the key registry (`commands/config_commands.rs`) | every `.oxplow/project.yaml` key with doc, value schema, current value, `human_only` |
-| `config.set { key, value }` / `config.unset { key }` | `Tx`: validate against the key's schema, take the new document through the loader's own validation (`oxplow_config::keys::with_key`); after commit, write the file and swap the in-memory config | undoable (inverse restores the prior value or unsets); logs `config.changed@1 { key, before, after }`; `after_commit` broadcasts `ConfigChanged`; a **human-only key** (`HUMAN_ONLY_KEYS`: `ai`, `agents`, `agent`, `agentModels`, `acpAgents`, `extensionInstances`, `lsp`, `collection`, `extensions`, `gauges`, `agentPromptAppend` — each runs a program, picks the model, enables code, or steers every agent; a test fails if a key documented as running programs or steering agents isn't listed) needs a person's confirmation per input |
+| `config.set { key, value }` / `config.unset { key }` | `Tx`: validate against the key's schema, take the new document through the loader's own validation (`oxplow_config::keys::with_key`); after commit, write the file and swap the in-memory config | undoable (inverse restores the prior value or unsets); logs `config.changed@1 { key, before, after }`; `after_commit` broadcasts `ConfigChanged`; a **human-only key** (`HUMAN_ONLY_KEYS`: `ai`, `agents`, `agentModels`, `acpAgents`, `extensionInstances`, `lsp`, `collection`, `extensions`, `gauges`, `agentPromptAppend` — each runs a program, picks the model, enables code, or steers every agent; a test fails if a key documented as running programs or steering agents isn't listed) needs a person's confirmation per input |
 | `metric.enable { keys, enabled }` | `Tx`: turns metrics on or off — computes the new `metrics:` list with `MetricsService::apply_metric_enabled` (a bundled gauge is off until a `use:` names it; a producer/plugin metric is on until an `enabled: false` marker) and hands it to `config.set`'s core; an unknown key (not in `metric_catalog`) is refused | undoable (restores the prior list); logs `config.changed@1 { key: metrics, … }`; the reseed follows `ConfigChanged` |
 | `metric.record { key, value, subject?, dims?, stream? }` | `Tx` over `fact_store::record_facts_tx` (`commands/metric.rs`, P4.8) | not undoable. An asserted fact on the metric's source measure, stamped to match its filter, anchored to the stream's latest snapshot; the fact and the audit commit together. A formula or `count` metric, an unknown key, or another stream (for an agent) is refused. After commit: clears the fact memo, emits `MetricSamplesChanged` for the measure |
 | `metric.run { key, stream? }` / `metric.rebuild { force }` | `External` over `MetricsService::run_metric_by_key` / `rebuild_baseline` | not undoable. Run one gauge now, or every gauge's whole-tree baseline. They drive snapshot captures and gauge scripts, which own their own transactions |
@@ -193,8 +215,7 @@ edit and finish tasks but not move one to `in_progress` (tsk466); RPC
 `system:task_service`, but isn't audited.
 **Config is written only by `config.*`** (tsk515). The Settings page's
 typed IPC setters (`set_agents`, `set_agent_prompt_append`,
-`set_agent_model`, `set_snapshot_retention_days`,
-`set_snapshot_max_file_bytes`, `set_generated`, `set_extension_enabled`)
+`set_agent_model`, `set_generated`, `set_extension_enabled`)
 and `enable_metrics` each run `config.set` / `config.unset` as
 `Actor::Human`, confirmed — the person's click is the confirmation a
 person-only key asks for — through `oxplow_rpc::commands::config::set_key`.

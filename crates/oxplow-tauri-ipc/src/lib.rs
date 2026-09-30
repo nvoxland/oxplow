@@ -135,6 +135,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::query_sql,
             commands::generated::list_data_entities,
             commands::generated::prompt_catalog,
+            commands::generated::effective_config,
             commands::generated::get_panel_layout,
             commands::generated::set_panel_layout,
             // extensions + lenses
@@ -227,8 +228,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::get_config,
             commands::generated::set_agent_prompt_append,
             commands::generated::set_agents,
-            commands::generated::set_snapshot_retention_days,
-            commands::generated::set_snapshot_max_file_bytes,
             commands::generated::set_generated,
             commands::generated::set_agent_model,
             commands::generated::get_workspace_context,

@@ -56,6 +56,29 @@ pub async fn prompt_catalog(
     ))
 }
 
+/// Every setting with its value and where it comes from (P6.H1): the
+/// Settings view. UI-only: an agent reads `config.list_keys`.
+pub async fn effective_config(
+    svc: &Services,
+) -> Result<Vec<oxplow_app::effective_config::EffectiveSetting>, IpcError> {
+    let config = svc
+        .config
+        .read()
+        .map_err(|_| IpcError::internal("config lock poisoned"))?
+        .clone();
+    let root = svc.worktrees.resolve(None).await;
+    let extensions = svc.extension_catalog.get(&root);
+    let ai = svc.ai.settings().ok();
+    let global = oxplow_config::global_config_dir();
+    Ok(oxplow_app::effective_config::effective_config(
+        &config,
+        &svc.layout.project_dir,
+        ai.as_ref(),
+        global.as_deref(),
+        extensions.as_ref(),
+    ))
+}
+
 /// The person's left-nav layout (P6.G1): each panel's order, and whether
 /// it's hidden or collapsed. UI-only.
 pub async fn get_panel_layout(svc: &Services) -> Result<Vec<oxplow_db::PanelPlacement>, IpcError> {

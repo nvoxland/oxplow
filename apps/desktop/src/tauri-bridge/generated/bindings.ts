@@ -255,6 +255,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	effectiveConfig: () => typedError<EffectiveSetting[], IpcError>(__TAURI_INVOKE("effective_config")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getPanelLayout: () => typedError<PanelPlacement[], IpcError>(__TAURI_INVOKE("get_panel_layout")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -703,16 +708,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	setAgents: (agents: AgentKind[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agents", { agents })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setSnapshotRetentionDays: (days: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_retention_days", { days })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setSnapshotMaxFileBytes: (bytes: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_max_file_bytes", { bytes })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1790,6 +1785,9 @@ export type CommitRefLabel = {
 
 export type CommitRefLabelKind = "branch" | "tag";
 
+// Where a setting's value comes from.
+export type ConfigOrigin = "default" | "global" | "project" | "extension";
+
 // A config problem `check` reported.
 export type ConfigProblem = {
 	// A JSON pointer into the config (`/team`), `""` for the whole.
@@ -2003,6 +2001,24 @@ export type Divergence = {
 	// Files changed on both sides since they split, sorted.
 	overlapping_files: string[],
 	readiness: MergeReadiness,
+};
+
+// One setting as the Settings view shows it.
+export type EffectiveSetting = {
+	/**
+	 *  A project key (`snapshotRetentionDays`), or a scoped name
+	 *  (`ai.roles.main`, `metrics.<key>`, `dimensions.<key>`).
+	 */
+	key: string,
+	doc: string,
+	value: unknown,
+	origin: ConfigOrigin,
+	// The extension a value comes from (`origin: extension`).
+	extension: string | null,
+	// Only a person may set it; an agent's change asks them.
+	humanOnly: boolean,
+	// A project key's value schema; null for the rest.
+	schema: unknown,
 };
 
 export type Effort = {

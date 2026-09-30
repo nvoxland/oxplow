@@ -162,6 +162,7 @@ pub const MANIFEST: &[Capability] = &[
     // reads v_model and counts with query_sql.
     ui("list_data_entities"),
     ui("prompt_catalog"),
+    ui("effective_config"),
     ui("get_panel_layout"),
     ui("set_panel_layout"),
     both("list_extensions"),
@@ -372,8 +373,6 @@ pub const MANIFEST: &[Capability] = &[
     // ---- ui-only: config ----
     ui("get_config"),
     ui("set_agent_prompt_append"),
-    ui("set_snapshot_retention_days"),
-    ui("set_snapshot_max_file_bytes"),
     ui("set_generated"),
     ui("set_agent_model"),
     ui("get_workspace_context"),
