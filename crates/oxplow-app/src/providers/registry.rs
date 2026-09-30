@@ -360,9 +360,26 @@ impl Instance {
                 )));
             }
         }
+        for subject in &draft.subject {
+            check_subject(&self.spec.id, &self.ext.name, subject).map_err(&failed)?;
+        }
         Envelope::new(draft.event_type, draft.v, actor.source(), draft.payload)
             .map(|e| e.with_subject(draft.subject))
             .map_err(|e| failed(e.to_string()))
+    }
+}
+
+/// Whether a provider's event may name `subject`: only its own items
+/// (`work_item:<id>:…`) and its extension (`plugin:<ext>`).
+pub fn check_subject(provider: &str, extension: &str, subject: &str) -> Result<(), String> {
+    let own_item = subject.starts_with("work_item:")
+        && oxplow_domain::work_items::provider_of(subject).ok() == Some(provider);
+    if own_item || subject == format!("plugin:{extension}") {
+        Ok(())
+    } else {
+        Err(format!(
+            "provider `{extension}/{provider}` named `{subject}`, which isn't one of its own refs"
+        ))
     }
 }
 

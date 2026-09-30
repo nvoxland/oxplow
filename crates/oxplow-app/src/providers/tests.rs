@@ -490,3 +490,59 @@ async fn a_provider_runs_from_its_verified_copy() {
         std::fs::read_to_string(&script).unwrap()
     );
 }
+
+/// tsk548: a provider may emit only its capability's event types — a
+/// declared `provider.enabled` (which would clear another instance's
+/// automatic disable) is refused when the manifest loads.
+#[tokio::test]
+async fn a_provider_cannot_declare_another_core_event_type() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_extension(&project, "");
+    let mut declared = oxplow_provider_fake::declarations();
+    declared
+        .event_types
+        .push(oxplow_provider_protocol::model::EventTypeDecl {
+            event_type: "provider.enabled".into(),
+            v: 1,
+            schema: oxplow_domain::events::schema::schema_for::<
+                oxplow_domain::events::schema::ProviderEnabled,
+            >(),
+        });
+    std::fs::write(
+        project.join("oxplow/extensions/tracker/provider.json"),
+        serde_json::to_string(&declared).unwrap(),
+    )
+    .unwrap();
+    let loaded = crate::extensions::load_extensions(&project)
+        .into_iter()
+        .find(|e| e.name == EXT)
+        .unwrap();
+    assert!(loaded.providers.is_empty());
+    assert!(
+        loaded
+            .errors
+            .iter()
+            .any(|e| e.contains("provider.enabled@1") && e.contains("work_items")),
+        "{:?}",
+        loaded.errors
+    );
+}
+
+/// tsk548: an event's subjects are the provider's own items and its
+/// extension, nothing else.
+#[test]
+fn a_provider_event_names_only_its_own_refs() {
+    use super::registry::check_subject;
+    assert!(check_subject("fake", "tracker", "work_item:fake:W-1").is_ok());
+    assert!(check_subject("fake", "tracker", "plugin:tracker").is_ok());
+    for bad in [
+        "work_item:oxplow:tsk1",
+        "plugin:other",
+        "wiki:page",
+        "file:src/a.rs",
+        "garbage",
+    ] {
+        assert!(check_subject("fake", "tracker", bad).is_err(), "{bad}");
+    }
+}

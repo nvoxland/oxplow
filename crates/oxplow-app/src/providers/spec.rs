@@ -24,6 +24,17 @@ use serde::{Deserialize, Serialize};
 pub const CAPABILITIES: &[&str] = &[WORK_ITEMS];
 pub const WORK_ITEMS: &str = "work_items";
 
+/// The event types a provider of each capability may declare (and emit):
+/// its capability's projection event, nothing else — no other core type
+/// (`provider.enabled` would clear another instance's disable), and no
+/// types of its own yet.
+pub fn allowed_event_types(capability: &str) -> &'static [(&'static str, u32)] {
+    match capability {
+        WORK_ITEMS => &[("work_item.recorded", 1)],
+        _ => &[],
+    }
+}
+
 /// The commands a work-items provider must declare (`link` and `comment`
 /// too when its features say so): what `ExternalWorkItems` calls.
 pub const WORK_ITEMS_COMMANDS: &[&str] = &["create", "update", "transition"];
@@ -138,6 +149,24 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
             spec.capability
         ));
     };
+    let allowed = allowed_event_types(&spec.capability);
+    if let Some(t) = declared
+        .event_types
+        .iter()
+        .find(|t| !allowed.contains(&(t.event_type.as_str(), t.v)))
+    {
+        return Err(format!(
+            "provider `{id}` declares `{}@{}`, but a {} provider may emit only {}",
+            t.event_type,
+            t.v,
+            spec.capability,
+            allowed
+                .iter()
+                .map(|(t, v)| format!("`{t}@{v}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
     for command in &declared.commands {
         oxplow_domain::CommandSpec::validate_name(&format!("{id}.{}", command.name))
             .map_err(|e| format!("provider `{id}`: {e}"))?;

@@ -171,12 +171,17 @@ counts as a failure, and its next call restarts it after a backoff that
 doubles from `MachineEnv.provider_backoff` (1 s in the app, 0 in
 `Services::in_memory`) up to 60 s. `stop(instance)` removes both and
 kills the process. An id already used as a command namespace or
-provider is refused, and so is a declared event type the host doesn't
-know with exactly that schema (a provider emits core types only for
-now; its own types are P7). A command's run invokes the process and
-hands the bus its result, its inverse (as `<id>.<command>`) and its
-events — refused if a type isn't declared or a `work_item.recorded`
-names another provider's item.
+provider is refused. **A provider emits only its capability's event
+types** (`spec::allowed_event_types`: `work_items` → `work_item.recorded@1`;
+tsk548): declaring any other type — another core one such as
+`provider.enabled`, which would clear another instance's disable — is
+refused when the manifest loads, and the declared schema must equal
+core's (checked at enable). Its own types are P7. A command's run
+invokes the process and hands the bus its result, its inverse (as
+`<id>.<command>`) and its events — refused if a type isn't declared, a
+`work_item.recorded` names another provider's item, or a subject isn't
+one of its own refs (`check_subject`: `work_item:<id>:…` or
+`plugin:<ext>`).
 
 **Health** (`InstanceHealth { state, consecutive_failures, last_ok_at,
 mean_invoke_ms }`, per machine, in memory): `state` is `off`,
