@@ -30,6 +30,7 @@ members = [
     "crates/oxplow-ai",
     "crates/oxplow-acp-fake",
     "crates/oxplow-provider-protocol",
+    "crates/oxplow-provider-fake",
 ]
 
 [workspace.package]

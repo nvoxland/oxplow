@@ -3,7 +3,7 @@
 A provider is a program oxplow talks to — an issue tracker's bridge, a
 docs system's — that implements one of oxplow's capabilities (work items
 first) outside the app (P5.D, `target-architecture.md` §10). This doc
-covers the protocol (D1); the fake provider (D2), the host with its
+covers the protocol (D1) and the fake provider (D2); the host with its
 consent and spawn rules (D3), instances and health (D4) and the
 conformance kit (D5) extend it as they land.
 
@@ -55,3 +55,30 @@ checks a message against its golden (`for_message` picks it by method),
 which the conformance kit runs on every message. Generating TypeScript
 bindings for what the UI shows comes with the host (D3/D4); there is no
 stub generation for provider authors.
+
+## The fake provider (`crates/oxplow-provider-fake`)
+
+A scripted **work-items** provider, lib + bin (the `oxplow-acp-fake`
+pattern), that the host's tests and the conformance kit drive over real
+stdio. `declarations()` is its `InitializeResult`: the `work_items`
+capability (hierarchy, comments and links; not
+`in_progress_opens_effort`), the commands `create` / `update` /
+`transition` / `link` / `comment` (effect `record`, no confirmation), the
+`work_item.recorded@1` event type with the core schema, a `work_items`
+collector over the `work_item` entity, and a config schema requiring
+`team`. `check` returns handle `fake:<team>` or a `/team` problem. Items
+live in memory as `work_item:fake:W-<n>` with native states `Backlog`,
+`Doing`, `Stuck`, `Shipped`, `Dropped` (one per canonical state); every
+`invoke` returns the `work_item.recorded` events the host logs. `read`
+streams each item after the cursor as `$/record`, then `$/state
+{ cursor }`, then `{ records }`.
+
+**Script hooks** — `OXPLOW_FAKE_HOOKS` at spawn, or a `fake/hooks
+{ hooks }` notification mid-session (comma-separated):
+`fail-next:<n>` (the next n check/invoke/read fail `Internal`),
+`slow:<ms>` (invoke and read wait first; `$/cancel` interrupts them with
+`Cancelled`), `crash` (the next request drops the connection; the binary
+exits 3) and `bad-declarations` (`initialize` answers something other
+than `declarations()`, for the host's handshake check).
+`tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
+notifications against the goldens.
