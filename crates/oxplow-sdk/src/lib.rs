@@ -305,15 +305,18 @@ pub struct CheckReport {
 /// manifest's shape and lifecycle, every cross-reference, every lens's
 /// shape, and — with a `layer` — a dry run of every lens and advisory
 /// against the semantic layer. This is what `validate_extension` returns
-/// and what `oxplow plugin check` prints.
+/// and what `oxplow plugin check` prints. `commands` (the running app's
+/// registry) checks launcher command entries; without it they're reported
+/// unchecked.
 pub async fn check(
     root: &Path,
     name: &str,
     catalog: &ExtensionCatalog,
     layer: Option<&SqlGateway>,
+    commands: Option<extensions::CommandSchemas<'_>>,
 ) -> Result<CheckReport, SdkError> {
     let extension = match layer {
-        Some(layer) => extensions::validate_extension(layer, catalog, root, name).await,
+        Some(layer) => extensions::validate_extension(layer, catalog, root, name, commands).await,
         None => catalog.named(root, name),
     }
     .map_err(|e| match e {
@@ -443,7 +446,7 @@ mod tests {
                 "oxplow/extensions/demo/lenses/demo.yaml",
             ]
         );
-        let report = check(dir.path(), "demo", &ExtensionCatalog::new(), None)
+        let report = check(dir.path(), "demo", &ExtensionCatalog::new(), None, None)
             .await
             .unwrap();
         assert!(report.ok, "{}", render_findings(&report, Format::Text));
@@ -465,7 +468,7 @@ mod tests {
         let ext_only = scaffold(dir.path(), Kind::Extension, "bare", None).unwrap();
         assert_eq!(ext_only.files.len(), 2);
         assert!(
-            check(dir.path(), "bare", &ExtensionCatalog::new(), None)
+            check(dir.path(), "bare", &ExtensionCatalog::new(), None, None)
                 .await
                 .unwrap()
                 .ok
@@ -480,7 +483,7 @@ mod tests {
             "oxplow/extensions/team/extension.yaml",
             "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nref_kinds:\n  - kind: ticket\n",
         );
-        let report = check(dir.path(), "team", &ExtensionCatalog::new(), None)
+        let report = check(dir.path(), "team", &ExtensionCatalog::new(), None, None)
             .await
             .unwrap();
         assert!(!report.ok);
@@ -497,7 +500,7 @@ mod tests {
         assert_eq!(json["ok"], false);
         assert_eq!(json["errors"].as_array().unwrap().len(), 1);
         assert!(matches!(
-            check(dir.path(), "nope", &ExtensionCatalog::new(), None).await,
+            check(dir.path(), "nope", &ExtensionCatalog::new(), None, None).await,
             Err(SdkError::NotFound(_))
         ));
     }

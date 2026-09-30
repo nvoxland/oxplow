@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { readAt } from "../../api.js";
 import { languageForPath } from "../../editor-language.js";
-import type { Revision } from "../../revision.js";
+import { revisionSlot, type Revision } from "../../revision.js";
+import { askAboutSelection } from "../../agent-context-ref.js";
+import { insertIntoAgent } from "../../agent-input-bus.js";
 
 export interface DiffSpec {
   path: string;
@@ -47,6 +49,8 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
   const modelsRef = useRef<{ left: any; right: any } | null>(null);
+  const specRef = useRef(spec);
+  specRef.current = spec;
   const monacoRef = useRef<any>(null);
   const [editorReady, setEditorReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +75,21 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
         renderSideBySide: true,
         theme: "vs-dark",
         minimap: { enabled: false },
+      });
+      // Ask About This on the right side's selection (P6.D1): its lines
+      // at the right side's revision. A literal right side (compare with
+      // clipboard) has no ref.
+      editor.getModifiedEditor().addAction({
+        id: "oxplow.askAbout",
+        label: "Ask About This",
+        contextMenuGroupId: "navigation",
+        precondition: "editorHasSelection",
+        run: (ed: { getSelection(): { startLineNumber: number; endLineNumber: number; endColumn: number } | null }) => {
+          const current = specRef.current;
+          const sel = ed.getSelection();
+          if (!sel || current.rightContent !== undefined) return;
+          insertIntoAgent(askAboutSelection(current.path, sel, revisionSlot(current.rightVersion)));
+        },
       });
       editorRef.current = editor;
       setEditorReady(true);

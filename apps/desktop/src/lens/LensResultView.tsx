@@ -23,7 +23,7 @@ import {
   hunkRows,
   limitRows,
   lineSeries,
-  rowMention,
+  rowAsk,
   stepItems,
   timelineEntries,
   treeNodes,
@@ -207,10 +207,10 @@ function RowsBody({
   const onRowMenu = (e: React.MouseEvent, row: SqlCell[]) =>
     ctxMenu.open(e, [
       {
-        id: "add-row-to-agent",
-        label: "Add Row to Agent Context",
+        id: "ask-about-row",
+        label: "Ask About This",
         enabled: true,
-        run: () => insertIntoAgent(rowMention(lens.id, result.columns, row)),
+        run: () => insertIntoAgent(rowAsk(lens, result.columns, row)),
       },
       ...rowActions.map((a) => ({
         id: `lens-action-${a.id}`,

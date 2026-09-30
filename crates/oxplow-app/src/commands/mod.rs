@@ -259,6 +259,15 @@ impl CommandBus {
         self.commands.read().get(name).map(|c| c.spec.clone())
     }
 
+    /// A registered command's input schema: what an extension's launcher
+    /// command entry is checked against (`extensions::CommandSchemas`).
+    pub fn input_schema(&self, name: &str) -> Option<Value> {
+        self.commands
+            .read()
+            .get(name)
+            .map(|c| c.spec.input_schema.clone())
+    }
+
     /// The log the bus records into (tests read it back).
     pub fn log_for_tests(&self) -> &SqliteEventLogStore {
         &self.log

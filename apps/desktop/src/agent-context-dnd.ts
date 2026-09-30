@@ -11,7 +11,7 @@
  */
 
 import type { DragEvent as ReactDragEvent } from "react";
-import type { ContextRef } from "./agent-context-ref.js";
+import { formatContextMention, type ContextRef } from "./agent-context-ref.js";
 import { CONTEXT_REF_MIME, TASK_DRAG_MIME } from "./dragMimes.js";
 
 type AnyDragEvent = ReactDragEvent | DragEvent;
@@ -24,14 +24,7 @@ export function setContextRefDrag(e: AnyDragEvent, ref: ContextRef): void {
   dt.setData(CONTEXT_REF_MIME, JSON.stringify(ref));
   // Plain-text fallback so dragging into a non-aware text input still
   // does a sensible thing (e.g. a chat outside the terminal).
-  const fallback = ref.kind === "file"
-    ? `@${ref.path}`
-    : ref.kind === "wiki"
-      ? `@.oxplow/wiki/${ref.slug}.md`
-      : ref.kind === "lens"
-        ? `[oxplow lens ${ref.lensId}]`
-        : `[oxplow task ${ref.itemId}]`;
-  dt.setData("text/plain", fallback);
+  dt.setData("text/plain", formatContextMention(ref).trimEnd());
   dt.effectAllowed = "copy";
 }
 

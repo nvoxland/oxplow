@@ -683,11 +683,25 @@ context" kebab/menu action; both share one path through
   - task → `[oxplow task <id>: "<title>" (<status>)] `
     (plain-text reference; agent can fetch via
     `oxplow__get_task`).
+  - any canonical ref → `[oxplow ref <ref>] ` — **Ask About This**
+    (below). The agent guide says how to read each kind.
   - Always trailing space so the user can keep typing.
 - **Right-click parity**: every drag source should also offer "Add to
   agent context" in its right-click menu — keyboard-first users
   shouldn't have to drag. Funnel both paths through the same
   `insertIntoAgent + formatContextMention` calls.
+- **Ask About This** (P6.D1) is the conversation-first form of the
+  same gesture: it puts `[oxplow ref <ref>] ` in the agent's input for
+  the person to finish the question, and never sends. It's on:
+  - the page nav bar (`page-nav-ask`), for any page whose tab id is a
+    canonical ref (`PageNavigationContext.askRef`);
+  - a lens row's right-click menu (`rowAsk`: the first ref the row links
+    to, else the row as a lens mention);
+  - an editor selection and a diff's right-side selection
+    (`askAboutSelection`: `file:<path>[@rev]#L<a>-<b>`).
+  The launcher's last row for any typed text is **Ask the Agent: <text>**,
+  which inserts the text the same way. Nothing in oxplow sends agent
+  input on its own; these only fill the draft.
 - **Visual feedback**: drop target shows a dashed accent border +
   centered "Drop to add to agent context" overlay only while a
   payload with our MIME is hovering. Foreign drags (text, OS files)

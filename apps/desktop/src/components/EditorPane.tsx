@@ -17,6 +17,8 @@ import { usePageSnapshot } from "../tabs/usePageSnapshot.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { gitRevision } from "../revision.js";
+import { askAboutSelection } from "../agent-context-ref.js";
+import { insertIntoAgent } from "../agent-input-bus.js";
 import { MonacoCommentLayer, type MonacoCommentHandle } from "./Comments/MonacoCommentLayer.js";
 
 interface Props {
@@ -527,6 +529,16 @@ export function EditorPane({
         if (!editor || !model || !sel || sel.isEmpty() || !filePath) return;
         const text = model.getValueInRange(sel);
         onCompareWithClipboard?.(text, filePath);
+      },
+    },
+    {
+      id: "editor.ask-about",
+      label: "Ask About This",
+      enabled: !!filePath && hasEditorSelection(editorRef.current),
+      run: () => {
+        const sel = editorRef.current?.getSelection?.();
+        if (!sel || sel.isEmpty() || !filePath) return;
+        insertIntoAgent(askAboutSelection(filePath, sel));
       },
     },
     {

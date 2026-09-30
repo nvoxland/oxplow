@@ -2372,6 +2372,11 @@ export type Extension_Deserialize = {
 	 *  declaration is broken (see `errors`).
 	 */
 	models: ModelSource[],
+	/**
+	 *  Launcher entries for what isn't a lens: a page, a command, a
+	 *  prompt (P6.D1; valid ones — invalid ones are in `errors`).
+	 */
+	launcher: LauncherEntry[],
 };
 
 // A loaded extension and anything wrong with it.
@@ -2445,6 +2450,11 @@ export type Extension_Serialize = {
 	 *  declaration is broken (see `errors`).
 	 */
 	models: ModelSource[],
+	/**
+	 *  Launcher entries for what isn't a lens: a page, a command, a
+	 *  prompt (P6.D1; valid ones — invalid ones are in `errors`).
+	 */
+	launcher: LauncherEntry[],
 };
 
 export type FileSnapshot = {
@@ -2772,6 +2782,28 @@ export type ItemBody =
  *  renderer's `PageCategory`.
  */
 export type LauncherCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Data" | "Lenses" | "System";
+
+/**
+ *  A launcher entry for something that isn't a lens (P6.D1): the launcher
+ *  lists it under `category`.
+ */
+export type LauncherEntry = {
+	label: string,
+	category: LauncherCategory,
+	target: LauncherTarget,
+};
+
+// What a launcher entry does.
+export type LauncherTarget = 
+// Open a page: a canonical ref (`page:settings`, `lens:x/y`).
+{ kind: "ref"; ref: string } | 
+/**
+ *  Run a command as the person who picked it, asking first when the
+ *  command asks.
+ */
+{ kind: "command"; command: string; input: unknown } | 
+// Put a prompt in the agent's input. Never sent: the person sends it.
+{ kind: "prompt"; prompt: string };
 
 // A loaded lens.
 export type Lens = Lens_Serialize | Lens_Deserialize;

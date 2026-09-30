@@ -85,6 +85,8 @@ import { StatusBar } from "./components/StatusBar.js";
 import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
+import { parseRef } from "./refs/ref.js";
+import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
 import { subscribeUiError } from "./ui-error.js";
 import { useBackendSubscriptions } from "./useBackendSubscriptions.js";
@@ -3224,6 +3226,7 @@ export function App() {
         setTitle: (t: string) => setPageTitle(tabId, t),
         title: registeredTitle,
         pageKey: selectedThreadId ? `${selectedThreadId}::${tabId}` : undefined,
+        askRef: ref && parseRef(ref.id) ? ref.id : undefined,
         bookmark: ref ? {
           scopes,
           toggle: (scope: BookmarkScope) => {
@@ -3520,6 +3523,7 @@ export function App() {
       ) : null}
       {daemonUnavailable ? <DaemonDownDialog /> : null}
       <UndoToastStack />
+      <PersonCommandConfirm />
       <RemoteConnectionBanner />
     </div>
   );

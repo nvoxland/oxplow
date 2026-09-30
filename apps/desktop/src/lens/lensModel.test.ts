@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, slotMounts, effortRowId, firingAlerts, slotExtensions } from "./lensModel.js";
+import { treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, slotMounts, effortRowId, firingAlerts, slotExtensions } from "./lensModel.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
   id: "review/waiting",
@@ -145,6 +145,14 @@ describe("rowMention", () => {
     expect(rowMention("review/waiting", ["id", "title", "note"], [42, "Fix it", null])).toBe(
       '[oxplow lens review/waiting row: id=42, title="Fix it", note=null] ',
     );
+  });
+});
+
+describe("rowAsk", () => {
+  test("Ask About This on a row asks about what it links to, else the row itself", () => {
+    const linked = lens({ columns: [{ key: "sha", label: null, link: { kind: "commit", from: null, line: null } }] });
+    expect(rowAsk(linked, ["sha", "subject"], ["abc123", "Fix"])).toBe("[oxplow ref commit:abc123] ");
+    expect(rowAsk(lens(), ["id", "title"], [42, "Fix it"])).toBe('[oxplow lens review/waiting row: id=42, title="Fix it"] ');
   });
 });
 

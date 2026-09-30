@@ -841,8 +841,23 @@ tool list stable no matter how many extensions are installed.
     (`ThreadRuntimeRegistry::open_page`).
   - A hidden-but-mounted page can't overwrite the report, because only
     the active page's detail is sent.
-- **Row actions (current):** right-click a lens row → "Add Row to Agent
-  Context", which inserts `[oxplow lens <id> row: col=value, …]`.
+- **Row actions (current):** right-click a lens row → "Ask About This"
+  (P6.D1): `[oxplow ref <ref>]` for the first ref the row links to, else
+  `[oxplow lens <id> row: col=value, …]` (`rowAsk`).
+- **Launcher entries (current, P6.D1):** the manifest's `launcher:` lists
+  what isn't a lens, each `{ label, category, target }`, where `target` is
+  exactly one of `{ ref }` (a canonical ref, opened as a page),
+  `{ command, input? }` (run as the person, asking first when the command
+  asks — `personCommands.ts` + `PersonCommandConfirm`, mounted once in
+  `App`) or `{ prompt }` (put in the agent's input, never sent).
+  `manifest_v2::launcher_entries` types them at load (a bad one is an
+  error at its line and is dropped); the dry run (`validate_extension`,
+  `review_extension`, with `CommandBus::input_schema` as
+  `CommandSchemas`) checks that a command is registered and its input
+  fits. `oxplow plugin check` has no running app to ask, so it says the
+  commands weren't checked. The launcher (`components/extensionLauncher.ts`)
+  merges ref entries into the page directory and lists the others as
+  actions under their category.
 - **Lens actions (current, P6.B1):** `actions:` are commands, run by an
   agent with `run_lens_action` as the lens acting for it (see "Actions
   are commands").

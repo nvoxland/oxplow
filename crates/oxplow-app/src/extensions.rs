@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 pub mod manifest_v2;
 pub mod migrate_v1;
 use manifest_v2::{at, key_line, line_under, ManifestV2};
-pub use manifest_v2::{Intent, IntentExample, Sharing};
+pub use manifest_v2::{Intent, IntentExample, LauncherEntry, LauncherTarget, Sharing};
 
 /// Where project extensions live, relative to a worktree root.
 pub const EXTENSIONS_DIR: &str = "oxplow/extensions";
@@ -789,6 +789,9 @@ pub struct Extension {
     /// `v_<extension>_<name>` (`extension_models`). Empty when any
     /// declaration is broken (see `errors`).
     pub models: Vec<oxplow_db::models::ModelSource>,
+    /// Launcher entries for what isn't a lens: a page, a command, a
+    /// prompt (P6.D1; valid ones — invalid ones are in `errors`).
+    pub launcher: Vec<LauncherEntry>,
 }
 
 /// Provenance of an installed extension, kept in its `source.yaml`.
@@ -978,6 +981,7 @@ fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
         models: Vec::new(),
         metrics: Vec::new(),
         gauges: Vec::new(),
+        launcher: Vec::new(),
     }
 }
 
@@ -1032,6 +1036,9 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         let (errors, warnings) = manifest_v2::check(&m, &file, &manifest, origin == "bundled");
         ext.errors.extend(errors);
         ext.warnings.extend(warnings);
+        let (launcher, errors) = manifest_v2::launcher_entries(&m, &file, &manifest);
+        ext.launcher = launcher;
+        ext.errors.extend(errors);
     } else {
         ext.warnings.push(at(
             &file,
@@ -1507,6 +1514,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.metrics.clear();
         ext.gauges.clear();
         ext.models.clear();
+        ext.launcher.clear();
     }
     ext
 }
@@ -1737,10 +1745,62 @@ pub async fn validate_extension(
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     name: &str,
+    commands: Option<CommandSchemas<'_>>,
 ) -> Result<Extension, DomainError> {
     let mut ext = catalog.named(root, name)?;
-    check_extension(layer, catalog, root, &mut ext).await;
+    check_extension(layer, catalog, root, &mut ext, commands).await;
     Ok(ext)
+}
+
+/// A command's input schema by name (`CommandBus::spec`): what a launcher
+/// entry's command is checked against. `None` where there's no running
+/// app to ask (the CLI).
+pub type CommandSchemas<'a> = &'a (dyn Fn(&str) -> Option<serde_json::Value> + Sync);
+
+/// A launcher command entry names a registered command whose input fits.
+fn check_launcher_commands(ext: &mut Extension, commands: Option<CommandSchemas<'_>>) {
+    let entries: Vec<(String, String, serde_json::Value)> = ext
+        .launcher
+        .iter()
+        .filter_map(|e| match &e.target {
+            LauncherTarget::Command { command, input } => {
+                Some((e.label.clone(), command.clone(), input.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    if entries.is_empty() {
+        return;
+    }
+    let Some(schema_of) = commands else {
+        ext.warnings.push(format!(
+            "{}/extension.yaml: launcher commands weren't checked (no running oxplow to ask \
+             which commands exist) — use validate_extension",
+            ext.path
+        ));
+        return;
+    };
+    for (label, command, input) in entries {
+        match schema_of(&command) {
+            None => ext.errors.push(format!(
+                "{}/extension.yaml: launcher entry `{label}`: no command `{command}` — name a \
+                 registered one",
+                ext.path
+            )),
+            Some(schema) => {
+                let fits = oxplow_domain::InputValidator::compile(&schema)
+                    .map_err(|e| e.to_string())
+                    .and_then(|v| v.check(&input).map_err(|e| e.to_string()));
+                if let Err(e) = fits {
+                    ext.errors.push(format!(
+                        "{}/extension.yaml: launcher entry `{label}`: the input doesn't fit \
+                         `{command}`: {e}",
+                        ext.path
+                    ));
+                }
+            }
+        }
+    }
 }
 
 /// Dry-run a loaded extension's models, advisories and lenses, appending
@@ -1750,7 +1810,9 @@ async fn check_extension(
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     ext: &mut Extension,
+    commands: Option<CommandSchemas<'_>>,
 ) {
+    check_launcher_commands(ext, commands);
     // Its models, beside the other enabled extensions' (a ref() may name
     // theirs): compiled as temp views, published nowhere (P4.9).
     if !ext.models.is_empty() {
@@ -1884,6 +1946,7 @@ pub async fn review_extension(
     git_url: &str,
     git_ref: Option<&str>,
     replacing: Option<&str>,
+    commands: CommandSchemas<'_>,
 ) -> Result<ExtensionReview, DomainError> {
     let fetched = {
         let (root, url, r, rep) = (
@@ -1898,7 +1961,7 @@ pub async fn review_extension(
     };
     let mut extension = fetched.load();
     let load_errors = extension.errors.len();
-    check_extension(layer, catalog, root, &mut extension).await;
+    check_extension(layer, catalog, root, &mut extension, Some(commands)).await;
     let problems = extension.errors.split_off(load_errors);
     Ok(ExtensionReview {
         extension,
@@ -1916,6 +1979,7 @@ pub async fn review_update(
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     name: &str,
+    commands: CommandSchemas<'_>,
 ) -> Result<ExtensionReview, DomainError> {
     let source = installed_source(root, name)?;
     review_extension(
@@ -1925,6 +1989,7 @@ pub async fn review_update(
         &source.git,
         source.git_ref.as_deref(),
         Some(name),
+        commands,
     )
     .await
 }
@@ -2835,7 +2900,7 @@ empty: No tasks.
         );
         let sl = layer().await;
 
-        let e = validate_extension(&sl, &cat(), dir.path(), "review")
+        let e = validate_extension(&sl, &cat(), dir.path(), "review", None)
             .await
             .unwrap();
         assert_eq!(e.errors.len(), 2, "{:?}", e.errors);
@@ -2846,7 +2911,7 @@ empty: No tasks.
             .any(|m| m.contains("review/badcol") && m.contains("missing")));
 
         assert!(matches!(
-            validate_extension(&sl, &cat(), dir.path(), "nope").await,
+            validate_extension(&sl, &cat(), dir.path(), "nope", None).await,
             Err(DomainError::NotFound)
         ));
     }
@@ -2909,7 +2974,7 @@ empty: No tasks.
         let url = repo.path().to_string_lossy().to_string();
         let sl = layer().await;
 
-        let review = review_extension(&sl, &cat(), project.path(), &url, None, None)
+        let review = review_extension(&sl, &cat(), project.path(), &url, None, None, &|_| None)
             .await
             .unwrap();
         assert_eq!(review.extension.name, "shared");
@@ -3277,7 +3342,7 @@ empty: No tasks.
             msg.contains("v_gh_pr") && msg.contains("prs") && msg.contains("hasn't synced"),
             "{msg}"
         );
-        let e = validate_extension(&sl, &cat(), dir.path(), "gh")
+        let e = validate_extension(&sl, &cat(), dir.path(), "gh", None)
             .await
             .unwrap();
         assert!(e.errors[0].contains("hasn't synced"), "{:?}", e.errors);
@@ -3558,12 +3623,12 @@ empty: No tasks.
             .iter()
             .any(|s| s.slot == "effort-review" && s.lens_id == "oxplow-review/inferred-decisions"));
         // The analytics extension's advisory and lens SQL runs too.
-        let a = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-analytics")
+        let a = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-analytics", None)
             .await
             .unwrap();
         assert!(a.errors.is_empty(), "{:?}", a.errors);
         // Every bundled lens's SQL runs against a real schema.
-        let v = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-review")
+        let v = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-review", None)
             .await
             .unwrap();
         assert!(v.errors.is_empty(), "{:?}", v.errors);
@@ -3796,7 +3861,7 @@ empty: No tasks.
             )],
             "",
         );
-        let v = validate_extension(&layer().await, &cat(), d.path(), "x")
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
             .await
             .unwrap();
         let errs = v.errors.join("\n");
@@ -3812,7 +3877,7 @@ empty: No tasks.
             ],
             "",
         );
-        let v = validate_extension(&layer().await, &cat(), d.path(), "x")
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
             .await
             .unwrap();
         let errs = v.errors.join("\n");
@@ -4221,7 +4286,7 @@ empty: No tasks.
             )],
             "",
         );
-        let v = validate_extension(&layer().await, &cat(), d.path(), "x")
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
             .await
             .unwrap();
         assert!(
@@ -4314,7 +4379,7 @@ empty: No tasks.
         );
         assert!(ext.errors.join("\n").contains("Bad Id"), "{:?}", ext.errors);
 
-        let v = validate_extension(&layer().await, &cat(), d.path(), "x")
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
             .await
             .unwrap();
         let errs = v.errors.join("\n");
@@ -4371,6 +4436,115 @@ empty: No tasks.
         assert!(
             errs.contains("none") && errs.contains("change_id"),
             "{errs}"
+        );
+    }
+
+    const LAUNCHER_MANIFEST: &str = "manifest: 2\nintent:\n  purpose: p\nlauncher:\n";
+
+    /// P6.D1: a launcher entry opens a ref, runs a command, or puts a
+    /// prompt in the agent's input — each form checked for shape.
+    #[test]
+    fn launcher_entries_are_refs_commands_or_prompts() {
+        let (_d, ext) = load_x(
+            &[],
+            &format!(
+                "{LAUNCHER_MANIFEST}  - {{ label: Settings, category: System, target: {{ ref: 'page:settings' }} }}\n  - {{ label: New Task, category: Work, target: {{ command: work_item.create, input: {{ title: x }} }} }}\n  - {{ label: Why slow, category: Code, target: {{ prompt: 'Why is the build slow?' }} }}\n"
+            ),
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(
+            ext.launcher
+                .iter()
+                .map(|e| e.target.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                LauncherTarget::Ref {
+                    r#ref: "page:settings".into()
+                },
+                LauncherTarget::Command {
+                    command: "work_item.create".into(),
+                    input: serde_json::json!({ "title": "x" }),
+                },
+                LauncherTarget::Prompt {
+                    prompt: "Why is the build slow?".into()
+                },
+            ]
+        );
+
+        for (entry, want) in [
+            ("{ ref: 'not a ref' }", "not a canonical ref"),
+            ("{ command: Not-A-Name }", "`Not-A-Name`"),
+            ("{ command: a.b, input: [1] }", "`input` must be a map"),
+            ("{ prompt: '  ' }", "an empty prompt"),
+            (
+                "{ ref: 'page:settings', prompt: hi }",
+                "one of `ref`, `command` or `prompt`",
+            ),
+            ("'page:settings'", "one of `ref`, `command` or `prompt`"),
+        ] {
+            let (_d, ext) = load_x(
+                &[],
+                &format!(
+                    "{LAUNCHER_MANIFEST}  - {{ label: Bad, category: Work, target: {entry} }}\n"
+                ),
+            );
+            let errs = ext.errors.join("\n");
+            assert!(
+                errs.contains(want) && errs.contains("extension.yaml:"),
+                "{entry}: {errs}"
+            );
+            assert!(ext.launcher.is_empty(), "{entry}");
+        }
+    }
+
+    /// A command entry names a registered command and its input fits;
+    /// without a registry (the CLI) that half isn't checked, and says so.
+    #[tokio::test]
+    async fn validate_checks_launcher_commands_against_the_registry() {
+        let (d, _) = load_x(
+            &[],
+            &format!(
+                "{LAUNCHER_MANIFEST}  - {{ label: A, category: Work, target: {{ command: no.such }} }}\n  - {{ label: B, category: Work, target: {{ command: work_item.create, input: {{ nope: 1 }} }} }}\n  - {{ label: C, category: Work, target: {{ command: work_item.create, input: {{ title: ok }} }} }}\n"
+            ),
+        );
+        let schema = |name: &str| {
+            (name == "work_item.create").then(|| {
+                serde_json::json!({
+                    "type": "object",
+                    "properties": { "title": { "type": "string" } },
+                    "required": ["title"],
+                    "additionalProperties": false
+                })
+            })
+        };
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x", Some(&schema))
+            .await
+            .unwrap();
+        let errs = v.errors.join("\n");
+        assert!(
+            errs.contains("launcher entry `A`: no command `no.such`"),
+            "{errs}"
+        );
+        assert!(
+            errs.contains("launcher entry `B`: the input doesn't fit `work_item.create`"),
+            "{errs}"
+        );
+        assert!(!errs.contains("entry `C`"), "{errs}");
+
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
+            .await
+            .unwrap();
+        assert!(
+            !v.errors.join("\n").contains("launcher entry"),
+            "{:?}",
+            v.errors
+        );
+        assert!(
+            v.warnings
+                .join("\n")
+                .contains("launcher commands weren't checked"),
+            "{:?}",
+            v.warnings
         );
     }
 }

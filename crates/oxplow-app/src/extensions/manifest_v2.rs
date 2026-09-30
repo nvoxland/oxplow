@@ -67,15 +67,118 @@ pub struct SlotMount {
     pub lens: String,
 }
 
-/// A launcher entry for a target that is not a lens (a page, a command).
-/// Parsed and checked for shape in P1; rendered when pages land.
+/// A launcher entry as the manifest holds it; [`launcher_entries`]
+/// checks its target and types it.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct LauncherEntryFile {
+    pub label: String,
+    pub category: super::LauncherCategory,
+    pub target: Value,
+}
+
+/// A launcher entry for something that isn't a lens (P6.D1): the launcher
+/// lists it under `category`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub struct LauncherEntry {
     pub label: String,
     pub category: super::LauncherCategory,
-    /// A canonical ref (`page:…`, `command:…`).
-    pub target: String,
+    pub target: LauncherTarget,
+}
+
+/// What a launcher entry does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum LauncherTarget {
+    /// Open a page: a canonical ref (`page:settings`, `lens:x/y`).
+    Ref { r#ref: String },
+    /// Run a command as the person who picked it, asking first when the
+    /// command asks.
+    Command {
+        command: String,
+        #[specta(type = oxplow_domain::Json)]
+        input: serde_json::Value,
+    },
+    /// Put a prompt in the agent's input. Never sent: the person sends it.
+    Prompt { prompt: String },
+}
+
+/// Type the manifest's `launcher:` entries: each target is exactly one of
+/// `{ ref }` (a canonical ref), `{ command, input? }` (a command name and
+/// a map) or `{ prompt }` (non-empty). A bad one is an error at its line
+/// and is dropped. Whether a command is registered, and its input fits,
+/// is the dry run's (`validate_extension`).
+pub fn launcher_entries(
+    m: &ManifestV2,
+    file: &str,
+    text: &str,
+) -> (Vec<LauncherEntry>, Vec<String>) {
+    let mut entries = Vec::new();
+    let mut errors = Vec::new();
+    for entry in &m.launcher {
+        match launcher_target(&entry.target) {
+            Ok(target) => entries.push(LauncherEntry {
+                label: entry.label.clone(),
+                category: entry.category,
+                target,
+            }),
+            Err(e) => errors.push(at(
+                file,
+                line_under(text, "launcher", &entry.label),
+                format!("launcher entry `{}`: {e}", entry.label),
+            )),
+        }
+    }
+    (entries, errors)
+}
+
+fn launcher_target(v: &Value) -> Result<LauncherTarget, String> {
+    const FORMS: &str =
+        "a target is one of `ref`, `command` or `prompt`: `{ ref: page:settings }`, \
+                         `{ command: work_item.create, input: { … } }` or `{ prompt: … }`";
+    let Some(map) = v.as_mapping() else {
+        return Err(FORMS.into());
+    };
+    let key = |k: &str| map.get(Value::String(k.into()));
+    let keys: Vec<&str> = map.keys().filter_map(|k| k.as_str()).collect();
+    let form = |k: &str| keys.contains(&k);
+    match (form("ref"), form("command"), form("prompt")) {
+        (true, false, false) if keys.len() == 1 => {
+            let r = key("ref").and_then(|v| v.as_str()).unwrap_or_default();
+            oxplow_domain::refs::grammar::CanonicalRef::parse(r)
+                .map_err(|_| format!("`{r}` is not a canonical ref (`<kind>:<id>`)"))?;
+            Ok(LauncherTarget::Ref {
+                r#ref: r.to_string(),
+            })
+        }
+        (false, true, false) if keys.iter().all(|k| *k == "command" || *k == "input") => {
+            let command = key("command").and_then(|v| v.as_str()).unwrap_or_default();
+            oxplow_domain::CommandSpec::validate_name(command)
+                .map_err(|e| e.to_string().replacen("invalid value: ", "", 1))?;
+            let input = match key("input") {
+                None => serde_json::json!({}),
+                Some(v) => serde_json::to_value(v).map_err(|e| e.to_string())?,
+            };
+            if !input.is_object() {
+                return Err("`input` must be a map (the command's input)".into());
+            }
+            Ok(LauncherTarget::Command {
+                command: command.to_string(),
+                input,
+            })
+        }
+        (false, false, true) if keys.len() == 1 => {
+            let prompt = key("prompt").and_then(|v| v.as_str()).unwrap_or_default();
+            if prompt.trim().is_empty() {
+                return Err("an empty prompt — write what to ask the agent".into());
+            }
+            Ok(LauncherTarget::Prompt {
+                prompt: prompt.to_string(),
+            })
+        }
+        _ => Err(FORMS.into()),
+    }
 }
 
 /// `extension.yaml` at `manifest: 2`, as written on disk.
@@ -124,7 +227,7 @@ pub struct ManifestV2 {
     /// Launcher entries for non-lens targets; a lens lists itself with
     /// its own `launcher:` block.
     #[serde(default)]
-    pub launcher: Vec<LauncherEntry>,
+    pub launcher: Vec<LauncherEntryFile>,
     /// Lenses mounted into core pages (v1 `slots`).
     #[serde(default)]
     pub slot_mounts: Vec<SlotMount>,
@@ -356,18 +459,6 @@ pub fn check(m: &ManifestV2, file: &str, text: &str, bundled: bool) -> (Vec<Stri
     } else if let Some(engine) = &m.engine {
         if let Err(e) = engine_check(engine, current_engine()) {
             errors.push(at(file, key_line(text, "engine"), e));
-        }
-    }
-    for entry in &m.launcher {
-        if oxplow_domain::refs::grammar::CanonicalRef::parse(&entry.target).is_err() {
-            errors.push(at(
-                file,
-                line_under(text, "launcher", &entry.target),
-                format!(
-                    "launcher entry `{}` targets `{}`, which is not a canonical ref",
-                    entry.label, entry.target
-                ),
-            ));
         }
     }
     (errors, warnings)

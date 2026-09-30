@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { formatRef, parseRef, type CanonicalRef } from "./ref.js";
+import { formatRef, parseRef, type CanonicalRef, fileLinesRef } from "./ref.js";
 
 interface Fixture {
   valid: Array<CanonicalRef & { text: string }>;
@@ -38,5 +38,13 @@ describe("canonical ref grammar (shared fixture)", () => {
       expect(formatRef(r)).toBe(c.text);
       expect(parseRef(c.text)).toEqual(r);
     }
+  });
+});
+
+describe("fileLinesRef", () => {
+  test("a file's lines as a ref: one line, or a range", () => {
+    expect(fileLinesRef("src/a.rs", 10, 10)).toBe("file:src/a.rs#L10");
+    expect(fileLinesRef("src/a.rs", 10, 20)).toBe("file:src/a.rs#L10-20");
+    expect(fileLinesRef("src/a.rs", 3, 3, "git:abc123")).toBe("file:src/a.rs@git:abc123#L3");
   });
 });

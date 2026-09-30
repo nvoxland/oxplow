@@ -103,6 +103,13 @@ export function ref(kind: string, id: string, rev: string | null = null, frag: s
   return formatRef({ kind, id, rev, frag });
 }
 
+/** A file's lines (`file:src/a.rs#L10-20`, `file:src/a.rs@git:abc#L3`
+ *  at a revision): what Ask About This names for an editor or diff
+ *  selection. */
+export function fileLinesRef(path: string, start: number, end: number, rev: string | null = null): string {
+  return ref("file", path, rev, start === end ? `L${start}` : `L${start}-${end}`);
+}
+
 /** The kind of a ref string, or null when it isn't a canonical ref. */
 export function kindOf(text: string): string | null {
   return parseRef(text)?.kind ?? null;

@@ -28,6 +28,8 @@ export interface PageNavBarConfig {
     scopes: BookmarkScope[];
     onToggleScope(scope: BookmarkScope): void;
   };
+  /** The page's canonical ref, for Ask About This. */
+  askRef?: string;
   /** Backlinks dropdown content. Mutually exclusive with the
    *  legacy footer panel — when this is supplied, the footer is
    *  suppressed even if the `backlinks` prop is also set. */
@@ -199,6 +201,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
           onToggleScope: (scope) => ctxNav.bookmark!.toggle(scope),
         }
       : undefined,
+    askRef: ctxNav.askRef,
   } : undefined);
   // When a nav bar is present, promote backlinks into its dropdown
   // and suppress the legacy footer. Pages that explicitly set
@@ -244,6 +247,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
           snapshots={effectiveNavBar.snapshots}
           comments={effectiveNavBar.comments}
           actions={effectiveNavBar.actions}
+          askRef={effectiveNavBar.askRef}
         />
       ) : null}
       {showHeader && !effectiveNavBar ? (

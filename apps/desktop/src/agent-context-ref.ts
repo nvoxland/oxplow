@@ -10,11 +10,27 @@
  * resolve the title to a body via `oxplow__get_task` if it cares.
  */
 
+import { fileLinesRef } from "./refs/ref.js";
+
 export type ContextRef =
   | { kind: "file"; path: string }
   | { kind: "wiki"; slug: string }
   | { kind: "task"; itemId: string; title: string; status: string }
-  | { kind: "lens"; lensId: string; params: Record<string, unknown> };
+  | { kind: "lens"; lensId: string; params: Record<string, unknown> }
+  /** Ask About This (P6.D1): any canonical ref; the agent reads it by kind. */
+  | { kind: "ref"; ref: string };
+
+/** Ask About This on a selection (the editor, a diff's right side): the
+ *  selected lines of `path` at `rev` (null = the working tree). A
+ *  selection ending at column 1 of a line doesn't include that line. */
+export function askAboutSelection(
+  path: string,
+  sel: { startLineNumber: number; endLineNumber: number; endColumn: number },
+  rev: string | null = null,
+): string {
+  const end = sel.endColumn === 1 && sel.endLineNumber > sel.startLineNumber ? sel.endLineNumber - 1 : sel.endLineNumber;
+  return formatContextMention({ kind: "ref", ref: fileLinesRef(path, sel.startLineNumber, end, rev) });
+}
 
 export function formatContextMention(ref: ContextRef): string {
   if (ref.kind === "file") {
@@ -22,6 +38,9 @@ export function formatContextMention(ref: ContextRef): string {
   }
   if (ref.kind === "wiki") {
     return `@.oxplow/wiki/${ref.slug}.md `;
+  }
+  if (ref.kind === "ref") {
+    return `[oxplow ref ${ref.ref}] `;
   }
   if (ref.kind === "lens") {
     // `[oxplow lens <id> k=v …]` — the agent reads it with `get_lens` /

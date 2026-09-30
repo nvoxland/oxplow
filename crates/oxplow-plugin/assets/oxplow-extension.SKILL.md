@@ -133,6 +133,13 @@ empty: Nothing is waiting on you.
   launcher heading (Work, Code, Git, Activity, Knowledge, Data, Lenses,
   System; default Lenses). **`hidden: true`** keeps it out of the
   launcher, for lenses only a slot shows.
+- **Launcher entries that aren't lenses** go in `extension.yaml`:
+  `launcher: [{ label, category, target }]`, where `target` is one of
+  `{ ref: commit:abc123 }` (opens that page), `{ command: work_item.create,
+  input: { … } }` (runs it as the person who picks it, asking first when
+  the command asks) or `{ prompt: "…" }` (puts the prompt in the agent's
+  input for them to send). `validate_extension` checks that a command
+  exists and the input fits it.
 - **Slots** mount a lens into a core page (`slot_mounts: [{ slot, lens }]`
   in `extension.yaml`). The lens must declare at least one param the slot
   binds, and gets only the ones it declares:

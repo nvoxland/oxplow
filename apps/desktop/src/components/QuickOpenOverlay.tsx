@@ -27,7 +27,10 @@ import { PageKindIcon } from "../pageKinds.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./RailHud/history.js";
 import type { PageCategory, PageDirectoryEntry } from "./RailHud/sections.js";
-import { lensDirectoryEntries, mergeDirectory } from "../lens/lensModel.js";
+import { mergeDirectory } from "../lens/lensModel.js";
+import { insertIntoAgent } from "../agent-input-bus.js";
+import { personCommands } from "../personCommands.js";
+import { launcherDirectory, type LauncherAction } from "./extensionLauncher.js";
 
 interface Props {
   open: boolean;
@@ -264,16 +267,24 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   // their `launcher.category` ("Lenses" by default), so they're both browsable (start menu) and
   // searchable. Re-read on every open: lens files are ordinary project
   // files the agent may have just written.
+  // Their manifest `launcher:` entries join too: a ref as a page, a
+  // command or prompt as an action (P6.D1).
   const [lensPages, setLensPages] = useState<PageDirectoryEntry[]>([]);
+  const [launcherActions, setLauncherActions] = useState<LauncherAction[]>([]);
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     void listExtensions(stream?.id ?? null)
       .then((exts) => {
-        if (!cancelled) setLensPages(lensDirectoryEntries(exts));
+        if (cancelled) return;
+        const dir = launcherDirectory(exts);
+        setLensPages(dir.pages);
+        setLauncherActions(dir.actions);
       })
       .catch(() => {
-        if (!cancelled) setLensPages([]);
+        if (cancelled) return;
+        setLensPages([]);
+        setLauncherActions([]);
       });
     return () => {
       cancelled = true;
@@ -311,7 +322,27 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
 
   // The launcher's commands — the retired CommandPalette's entries now
   // live here so this overlay is the single discovery surface.
-  const commands = useMemo(() => flattenCommands(menuGroups), [menuGroups]);
+  // An extension's command entry runs as the person (asking first when
+  // the command asks); a prompt entry fills the agent's input, never sent.
+  const commands = useMemo(
+    () => [
+      ...flattenCommands(menuGroups),
+      ...launcherActions.map((a) => {
+        const t = a.target;
+        return {
+          id: `ext:${a.id}`,
+          group: a.category,
+          label: a.label,
+          run:
+            t.kind === "prompt"
+              ? () => insertIntoAgent(t.prompt)
+              : () => void personCommands.run(a.label, t.command, t.input),
+          searchKey: `${a.category} ${a.label} ${a.extension}`.toLowerCase(),
+        };
+      }),
+    ],
+    [menuGroups, launcherActions],
+  );
 
   // Empty input = launcher mode (pages only, grouped by category in the
   // render below). With a query: exact matches first, then pages →
@@ -372,6 +403,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
       setTimeout(result.entry.run, 0);
       return;
     } else if (result.kind === "file") onOpenFile(result.file.path);
+    else if (result.kind === "ask") insertIntoAgent(result.text);
     else onOpenSearchHit(result.hit);
     onClose();
   }
@@ -536,6 +568,29 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                       {result.hit.snippet}
                     </span>
                     <span style={{ color: "var(--muted)", fontSize: 11 }}>{result.hit.kind}</span>
+                  </button>
+                );
+              }
+              if (result.kind === "ask") {
+                return (
+                  <button type="button"
+                    key="ask"
+                    data-testid="launcher-ask"
+                    data-row-index={index}
+                    onClick={() => confirm(result)}
+                    title="Put this in the agent's input (it isn't sent)"
+                    style={{
+                      ...resultStyle,
+                      background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
+                    }}
+                  >
+                    <span style={{ width: 18, display: "inline-flex", justifyContent: "center", color: "var(--muted)", fontSize: 11 }}>
+                      ?
+                    </span>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      Ask the Agent: {result.text}
+                    </span>
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>agent</span>
                   </button>
                 );
               }

@@ -162,7 +162,15 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                 }
             });
             let layer = db.map(oxplow_app::sql_gateway::SqlGateway::new);
-            let report = block_on(oxplow_sdk::check(&root, &name, &catalog, layer.as_ref()))?;
+            // No running oxplow to ask which commands exist: launcher
+            // command entries are reported unchecked.
+            let report = block_on(oxplow_sdk::check(
+                &root,
+                &name,
+                &catalog,
+                layer.as_ref(),
+                None,
+            ))?;
             let format = if p.json { Format::Json } else { Format::Text };
             let _ = write!(out, "{}", oxplow_sdk::render_findings(&report, format));
             if p.json {

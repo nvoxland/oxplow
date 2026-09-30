@@ -249,11 +249,17 @@ mod tests {
         );
         svc.extension_models.sync().await.unwrap();
         let validate = || async {
-            crate::extensions::validate_extension(&svc.sql, &svc.extension_catalog, &root, "late")
-                .await
-                .unwrap()
-                .errors
-                .join("\n")
+            crate::extensions::validate_extension(
+                &svc.sql,
+                &svc.extension_catalog,
+                &root,
+                "late",
+                None,
+            )
+            .await
+            .unwrap()
+            .errors
+            .join("\n")
         };
         assert_eq!(validate().await, "");
         write(

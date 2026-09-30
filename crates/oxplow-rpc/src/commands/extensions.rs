@@ -182,9 +182,16 @@ pub async fn validate_extension(
     stream_id: Option<String>,
 ) -> Result<oxplow_sdk::CheckReport, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
-    oxplow_sdk::check(&root, &name, &svc.extension_catalog, Some(&svc.sql))
-        .await
-        .map_err(sdk_error)
+    let commands = |n: &str| svc.commands.input_schema(n);
+    oxplow_sdk::check(
+        &root,
+        &name,
+        &svc.extension_catalog,
+        Some(&svc.sql),
+        Some(&commands),
+    )
+    .await
+    .map_err(sdk_error)
 }
 
 fn sdk_error(e: oxplow_sdk::SdkError) -> IpcError {
@@ -225,6 +232,7 @@ pub async fn review_extension(
     stream_id: Option<String>,
 ) -> Result<extensions::ExtensionReview, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
+    let commands = |n: &str| svc.commands.input_schema(n);
     Ok(match (git_url, name) {
         (Some(url), None) => {
             extensions::review_extension(
@@ -234,11 +242,13 @@ pub async fn review_extension(
                 &url,
                 git_ref.as_deref(),
                 None,
+                &commands,
             )
             .await?
         }
         (None, Some(name)) => {
-            extensions::review_update(&svc.sql, &svc.extension_catalog, &root, &name).await?
+            extensions::review_update(&svc.sql, &svc.extension_catalog, &root, &name, &commands)
+                .await?
         }
         _ => {
             return Err(IpcError::invalid(

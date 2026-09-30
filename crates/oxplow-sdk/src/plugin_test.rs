@@ -58,7 +58,7 @@ pub async fn test_extension(
     layer: Option<&SqlGateway>,
     bless: bool,
 ) -> Result<TestReport, SdkError> {
-    let checked = crate::check(root, name, &ExtensionCatalog::new(), layer).await?;
+    let checked = crate::check(root, name, &ExtensionCatalog::new(), layer, None).await?;
     let mut report = TestReport {
         name: name.to_string(),
         ok: false,

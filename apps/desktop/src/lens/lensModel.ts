@@ -9,6 +9,8 @@ import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/Rail
 import { computeDiffId, duplicateBlockRef, effortDiffRef, refFromTabId, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
+import { formatContextMention } from "../agent-context-ref.js";
+import { parseRef } from "../refs/ref.js";
 
 export interface DisplayColumn {
   key: string;
@@ -234,6 +236,17 @@ export function adHocLens(query: string, viz: LensViz): Lens {
 export function rowMention(lensId: string, columns: string[], row: SqlCell[]): string {
   const fields = columns.map((c, i) => `${c}=${JSON.stringify(row[i] ?? null)}`).join(", ");
   return `[oxplow lens ${lensId} row: ${fields}] `;
+}
+
+/** Ask About This on a lens row (P6.D1): the first ref the row links to
+ *  (`[oxplow ref commit:abc]`), or — a row that links nowhere — the row
+ *  itself as a lens mention. */
+export function rowAsk(lens: Lens, columns: string[], row: SqlCell[]): string {
+  for (const c of lens.columns) {
+    const ref = c.link ? cellLinkRef(c.link, c.key, row, columns) : null;
+    if (ref && parseRef(ref.id)) return formatContextMention({ kind: "ref", ref: ref.id });
+  }
+  return rowMention(lens.id, columns, row);
 }
 
 /** What a slot runs: each mounted lens with the slot params it declares

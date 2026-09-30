@@ -1,7 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { formatContextMention } from "./agent-context-ref.js";
+import { askAboutSelection, formatContextMention } from "./agent-context-ref.js";
+
+describe("askAboutSelection", () => {
+  test("the selected lines, dropping a trailing line the selection only touches", () => {
+    expect(askAboutSelection("a.rs", { startLineNumber: 4, endLineNumber: 6, endColumn: 9 })).toBe("[oxplow ref file:a.rs#L4-6] ");
+    expect(askAboutSelection("a.rs", { startLineNumber: 4, endLineNumber: 7, endColumn: 1 })).toBe("[oxplow ref file:a.rs#L4-6] ");
+    expect(askAboutSelection("a.rs", { startLineNumber: 2, endLineNumber: 2, endColumn: 5 }, "git:abc")).toBe("[oxplow ref file:a.rs@git:abc#L2] ");
+  });
+});
 
 describe("formatContextMention", () => {
+  test("ref → [oxplow ref <ref>] with trailing space: Ask About This", () => {
+    expect(formatContextMention({ kind: "ref", ref: "commit:abc123" })).toBe("[oxplow ref commit:abc123] ");
+  });
+
   test("file → @<path> with trailing space", () => {
     expect(formatContextMention({ kind: "file", path: "src/foo.ts" })).toBe("@src/foo.ts ");
   });

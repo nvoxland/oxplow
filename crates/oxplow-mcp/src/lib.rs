@@ -1623,6 +1623,7 @@ impl OxplowMcp {
             .await;
         let root = self.services.worktrees.resolve(stream.as_deref()).await;
         let layer = self.services.sql.clone();
+        let commands = |n: &str| self.services.commands.input_schema(n);
         let review = match (p.git_url.as_deref(), p.name.as_deref()) {
             (Some(url), None) => {
                 oxplow_app::extensions::review_extension(
@@ -1632,6 +1633,7 @@ impl OxplowMcp {
                     url,
                     p.git_ref.as_deref(),
                     None,
+                    &commands,
                 )
                 .await
             }
@@ -1641,6 +1643,7 @@ impl OxplowMcp {
                     &self.services.extension_catalog,
                     &root,
                     name,
+                    &commands,
                 )
                 .await
             }
@@ -1974,11 +1977,13 @@ impl OxplowMcp {
             .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
         let root = self.services.worktrees.resolve(stream.as_deref()).await;
+        let commands = |n: &str| self.services.commands.input_schema(n);
         let report = oxplow_sdk::check(
             &root,
             &p.name,
             &self.services.extension_catalog,
             Some(&self.services.sql),
+            Some(&commands),
         )
         .await
         .map_err(|e| match e {

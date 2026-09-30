@@ -106,6 +106,15 @@ describe("buildQuickOpenResults", () => {
   const commands = flattenCommands([group([{ id: "git.commit", label: "Commit Changes…", enabled: true }])]);
   const files = [file("src/git.rs"), file("README.md")];
 
+  test("a typed query ends with Ask the Agent, carrying what was typed; an empty one has none", () => {
+    const out = buildQuickOpenResults({ query: "  Why is git slow?  ", pages, commands, files, siteHits: [] });
+    expect(out.results[out.results.length - 1]).toEqual({ kind: "ask", text: "Why is git slow?" });
+    const nothing = buildQuickOpenResults({ query: "zzzz", pages, commands, files, siteHits: [] });
+    expect(nothing.results).toEqual([{ kind: "ask", text: "zzzz" }]);
+    const empty = buildQuickOpenResults({ query: "", pages, commands, files, siteHits: [] });
+    expect(empty.results.some((r) => r.kind === "ask")).toBe(false);
+  });
+
   test("empty query is launcher mode — pages only, in given order", () => {
     const out = buildQuickOpenResults({ query: "", pages, commands, files, siteHits: [] });
     expect(out.results.map((r) => r.kind)).toEqual(["page", "page"]);
@@ -125,7 +134,7 @@ describe("buildQuickOpenResults", () => {
     // the src/git.rs file path, and the wiki body hit — in that order.
     // (The "Git" page label also equals the query, so the exact-match
     // hoist keeps it first — where it already was.)
-    expect(out.results.map((r) => r.kind)).toEqual(["page", "command", "file", "hit"]);
+    expect(out.results.map((r) => r.kind)).toEqual(["page", "command", "file", "hit", "ask"]);
   });
 
   test("multi-token query matches group+label of a command in any order", () => {

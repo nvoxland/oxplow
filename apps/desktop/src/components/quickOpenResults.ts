@@ -20,7 +20,10 @@ export type QuickOpenResult =
   | { kind: "page"; entry: PageDirectoryEntry }
   | { kind: "command"; entry: CommandEntry }
   | { kind: "file"; file: WorkspaceIndexedFile }
-  | { kind: "hit"; hit: SearchHit };
+  | { kind: "hit"; hit: SearchHit }
+  /** "Ask the Agent: <text>" — puts what was typed in the agent's input
+   *  (never sent). Last in every search. */
+  | { kind: "ask"; text: string };
 
 /// Flatten enabled, runnable menu commands into searchable entries.
 /// Disabled commands (and the native responder-chain placeholders with
@@ -85,6 +88,8 @@ function isExactMatch(r: QuickOpenResult, q: string): boolean {
     }
     case "hit":
       return r.hit.title.toLowerCase() === q || r.hit.ref_id.toLowerCase() === q;
+    case "ask":
+      return false;
   }
 }
 
@@ -100,6 +105,8 @@ function resultKey(r: QuickOpenResult): string {
       return `file:${r.file.path}`;
     case "hit":
       return `hit:${r.hit.kind}:${r.hit.ref_id}:${r.hit.stream_id ?? ""}`;
+    case "ask":
+      return "ask";
   }
 }
 
@@ -189,6 +196,7 @@ export function buildQuickOpenResults(input: {
     ...restFiles.slice(0, MAX_FILE_ROWS),
     ...restHits.slice(0, MAX_HIT_ROWS),
   ];
+  results.push({ kind: "ask", text: input.query.trim() });
   const truncated =
     Math.max(0, restFiles.length - MAX_FILE_ROWS) + Math.max(0, restHits.length - MAX_HIT_ROWS);
   return { results, truncated };
