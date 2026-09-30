@@ -844,6 +844,22 @@ tool list stable no matter how many extensions are installed.
 - **Row actions (current):** right-click a lens row → "Ask About This"
   (P6.D1): `[oxplow ref <ref>]` for the first ref the row links to, else
   `[oxplow lens <id> row: col=value, …]` (`rowAsk`).
+- **The prompt catalog (current, P6.D2):** what a person can ask.
+  - Core's are the capability questions
+    (`crates/oxplow-plugin/assets/questions/*.yaml`,
+    `oxplow_plugin::capability_prompts`); a question with `about: <ref
+    kind>` is phrased with "this" and is offered on pages for that kind
+    (its `reaches` keeps concrete fixture values for the answerability
+    check, which also checks `about` names a registered kind).
+  - An extension's are `intent.prompts: [{ prompt, about? }]` in its
+    manifest (checked: non-empty, `about` a registered ref kind).
+  - `prompt_catalog::prompt_catalog(extensions)` merges them (core first,
+    then enabled extensions by name); RPC `prompt_catalog { stream_id }`
+    (UI only) serves it.
+  - The UI: the **Catalog** page (`page:catalog`, `pages/CatalogPage.tsx`:
+    prompts by source, `v_model` by owner, `config.list_keys`), the nav
+    bar's Ask menu (suggested prompts for the page's ref kind), and
+    `EmptyState`'s prompts (usability.md → "Empty states").
 - **Launcher entries (current, P6.D1):** the manifest's `launcher:` lists
   what isn't a lens, each `{ label, category, target }`, where `target` is
   exactly one of `{ ref }` (a canonical ref, opened as a page),

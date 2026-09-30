@@ -78,6 +78,7 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "explore-data", label: "Explore Data", ref: indexRef("explore-data"), category: "Data", keywords: "sql query schema semantic layer lens" },
     { id: "metrics-recorded", label: "Metrics", ref: indexRef("metrics-recorded"), category: "Data", keywords: "recorded catalog" },
     { id: "dashboards", label: "Dashboards", ref: dashboardsRef(), category: "Data", keywords: "custom metric tiles lens" },
+    { id: "catalog", label: "Catalog", ref: indexRef("catalog"), category: "System", keywords: "ask prompts questions what can i help data config" },
     { id: "terminal", label: "Terminal", ref: indexRef("terminal"), category: "System" },
     { id: "closed-threads", label: "Closed Threads", ref: closedThreadsRef(), category: "System" },
     { id: "settings", label: "Settings", ref: indexRef("settings"), category: "System" },

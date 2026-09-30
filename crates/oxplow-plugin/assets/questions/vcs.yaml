@@ -3,7 +3,8 @@
 # `.context/extensions.md` "Answerability"). Each question names the
 # skill that should lead the agent to its answer; everything `reaches`
 # names must be in that skill's text.
-- question: Which commits touched src/lib.rs, newest first?
+- question: Which commits touched this file, newest first?
+  about: file
   skill: oxplow-codebase
   reaches:
     sql: >-
@@ -11,7 +12,8 @@
       JOIN v_commit_file f ON f.sha = c.sha
       WHERE f.path = 'src/lib.rs' ORDER BY c.committed_at DESC LIMIT 20
   shape: { columns: [sha, subject, committed_at] }
-- question: Who has changed src/lib.rs the most?
+- question: Who has changed this file the most?
+  about: file
   skill: oxplow-codebase
   reaches:
     sql: >-
@@ -24,3 +26,9 @@
   reaches:
     sql: SELECT name, kind, is_default FROM v_branch ORDER BY is_default DESC, name
   shape: { columns: [name, kind, is_default] }
+- question: What did this commit change?
+  about: commit
+  skill: oxplow-codebase
+  reaches:
+    sql: SELECT path, status, additions, deletions FROM v_commit_file WHERE sha = 'abc123'
+  shape: { columns: [path, status, additions, deletions] }

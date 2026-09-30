@@ -43,8 +43,34 @@ pub async fn list_data_entities(
     )
 }
 
+/// What the person can ask (the catalog page, contextual prompts): every
+/// capability's questions and the stream's enabled extensions' prompts.
+/// UI-only: the agent is who gets asked.
+pub async fn prompt_catalog(
+    svc: &Services,
+    stream_id: Option<String>,
+) -> Result<Vec<oxplow_app::prompt_catalog::CatalogPrompt>, IpcError> {
+    let root = svc.worktrees.resolve(stream_id.as_deref()).await;
+    Ok(oxplow_app::prompt_catalog::prompt_catalog(
+        svc.extension_catalog.get(&root).as_ref(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn prompt_catalog_dispatches() {
+        let (svc, _dir) = crate::test_support::services();
+        let out = crate::dispatch("prompt_catalog", serde_json::json!({}), &svc)
+            .await
+            .unwrap();
+        assert!(out
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["about"] == "effort" && p["source"]["kind"] == "capability"));
+    }
+
     #[tokio::test]
     async fn list_data_entities_dispatches() {
         let (svc, _dir) = crate::test_support::services();

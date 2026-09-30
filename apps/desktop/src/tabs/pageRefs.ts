@@ -193,7 +193,8 @@ export type IndexKind =
   | "settings"
   | "metrics-recorded"
   | "dashboards"
-  | "explore-data";
+  | "explore-data"
+  | "catalog";
 
 export function indexRef(kind: IndexKind): TabRef {
   return route(kind);
@@ -479,6 +480,7 @@ const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> 
   "metrics-recorded": () => indexRef("metrics-recorded"),
   dashboards: () => indexRef("dashboards"),
   "explore-data": () => indexRef("explore-data"),
+  catalog: () => indexRef("catalog"),
   "git-dashboard": () => gitDashboardRef(),
   "uncommitted-changes": () => uncommittedChangesRef(),
   "new-stream": () => newStreamRef(),

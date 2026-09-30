@@ -20,6 +20,7 @@ import { deleteWikiPage } from "../../api.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { wikiPageRef } from "../../tabs/pageRefs.js";
 import { wikiRowTooltip } from "./wikiRowLabel.js";
+import { EmptyState } from "../Prompts/EmptyState.js";
 
 const SECTION_INITIAL_LIMIT = 8;
 
@@ -302,8 +303,13 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
             }}
           />
         ) : notes.length === 0 ? (
-          <div style={{ padding: 12, fontSize: "var(--text-xs)", opacity: 0.6 }}>
-            No wiki pages yet. Click "+ New" or create a file at <code>.oxplow/wiki/*.md</code>.
+          <div style={{ padding: 12 }}>
+            <EmptyState
+              testId="wiki-empty"
+              title="No wiki pages yet"
+              text={<>Click "+ New", or ask the agent to write down what it learns (pages live in <code>.oxplow/wiki/</code>).</>}
+              prompts={["Write a wiki page explaining how this project is structured", "Capture what we just figured out as a wiki page"]}
+            />
           </div>
         ) : (
           <>

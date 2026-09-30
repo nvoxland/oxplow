@@ -144,6 +144,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // semantic layer
             commands::generated::query_sql,
             commands::generated::list_data_entities,
+            commands::generated::prompt_catalog,
             // extensions + lenses
             commands::generated::list_extensions,
             commands::generated::get_lens,

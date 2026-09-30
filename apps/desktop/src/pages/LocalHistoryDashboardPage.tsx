@@ -22,6 +22,7 @@ import type { NavSiblingEntry, NavSiblings } from "../tabs/PageNavigationContext
 import { gitCommitRef, indexRef, snapshotRef } from "../tabs/pageRefs.js";
 import { workItemLabel } from "../workItemRef.js";
 import { vcsRevOf } from "../revision.js";
+import { EmptyState } from "../components/Prompts/EmptyState.js";
 
 const RECENT_LIMIT = 20;
 /** Cap on the number of commit groups rendered in the dashboard's
@@ -525,7 +526,11 @@ function RecentSnapshotsCard({
   return (
     <Card testId="local-history-recent" title="Recent Snapshots">
       {rows.length === 0 ? (
-        <div style={muted}>No snapshots yet.</div>
+        <EmptyState
+          testId="local-history-empty"
+          title="No snapshots yet"
+          text="oxplow snapshots the working tree as files change and when work starts or ends; they'll show up here."
+        />
       ) : (
         <div style={{ display: "flex", flexDirection: "column" }}>
           {rows.map((row, idx) => (

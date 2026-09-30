@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { formatContextMention } from "../agent-context-ref.js";
-import { insertIntoAgent } from "../agent-input-bus.js";
+import { AskMenu, type AskTarget } from "../components/Prompts/AskMenu.js";
 import type { BookmarkScope } from "./bookmarks.js";
 
 export interface PageNavBarProps {
@@ -72,9 +71,9 @@ export interface PageNavBarProps {
   comments?: ReactNode;
   /** Optional kebab actions slot at the right edge. */
   actions?: ReactNode;
-  /** The page's canonical ref: Ask About This puts it in the agent's
-   *  input (P6.D1). Omitted, no Ask button. */
-  askRef?: string;
+  /** The page's canonical ref (and stream): the Ask menu — Ask About
+   *  This and the prompts about its kind (P6.D1/D2). Omitted, no Ask. */
+  ask?: AskTarget;
 }
 
 /**
@@ -96,7 +95,7 @@ export function PageNavBar({
   snapshots,
   comments,
   actions,
-  askRef,
+  ask,
 }: PageNavBarProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   const [outboundOpen, setOutboundOpen] = useState(false);
@@ -353,17 +352,7 @@ export function PageNavBar({
         <div style={{ flex: 1 }} />
       )}
 
-      {askRef ? (
-        <button
-          type="button"
-          data-testid="page-nav-ask"
-          title="Ask About This — put this page in the agent's input (it isn't sent)"
-          onClick={() => insertIntoAgent(formatContextMention({ kind: "ref", ref: askRef }))}
-          style={{ ...navButtonStyle(true), color: "var(--text-secondary)", fontSize: 11 }}
-        >
-          Ask
-        </button>
-      ) : null}
+      {ask ? <AskMenu ask={ask} buttonStyle={{ ...navButtonStyle(true), color: "var(--text-secondary)", fontSize: 11 }} /> : null}
       {bookmark ? (
         <div style={{ position: "relative", display: "inline-flex" }}>
           <button

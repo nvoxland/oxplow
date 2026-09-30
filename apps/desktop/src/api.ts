@@ -22,6 +22,7 @@ import { taskIdOfWorkItemRef, workItemRef } from "./workItemRef.js";
 import { IpcCallError, ipcErrorCode, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
+  CatalogPrompt,
   ChangeRow,
   ChangeTarget,
   CheckReport,
@@ -668,6 +669,12 @@ export async function submitLensForm(
   confirmed: boolean,
 ): Promise<CommandOutcome> {
   return unwrap(await commands.submitLensForm(id, input, params, streamId, confirmed));
+}
+
+/** What the person can ask: every capability's questions and the stream's
+ *  enabled extensions' prompts (the catalog; contextual suggestions). */
+export async function promptCatalog(streamId: string | null): Promise<CatalogPrompt[]> {
+  return unwrap(await commands.promptCatalog(streamId));
 }
 
 /** Run an answer an agent showed in a thread (`answer:<id>`). */

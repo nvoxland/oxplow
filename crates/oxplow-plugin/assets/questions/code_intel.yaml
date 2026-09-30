@@ -4,7 +4,8 @@
   reaches:
     sql: SELECT path, line, kind, container FROM v_symbol WHERE name = 'main'
   shape: { columns: [path, line, kind, container] }
-- question: What does src/lib.rs declare, in order?
+- question: What does this file declare, in order?
+  about: file
   skill: oxplow-codebase
   reaches:
     sql: SELECT name, kind, container, line FROM v_symbol WHERE path = 'src/lib.rs' ORDER BY line

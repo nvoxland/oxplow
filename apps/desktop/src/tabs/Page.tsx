@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { PageNavBar } from "./PageNavBar.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 import type { BookmarkScope } from "./bookmarks.js";
+import type { AskTarget } from "../components/Prompts/AskMenu.js";
 
 export interface PageNavBarConfig {
   canBack: boolean;
@@ -28,8 +29,8 @@ export interface PageNavBarConfig {
     scopes: BookmarkScope[];
     onToggleScope(scope: BookmarkScope): void;
   };
-  /** The page's canonical ref, for Ask About This. */
-  askRef?: string;
+  /** The page's ref and stream, for the Ask menu. */
+  ask?: AskTarget;
   /** Backlinks dropdown content. Mutually exclusive with the
    *  legacy footer panel — when this is supplied, the footer is
    *  suppressed even if the `backlinks` prop is also set. */
@@ -201,7 +202,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
           onToggleScope: (scope) => ctxNav.bookmark!.toggle(scope),
         }
       : undefined,
-    askRef: ctxNav.askRef,
+    ask: ctxNav.ask,
   } : undefined);
   // When a nav bar is present, promote backlinks into its dropdown
   // and suppress the legacy footer. Pages that explicitly set
@@ -247,7 +248,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
           snapshots={effectiveNavBar.snapshots}
           comments={effectiveNavBar.comments}
           actions={effectiveNavBar.actions}
-          askRef={effectiveNavBar.askRef}
+          ask={effectiveNavBar.ask}
         />
       ) : null}
       {showHeader && !effectiveNavBar ? (

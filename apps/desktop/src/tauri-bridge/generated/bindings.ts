@@ -318,6 +318,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	promptCatalog: (streamId: string | null) => typedError<CatalogPrompt[], IpcError>(__TAURI_INVOKE("prompt_catalog", { streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listExtensions: (streamId: string | null) => typedError<Extension_Serialize[], IpcError>(__TAURI_INVOKE("list_extensions", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1552,6 +1557,14 @@ export type BranchChangeEntry = {
 	deletions: number,
 };
 
+// One question the person can ask, with where it comes from.
+export type CatalogPrompt = {
+	prompt: string,
+	// A ref kind (`file`, `commit`, `effort`): a page for one offers it.
+	about: string | null,
+	source: PromptSource,
+};
+
 export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked";
 
 // A change's identity and state.
@@ -2727,6 +2740,11 @@ export type Intent = {
 	// The thread or effort ref that created it (`effort:eff42`), when known.
 	origin?: string | null,
 	examples?: IntentExample[],
+	/**
+	 *  Questions it helps answer, offered to the person with an Ask
+	 *  button (the catalog; pages for a ref of `about`'s kind).
+	 */
+	prompts?: IntentPrompt[],
 };
 
 /**
@@ -2737,6 +2755,15 @@ export type IntentExample = {
 	name: string,
 	input?: unknown,
 	expect?: unknown,
+};
+
+/**
+ *  A question an extension helps answer (P6.D2). `about` is a ref kind
+ *  (`commit`, `file`, `effort`): a page for a ref of that kind suggests it.
+ */
+export type IntentPrompt = {
+	prompt: string,
+	about?: string | null,
 };
 
 // Which surfaces may invoke a command.
@@ -3916,6 +3943,13 @@ export type ProjectProgram = {
 	 */
 	version: string | null,
 };
+
+// Who offers a prompt.
+export type PromptSource = 
+// A core capability (`vcs`, `work_items`, `knowledge`, `code_intel`).
+{ kind: "capability"; name: string } | 
+// An extension.
+{ kind: "extension"; name: string };
 
 export type ProviderConfig = {
 	/**

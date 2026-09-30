@@ -4,7 +4,8 @@
   reaches:
     sql: SELECT ref, title, stale_ref_count FROM v_knowledge_page WHERE stale_ref_count > 0
   shape: { columns: [ref, title, stale_ref_count] }
-- question: Which wiki pages talk about src/lib.rs?
+- question: Which wiki pages talk about this file?
+  about: file
   skill: oxplow-wiki-capture
   reaches:
     sql: SELECT page, stale FROM v_knowledge_ref WHERE path = 'src/lib.rs'

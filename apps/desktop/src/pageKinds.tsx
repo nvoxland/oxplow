@@ -102,6 +102,8 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Glasses;
     case "explore-data":
       return Database;
+    case "catalog":
+      return BookOpen;
 
     // Literal-id index pages (kind === id).
     case "agent":

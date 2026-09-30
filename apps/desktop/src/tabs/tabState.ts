@@ -62,7 +62,8 @@ export type RoutePageKind =
   | "metrics-recorded"
   | "custom-dashboard"
   | "dashboards"
-  | "explore-data";
+  | "explore-data"
+  | "catalog";
 
 export type PageKind = EntityPageKind | RoutePageKind;
 

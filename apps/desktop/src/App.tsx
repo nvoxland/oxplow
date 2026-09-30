@@ -130,6 +130,7 @@ import { NEW_LENS_PROMPT } from "./lens/lensModel.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { ExploreDataPage } from "./pages/ExploreDataPage.js";
+import { CatalogPage } from "./pages/CatalogPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
@@ -2869,6 +2870,12 @@ export function App() {
           render: () => <DashboardsIndexPage onOpenPage={nav.navOpen} />,
         };
       },
+      catalog: (ref, nav) => ({
+        id: ref.id,
+        label: "Catalog",
+        closable: true,
+        render: () => <CatalogPage streamId={stream?.id ?? null} onOpenPage={nav.navOpen} />,
+      }),
       "explore-data": (ref, nav) => {
         return {
           id: ref.id,
@@ -3226,7 +3233,7 @@ export function App() {
         setTitle: (t: string) => setPageTitle(tabId, t),
         title: registeredTitle,
         pageKey: selectedThreadId ? `${selectedThreadId}::${tabId}` : undefined,
-        askRef: ref && parseRef(ref.id) ? ref.id : undefined,
+        ask: ref && parseRef(ref.id) ? { ref: ref.id, streamId: stream?.id ?? null } : undefined,
         bookmark: ref ? {
           scopes,
           toggle: (scope: BookmarkScope) => {

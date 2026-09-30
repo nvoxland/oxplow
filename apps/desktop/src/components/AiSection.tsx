@@ -36,6 +36,7 @@ import { formatMetricValue, formatMetricValueExact } from "./format.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
+import { EmptyState } from "./Prompts/EmptyState.js";
 
 export function AiSection() {
   const [settings, setSettings] = useState<AiSettings | null>(null);
@@ -60,9 +61,11 @@ export function AiSection() {
     <div data-testid="ai-section">
       <h3 style={subheadStyle}>Providers</h3>
       {settings.providers.length === 0 ? (
-        <div style={mutedStyle} data-testid="ai-providers-empty">
-          No providers yet. Add one below: an API key for a hosted service, or the URL of a local server.
-        </div>
+        <EmptyState
+          testId="ai-providers-empty"
+          title="No providers yet"
+          text="Add one below: an API key for a hosted service, or the URL of a local server. Only you can — agents never see keys."
+        />
       ) : (
         <ul style={listStyle}>
           {settings.providers.map((p) => (

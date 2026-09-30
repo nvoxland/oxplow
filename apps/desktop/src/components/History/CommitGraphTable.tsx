@@ -7,6 +7,7 @@ import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { gitCommitRef } from "../../tabs/pageRefs.js";
 import type { NavSiblingEntry } from "../../tabs/PageNavigationContext.js";
 import { RefBadge } from "../RefBadge.js";
+import { EmptyState } from "../Prompts/EmptyState.js";
 
 const BRANCH_COLORS = [
   "#4a9eff",
@@ -83,7 +84,11 @@ export function CommitGraphTable({
   );
 
   if (layout.rows.length === 0) {
-    return <div style={{ padding: 12, color: "var(--muted)", fontSize: "var(--text-xs)" }}>No commits.</div>;
+    return (
+      <div style={{ padding: 12 }}>
+        <EmptyState testId="history-empty" title="No commits" text="This branch has no history yet." />
+      </div>
+    );
   }
 
   return (

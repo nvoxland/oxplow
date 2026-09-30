@@ -163,6 +163,7 @@ pub const MANIFEST: &[Capability] = &[
     // Settings → Data (models with counts, unsynced entities); an agent
     // reads v_model and counts with query_sql.
     ui("list_data_entities"),
+    ui("prompt_catalog"),
     both("list_extensions"),
     both("get_lens"),
     both("run_lens"),

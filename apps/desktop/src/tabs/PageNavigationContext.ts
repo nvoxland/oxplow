@@ -75,9 +75,9 @@ export interface PageNavigation {
   goSibling?(index: number): void;
   /** Bookmark binding for the page currently rendered in this tab. */
   bookmark?: BookmarkBinding;
-  /** The page's canonical ref (`commit:<sha>`, `lens:x/y`), for Ask
-   *  About This; absent for a page whose tab id isn't one. */
-  askRef?: string;
+  /** The page's canonical ref (`commit:<sha>`, `lens:x/y`) and stream,
+   *  for the Ask menu; absent for a page whose tab id isn't one. */
+  ask?: import("../components/Prompts/AskMenu.js").AskTarget;
   /**
    * Register the page's current title with the host so the tab strip
    * label and the shared chrome header pull from a single source.

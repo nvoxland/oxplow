@@ -11,6 +11,7 @@ import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { fileRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
+import { EmptyState } from "../components/Prompts/EmptyState.js";
 
 /// Map a comment's target back to the page that owns it.
 function targetRef(kind: string, id: string): TabRef | null {
@@ -147,9 +148,11 @@ export function CommentsInboxPage({
           </div>
         )}
         {threads.length === 0 ? (
-          <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
-            No comments yet. Select text in a wiki page, file, or task and add one.
-          </div>
+          <EmptyState
+            testId="comments-empty"
+            title="No comments yet"
+            text="Select text in a wiki page, file, task or the agent's output and add one; the agent can answer them."
+          />
         ) : groups.length === 0 ? (
           <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
             No unresolved comments.{resolvedOptions.length > 0 ? " Use the filter above to show resolved ones." : ""}

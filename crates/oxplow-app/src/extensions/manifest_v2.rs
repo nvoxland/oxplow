@@ -57,6 +57,20 @@ pub struct Intent {
     pub origin: Option<String>,
     #[serde(default)]
     pub examples: Vec<IntentExample>,
+    /// Questions it helps answer, offered to the person with an Ask
+    /// button (the catalog; pages for a ref of `about`'s kind).
+    #[serde(default)]
+    pub prompts: Vec<IntentPrompt>,
+}
+
+/// A question an extension helps answer (P6.D2). `about` is a ref kind
+/// (`commit`, `file`, `effort`): a page for a ref of that kind suggests it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct IntentPrompt {
+    pub prompt: String,
+    #[serde(default)]
+    pub about: Option<String>,
 }
 
 /// A slot mount: a lens into a core page.
@@ -413,6 +427,22 @@ pub fn check(m: &ManifestV2, file: &str, text: &str, bundled: bool) -> (Vec<Stri
                     ));
                 }
             }
+            let kinds = oxplow_domain::refs::kind::core_kinds();
+            for p in &intent.prompts {
+                let line = line_under(text, "intent", &p.prompt).or(key_line(text, "intent"));
+                if p.prompt.trim().is_empty() {
+                    errors.push(at(file, line, "`intent.prompts`: an empty prompt — write the question"));
+                }
+                if let Some(about) = &p.about {
+                    if kinds.get(about).is_none() {
+                        errors.push(at(
+                            file,
+                            line,
+                            format!("`intent.prompts`: `{about}` isn't a kind of ref (`commit`, `file`, `effort`, `work_item`, …)"),
+                        ));
+                    }
+                }
+            }
             if intent.examples.is_empty() {
                 warnings.push(at(
                     file,
@@ -549,6 +579,38 @@ mod tests {
         let text = "manifest: 2\nname: acme\nintent: { purpose: x, origin: nope, examples: [{ name: a }] }\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
         assert!(errors[0].contains("not a canonical ref"), "{errors:?}");
+    }
+
+    /// P6.D2: `intent.prompts` are questions the extension helps answer,
+    /// each optionally about a kind of ref (what page offers it).
+    #[test]
+    fn intent_prompts_are_questions_about_a_ref_kind() {
+        let text = "manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{ name: a }]\n  prompts:\n    - { prompt: 'Which PRs are waiting on me?' }\n    - { prompt: 'Who reviews this commit?', about: commit }\n";
+        let m = parse(text);
+        let (errors, _) = check(&m, "e/extension.yaml", text, false);
+        assert!(errors.is_empty(), "{errors:?}");
+        let prompts = &m.intent.as_ref().unwrap().prompts;
+        assert_eq!(
+            prompts[1],
+            IntentPrompt {
+                prompt: "Who reviews this commit?".into(),
+                about: Some("commit".into())
+            }
+        );
+
+        for (entry, want) in [
+            ("{ prompt: '  ' }", "an empty prompt"),
+            ("{ prompt: x, about: nope }", "`nope` isn't a kind of ref"),
+        ] {
+            let text = format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\n  prompts:\n    - {entry}\n");
+            let (errors, _) = check(&parse(&text), "e/extension.yaml", &text, false);
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| e.contains(want) && e.starts_with("e/extension.yaml:")),
+                "{entry}: {errors:?}"
+            );
+        }
     }
 
     #[test]

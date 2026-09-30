@@ -242,6 +242,40 @@ pub const CAPABILITY_QUESTIONS: &[(&str, &str)] = &[
     ),
 ];
 
+/// A capability question as the person sees it (P6.D2): offered with an
+/// Ask button on the catalog page, and on a page for a ref of `about`'s
+/// kind (`file`, `commit`, `effort`, `work_item`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityPrompt {
+    pub capability: &'static str,
+    pub prompt: String,
+    pub about: Option<String>,
+}
+
+/// Every capability question, in file order. The files' other keys are
+/// the answerability check's (`oxplow_sdk::answerability`).
+pub fn capability_prompts() -> Vec<CapabilityPrompt> {
+    #[derive(serde::Deserialize)]
+    struct Entry {
+        question: String,
+        #[serde(default)]
+        about: Option<String>,
+    }
+    CAPABILITY_QUESTIONS
+        .iter()
+        .flat_map(|(capability, yaml)| {
+            serde_yaml::from_str::<Vec<Entry>>(yaml)
+                .expect("a bundled questions file parses (checked by its test)")
+                .into_iter()
+                .map(|e| CapabilityPrompt {
+                    capability,
+                    prompt: e.question,
+                    about: e.about,
+                })
+        })
+        .collect()
+}
+
 /// One skill's `SKILL.md` body by name.
 pub fn skill_body(name: &str) -> Option<&'static str> {
     OXPLOW_SKILLS
@@ -660,6 +694,28 @@ fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), PluginError>
 
 #[cfg(test)]
 mod tests {
+    /// P6.D2: each capability question is a prompt; an `about` names a
+    /// registered kind of ref, and the entity pages have some.
+    #[test]
+    fn capability_prompts_are_about_registered_ref_kinds() {
+        let prompts = capability_prompts();
+        let kinds = oxplow_domain::refs::kind::core_kinds();
+        for p in &prompts {
+            if let Some(about) = &p.about {
+                assert!(kinds.get(about).is_some(), "{}: `{about}`", p.prompt);
+            }
+        }
+        for kind in ["file", "commit", "effort", "work_item"] {
+            assert!(
+                prompts.iter().any(|p| p.about.as_deref() == Some(kind)),
+                "no prompt about `{kind}`"
+            );
+        }
+        assert!(prompts
+            .iter()
+            .any(|p| p.capability == "vcs" && p.prompt == "Who has changed this file the most?"));
+    }
+
     use super::*;
     use tempfile::TempDir;
 

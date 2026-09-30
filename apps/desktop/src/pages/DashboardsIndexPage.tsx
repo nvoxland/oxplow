@@ -6,6 +6,7 @@ import { customDashboardRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { RouteLink } from "../tabs/RouteLink.js";
 import type { TabRef } from "../tabs/tabState.js";
+import { EmptyState } from "../components/Prompts/EmptyState.js";
 
 /**
  * Dashboards index (tsk141, epic tsk138) — the list of the user's custom
@@ -73,9 +74,12 @@ export function DashboardsIndexPage({
         {loading ? (
           <div style={{ opacity: 0.6 }}>Loading…</div>
         ) : dashboards.length === 0 ? (
-          <div style={{ opacity: 0.6 }} data-testid="dashboards-empty">
-            No dashboards yet. Create one to compose a grid of metric tiles.
-          </div>
+          <EmptyState
+            testId="dashboards-empty"
+            title="No dashboards yet"
+            text="A dashboard is a grid of metric and lens tiles. Create one here, or have the agent build it."
+            prompts={["Build me a dashboard of this week's test health", "Make a dashboard of where the code churn is"]}
+          />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {dashboards.map((d) => (

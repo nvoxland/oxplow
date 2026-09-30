@@ -23,6 +23,7 @@ import {
   type PageVisitApi,
   type TopVisitedRowApi,
 } from "../../api.js";
+import { EmptyState } from "../Prompts/EmptyState.js";
 
 export interface UncommittedSummary {
   added: number;
@@ -959,8 +960,8 @@ function ActiveItemSection({
  *  renders (the pane list is stable — sections never disappear). */
 function RailEmpty({ label }: { label: string }) {
   return (
-    <div style={{ padding: "4px 14px 10px", color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>
-      {label}
+    <div style={{ padding: "4px 14px 10px" }}>
+      <EmptyState compact title={label} />
     </div>
   );
 }

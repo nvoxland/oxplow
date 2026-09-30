@@ -70,6 +70,9 @@ intent:                 # required: what it is for, and how to know it works
     - name: a stream with one blocked task
       input: { lens: waiting-on-me, params: { stream_id: 1 } }
       expect: one row for the blocked task
+  prompts:              # optional: questions it helps answer, offered with Ask
+    - { prompt: "What's waiting on me?" }
+    - { prompt: "Who should review this effort?", about: effort }  # also on effort pages
 slot_mounts:            # optional: mount a lens into a core page
   - { slot: rail, lens: waiting-on-me }
 ```

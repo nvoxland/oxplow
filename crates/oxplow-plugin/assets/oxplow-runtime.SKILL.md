@@ -149,6 +149,10 @@ provider's items with `query_sql` over **`v_work_item`** (`ref`,
 `canceled` — `native_state`, `parent_ref`): what's in progress is
 `SELECT ref, provider, title FROM v_work_item WHERE state =
 'in_progress'`, an item's children `WHERE parent_ref = '<ref>'`.
+The work done on an item is its **efforts** (`v_effort`: `id`,
+`work_item`, `thread_id`, `started_at`, `ended_at`, `summary`); the files
+an effort touched are **`v_effort_file`** (`effort_id`, `path`,
+`change_kind`).
 
 Change oxplow's own with `run_command` and the item's canonical ref:
 `work_item.transition { ref, to }` (a status: `done`, `blocked`, …),

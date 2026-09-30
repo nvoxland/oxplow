@@ -28,6 +28,9 @@ import {
   mergeSnapshot,
   type AcpViewState,
 } from "./acpTranscript.js";
+import { EmptyState } from "../Prompts/EmptyState.js";
+
+const NO_MESSAGES = "No messages yet.";
 
 interface Props {
   thread: Thread;
@@ -189,7 +192,7 @@ export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpen
         onOpenFile={onOpenFile}
         onOpenPage={onOpenPage}
         onError={report}
-        emptyText={opening || state.status === "starting" ? "Starting the agent…" : "No messages yet."}
+        emptyText={opening || state.status === "starting" ? "Starting the agent…" : NO_MESSAGES}
       />
 
       {state.status === "stopped" && state.closedReason && (
@@ -296,7 +299,11 @@ function Transcript({
       style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}
     >
       {items.length === 0 ? (
-        <div style={{ color: "var(--text-muted)" }}>{emptyText}</div>
+        <EmptyState
+          compact
+          title={emptyText}
+          prompts={emptyText === NO_MESSAGES ? ["What changed in this project this week?", "What's in progress right now?"] : []}
+        />
       ) : (
         items.map((item) => (
           <div key={item.id} data-testid={`acp-item-${item.id}`} data-kind={item.type}>

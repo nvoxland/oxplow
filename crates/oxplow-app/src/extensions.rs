@@ -19,7 +19,9 @@ use serde::{Deserialize, Serialize};
 pub mod manifest_v2;
 pub mod migrate_v1;
 use manifest_v2::{at, key_line, line_under, ManifestV2};
-pub use manifest_v2::{Intent, IntentExample, LauncherEntry, LauncherTarget, Sharing};
+pub use manifest_v2::{
+    Intent, IntentExample, IntentPrompt, LauncherEntry, LauncherTarget, Sharing,
+};
 
 /// Where project extensions live, relative to a worktree root.
 pub const EXTENSIONS_DIR: &str = "oxplow/extensions";
@@ -958,7 +960,7 @@ impl ExtensionFiles for Embedded {
     }
 }
 
-fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
+pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
     Extension {
         name: name.to_string(),
         description: String::new(),

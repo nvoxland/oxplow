@@ -533,6 +533,16 @@ declaring *what it is* and mounting the generic layer.
     "+ New terminal" button
   These are load-bearing for `tests-e2e/` — don't rename casually.
 
+## Empty states
+
+- **Every empty page or section uses `EmptyState`**
+  (`components/Prompts/EmptyState.tsx`, P6.D2): a title saying what
+  would be here, one sentence on how it gets here, and 1–3 prompts the
+  person can hand the agent. Each prompt is an Ask — it fills the agent's
+  input and never sends. `compact` is the one-line form (rail sections,
+  the ACP transcript). Don't offer prompts for what an agent can't do
+  (AI providers, keys, consent): say who does it instead.
+
 ## Feedback
 
 - **Show loading state** for any operation >150ms.
@@ -699,6 +709,9 @@ context" kebab/menu action; both share one path through
     to, else the row as a lens mention);
   - an editor selection and a diff's right-side selection
     (`askAboutSelection`: `file:<path>[@rev]#L<a>-<b>`).
+  The nav bar's Ask is a menu (`components/Prompts/AskMenu.tsx`): Ask
+  About This, then the catalog's prompts `about` the page's ref kind
+  (`SuggestedPrompts`), each inserted as `[oxplow ref <ref>] <question>`.
   The launcher's last row for any typed text is **Ask the Agent: <text>**,
   which inserts the text the same way. Nothing in oxplow sends agent
   input on its own; these only fill the draft.

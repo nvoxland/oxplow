@@ -38,6 +38,10 @@ pub struct Question {
     pub reaches: Reaches,
     #[serde(default)]
     pub shape: Option<Shape>,
+    /// The kind of ref it's about (`file`, `commit`): a page for one
+    /// offers it (P6.D2). Phrase it with "this".
+    #[serde(default)]
+    pub about: Option<String>,
 }
 
 /// What answers it: a query, or a command with its input.
@@ -222,6 +226,14 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
     let mut out = Checked::default();
     for (i, q) in questions.iter().enumerate() {
         let at = format!("{file}: question {} ({:?})", i + 1, q.question);
+        if let Some(about) = &q.about {
+            if oxplow_domain::refs::kind::core_kinds().get(about).is_none() {
+                out.errors.push(format!(
+                    "{at}: `about: {about}` isn't a kind of ref — fix: `file`, `commit`, `effort`, \
+                     `work_item`, …"
+                ));
+            }
+        }
         let Some(text) = (c.skill_text)(&q.skill) else {
             out.errors.push(format!(
                 "{at}: no skill `{}` — fix: name a skill that exists",

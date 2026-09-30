@@ -4,7 +4,8 @@
   reaches:
     sql: SELECT ref, provider, title FROM v_work_item WHERE state = 'in_progress'
   shape: { columns: [ref, provider, title] }
-- question: What are the children of a work item?
+- question: What are the children of this work item?
+  about: work_item
   skill: oxplow-runtime
   reaches:
     sql: SELECT ref, title, state FROM v_work_item WHERE parent_ref = 'work_item:oxplow:tsk1'
@@ -19,3 +20,9 @@
   reaches:
     command: work_item.link
     input: { ref: "work_item:oxplow:tsk1", target: "work_item:oxplow:tsk2", link_type: blocks }
+- question: Which files did this effort touch?
+  about: effort
+  skill: oxplow-runtime
+  reaches:
+    sql: SELECT path, change_kind FROM v_effort_file WHERE effort_id = 1
+  shape: { columns: [path, change_kind] }

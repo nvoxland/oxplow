@@ -84,6 +84,7 @@ pub mod page_ref_backfill;
 pub mod page_ref_consumers;
 pub mod post_tool_reactors;
 pub mod producer_metrics;
+pub mod prompt_catalog;
 pub mod providers;
 pub mod reasoning;
 pub mod recovery;
