@@ -583,19 +583,32 @@ pub fn compile(
     .map_err(map_sql_err)?;
     let now = ts_to_string(oxplow_domain::Timestamp::now());
     for m in &models {
-        publish(&tx, m, owner, &now)?;
+        publish(&tx, m, owner, &now, Pass::Publish)?;
     }
     tx.commit().map_err(map_sql_err)
 }
 
 /// Create one resolved model's view, check its lineage and contract, and
 /// record it.
-fn publish(conn: &Connection, m: &Resolved<'_>, owner: &str, now: &str) -> Result<(), DomainError> {
+fn publish(
+    conn: &Connection,
+    m: &Resolved<'_>,
+    owner: &str,
+    now: &str,
+    mode: Pass,
+) -> Result<(), DomainError> {
     let decl = &m.source.decl;
-    conn.execute_batch(&format!("CREATE VIEW {} AS {}", quote(&m.view), m.sql))
+    let create = match mode {
+        Pass::Publish => "CREATE VIEW",
+        Pass::Check => "CREATE TEMP VIEW",
+    };
+    conn.execute_batch(&format!("{create} {} AS {}", quote(&m.view), m.sql))
         .map_err(|e| invalid(format!("{}: {e}", m.source.file)))?;
     check_lineage(conn, m)?;
-    check_contract(conn, m, now)?;
+    check_contract(conn, m, now, mode == Pass::Publish)?;
+    if mode == Pass::Check {
+        return Ok(());
+    }
     conn.execute(
         "INSERT INTO model (view, name, owner, version, description, sql, compiled_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -665,8 +678,13 @@ fn check_lineage(conn: &Connection, m: &Resolved<'_>) -> Result<(), DomainError>
 }
 
 /// The view's columns are the declared ones, and a contract recorded for
-/// this version is unchanged.
-fn check_contract(conn: &Connection, m: &Resolved<'_>, now: &str) -> Result<(), DomainError> {
+/// this version is unchanged; with `record`, a first contract is recorded.
+fn check_contract(
+    conn: &Connection,
+    m: &Resolved<'_>,
+    now: &str,
+    record: bool,
+) -> Result<(), DomainError> {
     let decl = &m.source.decl;
     let actual = view_columns(conn, &m.view)?;
     let declared: Vec<(String, String)> = decl
@@ -692,6 +710,7 @@ fn check_contract(conn: &Connection, m: &Resolved<'_>, now: &str) -> Result<(), 
         .optional()
         .map_err(map_sql_err)?;
     match stored {
+        None if !record => Ok(()),
         None => {
             conn.execute(
                 "INSERT INTO model_contract (view, version, columns_json, recorded_at)
@@ -886,28 +905,6 @@ pub fn compile_extensions(
     extensions: &[ExtensionModels],
 ) -> Result<BTreeMap<String, Vec<String>>, DomainError> {
     let tx = conn.transaction().map_err(map_sql_err)?;
-    let mut errors: BTreeMap<String, Vec<String>> = extensions
-        .iter()
-        .map(|e| (e.extension.clone(), Vec::new()))
-        .collect();
-    // Kept earlier versions take the columns they published, or aren't kept.
-    let today = today();
-    let mut ready = Vec::with_capacity(extensions.len());
-    for e in extensions {
-        let view_of = |name: &str| extension_view(&e.extension, name);
-        let mut sources = Vec::with_capacity(e.sources.len());
-        for s in &e.sources {
-            match fill_twin(&tx, s, &view_of, &today)? {
-                Kept::Yes(s) => sources.push(s),
-                Kept::No(why) => push(&mut errors, &e.extension, why),
-            }
-        }
-        ready.push(ExtensionModels {
-            extension: e.extension.clone(),
-            sources,
-        });
-    }
-    let extensions = &ready;
     // The last pass's views go first: the set is recompiled whole.
     let previous: Vec<String> = {
         let mut st = tx
@@ -929,14 +926,69 @@ pub fn compile_extensions(
         [CORE],
     )
     .map_err(map_sql_err)?;
+    let errors = pass(&tx, extensions, Pass::Publish)?;
+    tx.commit().map_err(map_sql_err)?;
+    Ok(errors)
+}
+
+/// Check the extensions' models without publishing anything — what
+/// `oxplow plugin check` runs, on a read-only database: the same
+/// resolution, lineage and contract checks as [`compile_extensions`] (a
+/// changed contract at a published version fails), against temp views.
+/// Run it inside a transaction that's rolled back (`Database::read`).
+pub fn check_extensions(
+    conn: &Connection,
+    extensions: &[ExtensionModels],
+) -> Result<BTreeMap<String, Vec<String>>, DomainError> {
+    pass(conn, extensions, Pass::Check)
+}
+
+/// What a pass over the extensions' models does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pass {
+    /// Create the views, record them and their contracts, run their tests.
+    Publish,
+    /// Create temp views to prove they compile; record nothing.
+    Check,
+}
+
+/// One pass over the extensions' models (see [`compile_extensions`]).
+fn pass(
+    tx: &Connection,
+    extensions: &[ExtensionModels],
+    mode: Pass,
+) -> Result<BTreeMap<String, Vec<String>>, DomainError> {
+    let mut errors: BTreeMap<String, Vec<String>> = extensions
+        .iter()
+        .map(|e| (e.extension.clone(), Vec::new()))
+        .collect();
+    // Kept earlier versions take the columns they published, or aren't kept.
+    let today = today();
+    let mut ready = Vec::with_capacity(extensions.len());
+    for e in extensions {
+        let view_of = |name: &str| extension_view(&e.extension, name);
+        let mut sources = Vec::with_capacity(e.sources.len());
+        for s in &e.sources {
+            match fill_twin(tx, s, &view_of, &today)? {
+                Kept::Yes(s) => sources.push(s),
+                Kept::No(why) => push(&mut errors, &e.extension, why),
+            }
+        }
+        ready.push(ExtensionModels {
+            extension: e.extension.clone(),
+            sources,
+        });
+    }
+    let extensions = &ready;
     // What a ref() can name: core models, extensions' entities, and the
-    // models declared in this pass.
+    // models declared in this pass (never the last pass's, which this one
+    // replaces).
     let registered: Vec<(String, String, String)> = {
         let mut st = tx
-            .prepare("SELECT owner, name, view FROM model")
+            .prepare("SELECT owner, name, view FROM model WHERE kind = 'entity' OR owner = ?1")
             .map_err(map_sql_err)?;
         let rows = st
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .query_map([CORE], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .map_err(map_sql_err)?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(map_sql_err)?;
@@ -985,7 +1037,7 @@ pub fn compile_extensions(
                 .or_insert_with(|| extension_view(&e.extension, &src.decl.name));
         }
     }
-    let tables = stored_tables(&tx)?;
+    let tables = stored_tables(tx)?;
     let mut resolved: Vec<(String, Resolved<'_>)> = Vec::new();
     for e in extensions {
         let own_prefix = format!("ext__{}__", e.extension.replace('-', "_"));
@@ -1050,7 +1102,7 @@ pub fn compile_extensions(
             {
                 tx.execute_batch("SAVEPOINT extension_model")
                     .map_err(map_sql_err)?;
-                match publish(&tx, &m, &ext, &now) {
+                match publish(tx, &m, &ext, &now, mode) {
                     Ok(()) => {
                         tx.execute_batch("RELEASE extension_model")
                             .map_err(map_sql_err)?;
@@ -1086,8 +1138,9 @@ pub fn compile_extensions(
         pending = waiting;
     }
     // Declared tests, on what published: a failure is the extension's
-    // health, and the view stays.
-    for e in extensions {
+    // health, and the view stays. (A check proves the SQL; running the
+    // tests is `plugin test`'s.)
+    for e in extensions.iter().filter(|_| mode == Pass::Publish) {
         let mine: Vec<ModelSource> = published
             .iter()
             .filter(|(ext, _)| ext == &e.extension)
@@ -1112,7 +1165,7 @@ pub fn compile_extensions(
                 )
             })
             .collect();
-        for r in run_tests(&tx, &mine, &view_of)? {
+        for r in run_tests(tx, &mine, &view_of)? {
             let file = file_of.get(&r.view).cloned().unwrap_or_default();
             let detail = r.detail.unwrap_or_default();
             let problem = match r.state {
@@ -1123,7 +1176,6 @@ pub fn compile_extensions(
             push(&mut errors, &e.extension, problem);
         }
     }
-    tx.commit().map_err(map_sql_err)?;
     Ok(errors)
 }
 
@@ -1729,5 +1781,53 @@ mod tests {
                 .contains("no published contract for `fresh` v2"),
             "{errors:?}"
         );
+    }
+
+    /// P4.9 (tsk494): the check `oxplow plugin check` runs works on a
+    /// read-only database and writes nothing: a good model passes, and a
+    /// changed contract at a published version fails naming the column.
+    #[tokio::test]
+    async fn a_check_on_a_read_only_database_catches_a_breaking_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db.sqlite");
+        let late = |sql: &str, cols: &[&str]| ext("late-work", vec![source("late", sql, cols)]);
+        {
+            let db = crate::Database::open(&path).unwrap();
+            db.compile_extension_models(vec![late("SELECT id FROM ref('task')", &["id INTEGER"])])
+                .await
+                .unwrap();
+        }
+        let ro = crate::Database::open_read_only(&path).unwrap();
+        let errors = ro
+            .check_extension_models(vec![late(
+                "SELECT id FROM ref('task') WHERE status = 'done'",
+                &["id INTEGER"],
+            )])
+            .await
+            .unwrap();
+        assert!(errors["late-work"].is_empty(), "{errors:?}");
+        let errors = ro
+            .check_extension_models(vec![late(
+                "SELECT id, title FROM ref('task')",
+                &["id INTEGER", "title TEXT"],
+            )])
+            .await
+            .unwrap();
+        let joined = errors["late-work"].join("\n");
+        assert!(joined.contains("column `title` added"), "{joined}");
+        assert!(joined.contains("bump its version"), "{joined}");
+        // Nothing was written: the published model is the one compiled.
+        let sql: String = ro
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT sql FROM model WHERE view = 'v_late_work_late'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert!(!sql.contains("done"), "{sql}");
     }
 }

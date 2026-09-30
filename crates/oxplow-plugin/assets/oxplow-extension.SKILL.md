@@ -157,6 +157,9 @@ names the file and line and says what to change.
      missing `intent`, an experimental kind in a `shared` extension);
    - cross-references that don't resolve (a slot mount naming a lens
      that doesn't exist, a link kind nobody registered);
+   - its models compiled without publishing (SQL errors, a `ref()` or
+     `source()` that doesn't resolve, columns that differ from the
+     declared contract, a changed contract at a published version);
    - a dry run of every lens and advisory with its default params (SQL
      errors, and `columns` keys the query doesn't return).
 
@@ -189,6 +192,47 @@ file or pick up a task before editing, and list the files in
   2. Read the definition with `get_lens`.
   3. Change the file.
   4. Validate and run it again.
+
+## Publishing models
+
+When other lenses, extensions or agents should read a shaped dataset —
+not just one lens — publish it as a **model**: a documented, versioned
+view. Declare it in `extension.yaml` and write its SQL in
+`models/<name>.sql`:
+
+```yaml
+models:
+  - name: blocked
+    version: 1
+    description: Blocked tasks, oldest first.
+    columns:                       # the contract: every column, in order
+      - { name: id, type: INTEGER, doc: Task id. }
+      - { name: title, type: TEXT, doc: Title. }
+    tests:
+      - { not_null: id }
+      - { unique: id }
+```
+
+```sql
+-- models/blocked.sql
+SELECT id, title FROM ref('task') WHERE status = 'blocked'
+```
+
+- It publishes as `v_<extension>_<name>` (dashes as underscores):
+  `v_late_work_blocked` for extension `late-work`.
+- Read through `ref()` only: `ref('task')` is a core model (`v_task`),
+  `ref('blocked')` your own model or synced entity, and
+  `ref('other-ext/name')` another extension's. `source('<table>')` is only
+  for your own source tables (`ext__<ext>__<entity>`).
+- `type` is what SQLite reports for the column (`PRAGMA table_info`);
+  leave it out for a computed column (`count(*)`, an expression).
+- **Changing the columns is a breaking change:** bump `version`. To keep
+  the old shape for readers, keep its SQL in another file and list it:
+  `deprecated: [{ version: 1, file: blocked.v1.sql, until: 2027-01-01 }]`
+  publishes `v_<ext>_blocked_v1` until then.
+- Check runs the compile without publishing; oxplow publishes after
+  the files change. A failing declared test shows in the extension's
+  errors and `v_model_test`, and the view stays up.
 
 ## Contributing metrics
 

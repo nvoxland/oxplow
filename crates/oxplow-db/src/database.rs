@@ -359,6 +359,16 @@ impl Database {
             .await
     }
 
+    /// Check the extensions' models without publishing them — works on a
+    /// read-only database ([`crate::models::check_extensions`]).
+    pub async fn check_extension_models(
+        &self,
+        extensions: Vec<crate::models::ExtensionModels>,
+    ) -> Result<std::collections::BTreeMap<String, Vec<String>>, oxplow_domain::DomainError> {
+        self.read(move |tx| crate::models::check_extensions(tx, &extensions))
+            .await
+    }
+
     /// Run a read-only closure off the async runtime, in a DEFERRED
     /// transaction: one consistent snapshot across its statements, and no
     /// write lock (a [`Self::transaction`] begins IMMEDIATE). Always rolled

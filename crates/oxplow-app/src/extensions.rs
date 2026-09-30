@@ -1467,14 +1467,37 @@ pub async fn validate_extension(
     Ok(ext)
 }
 
-/// Dry-run a loaded extension's advisories and lenses, appending what's
-/// wrong to its `errors`. `root` names sources for an unsynced view.
+/// Dry-run a loaded extension's models, advisories and lenses, appending
+/// what's wrong to its `errors`. `root` names sources for an unsynced view.
 async fn check_extension(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     ext: &mut Extension,
 ) {
+    // Its models, beside the other enabled extensions' (a ref() may name
+    // theirs): compiled as temp views, published nowhere (P4.9).
+    if !ext.models.is_empty() {
+        let mut models: Vec<oxplow_db::models::ExtensionModels> = catalog
+            .get(root)
+            .iter()
+            .filter(|e| e.enabled && e.name != ext.name && !e.models.is_empty())
+            .map(|e| oxplow_db::models::ExtensionModels {
+                extension: e.name.clone(),
+                sources: e.models.clone(),
+            })
+            .collect();
+        models.push(oxplow_db::models::ExtensionModels {
+            extension: ext.name.clone(),
+            sources: ext.models.clone(),
+        });
+        match layer.check_extension_models(models).await {
+            Ok(mut errors) => ext
+                .errors
+                .extend(errors.remove(&ext.name).unwrap_or_default()),
+            Err(e) => ext.errors.push(format!("models: {e}")),
+        }
+    }
     for a in ext.advisories.clone() {
         let run = layer
             .run(

@@ -452,7 +452,11 @@ and one calling MCP read identical `file:line: what — fix` lines.
   a non-ref origin; what it writes passes `check` with no warnings.
 - **`check(root, name, catalog, layer: Option<&SemanticLayer>)`** is
   `catalog.named` (manifest shape, lifecycle, cross-refs, lens shape)
-  plus, with a layer, `extensions::validate_extension`'s dry run of every
+  plus, with a layer, `extensions::validate_extension`'s dry run of the
+  extension's models (P4.9: compiled as temp views beside the other
+  enabled extensions', on the read-only database — resolution, lineage,
+  and the contract, so a changed contract at a published version fails
+  here before it publishes; `models::check_extensions`) and of every
   lens and advisory. It returns a `CheckReport { ok, errors, warnings,
   sql_checked, extension }`; `render_findings` prints it as text
   (`error: <file:line …>` lines then a one-line summary) or JSON.

@@ -135,6 +135,14 @@ impl SqlGateway {
         Ok(reads)
     }
 
+    /// Check extensions' models compile, publishing nothing (P4.9).
+    pub async fn check_extension_models(
+        &self,
+        extensions: Vec<oxplow_db::models::ExtensionModels>,
+    ) -> Result<std::collections::BTreeMap<String, Vec<String>>, DomainError> {
+        self.layer.check_extension_models(extensions).await
+    }
+
     /// The name of every view in the database.
     pub async fn view_names(&self) -> Result<std::collections::HashSet<String>, DomainError> {
         self.layer.view_names().await

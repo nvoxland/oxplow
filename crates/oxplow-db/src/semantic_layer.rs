@@ -293,6 +293,15 @@ impl SemanticLayer {
     pub async fn view_names(&self) -> Result<std::collections::HashSet<String>, DomainError> {
         self.db.call_mut(|conn| view_names(conn)).await
     }
+
+    /// Check extensions' models compile, without publishing them (works
+    /// on a read-only database; see `models::check_extensions`).
+    pub async fn check_extension_models(
+        &self,
+        extensions: Vec<crate::models::ExtensionModels>,
+    ) -> Result<std::collections::BTreeMap<String, Vec<String>>, DomainError> {
+        self.db.check_extension_models(extensions).await
+    }
 }
 
 fn invalid(e: rusqlite::Error) -> DomainError {

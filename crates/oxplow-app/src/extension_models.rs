@@ -221,4 +221,61 @@ mod tests {
             .await
             .is_err());
     }
+
+    /// P4.9 (tsk494): `validate_extension` (what `oxplow plugin check`
+    /// runs) catches a breaking change at a published version before it
+    /// is published, and a plugin's `source()` of a core table.
+    #[tokio::test]
+    async fn validate_catches_a_breaking_change_and_a_foreign_source() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        let manifest = |cols: &str| {
+            format!(
+                "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\nmodels:\n  - name: blocked\n    version: 1\n    description: Blocked tasks.\n    columns:\n{cols}"
+            )
+        };
+        let id = "      - { name: id, type: INTEGER, doc: Task id. }\n";
+        let title = "      - { name: title, type: TEXT, doc: Title. }\n";
+        write(
+            &root,
+            "oxplow/extensions/late/extension.yaml",
+            &manifest(id),
+        );
+        write(
+            &root,
+            "oxplow/extensions/late/models/blocked.sql",
+            "SELECT id FROM ref('task') WHERE status = 'blocked'",
+        );
+        svc.extension_models.sync().await.unwrap();
+        let validate = || async {
+            crate::extensions::validate_extension(&svc.sql, &svc.extension_catalog, &root, "late")
+                .await
+                .unwrap()
+                .errors
+                .join("\n")
+        };
+        assert_eq!(validate().await, "");
+        write(
+            &root,
+            "oxplow/extensions/late/extension.yaml",
+            &manifest(&format!("{id}{title}")),
+        );
+        write(
+            &root,
+            "oxplow/extensions/late/models/blocked.sql",
+            "SELECT id, title FROM ref('task') WHERE status = 'blocked'",
+        );
+        let errors = validate().await;
+        assert!(
+            errors.contains("column `title` added") && errors.contains("bump its version"),
+            "{errors}"
+        );
+        write(
+            &root,
+            "oxplow/extensions/late/models/blocked.sql",
+            "SELECT id, title FROM source('task')",
+        );
+        assert!(validate().await.contains("only its own extension's tables"));
+    }
 }
