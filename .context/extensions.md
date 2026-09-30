@@ -191,9 +191,21 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - Lists every model from `v_model`, with its columns from
       `v_model_column` (SQL, like everything else; live as extensions
       compile).
+    - A picked model shows its **lineage** (`ModelLineage.tsx`, from
+      `v_model_lineage`): the models it reads (links that open them), the
+      tables it reads (plain text), and the models that read it.
     - Picking one runs `SELECT * … LIMIT 50`; the SQL box then accepts
-      any read-only query (Cmd/Ctrl+Enter runs it).
+      any read-only query (Cmd/Ctrl+Enter runs it), metrics included —
+      `SELECT bucket, MEASURE('<key>') FROM metric_grid('week')` — and
+      re-runs when what it read changes.
     - "Show as" switches the viz.
+    - **Raw tables** (a checkbox, in warning color) reads physical tables
+      too — the person's debugging switch, IPC `query_sql { raw }` only,
+      never an agent's. A raw result carries a banner, and **Save as
+      Lens** and **Pin to Dashboard** are disabled with the reason
+      (`keepBlockedReason`): a lens or a tile reads only models.
+    - **Pin to Dashboard** adds the query as a `query` tile shown with
+      the chosen viz (`PinToDashboard.tsx`, shared with the lens page).
     - **Save as Lens** writes the file through the UI-only `save_lens`
       IPC, then opens the new lens. It creates the extension if missing
       (with the same v2 manifest `oxplow plugin new` writes —

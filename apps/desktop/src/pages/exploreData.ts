@@ -43,3 +43,36 @@ export function modelColumns(result: SqlQueryResult): ModelColumn[] {
     doc: cellText(r.doc) ?? "",
   }));
 }
+
+/** What one model reads, and what reads it (`v_model_lineage`). */
+export interface Lineage {
+  /** Its inputs: other models (`ref`) and tables (`source`), by name. */
+  reads: { name: string; kind: string }[];
+  /** The models that read it. */
+  readBy: string[];
+}
+
+export const LINEAGE_SQL = "SELECT view, input, kind FROM v_model_lineage WHERE view = ?1 OR input = ?1";
+
+/** `view`'s lineage from the rows `LINEAGE_SQL` returned for it, sorted. */
+export function lineage(view: string, result: SqlQueryResult): Lineage {
+  const reads: Lineage["reads"] = [];
+  const readBy: string[] = [];
+  for (const r of rowObjects(result)) {
+    const reader = cellText(r.view) ?? "";
+    const input = cellText(r.input) ?? "";
+    if (reader === view) reads.push({ name: input, kind: cellText(r.kind) ?? "" });
+    else if (input === view) readBy.push(reader);
+  }
+  reads.sort((a, b) => a.name.localeCompare(b.name));
+  readBy.sort();
+  return { reads, readBy };
+}
+
+/** Why a query can't be kept as a lens or a dashboard tile, if it can't:
+ *  a raw read reaches physical tables, and what's kept reads only models. */
+export function keepBlockedReason(raw: boolean): string | null {
+  return raw
+    ? "Turn off raw tables to keep this: a lens or dashboard tile reads only models, never physical tables."
+    : null;
+}

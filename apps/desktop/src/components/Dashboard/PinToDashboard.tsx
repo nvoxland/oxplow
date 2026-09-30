@@ -19,12 +19,15 @@ export function PinToDashboard({
   tile,
   testId,
   onOpenPage,
+  disabledReason = null,
 }: {
   /** The tile to add (see `addDashboardItem`). */
   tile: PinnedTile;
   /** Test-id prefix for the button and its menu. */
   testId: string;
   onOpenPage(ref: TabRef): void;
+  /** Why it can't be pinned now, shown on the disabled button. */
+  disabledReason?: string | null;
 }) {
   const [dashboards, setDashboards] = useState<Dashboard[] | null>(null);
   const wrapRef = useRef<HTMLSpanElement | null>(null);
@@ -81,7 +84,13 @@ export function PinToDashboard({
 
   return (
     <span ref={wrapRef} style={{ position: "relative" }}>
-      <button type="button" data-testid={testId} onClick={() => void toggle()}>
+      <button
+        type="button"
+        data-testid={testId}
+        disabled={!!disabledReason}
+        title={disabledReason ?? undefined}
+        onClick={() => void toggle()}
+      >
         Pin to Dashboard
       </button>
       {dashboards ? (

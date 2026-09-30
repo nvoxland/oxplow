@@ -5,6 +5,7 @@ import { lensRef } from "../tabs/pageRefs.js";
 import type { Stream } from "../tauri-bridge/index.js";
 import { querySql, saveLens, type LensRun, type LensViz } from "../api.js";
 import { LensResultView } from "../lens/LensResultView.js";
+import { ModelLineage } from "./ModelLineage.js";
 import { PinToDashboard } from "../components/Dashboard/PinToDashboard.js";
 import { adHocLens, NEW_LENS_PROMPT, slugify } from "../lens/lensModel.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
@@ -12,7 +13,18 @@ import { insertIntoAgent } from "../agent-input-bus.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { useRequestGuard } from "../request-guard.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
-import { MODEL_COLUMNS_SQL, MODELS_SQL, modelColumns, models, type ModelColumn, type ModelRow } from "./exploreData.js";
+import {
+  keepBlockedReason,
+  lineage,
+  LINEAGE_SQL,
+  MODEL_COLUMNS_SQL,
+  MODELS_SQL,
+  modelColumns,
+  models,
+  type Lineage,
+  type ModelColumn,
+  type ModelRow,
+} from "./exploreData.js";
 
 export interface ExploreDataPageProps {
   stream: Stream | null;
@@ -24,8 +36,11 @@ const VIZ_OPTIONS: LensViz[] = ["table", "list", "number", "markdown"];
 
 /**
  * Explore Data: the semantic layer's catalog (every model in `v_model`,
- * with its documented columns from `v_model_column`), an editable SQL box
- * over it, and "Save as Lens" to keep a query as a page. The core,
+ * with its documented columns from `v_model_column` and its lineage from
+ * `v_model_lineage`), an editable SQL box over it — metrics too, through
+ * `metric_grid()` — and "Save as Lens" / "Pin to Dashboard" to keep a
+ * query. A person debugging can turn on raw tables (physical tables
+ * too, IPC only); nothing read that way can be kept. The core,
  * deliberately simple starting point for people who want to see what data
  * exists before asking an agent for a lens. See
  * `.context/semantic-layer.md` and `.context/extensions.md`.
@@ -35,6 +50,10 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
   const [catalogReads, setCatalogReads] = useState<Reads>(NO_READS);
   const [selected, setSelected] = useState<string | null>(null);
   const [columns, setColumns] = useState<ModelColumn[]>([]);
+  const [lineageOf, setLineageOf] = useState<Lineage | null>(null);
+  const [raw, setRaw] = useState(false);
+  // Whether the result on screen was a raw read.
+  const [ranRaw, setRanRaw] = useState(false);
   const [sql, setSql] = useState("");
   const [viz, setViz] = useState<LensViz>("table");
   const [run, setRun] = useState<LensRun | null>(null);
@@ -57,9 +76,11 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
   useEffect(() => {
     if (!selected) return;
     let cancelled = false;
-    querySql(MODEL_COLUMNS_SQL, [selected], null)
-      .then((result) => {
-        if (!cancelled) setColumns(modelColumns(result));
+    Promise.all([querySql(MODEL_COLUMNS_SQL, [selected], null), querySql(LINEAGE_SQL, [selected], null)])
+      .then(([cols, lin]) => {
+        if (cancelled) return;
+        setColumns(modelColumns(cols));
+        setLineageOf(lineage(selected, lin));
       })
       .catch((e) => setError(String(e)));
     return () => {
@@ -67,13 +88,15 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
     };
   }, [selected]);
 
-  async function execute(query: string, as: LensViz = viz) {
+  async function execute(query: string, as: LensViz = viz, rawRead: boolean = raw) {
     // A slower earlier query mustn't land over this one.
     const current = guard.begin();
     setError(null);
     try {
-      const result = await querySql(query, [], null);
-      if (current()) setRun({ lens: adHocLens(query, as), params: {}, result, alert: null });
+      const result = await querySql(query, [], null, rawRead);
+      if (!current()) return;
+      setRun({ lens: adHocLens(query, as), params: {}, result, alert: null });
+      setRanRaw(rawRead);
     } catch (e) {
       if (!current()) return;
       setRun(null);
@@ -83,8 +106,9 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
 
   // Live like a lens: the query re-runs when what it read changes.
   useRerunOnChange(run?.result.reads ?? NO_READS, () => {
-    if (run) void execute(run.lens.query, run.lens.viz);
+    if (run) void execute(run.lens.query, run.lens.viz, ranRaw);
   });
+  const blocked = keepBlockedReason(ranRaw);
 
   function pick(name: string) {
     const q = `SELECT * FROM ${name} LIMIT ${SAMPLE_LIMIT}`;
@@ -118,7 +142,8 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
     <Page testId="page-explore-data" title="Explore Data" layout="details" rightRail={catalogList} rightRailTitle="Data">
       <p style={{ color: "var(--text-secondary)", marginTop: 0 }}>
         Everything oxplow knows, as read-only SQL views. Pick one on the right, tweak the query, and save it as a
-        lens to keep it as a page — or{" "}
+        lens to keep it as a page. Metrics read as columns of a grid:{" "}
+        <code>SELECT bucket, MEASURE('oxplow.todos') FROM metric_grid('week')</code>. Or{" "}
         <button type="button" data-testid="explore-new-lens" onClick={() => insertIntoAgent(NEW_LENS_PROMPT)}>
           ask your agent to build one…
         </button>
@@ -143,10 +168,11 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
           </table>
         </details>
       ) : null}
+      {model && lineageOf ? <ModelLineage lineage={lineageOf} onPick={pick} /> : null}
       <textarea
         data-testid="explore-sql"
         value={sql}
-        placeholder="SELECT … FROM v_task …   (Cmd/Ctrl+Enter runs)"
+        placeholder="SELECT … FROM v_task …  or  SELECT bucket, MEASURE('…') FROM metric_grid('day')   (Cmd/Ctrl+Enter runs)"
         onChange={(e) => setSql(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -179,16 +205,38 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
             ))}
           </select>
         </label>
+        <label
+          data-testid="explore-raw"
+          style={rawToggleStyle}
+          title="Read physical tables too, for debugging. Nothing read this way can be saved or pinned."
+        >
+          <input
+            type="checkbox"
+            data-testid="explore-raw-toggle"
+            checked={raw}
+            onChange={(e) => setRaw(e.target.checked)}
+          />{" "}
+          Raw tables
+        </label>
         <span style={{ flex: 1 }} />
         {run ? (
           <PinToDashboard
             tile={{ kind: "query", sql: run.lens.query, display: viz, optionsJson: JSON.stringify({ size: "wide" }) }}
             testId="explore-pin"
             onOpenPage={onOpenPage}
+            disabledReason={blocked}
           />
         ) : null}
-        {run ? <SaveAsLens query={run.lens.query} viz={viz} stream={stream} onOpenPage={onOpenPage} /> : null}
+        {run ? (
+          <SaveAsLens query={run.lens.query} viz={viz} stream={stream} onOpenPage={onOpenPage} disabledReason={blocked} />
+        ) : null}
       </div>
+      {run && ranRaw ? (
+        <div data-testid="explore-raw-banner" style={rawBannerStyle}>
+          Raw tables: this read bypasses the models, so its columns can change without notice. It can't be saved as
+          a lens or pinned to a dashboard.
+        </div>
+      ) : null}
       {error ? (
         <div data-testid="explore-error" style={errorStyle}>
           {error}
@@ -201,16 +249,19 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
 
 /** Inline "Save as Lens" strip: extension + title → a lens file in this
  *  stream's worktree, then opens it. Enter saves, Escape cancels. */
-function SaveAsLens({
+export function SaveAsLens({
   query,
   viz,
   stream,
   onOpenPage,
+  disabledReason,
 }: {
   query: string;
   viz: LensViz;
   stream: Stream | null;
   onOpenPage(ref: TabRef): void;
+  /** Why it can't be saved now (a raw read). */
+  disabledReason: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [extension, setExtension] = useState("mine");
@@ -233,9 +284,15 @@ function SaveAsLens({
     }
   }
 
-  if (!open) {
+  if (!open || disabledReason) {
     return (
-      <button type="button" data-testid="explore-save-open" onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        data-testid="explore-save-open"
+        disabled={!!disabledReason}
+        title={disabledReason ?? undefined}
+        onClick={() => setOpen(true)}
+      >
         Save as Lens
       </button>
     );
@@ -288,6 +345,18 @@ const sqlStyle: CSSProperties = {
 };
 const docsTableStyle: CSSProperties = { borderCollapse: "collapse", fontSize: "var(--text-xs)", marginTop: 6 };
 const docsCellStyle: CSSProperties = { padding: "2px 8px 2px 0", verticalAlign: "top" };
+const rawToggleStyle: CSSProperties = {
+  fontSize: "var(--text-sm)",
+  color: "var(--severity-medium)",
+};
+const rawBannerStyle: CSSProperties = {
+  fontSize: "var(--text-xs)",
+  padding: "6px 8px",
+  marginBottom: 12,
+  border: "1px solid var(--severity-medium)",
+  borderRadius: 4,
+  color: "var(--text-secondary)",
+};
 const errorStyle: CSSProperties = {
   fontFamily: "var(--font-mono, monospace)",
   fontSize: "var(--text-xs)",
