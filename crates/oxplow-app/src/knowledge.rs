@@ -551,6 +551,10 @@ fn domain(e: DomainError) -> CommandError {
 }
 
 /// Refuse a body whose links don't all resolve, naming each.
+/// Refuse the links `body` adds that don't resolve. A link the page
+/// already has (in its file now) isn't the writer's to fix: a cited file
+/// or task that has since gone, or a hand edit's bad link, mustn't block
+/// verifying, rewriting or linking the page.
 fn links_resolve(
     target: &KnowledgeTarget,
     conn: &rusqlite::Connection,
@@ -558,7 +562,16 @@ fn links_resolve(
     body: &str,
 ) -> Result<(), CommandError> {
     let graph = target.vcs.revision_graph(&target.project_dir);
-    let warnings = check_links_in(
+    let existing: std::collections::HashSet<String> =
+        std::fs::read_to_string(page_path(&target.project_dir, slug))
+            .map(|current| {
+                oxplow_domain::refs::classify_wikilinks(&current)
+                    .into_iter()
+                    .map(|l| l.raw)
+                    .collect()
+            })
+            .unwrap_or_default();
+    let mut warnings = check_links_in(
         &LinkWorld {
             conn,
             project_dir: &target.project_dir,
@@ -567,6 +580,7 @@ fn links_resolve(
         },
         body,
     );
+    warnings.retain(|w| !existing.contains(&w.target));
     if warnings.is_empty() {
         return Ok(());
     }
@@ -1000,6 +1014,45 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    /// Only links the page doesn't already have are refused (tsk564): once
+    /// a cited file is gone, the page can still be verified, rewritten and
+    /// linked — a new dangling link is still refused.
+    #[tokio::test]
+    async fn a_link_that_went_dangling_doesnt_block_the_page() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
+        std::fs::write(dir(&fx).join("src/a.rs"), "a").unwrap();
+        std::fs::write(dir(&fx).join("src/b.rs"), "b").unwrap();
+        let body = "# P\n\nsee [[src/a.rs]] and [[src/b.rs]]\n";
+        run(&fx, WRITE_PAGE, json!({ "slug": "p", "body": body }))
+            .await
+            .unwrap();
+        run(&fx, WRITE_PAGE, json!({ "slug": "q", "body": "# Q\n" }))
+            .await
+            .unwrap();
+        std::fs::remove_file(dir(&fx).join("src/a.rs")).unwrap();
+
+        run(
+            &fx,
+            WRITE_PAGE,
+            json!({ "slug": "p", "body": body, "verified_refs": ["src/b.rs"] }),
+        )
+        .await
+        .unwrap();
+        run(&fx, LINK, json!({ "page": "p", "target": "q" }))
+            .await
+            .unwrap();
+        let err = run(
+            &fx,
+            WRITE_PAGE,
+            json!({ "slug": "p", "body": format!("{body}and [[src/c.rs]]\n") }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("src/c.rs"), "{err}");
+        assert!(!err.to_string().contains("src/a.rs"), "{err}");
     }
 
     /// Verified refs must be cited (or under a cited directory, which

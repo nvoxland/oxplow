@@ -12,9 +12,12 @@ file is the page, the row and edges are derived from it.
 written — by an agent (`run_command`), by the desktop editor, and by
 "Mark verified" on the Freshness page. In the bus's transaction it:
 
-1. validates the slug (kebab-case) and **every `[[link]]`** — a task,
-   page, file, directory, finding or commit that doesn't exist is refused,
-   each named (`link_check::check_links_in`, synchronous: the database,
+1. validates the slug (kebab-case) and **every `[[link]]` the write
+   adds** — a task, page, file, directory, finding or commit that doesn't
+   exist is refused, each named. A link the page's file already has isn't
+   re-checked: a cited file or task that has since gone (or a hand edit's
+   bad link) mustn't block verifying, rewriting or linking the page
+   (tsk564) (`link_check::check_links_in`, synchronous: the database,
    the project's files and `Vcs::revision_graph` for commits; a page may
    link to itself);
 2. checks the ref declarations: `removed_refs` must be gone from the
