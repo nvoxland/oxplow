@@ -91,6 +91,49 @@ pub async fn lens_text(
     Ok(oxplow_app::lens_text::text_of(svc, &root, &run, &ctx).await?)
 }
 
+/// What a form lens shows: its command's spec (the fields) and the values
+/// they start from.
+pub async fn lens_form(
+    svc: &Services,
+    id: String,
+    params: Option<BTreeMap<String, SqlCell>>,
+    stream_id: Option<String>,
+) -> Result<oxplow_app::lens_actions::FormStart, IpcError> {
+    let root = root(svc, stream_id.as_deref()).await;
+    let ctx = context(svc, stream_id.as_deref()).await;
+    Ok(
+        oxplow_app::lens_actions::form_start(svc, &root, &id, params.unwrap_or_default(), &ctx)
+            .await?,
+    )
+}
+
+/// A person submits a form lens: its command runs as the lens, acting for
+/// them (`NEEDS_CONFIRMATION` asks them first).
+pub async fn submit_lens_form(
+    svc: &Services,
+    id: String,
+    input: oxplow_domain::Json,
+    params: Option<BTreeMap<String, SqlCell>>,
+    stream_id: Option<String>,
+    confirmed: bool,
+) -> Result<oxplow_domain::CommandOutcome, IpcError> {
+    let root = root(svc, stream_id.as_deref()).await;
+    let ctx = context(svc, stream_id.as_deref()).await;
+    Ok(oxplow_app::lens_actions::submit_form(
+        svc,
+        &root,
+        oxplow_app::lens_actions::FormSubmission {
+            lens_id: id,
+            input: input.0,
+            params: params.unwrap_or_default(),
+            on_behalf_of: oxplow_domain::Actor::Human,
+            confirmed,
+        },
+        &ctx,
+    )
+    .await?)
+}
+
 /// A person presses one of a lens's actions: its command runs as the
 /// lens, acting for them (`NEEDS_CONFIRMATION` asks them first). A row
 /// action takes the row it was pressed on.

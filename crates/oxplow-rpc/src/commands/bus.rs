@@ -5,7 +5,7 @@
 //! confirmation, audit and undo apply once.
 
 use oxplow_app::Services;
-use oxplow_domain::{Actor, CommandOutcome, Json};
+use oxplow_domain::{Actor, CommandOutcome, CommandSpec, Json};
 
 use crate::error::IpcError;
 
@@ -29,6 +29,14 @@ pub async fn run_command(
         svc.tasks.settle_lifecycle().await;
     }
     Ok(outcome)
+}
+
+/// A command's spec — what a form renders from its `input_schema`, and
+/// what a confirmation says (its summary, whether it's destructive).
+pub async fn get_command(svc: &Services, name: String) -> Result<CommandSpec, IpcError> {
+    svc.commands
+        .spec(&name)
+        .ok_or_else(|| IpcError::from(oxplow_domain::CommandError::Unknown { name }))
 }
 
 /// Apply the inverse recorded for audit row `audit_id`, as the person,

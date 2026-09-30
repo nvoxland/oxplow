@@ -170,7 +170,16 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `detail` (the first row as label/value pairs), `steps` (a checklist
     by `steps.status`: done, active, failed, else pending) and `hunks`
     (each row's file diffed between `hunks.from` and `hunks.to` in the
-    diff viewer, `DiffPane`, one expanded at a time). The loader drops a
+    diff viewer, `DiffPane`, one expanded at a time), and **`form`**
+    (P6.B2): `form: { command, defaults? }` renders the command's
+    `input_schema` as a `SchemaForm`, its fields starting from `defaults`
+    (placeholders bound like an action's) under the query's first row —
+    a form needs no `query` (RPC `lens_form` returns the spec and those
+    values). Submitting (RPC `submit_lens_form`,
+    `lens_actions::submit_form`) runs the command as the lens acting for
+    the person, the defaults under what they entered; a command that asks
+    shows `CommandConfirm`. A form's text rendering names its command
+    (an agent runs the command itself). Only a form may omit `query`. The loader drops a
     lens missing the column roles its viz needs, naming the block
     (`chart`, `tree`, `timeline`, `steps`, `hunks`), and
     `validate_extension` checks every named column exists in the result
@@ -602,7 +611,8 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   binding.
 - `viz`: `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`,
   `grid` (child lenses, `children`), `tree`, `timeline`, `detail`,
-  `steps` or `hunks`. Each component names the columns it draws from in
+  `steps`, `hunks` or `form` (`form: { command, defaults? }`; no `query`
+  needed). Each component names the columns it draws from in
   its own block: `chart` (`x`, `y`, `series`, `label`, `size`, `group`),
   `tree` (`id`, `parent`, `label`), `timeline` (`at`, `label`, `ref`),
   `steps` (`label`, `status`), `hunks` (`path`, `from`, `to` — two

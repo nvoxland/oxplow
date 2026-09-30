@@ -57,23 +57,3 @@ export function integrationRow(v: ProviderInstanceView): IntegrationRowModel {
     problem: ["missing", "unapproved", "unconfigured", "failing", "disabled"].includes(s.state),
   };
 }
-
-/** The config text read as JSON: its object, or why it isn't one. */
-export interface ParsedConfig {
-  value: Record<string, unknown> | null;
-  error: string | null;
-}
-
-/// The config textarea's text as the instance's config: a JSON object.
-export function parseConfig(text: string): ParsedConfig {
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch (e) {
-    return { value: null, error: `Not JSON: ${e instanceof Error ? e.message : String(e)}` };
-  }
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return { value: null, error: "The config must be a JSON object" };
-  }
-  return { value: value as Record<string, unknown>, error: null };
-}

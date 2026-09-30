@@ -44,6 +44,8 @@ import type {
   SourceRunReport,
   DataEntity,
   CommandOutcome,
+  CommandSpec,
+  FormStart,
   AcpAgentListing,
   AcpEvent,
   AcpSnapshot,
@@ -643,6 +645,29 @@ export async function runLensAction(
   confirmed: boolean,
 ): Promise<CommandOutcome> {
   return unwrap(await commands.runLensAction(id, action, params, row, streamId, confirmed));
+}
+
+/** A command's spec: what a form renders from its `input_schema`, and
+ *  what a confirmation says. */
+export async function getCommand(name: string): Promise<CommandSpec> {
+  return unwrap(await commands.getCommand(name));
+}
+
+/** A form lens's command and the values its fields start from. */
+export async function lensForm(id: string, params: Record<string, SqlCell>, streamId: string | null): Promise<FormStart> {
+  return unwrap(await commands.lensForm(id, params, streamId));
+}
+
+/** Submit a form lens: its command runs as the lens, acting for the
+ *  person. Throws `NEEDS_CONFIRMATION` when the command asks. */
+export async function submitLensForm(
+  id: string,
+  input: Record<string, unknown>,
+  params: Record<string, SqlCell>,
+  streamId: string | null,
+  confirmed: boolean,
+): Promise<CommandOutcome> {
+  return unwrap(await commands.submitLensForm(id, input, params, streamId, confirmed));
 }
 
 /** A lens's text rendering — what Copy puts on the clipboard. */

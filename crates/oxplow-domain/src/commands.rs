@@ -113,6 +113,7 @@ pub struct CommandSpec {
     /// One sentence for `list_commands` and the launcher.
     pub summary: String,
     /// JSON Schema for the input.
+    #[specta(type = crate::Json)]
     pub input_schema: Value,
     pub invokers: Invokers,
     pub confirm: Confirm,

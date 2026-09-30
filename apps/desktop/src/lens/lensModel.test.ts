@@ -18,6 +18,7 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
   timeline: null,
   steps: null,
   hunks: null,
+  form: null,
   children: [],
   launcherCategory: null,
   hidden: false,

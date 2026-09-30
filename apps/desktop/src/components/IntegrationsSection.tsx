@@ -1,12 +1,13 @@
 /// "Integrations" section body for SettingsPage (P5.D4): each extension
-/// provider's instance on this machine — its state, its config (JSON,
-/// edited inline), Check, and Enable / Disable. Enabling checks first;
+/// provider's instance on this machine — its state, its config (a form
+/// from the provider's `config_schema`, P6.B2), Check, and Enable /
+/// Disable. Enabling checks first;
 /// an unapproved provider is approved under Data → Programs. See
 /// `.context/providers.md`.
 ///
 /// Usability contract (.context/usability.md): inline edits, Escape
-/// resets an edit, a disabled action while the JSON is invalid, failures
-/// in opErrorsStore.
+/// resets an edit, the actions disabled while a field has a problem,
+/// failures in opErrorsStore.
 
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useState } from "react";
@@ -19,7 +20,8 @@ import {
   type ProviderInstanceView,
 } from "../api.js";
 import { CredentialRow } from "./ExtensionsSection.js";
-import { integrationRow, parseConfig } from "./integrationsModel.js";
+import { integrationRow } from "./integrationsModel.js";
+import { SchemaForm } from "./SchemaForm/SchemaForm.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
 
@@ -68,19 +70,17 @@ function IntegrationRow({
   onChanged(views: ProviderInstanceView[]): void;
   onCredentialChanged(): void;
 }) {
-  const saved = JSON.stringify(view.config, null, 2);
-  const [text, setText] = useState(saved);
+  const saved = view.config as Record<string, unknown>;
+  const [config, setConfig] = useState<Record<string, unknown> | null>(saved);
   const [checked, setChecked] = useState<ProviderInstanceView | null>(null);
   const [busy, setBusy] = useState<"check" | "toggle" | null>(null);
-  useEffect(() => setText(saved), [saved]);
+  useEffect(() => setConfig(saved), [saved]);
 
   const shown = checked ?? view;
   const m = integrationRow(shown);
-  const parsed = parseConfig(text);
   const missing = view.health.state.state === "missing";
 
   async function check() {
-    const config = parsed.value;
     if (!config) return;
     setBusy("check");
     try {
@@ -93,7 +93,6 @@ function IntegrationRow({
   }
 
   async function toggle() {
-    const config = parsed.value;
     if (!config) return;
     const enable = m.enableLabel !== "Disable";
     setBusy("toggle");
@@ -121,7 +120,7 @@ function IntegrationRow({
         <button
           type="button"
           data-testid={`integration-check-${m.key}`}
-          disabled={busy !== null || missing || parsed.value === null}
+          disabled={busy !== null || missing || config === null}
           title="Start it with this config and ask it to check the config; nothing is saved or enabled"
           onClick={() => void check()}
         >
@@ -130,7 +129,7 @@ function IntegrationRow({
         <button
           type="button"
           data-testid={`integration-toggle-${m.key}`}
-          disabled={busy !== null || missing || parsed.value === null}
+          disabled={busy !== null || missing || config === null}
           title={
             m.enableLabel === "Disable"
               ? "Stop it and turn it off in the project's config"
@@ -154,26 +153,15 @@ function IntegrationRow({
         />
       ))}
       {missing ? null : (
-        <>
-          <textarea
-            data-testid={`integration-config-${m.key}`}
-            aria-label={`${view.instance} config (JSON)`}
-            value={text}
-            rows={Math.min(8, Math.max(2, text.split("\n").length))}
-            onChange={(e) => {
-              setText(e.target.value);
-              setChecked(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setText(saved);
-                setChecked(null);
-              }
-            }}
-            style={textareaStyle}
-          />
-          {parsed.error ? <div style={errorStyle}>{parsed.error}</div> : null}
-        </>
+        <SchemaForm
+          schema={view.configSchema as Record<string, unknown>}
+          initial={saved}
+          onChange={(next) => {
+            setConfig(next);
+            setChecked(null);
+          }}
+          testIdPrefix={`integration-config-${m.key}`}
+        />
       )}
     </div>
   );
@@ -188,10 +176,4 @@ const rowStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 4,
-};
-const textareaStyle: CSSProperties = {
-  fontFamily: "var(--font-mono)",
-  fontSize: "var(--text-xs)",
-  width: "100%",
-  boxSizing: "border-box",
 };

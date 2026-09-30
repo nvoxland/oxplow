@@ -149,6 +149,9 @@ pub const MANIFEST: &[Capability] = &[
     // person through IPC (`Actor::Human`, confirming where asked). Undo is
     // the person's (P5.A1).
     both("run_command"),
+    // One command's spec, for a form or a confirmation; agents list them
+    // with list_commands.
+    ui("get_command"),
     ui("undo_command"),
     // ---- the event log's dead-letter queue ----
     both("list_dead_letters"),
@@ -167,6 +170,9 @@ pub const MANIFEST: &[Capability] = &[
     both("run_lens_action"),
     // Copy on every lens; an agent reads the same text through run_lens.
     ui("lens_text"),
+    // A form lens: agents run the command itself.
+    ui("lens_form"),
+    ui("submit_lens_form"),
     both("validate_extension"),
     both("review_extension"),
     both("install_extension"),

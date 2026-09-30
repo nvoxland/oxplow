@@ -219,6 +219,7 @@ export function adHocLens(query: string, viz: LensViz): Lens {
     timeline: null,
     steps: null,
     hunks: null,
+    form: null,
     children: [],
     launcherCategory: null,
     hidden: false,

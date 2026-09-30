@@ -253,6 +253,7 @@ macro_rules! oxplow_command_table {
                 // switches them, through the `metric.enable` command (P4.7)
                 enable_metrics => $crate::commands::metrics::enable_metrics { keys: Vec<String>, enabled: bool } -> (),
                 // the command bus, as the person
+                get_command => $crate::commands::bus::get_command { name: String } -> ::oxplow_domain::CommandSpec,
                 run_command => $crate::commands::bus::run_command { name: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 undo_command => $crate::commands::bus::undo_command { audit_id: i64, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 // followup
@@ -287,6 +288,8 @@ macro_rules! oxplow_command_table {
                 get_lens => $crate::commands::extensions::get_lens { id: String, stream_id: Option<String> } -> ::oxplow_app::extensions::Lens,
                 run_lens => $crate::commands::extensions::run_lens { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::extensions::LensRun,
                 run_lens_action => $crate::commands::extensions::run_lens_action { id: String, action: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
+                lens_form => $crate::commands::extensions::lens_form { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::lens_actions::FormStart,
+                submit_lens_form => $crate::commands::extensions::submit_lens_form { id: String, input: ::oxplow_domain::Json, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 lens_text => $crate::commands::extensions::lens_text { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> String,
                 validate_extension => $crate::commands::extensions::validate_extension { name: String, stream_id: Option<String> } -> ::oxplow_sdk::CheckReport,
                 review_extension => $crate::commands::extensions::review_extension { git_url: Option<String>, git_ref: Option<String>, name: Option<String>, stream_id: Option<String> } -> ::oxplow_app::extensions::ExtensionReview,

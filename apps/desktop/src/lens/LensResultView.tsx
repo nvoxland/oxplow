@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { getLens, lensText, runLens, runLensAction, type LensRun, type SqlCell } from "../api.js";
+import { getLens, lensForm, lensText, runLens, runLensAction, submitLensForm, type LensRun, type SqlCell } from "../api.js";
+import type { FormStart } from "../tauri-bridge/generated/bindings.js";
 import type { LensAction } from "../tauri-bridge/generated/bindings.js";
 import { DailyBarChart } from "../components/Analytics/DailyBarChart.js";
 import { TrendChart } from "../components/charts/TrendChart.js";
@@ -7,6 +8,9 @@ import { squarify } from "../components/charts/squarify.js";
 import { formatMetricValue, formatMetricValueExact } from "../components/format.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { DiffPane } from "../components/Diff/DiffPane.js";
+import { CommandConfirm } from "../components/CommandConfirm.js";
+import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
+import { needsConfirmation } from "../ipc-error.js";
 import { RouteLink } from "../tabs/RouteLink.js";
 import { refFromTabId } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -107,15 +111,17 @@ function LensToolbar({ run, streamId, actions }: { run: LensRun; streamId: strin
   const [copied, setCopied] = useState(false);
   const buttons = run.lens.actions.filter((a) => !a.row);
   return (
+    <>
+    {actions.pending ? (
+      <CommandConfirm
+        label={actions.pending.action.label}
+        command={actions.pending.action.command}
+        onConfirm={actions.confirm}
+        onCancel={actions.cancel}
+        testIdPrefix="lens-action-confirm"
+      />
+    ) : null}
     <div data-testid="lens-actions" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, marginBottom: 6 }}>
-      {actions.pending ? (
-        <ConfirmStrip
-          message={`${actions.pending.action.label} (${actions.pending.action.command}) asks for your confirmation.`}
-          confirmLabel={`Run ${actions.pending.action.label}`}
-          onConfirm={actions.confirm}
-          onCancel={actions.cancel}
-        />
-      ) : null}
       <button
         type="button"
         data-testid="lens-copy"
@@ -150,38 +156,7 @@ function LensToolbar({ run, streamId, actions }: { run: LensRun; streamId: strin
         </button>
       ))}
     </div>
-  );
-}
-
-/** A command asked for confirmation: Run (focused; Enter) or Cancel
- *  (Escape). */
-function ConfirmStrip({
-  message,
-  confirmLabel,
-  onConfirm,
-  onCancel,
-}: {
-  message: string;
-  confirmLabel: string;
-  onConfirm(): void;
-  onCancel(): void;
-}) {
-  return (
-    <span
-      data-testid="lens-action-confirm"
-      style={{ display: "flex", gap: 6, alignItems: "center", marginRight: "auto" }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onCancel();
-      }}
-    >
-      <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>{message}</span>
-      <button type="button" data-testid="lens-action-confirm-run" autoFocus onClick={onConfirm}>
-        {confirmLabel}
-      </button>
-      <button type="button" data-testid="lens-action-confirm-cancel" onClick={onCancel}>
-        Cancel
-      </button>
-    </span>
+    </>
   );
 }
 
@@ -194,6 +169,7 @@ function LensBody(props: LensResultViewProps & { runRowAction?: RowActionRunner 
   if (run.lens.viz === "grid") {
     return <GridViz childIds={run.lens.children} params={run.params} streamId={streamId} onOpenPage={onOpenPage} />;
   }
+  if (run.lens.viz === "form") return <FormViz run={run} streamId={streamId} />;
   return <RowsBody {...props} />;
 }
 
@@ -289,6 +265,71 @@ function RowsBody({
         </>
       );
   }
+}
+
+/** `form`: the fields of its command's input, starting from the form's
+ *  values; submitting runs the command as the lens, for the person. */
+function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
+  const [start, setStart] = useState<FormStart | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<Record<string, unknown> | null>(null);
+  const [round, setRound] = useState(0);
+  const paramsKey = JSON.stringify(run.params);
+  useEffect(() => {
+    let live = true;
+    lensForm(run.lens.id, run.params, streamId)
+      .then((s) => {
+        if (live) setStart(s);
+      })
+      .catch((e) => {
+        if (live) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      live = false;
+    };
+    // paramsKey stands in for `run.params` (a fresh object each render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run.lens.id, paramsKey, streamId]);
+  if (error) return <div style={{ color: "var(--severity-critical)", fontSize: "var(--text-sm)" }}>{error}</div>;
+  if (!start) return null;
+  const submit = async (input: Record<string, unknown>, confirmed: boolean) => {
+    setBusy(true);
+    try {
+      await submitLensForm(run.lens.id, input, run.params, streamId, confirmed);
+      setPending(null);
+      showToast({ message: `${run.lens.title}: done.` });
+      // A fresh form for the next entry.
+      setRound((r) => r + 1);
+    } catch (e) {
+      if (!confirmed && needsConfirmation(e)) setPending(input);
+      else recordOpError({ label: run.lens.title, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div data-testid="lens-form">
+      {pending ? (
+        <CommandConfirm
+          label={run.lens.title}
+          command={start.command.name}
+          onConfirm={() => void submit(pending, true)}
+          onCancel={() => setPending(null)}
+          testIdPrefix="lens-form-confirm"
+        />
+      ) : null}
+      <SchemaForm
+        key={round}
+        schema={start.command.input_schema as Record<string, unknown>}
+        initial={start.values}
+        submitLabel={run.lens.title}
+        busy={busy}
+        onSubmit={(input) => void submit(input, false)}
+        testIdPrefix="lens-form-fields"
+      />
+    </div>
+  );
 }
 
 /** `tree`: nested rows, each branch collapsible (expanded by default). */

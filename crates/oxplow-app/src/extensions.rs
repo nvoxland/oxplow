@@ -64,6 +64,11 @@ pub enum LensViz {
     /// `hunks.from` and `hunks.to` (`working`, `snap:<id>`,
     /// `<vcs>:<rev>`), read-only.
     Hunks,
+    /// A form for command `form.command`: its fields from the command's
+    /// input schema, prefilled from `form.defaults` (placeholders bound
+    /// like an action's) and the query's first row, if the lens has one.
+    /// Submitting runs the command as the lens (P6.B2).
+    Form,
 }
 
 /// When a lens needs attention: its row count reaches `min_rows`, or the
@@ -227,6 +232,17 @@ pub struct LensSteps {
     pub status: Option<String>,
 }
 
+/// `form` viz: the command it submits and the values it starts from.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct LensForm {
+    pub command: Option<String>,
+    /// Input values the form starts with (`{{param.x}}` placeholders bound).
+    #[serde(default)]
+    #[specta(type = Option<oxplow_domain::Json>)]
+    pub defaults: Option<serde_json::Value>,
+}
+
 /// `hunks` viz: the file and the two revisions each row diffs.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(deny_unknown_fields)]
@@ -356,6 +372,8 @@ struct LensFile {
     title: String,
     #[serde(default)]
     description: String,
+    /// Required, except by a `form` (whose query, if any, prefills it).
+    #[serde(default)]
     query: String,
     #[serde(default = "default_viz")]
     viz: LensViz,
@@ -376,6 +394,8 @@ struct LensFile {
     steps: Option<LensSteps>,
     #[serde(default)]
     hunks: Option<LensHunks>,
+    #[serde(default)]
+    form: Option<LensForm>,
     /// For `grid`: lens slugs in this extension, or `<ext>/<slug>` ids.
     #[serde(default)]
     children: Vec<String>,
@@ -643,6 +663,7 @@ pub struct Lens {
     pub timeline: Option<LensTimeline>,
     pub steps: Option<LensSteps>,
     pub hunks: Option<LensHunks>,
+    pub form: Option<LensForm>,
     /// For `grid`: child lens ids.
     pub children: Vec<String>,
     /// Launcher section; `None` = "Lenses".
@@ -1189,6 +1210,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 timeline: l.timeline,
                 steps: l.steps,
                 hunks: l.hunks,
+                form: l.form,
                 children: l
                     .children
                     .into_iter()
@@ -1337,6 +1359,19 @@ fn shape_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
                 &[("path", &h.path), ("from", &h.from), ("to", &h.to)],
             )
         }
+        LensViz::Form => {
+            let f = lens.form.clone().unwrap_or_default();
+            need("form", &[("command", &f.command)]).or_else(|| {
+                let command = f.command.as_deref().unwrap_or_default();
+                oxplow_domain::CommandSpec::validate_name(command)
+                    .err()
+                    .map(|e| format!("form: {e}"))
+            })
+        }
+        _ if lens.query.trim().is_empty() => Some(format!(
+            "viz `{}` needs a `query`",
+            format!("{:?}", lens.viz).to_lowercase()
+        )),
         LensViz::Grid if lens.children.is_empty() => {
             Some("viz `grid` needs `children: [lens, ...]`".into())
         }
@@ -1593,18 +1628,29 @@ async fn execute(
         Some(SqlCell::Int(id)) => Some(*id),
         _ => None,
     };
-    let result = layer
-        .run(
-            oxplow_db::SqlQuery::new(&lens.query)
-                .named(named)
-                .limit(None)
-                .stream(stream),
-        )
-        .await
-        .map_err(|e| match e {
-            DomainError::Invalid(m) => DomainError::Invalid(format!("lens {}: {m}", lens.id)),
-            other => other,
-        })?;
+    // A form without a query has no rows to read.
+    let result = if lens.query.trim().is_empty() {
+        oxplow_db::SqlQueryResult {
+            columns: Vec::new(),
+            rows: Vec::new(),
+            truncated: false,
+            reads: oxplow_db::Reads::default(),
+            freshness: Vec::new(),
+        }
+    } else {
+        layer
+            .run(
+                oxplow_db::SqlQuery::new(&lens.query)
+                    .named(named)
+                    .limit(None)
+                    .stream(stream),
+            )
+            .await
+            .map_err(|e| match e {
+                DomainError::Invalid(m) => DomainError::Invalid(format!("lens {}: {m}", lens.id)),
+                other => other,
+            })?
+    };
     let alert = lens.alert.as_ref().map(|a| evaluate_alert(a, &result));
     Ok(LensRun {
         lens,

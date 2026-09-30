@@ -231,8 +231,9 @@ a failed enable writes nothing and the config never says enabled for
 an instance that wasn't — then a reconcile). Each row
 shows its state, its credentials (set into the keychain through
 `set_source_credential`, which accepts a provider's credentials too),
-the config as JSON (Escape resets an edit; invalid JSON disables the
-actions), Check and Enable / Disable / Enable again. Approving the
+the config as a form from the provider's `config_schema`
+(`SchemaForm`, P6.B2: Escape resets an edit; a field's problem disables
+the actions), Check and Enable / Disable / Enable again. Approving the
 program stays in Data → Programs; approving a provider restarts its
 running instance on what was approved (`ProviderRegistry::approved`,
 called by `approve_project_program`), so updated declarations take

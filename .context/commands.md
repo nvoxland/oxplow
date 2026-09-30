@@ -209,7 +209,16 @@ input, confirmed }` and `undo_command { audit_id, confirmed }`
 `NEEDS_CONFIRMATION` and the UI asks, then calls again with `confirmed`.
 A typed IPC setter is a convenience over one command; anything new the
 UI writes goes through `run_command`. Parity: `both("run_command")`,
-`ui("undo_command")`.
+`ui("undo_command")`. The thrown error keeps its IPC code
+(`IpcCallError.code`, `needsConfirmation(e)` in `ipc-error.ts`), and
+the UI asks with **`CommandConfirm`** (`components/CommandConfirm.tsx`:
+the command's summary from RPC **`get_command { name }`**, destructive
+ones marked; Run focused, Escape cancels). A command's `input_schema`
+renders as a form with **`SchemaForm`** (`components/SchemaForm/`:
+schemars' shapes — `$defs`/`$ref`, `Option<T>`, enums, nested objects,
+string lists — else a JSON field; Enter submits, Escape resets, submit
+disabled while a field has a problem; model in `schemaFormModel.ts`).
+P6.B2.
 
 `CommandError` → `McpError` mapping lives in `command_error` (oxplow-mcp):
 invalid/denied/unknown are the caller's to fix, `NeedsConfirmation` tells

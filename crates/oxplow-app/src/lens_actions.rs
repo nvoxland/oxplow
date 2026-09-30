@@ -96,6 +96,139 @@ pub async fn run_lens_action(
         .await
 }
 
+/// What a form lens shows: its command (the fields come from its input
+/// schema) and the values the fields start from — the form's `defaults`
+/// (placeholders bound) under the query's first row, if it has a query.
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+pub struct FormStart {
+    pub command: oxplow_domain::CommandSpec,
+    #[specta(type = oxplow_domain::Json)]
+    pub values: Value,
+}
+
+pub async fn form_start(
+    svc: &crate::Services,
+    lens_root: &Path,
+    lens_id: &str,
+    params: BTreeMap<String, SqlCell>,
+    ctx: &extensions::LensContext,
+) -> Result<FormStart, CommandError> {
+    let run = extensions::run_lens(
+        &svc.sql,
+        &svc.extension_catalog,
+        lens_root,
+        lens_id,
+        params,
+        ctx,
+    )
+    .await
+    .map_err(CommandError::from)?;
+    let form = match (&run.lens.viz, &run.lens.form) {
+        (extensions::LensViz::Form, Some(form)) => form.clone(),
+        _ => {
+            return Err(CommandError::Invalid {
+                field: Some("/lens".into()),
+                message: format!("`{lens_id}` isn't a form"),
+            })
+        }
+    };
+    let name = form.command.clone().unwrap_or_default();
+    let command = svc
+        .commands
+        .spec(&name)
+        .ok_or_else(|| CommandError::Unknown { name: name.clone() })?;
+    let mut values = match form.defaults.as_ref() {
+        Some(d) => match bind_input(d, &run.params, None)? {
+            Value::Object(m) => m,
+            _ => serde_json::Map::new(),
+        },
+        None => serde_json::Map::new(),
+    };
+    if let Some(row) = run.result.rows.first() {
+        for (col, cell) in run.result.columns.iter().zip(row) {
+            if *cell != SqlCell::Null(()) {
+                values.insert(
+                    col.clone(),
+                    serde_json::to_value(cell).unwrap_or(Value::Null),
+                );
+            }
+        }
+    }
+    Ok(FormStart {
+        command,
+        values: Value::Object(values),
+    })
+}
+
+/// One submit of a form lens.
+pub struct FormSubmission {
+    pub lens_id: String,
+    /// What its fields hold (a map, the command's input).
+    pub input: Value,
+    /// Param overrides, as for running the lens.
+    pub params: BTreeMap<String, SqlCell>,
+    pub on_behalf_of: Actor,
+    pub confirmed: bool,
+}
+
+/// A form lens is submitted: its command runs as the lens, acting for
+/// whoever submitted, with the form's `defaults` (placeholders bound from
+/// its params) under the submitted input.
+pub async fn submit_form(
+    svc: &crate::Services,
+    lens_root: &Path,
+    submission: FormSubmission,
+    ctx: &extensions::LensContext,
+) -> Result<CommandOutcome, CommandError> {
+    let FormSubmission {
+        lens_id,
+        input,
+        params,
+        on_behalf_of,
+        confirmed,
+    } = submission;
+    let lens_id = lens_id.as_str();
+    let lens = svc
+        .extension_catalog
+        .find_lens(lens_root, lens_id)
+        .map_err(CommandError::from)?;
+    let form = match (&lens.viz, &lens.form) {
+        (extensions::LensViz::Form, Some(form)) => form.clone(),
+        _ => {
+            return Err(CommandError::Invalid {
+                field: Some("/lens".into()),
+                message: format!("`{lens_id}` isn't a form"),
+            })
+        }
+    };
+    let Value::Object(given) = input else {
+        return Err(CommandError::Invalid {
+            field: Some("/input".into()),
+            message: "a form's input is its fields, a map".into(),
+        });
+    };
+    let params = extensions::resolve_params(&lens, &params, ctx).map_err(CommandError::from)?;
+    let mut merged = match form.defaults.as_ref() {
+        Some(d) => match bind_input(d, &params, None)? {
+            Value::Object(m) => m,
+            _ => serde_json::Map::new(),
+        },
+        None => serde_json::Map::new(),
+    };
+    merged.extend(given);
+    svc.commands
+        .run(
+            &Actor::Lens {
+                lens_id: lens_id.to_string(),
+                on_behalf_of: Box::new(on_behalf_of),
+            },
+            form.command.as_deref().unwrap_or_default(),
+            Value::Object(merged),
+            confirmed,
+        )
+        .await
+}
+
 /// `input` with its placeholders bound: a string that is exactly
 /// `{{param.x}}` / `{{row.x}}` becomes that value (typed), one that
 /// contains them has them spliced in as text. The values are data — they
@@ -339,5 +472,64 @@ actions:
         assert_eq!(bound, json!({ "a": 3, "b": "tsk42", "c": [42], "d": 1 }));
         let err = bind_input(&json!({ "a": "{{row.id}}" }), &params, None).unwrap_err();
         assert!(err.to_string().contains("row.id"), "{err}");
+    }
+
+    /// P6.B2: a form lens submits its command as the lens, its defaults
+    /// under what the person filled in.
+    #[tokio::test]
+    async fn a_form_submits_its_command_as_the_lens() {
+        let (fx, root) = fixture().await;
+        std::fs::write(
+            root.join("oxplow/extensions/acme/lenses/new-task.yaml"),
+            "title: New Task\nviz: form\nparams: [{ name: body, default: from the form }]\nform: { command: work_item.create, defaults: { description: '{{param.body}}' } }\n",
+        )
+        .unwrap();
+        let out = submit_form(
+            &fx.svc,
+            &root,
+            FormSubmission {
+                lens_id: "acme/new-task".into(),
+                input: json!({ "title": "Made by a form" }),
+                params: BTreeMap::new(),
+                on_behalf_of: Actor::Human,
+                confirmed: false,
+            },
+            &extensions::LensContext::default(),
+        )
+        .await
+        .unwrap();
+        let item = out.result["ref"].as_str().unwrap().to_string();
+        let (kind, _) = audit_actor(&fx.svc).await;
+        assert_eq!(kind, "lens");
+        let row: (String, String) = fx
+            .svc
+            .db
+            .read(move |c| {
+                c.query_row(
+                    "SELECT title, body FROM v_work_item WHERE ref = ?1",
+                    [item],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap();
+        assert_eq!(row, ("Made by a form".into(), "from the form".into()));
+        // A lens that isn't a form can't be submitted.
+        let err = submit_form(
+            &fx.svc,
+            &root,
+            FormSubmission {
+                lens_id: "acme/tasks".into(),
+                input: json!({}),
+                params: BTreeMap::new(),
+                on_behalf_of: Actor::Human,
+                confirmed: false,
+            },
+            &extensions::LensContext::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("isn't a form"), "{err}");
     }
 }

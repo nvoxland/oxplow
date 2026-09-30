@@ -150,6 +150,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::run_lens,
             commands::generated::run_lens_action,
             commands::generated::lens_text,
+            commands::generated::lens_form,
+            commands::generated::submit_lens_form,
             commands::generated::validate_extension,
             commands::generated::review_extension,
             commands::generated::install_extension,
@@ -252,6 +254,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_efforts_in_window,
             commands::generated::enable_metrics,
             commands::generated::run_command,
+            commands::generated::get_command,
             commands::generated::undo_command,
             // log
             // workspace

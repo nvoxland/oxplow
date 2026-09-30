@@ -343,6 +343,16 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	lensForm: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<FormStart, IpcError>(__TAURI_INVOKE("lens_form", { id, params, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	submitLensForm: (id: string, input: unknown, params: { [key in string]: SqlCell } | null, streamId: string | null, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("submit_lens_form", { id, input, params, streamId, confirmed })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	validateExtension: (name: string, streamId: string | null) => typedError<CheckReport, IpcError>(__TAURI_INVOKE("validate_extension", { name, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -852,6 +862,11 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	runCommand: (name: string, input: unknown, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("run_command", { name, input, confirmed })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	getCommand: (name: string) => typedError<CommandSpec, IpcError>(__TAURI_INVOKE("get_command", { name })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1427,6 +1442,15 @@ export type AppVersion = {
 };
 
 /**
+ *  Whether the handler runs inside the bus's transaction (with the audit
+ *  row and `command.executed`), or outside it, against a system the bus
+ *  doesn't own — a VCS, a provider process, a gauge script — and is
+ *  audited after it returns (`External`). A test lists the `External`
+ *  commands, so each one is a reviewed choice.
+ */
+export type Atomicity = "tx" | "external";
+
+/**
  *  Result of `attach_or_create` — the session id plus a base64
  *  snapshot of the replay buffer that the renderer should write into
  *  a fresh xterm before starting to consume live events.
@@ -1690,6 +1714,18 @@ export type CommandCall = {
 	input: unknown,
 };
 
+/**
+ *  Whether a command changes anything, and who may. A `Read` runs
+ *  without an audit row or a `command.executed` event (a polling agent
+ *  must not fill the log), and an agent thread that may not write can
+ *  still run it. A `Write` is refused outright to an agent thread that
+ *  isn't its stream's writer. A `Record` changes oxplow's own records
+ *  (filing and editing tasks) and is audited like a `Write`, but any
+ *  thread may run it: the handler refuses only the part that would claim
+ *  the worktree — opening an effort — when `TxCtx::may_claim` is false.
+ */
+export type CommandEffect = "read" | "write" | "record";
+
 // A completed run.
 export type CommandOutcome = {
 	result: unknown,
@@ -1702,6 +1738,26 @@ export type CommandOutcome = {
 	 *  runs it.
 	 */
 	inverse: CommandCall | null,
+};
+
+// What a command declares about itself.
+export type CommandSpec = {
+	/**
+	 *  `<capability|plugin>.<verb>`, snake_case: `work_item.transition`,
+	 *  `config.set`.
+	 */
+	name: string,
+	// One sentence for `list_commands` and the launcher.
+	summary: string,
+	// JSON Schema for the input.
+	input_schema: unknown,
+	invokers: Invokers,
+	confirm: Confirm,
+	// The handler returns an inverse, so `commands.undo` can apply it.
+	undoable: boolean,
+	lifecycle: Lifecycle,
+	atomicity: Atomicity,
+	effect: CommandEffect,
 };
 
 /**
@@ -1807,6 +1863,14 @@ export type ConfigProblem = {
 	path: string,
 	message: string,
 };
+
+/**
+ *  Whether a run must be confirmed by a person first. An agent can never
+ *  confirm: it receives `NeedsConfirmation` and writes nothing.
+ */
+export type Confirm = "never" | "always" | 
+// Irreversible; presented as destructive and always confirmed.
+"destructive";
 
 /**
  *  Context-window occupancy and cumulative cost from `usage_update`. It
@@ -2334,6 +2398,16 @@ export type Followup = {
 };
 
 /**
+ *  What a form lens shows: its command (the fields come from its input
+ *  schema) and the values the fields start from — the form's `defaults`
+ *  (placeholders bound) under the query's first row, if it has a query.
+ */
+export type FormStart = {
+	command: CommandSpec,
+	values: unknown,
+};
+
+/**
  *  A derived-metric formula on a `metrics:` spec (the `formula:` block) — a
  *  constrained binary op over two OTHER metric keys (no source measure). The
  *  engine aligns the two metrics on their shared rollup key and applies `op`
@@ -2529,6 +2603,13 @@ export type IntentExample = {
 	expect?: unknown,
 };
 
+// Which surfaces may invoke a command.
+export type Invokers = {
+	human: boolean,
+	agent: boolean,
+	lens: boolean,
+};
+
 /**
  *  Frontend-facing error envelope.
  * 
@@ -2588,6 +2669,7 @@ export type Lens = {
 	timeline: LensTimeline | null,
 	steps: LensSteps | null,
 	hunks: LensHunks | null,
+	form: LensForm | null,
 	// For `grid`: child lens ids.
 	children: string[],
 	// Launcher section; `None` = "Lenses".
@@ -2660,6 +2742,13 @@ export type LensColumn = {
 	// Header text; defaults to `key`.
 	label?: string | null,
 	link?: LensLink | null,
+};
+
+// `form` viz: the command it submits and the values it starts from.
+export type LensForm = {
+	command: string | null,
+	// Input values the form starts with (`{{param.x}}` placeholders bound).
+	defaults?: unknown | null,
 };
 
 // `hunks` viz: the file and the two revisions each row diffs.
@@ -2822,7 +2911,16 @@ export type LensViz =
  *  `hunks.from` and `hunks.to` (`working`, `snap:<id>`,
  *  `<vcs>:<rev>`), read-only.
  */
-"hunks";
+"hunks" | 
+/**
+ *  A form for command `form.command`: its fields from the command's
+ *  input schema, prefilled from `form.defaults` (placeholders bound
+ *  like an action's) and the query's first row, if the lens has one.
+ *  Submitting runs the command as the lens (P6.B2).
+ */
+"form";
+
+export type Lifecycle = "stable" | "experimental";
 
 export type LspServerConfig = {
 	languageId: string,

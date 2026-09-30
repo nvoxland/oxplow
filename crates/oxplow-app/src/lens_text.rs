@@ -194,6 +194,18 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
             .collect::<Vec<_>>()
             .join("\n\n");
     }
+    if run.lens.viz == LensViz::Form {
+        // An agent runs the command itself; the text says which.
+        let f = run.lens.form.clone().unwrap_or_default();
+        return format!(
+            "A form that runs `{}`{}.",
+            f.command.unwrap_or_default(),
+            f.defaults
+                .filter(|d| d.as_object().is_some_and(|o| !o.is_empty()))
+                .map(|d| format!(", starting from {d}"))
+                .unwrap_or_default()
+        );
+    }
     if rows.is_empty() {
         return run
             .lens
@@ -215,7 +227,7 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
         LensViz::Detail => detail(run),
         LensViz::Steps => steps(run),
         LensViz::Hunks => hunks(run, &resolved.diffs),
-        LensViz::Table | LensViz::List | LensViz::Grid => table(run),
+        LensViz::Table | LensViz::List | LensViz::Grid | LensViz::Form => table(run),
     };
     if run.result.truncated {
         format!("{body}\n(the query stopped at its row limit)")
@@ -647,6 +659,7 @@ mod tests {
                 timeline: None,
                 steps: None,
                 hunks: None,
+                form: None,
                 children: Vec::new(),
                 launcher_category: None,
                 hidden: false,

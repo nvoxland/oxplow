@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { ProviderInstanceView } from "../tauri-bridge/generated/bindings.js";
-import { integrationRow, parseConfig } from "./integrationsModel.js";
+import { integrationRow } from "./integrationsModel.js";
 
 const view = (over: Partial<ProviderInstanceView>): ProviderInstanceView => ({
   instance: "tracker/linear",
@@ -48,12 +48,4 @@ test("integrationRow says where an instance stands and what the person can do", 
   );
   expect(ready.status).toBe("Ready · ~42 ms a call");
   expect(ready.enableLabel).toBe("Disable");
-});
-
-test("parseConfig takes a JSON object and names what's wrong otherwise", () => {
-  expect(parseConfig('{ "team": "core" }')).toEqual({ value: { team: "core" }, error: null });
-  expect(parseConfig("[1]")).toEqual({ value: null, error: "The config must be a JSON object" });
-  const bad = parseConfig("{ team");
-  expect(bad.value).toBeNull();
-  expect(bad.error).toStartWith("Not JSON:");
 });
