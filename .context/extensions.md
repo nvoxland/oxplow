@@ -94,9 +94,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     A tab id may carry starting values (`lens:<ext>/<slug>?effort_id=12`).
   - A run failure shows the error inline, with a nudge to use "Improve
     with Agent".
-  - The page re-runs, debounced, on data events and on edits under
-    `oxplow/extensions/`; `shouldRerunLens` in `src/lens/lensModel.ts`
-    decides which events count.
+  - The page re-runs when a model it read changed (`modelsChanged`), when
+    facts landed for a measure its `metric_grid()` read
+    (`metricSamplesChanged`), and on edits under `oxplow/extensions/` —
+    the run's `result.reads` is what it subscribes to (P4.6). Every lens
+    host uses `useRerunOnChange` in `src/lens/lensRerun.ts`.
   - "Improve with Agent" inserts `[oxplow lens <id> k=v…]`, with only the
     changed params, through the standard add-to-context path.
   - The Cmd+P launcher re-reads lenses from the stream's worktree every

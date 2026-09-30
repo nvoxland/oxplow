@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, shouldRerunLens, limitRows, slugify, adHocLens, rowMention, slotMounts, effortRowId, firingAlerts, slotExtensions } from "./lensModel.js";
+import { slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, slotMounts, effortRowId, firingAlerts, slotExtensions } from "./lensModel.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
   id: "review/waiting",
@@ -107,15 +107,6 @@ describe("changedParams", () => {
   });
 });
 
-describe("shouldRerunLens", () => {
-  test("data events re-run; UI bookkeeping doesn't; file edits only under oxplow/extensions", () => {
-    expect(shouldRerunLens({ kind: "tasksChanged" })).toBe(true);
-    expect(shouldRerunLens({ kind: "pageVisitChanged" })).toBe(false);
-    expect(shouldRerunLens({ kind: "usageRecorded" })).toBe(false);
-    expect(shouldRerunLens({ kind: "workspaceChanged", path: "src/main.rs" })).toBe(false);
-    expect(shouldRerunLens({ kind: "workspaceChanged", path: "oxplow/extensions/review/lenses/a.yaml" })).toBe(true);
-  });
-});
 
 describe("limitRows", () => {
   test("caps rows for compact views and marks the result truncated", () => {

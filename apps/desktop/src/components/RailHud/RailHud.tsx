@@ -9,8 +9,9 @@ import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { moveToIndex } from "../CenterTabs/centerTabsReorder.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./sections.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
-import { listExtensions, runLens, subscribeOxplowEvents } from "../../api.js";
-import { firingAlerts, shouldRerunLens, slotRuns } from "../../lens/lensModel.js";
+import { listExtensions, runLens } from "../../api.js";
+import { firingAlerts, slotRuns } from "../../lens/lensModel.js";
+import { NO_READS, unionReads, useRerunOnChange } from "../../lens/lensRerun.js";
 import {
   listCommentsForStream,
   listRecentPageVisits,
@@ -1174,6 +1175,8 @@ function AlertsSection({
   onOpenPage(ref: TabRef): void;
 }) {
   const [alerts, setAlerts] = useState<{ id: string; title: string; message: string }[]>([]);
+  const [reads, setReads] = useState(NO_READS);
+  const refreshRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1186,24 +1189,22 @@ function AlertsSection({
             run: await runLens(id, params, streamId).catch(() => null),
           })),
         );
-        if (!cancelled) setAlerts(firingAlerts(runs));
+        if (!cancelled) {
+          setAlerts(firingAlerts(runs));
+          setReads(unionReads(runs.map(({ run }) => run?.result.reads)));
+        }
       } catch {
         if (!cancelled) setAlerts([]);
       }
     };
+    refreshRef.current = refresh;
     void refresh();
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const off = subscribeOxplowEvents((event) => {
-      if (!shouldRerunLens({ kind: event.kind, path: (event as { path?: unknown }).path })) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => void refresh(), 750);
-    });
     return () => {
       cancelled = true;
-      if (timer) clearTimeout(timer);
-      off();
+      refreshRef.current = null;
     };
   }, [streamId]);
+  useRerunOnChange(reads, () => void refreshRef.current?.());
 
   return (
     <RailSection id="alerts" title="Alerts" count={alerts.length || undefined}>

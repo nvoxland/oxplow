@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { runLens, subscribeOxplowEvents, type DashboardItem, type LensRun } from "../../api.js";
+import { runLens, type DashboardItem, type LensRun } from "../../api.js";
 import { LensResultView } from "../../lens/LensResultView.js";
-import { shouldRerunLens } from "../../lens/lensModel.js";
+import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import type { MenuItem } from "../../menu.js";
 import type { TileOptions } from "../../pages/customDashboardData.js";
 import { lensRef } from "../../tabs/pageRefs.js";
@@ -47,17 +47,8 @@ export function LensTile({
 
   useEffect(() => {
     void refresh();
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const off = subscribeOxplowEvents((event) => {
-      if (!shouldRerunLens({ kind: event.kind, path: (event as { path?: unknown }).path })) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => void refresh(), 750);
-    });
-    return () => {
-      if (timer) clearTimeout(timer);
-      off();
-    };
   }, [refresh]);
+  useRerunOnChange(run?.result.reads ?? NO_READS, () => void refresh());
 
   const menuItems: MenuItem[] = [
     {

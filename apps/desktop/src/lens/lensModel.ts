@@ -199,19 +199,6 @@ export function changedParams(lens: Lens, values: Record<string, SqlCell>): Reco
 }
 
 /** Events that can't change what a lens shows (UI bookkeeping). */
-const IGNORED_EVENT_KINDS = new Set(["pageVisitChanged", "usageRecorded"]);
-
-/** Whether an oxplow event should re-run an open lens: any data event,
- *  plus file edits under `oxplow/extensions/` (the lens definition
- *  itself). Other file edits don't change semantic-layer data. */
-export function shouldRerunLens(event: { kind: string; path?: unknown }): boolean {
-  if (IGNORED_EVENT_KINDS.has(event.kind)) return false;
-  if (event.kind === "workspaceChanged") {
-    return typeof event.path === "string" && event.path.startsWith("oxplow/extensions/");
-  }
-  return true;
-}
-
 /** Cap a result's rows for a compact view (a dashboard tile), marking it
  *  truncated when rows were dropped. Returns the input unchanged when it
  *  already fits. */

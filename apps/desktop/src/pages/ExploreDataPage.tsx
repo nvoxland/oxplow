@@ -13,6 +13,7 @@ import {
 } from "../api.js";
 import { LensResultView } from "../lens/LensResultView.js";
 import { adHocLens, NEW_LENS_PROMPT, slugify } from "../lens/lensModel.js";
+import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { useRequestGuard } from "../request-guard.js";
@@ -60,6 +61,11 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }
+
+  // Live like a lens: the query re-runs when what it read changes.
+  useRerunOnChange(run?.result.reads ?? NO_READS, () => {
+    if (run) void execute(run.lens.query, run.lens.viz);
+  });
 
   function pick(name: string) {
     const q = `SELECT * FROM ${name} LIMIT ${SAMPLE_LIMIT}`;

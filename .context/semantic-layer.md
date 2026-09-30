@@ -229,6 +229,15 @@ What a query read is what it subscribes to.
   `MetricSamplesChanged { measures }`: facts land on every OTLP burst, and
   the measure scope keeps a metric tile quiet unless its own measures
   moved (tsk198).
+- **The UI** (`src/lens/lensRerun.ts`): every lens host — the lens page,
+  slots, dashboard lens tiles, the rail's alerts and the explorer — keeps
+  its last run's `reads` and re-runs through `useRerunOnChange` when
+  `modelsChanged` names a model it read, `metricSamplesChanged` names one
+  of its measures (an empty list is "unknown", so it re-runs), or a lens
+  definition under `oxplow/extensions/` changed. Nothing else re-runs it:
+  the old everything-but-two deny-list (`shouldRerunLens`) and its 750 ms
+  debounce are gone; a burst of commits coalesces into one re-run
+  (100 ms).
 
 ## The `v_*` contract (current)
 

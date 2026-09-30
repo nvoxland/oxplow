@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
-import { listExtensions, runLens, subscribeOxplowEvents, type LensRun, type SqlCell } from "../api.js";
+import { listExtensions, runLens, type LensRun, type SqlCell } from "../api.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import { RouteLink } from "../tabs/RouteLink.js";
 import { useRequestGuard } from "../request-guard.js";
 import { LensResultView } from "./LensResultView.js";
-import { shouldRerunLens, slotRuns } from "./lensModel.js";
+import { slotRuns } from "./lensModel.js";
+import { unionReads, useRerunOnChange } from "./lensRerun.js";
 
 const MAX_ROWS = 25;
 
@@ -73,17 +74,8 @@ export function LensSlots({
     guard.cancel();
     setRuns([]);
     void refresh();
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const off = subscribeOxplowEvents((event) => {
-      if (!shouldRerunLens({ kind: event.kind, path: (event as { path?: unknown }).path })) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => void refresh(), 750);
-    });
-    return () => {
-      if (timer) clearTimeout(timer);
-      off();
-    };
   }, [refresh, guard]);
+  useRerunOnChange(unionReads(runs.map(({ run }) => run?.result.reads)), () => void refresh());
 
   if (runs.length === 0) return null;
   if (variant === "strip") {

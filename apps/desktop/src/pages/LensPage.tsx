@@ -8,7 +8,6 @@ import {
   createDashboard,
   listDashboards,
   runLens,
-  subscribeOxplowEvents,
   type Dashboard,
   type LensRun,
   type SqlCell,
@@ -19,7 +18,8 @@ import { customDashboardRef, lensRef } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
-import { changedParams, parseParamInput, shouldRerunLens } from "../lens/lensModel.js";
+import { changedParams, parseParamInput } from "../lens/lensModel.js";
+import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { useRequestGuard } from "../request-guard.js";
 import { LensResultView } from "../lens/LensResultView.js";
 
@@ -32,8 +32,6 @@ export interface LensPageProps {
   stream: Stream | null;
   onOpenPage(ref: TabRef): void;
 }
-
-const RERUN_DEBOUNCE_MS = 750;
 
 /**
  * A lens: a user/agent-built query over the semantic layer, read from
@@ -73,18 +71,7 @@ export function LensPage({ lensId, initialParams, stream, onOpenPage }: LensPage
     void refresh();
   }, [refresh, overrides]);
 
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const off = subscribeOxplowEvents((event) => {
-      if (!shouldRerunLens({ kind: event.kind, path: (event as { path?: unknown }).path })) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => void refresh(), RERUN_DEBOUNCE_MS);
-    });
-    return () => {
-      if (timer) clearTimeout(timer);
-      off();
-    };
-  }, [refresh]);
+  useRerunOnChange(run?.result.reads ?? NO_READS, () => void refresh());
 
   const lens = run?.lens ?? null;
   const title = lens?.title ?? lensId;
