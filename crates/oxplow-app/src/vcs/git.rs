@@ -27,6 +27,16 @@ pub use oxplow_git::{ChangeScopes, CommitRefLabel, RemoteBranchEntry};
 /// and `.gitignore` (the `git.*` commands, `commands/vcs.rs`, run them),
 /// and the git-native reads behind the `git_*` RPCs.
 impl GitProvider {
+    /// Make `path` a new repository with an empty root commit (a
+    /// throwaway project, such as the conformance kit's host).
+    pub async fn init_repository(&self, path: &Path) -> Result<(), VcsError> {
+        let path = path.to_path_buf();
+        blocking(move || {
+            oxplow_git::init_repository(&path).map_err(|e| VcsError::Failed(e.to_string()))
+        })
+        .await
+    }
+
     /// Replay the workspace's branch onto `onto`; oxplow's smart merge
     /// then settles the conflicts it can.
     pub async fn rebase(&self, ws: &Path, onto: &str) -> Result<OpOutcome, VcsError> {

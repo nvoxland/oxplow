@@ -4,8 +4,8 @@ A provider is a program oxplow talks to — an issue tracker's bridge, a
 docs system's — that implements one of oxplow's capabilities (work items
 first) outside the app (P5.D, `target-architecture.md` §10). This doc
 covers the protocol (D1), the fake provider (D2) and the host with its
-consent and spawn rules (D3) and instances with health (D4); the
-conformance kit (D5) extends it as it lands.
+consent and spawn rules (D3), instances with health (D4) and the
+conformance kit with `oxplow plugin test` (D5).
 
 ## The protocol (`crates/oxplow-provider-protocol`)
 
@@ -208,3 +208,48 @@ disables again; `fail-next:3` disables it after three failures with the
 reason logged, keeps it off across a reconcile, refuses an agent's
 `provider.enable` and comes back on a person's; and the work-items
 conformance suite passes through `ExternalWorkItems` over the fake.
+
+## The conformance kit (`crates/oxplow-sdk/src/conformance.rs`, `plugin_test.rs`)
+
+What `oxplow plugin test <name> [--bless] [--json]` runs for each
+provider an extension declares ([extensions.md](./extensions.md) "The
+SDK"). The person running it runs their own program, so there is no
+approval check; credentials come from the environment (the declared
+names).
+
+- **`ReferenceClient`** spawns the provider exactly as the host does
+  (`host::spawn`: scrubbed env, sandbox, kill on drop) and taps both
+  pipes: every line is recorded and validated against the schema goldens
+  (`schemas::for_message` by method; a reply is checked against the
+  method its request named). A provider-sent notification or request
+  outside the protocol, or a line that isn't JSON-RPC, is a violation.
+  `finish()` sends `shutdown`, waits for the process and returns the
+  session.
+- **The session**: `initialize` (must equal the declarations file,
+  naming the first difference), `check` with `fixtures/provider-<id>.yaml`'s
+  `config` (each problem is a finding at that file), then each
+  `intent.examples[*]` whose `fixtures/<name>.yaml` is `{ input: {
+  command, input }, expect }`: `invoke`, and the result must match
+  `expect` (`first_mismatch`; `"$any"` matches anything).
+- **The golden transcript** `fixtures/transcripts/<id>.jsonl`: one
+  `{ from, message }` per line, `normalize`d — ids renumbered from 1 per
+  sender in order of its requests (replies and `$/…` notifications
+  follow their request), the host's version `$any`. Compared line by
+  line (a mismatch names the file, the line and the JSON pointer;
+  `$any` in the golden matches anything, so an author can loosen a
+  volatile value by hand); `--bless` writes it. A missing golden is a
+  finding.
+- **The capability suite** runs through a throwaway host: a temp
+  project (`GitProvider::init_repository`: an empty root commit) with a
+  copy of the extension, `Services::in_memory` over it, the provider
+  approved there and enabled with the fixture config, then
+  `work_items_conformance::suite` against its `ExternalWorkItems`.
+
+The red test (`plugin_cli.rs`,
+`plugin_test_blesses_a_provider_then_a_changed_transcript_fails`)
+scaffolds `plugin new provider fake`, sees the stub fail the handshake,
+puts the fake behind the entry, sees the unconfigured fixture and the
+missing golden fail, blesses, passes, then edits the golden and gets
+one error at the transcript's line and pointer. The fake binary exits
+as soon as serving ends (its runtime would otherwise wait on the
+blocked stdin reader).

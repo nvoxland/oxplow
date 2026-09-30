@@ -20,6 +20,23 @@ pub fn is_git_repo(path: impl AsRef<Path>) -> bool {
     }
 }
 
+/// Make `path` a new repository with one empty root commit on its
+/// default branch (HEAD born, so a workspace can be opened over it).
+pub fn init_repository(path: impl AsRef<Path>) -> Result<(), git2::Error> {
+    let repo = git2::Repository::init(path.as_ref())?;
+    let sig = git2::Signature::now("oxplow", "oxplow@localhost")?;
+    let tree = repo.find_tree(repo.index()?.write_tree()?)?;
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "oxplow: initial commit",
+        &tree,
+        &[],
+    )?;
+    Ok(())
+}
+
 /// True when `path` is a secondary git worktree (its `.git` is a
 /// regular file pointing at the main repo's worktrees/ dir).
 ///

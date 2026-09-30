@@ -1,4 +1,4 @@
-//! `oxplow plugin new|check|migrate` (`.context/extensions.md` "The
+//! `oxplow plugin new|check|migrate|test` (`.context/extensions.md` "The
 //! SDK"). A thin argv shell over `oxplow_sdk`: the same `check` the
 //! RPC/MCP `validate_extension` runs, printed as `file:line: what — fix`
 //! lines so an agent editing an extension from a terminal gets the same
@@ -14,16 +14,22 @@ use oxplow_sdk::{Format, Kind};
 
 const USAGE: &str = "\
 usage:
-  oxplow plugin new <lens|extension> <name> [--origin <ref>] [--root <dir>]
+  oxplow plugin new <lens|extension|provider> <name> [--origin <ref>] [--root <dir>]
       scaffold oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
-      and fixture — and, for a lens, one starter lens
+      and fixture — and, for a lens, one starter lens; for a provider, its
+      declarations, a stub program and its test config
   oxplow plugin check <name|path> [--json] [--root <dir>]
       load the extension and report every problem with file:line; when the
       project has been opened in oxplow (.oxplow/local.sqlite exists) every
       lens and advisory is also dry-run against its database
   oxplow plugin migrate <name|path> [--root <dir>]
       rewrite a v1 extension.yaml as v2 in place (idempotent)
+  oxplow plugin test <name|path> [--bless] [--json] [--root <dir>]
+      check, then run each declared provider: its handshake against its
+      declarations, its test config, the intent examples' fixtures, every
+      message against the protocol's schemas, its golden transcript
+      (--bless writes it) and its capability's conformance suite
 
 <name|path> is an extension name under the project's oxplow/extensions/,
 or the path to that folder. --root names the project (default: the
@@ -68,6 +74,7 @@ struct Parsed {
     origin: Option<String>,
     root: Option<PathBuf>,
     json: bool,
+    bless: bool,
 }
 
 fn parse(args: &[String]) -> Result<Parsed, Failure> {
@@ -76,6 +83,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
         origin: None,
         root: None,
         json: false,
+        bless: false,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -94,6 +102,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
                     })?))
             }
             "--json" => p.json = true,
+            "--bless" => p.bless = true,
             "-h" | "--help" | "help" => return Err(Failure::Usage("help".into())),
             flag if flag.starts_with('-') => {
                 return Err(Failure::Usage(format!("unknown flag `{flag}`")))
@@ -112,10 +121,9 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
     };
     match sub.as_str() {
         "new" => {
-            let kind = pos
-                .next()
-                .and_then(|k| Kind::parse(k))
-                .ok_or_else(|| Failure::Usage("new needs a kind: `lens` or `extension`".into()))?;
+            let kind = pos.next().and_then(|k| Kind::parse(k)).ok_or_else(|| {
+                Failure::Usage("new needs a kind: `lens`, `extension` or `provider`".into())
+            })?;
             let name = pos
                 .next()
                 .ok_or_else(|| Failure::Usage("new needs a name".into()))?;
@@ -157,6 +165,27 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
             let report = block_on(oxplow_sdk::check(&root, &name, &catalog, layer.as_ref()))?;
             let format = if p.json { Format::Json } else { Format::Text };
             let _ = write!(out, "{}", oxplow_sdk::render_findings(&report, format));
+            if p.json {
+                let _ = writeln!(out);
+            }
+            Ok(if report.ok { 0 } else { 1 })
+        }
+        "test" => {
+            let target = pos
+                .next()
+                .ok_or_else(|| Failure::Usage("test needs an extension name or path".into()))?;
+            let (root, name) = locate(p.root.as_deref(), target);
+            let db = oxplow_sdk::project_database(&root)
+                .and_then(|path| oxplow_db::Database::open_read_only(&path).ok());
+            let layer = db.map(oxplow_app::sql_gateway::SqlGateway::new);
+            let report = block_on(oxplow_sdk::plugin_test::test_extension(
+                &root,
+                &name,
+                layer.as_ref(),
+                p.bless,
+            ))?;
+            let format = if p.json { Format::Json } else { Format::Text };
+            let _ = write!(out, "{}", oxplow_sdk::plugin_test::render(&report, format));
             if p.json {
                 let _ = writeln!(out);
             }
@@ -315,7 +344,7 @@ mod tests {
         assert_eq!(cli(&["frobnicate"]).0, 2);
         let (code, _, err) = cli(&["new", "widget", "x", "--root", root]);
         assert_eq!(code, 2);
-        assert!(err.contains("`lens` or `extension`"), "{err}");
+        assert!(err.contains("`lens`, `extension` or `provider`"), "{err}");
         let (code, _, err) = cli(&["check", "nope", "--root", root]);
         assert_eq!(code, 1);
         assert!(err.contains("no extension `nope`"), "{err}");
@@ -342,6 +371,112 @@ mod tests {
             "not a database",
             "check wrote to the project's database"
         );
+    }
+
+    /// The fake provider's binary, built beside this test binary (the
+    /// workspace build builds every crate's bins).
+    fn fake_bin() -> PathBuf {
+        let exe = std::env::current_exe().expect("test exe");
+        let bin = exe
+            .parent()
+            .and_then(Path::parent)
+            .expect("target/<profile>/deps")
+            .join("oxplow-provider-fake");
+        assert!(
+            bin.is_file(),
+            "{} is missing; build it with `cargo build -p oxplow-provider-fake`",
+            bin.display()
+        );
+        bin
+    }
+
+    /// P5.D5's red: `plugin test` on a scaffolded provider — the stub
+    /// fails, the fake behind it passes once blessed, and a changed
+    /// golden transcript fails naming the file and line.
+    #[test]
+    fn plugin_test_blesses_a_provider_then_a_changed_transcript_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let (code, out, err) = cli(&["new", "provider", "fake", "--root", root]);
+        assert_eq!(code, 0, "{err}");
+        for f in [
+            "provider.json",
+            "bin/provider",
+            "fixtures/provider-fake.yaml",
+        ] {
+            assert!(out.contains(f), "{out}");
+        }
+        assert_eq!(cli(&["check", "fake", "--root", root]).0, 0);
+        let ext = dir.path().join("oxplow/extensions/fake");
+
+        // The stub doesn't speak the protocol.
+        let (code, out, _) = cli(&["test", "fake", "--root", root]);
+        assert_eq!(code, 1, "{out}");
+        assert!(
+            out.contains("error: oxplow/extensions/fake/provider.json:1: initialize failed"),
+            "{out}"
+        );
+
+        // The fake does: its declarations, a config its check accepts.
+        std::fs::write(
+            ext.join("bin/provider"),
+            format!("#!/bin/sh\nexec '{}' \"$@\"\n", fake_bin().display()),
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("provider.json"),
+            serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
+        )
+        .unwrap();
+        let (code, out, _) = cli(&["test", "fake", "--root", root]);
+        assert_eq!(code, 1, "{out}");
+        assert!(
+            out.contains(
+                "oxplow/extensions/fake/fixtures/provider-fake.yaml:1: check reports `/team`"
+            ),
+            "{out}"
+        );
+        std::fs::write(
+            ext.join("fixtures/provider-fake.yaml"),
+            "config: { team: core }\n",
+        )
+        .unwrap();
+        let (code, out, _) = cli(&["test", "fake", "--root", root]);
+        assert_eq!(code, 1, "{out}");
+        assert!(
+            out.contains("fixtures/transcripts/fake.jsonl:1: no golden transcript"),
+            "{out}"
+        );
+
+        let (code, out, err) = cli(&["test", "fake", "--bless", "--root", root]);
+        assert_eq!(code, 0, "{out}{err}");
+        assert!(
+            out.contains("blessed: oxplow/extensions/fake/fixtures/transcripts/fake.jsonl"),
+            "{out}"
+        );
+        assert!(
+            out.contains("ran check, provider fake, work_items suite"),
+            "{out}"
+        );
+        let (code, out, _) = cli(&["test", "fake", "--root", root]);
+        assert_eq!(code, 0, "a blessed transcript matches: {out}");
+
+        // A changed golden is a diff at its line.
+        let golden = ext.join("fixtures/transcripts/fake.jsonl");
+        let text = std::fs::read_to_string(&golden).unwrap();
+        let line = text.lines().position(|l| l.contains("\"First\"")).unwrap() + 1;
+        std::fs::write(&golden, text.replace("\"First\"", "\"Second\"")).unwrap();
+        let (code, out, _) = cli(&["test", "fake", "--json", "--root", root]);
+        assert_eq!(code, 1, "{out}");
+        let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let errors = report["errors"].as_array().unwrap();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let e = errors[0].as_str().unwrap();
+        assert!(
+            e.starts_with(&format!("oxplow/extensions/fake/fixtures/transcripts/fake.jsonl:{line}: the transcript differs at `/message/params/input/title`")),
+            "{e}"
+        );
+        assert!(e.contains("--bless"), "{e}");
     }
 
     #[test]

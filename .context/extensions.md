@@ -453,7 +453,7 @@ re-approval (tested).
 ## The SDK
 
 `crates/oxplow-sdk` (P1.14, tsk416; target §10.5) is the one
-implementation behind three doors: the `oxplow plugin new|check|migrate`
+implementation behind three doors: the `oxplow plugin new|check|migrate|test`
 CLI, the RPC/MCP `validate_extension`, and `save_lens`'s manifest. Every
 door gives an author the same report, so an agent editing from a terminal
 and one calling MCP read identical `file:line: what — fix` lines.
@@ -477,6 +477,25 @@ and one calling MCP read identical `file:line: what — fix` lines.
   (`error: <file:line …>` lines then a one-line summary) or JSON.
 - **`migrate(root, name)`** writes `migrate_v1::migrate_v1_to_v2` to the
   file; `changed: false` when it was already v2.
+- **`scaffold(…, Kind::Provider, …)`** (`plugin new provider <name>`,
+  P5.D5) adds a `providers:` entry (id = the name with `_` for `-`,
+  capability `work_items`), `provider.json` (create / update /
+  transition, the core `work_item.recorded@1`, an object config
+  schema), a stub `bin/provider` that exits 1, `fixtures/basic.yaml`
+  invoking `create` and expecting `{ ref: $any }`, and
+  `fixtures/provider-<id>.yaml` (`config: {}`).
+- **`plugin_test::test_extension(root, name, layer, bless)`** (`plugin
+  test <name> [--bless] [--json]`, P5.D5) runs `check` and then, per
+  declared provider, the conformance kit ([providers.md](./providers.md)
+  "The conformance kit"): its handshake against its declarations, its
+  `check` of `fixtures/provider-<id>.yaml`, every intent example that has
+  a fixture (`input: { command, input }`, `expect`; `$any` matches
+  anything), every message against the protocol's schema goldens, the
+  golden transcript `fixtures/transcripts/<id>.jsonl` (`--bless` writes
+  it), and the capability's conformance suite through a throwaway host.
+  Without providers, intent examples aren't run (a warning: nothing
+  declares a runtime). `TestReport { ok, errors, warnings, blessed, ran
+  }`; `render` prints it like `check`'s. Exit 0 / 1 / 2 as `check`.
 - **The CLI** is `apps/desktop/src-tauri/src/plugin_cli.rs`, dispatched
   by `main.rs` before Tauri boots exactly like `oxplow hook`. It takes a
   bare name (under `--root` or the cwd) or the extension folder's path

@@ -1,13 +1,17 @@
 //! The plugin SDK (`.context/extensions.md` "The SDK";
-//! `.context/target-architecture.md` §10.5): scaffold, check and migrate
-//! an extension.
+//! `.context/target-architecture.md` §10.5): scaffold, check, migrate and
+//! test an extension, and the provider conformance kit
+//! ([`conformance`], [`plugin_test`]).
 //!
-//! One library behind three callers — the `oxplow plugin new|check|migrate`
+//! One library behind three callers — the `oxplow plugin new|check|migrate|test`
 //! CLI in the Tauri binary, the RPC/MCP `validate_extension`, and
 //! `save_lens` — so every message reads the same (`file:line: what — fix`)
 //! wherever the author meets it. For an AI author that consistency is the
 //! feature: the skill says "run `check` after every edit", and the error
 //! it gets back names the file and line and says what to change.
+
+pub mod conformance;
+pub mod plugin_test;
 
 use std::path::{Path, PathBuf};
 
@@ -36,6 +40,9 @@ pub enum Kind {
     Lens,
     /// An extension folder with a v2 manifest only.
     Extension,
+    /// An extension declaring a work-items provider: its declarations,
+    /// a stub program to replace, and the fixtures `plugin test` runs.
+    Provider,
 }
 
 impl Kind {
@@ -43,6 +50,7 @@ impl Kind {
         match s {
             "lens" => Some(Kind::Lens),
             "extension" => Some(Kind::Extension),
+            "provider" => Some(Kind::Provider),
             _ => None,
         }
     }
@@ -105,27 +113,64 @@ pub fn scaffold(
             "one row per open task in the stream, newest first".to_string(),
         ),
         Kind::Extension => ("{}".to_string(), "TODO: what a run should show".to_string()),
+        Kind::Provider => (
+            "{ command: create, input: { title: First } }".to_string(),
+            "the new item's ref".to_string(),
+        ),
     };
-    write(
-        &format!("{rel_dir}/extension.yaml"),
-        extensions::scaffold_manifest(&extensions::ManifestScaffold {
-            name,
-            description: "TODO: one line on what this extension shows or does",
-            purpose: "TODO: the question this answers, or the job it does",
-            origin,
-            example_name: "basic",
-            example_input: &example_input,
-            example_expect: &example_expect,
-        }),
-    )?;
+    let provider_id = name.replace('-', "_");
+    let mut manifest = extensions::scaffold_manifest(&extensions::ManifestScaffold {
+        name,
+        description: "TODO: one line on what this extension shows or does",
+        purpose: "TODO: the question this answers, or the job it does",
+        origin,
+        example_name: "basic",
+        example_input: &example_input,
+        example_expect: &example_expect,
+    });
+    if kind == Kind::Provider {
+        manifest.push_str(&format!(
+            "providers:\n  - id: {provider_id}\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n"
+        ));
+    }
+    write(&format!("{rel_dir}/extension.yaml"), manifest)?;
+    let fixture_expect = match kind {
+        // What `plugin test` compares the invoke result with.
+        Kind::Provider => "{ ref: $any }".to_string(),
+        _ => example_expect.clone(),
+    };
     write(
         &format!("{rel_dir}/fixtures/basic.yaml"),
         format!(
             "# The acceptance example from extension.yaml as a fixture for `oxplow plugin test`\n\
              # (input in, expected output out). Keep the two in step.\n\
-             name: basic\ninput: {example_input}\nexpect: {example_expect}\n"
+             name: basic\ninput: {example_input}\nexpect: {fixture_expect}\n"
         ),
     )?;
+    if kind == Kind::Provider {
+        write(
+            &format!("{rel_dir}/provider.json"),
+            serde_json::to_string_pretty(&provider_declarations(name))
+                .expect("declarations serialize")
+                + "\n",
+        )?;
+        write(
+            &format!("{rel_dir}/bin/provider"),
+            "#!/bin/sh\n\
+             # TODO: the provider program. It speaks the provider protocol (JSON-RPC 2.0,\n\
+             # one message per line) on stdin/stdout and answers what provider.json\n\
+             # declares; see the oxplow-extension skill.\n\
+             echo 'provider: not implemented yet' >&2\n\
+             exit 1\n"
+                .to_string(),
+        )?;
+        make_executable(&root.join(&rel_dir).join("bin/provider"))?;
+        write(
+            &format!("{rel_dir}/fixtures/provider-{provider_id}.yaml"),
+            "# The instance config `oxplow plugin test` checks the provider with.\nconfig: {}\n"
+                .to_string(),
+        )?;
+    }
     if kind == Kind::Lens {
         write(
             &format!("{rel_dir}/lenses/{name}.yaml"),
@@ -155,6 +200,74 @@ pub fn scaffold(
         dir: rel_dir,
         files,
     })
+}
+
+/// A work-items provider's starting declarations: create, update and
+/// transition (`record` effect, no confirmation), the core
+/// `work_item.recorded@1` event and an empty config schema.
+fn provider_declarations(name: &str) -> oxplow_provider_protocol::model::InitializeResult {
+    use oxplow_domain::events::schema::{schema_for, EventType, WorkItemRecorded};
+    use oxplow_provider_protocol::model::*;
+    let command = |name: &str, summary: &str, input: serde_json::Value| CommandDecl {
+        name: name.into(),
+        summary: summary.into(),
+        input_schema: input,
+        confirm: "never".into(),
+        effect: "record".into(),
+        undoable: false,
+    };
+    let str_prop = serde_json::json!({ "type": "string" });
+    InitializeResult {
+        protocol_version: PROTOCOL_VERSION.into(),
+        provider: Party {
+            name: name.into(),
+            version: "0.1.0".into(),
+        },
+        capabilities: vec![CapabilityDecl {
+            capability: "work_items".into(),
+            features: serde_json::json!({
+                "hierarchy": false,
+                "comments": false,
+                "links": false,
+                "in_progress_opens_effort": false,
+            }),
+        }],
+        commands: vec![
+            command(
+                "create",
+                "Create a work item.",
+                serde_json::json!({ "type": "object", "required": ["title"], "properties": { "title": str_prop, "body": str_prop } }),
+            ),
+            command(
+                "update",
+                "Change a work item's title or body.",
+                serde_json::json!({ "type": "object", "required": ["ref"], "properties": { "ref": str_prop, "title": str_prop, "body": str_prop } }),
+            ),
+            command(
+                "transition",
+                "Move a work item to a canonical or native state.",
+                serde_json::json!({ "type": "object", "required": ["ref", "to"], "properties": { "ref": str_prop, "to": str_prop } }),
+            ),
+        ],
+        event_types: vec![EventTypeDecl {
+            event_type: WorkItemRecorded::TYPE.into(),
+            v: WorkItemRecorded::V,
+            schema: schema_for::<WorkItemRecorded>(),
+        }],
+        collectors: Vec::new(),
+        config_schema: serde_json::json!({ "type": "object" }),
+    }
+}
+
+#[cfg(unix)]
+fn make_executable(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 fn title_case(name: &str) -> String {

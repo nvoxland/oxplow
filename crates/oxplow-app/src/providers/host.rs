@@ -105,8 +105,21 @@ impl Connection {
     }
 }
 
-/// Spawn the approved provider and handshake with it.
-pub async fn connect(launch: &Launch) -> Result<Connection, HostError> {
+/// A spawned provider process and its pipes, before any handshake.
+pub struct Spawned {
+    pub child: tokio::process::Child,
+    pub stdin: tokio::process::ChildStdin,
+    pub stdout: tokio::process::ChildStdout,
+    /// The egress proxy it reaches the network through, where enforced;
+    /// it lives as long as this does.
+    pub proxy: Option<crate::net_sandbox::EgressProxy>,
+}
+
+/// Start the provider's program the trusted way: a scrubbed environment
+/// (PATH, HOME, its declared `env` names, its credentials, `OXPLOW_*`
+/// context), the egress proxy and `sandbox-exec` where enforced, stderr
+/// to the log, killed on drop. Consent is the caller's to have checked.
+pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
     let failed = |message: String| HostError::Failed {
         name: launch.name.clone(),
         message,
@@ -181,6 +194,38 @@ pub async fn connect(launch: &Launch) -> Result<Connection, HostError> {
             }
         });
     }
+    Ok(Spawned {
+        child,
+        stdin,
+        stdout,
+        proxy,
+    })
+}
+
+/// The host's `initialize` params.
+pub fn initialize_params() -> InitializeParams {
+    InitializeParams {
+        protocol_version: PROTOCOL_VERSION.into(),
+        host: Party {
+            name: "oxplow".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+        },
+    }
+}
+
+/// Spawn the approved provider and handshake with it: the live
+/// `initialize` must equal `launch.declared`.
+pub async fn connect(launch: &Launch) -> Result<Connection, HostError> {
+    let failed = |message: String| HostError::Failed {
+        name: launch.name.clone(),
+        message,
+    };
+    let Spawned {
+        child,
+        stdin,
+        stdout,
+        proxy,
+    } = spawn(launch).await?;
     let (peer, incoming) = Peer::spawn(stdout, stdin);
     serve_incoming(peer.clone(), incoming);
     let conn = Connection {
@@ -190,16 +235,7 @@ pub async fn connect(launch: &Launch) -> Result<Connection, HostError> {
     };
     let live: InitializeResult = tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
-        conn.peer.call(
-            method::INITIALIZE,
-            &InitializeParams {
-                protocol_version: PROTOCOL_VERSION.into(),
-                host: Party {
-                    name: "oxplow".into(),
-                    version: env!("CARGO_PKG_VERSION").into(),
-                },
-            },
-        ),
+        conn.peer.call(method::INITIALIZE, &initialize_params()),
     )
     .await
     .map_err(|_| failed(format!("no answer to initialize in {HANDSHAKE_TIMEOUT:?}")))?
@@ -215,7 +251,7 @@ pub async fn connect(launch: &Launch) -> Result<Connection, HostError> {
 
 /// What the provider sends that isn't a reply: the host serves no
 /// requests yet, and a notification outside a read is dropped.
-fn serve_incoming(peer: Peer, mut incoming: tokio::sync::mpsc::UnboundedReceiver<Incoming>) {
+pub fn serve_incoming(peer: Peer, mut incoming: tokio::sync::mpsc::UnboundedReceiver<Incoming>) {
     tokio::spawn(async move {
         while let Some(message) = incoming.recv().await {
             if let Incoming::Request { id, method, .. } = message {
@@ -228,7 +264,7 @@ fn serve_incoming(peer: Peer, mut incoming: tokio::sync::mpsc::UnboundedReceiver
 }
 
 /// Where two declarations first differ, for the person reading why.
-fn first_difference(approved: &InitializeResult, live: &InitializeResult) -> String {
+pub fn first_difference(approved: &InitializeResult, live: &InitializeResult) -> String {
     let a = serde_json::to_value(approved).unwrap_or_default();
     let b = serde_json::to_value(live).unwrap_or_default();
     fn walk(path: &str, a: &serde_json::Value, b: &serde_json::Value) -> Option<String> {

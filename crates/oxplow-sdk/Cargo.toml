@@ -7,8 +7,8 @@ authors.workspace = true
 license.workspace = true
 publish = false
 
-# The plugin SDK (`.context/extensions.md` "The SDK"): scaffold, check and
-# migrate an extension. A library so the `oxplow plugin …` CLI (the Tauri
+# The plugin SDK (`.context/extensions.md` "The SDK"): scaffold, check,
+# migrate and test an extension, and the provider conformance kit. A library so the `oxplow plugin …` CLI (the Tauri
 # binary), the RPC/MCP `validate_extension` and `save_lens` share one
 # implementation and one set of messages.
 
@@ -16,14 +16,17 @@ publish = false
 oxplow-app = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-domain = { workspace = true }
+oxplow-provider-protocol = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 specta = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
-tokio = { workspace = true }
+oxplow-provider-fake = { workspace = true }
 
 [lints]
 workspace = true

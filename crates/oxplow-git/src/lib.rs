@@ -46,7 +46,10 @@ pub use refs::{
     CommitRefLabel, CommitRefLabelKind, GroupedGitRefs, RefKind, RefOption, RemoteBranchEntry,
 };
 pub use refs_watch::{GitRefsWatcher, RefsChangeEvent};
-pub use repo::{detect_current_branch, is_git_repo, is_git_worktree, merge_base, resolve_revision};
+pub use repo::{
+    detect_current_branch, init_repository, is_git_repo, is_git_worktree, merge_base,
+    resolve_revision,
+};
 pub use smart_merge::{auto_resolve_conflicts, merge3, merge3_str, tokenize, AutoResolveReport};
 pub use status::{
     clean_head_blob_oids, head_commit_sha, list_git_statuses, read_blob, status_for_path,

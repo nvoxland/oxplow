@@ -172,6 +172,20 @@ names the file and line and says what to change.
 3. Pass **your own `stream_id`** to both when you're in a worktree
    stream. Extensions are read from the stream's worktree, so the primary
    stream won't see yours until it's merged.
+4. An extension with a **provider** (`providers:` — a program that
+   connects an outside system, such as an issue tracker; private
+   extensions only) is tested with `oxplow plugin test <name>`:
+   `oxplow plugin new provider <name>` scaffolds one (its `provider.json`
+   declarations, a stub `bin/provider` to replace, and the fixtures).
+   The test runs `check`, then the provider: its `initialize` must equal
+   `provider.json`, its `check` must accept `fixtures/provider-<id>.yaml`'s
+   `config`, each intent example's fixture (`input: { command, input }`,
+   `expect`, `$any` matching anything) is invoked, every message must
+   match the protocol, the session must match the golden
+   `fixtures/transcripts/<id>.jsonl` (`--bless` writes it when a change is
+   intended — commit it), and the work-items conformance suite must pass.
+   A person approves the provider in Settings → Data → Programs and
+   enables it in Settings → Integrations; you can't do either.
 
 ## 4. Hand it over
 
