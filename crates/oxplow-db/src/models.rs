@@ -403,6 +403,15 @@ pub fn drop_all(conn: &Connection) -> Result<(), DomainError> {
         conn.execute_batch(&format!("DROP VIEW IF EXISTS {}", quote(&view)))
             .map_err(map_sql_err)?;
     }
+    // Extensions' models are recompiled after the open
+    // (`compile_extensions`); until then the registry lists none of them.
+    if has_kind {
+        conn.execute(
+            "DELETE FROM model WHERE kind = 'sql' AND owner <> ?1",
+            [CORE],
+        )
+        .map_err(map_sql_err)?;
+    }
     Ok(())
 }
 

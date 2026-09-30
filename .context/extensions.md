@@ -381,7 +381,8 @@ slot_mounts:         # v1 `slots`: mount lenses into core pages
 advisories:  [...]   # see "Advisories"
 launcher:            # entries for non-lens targets (a page, a command); a lens uses its own launcher: block
   - { label: …, category: Data, target: page:… }
-models: …  commands: …  pages: …  panels: …  config: …   # parsed as data; runtimes land in later phases
+models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name> (semantic-layer.md "Extension models")
+commands: …  pages: …  panels: …  config: …   # parsed as data; runtimes land in later phases
 # experimental kinds — a PRIVATE extension only
 providers: … effects: … event_types: … ref_kinds: … custom_components: … decorators: … replacements: …
 ```

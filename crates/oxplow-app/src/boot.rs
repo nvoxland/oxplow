@@ -340,6 +340,9 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     )
     .spawn();
 
+    // Extensions' SQL models (P4.9): compiled now and on every change.
+    state.extension_models.clone().spawn(event_bus.clone());
+
     // Asset subscriptions (P4.6): which models each commit changed.
     crate::models_changed::spawn(
         state.db.clone(),

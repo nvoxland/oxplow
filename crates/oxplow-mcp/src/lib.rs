@@ -1728,7 +1728,12 @@ impl OxplowMcp {
             .git
             .resolve_repo_dir(params.0.stream_id.as_deref())
             .await;
-        json_result(&*self.services.extension_catalog.get(&root))
+        let listed = self
+            .services
+            .extension_models
+            .with_health(&root, self.services.extension_catalog.get(&root).to_vec())
+            .await;
+        json_result(&listed)
     }
 
     #[tool(

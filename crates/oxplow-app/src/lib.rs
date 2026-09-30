@@ -47,6 +47,7 @@ pub mod event_pump;
 pub mod events;
 pub mod exec_consent;
 pub mod extension_catalog;
+pub mod extension_models;
 pub mod extension_sources;
 pub mod extensions;
 pub mod file_ref_version;
@@ -430,6 +431,8 @@ pub struct Services {
     /// Loaded extensions per worktree root, reloaded when a file under
     /// `oxplow/extensions/` or the project config changes.
     pub extension_catalog: Arc<extension_catalog::ExtensionCatalog>,
+    /// The primary worktree's extensions' SQL models, and their errors (P4.9).
+    pub extension_models: Arc<extension_models::ExtensionModelsService>,
     /// The command bus: the one write path (`.context/commands.md`).
     pub commands: Arc<commands::CommandBus>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
@@ -845,6 +848,11 @@ impl Services {
         // Arcs only (never `Arc<Services>`); injected into TaskService for the
         // on-effort-complete ride-along and spawned as a loop in `boot.rs`.
         let extension_catalog = Arc::new(extension_catalog::ExtensionCatalog::new());
+        let extension_models = Arc::new(extension_models::ExtensionModelsService::new(
+            db.clone(),
+            extension_catalog.clone(),
+            layout.project_dir.clone(),
+        ));
         let metrics = metrics_service::MetricsService::new(
             snapshot_store.clone(),
             thread_store.clone(),
@@ -1005,6 +1013,7 @@ impl Services {
             model_watermarks,
             event_schemas,
             event_pump,
+            extension_models,
             extension_catalog,
             commands,
             wiki_page_store,

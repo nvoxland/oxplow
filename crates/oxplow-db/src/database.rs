@@ -349,6 +349,16 @@ impl Database {
 }
 
 impl Database {
+    /// Compile the enabled extensions' models over the core ones
+    /// ([`crate::models::compile_extensions`]): each extension's errors.
+    pub async fn compile_extension_models(
+        &self,
+        extensions: Vec<crate::models::ExtensionModels>,
+    ) -> Result<std::collections::BTreeMap<String, Vec<String>>, oxplow_domain::DomainError> {
+        self.call_mut(move |conn| crate::models::compile_extensions(conn, &extensions))
+            .await
+    }
+
     /// Run a read-only closure off the async runtime, in a DEFERRED
     /// transaction: one consistent snapshot across its statements, and no
     /// write lock (a [`Self::transaction`] begins IMMEDIATE). Always rolled

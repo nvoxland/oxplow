@@ -24,7 +24,10 @@ pub async fn list_extensions(
     stream_id: Option<String>,
 ) -> Result<Vec<Extension>, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
-    Ok(svc.extension_catalog.get(&root).to_vec())
+    Ok(svc
+        .extension_models
+        .with_health(&root, svc.extension_catalog.get(&root).to_vec())
+        .await)
 }
 
 /// One lens by `<extension>/<slug>`.

@@ -164,6 +164,35 @@ extension's is refused naming the owner — and recreates a missing view
 without dropping its table. `drop_extension` drops the extension's views
 by the registry. V109 registered the entity views synced before it.
 
+**Extension models** (P4.9, `crates/oxplow-app/src/extension_models.rs`).
+An extension declares `models:` in `extension.yaml` — each entry the same
+`ModelDecl` as `models.yaml` (name, version, description, columns,
+tests) — with its SQL in `models/<name>.sql` (`models::join_sources`;
+a declaration without its file, or a file without its declaration, is an
+extension error). Each publishes `v_<extension>_<name>` (dashes as
+underscores — the entity views' formula). Inside one:
+- `ref('x')` is the extension's own model or entity `x`, else the core
+  model `x`; `ref('<ext>/<name>')` is another extension's, explicitly;
+- `source()` reads only the extension's own `ext__<ext>__*` tables —
+  oxplow's data comes through `ref()`.
+
+`models::compile_extensions` compiles every enabled extension's models in
+one pass after the core ones: the last pass's extension views go, the
+rest publish in dependency order, each in a savepoint — a model that
+fails (resolution, lineage, contract, a name that belongs to core or an
+entity), and every model reading it, is left out and reported for its
+extension; a cycle is reported for each model in it. Only the primary
+worktree's extensions compile (views are project-wide, like source
+data). `ExtensionModelsService` runs a pass at boot and after an edit
+under `oxplow/extensions/`, a config change, or a registry change (a
+source syncing a new entity); its fingerprint — the enabled extensions'
+model sources plus the registered entity views — makes a pass over the
+same inputs, including the one its own registry writes set off, a no-op.
+The errors are the extension's health: `list_extensions` (IPC and MCP)
+merges them into `errors`; nothing fails boot. `drop_all` removes the
+extension models' registry rows with their views, so between an open and
+the first pass the registry lists none.
+
 Declared tests (`not_null`, `unique`, `accepted_values`,
 `relationships`, `sql` returning failing rows) run through
 `models::run_tests` and record `model_test` (`passed` / `failed` /
