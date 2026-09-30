@@ -16,6 +16,7 @@
 //! notification later (comma-separated):
 //! - `fail-next:<n>` — the next `n` `check` / `invoke` / `read` calls fail
 //!   (`Internal`);
+//! - `slow-check:<ms>` — every `check` takes `ms` first;
 //! - `slow:<ms>` — every `invoke` and `read` takes `ms` first (and honours
 //!   `$/cancel` meanwhile);
 //! - `crash` — drop the connection on the next request (the binary exits
@@ -43,6 +44,7 @@ pub const PROVIDER: &str = "fake";
 pub struct Hooks {
     pub fail_next: u32,
     pub slow_ms: u64,
+    pub slow_check_ms: u64,
     pub crash: bool,
     pub bad_declarations: bool,
 }
@@ -59,6 +61,7 @@ impl Hooks {
             match part.split_once(':') {
                 Some(("fail-next", n)) => self.fail_next = n.parse().unwrap_or(1),
                 Some(("slow", ms)) => self.slow_ms = ms.parse().unwrap_or(0),
+                Some(("slow-check", ms)) => self.slow_check_ms = ms.parse().unwrap_or(0),
                 None if part == "fail-next" => self.fail_next = 1,
                 None if part == "crash" => self.crash = true,
                 None if part == "bad-declarations" => self.bad_declarations = true,
@@ -305,6 +308,10 @@ async fn handle(
         }
         method::CHECK => {
             take_failure(world).await?;
+            let ms = world.lock().await.hooks.slow_check_ms;
+            if ms > 0 {
+                tokio::time::sleep(Duration::from_millis(ms)).await;
+            }
             let p: CheckParams = parse(params)?;
             let team = p.config.get("team").and_then(Value::as_str);
             let result = match team {

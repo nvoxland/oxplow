@@ -125,3 +125,32 @@ async fn peers_answer_requests_and_cancellations() {
     assert_eq!(call.reply().await, Err(ProtocolError::Cancelled));
     answering.await.unwrap();
 }
+
+/// tsk549: once the other side's stream has ended, a new request fails at
+/// once instead of waiting for a reply that can't come.
+#[tokio::test]
+async fn a_request_after_the_other_side_closed_fails_at_once() {
+    let (host_end, provider_end) = tokio::io::duplex(1024);
+    let (hr, hw) = tokio::io::split(host_end);
+    let (host, _incoming) = Peer::spawn(hr, hw);
+    // The provider closes its output but stays alive (still reading), so
+    // the host's writes succeed and only the reply can never come.
+    let (_provider_reads, mut provider_writes) = tokio::io::split(provider_end);
+    tokio::io::AsyncWriteExt::shutdown(&mut provider_writes)
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        if host.is_closed() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert!(host.is_closed());
+    let reply = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        host.request("echo", json!({})),
+    )
+    .await
+    .expect("answered without waiting");
+    assert!(reply.is_err());
+}

@@ -77,7 +77,7 @@ streams each item after the cursor as `$/record`, then `$/state
 { hooks }` notification mid-session (comma-separated):
 `fail-next:<n>` (the next n check/invoke/read fail `Internal`),
 `slow:<ms>` (invoke and read wait first; `$/cancel` interrupts them with
-`Cancelled`), `crash` (the next request drops the connection; the binary
+`Cancelled`), `slow-check:<ms>` (check waits first), `crash` (the next request drops the connection; the binary
 exits 3) and `bad-declarations` (`initialize` answers something other
 than `declarations()`, for the host's handshake check).
 `tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
@@ -182,6 +182,15 @@ invokes the process and hands the bus its result, its inverse (as
 `work_item.recorded` names another provider's item, or a subject isn't
 one of its own refs (`check_subject`: `work_item:<id>:…` or
 `plugin:<ext>`).
+
+**Calls are bounded** (tsk549): `check` and `invoke` time out after
+`HostDeps.call_timeout` (`MachineEnv.provider_call_timeout`: 60 s in the
+app, 2 s in `Services::in_memory`); a timeout sends `$/cancel` and
+counts as a failure. A restart runs under its own `starting` lock,
+never holding `live`, so a start that hangs can't block `stop` (and
+through it reconcile, `provider.enable` or `set_instance`). `Peer::start`
+refuses once the other side's stream has closed, instead of leaving a
+waiter that nothing resolves.
 
 **Health** (`InstanceHealth { state, consecutive_failures, last_ok_at,
 mean_invoke_ms }`, per machine, in memory): `state` is `off`,

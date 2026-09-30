@@ -414,6 +414,8 @@ struct MachineEnv {
     provider_backoff: std::time::Duration,
     /// Where approved provider copies run from, outside the repo.
     provider_copies: PathBuf,
+    /// How long a provider's `check` or `invoke` may take.
+    provider_call_timeout: std::time::Duration,
 }
 
 /// All the long-lived services oxplow needs to serve a UI.
@@ -658,6 +660,7 @@ impl Services {
                 .unwrap_or_else(|| layout.state_dir.join("global-config"))
                 .join("provider-copies")
                 .join(source_runner::project_key(&layout.project_dir)),
+            provider_call_timeout: std::time::Duration::from_secs(60),
         };
         Self::build(layout, config, db, machine)
     }
@@ -1035,6 +1038,7 @@ impl Services {
                 host_env: Arc::new(|name| std::env::var(name).ok()),
                 backoff: machine.provider_backoff,
                 copies: machine.provider_copies.clone(),
+                call_timeout: machine.provider_call_timeout,
             },
             &commands,
             work_items.clone(),
@@ -1238,6 +1242,8 @@ impl Services {
             // A test's failing provider restarts at once.
             provider_backoff: std::time::Duration::ZERO,
             provider_copies: state_dir.join("global-config/provider-copies"),
+            // A test's hung provider fails fast.
+            provider_call_timeout: std::time::Duration::from_secs(2),
         };
         Self::build(layout, config, Database::in_memory(), machine)
     }

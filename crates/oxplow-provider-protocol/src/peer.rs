@@ -138,7 +138,16 @@ impl Peer {
     pub async fn start(&self, method: &str, params: Value) -> Result<Call, ProtocolError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, reply) = oneshot::channel();
-        self.pending.lock().await.insert(id, tx);
+        {
+            // Under the lock the reader drains `pending` with once it has
+            // marked the stream closed: either this sees `closed`, or the
+            // drain sees this waiter.
+            let mut pending = self.pending.lock().await;
+            if self.is_closed() {
+                return Err(ProtocolError::Internal("the peer closed".into()));
+            }
+            pending.insert(id, tx);
+        }
         if let Err(e) = self
             .send(&Message::Request {
                 id,

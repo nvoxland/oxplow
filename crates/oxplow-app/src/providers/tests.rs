@@ -546,3 +546,55 @@ fn a_provider_event_names_only_its_own_refs() {
         assert!(check_subject("fake", "tracker", bad).is_err(), "{bad}");
     }
 }
+
+/// tsk549: a provider whose `check` hangs times out — counted as a
+/// failure — and never blocks stopping it.
+#[tokio::test]
+async fn a_hung_check_times_out_and_the_instance_can_still_stop() {
+    let (fx, ext) = approved("slow-check:30000").await;
+    let providers = &fx.svc.providers;
+    let enabled = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        providers.enable(&ext, &ext.providers[0], json!({ "team": "core" })),
+    )
+    .await
+    .expect("enable returns once check times out");
+    assert!(
+        enabled.is_ok(),
+        "a start that merely failed stays enabled: {enabled:?}"
+    );
+    let health = providers.health(INSTANCE).unwrap();
+    let InstanceState::Failing { errors } = &health.state else {
+        panic!("{health:?}");
+    };
+    assert!(errors[0].contains("timed out"), "{errors:?}");
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(2), providers.stop(INSTANCE))
+            .await
+            .is_ok(),
+        "stop must not wait on a hung start"
+    );
+}
+
+/// tsk549: a hung `invoke` times out (with `$/cancel`) and counts as a
+/// failure, instead of blocking the caller forever with health `ready`.
+#[tokio::test]
+async fn a_hung_invoke_times_out_and_counts() {
+    let (fx, ext) = approved("slow:30000").await;
+    let providers = &fx.svc.providers;
+    providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    let ran = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        fx.svc
+            .commands
+            .run(&Actor::Human, "fake.create", json!({ "title": "x" }), false),
+    )
+    .await
+    .expect("the call returns once it times out");
+    let err = ran.unwrap_err().to_string();
+    assert!(err.contains("timed out"), "{err}");
+    assert_eq!(providers.health(INSTANCE).unwrap().consecutive_failures, 1);
+}

@@ -76,6 +76,9 @@ pub struct HostDeps {
     /// Where approved copies of providers are kept and run from, outside
     /// the repo (`host::approved_copy`).
     pub copies: PathBuf,
+    /// How long a `check` or `invoke` may take before it is cancelled and
+    /// counted as a failure.
+    pub call_timeout: Duration,
 }
 
 /// A config problem `check` reported.
@@ -177,6 +180,8 @@ pub struct Instance {
     deps: HostDeps,
     registry: Weak<ProviderRegistry>,
     live: tokio::sync::Mutex<Option<Live>>,
+    /// One start at a time; held across a start, which `live` never is.
+    starting: tokio::sync::Mutex<()>,
     not_before: parking_lot::Mutex<Option<Instant>>,
 }
 
@@ -219,20 +224,20 @@ impl Instance {
             host_env: self.deps.host_env.clone(),
         })
         .await?;
-        let checked: CheckResult = conn
-            .peer
-            .call(
-                method::CHECK,
-                &CheckParams {
-                    config: self.config.clone(),
-                    credentials: names,
-                },
-            )
-            .await
-            .map_err(|e| HostError::Failed {
-                name: self.name.clone(),
-                message: format!("check: {e}"),
-            })?;
+        let checked: CheckResult = call_within(
+            &conn.peer,
+            method::CHECK,
+            &CheckParams {
+                config: self.config.clone(),
+                credentials: names,
+            },
+            self.deps.call_timeout,
+        )
+        .await
+        .map_err(|e| HostError::Failed {
+            name: self.name.clone(),
+            message: format!("check: {e}"),
+        })?;
         match checked.handle {
             Some(handle) if checked.problems.is_empty() => Ok(Live { conn, handle }),
             _ => Err(HostError::Unconfigured {
@@ -243,59 +248,71 @@ impl Instance {
     }
 
     /// The running process's peer and handle, starting it when it isn't
-    /// (unless it's backing off).
+    /// (unless it's backing off). The start runs without holding `live`,
+    /// so a start that hangs never blocks `stop`.
     async fn connection(&self) -> Result<(oxplow_provider_protocol::Peer, Handle), CommandError> {
-        let mut live = self.live.lock().await;
-        if live.as_ref().is_none_or(|l| l.conn.peer.is_closed()) {
-            *live = None;
-            if let Some(wait) = self
-                .not_before
-                .lock()
-                .and_then(|t| t.checked_duration_since(Instant::now()))
-            {
-                return Err(CommandError::Failed {
-                    message: format!(
-                        "provider `{}` failed to start; trying again in {}s",
-                        self.name,
-                        wait.as_secs() + 1
-                    ),
-                });
-            }
-            let started = self.start().await;
-            let registry = self.registry.upgrade();
-            match started {
-                Ok(l) => {
-                    *self.not_before.lock() = None;
-                    *live = Some(l);
-                }
-                Err(e) => {
-                    let message = e.to_string();
-                    drop(live);
-                    if let Some(r) = registry {
-                        r.start_failed(&self.name, e).await;
-                    }
-                    return Err(CommandError::Failed { message });
-                }
+        {
+            let live = self.live.lock().await;
+            if let Some(l) = live.as_ref().filter(|l| !l.conn.peer.is_closed()) {
+                return Ok((l.conn.peer.clone(), l.handle.clone()));
             }
         }
-        let l = live.as_ref().expect("started above");
-        Ok((l.conn.peer.clone(), l.handle.clone()))
+        if let Some(wait) = self
+            .not_before
+            .lock()
+            .and_then(|t| t.checked_duration_since(Instant::now()))
+        {
+            return Err(CommandError::Failed {
+                message: format!(
+                    "provider `{}` failed to start; trying again in {}s",
+                    self.name,
+                    wait.as_secs() + 1
+                ),
+            });
+        }
+        let _one = self.starting.lock().await;
+        // Another caller may have started it while this one waited.
+        if let Some(l) = self
+            .live
+            .lock()
+            .await
+            .as_ref()
+            .filter(|l| !l.conn.peer.is_closed())
+        {
+            return Ok((l.conn.peer.clone(), l.handle.clone()));
+        }
+        match self.start().await {
+            Ok(l) => {
+                *self.not_before.lock() = None;
+                let out = (l.conn.peer.clone(), l.handle.clone());
+                *self.live.lock().await = Some(l);
+                Ok(out)
+            }
+            Err(e) => {
+                let message = e.to_string();
+                if let Some(r) = self.registry.upgrade() {
+                    r.start_failed(&self.name, e).await;
+                }
+                Err(CommandError::Failed { message })
+            }
+        }
     }
 
     /// Run one of its declared commands.
     pub async fn invoke(&self, command: &str, input: Value) -> Result<InvokeResult, CommandError> {
         let (peer, handle) = self.connection().await?;
         let started = Instant::now();
-        let result = peer
-            .call::<_, InvokeResult>(
-                method::INVOKE,
-                &InvokeParams {
-                    handle,
-                    command: command.into(),
-                    input,
-                },
-            )
-            .await;
+        let result = call_within::<_, InvokeResult>(
+            &peer,
+            method::INVOKE,
+            &InvokeParams {
+                handle,
+                command: command.into(),
+                input,
+            },
+            self.deps.call_timeout,
+        )
+        .await;
         if peer.is_closed() {
             // It died under the call: the next one restarts it.
             self.live.lock().await.take();
@@ -612,6 +629,7 @@ impl ProviderRegistry {
             deps: self.deps.clone(),
             registry: self.me.clone(),
             live: tokio::sync::Mutex::new(None),
+            starting: tokio::sync::Mutex::new(()),
             not_before: parking_lot::Mutex::new(None),
         }))
     }
@@ -953,6 +971,31 @@ impl ProviderRegistry {
 /// The ref of an instance's extension (`plugin:<extension>`).
 fn plugin_ref(instance: &str) -> String {
     format!("plugin:{}", instance.split('/').next().unwrap_or_default())
+}
+
+/// A typed request that is cancelled (`$/cancel`) and fails if no reply
+/// comes within `limit`.
+async fn call_within<P: Serialize, R: serde::de::DeserializeOwned>(
+    peer: &oxplow_provider_protocol::Peer,
+    method: &str,
+    params: &P,
+    limit: Duration,
+) -> Result<R, ProtocolError> {
+    let params =
+        serde_json::to_value(params).map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
+    let call = peer.start(method, params).await?;
+    let id = call.id;
+    match tokio::time::timeout(limit, call.reply()).await {
+        Ok(reply) => serde_json::from_value(reply?)
+            .map_err(|e| ProtocolError::Internal(format!("`{method}` result: {e}"))),
+        Err(_) => {
+            let _ = peer.cancel(id).await;
+            Err(ProtocolError::Internal(format!(
+                "`{method}` timed out after {}s",
+                limit.as_secs_f32()
+            )))
+        }
+    }
 }
 
 /// [`host::approved_copy`] off the runtime (it copies and hashes files).
