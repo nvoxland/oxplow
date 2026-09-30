@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`knowledge.page.written@1`: a knowledge page's row and edges were\nrestated from its body — by `knowledge.write_page` / `link` /\n`resync`, or by the wiki watcher after a hand edit\n(`system:wiki_watch`).",
+  "properties": {
+    "outbound": {
+      "description": "Every ref the page now points at (`file:src/lib.rs`, `wiki:x`, …).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "page": {
+      "description": "`wiki:<slug>`.",
+      "type": "string"
+    },
+    "snapshot": {
+      "description": "The snapshot its new refs are pinned to (`snap:<id>`), when there\nis one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "page",
+    "outbound"
+  ],
+  "title": "KnowledgePageWrittenV1",
+  "type": "object"
+}

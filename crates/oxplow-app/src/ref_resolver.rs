@@ -416,20 +416,21 @@ mod tests {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).unwrap();
         let now = oxplow_domain::Timestamp::now();
+        let page = WikiPage {
+            slug: "architecture".into(),
+            title: "System Architecture".into(),
+            body_path: "architecture.md".into(),
+            body_excerpt: "The workspace isolation rule.".into(),
+            body_size_bytes: 30,
+            file_refs: vec![],
+            dir_refs: vec![],
+            related_notes: vec![],
+            created_at: now,
+            updated_at: now,
+        };
         services
-            .wiki_page_store
-            .upsert(&WikiPage {
-                slug: "architecture".into(),
-                title: "System Architecture".into(),
-                body_path: "architecture.md".into(),
-                body_excerpt: "The workspace isolation rule.".into(),
-                body_size_bytes: 30,
-                file_refs: vec![],
-                dir_refs: vec![],
-                related_notes: vec![],
-                created_at: now,
-                updated_at: now,
-            })
+            .db
+            .transaction(move |tx| oxplow_db::wiki_page_store::upsert_tx(tx, &page, ""))
             .await
             .unwrap();
         let summary = resolve_ref(&services, "wiki", "architecture").await;

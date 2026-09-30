@@ -9,14 +9,6 @@ pub async fn list_wiki_pages(svc: &Services) -> Result<Vec<WikiPage>, IpcError> 
     Ok(svc.wiki_page_store.list().await?)
 }
 
-pub async fn upsert_wiki_page(svc: &Services, note: WikiPage) -> Result<(), IpcError> {
-    Ok(svc.wiki_page_store.upsert(&note).await?)
-}
-
-pub async fn delete_wiki_page(svc: &Services, slug: String) -> Result<(), IpcError> {
-    Ok(svc.wiki_page_store.delete(&slug).await?)
-}
-
 pub async fn search_wiki_titles(
     svc: &Services,
     query: String,
@@ -41,24 +33,6 @@ pub async fn read_wiki_page_body(svc: &Services, slug: String) -> Result<String,
     tokio::task::spawn_blocking(move || std::fs::read_to_string(&path).unwrap_or_default())
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
-}
-
-pub async fn write_wiki_page_body(
-    svc: &Services,
-    slug: String,
-    body: String,
-) -> Result<(), IpcError> {
-    let path = wiki_page_body_path(svc, &slug);
-    tokio::task::spawn_blocking(move || {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, body)
-    })
-    .await
-    .map_err(|e| IpcError::internal(e.to_string()))?
-    .map_err(|e| IpcError::internal(e.to_string()))?;
-    Ok(())
 }
 
 #[cfg(test)]

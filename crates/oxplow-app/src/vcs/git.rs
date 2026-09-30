@@ -116,6 +116,19 @@ impl GitProvider {
 struct GitGraph(Option<git2::Repository>);
 
 impl RevisionGraph for GitGraph {
+    fn resolve(&self, rev: &str) -> Option<String> {
+        // revparse, not Oid::from_str: a short id must expand against the
+        // object database (from_str zero-pads it into a nonexistent id).
+        let commit = self
+            .0
+            .as_ref()?
+            .revparse_single(rev)
+            .ok()?
+            .peel_to_commit()
+            .ok()?;
+        Some(commit.id().to_string())
+    }
+
     fn is_ancestor_or_equal(&self, ancestor: &str, descendant: &str) -> Option<bool> {
         if ancestor == descendant {
             return Some(true);

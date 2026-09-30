@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import {
-  writeWikiPageBody,
+  writeWikiPage,
   type Stream,
 } from "../../api.js";
 import type { WikiRefFreshness } from "../../tauri-bridge/generated/bindings.js";
@@ -130,7 +130,7 @@ export function WikiPageTab({
               const next = postprocessWikilinks(markdown);
               if (next === body) return;
               setDraft(next);
-              void writeWikiPageBody(stream.id, slug, next).catch((error) => {
+              void writeWikiPage(slug, next).catch((error) => {
                 recordOpError({
                   label: `Save wiki page "${slug}"`,
                   message: String(error),

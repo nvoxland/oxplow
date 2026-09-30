@@ -62,20 +62,26 @@ pub fn build_write_guard_response(
     context: WriteGuardContext<'_>,
 ) -> Option<WriteGuardDeny> {
     let thread = thread?;
-    if thread.status.is_writer() {
-        return None;
-    }
-    if tool_name.is_empty() {
-        return None;
-    }
-    if tool_name.starts_with("mcp__") {
+    if tool_name.is_empty() || tool_name.starts_with("mcp__") {
         return None;
     }
     if !WORKTREE_MUTATING_TOOLS.contains(&tool_name) {
         return None;
     }
-
     let raw = context.tool_input.and_then(raw_target_path);
+    let deny = |reason: String| WriteGuardDeny {
+        hook_specific_output: HookSpecificOutput {
+            hook_event_name: "PreToolUse",
+            permission_decision: "deny",
+            permission_decision_reason: reason,
+        },
+    };
+    if let Some(reason) = wiki_page_reason(raw, context.project_dir) {
+        return Some(deny(reason));
+    }
+    if thread.status.is_writer() {
+        return None;
+    }
     // Without a project dir the path can't be placed: the generic reason.
     let raw = if context.project_dir.is_some() {
         raw
@@ -91,11 +97,34 @@ pub fn build_write_guard_response(
     })
 }
 
+/// Why an agent may not write `raw_path` itself, when it is a wiki page
+/// (`<project>/.oxplow/wiki/…`): pages are written with the
+/// `knowledge.write_page` command — validated, linked and audited, the
+/// file following — whatever the thread (P5.C3). A person's hand edit
+/// still converges through the wiki watcher.
+pub fn wiki_page_reason(raw_path: Option<&str>, project_dir: Option<&Path>) -> Option<String> {
+    let (raw, project_dir) = (raw_path?, project_dir?);
+    let path = Path::new(raw);
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        project_dir.join(path)
+    };
+    is_inside(&abs, &project_dir.join(".oxplow").join("wiki")).then(|| {
+        format!(
+            "`{}` is a wiki page: write it with mcp__oxplow__run_command → \
+             `knowledge.write_page {{ slug, body, verified_refs, removed_refs }}` \
+             (it writes the file); `knowledge.delete_page {{ slug }}` deletes one.",
+            abs.display()
+        )
+    })
+}
+
 /// The write guard's reason, if `thread` may not write `raw_path` (absolute
 /// or project-relative; `None` when the call names no path). The core
 /// shared by the Claude hook response and [`crate::policy::decide_tool`].
-/// `None` for a writer thread, a `.oxplow/wiki/` path, or a path outside
-/// both the project and `.oxplow/`.
+/// `None` for a writer thread or a path outside both the project and
+/// `.oxplow/`.
 pub fn read_only_reason(
     thread: &Thread,
     raw_path: Option<&str>,
@@ -112,10 +141,9 @@ pub fn read_only_reason(
             project_dir.join(path)
         };
         let oxplow_dir = project_dir.join(".oxplow");
-        let notes_dir = oxplow_dir.join("wiki");
         let inside_project = is_inside(&abs, project_dir);
         let inside_oxplow = is_inside(&abs, &oxplow_dir);
-        if is_inside(&abs, &notes_dir) || (!inside_project && !inside_oxplow) {
+        if !inside_project && !inside_oxplow {
             return None;
         }
         return Some(format!(
@@ -252,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn write_to_notes_dir_allowed() {
+    fn a_wiki_page_is_written_by_command_whatever_the_thread() {
         let t = read_only_thread();
         let project = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(project.path().join(".oxplow/wiki")).unwrap();
@@ -267,7 +295,22 @@ mod tests {
                 tool_input: Some(&input),
             },
         );
-        assert!(result.is_none(), "notes dir should be allowed");
+        let reason = result
+            .expect("a wiki page write is refused")
+            .hook_specific_output
+            .permission_decision_reason;
+        assert!(reason.contains("knowledge.write_page"), "{reason}");
+        let mut writer = t.clone();
+        writer.status = ThreadStatus::Active;
+        assert!(build_write_guard_response(
+            Some(&writer),
+            "Write",
+            WriteGuardContext {
+                project_dir: Some(project.path()),
+                tool_input: Some(&input),
+            },
+        )
+        .is_some());
     }
 
     #[test]

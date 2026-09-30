@@ -115,9 +115,9 @@ The neutral RPCs are `read_at { streamId, path, revision }`, `files_at`
 and `diff { streamId, from, to }` (UI), and MCP `read_at`; they replaced
 `read_file`, `read_file_at_ref` and `diff_endpoints`. Change analysis
 and the duplicate scan read through `Trees`, so a closed effort's
-snapshot head is scanned too. (The wiki's `@<rev>` link syntax is still
-its own `WikiVersion`; it joins `Revision` when knowledge becomes a
-capability, P5.C3.)
+snapshot head is scanned too. (The wiki's old `@<rev>` link syntax went
+in P5.C3: a link names a file; its version is the edge's pin —
+[knowledge.md](./knowledge.md).)
 
 ## The stream's reads (P5.B4)
 

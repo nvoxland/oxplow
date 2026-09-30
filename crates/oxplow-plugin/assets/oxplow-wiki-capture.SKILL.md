@@ -1,6 +1,6 @@
 ---
 name: oxplow-wiki-capture
-description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on mcp__oxplow__list_wiki_pages, search_wiki_pages, search_wiki_page_bodies, list_backlinks, get_wiki_page_metadata, resync_wiki_page, record_wiki_page_update, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
+description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on mcp__oxplow__list_wiki_pages, search_wiki_pages, search_wiki_page_bodies, list_backlinks, get_wiki_page_metadata, knowledge.write_page, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
 ---
 
 # Wiki pages — exploratory capture
@@ -33,8 +33,8 @@ otherwise fire.
 
 ## On a read-only thread
 
-The write guard exempts `.oxplow/wiki/<slug>.md` — capture exactly
-the same way as on the writer thread. Don't punt the user's
+`knowledge.write_page` is open to every thread — capture exactly the
+same way as on the writer thread. Don't punt the user's
 exploration answer just because you can't edit code; the wiki is
 where exploration goes regardless of writer status.
 
@@ -81,7 +81,7 @@ Files referenced: [[src/foo.ts]], [[src/bar/baz.ts]]
   freshness is tracked per `page_ref` row in the DB (the pin is
   stamped at write time and preserved across saves that don't touch the
   ref), and `@disk`/`@HEAD`/`@<sha>` are stripped on parse. You manage
-  it explicitly via `record_wiki_page_update` (below).
+  it explicitly with `verified_refs` / `removed_refs` (below).
 - Backticks stay reserved for code-ish things (identifiers, types,
   shell commands, config keys). If it's a clickable path, wikilink it.
 
@@ -103,16 +103,24 @@ wired up by [[src/ui/index.tsx]]."
 
 ## Write mechanics
 
-1. Resolve the path: call `mcp__oxplow__get_wiki_page_metadata` (existing
-   note) or `mcp__oxplow__list_wiki_pages` and use the returned `path`.
-   For a brand-new slug, the path is
-   `<projectDir>/.oxplow/wiki/<slug>.md`.
-2. Use the **Write** tool to write/replace the file. (For appends to
-   an existing note, Read first, then Write the merged body.)
-3. Call `mcp__oxplow__record_wiki_page_update` (slug, `verified_refs`,
-   `removed_refs`) — see that tool's docs for the ref rules. Refs left
-   in place without re-checking go in NEITHER list, keeping their pin.
-4. When you close the surrounding task, declare the page in
+1. For an existing page, read it first (`get_wiki_page_metadata` gives
+   its `path`; Read the file) and merge your addition into its body.
+2. Write the whole page with `mcp__oxplow__run_command`:
+   `knowledge.write_page { slug, body, verified_refs, removed_refs }`
+   (`title` optionally sets the `# ` heading). That one run writes the
+   row, the links and `.oxplow/wiki/<slug>.md` — don't Write the file
+   yourself. Every `[[link]]` must resolve: a dangling one is refused
+   and named, so fix or drop it and run again.
+   - `verified_refs`: files you re-read against this body; their
+     freshness pins move to now. A file under a `[[dir:…]]` the page
+     cites counts (it gets a pin of its own).
+   - `removed_refs`: files you took out of the body.
+   - Refs left in place without re-checking go in NEITHER list, keeping
+     their pin.
+   `knowledge.link { page, target }` adds one link under the page's
+   Related heading; `knowledge.delete_page { slug }` deletes a page (the
+   person confirms).
+3. When you close the surrounding task, declare the page in
    `complete_task`'s `impacts`: `{ kind:"wiki", id:"<slug>",
    action:"created"|"updated" }` — this backlinks the task to the page.
 

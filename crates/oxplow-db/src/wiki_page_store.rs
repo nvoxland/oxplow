@@ -36,6 +36,84 @@ pub struct WikiPageSearchHit {
     pub updated_at: Timestamp,
 }
 
+/// Write `page`'s row and its FTS mirror; `body_hash` is the hash of the
+/// body it was derived from. The one writer of `wiki_page` — composes
+/// inside `knowledge.write_page`'s transaction and the watcher's.
+pub fn upsert_tx(
+    conn: &rusqlite::Connection,
+    page: &WikiPage,
+    body_hash: &str,
+) -> Result<(), DomainError> {
+    let json = |v: &Vec<String>| serde_json::to_string(v).unwrap_or_else(|_| "[]".to_string());
+    conn.execute(
+        "INSERT INTO wiki_page (
+            slug, title, body_path, body_excerpt, body_size_bytes,
+            file_refs_json, related_notes_json, dir_refs_json,
+            created_at, updated_at, body_hash
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(slug) DO UPDATE SET
+            title = excluded.title,
+            body_path = excluded.body_path,
+            body_excerpt = excluded.body_excerpt,
+            body_size_bytes = excluded.body_size_bytes,
+            file_refs_json = excluded.file_refs_json,
+            related_notes_json = excluded.related_notes_json,
+            dir_refs_json = excluded.dir_refs_json,
+            updated_at = excluded.updated_at,
+            body_hash = excluded.body_hash",
+        params![
+            page.slug,
+            page.title,
+            page.body_path,
+            page.body_excerpt,
+            page.body_size_bytes,
+            json(&page.file_refs),
+            json(&page.related_notes),
+            json(&page.dir_refs),
+            ts_to_string(page.created_at),
+            ts_to_string(page.updated_at),
+            body_hash,
+        ],
+    )
+    .map_err(crate::database::map_sql_err)?;
+    conn.execute(
+        "DELETE FROM wiki_page_fts WHERE slug = ?1",
+        params![page.slug],
+    )
+    .map_err(crate::database::map_sql_err)?;
+    conn.execute(
+        "INSERT INTO wiki_page_fts (slug, title, body_excerpt) VALUES (?1, ?2, ?3)",
+        params![page.slug, page.title, page.body_excerpt],
+    )
+    .map_err(crate::database::map_sql_err)?;
+    Ok(())
+}
+
+/// Delete `slug`'s row and FTS mirror; whether there was a row.
+pub fn delete_tx(conn: &rusqlite::Connection, slug: &str) -> Result<bool, DomainError> {
+    let rows = conn
+        .execute("DELETE FROM wiki_page WHERE slug = ?1", params![slug])
+        .map_err(crate::database::map_sql_err)?;
+    conn.execute("DELETE FROM wiki_page_fts WHERE slug = ?1", params![slug])
+        .map_err(crate::database::map_sql_err)?;
+    Ok(rows > 0)
+}
+
+/// `slug`'s row and the hash of the body it was written from, if any.
+pub fn get_tx(
+    conn: &rusqlite::Connection,
+    slug: &str,
+) -> Result<Option<(WikiPage, String)>, DomainError> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT * FROM wiki_page WHERE slug = ?1",
+        params![slug],
+        |r| Ok((row_to_note(r)?, r.get::<_, String>("body_hash")?)),
+    )
+    .optional()
+    .map_err(crate::database::map_sql_err)
+}
+
 #[derive(Clone)]
 pub struct SqliteWikiPageStore {
     db: Database,
@@ -101,69 +179,6 @@ impl SqliteWikiPageStore {
                     Some(r) => Ok(Some(r?)),
                     None => Ok(None),
                 }
-            })
-            .await
-    }
-
-    pub async fn upsert(&self, note: &WikiPage) -> Result<(), DomainError> {
-        let note = note.clone();
-        self.db
-            .call(move |conn| {
-                let file_refs_json =
-                    serde_json::to_string(&note.file_refs).unwrap_or_else(|_| "[]".to_string());
-                let related_notes_json =
-                    serde_json::to_string(&note.related_notes).unwrap_or_else(|_| "[]".to_string());
-                let dir_refs_json =
-                    serde_json::to_string(&note.dir_refs).unwrap_or_else(|_| "[]".to_string());
-                conn.execute(
-                    "INSERT INTO wiki_page (
-                        slug, title, body_path, body_excerpt, body_size_bytes,
-                        file_refs_json, related_notes_json, dir_refs_json,
-                        created_at, updated_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                     ON CONFLICT(slug) DO UPDATE SET
-                        title = excluded.title,
-                        body_path = excluded.body_path,
-                        body_excerpt = excluded.body_excerpt,
-                        body_size_bytes = excluded.body_size_bytes,
-                        file_refs_json = excluded.file_refs_json,
-                        related_notes_json = excluded.related_notes_json,
-                        dir_refs_json = excluded.dir_refs_json,
-                        updated_at = excluded.updated_at",
-                    params![
-                        note.slug,
-                        note.title,
-                        note.body_path,
-                        note.body_excerpt,
-                        note.body_size_bytes,
-                        file_refs_json,
-                        related_notes_json,
-                        dir_refs_json,
-                        ts_to_string(note.created_at),
-                        ts_to_string(note.updated_at),
-                    ],
-                )?;
-                // FTS5 mirror.
-                conn.execute(
-                    "DELETE FROM wiki_page_fts WHERE slug = ?1",
-                    params![note.slug],
-                )?;
-                conn.execute(
-                    "INSERT INTO wiki_page_fts (slug, title, body_excerpt) VALUES (?1, ?2, ?3)",
-                    params![note.slug, note.title, note.body_excerpt],
-                )?;
-                Ok(())
-            })
-            .await
-    }
-
-    pub async fn delete(&self, slug: &str) -> Result<(), DomainError> {
-        let slug = slug.to_string();
-        self.db
-            .call(move |conn| {
-                conn.execute("DELETE FROM wiki_page WHERE slug = ?1", params![slug])?;
-                conn.execute("DELETE FROM wiki_page_fts WHERE slug = ?1", params![slug])?;
-                Ok(())
             })
             .await
     }
@@ -234,8 +249,6 @@ impl SqliteWikiPageStore {
 pub trait WikiPageStore: Send + Sync {
     async fn list(&self) -> Result<Vec<WikiPage>, DomainError>;
     async fn get(&self, slug: &str) -> Result<Option<WikiPage>, DomainError>;
-    async fn upsert(&self, note: &WikiPage) -> Result<(), DomainError>;
-    async fn delete(&self, slug: &str) -> Result<(), DomainError>;
     async fn search_bodies(
         &self,
         query: &str,
@@ -252,12 +265,6 @@ impl WikiPageStore for SqliteWikiPageStore {
     async fn get(&self, slug: &str) -> Result<Option<WikiPage>, DomainError> {
         SqliteWikiPageStore::get(self, slug).await
     }
-    async fn upsert(&self, note: &WikiPage) -> Result<(), DomainError> {
-        SqliteWikiPageStore::upsert(self, note).await
-    }
-    async fn delete(&self, slug: &str) -> Result<(), DomainError> {
-        SqliteWikiPageStore::delete(self, slug).await
-    }
     async fn search_bodies(
         &self,
         query: &str,
@@ -273,6 +280,19 @@ impl WikiPageStore for SqliteWikiPageStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    trait Upsert {
+        async fn upsert(&self, page: &WikiPage) -> Result<(), DomainError>;
+    }
+
+    impl Upsert for SqliteWikiPageStore {
+        async fn upsert(&self, page: &WikiPage) -> Result<(), DomainError> {
+            let page = page.clone();
+            self.db
+                .transaction(move |tx| upsert_tx(tx, &page, ""))
+                .await
+        }
+    }
 
     fn now() -> Timestamp {
         Timestamp::from_unix_ms(1_700_000_000_000)
@@ -332,7 +352,7 @@ mod tests {
     async fn delete_clears_fts_too() {
         let store = SqliteWikiPageStore::new(Database::in_memory());
         store.upsert(&note("a", "x", "find me")).await.unwrap();
-        store.delete("a").await.unwrap();
+        store.db.transaction(|tx| delete_tx(tx, "a")).await.unwrap();
         assert!(store.search_bodies("me", 10).await.unwrap().is_empty());
     }
 }

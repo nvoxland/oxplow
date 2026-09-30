@@ -9,12 +9,14 @@
 //!
 //! Classification (recognized-or-not) lives in
 //! [`oxplow_domain::refs::classify_wikilinks`]; this module adds only the
-//! IO-backed existence probes, reusing the same store/git/fs surfaces as
-//! [`crate::ref_resolver`].
+//! existence probes — the database, the project's files and the VCS's
+//! revision graph — synchronously, so `knowledge.write_page` refuses a
+//! dangling link inside its transaction.
 
 use serde::{Deserialize, Serialize};
 
 use oxplow_domain::refs::{classify_wikilinks, Reference};
+use oxplow_domain::vcs::RevisionGraph;
 
 use crate::Services;
 
@@ -28,10 +30,21 @@ pub struct LinkWarning {
     pub reason: String,
 }
 
+/// What a link check looks things up in: the database, the project's
+/// files and its revision graph. `this_page` is the wiki page being
+/// written, which may link to itself before its row exists.
+pub struct LinkWorld<'a> {
+    pub conn: &'a rusqlite::Connection,
+    pub project_dir: &'a std::path::Path,
+    pub graph: &'a dyn RevisionGraph,
+    pub this_page: Option<&'a str>,
+}
+
 /// Check every `[[…]]` wikilink in `body`, returning one [`LinkWarning`]
 /// per invalid link (empty when every link is valid). Links inside code
 /// spans / fenced blocks are ignored (they're illustrative, not refs).
-pub async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {
+/// Synchronous, so a command validates inside its transaction.
+pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
     let mut out = Vec::new();
     for link in classify_wikilinks(body) {
         match &link.reference {
@@ -45,7 +58,7 @@ pub async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {
                 ),
             }),
             Some(reference) => {
-                if let Some(reason) = missing_reason(services, reference).await {
+                if let Some(reason) = missing_reason(world, reference) {
                     out.push(LinkWarning {
                         target: link.raw.clone(),
                         reason,
@@ -57,53 +70,66 @@ pub async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {
     out
 }
 
+/// [`check_links_in`] over the app's services, for the tools that report
+/// warnings rather than refuse (task and note bodies).
+pub async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {
+    let project_dir = services.layout.project_dir.clone();
+    let graph = services.vcs.revision_graph(&project_dir);
+    let body = body.to_string();
+    services
+        .db
+        .read(move |conn| {
+            Ok(check_links_in(
+                &LinkWorld {
+                    conn,
+                    project_dir: &project_dir,
+                    graph: &*graph,
+                    this_page: None,
+                },
+                &body,
+            ))
+        })
+        .await
+        .unwrap_or_default()
+}
+
+fn exists(conn: &rusqlite::Connection, sql: &str, param: &dyn rusqlite::ToSql) -> bool {
+    conn.query_row(sql, [param], |_| Ok(()))
+        .map(|()| true)
+        .unwrap_or(false)
+}
+
 /// `Some(reason)` when a recognized reference's object doesn't exist,
-/// `None` when it resolves. Mirrors the per-kind lookups in
-/// [`crate::ref_resolver`].
-async fn missing_reason(services: &Services, reference: &Reference) -> Option<String> {
+/// `None` when it resolves.
+fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String> {
     match reference {
-        Reference::Task(id) => {
-            use oxplow_domain::stores::TaskStore as _;
-            let tid = oxplow_domain::TaskId::new(*id);
-            let exists = matches!(services.task_store.get(tid).await, Ok(Some(_)));
-            (!exists).then(|| format!("task tsk{id} does not exist"))
-        }
-        Reference::Wiki(slug) => {
-            let exists = matches!(services.wiki_page_store.get(slug).await, Ok(Some(_)));
-            (!exists).then(|| format!("wiki page `{slug}` does not exist"))
-        }
-        Reference::Commit(sha) => {
-            let exists = services
-                .vcs
-                .resolve(services.worktrees.project_dir(), sha)
-                .await
-                .is_ok();
-            (!exists).then(|| format!("commit `{sha}` was not found"))
-        }
-        Reference::File(detail) => {
-            let path = services.layout.project_dir.join(&detail.path);
-            let exists = tokio::task::spawn_blocking(move || path.is_file())
-                .await
-                .unwrap_or(false);
-            (!exists).then(|| format!("file `{}` does not exist", detail.path))
-        }
-        Reference::Dir(dir) => {
-            let path = services.layout.project_dir.join(dir);
-            let exists = tokio::task::spawn_blocking(move || path.is_dir())
-                .await
-                .unwrap_or(false);
-            (!exists).then(|| format!("directory `{dir}` does not exist"))
-        }
-        Reference::Finding(id) => {
-            let Ok(fid) = id.parse::<i64>() else {
-                return Some(format!("finding `{id}` is not a valid finding id"));
-            };
-            let exists = matches!(
-                services.code_quality_store.get_finding(fid).await,
-                Ok(Some(_))
-            );
-            (!exists).then(|| format!("finding `{id}` does not exist"))
-        }
+        Reference::Task(id) => (!exists(
+            world.conn,
+            "SELECT 1 FROM task WHERE id = ?1 AND deleted_at IS NULL",
+            id,
+        ))
+        .then(|| format!("task tsk{id} does not exist")),
+        Reference::Wiki(slug) => (world.this_page != Some(slug.as_str())
+            && !exists(world.conn, "SELECT 1 FROM wiki_page WHERE slug = ?1", slug))
+        .then(|| format!("wiki page `{slug}` does not exist")),
+        Reference::Commit(sha) => world
+            .graph
+            .resolve(sha)
+            .is_none()
+            .then(|| format!("commit `{sha}` was not found")),
+        Reference::File(detail) => (!world.project_dir.join(&detail.path).is_file())
+            .then(|| format!("file `{}` does not exist", detail.path)),
+        Reference::Dir(dir) => (!world.project_dir.join(dir).is_dir())
+            .then(|| format!("directory `{dir}` does not exist")),
+        Reference::Finding(id) => match id.parse::<i64>() {
+            Err(_) => Some(format!("finding `{id}` is not a valid finding id")),
+            Ok(fid) => (!exists(
+                world.conn,
+                "SELECT 1 FROM code_quality_finding WHERE id = ?1",
+                &fid,
+            ))
+            .then(|| format!("finding `{id}` does not exist")),
+        },
     }
 }
 

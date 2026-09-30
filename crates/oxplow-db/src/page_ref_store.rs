@@ -147,105 +147,7 @@ impl SqlitePageRefStore {
         self.db
             .call_mut(move |conn| {
                 let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
-                // Read existing PKs + version data for this source. The
-                // unique key for an edge within a source is
-                // (target_kind, target_id, ref_type).
-                type Key = (String, String, String);
-                type Existing = std::collections::HashMap<Key, (Option<i64>, Option<String>, bool)>;
-                let existing: Existing = {
-                    let mut stmt = tx
-                        .prepare(
-                            "SELECT target_kind, target_id, ref_type,
-                                local_snapshot_id, closest_git_version,
-                                git_version_exact
-                         FROM page_ref
-                         WHERE source_kind = ?1 AND source_id = ?2",
-                        )
-                        .map_err(crate::database::map_sql_err)?;
-                    let rows = stmt
-                        .query_map(params![&source_kind, &source_id], |r| {
-                            let kind: String = r.get(0)?;
-                            let id: String = r.get(1)?;
-                            let rt: String = r.get(2)?;
-                            let local: Option<i64> = r.get(3)?;
-                            let git: Option<String> = r.get(4)?;
-                            let exact: i64 = r.get(5)?;
-                            Ok(((kind, id, rt), (local, git, exact != 0)))
-                        })
-                        .map_err(crate::database::map_sql_err)?;
-                    let mut map = std::collections::HashMap::new();
-                    for row in rows {
-                        let (k, v) = row.map_err(crate::database::map_sql_err)?;
-                        map.insert(k, v);
-                    }
-                    map
-                };
-                // Build the new key set for the post-merge delete step.
-                let mut new_keys: std::collections::HashSet<Key> = std::collections::HashSet::new();
-                for edge in &edges {
-                    if edge.source_kind != source_kind || edge.source_id != source_id {
-                        continue;
-                    }
-                    new_keys.insert((
-                        edge.target_kind.clone(),
-                        edge.target_id.clone(),
-                        edge.ref_type.clone(),
-                    ));
-                }
-                // Upsert each new edge. Match on PK; if existing,
-                // preserve version data; otherwise stamp with the
-                // caller-supplied version.
-                for edge in edges {
-                    if edge.source_kind != source_kind || edge.source_id != source_id {
-                        continue;
-                    }
-                    let key = (
-                        edge.target_kind.clone(),
-                        edge.target_id.clone(),
-                        edge.ref_type.clone(),
-                    );
-                    let (local, git, exact) = match existing.get(&key) {
-                        Some(prev) => prev.clone(),
-                        None => (
-                            edge.local_snapshot_id,
-                            edge.closest_git_version.clone(),
-                            edge.git_version_exact,
-                        ),
-                    };
-                    tx.execute(
-                        "INSERT OR REPLACE INTO page_ref
-                       (source_kind, source_id, target_kind, target_id, ref_type,
-                        source_extra, local_snapshot_id, closest_git_version,
-                        git_version_exact)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                        params![
-                            edge.source_kind,
-                            edge.source_id,
-                            edge.target_kind,
-                            edge.target_id,
-                            edge.ref_type,
-                            edge.source_extra,
-                            local,
-                            git,
-                            if exact { 1 } else { 0 },
-                        ],
-                    )
-                    .map_err(crate::database::map_sql_err)?;
-                }
-                // Delete edges that existed but aren't in the new set.
-                for key in existing.keys() {
-                    if new_keys.contains(key) {
-                        continue;
-                    }
-                    tx.execute(
-                        "DELETE FROM page_ref
-                     WHERE source_kind = ?1 AND source_id = ?2
-                       AND target_kind = ?3 AND target_id = ?4
-                       AND ref_type = ?5",
-                        params![&source_kind, &source_id, &key.0, &key.1, &key.2],
-                    )
-                    .map_err(crate::database::map_sql_err)?;
-                }
+                merge_source_tx(&tx, &source_kind, &source_id, edges)?;
                 tx.commit().map_err(crate::database::map_sql_err)
             })
             .await
@@ -261,27 +163,7 @@ impl SqlitePageRefStore {
     /// path stays under a cited directory ref.
     pub async fn upsert_edge(&self, edge: PageRefEdge) -> Result<(), DomainError> {
         self.db
-            .call(move |conn| {
-                conn.execute(
-                    "INSERT OR REPLACE INTO page_ref
-                       (source_kind, source_id, target_kind, target_id, ref_type,
-                        source_extra, local_snapshot_id, closest_git_version,
-                        git_version_exact)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                    params![
-                        edge.source_kind,
-                        edge.source_id,
-                        edge.target_kind,
-                        edge.target_id,
-                        edge.ref_type,
-                        edge.source_extra,
-                        edge.local_snapshot_id,
-                        edge.closest_git_version,
-                        if edge.git_version_exact { 1 } else { 0 },
-                    ],
-                )?;
-                Ok(())
-            })
+            .transaction(move |tx| upsert_edge_tx(tx, &edge))
             .await
     }
 
@@ -360,57 +242,6 @@ impl SqlitePageRefStore {
                     Ok((slug, path))
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-
-    /// Re-stamp the version data on a single edge to the supplied
-    /// snapshot pin. Used by the "Mark verified" UI affordances and
-    /// by the wiki-update MCP call's `verified_refs` reconciliation.
-    /// No-op if the matching row doesn't exist.
-    // Each argument is doing distinct semantic work — the PK is 5
-    // strings and the version pin is 3 fields. Bundling them into
-    // a struct would just push the destructuring to every caller
-    // without buying clarity.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn restamp_edge_version(
-        &self,
-        source_kind: &str,
-        source_id: &str,
-        target_kind: &str,
-        target_id: &str,
-        ref_type: &str,
-        local_snapshot_id: i64,
-        closest_git_version: Option<String>,
-        git_version_exact: bool,
-    ) -> Result<(), DomainError> {
-        let source_kind = source_kind.to_string();
-        let source_id = source_id.to_string();
-        let target_kind = target_kind.to_string();
-        let target_id = target_id.to_string();
-        let ref_type = ref_type.to_string();
-        self.db
-            .call(move |conn| {
-                conn.execute(
-                    "UPDATE page_ref
-                        SET local_snapshot_id = ?6,
-                            closest_git_version = ?7,
-                            git_version_exact = ?8
-                      WHERE source_kind = ?1 AND source_id = ?2
-                        AND target_kind = ?3 AND target_id = ?4
-                        AND ref_type = ?5",
-                    params![
-                        source_kind,
-                        source_id,
-                        target_kind,
-                        target_id,
-                        ref_type,
-                        local_snapshot_id,
-                        closest_git_version,
-                        if git_version_exact { 1 } else { 0 },
-                    ],
-                )?;
-                Ok(())
             })
             .await
     }
@@ -570,6 +401,142 @@ impl PageRefStore for SqlitePageRefStore {
     ) -> Result<Vec<PageRefEdge>, DomainError> {
         SqlitePageRefStore::list_outbound(self, source_kind, source_id, limit).await
     }
+}
+
+/// Sync core of [`SqlitePageRefStore::merge_source`] (its semantics):
+/// edges already stored keep their version pins, new ones take theirs,
+/// and stored edges not in `edges` go.
+pub fn merge_source_tx(
+    conn: &rusqlite::Connection,
+    source_kind: &str,
+    source_id: &str,
+    edges: Vec<PageRefEdge>,
+) -> Result<(), DomainError> {
+    // Read existing PKs + version data for this source. The
+    // unique key for an edge within a source is
+    // (target_kind, target_id, ref_type).
+    type Key = (String, String, String);
+    type Existing = std::collections::HashMap<Key, (Option<i64>, Option<String>, bool)>;
+    let existing: Existing = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT target_kind, target_id, ref_type,
+                    local_snapshot_id, closest_git_version,
+                    git_version_exact
+             FROM page_ref
+             WHERE source_kind = ?1 AND source_id = ?2",
+            )
+            .map_err(crate::database::map_sql_err)?;
+        let rows = stmt
+            .query_map(params![&source_kind, &source_id], |r| {
+                let kind: String = r.get(0)?;
+                let id: String = r.get(1)?;
+                let rt: String = r.get(2)?;
+                let local: Option<i64> = r.get(3)?;
+                let git: Option<String> = r.get(4)?;
+                let exact: i64 = r.get(5)?;
+                Ok(((kind, id, rt), (local, git, exact != 0)))
+            })
+            .map_err(crate::database::map_sql_err)?;
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            let (k, v) = row.map_err(crate::database::map_sql_err)?;
+            map.insert(k, v);
+        }
+        map
+    };
+    // Build the new key set for the post-merge delete step.
+    let mut new_keys: std::collections::HashSet<Key> = std::collections::HashSet::new();
+    for edge in &edges {
+        if edge.source_kind != source_kind || edge.source_id != source_id {
+            continue;
+        }
+        new_keys.insert((
+            edge.target_kind.clone(),
+            edge.target_id.clone(),
+            edge.ref_type.clone(),
+        ));
+    }
+    // Upsert each new edge. Match on PK; if existing,
+    // preserve version data; otherwise stamp with the
+    // caller-supplied version.
+    for edge in edges {
+        if edge.source_kind != source_kind || edge.source_id != source_id {
+            continue;
+        }
+        let key = (
+            edge.target_kind.clone(),
+            edge.target_id.clone(),
+            edge.ref_type.clone(),
+        );
+        let (local, git, exact) = match existing.get(&key) {
+            Some(prev) => prev.clone(),
+            None => (
+                edge.local_snapshot_id,
+                edge.closest_git_version.clone(),
+                edge.git_version_exact,
+            ),
+        };
+        conn.execute(
+            "INSERT OR REPLACE INTO page_ref
+           (source_kind, source_id, target_kind, target_id, ref_type,
+            source_extra, local_snapshot_id, closest_git_version,
+            git_version_exact)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                edge.source_kind,
+                edge.source_id,
+                edge.target_kind,
+                edge.target_id,
+                edge.ref_type,
+                edge.source_extra,
+                local,
+                git,
+                if exact { 1 } else { 0 },
+            ],
+        )
+        .map_err(crate::database::map_sql_err)?;
+    }
+    // Delete edges that existed but aren't in the new set.
+    for key in existing.keys() {
+        if new_keys.contains(key) {
+            continue;
+        }
+        conn.execute(
+            "DELETE FROM page_ref
+         WHERE source_kind = ?1 AND source_id = ?2
+           AND target_kind = ?3 AND target_id = ?4
+           AND ref_type = ?5",
+            params![&source_kind, &source_id, &key.0, &key.1, &key.2],
+        )
+        .map_err(crate::database::map_sql_err)?;
+    }
+    Ok(())
+}
+
+/// Insert or replace one edge with its own version pin — the sync core
+/// of [`SqlitePageRefStore::upsert_edge`].
+pub fn upsert_edge_tx(conn: &rusqlite::Connection, edge: &PageRefEdge) -> Result<(), DomainError> {
+    conn.execute(
+        "INSERT OR REPLACE INTO page_ref
+           (source_kind, source_id, target_kind, target_id, ref_type,
+            source_extra, local_snapshot_id, closest_git_version,
+            git_version_exact)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            edge.source_kind,
+            edge.source_id,
+            edge.target_kind,
+            edge.target_id,
+            edge.ref_type,
+            edge.source_extra,
+            edge.local_snapshot_id,
+            edge.closest_git_version,
+            if edge.git_version_exact { 1 } else { 0 },
+        ],
+    )
+    .map_err(crate::database::map_sql_err)?;
+    Ok(())
 }
 
 /// Sync core of [`SqlitePageRefStore::replace_source`]: every edge owned
@@ -854,51 +821,6 @@ mod tests {
         assert_eq!(by_target.get("a.rs"), Some(&Some(100)));
         assert_eq!(by_target.get("c.rs"), Some(&Some(200)));
         assert!(!by_target.contains_key("b.rs"));
-    }
-
-    #[tokio::test]
-    async fn restamp_edge_version_updates_one_row() {
-        let store = SqlitePageRefStore::new(Database::in_memory());
-        let a =
-            edge("wiki", "intro", "file", "a.rs", "wiki_file_ref").with_version(100, None, false);
-        let b =
-            edge("wiki", "intro", "file", "b.rs", "wiki_file_ref").with_version(100, None, false);
-        store
-            .merge_source("wiki", "intro", vec![a, b])
-            .await
-            .unwrap();
-        store
-            .restamp_edge_version(
-                "wiki",
-                "intro",
-                "file",
-                "a.rs",
-                "wiki_file_ref",
-                500,
-                Some("eeee".into()),
-                true,
-            )
-            .await
-            .unwrap();
-        let out = store.list_outbound("wiki", "intro", None).await.unwrap();
-        let by_target: std::collections::HashMap<_, _> = out
-            .iter()
-            .map(|e| {
-                (
-                    e.target_id.clone(),
-                    (
-                        e.local_snapshot_id,
-                        e.closest_git_version.clone(),
-                        e.git_version_exact,
-                    ),
-                )
-            })
-            .collect();
-        assert_eq!(
-            by_target.get("a.rs"),
-            Some(&(Some(500), Some("eeee".into()), true))
-        );
-        assert_eq!(by_target.get("b.rs"), Some(&(Some(100), None, false)));
     }
 
     #[tokio::test]

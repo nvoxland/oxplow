@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Page } from "../tabs/Page.js";
+import { writeWikiPage } from "../api.js";
 import { commands } from "../tauri-bridge/index.js";
 import type { WikiRefFreshness } from "../tauri-bridge/generated/bindings.js";
 import { fileRef, wikiPageRef } from "../tabs/pageRefs.js";
@@ -15,8 +16,9 @@ export interface WikiFreshnessPageProps {
  * Per-wiki Freshness view. Lists every file ref the page carries with
  * the snapshot it was captured against, the latest snapshot of the
  * target file, and a "stale" flag. Two affordances: per-ref "Mark
- * verified" re-stamps one edge to the current snapshot; the page-
- * level "Mark all verified" re-stamps every edge on this wiki page.
+ * verified" and page-level "Mark all verified" re-write the page with
+ * those refs in `verified_refs` (knowledge.write_page), moving their
+ * pins to the current snapshot.
  *
  * The wiki sync preserves unchanged ref pins on save, so this list
  * accurately reflects "the source files this page relies on have
@@ -44,21 +46,23 @@ export function WikiFreshnessPage({ slug, onOpenPage }: WikiFreshnessPageProps) 
     void refresh();
   }, [refresh]);
 
-  async function markOne(path: string) {
+  // Marking refs verified is re-writing the page with them in
+  // `verified_refs` (knowledge.write_page moves their pins to now).
+  async function markVerified(paths: string[]) {
     setBusy(true);
-    const r = await commands.markWikiRefVerified(slug, path);
-    if (r.status !== "ok") setError(r.error?.message ?? "failed to mark verified");
+    try {
+      const body = await commands.readWikiPageBody(slug);
+      if (body.status !== "ok") throw new Error(body.error.message);
+      await writeWikiPage(slug, body.data, { verifiedRefs: paths });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
     await refresh();
     setBusy(false);
   }
 
-  async function markAll() {
-    setBusy(true);
-    const r = await commands.markAllWikiRefsVerified(slug);
-    if (r.status !== "ok") setError(r.error?.message ?? "failed to mark all verified");
-    await refresh();
-    setBusy(false);
-  }
+  const markOne = (path: string) => markVerified([path]);
+  const markAll = () => markVerified((rows ?? []).map((r) => r.path));
 
   const staleCount = rows?.filter((r) => r.stale).length ?? 0;
 

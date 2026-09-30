@@ -56,6 +56,7 @@ pub mod followup;
 pub mod hook_ingest;
 pub mod indexer;
 pub mod inferred_decisions;
+pub mod knowledge;
 pub mod lens_actions;
 pub mod link_check;
 pub mod lsp_diagnostics;
@@ -664,9 +665,7 @@ impl Services {
                 Arc::new(page_ref_consumers::PageRefWorkItemConsumer),
                 Arc::new(work_items::WorkItemsProjection),
                 Arc::new(tool_call_reactors::ToolCallProjection),
-                Arc::new(tool_call_reactors::WikiAttribution {
-                    project_dir: layout.project_dir.clone(),
-                }),
+                Arc::new(knowledge::WikiAttribution),
             ],
         ));
         let wiki_page_store = Arc::new(SqliteWikiPageStore::new(db.clone()));
@@ -983,6 +982,15 @@ impl Services {
             commands::effort::close_command(work_items.clone()),
         ] {
             commands.register(command).expect("core commands register");
+        }
+        for command in knowledge::commands(knowledge::KnowledgeTarget {
+            project_dir: layout.project_dir.clone(),
+            vcs: vcs.clone(),
+            events: event_bus.clone(),
+        }) {
+            commands
+                .register(command)
+                .expect("knowledge commands register");
         }
         let config_target = commands::config_commands::ConfigTarget {
             config: config_arc.clone(),

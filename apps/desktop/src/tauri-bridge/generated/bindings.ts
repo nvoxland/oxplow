@@ -492,27 +492,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	upsertWikiPage: (note: WikiPage) => typedError<null, IpcError>(__TAURI_INVOKE("upsert_wiki_page", { note })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	deleteWikiPage: (slug: string) => typedError<null, IpcError>(__TAURI_INVOKE("delete_wiki_page", { slug })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	searchWikiTitles: (query: string, limit: number) => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("search_wiki_titles", { query, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
 	readWikiPageBody: (slug: string) => typedError<string, IpcError>(__TAURI_INVOKE("read_wiki_page_body", { slug })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	writeWikiPageBody: (slug: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_wiki_page_body", { slug, body })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -543,16 +528,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	listWikiFreshness: (slug: string) => typedError<WikiRefFreshness[], IpcError>(__TAURI_INVOKE("list_wiki_freshness", { slug })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	markWikiRefVerified: (slug: string, path: string) => typedError<null, IpcError>(__TAURI_INVOKE("mark_wiki_ref_verified", { slug, path })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	markAllWikiRefsVerified: (slug: string) => typedError<number, IpcError>(__TAURI_INVOKE("mark_all_wiki_refs_verified", { slug })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.

@@ -21,48 +21,26 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use oxplow_db::page_ref_projections::{stamp_file_versions, wiki_edges, KIND_FILE, KIND_WIKI};
-use oxplow_db::{SqlitePageRefStore, SqliteWikiPageStore, WikiPage};
-use oxplow_domain::{DomainError, Timestamp};
+use oxplow_db::{Database, SqliteWikiPageStore, WikiPage};
+use oxplow_domain::{DomainError, EventSchemaRegistry, Timestamp};
 
-/// Tree version a wikilink references, in the wiki's authoring syntax.
-/// (Joins `oxplow_domain::vcs::Revision` when knowledge becomes a
-/// capability, P5.C3.)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WikiVersion {
-    /// Working-tree version. The "local" version in user terms — the
-    /// file as it sits on disk right now, possibly with uncommitted
-    /// edits. Authored as `@disk` in the wikilink.
-    Disk,
-    /// A git ref: sha, branch, tag, or `HEAD`. Authored as
-    /// `@<spec>` in the wikilink.
-    Ref(String),
-}
-
-/// One file reference parsed out of a wikilink. The version captures
-/// the author's intent at write time: `@disk` says "the working tree
-/// when this note was written," `@<sha>` pins a specific committed
-/// version. A bare `[[path]]` is treated as `Disk` for back-compat
-/// with notes written before the syntax existed.
+/// One file reference parsed out of a wikilink: the path and an optional
+/// line anchor. A version (`[[path@sha]]`) is not the page's to say —
+/// freshness is the pin on the `page_ref` edge (`.context/knowledge.md`) —
+/// so an `@…` segment is dropped (and stripped from bodies on write).
 #[derive(Debug, Clone, PartialEq)]
 pub struct WikiFileRef {
     pub path: String,
-    pub version: WikiVersion,
     pub line: Option<u32>,
 }
 
 /// Refs extracted from a note body.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ParsedRefs {
-    /// Workspace-relative file paths (`src/foo.ts`), version-stripped
-    /// for backlinks lookup. The DB stores this list — backlinks
-    /// match by path regardless of which version a note pinned.
+    /// Workspace-relative file paths (`src/foo.ts`).
     pub file_refs: Vec<String>,
-    /// Rich form for renderers and version-aware consumers. Each
-    /// entry carries the path + intended version + optional line
-    /// anchor, exactly as written in the markdown body.
-    pub file_refs_detail: Vec<WikiFileRef>,
     /// Workspace-relative directory paths (`src/components`). Source
     /// form in markdown is `[[dir:src/components]]` — the `dir:`
     /// prefix is the explicit directory marker (mirrors `git:` for
@@ -73,47 +51,23 @@ pub struct ParsedRefs {
     pub related_notes: Vec<String>,
 }
 
-/// Parse a wikilink interior of the form `path[@version][:line]` into
-/// a structured `WikiFileRef`, or `None` if the interior doesn't look
-/// like a file path. The version slot is `@disk` (working tree) or
-/// `@<git-ref>` (sha / branch / tag / `HEAD`); a bare interior with
-/// no `@` defaults to `Disk` so legacy notes don't break.
+/// Parse a wikilink interior of the form `path[@version][:line]` into a
+/// [`WikiFileRef`], or `None` if it doesn't look like a file path. The
+/// `@version` segment is dropped (see [`WikiFileRef`]).
 pub fn parse_wiki_file_ref(interior: &str) -> Option<WikiFileRef> {
     let trimmed = interior.trim();
     if trimmed.is_empty() {
         return None;
     }
-    // Split off the `@<version>` segment first; the version may
-    // contain `:` (e.g. submodule sha), so we can't naively split on
-    // `:` for the line anchor without doing version first.
-    let (path_and_line, version) = match trimmed.split_once('@') {
-        Some((path_part, version_part)) => {
-            // The line anchor lives on the version side: `path@<v>:42`.
-            let (v, line_part) = match version_part.split_once(':') {
-                Some((v, l)) => (v, Some(l)),
-                None => (version_part, None),
-            };
-            let v = v.trim();
-            let parsed_version =
-                if v.eq_ignore_ascii_case("disk") || v.eq_ignore_ascii_case("local") {
-                    WikiVersion::Disk
-                } else if !v.is_empty() {
-                    WikiVersion::Ref(v.to_string())
-                } else {
-                    WikiVersion::Disk
-                };
-            // Reattach the line anchor (if any) to the path so the
-            // existing line-stripping path below still applies.
-            let pl = match line_part {
-                Some(l) => format!("{path_part}:{l}"),
-                None => path_part.to_string(),
-            };
-            (pl, parsed_version)
-        }
-        None => (trimmed.to_string(), WikiVersion::Disk),
+    // The line anchor sits after the version: `path@<v>:42`. The version
+    // may contain `:`, so split it off first.
+    let path_and_line = match trimmed.split_once('@') {
+        Some((path_part, version_part)) => match version_part.split_once(':') {
+            Some((_, line)) => format!("{path_part}:{line}"),
+            None => path_part.to_string(),
+        },
+        None => trimmed.to_string(),
     };
-
-    // Strip the `:line` anchor.
     let (bare, line) = match path_and_line.rsplit_once(':') {
         Some((p, l)) if l.chars().all(|c| c.is_ascii_digit()) && !l.is_empty() => {
             (p.to_string(), l.parse::<u32>().ok())
@@ -123,11 +77,7 @@ pub fn parse_wiki_file_ref(interior: &str) -> Option<WikiFileRef> {
     if bare.is_empty() || !looks_like_file(&bare) {
         return None;
     }
-    Some(WikiFileRef {
-        path: bare,
-        version,
-        line,
-    })
+    Some(WikiFileRef { path: bare, line })
 }
 
 /// Parse `[[…]]` wikilinks + inline file paths out of `body`.
@@ -145,8 +95,6 @@ pub fn parse_refs(body: &str) -> ParsedRefs {
     let mut notes = BTreeSet::new();
     // Detail entries preserve insertion order (first-seen wins on
     // duplicates) so the renderer can show them in author order.
-    let mut details: Vec<WikiFileRef> = Vec::new();
-    let mut details_seen: BTreeSet<(String, String, Option<u32>)> = BTreeSet::new();
 
     // 1. [[wikilinks]] first — they take priority, and we want to
     //    avoid double-counting an inline path that's also wrapped.
@@ -164,19 +112,8 @@ pub fn parse_refs(body: &str) -> ParsedRefs {
         // Try the rich file form first. `parse_wiki_file_ref` handles
         // `path@<version>[:line]` and bare `path[:line]`, returning
         // None if the interior doesn't shape like a file.
-        if let Some(rich) = parse_wiki_file_ref(interior) {
-            files.insert(rich.path.clone());
-            let key = (
-                rich.path.clone(),
-                match &rich.version {
-                    WikiVersion::Disk => "disk".to_string(),
-                    WikiVersion::Ref(r) => format!("ref:{r}"),
-                },
-                rich.line,
-            );
-            if details_seen.insert(key) {
-                details.push(rich);
-            }
+        if let Some(file) = parse_wiki_file_ref(interior) {
+            files.insert(file.path);
             continue;
         }
         // Not a file — try slug form (`bare-slug`). Strip the line
@@ -189,25 +126,14 @@ pub fn parse_refs(body: &str) -> ParsedRefs {
         // they're for the renderer, not wiki indexing.
     }
 
-    // 2. Inline file paths. These don't carry a version; they're
-    //    legacy free-text mentions, treat as Disk.
+    // 2. Inline file paths (legacy free-text mentions).
     let stripped = strip_urls(body);
     for path in find_inline_paths(&stripped) {
-        if files.insert(path.clone()) {
-            let key = (path.clone(), "disk".into(), None);
-            if details_seen.insert(key) {
-                details.push(WikiFileRef {
-                    path,
-                    version: WikiVersion::Disk,
-                    line: None,
-                });
-            }
-        }
+        files.insert(path);
     }
 
     ParsedRefs {
         file_refs: files.into_iter().collect(),
-        file_refs_detail: details,
         dir_refs: dirs.into_iter().collect(),
         related_notes: notes.into_iter().collect(),
     }
@@ -223,60 +149,37 @@ fn file_mtime(path: &Path) -> Option<Timestamp> {
     Some(Timestamp::from_unix_ms(i64::try_from(ms).ok()?))
 }
 
-/// Read `<projectDir>/.oxplow/wiki/<slug>.md` and upsert the
-/// `wiki_page` row. Deletes the row if the file is gone. Idempotent.
-pub async fn sync_from_disk(
+/// Restate `slug` from `.oxplow/wiki/<slug>.md` — how a hand edit (or
+/// the boot scan) converges — through the same core as
+/// `knowledge.write_page` ([`crate::knowledge::write_page_tx`]), logged
+/// as `system:wiki_watch`. Links aren't refused here: whatever is on
+/// disk is recorded. A body with `@version` literals is written back
+/// without them (versions live on the edges); an unchanged body (its
+/// hash matches the row's, as after a command's own write) is a no-op;
+/// a missing file deletes the page. `updated_at` is the file's mtime, so
+/// a boot scan doesn't reset every page's recency. Whether anything
+/// changed.
+pub fn sync_page_tx(
+    conn: &rusqlite::Connection,
+    ev: &oxplow_db::EventCtx<'_>,
     project_dir: &Path,
-    store: &SqliteWikiPageStore,
     slug: &str,
-) -> Result<(), DomainError> {
-    sync_from_disk_with_refs(project_dir, store, None, slug).await
-}
-
-/// `sync_from_disk` plus a unified `page_ref` projection: when
-/// `page_refs` is `Some`, the wiki body's full ref set (files, dirs,
-/// related slugs, tasks, findings, commits) is mirrored as
-/// `(wiki:<slug>) -> (target)` edges. The wiki source is single-
-/// owner, so we use the full `replace_source` (clears + inserts).
-pub async fn sync_from_disk_with_refs(
-    project_dir: &Path,
-    store: &SqliteWikiPageStore,
-    page_refs: Option<&SqlitePageRefStore>,
-    slug: &str,
-) -> Result<(), DomainError> {
-    sync_from_disk_with_refs_versioned(project_dir, store, page_refs, slug, None).await
-}
-
-/// Variant of [`sync_from_disk_with_refs`] that lets the caller pin
-/// a resolved file-version triple onto every file/directory edge
-/// emitted from this page. The watcher uses this to stamp the
-/// current snapshot id + git pin so backlinks know how out-of-date
-/// each ref is. Pass `None` when no snapshot is available (test
-/// fixtures, manual one-off syncs) — file edges then get NULL
-/// version columns.
-pub async fn sync_from_disk_with_refs_versioned(
-    project_dir: &Path,
-    store: &SqliteWikiPageStore,
-    page_refs: Option<&SqlitePageRefStore>,
-    slug: &str,
-    file_version: Option<crate::file_ref_version::ResolvedFileVersion>,
-) -> Result<(), DomainError> {
-    let file_path = wiki_pages_dir(project_dir).join(format!("{slug}.md"));
-    if !file_path.exists() {
-        if let Some(refs) = page_refs {
-            refs.replace_source(KIND_WIKI, slug, vec![]).await?;
+) -> Result<bool, DomainError> {
+    let file_path = crate::knowledge::page_path(project_dir, slug);
+    let raw = match fs::read_to_string(&file_path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return crate::knowledge::delete_page_tx(
+                conn,
+                ev,
+                oxplow_domain::Anchors::default(),
+                slug,
+            );
         }
-        return store.delete(slug).await;
-    }
-    let raw_body = fs::read_to_string(&file_path)
-        .map_err(|e| DomainError::Storage(format!("read note {slug}: {e}")))?;
-    // Strip @version literals from any (file|dir):path@version or
-    // [[path@version]] form. The body is prose; versioning lives in
-    // the page_ref row. @disk / @local / @<sha> / @<branch> — all
-    // dropped. If the file changed, write the normalized body back
-    // so future reads see the canonical form.
-    let body = strip_body_version_literals(&raw_body);
-    if body != raw_body {
+        Err(e) => return Err(DomainError::Storage(format!("read wiki page {slug}: {e}"))),
+    };
+    let body = strip_body_version_literals(&raw);
+    if body != raw {
         if let Err(err) = fs::write(&file_path, &body) {
             tracing::warn!(
                 slug,
@@ -285,71 +188,40 @@ pub async fn sync_from_disk_with_refs_versioned(
             );
         }
     }
-    let title = extract_title(&body, slug);
-    let refs = parse_refs(&body);
-    let body_size_bytes = body.len() as i64;
-    let body_excerpt = body.chars().take(280).collect::<String>();
-    // updated_at mirrors the file's mtime (read after the potential
-    // version-strip write-back), not the sync time — the boot-time
-    // full scan re-syncs every page, and stamping "now" there would
-    // reset the whole index's recency on every start. `.oxplow/` is
-    // gitignored, so checkouts can't skew these mtimes.
-    let now = Timestamp::now();
-    let updated_at = file_mtime(&file_path).unwrap_or(now);
-    let existing = store.get(slug).await?;
-    let created_at = existing.as_ref().map(|n| n.created_at).unwrap_or(now);
-    let note = WikiPage {
-        slug: slug.to_string(),
-        title,
-        body_path: file_path.to_string_lossy().into_owned(),
-        body_excerpt,
-        body_size_bytes,
-        file_refs: refs.file_refs,
-        dir_refs: refs.dir_refs,
-        related_notes: refs.related_notes,
-        created_at,
-        updated_at,
-    };
-    store.upsert(&note).await?;
-    if let Some(page_refs) = page_refs {
-        let mut edges = wiki_edges(slug, &body);
-        if let Some(v) = file_version.as_ref() {
-            stamp_file_versions(&mut edges, v.as_ref());
-        }
-        // Preserve "verification" file edges: file refs the body
-        // doesn't literally cite but that live under a directory the
-        // body DOES cite (`[[dir:…]]`). The agent materializes these
-        // via `record_wiki_page_update` when it verifies a fact
-        // against a specific file it only references by directory.
-        // Re-including them here keeps merge_source from pruning them
-        // (and preserves their pins, since the PK matches the existing
-        // row). When the covering dir ref is removed from the body,
-        // the edge is no longer re-included → merge_source prunes it,
-        // so they self-clean.
-        if !note.dir_refs.is_empty() {
-            let existing = page_refs.list_outbound(KIND_WIKI, slug, None).await?;
-            for e in existing {
-                if e.target_kind != KIND_FILE {
-                    continue;
-                }
-                let already = edges
-                    .iter()
-                    .any(|b| b.target_kind == KIND_FILE && b.target_id == e.target_id);
-                if !already && path_under_any_dir(&e.target_id, &note.dir_refs) {
-                    edges.push(e);
-                }
-            }
-        }
-        // merge_source preserves the existing local_snapshot_id /
-        // closest_git_version / git_version_exact on any edge that
-        // matches an existing row by PK. New edges get the freshly
-        // stamped version. Deleted edges (in DB but not body) are
-        // pruned. So editing unrelated prose doesn't re-stamp every
-        // ref's freshness — only refs the body added inherit the
-        // current snapshot pin.
-        page_refs.merge_source(KIND_WIKI, slug, edges).await?;
+    let stored = oxplow_db::wiki_page_store::get_tx(conn, slug)?;
+    if stored.is_some_and(|(_, hash)| hash == crate::knowledge::body_hash(&body)) {
+        return Ok(false);
     }
-    Ok(())
+    crate::knowledge::write_page_tx(
+        conn,
+        ev,
+        project_dir,
+        &crate::knowledge::PageWrite {
+            slug,
+            body: &body,
+            verified: &[],
+            removed: &[],
+            updated_at: file_mtime(&file_path).unwrap_or_else(Timestamp::now),
+            anchors: oxplow_domain::Anchors::default(),
+        },
+    )?;
+    Ok(true)
+}
+
+/// [`sync_page_tx`] in its own transaction.
+pub async fn sync_page(
+    db: &Database,
+    schemas: &Arc<EventSchemaRegistry>,
+    project_dir: &Path,
+    slug: &str,
+) -> Result<bool, DomainError> {
+    let (schemas, project_dir, slug) =
+        (schemas.clone(), project_dir.to_path_buf(), slug.to_string());
+    db.transaction(move |tx| {
+        let ev = oxplow_db::EventCtx::system(&schemas, "wiki_watch");
+        sync_page_tx(tx, &ev, &project_dir, &slug)
+    })
+    .await
 }
 
 /// True if `path` is a file located under any of `dirs` (a directory
@@ -475,27 +347,20 @@ pub struct ScanReport {
     pub failures: Vec<(String, DomainError)>,
 }
 
-/// Sync every `.md` file in the notes dir + prune rows for deleted
-/// files. Run once at watcher startup.
+/// Sync every `.md` file in the wiki dir and delete the pages whose file
+/// is gone. Run once at watcher startup. Per-slug failures are collected
+/// into the report (and warned) rather than aborting; transient `Busy`
+/// errors retry with backoff first. The outer `Err` is reserved for
+/// scan-fatal failures (listing the known rows).
 pub async fn scan_and_sync_all(
+    db: &Database,
+    schemas: &Arc<EventSchemaRegistry>,
     project_dir: &Path,
     store: &SqliteWikiPageStore,
-) -> Result<ScanReport, DomainError> {
-    scan_and_sync_all_with_refs(project_dir, store, None).await
-}
-
-/// Full scan. Per-slug failures are collected into the report (and
-/// warned) rather than aborting; transient `Busy` errors retry with
-/// backoff first. The outer `Err` is reserved for scan-fatal failures
-/// (listing the known rows).
-pub async fn scan_and_sync_all_with_refs(
-    project_dir: &Path,
-    store: &SqliteWikiPageStore,
-    page_refs: Option<&SqlitePageRefStore>,
 ) -> Result<ScanReport, DomainError> {
     let dir = wiki_pages_dir(project_dir);
     fs::create_dir_all(&dir).ok();
-    let mut on_disk: BTreeSet<String> = BTreeSet::new();
+    let mut slugs: BTreeSet<String> = BTreeSet::new();
     if let Ok(entries) = fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -503,37 +368,21 @@ pub async fn scan_and_sync_all_with_refs(
                 continue;
             }
             if let Some(slug) = path.file_stem().and_then(|s| s.to_str()) {
-                on_disk.insert(slug.to_string());
+                slugs.insert(slug.to_string());
             }
         }
     }
+    // A known page whose file is gone syncs to a delete.
+    for page in retry_busy(|| store.list()).await? {
+        slugs.insert(page.slug);
+    }
     let mut report = ScanReport::default();
-    for slug in &on_disk {
-        match retry_busy(|| sync_from_disk_with_refs(project_dir, store, page_refs, slug)).await {
-            Ok(()) => report.synced += 1,
+    for slug in &slugs {
+        match retry_busy(|| sync_page(db, schemas, project_dir, slug)).await {
+            Ok(_) => report.synced += 1,
             Err(err) => {
                 tracing::warn!(slug, ?err, "wiki page sync failed during scan");
                 report.failures.push((slug.clone(), err));
-            }
-        }
-    }
-    let known = retry_busy(|| store.list()).await?;
-    for note in known {
-        if on_disk.contains(&note.slug) {
-            continue;
-        }
-        let prune = retry_busy(|| async {
-            if let Some(refs) = page_refs {
-                refs.replace_source(KIND_WIKI, &note.slug, vec![]).await?;
-            }
-            store.delete(&note.slug).await
-        })
-        .await;
-        match prune {
-            Ok(()) => report.synced += 1,
-            Err(err) => {
-                tracing::warn!(slug = note.slug, ?err, "wiki page prune failed during scan");
-                report.failures.push((note.slug.clone(), err));
             }
         }
     }
@@ -610,7 +459,7 @@ pub fn migrate_legacy_notes_dir(project_dir: &Path) {
     }
 }
 
-fn extract_title(body: &str, fallback: &str) -> String {
+pub fn extract_title(body: &str, fallback: &str) -> String {
     for line in body.lines() {
         if let Some(rest) = line.trim_start().strip_prefix("# ") {
             let title = rest.trim();
@@ -777,6 +626,10 @@ fn find_inline_paths(body: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    fn schemas() -> Arc<EventSchemaRegistry> {
+        Arc::new(EventSchemaRegistry::core())
+    }
+
     /// Re-syncing an unchanged file (e.g. the boot-time full scan on
     /// every daemon/app start) must not bump `updated_at` — the wiki
     /// index sorts and labels pages by it, and a boot that stamps
@@ -790,13 +643,13 @@ mod tests {
         std::fs::write(wiki_dir.join("note.md"), "# Note\nbody\n").unwrap();
 
         let db = oxplow_db::Database::in_memory();
-        let store = oxplow_db::SqliteWikiPageStore::new(db);
+        let store = oxplow_db::SqliteWikiPageStore::new(db.clone());
 
-        sync_from_disk(&project, &store, "note").await.unwrap();
+        sync_page(&db, &schemas(), &project, "note").await.unwrap();
         let first = store.get("note").await.unwrap().unwrap();
 
         tokio::time::sleep(std::time::Duration::from_millis(15)).await;
-        sync_from_disk(&project, &store, "note").await.unwrap();
+        sync_page(&db, &schemas(), &project, "note").await.unwrap();
         let second = store.get("note").await.unwrap().unwrap();
         assert_eq!(
             second.updated_at, first.updated_at,
@@ -805,7 +658,7 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(15)).await;
         std::fs::write(wiki_dir.join("note.md"), "# Note\nedited body\n").unwrap();
-        sync_from_disk(&project, &store, "note").await.unwrap();
+        sync_page(&db, &schemas(), &project, "note").await.unwrap();
         let third = store.get("note").await.unwrap().unwrap();
         assert!(
             third.updated_at > first.updated_at,
@@ -826,9 +679,11 @@ mod tests {
         std::fs::write(wiki_dir.join("zz-later.md"), "# Later\nbody\n").unwrap();
 
         let db = oxplow_db::Database::in_memory();
-        let store = oxplow_db::SqliteWikiPageStore::new(db);
+        let store = oxplow_db::SqliteWikiPageStore::new(db.clone());
 
-        let report = scan_and_sync_all(&project, &store).await.unwrap();
+        let report = scan_and_sync_all(&db, &schemas(), &project, &store)
+            .await
+            .unwrap();
         assert_eq!(report.synced, 2, "both healthy pages sync");
         assert_eq!(report.failures.len(), 1);
         assert_eq!(report.failures[0].0, "bad");
@@ -1066,86 +921,28 @@ mod tests {
     }
 
     #[test]
-    fn parse_wikilink_with_disk_version_emits_disk_in_detail() {
-        let refs = parse_refs("see [[src/foo.ts@disk]] for the live version");
-        assert_eq!(refs.file_refs, vec!["src/foo.ts"]);
-        assert_eq!(refs.file_refs_detail.len(), 1);
-        let d = &refs.file_refs_detail[0];
-        assert_eq!(d.path, "src/foo.ts");
-        assert_eq!(d.version, WikiVersion::Disk);
-        assert_eq!(d.line, None);
-    }
-
-    #[test]
-    fn parse_wikilink_with_local_alias_treated_as_disk() {
-        // `@local` is accepted as an alias for `@disk` because the
-        // user-facing terminology in the capture skill says "local
-        // version" — both must round-trip to the same WikiVersion.
-        let refs = parse_refs("[[src/foo.ts@local]]");
-        assert_eq!(refs.file_refs_detail[0].version, WikiVersion::Disk);
-    }
-
-    #[test]
-    fn parse_wikilink_with_sha_version() {
-        let refs = parse_refs("[[crates/oxplow-app/src/lib.rs@abc1234]]");
-        let d = &refs.file_refs_detail[0];
-        assert_eq!(d.path, "crates/oxplow-app/src/lib.rs");
-        assert_eq!(d.version, WikiVersion::Ref("abc1234".into()));
-    }
-
-    #[test]
-    fn parse_wikilink_with_head_version() {
-        let refs = parse_refs("[[src/foo.ts@HEAD]]");
-        assert_eq!(
-            refs.file_refs_detail[0].version,
-            WikiVersion::Ref("HEAD".into())
-        );
-    }
-
-    #[test]
-    fn parse_wikilink_with_branch_version() {
-        let refs = parse_refs("[[src/foo.ts@main]]");
-        assert_eq!(
-            refs.file_refs_detail[0].version,
-            WikiVersion::Ref("main".into())
-        );
-    }
-
-    #[test]
-    fn parse_wikilink_version_with_line_anchor() {
-        let refs = parse_refs("[[src/foo.ts@HEAD:42]]");
-        let d = &refs.file_refs_detail[0];
-        assert_eq!(d.path, "src/foo.ts");
-        assert_eq!(d.version, WikiVersion::Ref("HEAD".into()));
-        assert_eq!(d.line, Some(42));
-    }
-
-    #[test]
-    fn parse_wikilink_bare_path_defaults_to_disk() {
-        let refs = parse_refs("[[src/foo.ts]]");
-        let d = &refs.file_refs_detail[0];
-        assert_eq!(d.version, WikiVersion::Disk);
-        assert_eq!(d.line, None);
-    }
-
-    #[test]
-    fn parse_wikilink_bare_with_line() {
-        let refs = parse_refs("[[src/foo.ts:42]]");
-        let d = &refs.file_refs_detail[0];
-        assert_eq!(d.line, Some(42));
-        assert_eq!(d.version, WikiVersion::Disk);
-    }
-
-    #[test]
-    fn parse_wikilink_strips_version_from_backlinks_path() {
-        // The DB-stored `file_refs` path list MUST be version-stripped
-        // so backlinks_for_file("src/foo.ts") matches notes that pinned
-        // any version of foo.ts. The detail list keeps the version.
+    fn a_wikilinks_version_is_dropped_and_its_line_kept() {
+        // Freshness is the edge's pin, not the link's: any `@…` segment
+        // names the same file as the bare path.
         let refs = parse_refs(
-            "see [[src/foo.ts@HEAD]] and [[src/foo.ts@disk]] and [[src/foo.ts@abc1234]]",
+            "see [[src/foo.ts@HEAD]] and [[src/foo.ts@disk]] and [[src/foo.ts@abc1234:42]]",
         );
         assert_eq!(refs.file_refs, vec!["src/foo.ts"]);
-        assert_eq!(refs.file_refs_detail.len(), 3);
+        assert_eq!(
+            parse_wiki_file_ref("src/foo.ts@HEAD:42"),
+            Some(WikiFileRef {
+                path: "src/foo.ts".into(),
+                line: Some(42)
+            })
+        );
+        assert_eq!(
+            parse_wiki_file_ref("src/foo.ts:7"),
+            Some(WikiFileRef {
+                path: "src/foo.ts".into(),
+                line: Some(7)
+            })
+        );
+        assert_eq!(parse_wiki_file_ref("src/foo.rs@").unwrap().line, None);
     }
 
     #[test]
@@ -1239,22 +1036,6 @@ mod tests {
     }
 
     // ---- Edge cases: parse_wiki_file_ref ----
-
-    #[test]
-    fn parse_wiki_file_ref_handles_disk_alias_case_insensitive() {
-        let r = parse_wiki_file_ref("src/foo.rs@DISK").unwrap();
-        assert_eq!(r.version, WikiVersion::Disk);
-        let r = parse_wiki_file_ref("src/foo.rs@Local").unwrap();
-        assert_eq!(r.version, WikiVersion::Disk);
-    }
-
-    #[test]
-    fn parse_wiki_file_ref_empty_version_falls_back_to_disk() {
-        // `path@` (trailing @ with nothing after) should not crash;
-        // it degrades to Disk so the link still resolves.
-        let r = parse_wiki_file_ref("src/foo.rs@").unwrap();
-        assert_eq!(r.version, WikiVersion::Disk);
-    }
 
     #[test]
     fn parse_wiki_file_ref_returns_none_for_non_path() {
@@ -1380,12 +1161,9 @@ mod tests {
         .unwrap();
 
         let db = oxplow_db::Database::in_memory();
-        let store = oxplow_db::SqliteWikiPageStore::new(db.clone());
-        let page_refs = oxplow_db::SqlitePageRefStore::new(db);
+        let page_refs = oxplow_db::SqlitePageRefStore::new(db.clone());
 
-        sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
-            .await
-            .unwrap();
+        sync_page(&db, &schemas(), project, "intro").await.unwrap();
 
         // wi-1 backlink picks up the wiki source.
         let inbound_wi = page_refs
@@ -1454,12 +1232,9 @@ mod tests {
         std::fs::write(&body_path, "see [[dir:crates/cp]] for details").unwrap();
 
         let db = oxplow_db::Database::in_memory();
-        let store = oxplow_db::SqliteWikiPageStore::new(db.clone());
-        let page_refs = oxplow_db::SqlitePageRefStore::new(db);
+        let page_refs = oxplow_db::SqlitePageRefStore::new(db.clone());
 
-        sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
-            .await
-            .unwrap();
+        sync_page(&db, &schemas(), project, "intro").await.unwrap();
         // Materialize a verification edge for a file under the cited dir.
         page_refs
             .upsert_edge(
@@ -1477,9 +1252,7 @@ mod tests {
 
         // Re-sync with the body UNCHANGED: the verification edge must
         // survive (and keep its pin), even though it isn't in the body.
-        sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
-            .await
-            .unwrap();
+        sync_page(&db, &schemas(), project, "intro").await.unwrap();
         let after = page_refs
             .list_backlinks("file", "crates/cp/src/lib.rs", None)
             .await
@@ -1490,9 +1263,7 @@ mod tests {
         // Remove the dir ref from the body → next sync prunes the now-
         // orphaned verification edge.
         std::fs::write(&body_path, "no refs at all now").unwrap();
-        sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
-            .await
-            .unwrap();
+        sync_page(&db, &schemas(), project, "intro").await.unwrap();
         let gone = page_refs
             .list_backlinks("file", "crates/cp/src/lib.rs", None)
             .await
@@ -1514,17 +1285,12 @@ mod tests {
         std::fs::write(&body_path, "[[tsk1]] [[tsk2]]").unwrap();
 
         let db = oxplow_db::Database::in_memory();
-        let store = oxplow_db::SqliteWikiPageStore::new(db.clone());
-        let page_refs = oxplow_db::SqlitePageRefStore::new(db);
+        let page_refs = oxplow_db::SqlitePageRefStore::new(db.clone());
 
-        sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
-            .await
-            .unwrap();
+        sync_page(&db, &schemas(), project, "intro").await.unwrap();
         // Now drop wi-2 from the body.
         std::fs::write(&body_path, "[[tsk1]] only").unwrap();
-        sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
-            .await
-            .unwrap();
+        sync_page(&db, &schemas(), project, "intro").await.unwrap();
 
         let inbound_2 = page_refs
             .list_backlinks("work_item", "oxplow:tsk2", None)

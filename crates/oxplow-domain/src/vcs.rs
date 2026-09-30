@@ -298,6 +298,8 @@ pub trait CleanBaseline: Send + Sync {
 /// A VCS's revision graph, read synchronously (metric visibility asks it
 /// from inside a blocking fold). Unresolvable revisions answer `None`.
 pub trait RevisionGraph: Send {
+    /// The full id `rev` names (a short id, a branch), if it names one.
+    fn resolve(&self, rev: &str) -> Option<String>;
     /// Whether `ancestor` is `descendant` or in its history.
     fn is_ancestor_or_equal(&self, ancestor: &str, descendant: &str) -> Option<bool>;
     /// When `rev` was made.

@@ -120,9 +120,7 @@ fn surface_parity() {
             Exposure::UiOnly => {
                 // A leak is a tool that shares this command's name AND isn't
                 // already claimed by another row's `mcp` — the latter guards
-                // legitimate cross-surface name collisions (e.g. IPC
-                // `delete_wiki_page` deletes a page; the MCP tool of the same
-                // name deletes a note and is claimed by the `note.delete` row).
+                // legitimate cross-surface name collisions.
                 let i = c.ipc.unwrap();
                 if mcp.contains(i) && !mcp_in_manifest.contains(i) {
                     problems.push(format!(

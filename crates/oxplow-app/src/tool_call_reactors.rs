@@ -6,8 +6,6 @@
 //! - `tool_call.project` (sync) — the `agent_tool_call` row, a projection
 //!   of the event (`v_tool_call`, `v_context_read`, `v_struggle`); one row
 //!   per event however often it is delivered.
-//! - `wiki.attribution` (sync) — an edit of `.oxplow/wiki/<slug>.md` marks
-//!   the page touched by the thread (the rail's "Finished" list).
 //! - `effort.claim` (async) — a structured edit (Edit / Write / MultiEdit /
 //!   NotebookEdit) claims its file for the effort that was open when it
 //!   happened (the event's effort anchor), falling back to target scoring
@@ -28,7 +26,6 @@ use crate::event_pump::{AsyncEventConsumer, EventConsumer};
 use crate::task_service::TaskService;
 
 pub const TOOL_CALL_PROJECTION: &str = "tool_call.project";
-pub const WIKI_ATTRIBUTION: &str = "wiki.attribution";
 pub const EFFORT_CLAIM: &str = "effort.claim";
 
 /// Tools that write the file they name.
@@ -69,69 +66,6 @@ impl EventConsumer for ToolCallProjection {
             at: Some(env.at),
         };
         oxplow_db::tool_call_store::record_tx(conn, &call).map(|_| ())
-    }
-}
-
-/// The wiki-page slug for a path directly inside `.oxplow/wiki/` with a
-/// `.md` extension — relative (to the worktree) or absolute in the
-/// project.
-pub fn wiki_slug(raw: &str, project_dir: &Path) -> Option<String> {
-    let path = Path::new(raw);
-    let rel = if path.is_absolute() {
-        path.strip_prefix(project_dir).ok()?
-    } else {
-        path
-    };
-    let name = rel.strip_prefix(".oxplow/wiki").ok()?;
-    if name.parent().is_some_and(|p| !p.as_os_str().is_empty()) {
-        return None; // wiki pages are flat
-    }
-    let stem = name.file_stem()?.to_string_lossy().into_owned();
-    (name.extension()? == "md").then_some(stem)
-}
-
-/// Marks a wiki page touched by the thread that edited it.
-pub struct WikiAttribution {
-    pub project_dir: PathBuf,
-}
-
-impl EventConsumer for WikiAttribution {
-    fn name(&self) -> &'static str {
-        WIKI_ATTRIBUTION
-    }
-
-    fn handles(&self, event_type: &str) -> bool {
-        event_type == AgentToolFinished::TYPE
-    }
-
-    fn handle(&self, conn: &rusqlite::Connection, event: &StoredEvent) -> Result<(), DomainError> {
-        let (Some(thread), Some(tool), Some(path)) = (
-            event.envelope.anchors.thread_id,
-            str_field(event, "tool"),
-            str_field(event, "path"),
-        ) else {
-            return Ok(());
-        };
-        if !is_structured_write(tool) {
-            return Ok(());
-        }
-        let Some(slug) = wiki_slug(path, &self.project_dir) else {
-            return Ok(());
-        };
-        // Only an indexed page can be marked (the row references it). A page
-        // the edit just created is indexed by the wiki watcher, which may
-        // not have run yet; it goes unmarked, as it did before the reactor.
-        let indexed: bool = conn
-            .query_row(
-                "SELECT EXISTS (SELECT 1 FROM wiki_page WHERE slug = ?1)",
-                [&slug],
-                |r| r.get(0),
-            )
-            .map_err(oxplow_db::map_sql_err)?;
-        if !indexed {
-            return Ok(());
-        }
-        oxplow_db::wiki_page_thread_updates::touch_tx(conn, thread, &slug, event.envelope.at)
     }
 }
 
@@ -376,80 +310,5 @@ mod tests {
             files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
             vec!["src/b.rs"]
         );
-    }
-
-    /// An edit of a wiki page records that the thread touched it; a page
-    /// not indexed yet is skipped, not parked as a dead letter.
-    #[tokio::test]
-    async fn a_wiki_edit_is_attributed_to_the_thread() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        f.svc
-            .db
-            .transaction(|c| {
-                c.execute(
-                    "INSERT INTO wiki_page (slug, title, body_path, created_at, updated_at)
-                       VALUES ('architecture', 'A', '.oxplow/wiki/architecture.md', '2026-01-01', '2026-01-01')",
-                    [],
-                )
-                .map_err(oxplow_db::map_sql_err)?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        f.svc
-            .hook_ingest
-            .ingest(hook(
-                f.thread,
-                HookKind::PostToolUse,
-                json!({"tool_name": "Write", "tool_input": {"file_path": ".oxplow/wiki/brand-new.md"}}),
-            ))
-            .await
-            .unwrap();
-        for _ in 0..2 {
-            f.svc
-                .hook_ingest
-                .ingest(hook(
-                    f.thread,
-                    HookKind::PostToolUse,
-                    json!({"tool_name": "Edit", "tool_input": {"file_path": ".oxplow/wiki/architecture.md"}}),
-                ))
-                .await
-                .unwrap();
-        }
-        f.svc.event_pump.run_once().await.unwrap();
-        let touched = f
-            .svc
-            .wiki_page_thread_updates
-            .list_for_thread(&f.thread, 10)
-            .await
-            .unwrap();
-        assert_eq!(
-            touched.iter().map(|t| t.slug.as_str()).collect::<Vec<_>>(),
-            vec!["architecture"]
-        );
-        assert!(f
-            .svc
-            .event_pump
-            .list_dead_letters(true)
-            .await
-            .unwrap()
-            .is_empty());
-    }
-
-    #[test]
-    fn wiki_slugs_are_flat_md_files_under_the_wiki_dir() {
-        let project = std::path::Path::new("/p");
-        assert_eq!(
-            wiki_slug(".oxplow/wiki/data-model.md", project).as_deref(),
-            Some("data-model")
-        );
-        assert_eq!(
-            wiki_slug("/p/.oxplow/wiki/x.md", project).as_deref(),
-            Some("x")
-        );
-        assert_eq!(wiki_slug(".oxplow/wiki/sub/inner.md", project), None);
-        assert_eq!(wiki_slug(".oxplow/wiki/foo.txt", project), None);
-        assert_eq!(wiki_slug("README.md", project), None);
-        assert_eq!(wiki_slug("/etc/hosts", project), None);
     }
 }

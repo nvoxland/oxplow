@@ -289,11 +289,10 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     crate::wiki_pages::migrate_legacy_notes_dir(&state.layout.project_dir);
     {
         let wiki_store = state.wiki_page_store.clone();
-        let wiki_page_refs = state.page_ref_store.clone();
+        let wiki_db = state.db.clone();
+        let wiki_schemas = state.event_schemas.clone();
         let wiki_dir = state.layout.project_dir.clone();
         let wiki_events = event_bus.clone();
-        // Wiki is project-wide; pin to the primary stream's service.
-        let wiki_snapshot_capture = state.snapshot_captures.primary();
         let bts = state.background_tasks.clone();
         let task = bts.start(StartInput {
             kind: BackgroundTaskKind::NotesResync,
@@ -304,10 +303,10 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         tokio::spawn(async move {
             if let Some(watcher) = crate::wiki_pages_watch::WikiPagesWatcher::spawn(
                 wiki_dir,
+                wiki_db,
+                wiki_schemas,
                 wiki_store,
-                wiki_page_refs,
                 wiki_events,
-                wiki_snapshot_capture,
             )
             .await
             {

@@ -662,14 +662,6 @@ async fn wiki_freshness_reads_for_unknown_slug() {
             .unwrap()
             .is_empty()
     );
-    assert_eq!(
-        commands::generated::mark_all_wiki_refs_verified(app.state(), "no-slug".into())
-            .await
-            .unwrap(),
-        0
-    );
-    let _ = commands::generated::mark_wiki_ref_verified(app.state(), "no-slug".into(), "p".into())
-        .await;
 }
 
 // ---- effort reads ----

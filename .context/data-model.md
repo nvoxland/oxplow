@@ -907,80 +907,18 @@ it behind an `RwLock`) and on the copy used to build future ones.
 
 ### `wiki_page` — `WikiPageStore` (`crates/oxplow-db/src/wiki_page_store.rs`)
 
-User-curated personal knowledgebase — agent-written writeups, diagrams,
-and explanations that accumulate per project. **Bodies live on disk**
-as plain markdown files at `.oxplow/wiki/<slug>.md` (not committed to
-git — this is a personal KB, not team docs). The table only holds
-metadata; the filesystem is the source of truth for content.
-
-Columns: `id, slug (UNIQUE), title, body, captured_head_sha,
-captured_refs_json, created_at, updated_at`. The `body` column
-mirrors the on-disk markdown so MCP can run substring/content
-searches without reading every file — the filesystem is still the
-source of truth, and the watcher keeps the column in sync on every
-upsert.
-
-Workflow: the agent writes/edits note files directly with its
-Write/Edit tools (no MCP round-trip for bodies). A dedicated watcher
-(`crates/oxplow-fs-watch/src/lib.rs`) picks up every file event, re-parses the
-file, and upserts metadata + body. **Every write — agent or user —
-re-baselines freshness**, because any write implicitly asserts "this
-is current as of now." There is no agent-vs-user distinction.
-
-Freshness is a general indicator, not a proof:
-- `captured_head_sha` is HEAD at last write. If HEAD advances, the
-  note is flagged `stale`.
-- `captured_refs_json` stores `{path, blobSha, mtimeMs}` for every file
-  path mentioned in the note (extracted by the wiki-note-refs parser
-  inside `crates/oxplow-db/src/wiki_page_store.rs`). `computeFreshness`
-  rehashes each referenced file; any mismatch → `stale`; any missing
-  file → `very-stale`.
-
-Parsed wikilink targets are split across three JSON columns by the
-parser in `crates/oxplow-app/src/wiki_pages.rs`:
-
-- `file_refs_json` — `[[src/foo.ts]]` / `[[src/foo.ts:42]]` style
-  references (workspace-relative file paths).
-- `dir_refs_json` (migration V7) — `[[dir:src/components]]` style
-  references. The `dir:` prefix is the explicit directory marker
-  (mirrors `git:` for commit refs); a trailing `/` on the path is
-  tolerated and stripped on store. `backlinks_for_dir` is the
-  symmetric reader to `backlinks_for_file`.
-- `related_notes_json` — `[[some-other-slug]]` cross-note links.
-
-MCP tools (`crates/oxplow-mcp/src/lib.rs`) are metadata-only —
-`list_wiki_pages`, `get_wiki_page_metadata`, `resync_wiki_page`, `search_wiki_pages`
-(title), `search_wiki_page_bodies` (content + ~200-char snippet),
-`delete_wiki_page`. (Cross-kind file/wiki/task/finding/commit
-backlinks now go through the unified `list_backlinks` MCP tool —
-see the `page_ref` section below — so there's no separate
-`find_wiki_pages_for_file` tool.)
-There is no `create_note` or `update_note`: the agent Writes the
-file, then optionally calls `resync_wiki_page` to pin freshness
-immediately (otherwise the watcher catches up within a ~200ms
-debounce).
-
-UI: `NotesPane` (`apps/desktop/src/components/Notes/NotesPane.tsx`) is a
-left-dock `ToolWindow` with a debounced full-text search input and a
-recency-driven TOC ("Recently visited" / "Recently modified" / "All
-notes"); each section caps at 8 rows with a "show all" toggle. The
-freshness dot + relative-timestamp pattern is shared by all rows.
-Selecting a row opens the note as a center tab (`note:<slug>`)
-rendered by `NoteTab` (`apps/desktop/src/components/Notes/NoteTab.tsx`), which
-owns the view/edit/delete UI . Markdown rendering is delegated to the shared
-`MarkdownView` (`apps/desktop/src/components/Notes/MarkdownView.tsx`) which
-wraps `react-markdown`
-+ `remark-gfm` and post-renders mermaid
-fenced blocks into inline SVG when `renderMermaid` is set. The
-same component is reused for the Plan task description /
-acceptance fields (`TaskDetail`) so headings, lists, code,
-links, and emphasis come through there too — without mermaid.
-IPC surface: `listWikiPages`, `readWikiPageBody`,
-`writeWikiPageBody`, `deleteWikiPage`, `searchWikiPages`, plus the
-`wiki-note.changed` event on the bus. Full-text search is backed by
-the `wiki_page_fts` FTS5 virtual table (migration v39); insert/update/
-delete triggers keep it in sync, so `WikiPageStore.searchBodies()`
-returns ranked results with `<mark>…</mark>`-highlighted snippets.
+The per-project wiki's pages. **Bodies live on disk** at
+`.oxplow/wiki/<slug>.md` (not committed — a personal knowledge base);
+the row holds what's derived from the body: `slug`, `title`,
+`body_path`, `body_excerpt`, `body_size_bytes`, the parsed
+`file_refs_json` / `dir_refs_json` (`[[dir:…]]`) /
+`related_notes_json`, `created_at`, `updated_at`, and `body_hash` (V116:
+the hash of the body it was written from). FTS5 mirror
+`wiki_page_fts` (title + excerpt). The one writer is
+`wiki_page_store::upsert_tx` / `delete_tx`, inside
+`knowledge.write_page`'s transaction or the watcher's — see
+[knowledge.md](./knowledge.md) for the write path, pins and hand-edit
+convergence.
 
 ### `page_ref` — unified cross-page reference graph (`crates/oxplow-db/src/page_ref_store.rs`, migration `V11__page_ref.sql`)
 
@@ -1031,33 +969,23 @@ etc.) from `[[…]]` and `(file:…@…)` / `(dir:…@…)` body forms
 before parsing, and writes the normalised body back to disk —
 version state lives in the row, not the prose.
 
-**Verification edges under cited dirs survive sync.** One exception
+**Verification edges under cited dirs survive a write.** One exception
 to "edges not in the body are deleted": a `wiki_file_ref` edge whose
 `target_id` is a file under a directory the body cites
-(`[[dir:…]]`) is re-included by the sync (`path_under_any_dir` in
-`crates/oxplow-app/src/wiki_pages.rs`) so `merge_source` preserves it
-and its pin. These are **verification edges** materialized by
-`record_wiki_page_update` when the agent verifies a fact against a
-specific file it references only by directory. They self-clean: once
+(`[[dir:…]]`) is re-included (`path_under_any_dir`) so `merge_source`
+preserves it and its pin. These are **verification edges**, made by
+`knowledge.write_page`'s `verified_refs` when the agent verifies a fact
+against a specific file it references only by directory. They self-clean: once
 the covering `[[dir:…]]` ref leaves the body, the edge is no longer
 re-included and gets pruned.
 
-**Agent-driven `verified_refs` / `removed_refs`.** The
-`record_wiki_page_update` MCP tool takes two required arrays:
-`verified_refs` (paths the agent re-read against the new body
-this turn) and `removed_refs` (paths intentionally removed).
-The tool re-runs the sync synchronously, validates the
-declarations against the new body (every removed path MUST be
-absent; every verified path MUST be either a body file ref OR a
-file under a directory the body cites), then pins `verified_refs`
-to the current snapshot. A body file ref re-stamps its existing
-edge via `SqlitePageRefStore::restamp_edge_version`; a file under a
-cited dir is **materialized** as a new `wiki_file_ref` edge via
-`SqlitePageRefStore::upsert_edge` (see "Verification edges" above) —
-this is how the agent records "I verified a fact against
-`crates/x/src/lib.rs`" when the page only cites `[[dir:crates/x]]`.
-Refs left in the body but in NEITHER list keep their existing pin —
-that's how "this content relies on a stale source" stays accurate.
+**`verified_refs` / `removed_refs`.** `knowledge.write_page` takes
+the paths the agent re-read against the new body (`verified_refs`: re-
+pinned to the current snapshot; a file under a cited directory is
+materialized as an edge) and the paths it took out (`removed_refs`:
+must be gone). Refs left in the body but in NEITHER list keep their
+existing pin — that's how "this content relies on a stale source" stays
+accurate ([knowledge.md](./knowledge.md)).
 Skill prompt at `crates/oxplow-plugin/assets/oxplow-wiki-capture.SKILL.md`.
 
 **User-facing Freshness view.** The
@@ -1065,9 +993,9 @@ Skill prompt at `crates/oxplow-plugin/assets/oxplow-wiki-capture.SKILL.md`.
 (`crates/oxplow-tauri-ipc/src/commands/wiki_freshness.rs`) joins
 `page_ref` with the latest `file_snapshot` per target path,
 returning a `stale: bool` per ref. `WikiFreshnessPage` renders
-the table with per-ref + per-page "Mark verified" buttons
-backed by `mark_wiki_ref_verified` / `mark_all_wiki_refs_verified`
-IPCs. The wiki page chrome adds a `Freshness (N stale)` action
+the table with per-ref + per-page "Mark verified" buttons, which
+re-write the page with those refs in `verified_refs`
+(`knowledge.write_page`). The wiki page chrome adds a `Freshness (N stale)` action
 chip that routes to the page.
 
 Every stored `(source_kind, source_id)` / `(target_kind, target_id)`
@@ -1445,24 +1373,16 @@ Columns: `slug, thread_id, updated_at`. PK `(slug, thread_id)` so
 repeated edits in the same thread upsert in place. Index on
 `(thread_id, updated_at DESC)` drives the rail query.
 
-Writers funnel through two seams, both routing through
-`Runtime.wikiPageThreadUpdateStore.recordUpdate(slug, threadId)`:
+One writer: the `wiki.attribution` pump consumer
+(`knowledge::WikiAttribution`), from `knowledge.page.written` events
+carrying a thread anchor — a command run by an agent's thread
+([knowledge.md](./knowledge.md)).
 
-- **`oxplow__resync_wiki_page` MCP** — accepts `threadId` and records the
-  edit when present. The wiki-capture skill always supplies it.
-- **PostToolUse hook** in `crates/oxplow-runtime/src/lib.rs` — when
-  the agent writes a path matching `.oxplow/wiki/<slug>.md` via
-  Write/Edit/MultiEdit, attribution is recorded immediately, no
-  waiting on the watcher debounce.
-
-The notes file watcher itself does not record attribution (it has no
-thread context). `Runtime.writeWikiPageBody` (the editor save IPC)
-also intentionally skips attribution — the notes editor isn't
-thread-bound, so guessing would be worse than abstaining.
-
-`Runtime.deleteWikiPage` clears every attribution row for the slug
-when the note is deleted, so removed notes don't linger on the rail
-under their last author.
+A hand edit (the watcher) and a person's save from the editor carry no
+thread, so they mark nothing — guessing would be worse than abstaining.
+Deleting a page drops its attribution rows (`slug` references
+`wiki_page` `ON DELETE CASCADE`), so removed pages don't linger on the
+rail under their last author.
 
 ### `usage_event` — `UsageStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 

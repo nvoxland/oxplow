@@ -137,6 +137,10 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<WorkItemRecorded>()
             .expect("core type registers");
+        r.register::<KnowledgePageWritten>()
+            .expect("core type registers");
+        r.register::<KnowledgePageDeleted>()
+            .expect("core type registers");
         r
     }
 
@@ -978,6 +982,46 @@ impl EventType for WorkItemRecorded {
     type Payload = WorkItemRecordedV1;
 }
 
+/// `knowledge.page.written@1`: a knowledge page's row and edges were
+/// restated from its body — by `knowledge.write_page` / `link` /
+/// `resync`, or by the wiki watcher after a hand edit
+/// (`system:wiki_watch`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgePageWrittenV1 {
+    /// `wiki:<slug>`.
+    pub page: String,
+    /// Every ref the page now points at (`file:src/lib.rs`, `wiki:x`, …).
+    pub outbound: Vec<String>,
+    /// The snapshot its new refs are pinned to (`snap:<id>`), when there
+    /// is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<String>,
+}
+
+pub struct KnowledgePageWritten;
+impl EventType for KnowledgePageWritten {
+    const TYPE: &'static str = "knowledge.page.written";
+    const V: u32 = 1;
+    type Payload = KnowledgePageWrittenV1;
+}
+
+/// `knowledge.page.deleted@1`: a knowledge page is gone, its row and
+/// edges with it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgePageDeletedV1 {
+    /// `wiki:<slug>`.
+    pub page: String,
+}
+
+pub struct KnowledgePageDeleted;
+impl EventType for KnowledgePageDeleted {
+    const TYPE: &'static str = "knowledge.page.deleted";
+    const V: u32 = 1;
+    type Payload = KnowledgePageDeletedV1;
+}
+
 /// `effort.finished@1`: an effort's close is fully handled — its end
 /// snapshot pinned, unclaimed work reconciled, lifecycle metrics projected.
 /// Logged once per effort by the effort-lifecycle consumer (dedupe key
@@ -1030,6 +1074,8 @@ mod tests {
                 ("effort.closed", 1),
                 ("effort.finished", 1),
                 ("effort.opened", 1),
+                ("knowledge.page.deleted", 1),
+                ("knowledge.page.written", 1),
                 ("snapshot.taken", 1),
                 ("test.coverage.recorded", 1),
                 ("test.run.recorded", 1),

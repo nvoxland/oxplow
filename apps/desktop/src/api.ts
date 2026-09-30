@@ -1394,12 +1394,26 @@ export async function readWikiPageBody(_streamId: string, slug: string): Promise
   return unwrap(await commands.readWikiPageBody(slug));
 }
 
-export async function writeWikiPageBody(_streamId: string, slug: string, body: string): Promise<void> {
-  unwrap(await commands.writeWikiPageBody(slug, body));
+/** Write a wiki page — the `knowledge.write_page` command (P5.C3): the
+ *  row, its links and the file, in one audited run. Every `[[link]]` must
+ *  resolve (a dangling one is refused, named). `verifiedRefs` are files
+ *  re-checked against the page: their freshness pins move to now. */
+export async function writeWikiPage(
+  slug: string,
+  body: string,
+  options?: { verifiedRefs?: string[] },
+): Promise<void> {
+  await runCommand("knowledge.write_page", {
+    slug,
+    body,
+    verified_refs: options?.verifiedRefs ?? [],
+  });
 }
 
-export async function deleteWikiPage(_streamId: string, slug: string): Promise<void> {
-  unwrap(await commands.deleteWikiPage(slug));
+/** Delete a wiki page (`knowledge.delete_page`, destructive): the person
+ *  has confirmed. */
+export async function deleteWikiPage(slug: string, confirmed: boolean): Promise<void> {
+  await runCommand("knowledge.delete_page", { slug }, confirmed);
 }
 
 export function subscribeWikiPageEvents(onEvent: (slug: string) => void): () => void {

@@ -830,9 +830,8 @@ cons", "should I", "best way", "is it better", "advice on",
 "recommend", "rationale behind"). Either match injects a
 `<wiki-capture-hint>` block into `additionalContext`. The hint points
 the agent at the `oxplow-wiki-capture` skill (search existing notes →
-append-or-create → `mcp__oxplow__resync_wiki_page`) and notes that the
-write-guard wiki carve-out applies, so capture works on read-only
-threads too. Fix/feature/yes-ack prompts pay no token cost — the
+append-or-create → `run_command knowledge.write_page`) and notes that
+the command is open to read-only threads too. Fix/feature/yes-ack prompts pay no token cost — the
 builder returns `null`. The Stop hook no longer carries a
 wiki-capture branch; the old directive fired post-hoc, after the
 answer had already gone to chat with no durable home. The standing
@@ -1366,8 +1365,8 @@ Each row carries `ref_type` so you can tell e.g. a commit's
 `buildWikiPageMcpTools` (`crates/oxplow-mcp/src/lib.rs`) surfaces the
 per-project wiki (`wiki_page` table + `.oxplow/wiki/*.md` files — see
 `data-model.md`). Tools are metadata-only: `list_wiki_pages`,
-`get_wiki_page_metadata`, `resync_wiki_page`, `search_wiki_pages` (title),
-`search_wiki_page_bodies` (content), `delete_wiki_page`, and
+`get_wiki_page_metadata`, `search_wiki_pages` (title),
+`search_wiki_page_bodies` (content), and
 `list_stale_wiki_pages` (pages with ≥1 file ref whose pinned snapshot is
 older than the file's latest snapshot — same staleness rule as the UI
 `list_wiki_freshness` reader, surfaced so the agent can find drifted
@@ -1385,13 +1384,9 @@ drifted | unchanged | not_a_ref | no_pin | binary; the diff is capped
 (`truncated` flags it). The wiki-only
 `find_wiki_pages_for_file` was removed in favour of `list_backlinks`
 (below) — every cross-kind backlinks question goes through one tool
-now. **There is intentionally no create/update tool** —
-the agent writes bodies directly with its Write/Edit tools on
-`.oxplow/wiki/<slug>.md` (far cheaper than round-tripping full
-bodies through MCP args). The notes watcher re-syncs metadata + body
-on every file event; `resync_wiki_page` forces an immediate re-baseline
-when the agent wants freshness pinned to the current HEAD without
-waiting for the debounce.
+now. **Writes are commands** — `run_command knowledge.write_page` /
+`delete_page` / `link` / `resync` ([knowledge.md](./knowledge.md)); the
+write guard refuses an agent's Write/Edit into `.oxplow/wiki/`.
 
 The watcher emits `OxplowEvent::WikiPagesChanged { slug }` after
 each successful resync. The slug is the file stem of the touched
@@ -1437,12 +1432,13 @@ lookbehind,
 so backlinks/freshness work without parser changes. The
 
 **Link checker (MCP write-tool feedback).** The MCP write tools
-`create_task`, `update_task`, `complete_task`, `add_thread_note`, and
-`record_wiki_page_update` run `oxplow_app::link_check::check_links` over
+`create_task`, `update_task`, `complete_task` and `add_thread_note` run
+`oxplow_app::link_check::check_links` over
 the body/summary they just persisted and return a `link_warnings` array
 (omitted when empty) naming each invalid `[[…]]` — unrecognized syntax
 or a dangling target — so the authoring agent self-corrects in the same
-turn. The shared classifier is `oxplow_domain::refs::classify_wikilinks`
+turn. `knowledge.write_page` refuses instead, through the same
+synchronous core (`check_links_in`). The shared classifier is `oxplow_domain::refs::classify_wikilinks`
 (the single source of truth for "is this interior a real ref"), and
 existence probes reuse the `ref_resolver` store/git/fs surfaces. The
 `<wiki-capture-hint>` block injected on exploration UserPromptSubmits

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`knowledge.page.deleted@1`: a knowledge page is gone, its row and\nedges with it.",
+  "properties": {
+    "page": {
+      "description": "`wiki:<slug>`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "page"
+  ],
+  "title": "KnowledgePageDeletedV1",
+  "type": "object"
+}

@@ -314,11 +314,6 @@ pub struct AddThreadNoteParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DeleteNoteParams {
-    pub id: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ListCommentsParams {
     /// `"thread"` (id = `thr…`) or `"stream"` (id = `str…`). Optional —
     /// when omitted it's inferred from `id`'s prefix.
@@ -589,28 +584,6 @@ pub struct ListDeadLettersParams {
     /// Include `retried` and `discarded` letters too (default: `pending` only).
     #[serde(default)]
     pub all: bool,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ResyncNoteParams {
-    pub slug: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RecordWikiPageUpdateParams {
-    /// Wiki slug (without `.md`).
-    pub slug: String,
-    /// Repo-relative paths the agent re-read against the new body
-    /// during this edit. Each MUST appear as a `[[…]]` or
-    /// `[label](file:…)` reference in the new body, or the call
-    /// errors. Pass `[]` to declare "I didn't re-check any refs
-    /// this turn" — empty is allowed but the field is required so
-    /// the agent can't sleepwalk past freshness bookkeeping.
-    pub verified_refs: Vec<String>,
-    /// Repo-relative paths the agent intentionally removed from
-    /// the page in this edit. Each MUST NOT appear in the new
-    /// body. Pass `[]` if no refs were removed.
-    pub removed_refs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -3186,23 +3159,6 @@ impl OxplowMcp {
         json_result(&serde_json::json!({ "ok": true, "noteId": params.0.note_id }))
     }
 
-    #[tool(description = "Delete a note by id.")]
-    async fn delete_wiki_page(
-        &self,
-        params: Parameters<DeleteNoteParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind("delete_wiki_page", "id", &params.0.id, ID_NOTE)?;
-        let id = parse_note_id(&params.0.id)?;
-        self.services
-            .work_note_store
-            .delete(&id)
-            .await
-            .map_err(internal)?;
-        Ok(CallToolResult::success(vec![ContentBlock::text("deleted")]))
-    }
-
-    // ---------- wiki pages ----------
-
     #[tool(description = "List all wiki pages (metadata only).")]
     async fn list_wiki_pages(&self) -> Result<CallToolResult, McpError> {
         let notes = self
@@ -4554,202 +4510,6 @@ impl OxplowMcp {
             .emit(oxplow_app::OxplowEvent::LspServersChanged);
         json_result(&entry)
     }
-
-    #[tool(description = "Re-read a wiki page's body file and refresh the FTS index.")]
-    async fn resync_wiki_page(
-        &self,
-        params: Parameters<ResyncNoteParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let slug = params.0.slug;
-        let mut note = self
-            .services
-            .wiki_page_store
-            .get(&slug)
-            .await
-            .map_err(internal)?
-            .ok_or_else(|| McpError::invalid_params(format!("note not found: {slug}"), None))?;
-        let body_path = self
-            .services
-            .layout
-            .project_dir
-            .join(".oxplow")
-            .join("wiki")
-            .join(format!("{slug}.md"));
-        let body = std::fs::read_to_string(&body_path).unwrap_or_default();
-        // Refresh excerpt + size; upsert re-syncs the FTS mirror.
-        note.body_excerpt = body.chars().take(500).collect();
-        note.body_size_bytes = body.len() as i64;
-        note.updated_at = oxplow_domain::Timestamp::now();
-        self.services
-            .wiki_page_store
-            .upsert(&note)
-            .await
-            .map_err(internal)?;
-        json_result(&note)
-    }
-
-    #[tool(
-        description = "Record a wiki page edit's freshness bookkeeping — call AFTER writing \
-                       a `.oxplow/wiki/<slug>.md` file. `verified_refs` = paths you re-read \
-                       against the new body (their freshness pin advances to current); \
-                       `removed_refs` = paths you deleted from it. Both REQUIRED (`[]` if none). \
-                       A verified path may be a file under a directory the body cites via \
-                       `[[dir:…]]` — list the specific file to give it a precise pin. Refs left \
-                       in place without re-checking go in NEITHER list, keeping their existing \
-                       pin so the staleness signal stays honest. A non-empty `link_warnings` \
-                       array in the response flags invalid `[[…]]` wikilinks in the page body \
-                       (unrecognized syntax or dangling target) — fix the page so they resolve."
-    )]
-    async fn record_wiki_page_update(
-        &self,
-        params: Parameters<RecordWikiPageUpdateParams>,
-    ) -> Result<CallToolResult, McpError> {
-        use oxplow_db::page_ref_projections::{KIND_FILE, KIND_WIKI, RT_WIKI_FILE};
-        let p = params.0;
-        let slug = p.slug;
-        // Force a synchronous re-sync of the wiki page so the
-        // page_ref state matches the on-disk body before we
-        // validate / re-stamp. The fs-watcher will run again later
-        // but that's a no-op merge.
-        let resolved_version = {
-            // Wiki pages are project-wide; freshness is tagged against
-            // the primary stream's snapshot service. Pseudo-stream
-            // migration tracked in epic #28's follow-up.
-            let Some(svc) = self.services.snapshot_captures.primary() else {
-                return Err(internal("primary snapshot service not registered"));
-            };
-            let stream_id = *svc.stream_id();
-            match svc.store().latest_snapshot_id_for_stream(stream_id).await {
-                Ok(Some(snapshot_id)) => svc.resolve_file_version(snapshot_id).await.ok(),
-                _ => None,
-            }
-        };
-        oxplow_app::wiki_pages::sync_from_disk_with_refs_versioned(
-            &self.services.layout.project_dir,
-            &self.services.wiki_page_store,
-            Some(&self.services.page_ref_store),
-            &slug,
-            resolved_version.clone(),
-        )
-        .await
-        .map_err(internal)?;
-        // Read the body now reflected in the DB to validate against
-        // the agent's declarations.
-        let body_path = self
-            .services
-            .layout
-            .project_dir
-            .join(".oxplow")
-            .join("wiki")
-            .join(format!("{slug}.md"));
-        let body = std::fs::read_to_string(&body_path)
-            .map_err(|e| internal(format!("read {slug}.md: {e}")))?;
-        let parsed = oxplow_app::wiki_pages::parse_refs(&body);
-        let body_files: std::collections::HashSet<&str> =
-            parsed.file_refs.iter().map(|s| s.as_str()).collect();
-        // removed_refs MUST NOT appear in body.
-        let still_present: Vec<&String> = p
-            .removed_refs
-            .iter()
-            .filter(|path| body_files.contains(path.as_str()))
-            .collect();
-        if !still_present.is_empty() {
-            return Err(McpError::invalid_params(
-                format!(
-                    "removed_refs entries still referenced by the body: {}",
-                    still_present
-                        .iter()
-                        .map(|s| s.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                None,
-            ));
-        }
-        // A verified_ref is acceptable if the body cites it directly
-        // as a file, OR it's a file living under a directory the body
-        // cites (`[[dir:…]]`) — the "I verified a fact against a file
-        // I reference only by its directory" case. Anything else is
-        // genuinely unreferenced and rejected.
-        let missing: Vec<&String> = p
-            .verified_refs
-            .iter()
-            .filter(|path| {
-                !body_files.contains(path.as_str())
-                    && !oxplow_app::wiki_pages::path_under_any_dir(path, &parsed.dir_refs)
-            })
-            .collect();
-        if !missing.is_empty() {
-            return Err(McpError::invalid_params(
-                format!(
-                    "verified_refs entries are neither referenced by the body nor under a \
-                     cited directory: {}. Reference the file in the body, or name a file \
-                     under a [[dir:…]] the page cites.",
-                    missing
-                        .iter()
-                        .map(|s| s.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                None,
-            ));
-        }
-        // Pin verified refs to the current snapshot. A body file ref
-        // re-stamps its existing edge; a file under a cited dir is
-        // *materialized* as a new `(wiki→file)` edge (the wiki sync
-        // preserves it as long as the dir ref stays). Without a
-        // resolved snapshot (no snapshot service, e.g. tests) the body
-        // ref can't be re-stamped, but a materialized edge is still
-        // created — unpinned, which the staleness signal treats as
-        // stale until a real snapshot lands.
-        let mut restamped = Vec::new();
-        for path in &p.verified_refs {
-            if body_files.contains(path.as_str()) {
-                if let Some(v) = resolved_version.as_ref() {
-                    self.services
-                        .page_ref_store
-                        .restamp_edge_version(
-                            KIND_WIKI,
-                            &slug,
-                            KIND_FILE,
-                            path,
-                            RT_WIKI_FILE,
-                            v.local_snapshot_id,
-                            v.closest_git_version.clone(),
-                            v.git_version_exact,
-                        )
-                        .await
-                        .map_err(|e| internal(e.to_string()))?;
-                }
-            } else {
-                let mut edge =
-                    oxplow_db::PageRefEdge::new(KIND_WIKI, &slug, KIND_FILE, path, RT_WIKI_FILE);
-                if let Some(v) = resolved_version.as_ref() {
-                    edge = edge.with_version(
-                        v.local_snapshot_id,
-                        v.closest_git_version.clone(),
-                        v.git_version_exact,
-                    );
-                }
-                self.services
-                    .page_ref_store
-                    .upsert_edge(edge)
-                    .await
-                    .map_err(|e| internal(e.to_string()))?;
-            }
-            restamped.push(path.clone());
-        }
-        let mut result = serde_json::json!({
-            "slug": slug,
-            "verified": restamped,
-            "removed": p.removed_refs,
-        });
-        let link_warnings = oxplow_app::link_check::check_links(&self.services, &body).await;
-        if !link_warnings.is_empty() {
-            result["link_warnings"] = serde_json::to_value(&link_warnings).map_err(internal)?;
-        }
-        json_result(&result)
-    }
 }
 
 fn parse_status(s: &str) -> Result<TaskStatus, McpError> {
@@ -4953,7 +4713,6 @@ const WRITE_TOOLS: &[&str] = &[
     "resolve_comment",
     "delegate_query",
     "record_query_finding",
-    "delete_wiki_page",
     "add_followup",
     "remove_followup",
     "create_task",
@@ -4966,8 +4725,6 @@ const WRITE_TOOLS: &[&str] = &[
     "dispatch_task",
     "fork_thread",
     "lsp_install_server",
-    "resync_wiki_page",
-    "record_wiki_page_update",
 ];
 
 /// Stamp `read_only_hint = true` on tools in [`READ_ONLY_TOOLS`], leaving any
@@ -7408,75 +7165,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn record_wiki_page_update_validates_removed_refs_absent_from_body() {
-        let (proj, _svc, server) = boot();
-        seed_wiki(
-            proj.path(),
-            "intro",
-            "see [[crates/foo.rs]] and [[crates/bar.rs]]",
-        )
-        .await;
-        let err = server
-            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
-                slug: "intro".into(),
-                verified_refs: vec![],
-                removed_refs: vec!["crates/foo.rs".into()],
-            }))
-            .await
-            .expect_err("foo.rs still in body, should error");
-        let msg = format!("{err:?}");
-        assert!(
-            msg.contains("crates/foo.rs"),
-            "error should mention the offending path: {msg}",
-        );
-    }
-
-    #[tokio::test]
-    async fn record_wiki_page_update_validates_verified_refs_present_in_body() {
-        let (proj, _svc, server) = boot();
-        seed_wiki(proj.path(), "intro", "no refs here").await;
-        let err = server
-            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
-                slug: "intro".into(),
-                verified_refs: vec!["crates/foo.rs".into()],
-                removed_refs: vec![],
-            }))
-            .await
-            .expect_err("foo.rs not in body, should error");
-        let msg = format!("{err:?}");
-        assert!(
-            msg.contains("crates/foo.rs"),
-            "error should mention the missing path: {msg}",
-        );
-    }
-
-    #[tokio::test]
-    async fn record_wiki_page_update_accepts_empty_lists() {
-        // Empty verified + removed is allowed — the agent declared
-        // "I didn't re-check or remove anything in this edit." Body
-        // sync still happens, but no re-stamp.
-        let (proj, _svc, server) = boot();
-        seed_wiki(proj.path(), "intro", "see [[crates/foo.rs]]").await;
-        server
-            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
-                slug: "intro".into(),
-                verified_refs: vec![],
-                removed_refs: vec![],
-            }))
-            .await
-            .expect("empty lists are allowed");
-    }
-
-    #[tokio::test]
     async fn wiki_ref_drift_reports_status_per_ref() {
-        let (proj, _svc, server) = boot();
+        let (proj, svc, server) = boot();
         seed_wiki(proj.path(), "intro", "see [[crates/foo.rs]]").await;
-        server
-            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
-                slug: "intro".into(),
-                verified_refs: vec![],
-                removed_refs: vec![],
-            }))
+        oxplow_app::wiki_pages::sync_page(&svc.db, &svc.event_schemas, proj.path(), "intro")
             .await
             .unwrap();
         // The file IS referenced but has no pin (no snapshot service in tests).
@@ -7502,62 +7194,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn record_wiki_page_update_accepts_file_under_cited_dir_and_materializes_edge() {
-        let (proj, services, server) = boot();
-        // Body cites the directory, not the file.
-        seed_wiki(proj.path(), "intro", "see [[dir:crates/cp]] for details").await;
-        server
-            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
-                slug: "intro".into(),
-                verified_refs: vec!["crates/cp/src/lib.rs".into()],
-                removed_refs: vec![],
-            }))
-            .await
-            .expect("a file under a cited dir is an acceptable verified_ref");
-        // The verification edge was materialized as a wiki→file edge.
-        let backlinks = services
-            .page_ref_store
-            .list_backlinks("file", "crates/cp/src/lib.rs", None)
-            .await
-            .unwrap();
-        assert!(
-            backlinks.iter().any(|e| e.source_id == "intro"),
-            "expected a materialized wiki:intro → file edge, got {backlinks:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn record_wiki_page_update_rejects_file_not_under_any_cited_dir() {
-        let (proj, _svc, server) = boot();
-        seed_wiki(proj.path(), "intro", "see [[dir:crates/cp]] only").await;
-        let err = server
-            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
-                slug: "intro".into(),
-                verified_refs: vec!["crates/other/src/main.rs".into()],
-                removed_refs: vec![],
-            }))
-            .await
-            .expect_err("a file outside every cited dir must be rejected");
-        let msg = format!("{err:?}");
-        assert!(
-            msg.contains("crates/other/src/main.rs"),
-            "error should name the offending path: {msg}"
-        );
-    }
-
-    #[tokio::test]
     async fn get_wiki_page_metadata_includes_stale_refs_field() {
         // The enriched metadata carries `stale_refs` (empty here — no
         // snapshots seeded), which is what distinguishes it from the
         // bulk `list_wiki_pages` payload.
-        let (proj, _svc, server) = boot();
+        let (proj, svc, server) = boot();
         seed_wiki(proj.path(), "intro", "see [[crates/foo.rs]]").await;
-        server
-            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
-                slug: "intro".into(),
-                verified_refs: vec![],
-                removed_refs: vec![],
-            }))
+        oxplow_app::wiki_pages::sync_page(&svc.db, &svc.event_schemas, proj.path(), "intro")
             .await
             .unwrap();
         let r = server

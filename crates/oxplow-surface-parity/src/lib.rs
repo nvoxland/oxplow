@@ -228,8 +228,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("fork_thread"),
     agent("list_stale_wiki_pages"),
     agent("wiki_ref_drift"),
-    agent("resync_wiki_page"),
-    agent("record_wiki_page_update"),
     agent("find_wiki_pages_for_wiki_page"),
     // ---- collection (effort-scoped observations) ----
     agent("ingest_coverage"),
@@ -334,15 +332,10 @@ pub const MANIFEST: &[Capability] = &[
     ui("set_comment_anchor"),
     ui("relink_comment"),
     ui("delete_comment"),
-    // ---- ui-only: wiki (bodies stay direct file writes) ----
-    ui("upsert_wiki_page"),
-    both("delete_wiki_page"),
+    // ---- ui-only: wiki (writes are the knowledge.* commands) ----
     ui("read_wiki_page_body"),
-    ui("write_wiki_page_body"),
     // ---- ui-only: wiki freshness ----
     ui("list_wiki_freshness"),
-    ui("mark_wiki_ref_verified"),
-    ui("mark_all_wiki_refs_verified"),
     // ---- ui-only: page visits ----
     ui("record_page_visit"),
     ui("list_recent_page_visits"),

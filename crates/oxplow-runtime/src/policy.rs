@@ -61,7 +61,8 @@ pub struct PolicyFacts<'a> {
     /// Every other stream's worktree (the primary checkout included). No
     /// thread edits them (workspace isolation).
     pub other_roots: &'a [PathBuf],
-    /// The primary project, whose `.oxplow/wiki` every stream shares.
+    /// The primary project, whose `.oxplow/wiki` pages every stream shares
+    /// (written by `knowledge.write_page`, never by a tool).
     pub project_dir: &'a Path,
     /// Some thread in the stream has an `in_progress` task.
     pub has_open_effort: bool,
@@ -120,14 +121,10 @@ pub fn normalize_path(path: &Path, base: &Path) -> PathBuf {
     }
 }
 
-/// The other stream's worktree `path` falls in, if any. The shared wiki
-/// (`<project>/.oxplow/wiki`) belongs to every stream.
+/// The other stream's worktree `path` falls in, if any.
 fn foreign_root<'a>(path: &str, facts: &'a PolicyFacts<'_>) -> Option<&'a Path> {
     let p = Path::new(path);
     if !p.is_absolute() || p.starts_with(facts.worktree_root) {
-        return None;
-    }
-    if p.starts_with(facts.project_dir.join(".oxplow").join("wiki")) {
         return None;
     }
     facts
@@ -173,6 +170,16 @@ pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDe
         kind: intent.kind,
         paths: &resolved,
     };
+    // A wiki page is written by command, whatever the thread.
+    for p in intent.paths {
+        if let Some(reason) = crate::write_guard::wiki_page_reason(Some(p), Some(facts.project_dir))
+        {
+            return PolicyDecision::Deny {
+                layer: DenyLayer::WriteGuard,
+                reason,
+            };
+        }
+    }
     // Another stream's tree is off limits to every thread, writer or not.
     for p in intent.paths {
         if let Some(root) = foreign_root(p, facts) {
@@ -462,11 +469,16 @@ mod tests {
             )),
             Some(DenyLayer::WriteGuard)
         );
-        // The shared wiki lives in the primary project and stays writable.
-        assert_eq!(
-            decide_in_worktree(ThreadStatus::Queued, false, &["/proj/.oxplow/wiki/x.md"]),
-            PolicyDecision::Allow
-        );
+        // The shared wiki is written by command, not by a tool, whatever
+        // the thread.
+        for status in [ThreadStatus::Queued, ThreadStatus::Active] {
+            let d = decide_in_worktree(status, true, &["/proj/.oxplow/wiki/x.md"]);
+            assert!(
+                matches!(&d, PolicyDecision::Deny { layer: DenyLayer::WriteGuard, reason }
+                    if reason.contains("knowledge.write_page")),
+                "{d:?}"
+            );
+        }
     }
 
     #[test]

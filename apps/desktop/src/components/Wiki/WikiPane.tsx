@@ -5,7 +5,7 @@ import {
   searchWikiPages,
   subscribeUsageEvents,
   subscribeWikiPageEvents,
-  writeWikiPageBody,
+  writeWikiPage,
   type Stream,
   type UsageRollup,
   type WikiPageSearchHit,
@@ -132,7 +132,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
       return;
     }
     try {
-      await writeWikiPageBody(streamId, slug, `# ${slug}\n\n`);
+      await writeWikiPage(slug, `# ${slug}\n\n`);
       setNewSlugDraft(null);
       setNewSlugError(null);
       onOpenWikiPage(slug);
@@ -172,10 +172,12 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
           enabled: !!streamId,
           run: async () => {
             if (!streamId) return;
-            try { await deleteWikiPage(streamId, contextMenu.slug); } catch (error) {
+            const slug = contextMenu.slug;
+            setContextMenu(null);
+            if (!window.confirm(`Delete wiki page "${slug}"? The file will be removed.`)) return;
+            try { await deleteWikiPage(slug, true); } catch (error) {
               logUi("error", "deleteWikiPage failed", { error: String(error) });
             }
-            setContextMenu(null);
           },
         },
       ]

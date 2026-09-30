@@ -268,11 +268,8 @@ macro_rules! oxplow_command_table {
                 get_agent_turn => $crate::commands::hooks::get_agent_turn { turn_id: ::oxplow_domain::AgentTurnId } -> Option<::oxplow_domain::AgentTurn>,
                 // wiki
                 list_wiki_pages => $crate::commands::wiki::list_wiki_pages {} -> Vec<::oxplow_db::WikiPage>,
-                upsert_wiki_page => $crate::commands::wiki::upsert_wiki_page { note: ::oxplow_db::WikiPage } -> (),
-                delete_wiki_page => $crate::commands::wiki::delete_wiki_page { slug: String } -> (),
                 search_wiki_titles => $crate::commands::wiki::search_wiki_titles { query: String, limit: u32 } -> Vec<::oxplow_db::WikiPage>,
                 read_wiki_page_body => $crate::commands::wiki::read_wiki_page_body { slug: String } -> String,
-                write_wiki_page_body => $crate::commands::wiki::write_wiki_page_body { slug: String, body: String } -> (),
                 // events (the log's dead-letter queue)
                 list_dead_letters => $crate::commands::events::list_dead_letters { all: Option<bool> } -> Vec<::oxplow_db::DeadLetter>,
                 retry_dead_letter => $crate::commands::events::retry_dead_letter { id: i64 } -> ::oxplow_db::DeadLetter,
@@ -282,8 +279,6 @@ macro_rules! oxplow_command_table {
                 list_outbound => $crate::commands::page_refs::list_outbound { source_kind: String, source_id: String, limit: Option<i64> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
                 // wiki_freshness
                 list_wiki_freshness => $crate::commands::wiki_freshness::list_wiki_freshness { slug: String } -> Vec<$crate::commands::wiki_freshness::WikiRefFreshness>,
-                mark_wiki_ref_verified => $crate::commands::wiki_freshness::mark_wiki_ref_verified { slug: String, path: String } -> (),
-                mark_all_wiki_refs_verified => $crate::commands::wiki_freshness::mark_all_wiki_refs_verified { slug: String } -> usize,
                 // search
                 search => $crate::commands::search::search { query: String, stream_id: Option<String>, kinds: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
                 query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,

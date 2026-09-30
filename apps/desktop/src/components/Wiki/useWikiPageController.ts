@@ -4,7 +4,7 @@ import {
   listWikiPages,
   readWikiPageBody,
   subscribeWikiPageEvents,
-  writeWikiPageBody,
+  writeWikiPage,
   type Stream,
   type WikiPageSummary,
 } from "../../api.js";
@@ -104,7 +104,7 @@ export function useWikiPageController(stream: Stream, slug: string, onClosed: ()
 
   const save = useCallback(async () => {
     try {
-      await writeWikiPageBody(stream.id, slug, draft);
+      await writeWikiPage(slug, draft);
       setBody(draft);
     } catch (error) {
       recordOpError({
@@ -117,7 +117,7 @@ export function useWikiPageController(stream: Stream, slug: string, onClosed: ()
   const create = useCallback(async () => {
     const seed = `# ${slug}\n\n`;
     try {
-      await writeWikiPageBody(stream.id, slug, seed);
+      await writeWikiPage(slug, seed);
       setNotFound(false);
       setBody(seed);
       setDraft(seed);
@@ -134,7 +134,7 @@ export function useWikiPageController(stream: Stream, slug: string, onClosed: ()
   const remove = useCallback(async () => {
     if (!window.confirm(`Delete wiki page "${slug}"? The file will be removed.`)) return;
     try {
-      await deleteWikiPage(stream.id, slug);
+      await deleteWikiPage(slug, true);
       onClosed();
     } catch (error) {
       recordOpError({

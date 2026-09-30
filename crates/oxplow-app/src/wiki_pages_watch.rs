@@ -1,20 +1,20 @@
 //! fs watcher that keeps the `wiki_page` rows in sync with the
-//! `.oxplow/wiki/` markdown files.
-//!
-//! Mirrors `src/git/notes-watch.ts` from main: an initial scan on
-//! start, then debounced per-slug re-syncs on file change. Wraps
+//! `.oxplow/wiki/` markdown files: an initial scan on start, then
+//! debounced per-slug re-syncs ([`wiki_pages::sync_page`], logged as
+//! `system:wiki_watch`) on file change. A page `knowledge.write_page`
+//! just wrote syncs to a no-op (its body hash matches). Wraps
 //! [`oxplow_fs_watch::FsWatcher`] for the debouncing.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use oxplow_db::{SqlitePageRefStore, SqliteWikiPageStore};
+use oxplow_db::{Database, SqliteWikiPageStore};
+use oxplow_domain::EventSchemaRegistry;
 use oxplow_fs_watch::FsWatcher;
 use tracing::{info, warn};
 
 use crate::events::{EventBus, OxplowEvent};
-use crate::snapshot_capture::SnapshotCaptureService;
 use crate::wiki_pages;
 
 /// Spawn a wiki-page watcher. Holding the returned struct keeps the
@@ -30,16 +30,15 @@ impl WikiPagesWatcher {
     /// prevent the watcher from starting.
     pub async fn spawn(
         project_dir: PathBuf,
+        db: Database,
+        schemas: Arc<EventSchemaRegistry>,
         store: Arc<SqliteWikiPageStore>,
-        page_refs: Arc<SqlitePageRefStore>,
         events: EventBus,
-        snapshot_capture: Option<Arc<SnapshotCaptureService>>,
     ) -> Option<Self> {
         let dir = wiki_pages::wiki_pages_dir(&project_dir);
         std::fs::create_dir_all(&dir).ok();
 
-        match wiki_pages::scan_and_sync_all_with_refs(&project_dir, &store, Some(&page_refs)).await
-        {
+        match wiki_pages::scan_and_sync_all(&db, &schemas, &project_dir, &store).await {
             Ok(report) if report.failures.is_empty() => {
                 info!(dir = %dir.display(), synced = report.synced, "wiki pages initial scan complete");
             }
@@ -65,11 +64,6 @@ impl WikiPagesWatcher {
         // one re-sync per slug per burst is enough.
         let mut rx = watcher.subscribe_debounced(Duration::from_millis(250));
 
-        let project_dir_for_loop = project_dir.clone();
-        let store_for_loop = store.clone();
-        let page_refs_for_loop = page_refs.clone();
-        let events_for_loop = events.clone();
-        let snapshot_capture_for_loop = snapshot_capture.clone();
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
@@ -80,40 +74,13 @@ impl WikiPagesWatcher {
                         let Some(slug) = evt.path.file_stem().and_then(|s| s.to_str()) else {
                             continue;
                         };
-                        // Pin the snapshot the wiki -> file edges
-                        // for this re-sync should be tagged against.
-                        // Without a snapshot service (tests) the
-                        // edges land without version data.
-                        let file_version = match snapshot_capture_for_loop.as_ref() {
-                            Some(svc) => {
-                                match svc
-                                    .store()
-                                    .latest_snapshot_id_for_stream(*svc.stream_id())
-                                    .await
-                                {
-                                    Ok(Some(snapshot_id)) => {
-                                        svc.resolve_file_version(snapshot_id).await.ok()
-                                    }
-                                    _ => None,
-                                }
-                            }
-                            None => None,
-                        };
-                        if let Err(err) = wiki_pages::sync_from_disk_with_refs_versioned(
-                            &project_dir_for_loop,
-                            &store_for_loop,
-                            Some(&page_refs_for_loop),
-                            slug,
-                            file_version,
-                        )
-                        .await
-                        {
-                            warn!(slug, ?err, "wiki page resync failed");
-                            continue;
+                        match wiki_pages::sync_page(&db, &schemas, &project_dir, slug).await {
+                            Ok(true) => events.emit(OxplowEvent::WikiPagesChanged {
+                                slug: slug.to_string(),
+                            }),
+                            Ok(false) => {}
+                            Err(err) => warn!(slug, ?err, "wiki page resync failed"),
                         }
-                        events_for_loop.emit(OxplowEvent::WikiPagesChanged {
-                            slug: slug.to_string(),
-                        });
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         warn!(skipped = n, "wiki pages watcher lagged");
@@ -147,11 +114,11 @@ mod tests {
 
         let db = oxplow_db::Database::in_memory();
         let store = Arc::new(oxplow_db::SqliteWikiPageStore::new(db.clone()));
-        let page_refs = Arc::new(oxplow_db::SqlitePageRefStore::new(db));
+        let schemas = Arc::new(EventSchemaRegistry::core());
         let events = EventBus::new();
         let mut rx = events.subscribe();
 
-        let _watcher = WikiPagesWatcher::spawn(project.clone(), store, page_refs, events, None)
+        let _watcher = WikiPagesWatcher::spawn(project.clone(), db, schemas, store, events)
             .await
             .expect("watcher to spawn");
 
