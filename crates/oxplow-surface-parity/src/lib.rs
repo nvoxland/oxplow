@@ -135,7 +135,6 @@ pub const MANIFEST: &[Capability] = &[
     // here and writes it with `config.set` (tsk411); the renderer only reads
     // it (it rides on `get_config`), so there is no IPC counterpart.
     agent("list_zones"),
-    ui("list_wiki_pages"),
     both("add_followup"),
     both("list_followups"),
     both("remove_followup"),
@@ -216,7 +215,6 @@ pub const MANIFEST: &[Capability] = &[
     // ---- both (names diverge across surfaces) ----
     both_named("thread.list", "list_threads", "list_thread_work"),
     agent("list_tasks"),
-    ui("search_wiki_titles"),
     both_named("comment.list", "list_comments_for_stream", "list_comments"),
     both_named(
         "comment.respond",
@@ -342,9 +340,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("relink_comment"),
     ui("delete_comment"),
     // ---- ui-only: wiki (writes are the knowledge.* commands) ----
-    ui("read_wiki_page_body"),
     // ---- ui-only: wiki freshness ----
-    ui("list_wiki_freshness"),
     // ---- ui-only: page visits ----
     ui("record_page_visit"),
     ui("list_recent_page_visits"),

@@ -22,7 +22,6 @@ import {
   renameWorkspacePath,
   renameThread,
   renameStream,
-  subscribeWikiPageEvents,
   subscribeWorkspaceEvents,
   openExternalUrl,
   type FinishedEntry,

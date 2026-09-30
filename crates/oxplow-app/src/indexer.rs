@@ -349,25 +349,18 @@ impl Indexer {
     // ---- wiki ----
 
     pub async fn index_wiki(&self, slug: &str) {
-        let page = self.services.wiki_page_store.get(slug).await.ok().flatten();
-        let Some(page) = page else {
-            let _ = self
-                .services
-                .search_store
-                .remove(KIND_WIKI, slug, None)
-                .await;
-            return;
-        };
-        let path = self.services.layout.project_dir.join(&page.body_path);
-        match tokio::fs::read_to_string(&path).await {
-            Ok(body) => {
+        // The body is the row's (P6.E2), written with it in the command's or
+        // the watcher's transaction — already committed when the pump
+        // hands this the event.
+        match self.services.wiki_page_store.body(slug).await {
+            Ok(Some((title, body))) => {
                 let _ = self
                     .services
                     .search_store
-                    .upsert(KIND_WIKI, slug, None, &page.title, &body)
+                    .upsert(KIND_WIKI, slug, None, &title, &body)
                     .await;
             }
-            Err(_) => {
+            _ => {
                 let _ = self
                     .services
                     .search_store

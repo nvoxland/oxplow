@@ -430,7 +430,7 @@ mod tests {
         };
         services
             .db
-            .transaction(move |tx| oxplow_db::wiki_page_store::upsert_tx(tx, &page, ""))
+            .transaction(move |tx| oxplow_db::wiki_page_store::upsert_tx(tx, &page, "", ""))
             .await
             .unwrap();
         let summary = resolve_ref(&services, "wiki", "architecture").await;

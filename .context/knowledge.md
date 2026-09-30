@@ -97,14 +97,33 @@ The primary is the stream a pin comes from (`pin_tx`), so another
 stream's newer snapshot of the file neither makes a page stale nor keeps
 a verified one stale (tsk563). `v_knowledge_ref` is the **one
 definition**: `v_knowledge_page.stale_ref_count` counts its rows,
-`KnowledgeProvider::freshness` reads it, and the Freshness page's
-`list_wiki_freshness` RPC is that reader.
+`KnowledgeProvider::freshness` reads it, and so do the wiki page's
+freshness chip and the Freshness page.
+- **`v_knowledge_body`** (P6.E2) — `ref`, `body`: each page's markdown,
+  apart from `v_knowledge_page` so listing pages never reads bodies.
+- **`v_knowledge_touch`** — which threads wrote which pages (the rail's
+  Finished section).
+
+**The body is in the row** (`wiki_page.body`, V125). `.oxplow/.gitignore`
+is `*`, so the workspace filter hides `.oxplow/wiki/*.md` — the file
+can't be the UI's read path. `write_page_tx` writes the body with the
+row, so the command, `link`, `resync` and the watcher's `sync_page_tx`
+all keep it; V125 cleared `body_hash` so the first boot's scan restated
+every page from its file. The file is still the page (and still written
+inside the run); the row now carries its text as well as its hash.
+
 `wiki_ref_drift` (MCP) shows one stale ref's diff. Bodies are searched
 with the site `search` tool: the `search.index` pump consumer indexes a
 page from `knowledge.page.written` / `deleted` (written by command or by
-hand alike). The MCP read tools went; the desktop still reads through
-its `list_wiki_pages` / `read_wiki_page_body` RPCs until the knowledge
-pages move onto the models (P6).
+hand alike), reading the body from the row. The old excerpt-only
+`wiki_page_fts` mirror is gone (V125).
+
+**The desktop** (`apps/desktop/src/knowledge.ts`) reads the index, a
+page and its freshness from these models and finds pages with the site
+search (`kinds: ["wiki"]`, matches marked `«…»`); every wiki surface
+re-reads when a knowledge model changes (`knowledgeChanged`). The RPCs
+`list_wiki_pages`, `read_wiki_page_body`, `search_wiki_titles` and
+`list_wiki_freshness` are gone.
 
 ## The capability
 

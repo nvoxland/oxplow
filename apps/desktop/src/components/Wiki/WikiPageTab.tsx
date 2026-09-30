@@ -3,7 +3,7 @@ import {
   writeWikiPage,
   type Stream,
 } from "../../api.js";
-import type { WikiRefFreshness } from "../../tauri-bridge/generated/bindings.js";
+import type { WikiRefFreshness } from "../../knowledge.js";
 import {
   type WikiFreshnessLevel,
   type WikiFreshnessSummary,

@@ -82,24 +82,6 @@ async fn list_closed_threads_empty_for_unknown_stream() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_wiki_pages_empty_for_fresh_project() {
-    let app = TestApp::build();
-    let notes = commands::generated::list_wiki_pages(app.state())
-        .await
-        .unwrap();
-    assert!(notes.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn search_wiki_titles_empty_input_returns_empty() {
-    let app = TestApp::build();
-    let hits = commands::generated::search_wiki_titles(app.state(), "".into(), 10)
-        .await
-        .unwrap();
-    assert!(hits.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_recent_page_visits_empty_for_fresh_project() {
     let app = TestApp::build();
     let v = commands::generated::list_recent_page_visits(app.state(), 10, None)
@@ -533,17 +515,6 @@ async fn search_returns_empty_for_fresh_project() {
     .await
     .unwrap()
     .is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn wiki_freshness_reads_for_unknown_slug() {
-    let app = TestApp::build();
-    assert!(
-        commands::generated::list_wiki_freshness(app.state(), "no-slug".into())
-            .await
-            .unwrap()
-            .is_empty()
-    );
 }
 
 // ---- effort reads ----

@@ -104,5 +104,5 @@ pub use token_usage_store::{
     AgentTokenUsage, NewAgentTokenUsage, SqliteTokenUsageStore, TokenUsageTotals,
 };
 pub use tool_call_store::{NewToolCall, SqliteToolCallStore};
-pub use wiki_page_store::{SqliteWikiPageStore, WikiPage, WikiPageSearchHit, WikiPageStore};
+pub use wiki_page_store::{SqliteWikiPageStore, WikiPage};
 pub use wiki_page_thread_updates::{SqliteWikiPageThreadUpdateStore, WikiPageThreadUpdate};

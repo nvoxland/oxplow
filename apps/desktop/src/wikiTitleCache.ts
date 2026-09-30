@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { listWikiPages, subscribeWikiPageEvents } from "./api.js";
+import { subscribeOxplowEvents } from "./api.js";
+import { knowledgeChanged, readWikiPages } from "./knowledge.js";
 
 /**
  * Shared in-memory slug → title map. The wiki body markdown renderer
@@ -27,7 +28,7 @@ async function refresh(): Promise<void> {
   if (inFlight) return inFlight;
   inFlight = (async () => {
     try {
-      const pages = await listWikiPages("");
+      const pages = await readWikiPages();
       const next = new Map<string, string>();
       for (const p of pages) {
         if (p.slug && p.title) next.set(p.slug, p.title);
@@ -47,8 +48,8 @@ async function refresh(): Promise<void> {
 let unsubscribeEvents: (() => void) | null = null;
 function ensureSubscribed() {
   if (unsubscribeEvents) return;
-  unsubscribeEvents = subscribeWikiPageEvents(() => {
-    void refresh();
+  unsubscribeEvents = subscribeOxplowEvents((event) => {
+    if (knowledgeChanged(event as Record<string, unknown>)) void refresh();
   });
 }
 

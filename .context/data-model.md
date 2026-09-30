@@ -945,8 +945,8 @@ the row holds what's derived from the body: `slug`, `title`,
 `body_path`, `body_excerpt`, `body_size_bytes`, the parsed
 `file_refs_json` / `dir_refs_json` (`[[dir:…]]`) /
 `related_notes_json`, `created_at`, `updated_at`, and `body_hash` (V116:
-the hash of the body it was written from). FTS5 mirror
-`wiki_page_fts` (title + excerpt). The one writer is
+the hash of the body it was written from), and `body` (V125, P6.E2:
+the text itself, which `v_knowledge_body` publishes). The one writer is
 `wiki_page_store::upsert_tx` / `delete_tx`, inside
 `knowledge.write_page`'s transaction or the watcher's — see
 [knowledge.md](./knowledge.md) for the write path, pins and hand-edit
@@ -1020,11 +1020,10 @@ existing pin — that's how "this content relies on a stale source" stays
 accurate ([knowledge.md](./knowledge.md)).
 Skill prompt at `crates/oxplow-plugin/assets/oxplow-wiki-capture.SKILL.md`.
 
-**User-facing Freshness view.** The
-`list_wiki_freshness(slug)` IPC
-(`crates/oxplow-tauri-ipc/src/commands/wiki_freshness.rs`) joins
-`page_ref` with the latest `file_snapshot` per target path,
-returning a `stale: bool` per ref. `WikiFreshnessPage` renders
+**User-facing Freshness view.** `v_knowledge_ref` (read by
+`knowledge.ts`'s `readWikiFreshness`) joins `page_ref` with the latest
+primary-stream `file_snapshot` per target path, a `stale` flag per ref.
+`WikiFreshnessPage` renders
 the table with per-ref + per-page "Mark verified" buttons, which
 re-write the page with those refs in `verified_refs`
 (`knowledge.write_page`). The wiki page chrome adds a `Freshness (N stale)` action

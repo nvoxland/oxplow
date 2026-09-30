@@ -189,7 +189,7 @@ pub fn write_page_tx(
         created_at,
         updated_at,
     };
-    oxplow_db::wiki_page_store::upsert_tx(conn, &page, &body_hash(body))?;
+    oxplow_db::wiki_page_store::upsert_tx(conn, &page, body, &body_hash(body))?;
 
     let pin = pin_tx(conn)?;
     let mut edges = wiki_edges(slug, body);
@@ -1233,6 +1233,60 @@ mod tests {
         );
         assert!(fx.svc.wiki_page_store.get("hand").await.unwrap().is_none());
         assert_eq!(events_of(&fx, "knowledge.page.deleted").await.len(), 1);
+    }
+
+    async fn body_of(fx: &crate::test_fixtures::EffortFixture, page: &str) -> Option<String> {
+        let out = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT body FROM v_knowledge_body WHERE ref = ?1",
+                vec![oxplow_db::SqlCell::Text(page.into())],
+                None,
+            )
+            .await
+            .unwrap();
+        out.rows.first().map(|r| match &r[0] {
+            oxplow_db::SqlCell::Text(t) => t.clone(),
+            other => panic!("{other:?}"),
+        })
+    }
+
+    /// P6.E2: a page's body is in its row (the UI reads `v_knowledge_body`:
+    /// `.oxplow/` is ignored, so the file isn't readable through the
+    /// workspace), written with it by the command and by the watcher.
+    #[tokio::test]
+    async fn the_body_reads_back_from_v_knowledge_body() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        run(
+            &fx,
+            WRITE_PAGE,
+            json!({ "slug": "notes", "body": "# Notes\n\nFirst.\n" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            body_of(&fx, "wiki:notes").await.as_deref(),
+            Some("# Notes\n\nFirst.\n")
+        );
+
+        std::fs::write(
+            page_path(&dir(&fx), "notes"),
+            "# Notes\n\nEdited by hand.\n",
+        )
+        .unwrap();
+        assert!(crate::wiki_pages::sync_page(
+            &fx.svc.db,
+            &fx.svc.event_schemas,
+            &dir(&fx),
+            "notes"
+        )
+        .await
+        .unwrap());
+        assert_eq!(
+            body_of(&fx, "wiki:notes").await.as_deref(),
+            Some("# Notes\n\nEdited by hand.\n")
+        );
     }
 
     async fn stale_ref_count(fx: &crate::test_fixtures::EffortFixture, page: &str) -> i64 {

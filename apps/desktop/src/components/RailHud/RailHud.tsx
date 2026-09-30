@@ -15,15 +15,15 @@ import { NO_READS, unionReads, useRerunOnChange } from "../../lens/lensRerun.js"
 import {
   listCommentsForStream,
   listRecentPageVisits,
-  listWikiPages,
   subscribeCommentEvents,
+  subscribeOxplowEvents,
   subscribePageVisitEvents,
-  subscribeWikiPageEvents,
   topVisitedPages,
   type PageVisitApi,
   type TopVisitedRowApi,
 } from "../../api.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
+import { knowledgeChanged, readWikiPages } from "../../knowledge.js";
 
 export interface UncommittedSummary {
   added: number;
@@ -1541,7 +1541,7 @@ function useHistoryRows(threadId: string | null): HistoryRowsState {
   useEffect(() => {
     let cancelled = false;
     const refresh = () => {
-      void listWikiPages("").then((pages) => {
+      void readWikiPages().then((pages) => {
         if (cancelled) return;
         const map: Record<string, string> = {};
         for (const p of pages) map[p.slug] = p.title;
@@ -1549,7 +1549,9 @@ function useHistoryRows(threadId: string | null): HistoryRowsState {
       });
     };
     refresh();
-    const off = subscribeWikiPageEvents(refresh);
+    const off = subscribeOxplowEvents((event) => {
+      if (knowledgeChanged(event as Record<string, unknown>)) refresh();
+    });
     return () => {
       cancelled = true;
       off();

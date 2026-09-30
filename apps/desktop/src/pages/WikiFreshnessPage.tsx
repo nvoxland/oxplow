@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import { writeWikiPage } from "../api.js";
-import { commands } from "../tauri-bridge/index.js";
-import type { WikiRefFreshness } from "../tauri-bridge/generated/bindings.js";
+import { readWikiFreshness, readWikiPage } from "../knowledge.js";
+import type { WikiRefFreshness } from "../knowledge.js";
 import { fileRef, wikiPageRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { useOptionalPageNavigation, usePageTitle } from "../tabs/PageNavigationContext.js";
@@ -33,12 +33,11 @@ export function WikiFreshnessPage({ slug, onOpenPage }: WikiFreshnessPageProps) 
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const r = await commands.listWikiFreshness(slug);
-    if (r.status === "ok") {
-      setRows(r.data);
+    try {
+      setRows(await readWikiFreshness(slug));
       setError(null);
-    } else {
-      setError(r.error?.message ?? "failed to load freshness");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   }, [slug]);
 
@@ -51,9 +50,9 @@ export function WikiFreshnessPage({ slug, onOpenPage }: WikiFreshnessPageProps) 
   async function markVerified(paths: string[]) {
     setBusy(true);
     try {
-      const body = await commands.readWikiPageBody(slug);
-      if (body.status !== "ok") throw new Error(body.error.message);
-      await writeWikiPage(slug, body.data, { verifiedRefs: paths });
+      const page = await readWikiPage(slug);
+      if (!page) throw new Error(`no wiki page \`${slug}\``);
+      await writeWikiPage(slug, page.body, { verifiedRefs: paths });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }

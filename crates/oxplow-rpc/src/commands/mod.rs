@@ -48,6 +48,4 @@ pub mod threads;
 pub mod trees;
 pub mod usage;
 pub mod vcs;
-pub mod wiki;
-pub mod wiki_freshness;
 pub mod workspace;

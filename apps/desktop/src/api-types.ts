@@ -170,31 +170,6 @@ export interface MenuGroupSnapshot {
   items: { id: CommandId; label: string; disabled?: boolean }[];
 }
 
-// ---- Wiki notes ----
-
-export interface WikiPageSummary {
-  slug: string;
-  title: string;
-  excerpt: string;
-  updated_at: string;
-  /** Repo-relative file paths the page references (backend `file_refs`). */
-  file_refs?: string[];
-  dir_refs?: string[];
-  // The Electron-era freshness/changed_refs/deleted_refs/total_refs/
-  // referenced_files fields were removed — the Rust backend never sent
-  // them, so readers silently rendered nothing. Per-page freshness
-  // comes from `list_wiki_freshness` via `summarizeWikiFreshness`.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
-}
-
-export interface WikiPageSearchHit {
-  slug: string;
-  title: string;
-  snippet: string;
-  updated_at: string;
-}
-
 // ---- Page visit / usage ----
 
 export interface CountByDayRowApi {

@@ -179,9 +179,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::relink_comment,
             commands::generated::delete_comment,
             // wiki
-            commands::generated::list_wiki_pages,
-            commands::generated::search_wiki_titles,
-            commands::generated::read_wiki_page_body,
             // events (dead-letter queue)
             commands::generated::list_dead_letters,
             commands::generated::retry_dead_letter,
@@ -190,7 +187,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_backlinks,
             commands::generated::list_outbound,
             // wiki freshness (V20 file-ref version tracking)
-            commands::generated::list_wiki_freshness,
             // page visit
             commands::generated::record_page_visit,
             commands::generated::list_recent_page_visits,

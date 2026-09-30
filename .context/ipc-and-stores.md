@@ -124,12 +124,12 @@ subscribes to the relevant `*.changed` event to refetch.
 
 ## Worked example: `wiki_page`
 
-Concrete instance of the 7-layer flow. Look at the `wiki_page` table,
-`WikiPageStore`, the runtime's `listWikiPages`/`writeWikiPageBody`
-helpers, the matching IPC contract entries, the preload bindings, the
-main-process handlers, and the UI api wrappers. Every other persisted
-feature in this codebase follows the same shape — duplicate it for new
-work.
+Reads of a persisted feature are models now (P6): the `wiki_page`
+table is published as `v_knowledge_page` / `v_knowledge_body` /
+`v_knowledge_ref`, the desktop reads them with `querySql`
+(`knowledge.ts`), and writes are `knowledge.*` commands through the bus.
+A new feature follows that shape: a model for what the UI and agents
+read, a command for each write — no typed read RPC.
 
 **Arbitrary JSON across IPC is `oxplow_domain::Json`** (P5.A1). specta
 exports `serde_json::Value` as its Rust enum shape (`{ Bool: … } |

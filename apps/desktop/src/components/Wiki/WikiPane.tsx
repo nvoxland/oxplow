@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   listRecentUsage,
-  listWikiPages,
-  searchWikiPages,
+  subscribeOxplowEvents,
   subscribeUsageEvents,
-  subscribeWikiPageEvents,
   writeWikiPage,
   type Stream,
   type UsageRollup,
+} from "../../api.js";
+import {
+  knowledgeChanged,
+  readWikiPages,
+  searchWikiPages,
   type WikiPageSearchHit,
   type WikiPageSummary,
-} from "../../api.js";
+} from "../../knowledge.js";
 import { logUi } from "../../logger.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
@@ -52,9 +55,9 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
       return;
     }
     try {
-      setNotes(await listWikiPages(streamId));
+      setNotes(await readWikiPages());
     } catch (error) {
-      logUi("error", "listWikiPages failed", { error: String(error) });
+      logUi("error", "readWikiPages failed", { error: String(error) });
     }
   }, [streamId]);
 
@@ -74,7 +77,9 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
   useEffect(() => { void refreshUsage(); }, [refreshUsage]);
 
   useEffect(() => {
-    const unsub = subscribeWikiPageEvents(() => { void refreshNotes(); });
+    const unsub = subscribeOxplowEvents((event) => {
+      if (knowledgeChanged(event as Record<string, unknown>)) void refreshNotes();
+    });
     return unsub;
   }, [refreshNotes]);
 
@@ -95,7 +100,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
     setSearching(true);
     const handle = setTimeout(async () => {
       try {
-        const hits = await searchWikiPages(streamId, trimmed, 30);
+        const hits = await searchWikiPages(trimmed, 30);
         setSearchHits(hits);
       } catch (error) {
         logUi("error", "searchWikiPages failed", { error: String(error) });
@@ -622,7 +627,8 @@ function highlightSnippet(snippet: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+  // The site search marks each match `«…»`.
   return escaped
-    .replace(/&lt;mark&gt;/g, '<mark style="background: var(--status-waiting); color: inherit;">')
-    .replace(/&lt;\/mark&gt;/g, "</mark>");
+    .replace(/«/g, '<mark style="background: var(--status-waiting); color: inherit;">')
+    .replace(/»/g, "</mark>");
 }

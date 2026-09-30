@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  deleteWikiPage,
-  listWikiPages,
-  readWikiPageBody,
-  subscribeWikiPageEvents,
-  writeWikiPage,
-  type Stream,
-  type WikiPageSummary,
-} from "../../api.js";
+import { deleteWikiPage, subscribeOxplowEvents, writeWikiPage, type Stream } from "../../api.js";
+import { knowledgeChanged, readWikiPage, type WikiPageSummary } from "../../knowledge.js";
 import { recordOpError } from "../opErrorsStore.js";
 
 export interface WikiPageController {
@@ -39,28 +32,16 @@ export function useWikiPageController(stream: Stream, slug: string, onClosed: ()
 
   const refresh = useCallback(async () => {
     try {
-      const all = await listWikiPages(stream.id);
-      setSummary(all.find((n) => n.slug === slug) ?? null);
-    } catch {
-      // best-effort summary load
-    }
-    try {
-      const text = await readWikiPageBody(stream.id, slug);
-      setBody(text);
-      setNotFound(false);
+      const page = await readWikiPage(slug);
+      setSummary(page?.summary ?? null);
+      setBody(page?.body ?? "");
+      setNotFound(page === null);
       setLoadError(null);
     } catch (error) {
-      const message = String(error);
-      if (/(wiki page|note) not found/i.test(message)) {
-        setNotFound(true);
-        setLoadError(null);
-        setBody("");
-      } else {
-        setLoadError(message);
-        setNotFound(false);
-      }
+      setLoadError(String(error));
+      setNotFound(false);
     }
-  }, [stream.id, slug]);
+  }, [slug]);
 
   useEffect(() => {
     void refresh();
@@ -70,9 +51,8 @@ export function useWikiPageController(stream: Stream, slug: string, onClosed: ()
   // Stable subscription — see WikiPageTab original for the rationale.
   const refreshRef = useRef(refresh);
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
-  useEffect(() => subscribeWikiPageEvents((changedSlug) => {
-    if (changedSlug !== slug) return;
-    void refreshRef.current();
+  useEffect(() => subscribeOxplowEvents((event) => {
+    if (knowledgeChanged(event as Record<string, unknown>)) void refreshRef.current();
   }), [slug]);
 
   useEffect(() => {

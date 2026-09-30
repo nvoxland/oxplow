@@ -852,6 +852,16 @@
   tests:
     - { not_null: page }
     - { relationships: { column: page, to: knowledge_page, field: ref } }
+- name: knowledge_body
+  version: 1
+  description: "Each knowledge page's full markdown body (P6.E2), apart from v_knowledge_page so listing pages never reads bodies."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`wiki:<slug>` (v_knowledge_page.ref)." }
+    - { name: "body", type: "TEXT", doc: "The page's markdown, as its file holds it." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+    - { relationships: { column: ref, to: knowledge_page, field: ref } }
 - name: knowledge_touch
   version: 1
   description: "Which threads wrote or updated which knowledge pages, and when a thread last did (the rail's Finished section)."

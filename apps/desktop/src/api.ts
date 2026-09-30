@@ -1313,17 +1313,7 @@ export async function listRecentRemoteBranches(
   return unwrap(await commands.gitListRecentRemoteBranches(limit ?? null));
 }
 
-export type WikiPageSummary = import("./api-types.js").WikiPageSummary;
-export type WikiPageSearchHit = import("./api-types.js").WikiPageSearchHit;
 export type UsageRollup = import("./tauri-bridge/generated/bindings.js").UsageRollup;
-
-export async function listWikiPages(_streamId: string): Promise<WikiPageSummary[]> {
-  return unwrap(await commands.listWikiPages()) as unknown as WikiPageSummary[];
-}
-
-export async function readWikiPageBody(_streamId: string, slug: string): Promise<string> {
-  return unwrap(await commands.readWikiPageBody(slug));
-}
 
 /** Write a wiki page — the `knowledge.write_page` command (P5.C3): the
  *  row, its links and the file, in one audited run. Every `[[link]]` must
@@ -1345,15 +1335,6 @@ export async function writeWikiPage(
  *  has confirmed. */
 export async function deleteWikiPage(slug: string, confirmed: boolean): Promise<void> {
   await runCommand("knowledge.delete_page", { slug }, confirmed);
-}
-
-export function subscribeWikiPageEvents(onEvent: (slug: string) => void): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.kind === "wikiPagesChanged") {
-      const slug = typeof event.slug === "string" ? event.slug : "";
-      onEvent(slug);
-    }
-  });
 }
 
 // ---- Comments ----
@@ -1454,16 +1435,6 @@ export function subscribeCommentEvents(
     if (filter?.targetId !== undefined && filter.targetId !== targetId) return;
     onChange({ targetKind, targetId });
   });
-}
-
-export async function searchWikiPages(
-  _streamId: string,
-  query: string,
-  limit?: number,
-): Promise<WikiPageSearchHit[]> {
-  return unwrap(
-    await commands.searchWikiTitles(query, limit ?? 50),
-  ) as unknown as WikiPageSearchHit[];
 }
 
 export async function recordUsage(input: {

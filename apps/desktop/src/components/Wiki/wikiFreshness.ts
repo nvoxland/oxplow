@@ -6,7 +6,7 @@
 /// rail said "fresh" (the rail used to read vestigial fields that the
 /// Rust backend never populates).
 
-import type { WikiRefFreshness } from "../../tauri-bridge/generated/bindings.js";
+import type { WikiRefFreshness } from "../../knowledge.js";
 
 export type WikiFreshnessLevel = "fresh" | "stale" | "very-stale";
 

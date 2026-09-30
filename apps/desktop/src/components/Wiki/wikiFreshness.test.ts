@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { WikiRefFreshness } from "../../tauri-bridge/generated/bindings.js";
+import type { WikiRefFreshness } from "../../knowledge.js";
 import { summarizeWikiFreshness } from "./wikiFreshness.js";
 
 function row(path: string, stale: boolean): WikiRefFreshness {

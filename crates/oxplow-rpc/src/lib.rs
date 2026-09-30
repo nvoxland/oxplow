@@ -257,9 +257,6 @@ macro_rules! oxplow_command_table {
                 list_open_agent_turns => $crate::commands::hooks::list_open_agent_turns { thread_id: ::oxplow_domain::ThreadId } -> Vec<::oxplow_domain::AgentTurn>,
                 get_agent_turn => $crate::commands::hooks::get_agent_turn { turn_id: ::oxplow_domain::AgentTurnId } -> Option<::oxplow_domain::AgentTurn>,
                 // wiki
-                list_wiki_pages => $crate::commands::wiki::list_wiki_pages {} -> Vec<::oxplow_db::WikiPage>,
-                search_wiki_titles => $crate::commands::wiki::search_wiki_titles { query: String, limit: u32 } -> Vec<::oxplow_db::WikiPage>,
-                read_wiki_page_body => $crate::commands::wiki::read_wiki_page_body { slug: String } -> String,
                 // events (the log's dead-letter queue)
                 list_dead_letters => $crate::commands::events::list_dead_letters { all: Option<bool> } -> Vec<::oxplow_db::DeadLetter>,
                 retry_dead_letter => $crate::commands::events::retry_dead_letter { id: i64 } -> ::oxplow_db::DeadLetter,
@@ -268,7 +265,6 @@ macro_rules! oxplow_command_table {
                 list_backlinks => $crate::commands::page_refs::list_backlinks { target_kind: String, target_id: String, limit: Option<i64> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
                 list_outbound => $crate::commands::page_refs::list_outbound { source_kind: String, source_id: String, limit: Option<i64> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
                 // wiki_freshness
-                list_wiki_freshness => $crate::commands::wiki_freshness::list_wiki_freshness { slug: String } -> Vec<$crate::commands::wiki_freshness::WikiRefFreshness>,
                 // search
                 search => $crate::commands::search::search { query: String, stream_id: Option<String>, kinds: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
                 query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,
@@ -494,6 +490,21 @@ mod tests {
             "list_work_item_efforts",
             "list_recently_finished",
             "clear_recently_finished",
+        ] {
+            let err = dispatch(name, json!({}), &svc).await.unwrap_err();
+            assert_eq!(err.code, "NOT_FOUND", "{name}");
+        }
+    }
+
+    /// P6.E2: the UI reads knowledge pages through the models.
+    #[tokio::test]
+    async fn the_wiki_read_rpcs_are_gone() {
+        let (svc, _dir) = services();
+        for name in [
+            "list_wiki_pages",
+            "search_wiki_titles",
+            "read_wiki_page_body",
+            "list_wiki_freshness",
         ] {
             let err = dispatch(name, json!({}), &svc).await.unwrap_err();
             assert_eq!(err.code, "NOT_FOUND", "{name}");

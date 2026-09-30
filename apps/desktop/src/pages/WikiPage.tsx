@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import type { Stream, WikiRefFreshness } from "../tauri-bridge/index.js";
+import type { Stream } from "../tauri-bridge/index.js";
+import type { WikiRefFreshness } from "../knowledge.js";
 import type { ThreadWorkState } from "../workItems.js";
-import { commands } from "../tauri-bridge/index.js";
+import { readWikiFreshness } from "../knowledge.js";
 import { summarizeWikiFreshness } from "../components/Wiki/wikiFreshness.js";
 import { Page } from "../tabs/Page.js";
 import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
@@ -114,9 +115,9 @@ function WikiPageBody({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const r = await commands.listWikiFreshness(slug);
+      const rows = await readWikiFreshness(slug).catch(() => null);
       if (cancelled) return;
-      setFreshnessRows(r.status === "ok" ? r.data : null);
+      setFreshnessRows(rows);
     })();
     return () => { cancelled = true; };
   }, [slug, controller.summary?.updated_at]);

@@ -459,21 +459,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listWikiPages: () => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("list_wiki_pages")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	searchWikiTitles: (query: string, limit: number) => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("search_wiki_titles", { query, limit })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	readWikiPageBody: (slug: string) => typedError<string, IpcError>(__TAURI_INVOKE("read_wiki_page_body", { slug })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listDeadLetters: (all: boolean | null) => typedError<DeadLetter[], IpcError>(__TAURI_INVOKE("list_dead_letters", { all })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -495,11 +480,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	listOutbound: (sourceKind: string, sourceId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_outbound", { sourceKind, sourceId, limit })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listWikiFreshness: (slug: string) => typedError<WikiRefFreshness[], IpcError>(__TAURI_INVOKE("list_wiki_freshness", { slug })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -4605,44 +4585,6 @@ export type VisitedPage = {
 	page_kind: string,
 	page_id: string,
 	visit_count: number,
-};
-
-export type WikiPage = {
-	slug: string,
-	title: string,
-	body_path: string,
-	body_excerpt: string,
-	body_size_bytes: number,
-	file_refs: string[],
-	dir_refs: string[],
-	related_notes: string[],
-	created_at: Timestamp,
-	updated_at: Timestamp,
-};
-
-export type WikiRefFreshness = {
-	path: string,
-	/**
-	 *  The snapshot the ref was pinned to (written or verified against);
-	 *  `None` if never pinned.
-	 */
-	pinned_snapshot_id: number | null,
-	/**
-	 *  The VCS revision nearest the pin, and whether the pinned snapshot
-	 *  is exactly it.
-	 */
-	pinned_vcs_rev: string | null,
-	pinned_vcs_rev_exact: boolean,
-	/**
-	 *  The file's latest primary-stream snapshot; `None` if never
-	 *  captured there.
-	 */
-	latest_snapshot_id: number | null,
-	/**
-	 *  The file changed after the pin (or was captured but never
-	 *  pinned). The renderer paints a "stale" chip on these rows.
-	 */
-	stale: boolean,
 };
 
 /**
