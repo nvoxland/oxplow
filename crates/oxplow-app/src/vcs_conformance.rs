@@ -18,6 +18,10 @@
 //! 6. **Blame** — each line names the revision that last changed it; in
 //!    the working tree an uncommitted line names none.
 //!
+//! 8. **Branch deletion** — a merged branch deletes; an unmerged one
+//!    is refused as "not fully merged" unless forced (its commits would
+//!    be lost).
+//!
 //! (7, the snapshot↔revision mapping, runs in `trees.rs`: it needs the
 //! snapshot store.)
 
@@ -247,6 +251,29 @@ pub async fn branches_meet_at_their_merge_base(p: &dyn Vcs, ws: &Path) {
     assert_eq!(p.merge_base(ws, &side, &base).await.unwrap(), Some(base));
 }
 
+/// 8. A merged branch deletes; an unmerged one only when forced.
+pub async fn an_unmerged_branch_is_deleted_only_by_force(p: &dyn Vcs, ws: &Path) {
+    write(ws, "a.txt", "base\n");
+    commit(p, ws, "base").await;
+    let main = p.head(ws).await.unwrap().branch.unwrap();
+    p.checkout_branch(ws, "merged", true).await.unwrap();
+    p.checkout_branch(ws, "unmerged", true).await.unwrap();
+    write(ws, "u.txt", "u\n");
+    commit(p, ws, "only on unmerged").await;
+    p.checkout_branch(ws, &main, false).await.unwrap();
+
+    p.delete_branch(ws, "merged", false).await.unwrap();
+    let err = p.delete_branch(ws, "unmerged", false).await.unwrap_err();
+    assert!(err.to_string().contains("not fully merged"), "{err}");
+    let names =
+        |bs: Vec<oxplow_domain::vcs::Branch>| bs.into_iter().map(|b| b.name).collect::<Vec<_>>();
+    assert!(names(p.branches(ws).await.unwrap()).contains(&"unmerged".to_string()));
+    p.delete_branch(ws, "unmerged", true).await.unwrap();
+    let left = names(p.branches(ws).await.unwrap());
+    assert!(!left.contains(&"unmerged".to_string()), "{left:?}");
+    assert!(!left.contains(&"merged".to_string()), "{left:?}");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,6 +283,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         dir
+    }
+
+    #[tokio::test]
+    async fn git_an_unmerged_branch_is_deleted_only_by_force() {
+        let ws = workspace();
+        an_unmerged_branch_is_deleted_only_by_force(&GitProvider, ws.path()).await;
     }
 
     #[tokio::test]

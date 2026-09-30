@@ -251,12 +251,17 @@ provider runs the same list:
 5. the head resolves (a short id too; an unknown rev errors) and the
    log walks newest first;
 6. blame attributes each line to its revision, at any revision, and in
-   the working tree leaves uncommitted lines unattributed.
+   the working tree leaves uncommitted lines unattributed;
+8. a merged branch deletes; an unmerged one (its head reachable from
+   neither HEAD nor its upstream) is refused as "not fully merged"
+   unless forced — libgit2 never refuses, so `oxplow_git::delete_branch`
+   checks, and the branch picker's second confirmation is that refusal
+   (tsk566).
 
 7 (a snapshot taken on a clean workspace maps to its head revision
 and back, and diffs empty against it) needs the snapshot store, so it
-runs in `trees.rs`. Still to come: branch listing and divergence, and 8 (isolated
-workspaces share history).
+runs in `trees.rs`. Still to come: branch listing and divergence, and
+isolated workspaces sharing history.
 
 **Names never become options** (tsk550): `Revision::from_str` refuses
 a revision starting with `-`, and the git provider refuses any rev,

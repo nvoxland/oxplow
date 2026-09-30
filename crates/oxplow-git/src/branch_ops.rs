@@ -19,6 +19,8 @@ pub enum BranchOpError {
     NotARepo,
     #[error("branch not found: {0}")]
     NotFound(String),
+    #[error("branch `{0}` is not fully merged: its commits would be lost (delete it with force)")]
+    NotFullyMerged(String),
 }
 
 /// Rename a local branch.
@@ -31,15 +33,30 @@ pub fn rename_branch(repo_path: &Path, from: &str, to: &str) -> Result<(), Branc
     Ok(())
 }
 
-/// Delete a local branch. `force = true` corresponds to `git branch -D`.
+/// Delete a local branch. Like `git branch -d`, a branch whose head
+/// isn't reachable from HEAD or from its upstream is refused as
+/// [`BranchOpError::NotFullyMerged`] (its commits would be lost);
+/// `force = true` is `git branch -D`. libgit2's `Branch::delete` never
+/// refuses, so the check is ours.
 pub fn delete_branch(repo_path: &Path, branch: &str, force: bool) -> Result<(), BranchOpError> {
-    let _ = force; // libgit2's `Branch::delete` doesn't honor unmerged-rejection
-                   // the way the CLI does; relying on it being safe-by-default
-                   // is fine because callers always confirm in the UI.
     let repo = git2::Repository::open(repo_path)?;
     let mut b = repo
         .find_branch(branch, git2::BranchType::Local)
         .map_err(|_| BranchOpError::NotFound(branch.into()))?;
+    if !force {
+        if let Some(tip) = b.get().target() {
+            let upstream = b.upstream().ok().and_then(|u| u.get().target());
+            let head = repo.head().ok().and_then(|h| h.target());
+            let contains = |base: Option<git2::Oid>| {
+                base.is_some_and(|base| {
+                    base == tip || repo.graph_descendant_of(base, tip).unwrap_or(false)
+                })
+            };
+            if !contains(head) && !contains(upstream) {
+                return Err(BranchOpError::NotFullyMerged(branch.into()));
+            }
+        }
+    }
     b.delete()?;
     Ok(())
 }
@@ -203,6 +220,34 @@ mod tests {
         let head = repo.head().unwrap().peel_to_commit().unwrap();
         repo.branch("feature", &head, false).unwrap();
         delete_branch(dir.path(), "feature", false).unwrap();
+        assert!(repo
+            .find_branch("feature", git2::BranchType::Local)
+            .is_err());
+    }
+
+    #[test]
+    fn an_unmerged_branch_needs_force() {
+        let dir = init_repo();
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &head, false).unwrap();
+        // A commit only `feature` has.
+        let tree = head.tree().unwrap();
+        let sig = repo.signature().unwrap();
+        repo.commit(
+            Some("refs/heads/feature"),
+            &sig,
+            &sig,
+            "only on feature",
+            &tree,
+            &[&head],
+        )
+        .unwrap();
+        let err = delete_branch(dir.path(), "feature", false).unwrap_err();
+        assert!(matches!(err, BranchOpError::NotFullyMerged(_)), "{err:?}");
+        assert!(err.to_string().contains("not fully merged"), "{err}");
+        assert!(repo.find_branch("feature", git2::BranchType::Local).is_ok());
+        delete_branch(dir.path(), "feature", true).unwrap();
         assert!(repo
             .find_branch("feature", git2::BranchType::Local)
             .is_err());
