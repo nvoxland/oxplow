@@ -190,9 +190,17 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
             ));
         }
         for name in needed {
-            if !declared.commands.iter().any(|c| c.name == name) {
+            let Some(command) = declared.commands.iter().find(|c| c.name == name) else {
                 return Err(format!(
                     "provider `{id}` implements work_items but declares no `{name}` command"
+                ));
+            };
+            // `work_item.*` calls it, and that is what a person confirms;
+            // a verb confirming on its own could never run.
+            if command.confirm == "always" {
+                return Err(format!(
+                    "provider `{id}` command `{name}`: a work_items verb can't be `confirm: \
+                     always` (the `work_item.*` command calling it is what a person confirms)"
                 ));
             }
         }

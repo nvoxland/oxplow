@@ -94,6 +94,10 @@ pub async fn approve_project_program(
         &version,
     )
     .map_err(IpcError::invalid)?;
+    // A running provider restarts on what was just approved.
+    if kind == oxplow_app::exec_consent::ProgramKind::Provider {
+        svc.providers.approved(&name).await;
+    }
     Ok(oxplow_app::exec_consent::list(
         &svc.approvals,
         &svc.layout.project_dir,

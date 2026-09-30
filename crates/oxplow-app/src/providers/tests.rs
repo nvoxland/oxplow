@@ -598,3 +598,139 @@ async fn a_hung_invoke_times_out_and_counts() {
     assert!(err.contains("timed out"), "{err}");
     assert_eq!(providers.health(INSTANCE).unwrap().consecutive_failures, 1);
 }
+
+/// tsk569: a disable while an instance is starting wins — the start
+/// doesn't bring back what was just disabled.
+#[tokio::test]
+async fn a_disable_while_starting_keeps_the_instance_off() {
+    let (fx, ext) = approved("slow-check:400").await;
+    let providers = fx.svc.providers.clone();
+    let spec = ext.providers[0].clone();
+    let starting = {
+        let (providers, ext) = (providers.clone(), ext.clone());
+        tokio::spawn(async move {
+            providers
+                .enable(&ext, &spec, json!({ "team": "core" }))
+                .await
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    providers
+        .disable(INSTANCE, "a person turned it off".into())
+        .await;
+    let _ = starting.await.unwrap();
+    assert!(!fx.svc.commands.has_namespace("fake"));
+    assert!(providers.get(INSTANCE).await.is_none());
+    assert!(matches!(
+        providers.health(INSTANCE).unwrap().state,
+        InstanceState::Disabled { .. }
+    ));
+}
+
+/// tsk569: when whether an instance was disabled can't be read, a
+/// reconcile doesn't start it (it fails closed).
+#[tokio::test]
+async fn an_unreadable_disable_record_keeps_the_instance_off() {
+    let (fx, _ext) = approved("").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc
+        .db
+        .transaction(|c| {
+            c.execute_batch("ALTER TABLE event_log RENAME TO event_log_unreadable")
+                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+        })
+        .await
+        .unwrap();
+    fx.svc.providers.reconcile().await;
+    assert!(!fx.svc.commands.has_namespace("fake"));
+    let health = fx.svc.providers.health(INSTANCE).unwrap();
+    assert!(
+        matches!(&health.state, InstanceState::Failing { errors } if errors[0].contains("disabled")),
+        "{health:?}"
+    );
+}
+
+/// tsk569: approving an updated provider restarts a running instance on
+/// what was approved, instead of leaving it to be disabled at its next
+/// start as changed.
+#[tokio::test]
+async fn approving_updated_declarations_restarts_the_instance() {
+    let (fx, _ext) = approved("").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    assert!(fx.svc.commands.has_namespace("fake"));
+
+    // The provider updates: new behaviour and new declarations, approved.
+    let project = fx.svc.layout.project_dir.clone();
+    write_extension(&project, "bad-declarations");
+    std::fs::write(
+        project.join("oxplow/extensions/tracker/provider.json"),
+        serde_json::to_string_pretty(&oxplow_provider_fake::bad_declarations()).unwrap(),
+    )
+    .unwrap();
+    approve(&fx, &extension(&project));
+    fx.svc.providers.approved(INSTANCE).await;
+
+    let running = fx.svc.providers.get(INSTANCE).await.expect("running");
+    assert_eq!(running.declared, oxplow_provider_fake::bad_declarations());
+    assert_eq!(
+        fx.svc.providers.health(INSTANCE).unwrap().state,
+        InstanceState::Ready
+    );
+    assert!(logged(&fx, "provider.disabled").await.is_empty());
+}
+
+/// tsk569: enabling from Settings writes nothing when the enable itself
+/// fails — the config never says enabled for an instance that wasn't.
+#[tokio::test]
+async fn a_failed_enable_writes_no_config() {
+    let (fx, _ext) = approved("").await;
+    fx.svc
+        .db
+        .transaction(|c| {
+            c.execute_batch(
+                "CREATE TRIGGER refuse_enabled BEFORE INSERT ON event_log
+                 WHEN NEW.type = 'provider.enabled'
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+            )
+            .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+        })
+        .await
+        .unwrap();
+    let err = fx
+        .svc
+        .providers
+        .set_instance(&Actor::Human, INSTANCE, true, json!({ "team": "core" }))
+        .await;
+    assert!(err.is_err(), "{err:?}");
+    assert!(fx.svc.config.read().unwrap().extension_instances.is_empty());
+    assert!(!fx.svc.commands.has_namespace("fake"));
+}
+
+/// tsk569: a capability verb is called by `work_item.*` (which a person
+/// confirms), never confirmed on its own: declaring it `confirm: always`
+/// is refused.
+#[test]
+fn a_capability_verb_cannot_ask_for_confirmation() {
+    let (spec, mut declared) = {
+        let dir = tempfile::tempdir().unwrap();
+        write_extension(dir.path(), "");
+        (
+            extension(dir.path()).providers[0].clone(),
+            oxplow_provider_fake::declarations(),
+        )
+    };
+    spec::check_declarations(&spec, &declared).unwrap();
+    for c in declared
+        .commands
+        .iter_mut()
+        .filter(|c| c.name == "transition")
+    {
+        c.confirm = "always".into();
+    }
+    let err = spec::check_declarations(&spec, &declared).unwrap_err();
+    assert!(
+        err.contains("transition") && err.contains("confirm"),
+        "{err}"
+    );
+}

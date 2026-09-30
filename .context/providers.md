@@ -63,7 +63,9 @@ pattern), that the host's tests and the conformance kit drive over real
 stdio. `declarations()` is its `InitializeResult`: the `work_items`
 capability (hierarchy, comments and links; not
 `in_progress_opens_effort`), the commands `create` / `update` /
-`transition` / `link` / `comment` (effect `record`, no confirmation), the
+`transition` / `link` / `comment` (effect `record`, no confirmation —
+a verb declared `confirm: always` is refused, since the `work_item.*`
+command calling it is what a person confirms; tsk569), the
 `work_item.recorded@1` event type with the core schema, a `work_items`
 collector over the `work_item` entity, and a config schema requiring
 `team`. `check` returns handle `fake:<team>` or a `/team` problem. Items
@@ -204,7 +206,13 @@ stops and `provider.disabled@1 { instance, reason }` is logged (source
 `system:providers`, subject `plugin:<extension>`). So is a handshake that
 doesn't match the approved declarations. The log is what keeps it off,
 across reconciles and restarts: an instance whose latest
-`provider.disabled` has no later `provider.enabled` stays `disabled`.
+`provider.disabled` has no later `provider.enabled` stays `disabled`,
+and one whose record can't be read stays off too (`failing`, naming
+the error — not knowing isn't a yes). **A disable wins over a start in
+flight** (tsk569): each disable bumps the instance's epoch under the
+`running` lock, and a start registers (`admit`) only if the epoch it
+began with still holds, so a concurrent reconcile can't bring back
+what was just disabled.
 Only a person turns it back on — **`provider.enable { instance }`**
 (human-only, `External`, not undoable), which logs `provider.enabled@1`,
 resets the count and reconciles.
@@ -218,12 +226,17 @@ outcome is the view's state) and `set_provider_instance { instance,
 enabled, config }` (`ProviderRegistry::set_instance`: enabling checks
 first and refuses an unapproved or unconfigured instance, writing
 nothing, with the problem's field as `/config/<path>`; then `config.set`
-of `extensionInstances` and, to enable, `provider.enable`). Each row
+of `extensionInstances` — to enable, `provider.enable` runs **first**, so
+a failed enable writes nothing and the config never says enabled for
+an instance that wasn't — then a reconcile). Each row
 shows its state, its credentials (set into the keychain through
 `set_source_credential`, which accepts a provider's credentials too),
 the config as JSON (Escape resets an edit; invalid JSON disables the
 actions), Check and Enable / Disable / Enable again. Approving the
-program stays in Data → Programs.
+program stays in Data → Programs; approving a provider restarts its
+running instance on what was approved (`ProviderRegistry::approved`,
+called by `approve_project_program`), so updated declarations take
+effect instead of disabling it at its next start as changed.
 
 **Tests** (`providers/tests.rs`) run the real fake binary (built beside
 the test binary by the workspace build) through a script entry in a

@@ -98,6 +98,19 @@ fn command(name: &str, summary: &str, input_schema: Value) -> CommandDecl {
     }
 }
 
+/// What `initialize` answers under `bad-declarations`: an extra command
+/// the checked-in [`declarations`] don't list (checking this in instead
+/// is an updated provider's new declarations).
+pub fn bad_declarations() -> InitializeResult {
+    let mut declared = declarations();
+    declared.commands.push(command(
+        "undeclared",
+        "A command the checked-in declarations don't list.",
+        json!({ "type": "object" }),
+    ));
+    declared
+}
+
 /// What the fake declares — the checked-in declarations a host approves.
 pub fn declarations() -> InitializeResult {
     let string = json!({ "type": "string" });
@@ -296,14 +309,11 @@ async fn handle(
                     p.protocol_version
                 )));
             }
-            let mut declared = declarations();
-            if world.lock().await.hooks.bad_declarations {
-                declared.commands.push(command(
-                    "undeclared",
-                    "A command the checked-in declarations don't list.",
-                    json!({ "type": "object" }),
-                ));
-            }
+            let declared = if world.lock().await.hooks.bad_declarations {
+                bad_declarations()
+            } else {
+                declarations()
+            };
             Ok(serde_json::to_value(declared).expect("declarations serialize"))
         }
         method::CHECK => {

@@ -410,6 +410,9 @@ pub struct ProviderRegistry {
     health: parking_lot::Mutex<BTreeMap<String, InstanceHealth>>,
     /// One reconcile at a time.
     reconciling: tokio::sync::Mutex<()>,
+    /// How many times each instance has been disabled: a start that began
+    /// before a disable doesn't register what the disable stopped.
+    disables: parking_lot::Mutex<BTreeMap<String, u64>>,
 }
 
 impl ProviderRegistry {
@@ -422,6 +425,7 @@ impl ProviderRegistry {
             running: tokio::sync::Mutex::new(BTreeMap::new()),
             health: parking_lot::Mutex::new(BTreeMap::new()),
             reconciling: tokio::sync::Mutex::new(()),
+            disables: parking_lot::Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -556,10 +560,24 @@ impl ProviderRegistry {
                 self.set_state(&name, InstanceState::Off);
                 continue;
             }
-            if let Some(reason) = self.disabled_reason(&name).await {
-                self.stop(&name).await;
-                self.set_state(&name, InstanceState::Disabled { reason });
-                continue;
+            match self.disabled_reason(&name).await {
+                Ok(None) => {}
+                Ok(Some(reason)) => {
+                    self.stop(&name).await;
+                    self.set_state(&name, InstanceState::Disabled { reason });
+                    continue;
+                }
+                // Not knowing is not a yes: it stays off.
+                Err(e) => {
+                    self.stop(&name).await;
+                    self.set_state(
+                        &name,
+                        InstanceState::Failing {
+                            errors: vec![format!("couldn't read whether it was disabled: {e}")],
+                        },
+                    );
+                    continue;
+                }
             }
             if let Some(current) = self.get(&name).await {
                 if current.config == cfg.config
@@ -576,9 +594,10 @@ impl ProviderRegistry {
 
     /// Why `instance` is automatically disabled on this machine: its last
     /// `provider.disabled` has no later `provider.enabled`.
-    async fn disabled_reason(&self, instance: &str) -> Option<String> {
+    async fn disabled_reason(&self, instance: &str) -> Result<Option<String>, DomainError> {
         let instance = instance.to_string();
-        self.deps
+        Ok(self
+            .deps
             .db
             .read(move |c| {
                 use rusqlite::OptionalExtension;
@@ -593,11 +612,9 @@ impl ProviderRegistry {
                 .optional()
                 .map_err(|e| DomainError::Storage(e.to_string()))
             })
-            .await
-            .ok()
-            .flatten()
+            .await?
             .filter(|(t, _)| t == ProviderDisabled::TYPE)
-            .map(|(_, reason)| reason.unwrap_or_default())
+            .map(|(_, reason)| reason.unwrap_or_default()))
     }
 
     /// Check `ext`'s provider `spec` against `config` without enabling it:
@@ -656,6 +673,7 @@ impl ProviderRegistry {
         if self.get(&name).await.is_some() {
             return Err(refuse(format!("`{name}` is already running")));
         }
+        let epoch = self.disable_epoch(&name);
         if bus.has_namespace(&spec.id) || self.work_items.get(&spec.id).is_ok() {
             return Err(refuse(format!(
                 "`{}` is already a command namespace or a provider",
@@ -683,8 +701,7 @@ impl ProviderRegistry {
         match instance.start().await {
             Ok(live) => {
                 *instance.live.lock().await = Some(live);
-                self.register(&bus, &instance).map_err(&refuse)?;
-                self.running.lock().await.insert(name.clone(), instance);
+                self.admit(&bus, instance, epoch).await.map_err(&refuse)?;
                 let mut health = self.health.lock();
                 let h = health
                     .entry(name)
@@ -697,8 +714,7 @@ impl ProviderRegistry {
             // It may come up: enabled and failing, its next call restarts
             // it with backoff.
             Err(e @ HostError::Failed { .. }) => {
-                self.register(&bus, &instance).map_err(&refuse)?;
-                self.running.lock().await.insert(name.clone(), instance);
+                self.admit(&bus, instance, epoch).await.map_err(&refuse)?;
                 self.failed(&name, e.to_string()).await;
                 Ok(())
             }
@@ -707,6 +723,29 @@ impl ProviderRegistry {
                 Err(e)
             }
         }
+    }
+
+    /// How many times `instance` has been disabled.
+    fn disable_epoch(&self, instance: &str) -> u64 {
+        self.disables.lock().get(instance).copied().unwrap_or(0)
+    }
+
+    /// Register a started `instance` and count it running — unless it
+    /// was disabled since its start began (`epoch`): the disable wins.
+    /// Under the `running` lock, which a disable takes too.
+    async fn admit(
+        &self,
+        bus: &Arc<CommandBus>,
+        instance: Arc<Instance>,
+        epoch: u64,
+    ) -> Result<(), String> {
+        let mut running = self.running.lock().await;
+        if self.disable_epoch(&instance.name) != epoch {
+            return Err(format!("`{}` was disabled while it started", instance.name));
+        }
+        self.register(bus, &instance)?;
+        running.insert(instance.name.clone(), instance);
+        Ok(())
     }
 
     /// Put `instance`'s commands on the bus and its capability provider
@@ -737,12 +776,26 @@ impl ProviderRegistry {
         let Some(running) = self.running.lock().await.remove(instance) else {
             return false;
         };
+        self.tear_down(running).await;
+        true
+    }
+
+    /// Unregister a stopped instance and end its process.
+    async fn tear_down(&self, running: Arc<Instance>) {
         if let Some(bus) = self.bus.upgrade() {
             bus.unregister_namespace(&running.spec.id);
         }
         self.work_items.unregister(&running.spec.id);
         running.live.lock().await.take();
-        true
+    }
+
+    /// A person approved `instance` as it is now: a running instance
+    /// restarts on what was approved (its declarations may have changed,
+    /// and a start checks them against what it was enabled with).
+    pub async fn approved(&self, instance: &str) {
+        if self.stop(instance).await {
+            self.reconcile().await;
+        }
     }
 
     /// A person's Check / Enable / Disable on Settings → Integrations:
@@ -788,6 +841,13 @@ impl ProviderRegistry {
         let bus = self.bus.upgrade().ok_or_else(|| CommandError::Failed {
             message: "the command bus is gone".into(),
         })?;
+        // Enable (clearing an automatic disable) before writing: a failed
+        // enable writes nothing, so the config never says enabled for an
+        // instance that wasn't. The write then starts it (a reconcile).
+        if enabled {
+            bus.run(actor, ENABLE, json!({ "instance": instance }), false)
+                .await?;
+        }
         let mut all = self.instances_config();
         all.insert(
             instance.to_string(),
@@ -800,12 +860,7 @@ impl ProviderRegistry {
             true,
         )
         .await?;
-        if enabled {
-            bus.run(actor, ENABLE, json!({ "instance": instance }), false)
-                .await?;
-        } else {
-            self.reconcile().await;
-        }
+        self.reconcile().await;
         self.view(instance)
     }
 
@@ -931,8 +986,19 @@ impl ProviderRegistry {
 
     /// Stop `instance` and keep it off on this machine until a person
     /// enables it: `provider.disabled@1`.
-    async fn disable(&self, instance: &str, reason: String) {
-        self.stop(instance).await;
+    pub(super) async fn disable(&self, instance: &str, reason: String) {
+        let removed = {
+            let mut running = self.running.lock().await;
+            *self
+                .disables
+                .lock()
+                .entry(instance.to_string())
+                .or_default() += 1;
+            running.remove(instance)
+        };
+        if let Some(running) = removed {
+            self.tear_down(running).await;
+        }
         self.set_state(
             instance,
             InstanceState::Disabled {
