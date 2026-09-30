@@ -3,8 +3,8 @@
 A provider is a program oxplow talks to — an issue tracker's bridge, a
 docs system's — that implements one of oxplow's capabilities (work items
 first) outside the app (P5.D, `target-architecture.md` §10). This doc
-covers the protocol (D1) and the fake provider (D2); the host with its
-consent and spawn rules (D3), instances and health (D4) and the
+covers the protocol (D1), the fake provider (D2) and the host with its
+consent and spawn rules (D3); instances and health (D4) and the
 conformance kit (D5) extend it as they land.
 
 ## The protocol (`crates/oxplow-provider-protocol`)
@@ -82,3 +82,79 @@ exits 3) and `bad-declarations` (`initialize` answers something other
 than `declarations()`, for the host's handshake check).
 `tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
 notifications against the goldens.
+
+## The host (`crates/oxplow-app/src/providers/`)
+
+**The manifest kind** (`spec.rs`): `providers:` is an experimental kind,
+so only a private extension's are loaded (onto `Extension.providers`; a
+disabled extension has none):
+
+```yaml
+providers:
+  - id: fake                     # the ref segment and command namespace
+    capability: work_items       # the only one a provider implements today
+    entry: bin/provider          # a program in the extension folder
+    args: [--stdio]
+    env: [TRACKER_URL]           # host variables passed through by name
+    credentials: [token]         # keychain values, as env
+    network: [api.example.com]   # hosts it may reach
+    declarations: provider.json  # its InitializeResult, checked in
+```
+
+The loader refuses (into `errors`) an id that isn't lowercase
+snake_case, is `oxplow` or a core namespace, or repeats; an unknown
+capability; an entry or declarations path outside the folder (or the
+manifest, or under `lenses/`); a bad host pattern; and declarations that
+don't parse, speak another protocol version, lack the named capability,
+or — for `work_items` — lack `create` / `update` / `transition` (and
+`link` / `comment` when its features say so), or claim
+`in_progress_opens_effort` (only oxplow's tasks do).
+
+**Consent precedes execution** (`exec_consent`, `ProgramKind::Provider`,
+key `provider:<ext>/<id>`): the approval hash covers every file in the
+extension folder but the manifest and `lenses/` — the entry and the
+declarations file among them — plus the entry path, `args`, `env` names,
+`credentials` and `network`. So a changed declaration is a new version,
+shown unapproved in Settings → Data → Programs (with its grants listed)
+until a person approves it again. Every start re-checks it, restarts
+included.
+
+**The spawn** (`host.rs`, `connect`) mirrors an `exec` source: a
+scrubbed environment (PATH, HOME, the declared `env` names, the
+credentials from the keychain account `source:<project>:<ext>:<name>`,
+`OXPLOW_EXTENSION_DIR`, `OXPLOW_PROVIDER_ID`), the egress proxy and
+`sandbox-exec` where the OS enforces `network`, stderr to the log, and
+`kill_on_drop`. Then **the handshake**: the live `initialize` must equal
+the approved declarations (`HostError::DeclarationsChanged` names the
+first difference), and `check` of the instance's config must return a
+handle (`HostError::Unconfigured { problems }` otherwise). Requests from
+the provider are answered `MethodNotFound`.
+
+**The registry** (`registry.rs`, `Services.providers`): `enable(ext,
+spec, config)` starts an instance and only then registers its declared
+commands on the bus as `<id>.<name>` (`External`, `Experimental`, all
+invokers; confirm / effect / undoable as declared) and its capability
+provider (`ExternalWorkItems`) in `Services.work_items`; any refusal
+registers nothing. `disable(id)` removes both and kills the process. An
+id already used as a command namespace or provider is refused, and so is
+a declared event type the host doesn't know with exactly that schema (a
+provider emits core types only for now; its own types are P7). One
+process per instance: a call that finds it dead (`Peer::is_closed`)
+starts it again, and a failed start backs off exponentially (2 s … 60 s)
+before the next try. A command's run invokes the process and hands the
+bus its result, its inverse (as `<id>.<command>`) and its events —
+refused if a type isn't declared or a `work_item.recorded` names another
+provider's item.
+
+**What D4 adds:** the `extensionInstances` config that enables instances
+at boot, health (`InstanceHealth`, auto-disable after repeated failures)
+and the Settings → Integrations page. Until then an instance is enabled
+only by code (the tests).
+
+**Tests** (`providers/tests.rs`) run the real fake binary (built beside
+the test binary by the workspace build) through a script entry in a
+temp extension: an unapproved provider is refused and registers
+nothing; an edited declarations file is shown unapproved and refused;
+the `bad-declarations` hook is refused naming `/commands`, a config
+without `team` names `/team`; and the work-items conformance suite
+passes through `ExternalWorkItems` over the fake.

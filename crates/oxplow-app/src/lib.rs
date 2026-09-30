@@ -82,6 +82,7 @@ pub mod page_ref_backfill;
 pub mod page_ref_consumers;
 pub mod post_tool_reactors;
 pub mod producer_metrics;
+pub mod providers;
 pub mod reasoning;
 pub mod recovery;
 pub mod ref_resolver;
@@ -454,6 +455,8 @@ pub struct Services {
     pub commands: Arc<commands::CommandBus>,
     /// The work-items providers, by name (`.context/work-items.md`).
     pub work_items: oxplow_domain::work_items::WorkItemsRegistry,
+    /// The enabled external provider instances (`.context/providers.md`).
+    pub providers: Arc<providers::ProviderRegistry>,
     /// The knowledge provider: oxplow's wiki (`.context/knowledge.md`).
     pub knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
@@ -1002,6 +1005,17 @@ impl Services {
         ] {
             commands.register(command).expect("core commands register");
         }
+        let providers = Arc::new(providers::ProviderRegistry::new(
+            providers::HostDeps {
+                project_dir: layout.project_dir.clone(),
+                project: source_runner::project_key(&layout.project_dir),
+                approvals: approvals.clone(),
+                secrets: ai_env.secrets.clone(),
+                host_env: Arc::new(|name| std::env::var(name).ok()),
+            },
+            &commands,
+            work_items.clone(),
+        ));
         let knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider> =
             Arc::new(knowledge::OxplowKnowledge::new(&commands, db.clone()));
         for command in knowledge::commands(knowledge::KnowledgeTarget {
@@ -1110,6 +1124,7 @@ impl Services {
             extension_catalog,
             commands,
             work_items,
+            providers,
             knowledge,
             wiki_page_store,
             page_visit_store,

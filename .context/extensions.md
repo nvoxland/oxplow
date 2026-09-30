@@ -398,7 +398,8 @@ launcher:            # entries for non-lens targets (a page, a command); a lens 
 models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name> (semantic-layer.md "Extension models")
 commands: …  pages: …  panels: …  config: …   # parsed as data; runtimes land in later phases
 # experimental kinds — a PRIVATE extension only
-providers: … effects: … event_types: … ref_kinds: … custom_components: … decorators: … replacements: …
+providers: [...]    # external providers over the provider protocol (providers.md); the others below are parsed as data only
+effects: … event_types: … ref_kinds: … custom_components: … decorators: … replacements: …
 ```
 
 Lenses aren't listed here: every `lenses/*.yaml` file in the folder is

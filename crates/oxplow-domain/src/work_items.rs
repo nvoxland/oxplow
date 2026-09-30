@@ -190,6 +190,14 @@ impl WorkItemsRegistry {
             .insert(provider.provider().to_string(), provider);
     }
 
+    /// Remove a provider (an instance that stopped).
+    pub fn unregister(&self, provider: &str) {
+        self.providers
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(provider);
+    }
+
     /// Every registered provider's name, sorted.
     pub fn names(&self) -> Vec<String> {
         self.providers

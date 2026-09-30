@@ -12,7 +12,7 @@ name = "oxplow-provider-fake"
 path = "src/main.rs"
 
 [dependencies]
-oxplow-provider-protocol = { path = "../oxplow-provider-protocol" }
+oxplow-provider-protocol = { workspace = true }
 oxplow-domain = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

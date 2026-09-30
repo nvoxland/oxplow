@@ -223,6 +223,9 @@ pub enum ProgramKind {
     /// A shared extension's advisories: SQL whose results go into the
     /// agent's context (tsk352). Bundled extensions' aren't gated.
     Advisories,
+    /// An extension's provider (`providers:`): a long-lived program
+    /// implementing a capability, approved with its declarations.
+    Provider,
 }
 
 /// A program the project's config would run.
@@ -235,8 +238,16 @@ pub struct ProjectProgram {
     /// Project-relative path of the program.
     pub program: String,
     pub args: Vec<String>,
-    /// Extra environment it runs with, as `NAME=value` (ACP agents).
+    /// Extra environment it runs with, as `NAME=value` (ACP agents), or
+    /// the host variables it gets by name (a provider).
     pub env: Vec<String>,
+    /// Keychain credentials it gets, by name (a provider).
+    pub credentials: Vec<String>,
+    /// Hosts it may reach (a provider).
+    pub network: Vec<String>,
+    /// The project-relative folder whose every file the approval covers
+    /// (a provider's extension, declarations included).
+    pub tree: Option<String>,
     /// This machine approved it as it is now.
     pub approved: bool,
     /// Its approval hash as it is now (`None` when it can't be read). The
@@ -251,6 +262,7 @@ impl ProjectProgram {
             ProgramKind::Plugin => format!("plugin:{}", self.name),
             ProgramKind::AcpAgent => format!("acp:{}", self.name),
             ProgramKind::Advisories => format!("advisories:{}", self.name),
+            ProgramKind::Provider => format!("provider:{}", self.name),
         }
     }
 
@@ -286,6 +298,22 @@ impl ProjectProgram {
             }
             // Covered by what it says: each advisory is an arg (below).
             ProgramKind::Advisories => h.update(self.program.as_bytes()),
+            // The entry, and every file of its extension but what isn't
+            // code it runs (the manifest, whose grants are hashed below,
+            // and lenses) — so its declarations file too.
+            ProgramKind::Provider => {
+                h.update(self.program.as_bytes());
+                h.update([0u8]);
+                h.update(std::fs::read(&file)?);
+                let dir = project_dir.join(self.tree.as_deref().unwrap_or_default());
+                h.update([2u8]);
+                h.update(
+                    tree_hash_except(&dir, &|rel| {
+                        rel == Path::new("extension.yaml") || rel.starts_with("lenses")
+                    })?
+                    .as_bytes(),
+                );
+            }
             ProgramKind::AcpAgent => {
                 h.update(self.program.as_bytes());
                 if self.program.contains('/') && file.is_file() {
@@ -306,6 +334,14 @@ impl ProjectProgram {
         for e in &self.env {
             h.update([1u8]);
             h.update(e.as_bytes());
+        }
+        for c in &self.credentials {
+            h.update([4u8]);
+            h.update(c.as_bytes());
+        }
+        for n in &self.network {
+            h.update([5u8]);
+            h.update(n.as_bytes());
         }
         Ok(hex::encode(h.finalize()))
     }
@@ -371,6 +407,9 @@ pub fn program_hash(project_dir: &Path, program: &str, args: &[String]) -> std::
         program: program.to_string(),
         args: args.to_vec(),
         env: Vec::new(),
+        credentials: Vec::new(),
+        network: Vec::new(),
+        tree: None,
         approved: false,
         version: None,
     }
@@ -393,6 +432,9 @@ pub fn may_run(
         program: program.to_string(),
         args: args.to_vec(),
         env: Vec::new(),
+        credentials: Vec::new(),
+        network: Vec::new(),
+        tree: None,
         approved: false,
         version: None,
     };
@@ -419,6 +461,9 @@ pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
         program: agent.command.clone(),
         args: agent.args.clone(),
         env: agent.env.iter().map(|(k, v)| format!("{k}={v}")).collect(),
+        credentials: Vec::new(),
+        network: Vec::new(),
+        tree: None,
         approved: false,
         version: None,
     }
@@ -453,9 +498,45 @@ pub fn advisory_program(ext: &crate::extensions::Extension) -> ProjectProgram {
             })
             .collect(),
         env: Vec::new(),
+        credentials: Vec::new(),
+        network: Vec::new(),
+        tree: None,
         approved: false,
         version: None,
     }
+}
+
+/// An extension's provider as a program to approve: its entry, args,
+/// env names, credentials and network, over the extension folder's files
+/// (declarations included).
+pub fn provider_program(
+    ext: &crate::extensions::Extension,
+    spec: &crate::providers::ProviderSpec,
+) -> ProjectProgram {
+    let dir = ext.path.trim_end_matches('/');
+    ProjectProgram {
+        kind: ProgramKind::Provider,
+        name: spec.approval_name(&ext.name),
+        program: format!("{dir}/{}", spec.entry),
+        args: spec.args.clone(),
+        env: spec.env.clone(),
+        credentials: spec.credentials.clone(),
+        network: spec.network.clone(),
+        tree: Some(dir.to_string()),
+        approved: false,
+        version: None,
+    }
+}
+
+/// Whether an extension's provider may start: approved as it is now.
+pub fn may_run_provider(
+    store: &ApprovalStore,
+    project_dir: &Path,
+    ext: &crate::extensions::Extension,
+    spec: &crate::providers::ProviderSpec,
+) -> bool {
+    // The listing hashes it the same way; its files are the tree's.
+    approved_now(store, project_dir, &provider_program(ext, spec))
 }
 
 /// Extensions whose advisories need a person's approval: enabled,
@@ -486,6 +567,7 @@ pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
         ProgramKind::Plugin => "collection plugin",
         ProgramKind::AcpAgent => "ACP agent",
         ProgramKind::Advisories => "extension advisories",
+        ProgramKind::Provider => "provider",
     };
     format!(
         "{what} `{name}` runs `{program}` from the project's config and needs a person's approval first \
@@ -510,6 +592,9 @@ pub fn list(
             program: program.to_string(),
             args: args.to_vec(),
             env: Vec::new(),
+            credentials: Vec::new(),
+            network: Vec::new(),
+            tree: None,
             approved: false,
             version: None,
         });
@@ -539,6 +624,11 @@ pub fn list(
     }
     out.extend(config.acp_agents.iter().map(acp_program));
     out.extend(gated_advisories(extensions).map(advisory_program));
+    out.extend(extensions.iter().filter(|e| e.enabled).flat_map(|e| {
+        e.providers
+            .iter()
+            .map(move |spec| provider_program(e, spec))
+    }));
     for p in &mut out {
         p.version = p.hash(project_dir).ok();
         p.approved = p

@@ -164,6 +164,8 @@ oxplow-collect-plugin = { path = "crates/oxplow-collect-plugin" }
 oxplow-db = { path = "crates/oxplow-db" }
 oxplow-ai = { path = "crates/oxplow-ai" }
 oxplow-acp-fake = { path = "crates/oxplow-acp-fake" }
+oxplow-provider-protocol = { path = "crates/oxplow-provider-protocol" }
+oxplow-provider-fake = { path = "crates/oxplow-provider-fake" }
 oxplow-config = { path = "crates/oxplow-config" }
 oxplow-fs-watch = { path = "crates/oxplow-fs-watch" }
 oxplow-git = { path = "crates/oxplow-git" }

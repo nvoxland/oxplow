@@ -66,6 +66,24 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
       approveTitle: `Lets these queries' results into your agent's context (${p.program}). Approve only if you trust this extension; any change needs approval again.`,
     };
   }
+  if (p.kind === "provider") {
+    // Its grants are part of what's approved: env names, keychain
+    // credentials, hosts, and every file of its extension.
+    const command = [
+      [p.program, ...p.args].join(" "),
+      ...(p.env.length > 0 ? [`env: ${p.env.join(", ")}`] : []),
+      ...(p.credentials.length > 0 ? [`credentials: ${p.credentials.join(", ")}`] : []),
+      ...(p.network.length > 0 ? [`reaches: ${p.network.join(", ")}`] : []),
+    ].join("\n");
+    return {
+      key: `${p.kind}:${p.name}`,
+      label: `Provider ${p.name}`,
+      command,
+      status: p.approved ? "Approved on this machine" : "Not approved: it won't run",
+      approved: p.approved,
+      approveTitle: `Runs ${p.program} as a long-lived provider with these grants, approving every file in ${p.tree ?? "its extension"} (its declarations included). Approve only if you trust this extension; any change needs approval again.`,
+    };
+  }
   const command = [...(p.env ?? []), p.program, ...p.args].join(" ");
   const what = p.kind === "gauge" ? "Gauge" : p.kind === "plugin" ? "Collection plugin" : "ACP agent";
   return {

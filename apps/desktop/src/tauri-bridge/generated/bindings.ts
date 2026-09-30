@@ -2153,6 +2153,11 @@ export type Extension = {
 	// Declared data sources (valid ones; invalid ones are in `errors`).
 	sources: SourceSpec[],
 	/**
+	 *  Declared providers (experimental: a private extension's only;
+	 *  valid ones — invalid ones are in `errors`).
+	 */
+	providers: ProviderSpec[],
+	/**
 	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).
 	 */
@@ -3380,7 +3385,12 @@ export type ProgramKind =
  *  A shared extension's advisories: SQL whose results go into the
  *  agent's context (tsk352). Bundled extensions' aren't gated.
  */
-"advisories";
+"advisories" | 
+/**
+ *  An extension's provider (`providers:`): a long-lived program
+ *  implementing a capability, approved with its declarations.
+ */
+"provider";
 
 // A program the project's config would run.
 export type ProjectProgram = {
@@ -3390,8 +3400,20 @@ export type ProjectProgram = {
 	// Project-relative path of the program.
 	program: string,
 	args: string[],
-	// Extra environment it runs with, as `NAME=value` (ACP agents).
+	/**
+	 *  Extra environment it runs with, as `NAME=value` (ACP agents), or
+	 *  the host variables it gets by name (a provider).
+	 */
 	env: string[],
+	// Keychain credentials it gets, by name (a provider).
+	credentials: string[],
+	// Hosts it may reach (a provider).
+	network: string[],
+	/**
+	 *  The project-relative folder whose every file the approval covers
+	 *  (a provider's extension, declarations included).
+	 */
+	tree: string | null,
 	// This machine approved it as it is now.
 	approved: boolean,
 	/**
@@ -3424,6 +3446,27 @@ export type ProviderKind =
 "openai-compatible" | 
 // TypeSafe (Jev decision model).
 "typesafe";
+
+// One declared provider.
+export type ProviderSpec = {
+	/**
+	 *  The provider's name: its refs' segment (`work_item:<id>:…`) and its
+	 *  commands' namespace (`<id>.create`).
+	 */
+	id: string,
+	capability: string,
+	// The program, relative to the extension folder.
+	entry: string,
+	args?: string[],
+	// Host environment variables passed through by name.
+	env?: string[],
+	// Credentials it gets from the keychain, as environment variables.
+	credentials?: string[],
+	// Hosts it may reach (enforced where the OS can).
+	network?: string[],
+	// The checked-in `InitializeResult` (JSON), relative to the folder.
+	declarations: string,
+};
 
 // A provider as the UI and agents see it: never its key.
 export type ProviderStatus = {

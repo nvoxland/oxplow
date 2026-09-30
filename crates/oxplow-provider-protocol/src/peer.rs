@@ -4,7 +4,7 @@
 //! provider both use it.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
@@ -39,6 +39,7 @@ pub struct Peer {
     writer: Writer,
     pending: Pending,
     next_id: Arc<AtomicU64>,
+    closed: Arc<AtomicBool>,
 }
 
 /// A request in flight: its id (to `$/cancel` it) and its reply.
@@ -69,6 +70,7 @@ impl Peer {
             writer: Arc::new(Mutex::new(Box::new(writer))),
             pending: Arc::new(Mutex::new(HashMap::new())),
             next_id: Arc::new(AtomicU64::new(1)),
+            closed: Arc::new(AtomicBool::new(false)),
         };
         let (tx, rx) = mpsc::unbounded_channel();
         let pending = peer.pending.clone();
@@ -110,11 +112,17 @@ impl Peer {
                     }
                 }
             }
+            responder.closed.store(true, Ordering::SeqCst);
             for (_, waiter) in pending.lock().await.drain() {
                 let _ = waiter.send(Err(ProtocolError::Internal("the peer closed".into())));
             }
         });
         (peer, rx)
+    }
+
+    /// The other side's stream has ended: no reply will come.
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
     }
 
     async fn send(&self, message: &Message) -> Result<(), ProtocolError> {

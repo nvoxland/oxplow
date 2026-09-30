@@ -4379,6 +4379,8 @@ dependencies = [
  "oxplow-lsp",
  "oxplow-lsp-installer",
  "oxplow-plugin",
+ "oxplow-provider-fake",
+ "oxplow-provider-protocol",
  "oxplow-pty",
  "oxplow-runtime",
  "oxplow-session",

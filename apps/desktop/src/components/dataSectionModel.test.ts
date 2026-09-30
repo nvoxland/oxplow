@@ -61,3 +61,24 @@ test("programRow shows a shared extension's advisories as what they'd say", () =
   expect(m.status).toBe("Not approved: they won't reach your agent");
   expect(m.approveTitle).toContain("agent's context");
 });
+
+test("programRow shows a provider with the secrets and hosts it gets", () => {
+  const m = programRow({
+    kind: "provider",
+    name: "tracker/linear",
+    program: "oxplow/extensions/tracker/bin/provider",
+    args: ["--stdio"],
+    env: ["LINEAR_URL"],
+    credentials: ["token"],
+    network: ["api.linear.app"],
+    tree: "oxplow/extensions/tracker",
+    approved: false,
+    version: "abc",
+  });
+  expect(m.label).toBe("Provider tracker/linear");
+  expect(m.command).toBe(
+    "oxplow/extensions/tracker/bin/provider --stdio\nenv: LINEAR_URL\ncredentials: token\nreaches: api.linear.app",
+  );
+  expect(m.status).toBe("Not approved: it won't run");
+  expect(m.approveTitle).toContain("every file in oxplow/extensions/tracker");
+});

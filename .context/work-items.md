@@ -66,10 +66,26 @@ create lands a `todo` row; every canonical state round-trips (and
 `in_progress` opens exactly one effort iff the provider says so); a
 parent resolves with `hierarchy` and is refused without it; links and
 comments follow their features; a foreign ref is refused naming this
-provider; `work_item.created` / `transitioned` (and `linked` /
-`commented`) name the item in the log. A `WorkItemsProbe` reads back what
+provider; every write logged an event naming the item (the provider's own kinds:
+oxplow's `work_item.created` / `transitioned` / `linked` /
+`commented`, an external provider's `work_item.recorded`). A `WorkItemsProbe` reads back what
 the host recorded (`ServicesProbe` over the database). It runs in-tree
-against oxplow's provider (`oxplow_tasks_are_a_conforming_provider`) and,
-in P5.D, against an external one through the host and the kit. Undo and
+against oxplow's provider (`oxplow_tasks_are_a_conforming_provider`) and
+against an external one through the host over the fake provider
+(`the_work_items_suite_passes_through_the_host_over_the_fake`, P5.D3);
+the kit (P5.D5) runs it against any provider. The probe runs the pump
+once per settle, so the projection has landed before each read.
+
+## External providers
+
+`ExternalWorkItems` ([providers.md](./providers.md)) is the capability
+over an enabled provider instance: each call runs the provider's
+`<id>.create` / `update` / `transition` / `link` / `comment` command
+through the bus (inputs: `create { title, body, parent_ref? }`,
+`update { ref, title?, body?, parent_ref? }`, `transition { ref, to }`
+with a canonical or native state, `link { ref, target, link_type }`,
+`comment { ref, body }`), refuses another provider's ref naming its own,
+and refuses an unsupported feature before calling. The provider's
+`work_item.recorded` events reach `work_item` through the projection. Undo and
 delete aren't on the trait, so they aren't in the suite: undo is the
 bus's (its tests), delete is oxplow's own (the model's agreement test).

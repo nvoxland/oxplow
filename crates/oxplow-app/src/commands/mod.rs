@@ -213,6 +213,33 @@ impl CommandBus {
         Ok(())
     }
 
+    /// Remove every command under `namespace.` (a provider instance that
+    /// stopped); returns their names.
+    pub fn unregister_namespace(&self, namespace: &str) -> Vec<String> {
+        let prefix = format!("{namespace}.");
+        let mut commands = self.commands.write();
+        let names: Vec<String> = commands
+            .keys()
+            .filter(|n| n.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for n in &names {
+            commands.remove(n);
+        }
+        names
+    }
+
+    /// Whether any command is registered under `namespace.`.
+    pub fn has_namespace(&self, namespace: &str) -> bool {
+        let prefix = format!("{namespace}.");
+        self.commands.read().keys().any(|n| n.starts_with(&prefix))
+    }
+
+    /// The event types the log accepts.
+    pub fn event_schemas(&self) -> &Arc<oxplow_domain::EventSchemaRegistry> {
+        self.log.schemas()
+    }
+
     pub fn audit_store(&self) -> &SqliteCommandAuditStore {
         &self.audit
     }

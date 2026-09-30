@@ -85,7 +85,11 @@ None of these run until a person approves that program on their machine.
   - for an extension source, every file in the extension except
     `extension.yaml` and `lenses/` (not code it runs, so a lens edit
     doesn't ask again), plus what the manifest grants it: `entry`, `env`
-    passthrough, `credentials` and `network` (tsk348).
+    passthrough, `credentials` and `network` (tsk348);
+  - for an extension provider (`ProgramKind::Provider`, key
+    `provider:<ext>/<id>`), the same tree — which holds its checked-in
+    declarations — plus its entry, `args`, `env` names, `credentials`
+    and `network` ([providers.md](./providers.md)).
 
   Any change needs approving again. A directory of more than 500 files
   or 16 MB can't be approved as a whole: give the program its own

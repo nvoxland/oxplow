@@ -572,6 +572,9 @@ pub struct Extension {
     pub source: Option<ExtensionSource>,
     /// Declared data sources (valid ones; invalid ones are in `errors`).
     pub sources: Vec<crate::extension_sources::SourceSpec>,
+    /// Declared providers (experimental: a private extension's only;
+    /// valid ones — invalid ones are in `errors`).
+    pub providers: Vec<crate::providers::ProviderSpec>,
     /// `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
     /// read-only).
     pub origin: String,
@@ -830,6 +833,7 @@ fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
         lenses: Vec::new(),
         source: None,
         sources: Vec::new(),
+        providers: Vec::new(),
         origin: origin.to_string(),
         slots: Vec::new(),
         enabled: true,
@@ -908,6 +912,20 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 errors
                     .into_iter()
                     .map(|e| at(&file, key_line(&manifest, "collectors"), e)),
+            );
+        }
+        // An experimental kind: a shared manifest's is refused by `check`.
+        if let Some(v) = m
+            .providers
+            .as_ref()
+            .filter(|_| m.sharing == Sharing::Private)
+        {
+            let (providers, errors) = crate::providers::parse_providers(v, &|rel| files.read(rel));
+            ext.providers = providers;
+            ext.errors.extend(
+                errors
+                    .into_iter()
+                    .map(|e| at(&file, key_line(&manifest, "providers"), e)),
             );
         }
         for v in m.advisories.clone() {
@@ -1260,6 +1278,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.lenses.clear();
         ext.slots.clear();
         ext.sources.clear();
+        ext.providers.clear();
         ext.advisories.clear();
         ext.measures.clear();
         ext.dimensions.clear();

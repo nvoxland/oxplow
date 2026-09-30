@@ -178,22 +178,21 @@ pub async fn suite(
         Err(_) => {}
     }
 
-    // 6. What happened is in the log, naming the item.
+    // 6. What happened is in the log, naming the item: every write
+    //    logged an event about it (the provider's own kinds — oxplow's
+    //    `work_item.created` / `transitioned`, an external provider's
+    //    `work_item.recorded`).
     probe.settle().await;
-    let types = probe.event_types(&item).await;
-    for want in ["work_item.created", "work_item.transitioned"] {
-        if !types.iter().any(|t| t == want) {
-            fail(
-                "events",
-                format!("no `{want}` event names `{item}`: {types:?}"),
-            );
-        }
-    }
-    if features.links && !types.iter().any(|t| t == "work_item.linked") {
-        fail("events", format!("no `work_item.linked` names `{item}`"));
-    }
-    if features.comments && !types.iter().any(|t| t == "work_item.commented") {
-        fail("events", format!("no `work_item.commented` names `{item}`"));
+    let logged = probe.event_types(&item).await.len();
+    let writes = 1
+        + CanonicalState::ALL.len()
+        + usize::from(features.links)
+        + usize::from(features.comments);
+    if logged < writes {
+        fail(
+            "events",
+            format!("{logged} events name `{item}` after {writes} writes to it"),
+        );
     }
     findings
 }
@@ -209,6 +208,11 @@ pub struct ServicesProbe<'a>(pub &'a crate::Services);
 impl WorkItemsProbe for ServicesProbe<'_> {
     async fn settle(&self) {
         self.0.tasks.settle_lifecycle().await;
+        // The in-transaction consumers (the `work_items.project`
+        // projection) run on the pump's next pass; run it now.
+        if let Err(e) = self.0.event_pump.run_once().await {
+            tracing::warn!(error = %e, "conformance probe: pump run failed");
+        }
     }
 
     async fn record(&self, item_ref: &str) -> Option<WorkItemRecord> {
