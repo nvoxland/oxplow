@@ -20,10 +20,10 @@ use serde::{Deserialize, Serialize};
 use oxplow_app::ref_resolver::{self, RefSummary};
 use oxplow_app::{CreateTaskInput, OxplowEvent, Services, UpdateTaskChanges};
 use oxplow_domain::comment::CommentThread;
-use oxplow_domain::stores::{CommentStore, TaskLinkStore, TaskNoteStore, TaskStore, ThreadStore};
+use oxplow_domain::stores::{CommentStore, TaskNoteStore, TaskStore, ThreadStore};
 use oxplow_domain::{
-    CommentId, CommentStatus, EffortId, NoteId, StreamId, Task, TaskId, TaskLinkType, TaskPriority,
-    TaskStatus, ThreadId,
+    CommentId, CommentStatus, EffortId, NoteId, StreamId, Task, TaskId, TaskPriority, TaskStatus,
+    ThreadId,
 };
 
 mod lenient_params;
@@ -502,16 +502,6 @@ pub struct AmendEffortParams {
     /// Run refs to DISCLAIM (acknowledge as not yours) so they stop being
     /// flagged — another effort's, the user's, or CI's.
     pub disclaim_runs: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LinktasksParams {
-    pub thread_id: String,
-    pub from_id: String,
-    pub to_id: String,
-    /// One of: blocks, relates_to, discovered_from, duplicates,
-    /// supersedes, replies_to.
-    pub link_type: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -3915,27 +3905,6 @@ impl OxplowMcp {
         }))
     }
 
-    #[tool(description = "Create a typed link between two tasks.")]
-    async fn link_tasks(
-        &self,
-        params: Parameters<LinktasksParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        expect_id_kind("link_tasks", "thread_id", &p.thread_id, ID_THREAD)?;
-        let from_id = parse_task_id("link_tasks", "from_id", &p.from_id)?;
-        let to_id = parse_task_id("link_tasks", "to_id", &p.to_id)?;
-        let link_type = parse_link_type(&p.link_type)?;
-        let thread = parse_thread_id(&p.thread_id)?;
-        let link = self
-            .services
-            .task_link_store
-            .create(&thread, from_id, to_id, link_type)
-            .await
-            .map_err(internal)?;
-        self.emit_tasks_changed(Some(thread));
-        json_result(&link)
-    }
-
     #[tool(description = "Transition a batch of tasks to the same status.")]
     async fn transition_tasks(
         &self,
@@ -4867,23 +4836,6 @@ async fn resolve_lsp_proxy(
         })
 }
 
-fn parse_link_type(s: &str) -> Result<TaskLinkType, McpError> {
-    Ok(match s {
-        "blocks" => TaskLinkType::Blocks,
-        "relates_to" => TaskLinkType::RelatesTo,
-        "discovered_from" => TaskLinkType::DiscoveredFrom,
-        "duplicates" => TaskLinkType::Duplicates,
-        "supersedes" => TaskLinkType::Supersedes,
-        "replies_to" => TaskLinkType::RepliesTo,
-        other => {
-            return Err(McpError::invalid_params(
-                format!("unknown link type: {other}"),
-                None,
-            ))
-        }
-    })
-}
-
 /// Tools that only READ state — annotated `read_only_hint` so a client can
 /// auto-approve them instead of prompting (tsk203). Kept as an explicit set
 /// (rather than 100 per-`#[tool]` annotations) so the read/write split lives in
@@ -5008,7 +4960,6 @@ const WRITE_TOOLS: &[&str] = &[
     "update_task",
     "complete_task",
     "amend_effort",
-    "link_tasks",
     "transition_tasks",
     "await_user",
     "file_epic_with_children",
@@ -7841,7 +7792,7 @@ mod tests {
         assert_eq!(body.trim(), "[]");
     }
 
-    // ---- Pure helpers: parse_status / parse_priority / parse_link_type ----
+    // ---- Pure helpers: parse_status / parse_priority ----
 
     #[test]
     fn parse_status_accepts_every_status() {
@@ -7878,26 +7829,6 @@ mod tests {
     fn parse_priority_unknown_errors() {
         let err = parse_priority("critical").unwrap_err();
         assert!(err.message.contains("critical"));
-    }
-
-    #[test]
-    fn parse_link_type_accepts_every_relation() {
-        use oxplow_domain::TaskLinkType as L;
-        assert!(matches!(parse_link_type("blocks"), Ok(L::Blocks)));
-        assert!(matches!(parse_link_type("relates_to"), Ok(L::RelatesTo)));
-        assert!(matches!(
-            parse_link_type("discovered_from"),
-            Ok(L::DiscoveredFrom)
-        ));
-        assert!(matches!(parse_link_type("duplicates"), Ok(L::Duplicates)));
-        assert!(matches!(parse_link_type("supersedes"), Ok(L::Supersedes)));
-        assert!(matches!(parse_link_type("replies_to"), Ok(L::RepliesTo)));
-    }
-
-    #[test]
-    fn parse_link_type_unknown_errors() {
-        let err = parse_link_type("flubs").unwrap_err();
-        assert!(err.message.contains("flubs"));
     }
 
     // ---- expect_id_kind ----

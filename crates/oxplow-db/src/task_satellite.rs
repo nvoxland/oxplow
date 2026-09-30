@@ -17,7 +17,9 @@ use crate::database::{string_to_ts, ts_to_string};
 use crate::page_ref_projections::{
     link_edge, note_edges, task_link_ref_types, work_item_id, KIND_TASK_NOTE, KIND_WORK_ITEM,
 };
-use crate::page_ref_store::SqlitePageRefStore;
+use crate::page_ref_store::{
+    replace_source_for_ref_types_tx, replace_source_tx, SqlitePageRefStore,
+};
 
 fn link_type_to_str(t: TaskLinkType) -> &'static str {
     match t {
@@ -40,6 +42,87 @@ fn str_to_link_type(s: &str) -> Result<TaskLinkType, DomainError> {
         "replies_to" => Ok(TaskLinkType::RepliesTo),
         other => Err(DomainError::Invalid(format!("unknown link type: {other}"))),
     }
+}
+
+/// A note on task `item`, with its `page_ref` edges — the core of
+/// `work_item.comment`, composing inside the bus's transaction.
+pub fn add_task_note_tx(
+    conn: &rusqlite::Connection,
+    item: TaskId,
+    body: &str,
+    author: &str,
+) -> Result<TaskNote, DomainError> {
+    let now = Timestamp::now();
+    conn.execute(
+        "INSERT INTO task_note (task_id, body, author, created_at) VALUES (?1, ?2, ?3, ?4)",
+        params![item.value(), body, author, ts_to_string(now)],
+    )
+    .map_err(crate::database::map_sql_err)?;
+    let id = NoteId::new(conn.last_insert_rowid());
+    replace_source_tx(
+        conn,
+        KIND_TASK_NOTE,
+        &id.to_string(),
+        note_edges(&id.to_string(), body),
+    )?;
+    Ok(TaskNote {
+        id,
+        task_id: Some(item),
+        thread_id: None,
+        body: body.to_string(),
+        author: author.to_string(),
+        created_at: now,
+    })
+}
+
+/// A typed link from `from` to `to`, made in `thread`, restating `from`'s
+/// link edges — the core of `work_item.link`.
+pub fn create_link_tx(
+    conn: &rusqlite::Connection,
+    thread: ThreadId,
+    from: TaskId,
+    to: TaskId,
+    link_type: TaskLinkType,
+) -> Result<TaskLink, DomainError> {
+    let now = Timestamp::now();
+    conn.execute(
+        "INSERT INTO task_link (thread_id, from_item_id, to_item_id, link_type, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            thread.value(),
+            from.value(),
+            to.value(),
+            link_type_to_str(link_type),
+            ts_to_string(now),
+        ],
+    )
+    .map_err(crate::database::map_sql_err)?;
+    let link = TaskLink {
+        id: TaskLinkId::new(conn.last_insert_rowid()),
+        thread_id: thread,
+        from_item_id: from,
+        to_item_id: to,
+        link_type,
+        created_at: now,
+    };
+    let mut stmt = conn
+        .prepare("SELECT * FROM task_link WHERE from_item_id = ?1 ORDER BY created_at ASC")
+        .map_err(crate::database::map_sql_err)?;
+    let edges = stmt
+        .query_map(params![from.value()], row_to_link)
+        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+        .map_err(crate::database::map_sql_err)?
+        .iter()
+        .map(link_edge)
+        .collect();
+    replace_source_for_ref_types_tx(
+        conn,
+        KIND_WORK_ITEM,
+        &work_item_id(from),
+        &task_link_ref_types(),
+        edges,
+    )?;
+    Ok(link)
 }
 
 // ---------------- Work notes ----------------
@@ -103,38 +186,6 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskNote> {
 
 #[async_trait]
 impl TaskNoteStore for SqliteTaskNoteStore {
-    async fn add_for_item(
-        &self,
-        item: TaskId,
-        body: &str,
-        author: &str,
-    ) -> Result<TaskNote, DomainError> {
-        let body_owned = body.to_string();
-        let author = author.to_string();
-        let note = self
-            .db
-            .call(move |conn| {
-                let now = Timestamp::now();
-                conn.execute(
-                    "INSERT INTO task_note (task_id, body, author, created_at)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![item.value(), body_owned, author, ts_to_string(now)],
-                )?;
-                let id = NoteId::new(conn.last_insert_rowid());
-                Ok(TaskNote {
-                    id,
-                    task_id: Some(item),
-                    thread_id: None,
-                    body: body_owned,
-                    author,
-                    created_at: now,
-                })
-            })
-            .await?;
-        self.project_note(&note.id.to_string(), &note.body).await?;
-        Ok(note)
-    }
-
     async fn add_for_thread(
         &self,
         thread: &ThreadId,
@@ -307,44 +358,6 @@ fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskLink> {
 
 #[async_trait]
 impl TaskLinkStore for SqliteTaskLinkStore {
-    async fn create(
-        &self,
-        thread: &ThreadId,
-        from: TaskId,
-        to: TaskId,
-        link_type: TaskLinkType,
-    ) -> Result<TaskLink, DomainError> {
-        let thread_clone = *thread;
-        let link = self
-            .db
-            .call(move |conn| {
-                let now = Timestamp::now();
-                conn.execute(
-                    "INSERT INTO task_link (thread_id, from_item_id, to_item_id, link_type, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![
-                        thread_clone.value(),
-                        from.value(),
-                        to.value(),
-                        link_type_to_str(link_type),
-                        ts_to_string(now),
-                    ],
-                )?;
-                let new_id = conn.last_insert_rowid();
-                Ok(TaskLink {
-                    id: TaskLinkId::new(new_id),
-                    thread_id: thread_clone,
-                    from_item_id: from,
-                    to_item_id: to,
-                    link_type,
-                    created_at: now,
-                })
-            })
-            .await?;
-        self.project_outgoing_links(from).await?;
-        Ok(link)
-    }
-
     async fn list_outgoing(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError> {
         self.db
             .call(move |conn| {
@@ -473,14 +486,18 @@ mod tests {
         (db, t.id, item_id)
     }
 
+    async fn add_note(db: &Database, item: TaskId, body: &str, author: &str) -> TaskNote {
+        let (body, author) = (body.to_string(), author.to_string());
+        db.transaction(move |tx| add_task_note_tx(tx, item, &body, &author))
+            .await
+            .unwrap()
+    }
+
     #[tokio::test]
     async fn note_for_item_round_trips() {
         let (db, _tid, item_id) = fixture().await;
-        let store = SqliteTaskNoteStore::new(db);
-        let note = store
-            .add_for_item(item_id, "looking good", "user")
-            .await
-            .unwrap();
+        let store = SqliteTaskNoteStore::new(db.clone());
+        let note = add_note(&db, item_id, "looking good", "user").await;
         assert_eq!(note.task_id, Some(item_id));
         assert!(note.thread_id.is_none());
         let listed = store.list_for_item(item_id).await.unwrap();
@@ -491,7 +508,7 @@ mod tests {
     #[tokio::test]
     async fn note_for_thread_round_trips() {
         let (db, tid, _item_id) = fixture().await;
-        let store = SqliteTaskNoteStore::new(db);
+        let store = SqliteTaskNoteStore::new(db.clone());
         let note = store
             .add_for_thread(&tid, "thread-level finding", "agent")
             .await
@@ -505,8 +522,8 @@ mod tests {
     #[tokio::test]
     async fn note_delete_removes() {
         let (db, _tid, item_id) = fixture().await;
-        let store = SqliteTaskNoteStore::new(db);
-        let note = store.add_for_item(item_id, "x", "u").await.unwrap();
+        let store = SqliteTaskNoteStore::new(db.clone());
+        let note = add_note(&db, item_id, "x", "u").await;
         store.delete(&note.id).await.unwrap();
         assert!(store.list_for_item(item_id).await.unwrap().is_empty());
     }
@@ -516,12 +533,9 @@ mod tests {
         use crate::page_ref_store::SqlitePageRefStore;
         let (db, tid, item_id) = fixture().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteTaskNoteStore::new(db);
+        let store = SqliteTaskNoteStore::new(db.clone());
 
-        let note = store
-            .add_for_item(item_id, "blocked by tsk99 see [[src/app.rs]]", "u")
-            .await
-            .unwrap();
+        let note = add_note(&db, item_id, "blocked by tsk99 see [[src/app.rs]]", "u").await;
         let inbound_task = page_refs
             .list_backlinks("work_item", "oxplow:tsk99", None)
             .await
@@ -600,9 +614,8 @@ mod tests {
         };
         let to_id = items.insert(&to).await.unwrap();
 
-        let links = SqliteTaskLinkStore::new(db.clone());
-        let link = links
-            .create(&tid, from_id, to_id, TaskLinkType::Blocks)
+        let link = db
+            .transaction(move |tx| create_link_tx(tx, tid, from_id, to_id, TaskLinkType::Blocks))
             .await
             .unwrap();
 
@@ -622,7 +635,10 @@ mod tests {
             .iter()
             .any(|e| e.source_id == format!("oxplow:{from_id}")));
 
-        links.delete(link.id).await.unwrap();
+        SqliteTaskLinkStore::new(db.clone())
+            .delete(link.id)
+            .await
+            .unwrap();
         let inbound_to = page_refs
             .list_backlinks("work_item", &format!("oxplow:{to_id}"), None)
             .await
@@ -662,9 +678,8 @@ mod tests {
             author: Some(TaskAuthor::User),
         };
         let to_id = items.insert(&to).await.unwrap();
-        let store = SqliteTaskLinkStore::new(db);
-        store
-            .create(&tid, from_id, to_id, TaskLinkType::Blocks)
+        let store = SqliteTaskLinkStore::new(db.clone());
+        db.transaction(move |tx| create_link_tx(tx, tid, from_id, to_id, TaskLinkType::Blocks))
             .await
             .unwrap();
         let outgoing = store.list_outgoing(from_id).await.unwrap();

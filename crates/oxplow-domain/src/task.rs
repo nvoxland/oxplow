@@ -52,7 +52,9 @@ pub enum TaskAuthor {
 }
 
 /// The relationship type between two tasks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskLinkType {
     Blocks,

@@ -21,7 +21,12 @@ Bug/note categorization was intentionally dropped. If you need to
 record an observation without queueing execution, use a wiki page or a
 work-note attached to a thread.
 
-## Link types (`oxplow__link_tasks`)
+## Link types (`run_command work_item.link`)
+
+Link two tasks with `run_command` → `work_item.link { ref, target,
+link_type }` (refs are `work_item:oxplow:tsk<n>`; the link is made in
+your thread). Comment on a task with `work_item.comment { ref, body }`.
+
 
 - **blocks** — from-item must finish before to-item can start. Use
   this for hard ordering (migration before feature that uses it).

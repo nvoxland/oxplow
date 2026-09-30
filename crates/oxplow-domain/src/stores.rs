@@ -13,7 +13,7 @@ use crate::comment::{CommentIntent, CommentMessage, CommentStatus, CommentTarget
 use crate::hook::{AgentStatus, AgentTurn};
 use crate::ids::{AgentTurnId, CommentId, NoteId, StreamId, TaskId, TaskLinkId, ThreadId};
 use crate::stream::Stream;
-use crate::task::{Task, TaskLink, TaskLinkType, TaskNote, TaskStatus};
+use crate::task::{Task, TaskLink, TaskNote, TaskStatus};
 use crate::thread::Thread;
 use crate::DomainError;
 
@@ -82,12 +82,8 @@ pub trait TaskStore: Send + Sync {
 
 #[async_trait]
 pub trait TaskNoteStore: Send + Sync {
-    async fn add_for_item(
-        &self,
-        item: TaskId,
-        body: &str,
-        author: &str,
-    ) -> Result<TaskNote, DomainError>;
+    // A note on a task is a work-item comment: the `work_item.comment`
+    // command (`oxplow_db::task_satellite::add_task_note_tx`).
     async fn add_for_thread(
         &self,
         thread: &ThreadId,
@@ -105,13 +101,8 @@ pub trait TaskNoteStore: Send + Sync {
 
 #[async_trait]
 pub trait TaskLinkStore: Send + Sync {
-    async fn create(
-        &self,
-        thread: &ThreadId,
-        from: TaskId,
-        to: TaskId,
-        link_type: TaskLinkType,
-    ) -> Result<TaskLink, DomainError>;
+    // Links are made by the `work_item.link` command
+    // (`oxplow_db::task_satellite::create_link_tx`).
     async fn list_outgoing(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
     async fn list_incoming(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
     async fn delete(&self, id: TaskLinkId) -> Result<(), DomainError>;

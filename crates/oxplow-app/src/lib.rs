@@ -110,6 +110,8 @@ pub mod vcs_conformance;
 pub mod wiki_drift;
 pub mod wiki_pages;
 pub mod wiki_pages_watch;
+pub mod work_items;
+pub mod work_items_conformance;
 pub mod workspace_files;
 pub mod workspace_watch;
 pub mod worktrees;
@@ -443,6 +445,8 @@ pub struct Services {
     pub extension_models: Arc<extension_models::ExtensionModelsService>,
     /// The command bus: the one write path (`.context/commands.md`).
     pub commands: Arc<commands::CommandBus>,
+    /// The work-items providers, by name (`.context/work-items.md`).
+    pub work_items: oxplow_domain::work_items::WorkItemsRegistry,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
@@ -658,6 +662,7 @@ impl Services {
             (*event_log_store).clone(),
             vec![
                 Arc::new(page_ref_consumers::PageRefWorkItemConsumer),
+                Arc::new(work_items::WorkItemsProjection),
                 Arc::new(tool_call_reactors::ToolCallProjection),
                 Arc::new(tool_call_reactors::WikiAttribution {
                     project_dir: layout.project_dir.clone(),
@@ -956,9 +961,10 @@ impl Services {
                 })
             }),
         );
-        commands
-            .register(commands::work_item::command())
-            .expect("core commands register");
+        // The work-items providers (`.context/work-items.md`); oxplow's
+        // own, over this bus.
+        let work_items = oxplow_domain::work_items::WorkItemsRegistry::new();
+        work_items.register(Arc::new(work_items::OxplowWorkItems::new(&commands)));
         for command in commands::vcs::commands(commands::vcs::VcsTarget {
             vcs: vcs.clone(),
             git: vcs::GitProvider,
@@ -968,10 +974,13 @@ impl Services {
             commands.register(command).expect("vcs commands register");
         }
         for command in [
-            commands::work_item::update_command(),
-            commands::work_item::create_command(),
-            commands::effort::open_command(),
-            commands::effort::close_command(),
+            commands::work_item::command(work_items.clone()),
+            commands::work_item::update_command(work_items.clone()),
+            commands::work_item::create_command(work_items.clone()),
+            commands::work_item::link_command(work_items.clone()),
+            commands::work_item::comment_command(work_items.clone()),
+            commands::effort::open_command(work_items.clone()),
+            commands::effort::close_command(work_items.clone()),
         ] {
             commands.register(command).expect("core commands register");
         }
@@ -1071,6 +1080,7 @@ impl Services {
             extension_models,
             extension_catalog,
             commands,
+            work_items,
             wiki_page_store,
             page_visit_store,
             usage_store,

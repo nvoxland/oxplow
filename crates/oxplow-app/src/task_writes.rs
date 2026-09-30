@@ -4,6 +4,7 @@
 //! and opens or closes the effort in the same transaction. Other fields
 //! are plain row writes. (P2.6.3, tsk455; `.context/commands.md`.)
 
+use oxplow_domain::refs::build::work_item_ref;
 use oxplow_domain::stores::TaskStore as _;
 use oxplow_domain::{Actor, CommandError, Task, TaskId, TaskStatus};
 
@@ -22,7 +23,7 @@ pub async fn set_status(
         .run(
             actor,
             crate::commands::work_item::NAME,
-            serde_json::json!({ "id": id.to_string(), "to": to }),
+            serde_json::json!({ "ref": work_item_ref(id), "to": to }),
             // Not pre-confirmed: a transition that ever needs a person's
             // confirmation comes back as NEEDS_CONFIRMATION.
             false,
@@ -47,7 +48,7 @@ pub async fn create(
     let args = crate::commands::work_item::WorkItemCreateInput {
         title: input.title,
         description: input.description,
-        parent_id: input.parent_id.map(|p| p.to_string()),
+        parent_ref: input.parent_id.map(work_item_ref),
         status: input.status,
         priority: input.priority,
         thread: thread.map(|t| t.to_string()),
@@ -79,13 +80,13 @@ pub async fn update(
     changes: crate::task_service::UpdateTaskChanges,
 ) -> Result<Task, CommandError> {
     let input = crate::commands::work_item::WorkItemUpdateInput {
-        id: id.to_string(),
+        item_ref: work_item_ref(id),
         title: changes.title,
         description: changes.description,
         priority: changes.priority,
-        parent_id: changes
+        parent_ref: changes
             .parent_id
-            .map(|p| p.map(|p| p.to_string()).unwrap_or_default()),
+            .map(|p| p.map(work_item_ref).unwrap_or_default()),
         status: changes.status,
     };
     let moves_status = input.status.is_some();

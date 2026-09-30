@@ -1118,7 +1118,8 @@ intermediate `ready` step.
 - `get_batch_context`, `list_batch_work`,
   `list_ready_work`, `read_task_options`, `create_task`, `update_task`,
   `get_task`, `delete_task`, `reorder_tasks`,
-  `link_tasks`, `list_recent_file_changes`,
+  `list_recent_file_changes` (links and task comments are
+  `run_command work_item.link` / `work_item.comment`),
   `dispatch_task`, `file_epic_with_children`, `complete_task`,
   `amend_effort`, `transition_tasks`
 - `complete_task` returns `{ task, file_review }`. The "changed"

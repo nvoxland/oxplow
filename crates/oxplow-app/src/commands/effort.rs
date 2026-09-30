@@ -13,9 +13,8 @@
 
 use std::sync::Arc;
 
-use oxplow_domain::refs::build::{
-    task_of_work_item_ref, validate_work_item_ref, work_item_id_of_ref,
-};
+use oxplow_domain::refs::build::{validate_work_item_ref, work_item_id_of_ref};
+use oxplow_domain::work_items::{provider_of, WorkItemsRegistry};
 use oxplow_domain::{
     Atomicity, CommandError, CommandSpec, Confirm, EffortId, Invokers, Lifecycle, StreamId,
     ThreadId, Timestamp,
@@ -127,22 +126,33 @@ fn within_actor_stream(
     }
 }
 
-/// Only another provider's work item has a free-standing effort.
-fn not_an_oxplow_task(work_item: &str, field: &str) -> Result<(), CommandError> {
-    match task_of_work_item_ref(work_item) {
-        Some(task) => Err(invalid(
+/// A free-standing effort is for items whose provider doesn't open one
+/// itself: refused when `work_item`'s provider is registered and declares
+/// `in_progress_opens_effort` (oxplow's tasks — their effort follows their
+/// status). An unregistered provider's item (`work_item:linear:ENG-12`
+/// with no Linear provider) takes one.
+fn opens_its_own_effort(
+    registry: &WorkItemsRegistry,
+    work_item: &str,
+    field: &str,
+) -> Result<(), CommandError> {
+    let Ok(provider) = provider_of(work_item) else {
+        return Ok(());
+    };
+    match registry.get(provider) {
+        Ok(p) if p.features().in_progress_opens_effort => Err(invalid(
             field,
             format!(
-                "`{work_item}` is an oxplow task; its effort opens and closes with its \
-                 status — run `work_item.transition` on `{task}` instead"
+                "`{work_item}`'s effort opens and closes with its status ({provider} items \
+                 open their own) — run `work_item.transition` on it instead"
             ),
         )),
-        None => Ok(()),
+        _ => Ok(()),
     }
 }
 
-pub fn open_command() -> Command {
-    let handler = Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+pub fn open_command(registry: WorkItemsRegistry) -> Command {
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: EffortOpenInput =
             serde_json::from_value(input).map_err(|e| CommandError::Invalid {
                 field: None,
@@ -150,7 +160,7 @@ pub fn open_command() -> Command {
             })?;
         validate_work_item_ref(&input.work_item)
             .map_err(|e| invalid("/work_item", e.to_string()))?;
-        not_an_oxplow_task(&input.work_item, "/work_item")?;
+        opens_its_own_effort(&registry, &input.work_item, "/work_item")?;
         let thread = match input.thread.as_deref() {
             Some(raw) => raw
                 .parse::<ThreadId>()
@@ -198,9 +208,9 @@ pub fn open_command() -> Command {
     Command::new(
         spec(
             OPEN,
-            "Open an effort on a work item that isn't an oxplow task (work_item:<provider>:<id>): \
-             its edits are snapshotted and attributed like an in_progress task's. Close it with \
-             effort.close.",
+            "Open an effort on a work item whose provider doesn't open one itself (not an \
+             oxplow task; work_item:<provider>:<id>): its edits are snapshotted and attributed \
+             like an in_progress task's. Close it with effort.close.",
             serde_json::to_value(schemars::schema_for!(EffortOpenInput)).expect("schema"),
         ),
         handler,
@@ -208,8 +218,8 @@ pub fn open_command() -> Command {
     .expect("effort.open registers")
 }
 
-pub fn close_command() -> Command {
-    let handler = Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+pub fn close_command(registry: WorkItemsRegistry) -> Command {
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: EffortCloseInput =
             serde_json::from_value(input).map_err(|e| CommandError::Invalid {
                 field: None,
@@ -232,7 +242,7 @@ pub fn close_command() -> Command {
             .map_err(storage)?;
         let (work_item, thread) =
             row.ok_or_else(|| invalid("/effort", format!("no effort `{id}`")))?;
-        not_an_oxplow_task(&work_item, "/effort")?;
+        opens_its_own_effort(&registry, &work_item, "/effort")?;
         within_actor_stream(ctx, ThreadId::new(thread), "/effort", false)?;
         let closed = oxplow_db::effort_store::finish_tx(
             ctx.conn,

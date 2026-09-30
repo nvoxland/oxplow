@@ -1,3 +1,8 @@
+//! The oxplow provider's work-item commands (`work_item.*`, P2.6/P5.C2):
+//! each names its item by its canonical ref (`work_item:oxplow:tsk42`),
+//! and refuses another provider's (naming the registered ones) — an
+//! external provider's items are written through its own commands.
+//!
 //! `work_item.transition`: move a task to a status, as a `Tx` command —
 //! the row, the effort open/close it implies, `work_item.transitioned`
 //! and the effort's own events commit in the bus's transaction with the
@@ -6,9 +11,14 @@
 //! snapshot pin is the effort-lifecycle pump consumer's; callers that need
 //! it settle the pump (`TaskService::settle_lifecycle`).
 
+use oxplow_domain::events::schema::{
+    WorkItemCommented, WorkItemCommentedV1, WorkItemLinked, WorkItemLinkedV1,
+};
+use oxplow_domain::refs::build::{task_of_work_item_ref, work_item_ref};
+use oxplow_domain::work_items::{provider_of, WorkItemsRegistry};
 use oxplow_domain::{
     Atomicity, CommandCall, CommandError, CommandSpec, Confirm, Invokers, Lifecycle, TaskId,
-    TaskPriority, TaskStatus, Timestamp,
+    TaskLinkType, TaskPriority, TaskStatus, ThreadId, Timestamp,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -18,14 +28,48 @@ use oxplow_db::task_store::EffortTransition;
 
 use super::{Command, Handler, HandlerOutput, TxCtx};
 
+/// The oxplow task `item_ref` names. Refused (an `Invalid` at `field`)
+/// when it isn't a work-item ref, its provider isn't registered (the
+/// message names the registered ones), or it is another provider's.
+pub fn oxplow_task(
+    registry: &WorkItemsRegistry,
+    item_ref: &str,
+    field: &str,
+) -> Result<TaskId, CommandError> {
+    let invalid = |message: String| CommandError::Invalid {
+        field: Some(field.into()),
+        message,
+    };
+    let provider = provider_of(item_ref).map_err(|e| invalid(e.to_string()))?;
+    registry.get(provider).map_err(|e| invalid(e.to_string()))?;
+    if provider != crate::work_items::PROVIDER {
+        return Err(invalid(format!(
+            "`{item_ref}` is {provider}'s; the work_item.* commands write oxplow's tasks"
+        )));
+    }
+    task_of_work_item_ref(item_ref).ok_or_else(|| {
+        invalid(format!(
+            "`{item_ref}` names no oxplow task (work_item:oxplow:tsk<n>)"
+        ))
+    })
+}
+
+fn parse<T: serde::de::DeserializeOwned>(input: serde_json::Value) -> Result<T, CommandError> {
+    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
+        field: None,
+        message: e.to_string(),
+    })
+}
+
 pub const NAME: &str = "work_item.transition";
 
 /// The input: which task, and the status to move it to.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemTransitionInput {
-    /// The task id (`tsk42`).
-    pub id: String,
+    /// The task's ref (`work_item:oxplow:tsk42`).
+    #[serde(rename = "ref")]
+    pub item_ref: String,
     pub to: TaskStatus,
 }
 
@@ -48,17 +92,10 @@ pub fn spec() -> CommandSpec {
 }
 
 /// The handler is pure: it runs inside a transaction the bus may retry.
-pub fn command() -> Command {
+pub fn command(registry: WorkItemsRegistry) -> Command {
     let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: WorkItemTransitionInput =
-            serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-                field: None,
-                message: e.to_string(),
-            })?;
-        let id: TaskId = input.id.parse().map_err(|e| CommandError::Invalid {
-            field: Some("/id".into()),
-            message: format!("{e}"),
-        })?;
+        let input: WorkItemTransitionInput = parse(input)?;
+        let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
         let change = oxplow_db::task_store::set_status_tx(
             ctx.conn,
             &ctx.events,
@@ -81,7 +118,7 @@ pub fn command() -> Command {
             inverse: Some(CommandCall {
                 name: NAME.into(),
                 input: serde_json::to_value(WorkItemTransitionInput {
-                    id: input.id,
+                    item_ref: input.item_ref,
                     to: change.before.status,
                 })
                 .expect("input serializes"),
@@ -103,9 +140,9 @@ pub struct WorkItemCreateInput {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// The parent task (`tsk7`).
+    /// The parent task's ref (`work_item:oxplow:tsk7`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_id: Option<String>,
+    pub parent_ref: Option<String>,
     /// `ready` when absent; `in_progress` opens the effort in the same run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<TaskStatus>,
@@ -137,22 +174,13 @@ pub fn create_spec() -> CommandSpec {
 /// `oxplow_db::task_store::insert_logged_tx` as a `Tx` run: the row (at
 /// the end of its list), `work_item.created`, and the effort when filed
 /// `in_progress`, caused by the run. An agent's task is authored `agent`.
-pub fn create_command() -> Command {
+pub fn create_command(registry: WorkItemsRegistry) -> Command {
     let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: WorkItemCreateInput =
-            serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-                field: None,
-                message: e.to_string(),
-            })?;
+        let input: WorkItemCreateInput = parse(input)?;
         let parent_id = input
-            .parent_id
+            .parent_ref
             .as_deref()
-            .map(|raw| {
-                raw.parse::<TaskId>().map_err(|e| CommandError::Invalid {
-                    field: Some("/parent_id".into()),
-                    message: format!("{e}"),
-                })
-            })
+            .map(|r| oxplow_task(&registry, r, "/parent_ref"))
             .transpose()?;
         let thread = input
             .thread
@@ -197,8 +225,10 @@ pub fn create_command() -> Command {
             .ok_or_else(|| CommandError::Failed {
                 message: format!("task {id} vanished"),
             })?;
+        let mut result = serde_json::to_value(&row).expect("Task serializes");
+        result["ref"] = serde_json::Value::String(work_item_ref(id));
         Ok(HandlerOutput {
-            result: serde_json::to_value(&row).expect("Task serializes"),
+            result,
             inverse: None,
             events: Vec::new(),
             after_commit: None,
@@ -214,17 +244,18 @@ pub const UPDATE: &str = "work_item.update";
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemUpdateInput {
-    /// The task id (`tsk42`).
-    pub id: String,
+    /// The task's ref (`work_item:oxplow:tsk42`).
+    #[serde(rename = "ref")]
+    pub item_ref: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<TaskPriority>,
-    /// The parent task (`tsk7`), or `""` to detach.
+    /// The parent task's ref, or `""` to detach.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_id: Option<String>,
+    pub parent_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<TaskStatus>,
 }
@@ -251,26 +282,14 @@ pub fn update_spec() -> CommandSpec {
 /// `oxplow_db::task_store::update_with_status_tx`: `work_item.edited` for
 /// the fields, then the status move with everything it implies, all
 /// caused by the run. The inverse restores exactly what was given.
-pub fn update_command() -> Command {
+pub fn update_command(registry: WorkItemsRegistry) -> Command {
     let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: WorkItemUpdateInput =
-            serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-                field: None,
-                message: e.to_string(),
-            })?;
-        let id: TaskId = input.id.parse().map_err(|e| CommandError::Invalid {
-            field: Some("/id".into()),
-            message: format!("{e}"),
-        })?;
-        let parent = match input.parent_id.as_deref() {
+        let input: WorkItemUpdateInput = parse(input)?;
+        let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
+        let parent = match input.parent_ref.as_deref() {
             None => None,
             Some("") => Some(None),
-            Some(raw) => Some(Some(raw.parse::<TaskId>().map_err(|e| {
-                CommandError::Invalid {
-                    field: Some("/parent_id".into()),
-                    message: format!("{e}"),
-                }
-            })?)),
+            Some(r) => Some(Some(oxplow_task(&registry, r, "/parent_ref")?)),
         };
         let not_found = |e: oxplow_domain::DomainError| match e {
             oxplow_domain::DomainError::NotFound => CommandError::Failed {
@@ -309,17 +328,17 @@ pub fn update_command() -> Command {
             &format!("moving {id} to in_progress"),
         )?;
         let inverse = WorkItemUpdateInput {
-            id: input.id.clone(),
+            item_ref: input.item_ref.clone(),
             title: input.title.as_ref().map(|_| before.title.clone()),
             description: input
                 .description
                 .as_ref()
                 .map(|_| before.description.clone()),
             priority: input.priority.map(|_| before.priority),
-            parent_id: input
-                .parent_id
+            parent_ref: input
+                .parent_ref
                 .as_ref()
-                .map(|_| before.parent_id.map(|p| p.to_string()).unwrap_or_default()),
+                .map(|_| before.parent_id.map(work_item_ref).unwrap_or_default()),
             status: input.status.map(|_| before.status),
         };
         Ok(HandlerOutput {
@@ -335,12 +354,270 @@ pub fn update_command() -> Command {
     Command::new(update_spec(), handler).expect("work_item.update registers")
 }
 
+pub const LINK: &str = "work_item.link";
+
+/// A typed link from one task to another.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemLinkInput {
+    /// The task linked from (`work_item:oxplow:tsk42`).
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    /// The task linked to.
+    pub target: String,
+    pub link_type: TaskLinkType,
+    /// The thread the link is made in (`thr3`); the caller's by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
+}
+
+/// `oxplow_db::task_satellite::create_link_tx` as a `Tx` run, logging
+/// `work_item.linked`.
+pub fn link_command(registry: WorkItemsRegistry) -> Command {
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+        let input: WorkItemLinkInput = parse(input)?;
+        let from = oxplow_task(&registry, &input.item_ref, "/ref")?;
+        let to = oxplow_task(&registry, &input.target, "/target")?;
+        let thread = match input.thread.as_deref() {
+            Some(raw) => raw.parse::<ThreadId>().map_err(|e| CommandError::Invalid {
+                field: Some("/thread".into()),
+                message: e.to_string(),
+            })?,
+            None => ctx.actor.thread_id().ok_or_else(|| CommandError::Invalid {
+                field: Some("/thread".into()),
+                message: "no thread given and the caller has none".into(),
+            })?,
+        };
+        let link =
+            oxplow_db::task_satellite::create_link_tx(ctx.conn, thread, from, to, input.link_type)
+                .map_err(CommandError::from)?;
+        let event = ctx
+            .events
+            .typed::<WorkItemLinked>(&WorkItemLinkedV1 {
+                work_item: input.item_ref.clone(),
+                target: input.target.clone(),
+                link_type: serde_json::to_value(input.link_type)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .unwrap_or_default(),
+            })
+            .with_subject([input.item_ref.clone(), input.target.clone()]);
+        Ok(HandlerOutput {
+            result: serde_json::to_value(&link).expect("TaskLink serializes"),
+            inverse: None,
+            events: vec![event],
+            after_commit: None,
+        })
+    }));
+    Command::new(
+        CommandSpec {
+            name: LINK.into(),
+            summary: "Link one task to another: blocks, relates_to, discovered_from, duplicates, \
+                      supersedes or replies_to."
+                .into(),
+            input_schema: serde_json::to_value(schemars::schema_for!(WorkItemLinkInput))
+                .expect("schema serializes"),
+            invokers: Invokers::ALL,
+            confirm: Confirm::Never,
+            undoable: false,
+            lifecycle: Lifecycle::Stable,
+            atomicity: Atomicity::Tx,
+            effect: oxplow_domain::CommandEffect::Record,
+        },
+        handler,
+    )
+    .expect("work_item.link registers")
+}
+
+pub const COMMENT: &str = "work_item.comment";
+
+/// A comment on a task (a task note).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemCommentInput {
+    /// The task (`work_item:oxplow:tsk42`).
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    /// Markdown.
+    pub body: String,
+}
+
+/// `oxplow_db::task_satellite::add_task_note_tx` as a `Tx` run, logging
+/// `work_item.commented`; the note is authored by the actor's kind.
+pub fn comment_command(registry: WorkItemsRegistry) -> Command {
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+        let input: WorkItemCommentInput = parse(input)?;
+        let task = oxplow_task(&registry, &input.item_ref, "/ref")?;
+        if input.body.trim().is_empty() {
+            return Err(CommandError::Invalid {
+                field: Some("/body".into()),
+                message: "a comment needs a body".into(),
+            });
+        }
+        let author = if ctx.actor.is_agent_driven() {
+            "agent"
+        } else {
+            "user"
+        };
+        let note = oxplow_db::task_satellite::add_task_note_tx(ctx.conn, task, &input.body, author)
+            .map_err(CommandError::from)?;
+        let event = ctx
+            .events
+            .typed::<WorkItemCommented>(&WorkItemCommentedV1 {
+                work_item: input.item_ref.clone(),
+                comment: format!("task_note:{}", note.id),
+            })
+            .with_subject([input.item_ref.clone()]);
+        Ok(HandlerOutput {
+            result: serde_json::to_value(&note).expect("TaskNote serializes"),
+            inverse: None,
+            events: vec![event],
+            after_commit: None,
+        })
+    }));
+    Command::new(
+        CommandSpec {
+            name: COMMENT.into(),
+            summary: "Comment on a task (a note on it, shown with the task).".into(),
+            input_schema: serde_json::to_value(schemars::schema_for!(WorkItemCommentInput))
+                .expect("schema serializes"),
+            invokers: Invokers::ALL,
+            confirm: Confirm::Never,
+            undoable: false,
+            lifecycle: Lifecycle::Stable,
+            atomicity: Atomicity::Tx,
+            effect: oxplow_domain::CommandEffect::Record,
+        },
+        handler,
+    )
+    .expect("work_item.comment registers")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use oxplow_db::EffortStore as _;
     use oxplow_domain::{Actor, StreamId};
     use serde_json::json;
+
+    /// P5.C2: the commands take canonical refs and refuse another
+    /// provider's, naming the registered ones.
+    #[tokio::test]
+    async fn a_foreign_ref_is_refused_naming_the_registered_providers() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        for (name, input) in [
+            (
+                NAME,
+                json!({ "ref": "work_item:linear:ENG-12", "to": "done" }),
+            ),
+            (
+                UPDATE,
+                json!({ "ref": "work_item:linear:ENG-12", "title": "x" }),
+            ),
+            (
+                COMMENT,
+                json!({ "ref": "work_item:linear:ENG-12", "body": "x" }),
+            ),
+        ] {
+            let err = fx
+                .svc
+                .commands
+                .run(&Actor::Human, name, input, false)
+                .await
+                .unwrap_err();
+            match err {
+                CommandError::Invalid { field, message } => {
+                    assert_eq!(field.as_deref(), Some("/ref"), "{name}");
+                    assert_eq!(
+                        message, "no work-items provider `linear`; registered: oxplow",
+                        "{name}"
+                    );
+                }
+                other => panic!("{name}: expected Invalid, got {other:?}"),
+            }
+        }
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                NAME,
+                json!({ "ref": "tsk42", "to": "done" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("work_item:<provider>:<id>"),
+            "{err}"
+        );
+    }
+
+    /// `work_item.link` and `work_item.comment` write the link and the
+    /// note, each with its event, caused by the run.
+    #[tokio::test]
+    async fn links_and_comments_are_commands_with_their_events() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let agent = Actor::Agent {
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let from = work_item_ref(fx.task);
+        let other = fx
+            .svc
+            .commands
+            .run(&agent, CREATE, json!({ "title": "other" }), false)
+            .await
+            .unwrap()
+            .result["ref"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let linked = fx
+            .svc
+            .commands
+            .run(
+                &agent,
+                LINK,
+                json!({ "ref": from, "target": other, "link_type": "blocks" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(linked.result["link_type"], "blocks");
+        assert_eq!(linked.result["thread_id"], fx.thread.to_string());
+        let commented = fx
+            .svc
+            .commands
+            .run(
+                &agent,
+                COMMENT,
+                json!({ "ref": from, "body": "see [[src/lib.rs]]" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(commented.result["author"], "agent");
+        let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
+        for (out, event_type) in [
+            (&linked, "work_item.linked"),
+            (&commented, "work_item.commented"),
+        ] {
+            let caused: Vec<&str> = events
+                .iter()
+                .filter(|e| e.envelope.cause == out.event_id)
+                .map(|e| e.envelope.event_type.as_str())
+                .collect();
+            assert_eq!(caused, vec![event_type]);
+        }
+        let err = fx
+            .svc
+            .commands
+            .run(&agent, COMMENT, json!({ "ref": from, "body": "  " }), false)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("body"), "{err}");
+    }
 
     /// P2.6.3 (tsk455): a transition is one transaction with its audit —
     /// the status, the effort close, `work_item.transitioned` and
@@ -360,7 +637,7 @@ mod tests {
             .run(
                 &agent,
                 NAME,
-                json!({ "id": fx.task.to_string(), "to": "done" }),
+                json!({ "ref": work_item_ref(fx.task), "to": "done" }),
                 false,
             )
             .await
@@ -409,7 +686,7 @@ mod tests {
             .run(
                 &agent,
                 UPDATE,
-                json!({ "id": fx.task.to_string(), "title": "renamed", "status": "blocked" }),
+                json!({ "ref": work_item_ref(fx.task), "title": "renamed", "status": "blocked" }),
                 false,
             )
             .await
@@ -453,7 +730,7 @@ mod tests {
             .run(
                 &queued,
                 UPDATE,
-                json!({ "id": fx.task.to_string(), "title": "renamed", "status": "done" }),
+                json!({ "ref": work_item_ref(fx.task), "title": "renamed", "status": "done" }),
                 false,
             )
             .await
@@ -485,13 +762,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let later = filed.result["id"].as_str().unwrap().to_string();
+        let later = filed.result["ref"].as_str().unwrap().to_string();
         for (name, input) in [
             (
                 UPDATE,
-                json!({ "id": later, "title": "renamed", "status": "in_progress" }),
+                json!({ "ref": later, "title": "renamed", "status": "in_progress" }),
             ),
-            (NAME, json!({ "id": later, "to": "in_progress" })),
+            (NAME, json!({ "ref": later, "to": "in_progress" })),
         ] {
             let err = fx
                 .svc
@@ -504,7 +781,7 @@ mod tests {
                 "{name}: {err:?}"
             );
         }
-        let id: TaskId = later.parse().unwrap();
+        let id = task_of_work_item_ref(&later).unwrap();
         use oxplow_domain::stores::TaskStore as _;
         let row = fx.svc.task_store.get(id).await.unwrap().unwrap();
         assert_eq!(
@@ -661,7 +938,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 NAME,
-                json!({ "id": "tsk999", "to": "done" }),
+                json!({ "ref": "work_item:oxplow:tsk999", "to": "done" }),
                 false,
             )
             .await

@@ -218,7 +218,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("read_task_options"),
     agent("complete_task"),
     agent("amend_effort"),
-    agent("link_tasks"),
     agent("transition_tasks"),
     agent("dispatch_task"),
     agent("get_thread_context"),

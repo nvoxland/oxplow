@@ -132,6 +132,11 @@ impl EventSchemaRegistry {
         r.register::<WorkItemEdited>().expect("core type registers");
         r.register::<WorkItemCreated>()
             .expect("core type registers");
+        r.register::<WorkItemLinked>().expect("core type registers");
+        r.register::<WorkItemCommented>()
+            .expect("core type registers");
+        r.register::<WorkItemRecorded>()
+            .expect("core type registers");
         r
     }
 
@@ -920,6 +925,59 @@ impl EventType for WorkItemEdited {
     type Payload = WorkItemEditedV1;
 }
 
+/// `work_item.linked@1`: a typed link from one work item to another.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemLinkedV1 {
+    /// The item linked from.
+    pub work_item: String,
+    /// The item linked to.
+    pub target: String,
+    /// `blocks`, `relates_to`, `discovered_from`, `duplicates`,
+    /// `supersedes` or `replies_to`.
+    pub link_type: String,
+}
+
+pub struct WorkItemLinked;
+impl EventType for WorkItemLinked {
+    const TYPE: &'static str = "work_item.linked";
+    const V: u32 = 1;
+    type Payload = WorkItemLinkedV1;
+}
+
+/// `work_item.commented@1`: a comment on a work item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemCommentedV1 {
+    pub work_item: String,
+    /// The comment (oxplow: `task_note:<id>`).
+    pub comment: String,
+}
+
+pub struct WorkItemCommented;
+impl EventType for WorkItemCommented {
+    const TYPE: &'static str = "work_item.commented";
+    const V: u32 = 1;
+    type Payload = WorkItemCommentedV1;
+}
+
+/// `work_item.recorded@1`: a provider's item as it now stands — how an
+/// external provider's items reach `work_item` (the `work_items.project`
+/// consumer upserts it by ref). oxplow's own tasks don't log it: their
+/// rows are written with the task, in the same transaction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemRecordedV1 {
+    pub item: crate::work_items::WorkItemRecord,
+}
+
+pub struct WorkItemRecorded;
+impl EventType for WorkItemRecorded {
+    const TYPE: &'static str = "work_item.recorded";
+    const V: u32 = 1;
+    type Payload = WorkItemRecordedV1;
+}
+
 /// `effort.finished@1`: an effort's close is fully handled — its end
 /// snapshot pinned, unclaimed work reconciled, lifecycle metrics projected.
 /// Logged once per effort by the effort-lifecycle consumer (dedupe key
@@ -976,9 +1034,12 @@ mod tests {
                 ("test.coverage.recorded", 1),
                 ("test.run.recorded", 1),
                 ("vcs.head.moved", 1),
+                ("work_item.commented", 1),
                 ("work_item.created", 1),
                 ("work_item.deleted", 1),
                 ("work_item.edited", 1),
+                ("work_item.linked", 1),
+                ("work_item.recorded", 1),
                 ("work_item.transitioned", 1),
             ]
         );
