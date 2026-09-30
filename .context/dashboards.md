@@ -123,6 +123,14 @@ lens visualization (`QueryTile.tsx`, the explorer's "Pin to dashboard",
 in `customDashboardData.ts` builds that tile for the picker and the metric
 page. `update_dashboard_item {id, optionsJson}` re-checks a changed `sql`.
 
+**Chart tiles (P6.F1).** A `bar`, `line` or `treemap` query tile carries
+its columns in the options' `chart` — `bar`/`line` `{ x, y, series? }`,
+`treemap` `{ label, size, group? }`, the roles a lens's `chart:` names.
+`new_tile` refuses a chart display without its required roles, or one
+naming a column the query doesn't return (it dry-runs the SQL for one
+row). `parseTileOptions` keeps `chart` and `QueryTile` passes it to
+`adHocLens`, so a pinned chart renders as it did in Explore Data.
+
 **Metric card** — `components/Dashboard/MetricTile.tsx` (+ `TextTile.tsx`).
 A `display: "metric"` query tile runs its `sql` through `query_sql` and
 switches on the `options_json` `viz`:

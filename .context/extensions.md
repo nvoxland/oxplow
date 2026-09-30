@@ -239,7 +239,18 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       any read-only query (Cmd/Ctrl+Enter runs it), metrics included —
       `SELECT bucket, MEASURE('<key>') FROM metric_grid('week')` — and
       re-runs when what it read changes.
-    - "Show as" switches the viz.
+    - "Show as" switches the viz: `table`, `list`, `number`, `markdown`,
+      and the charts `bar`, `line`, `treemap` (P6.F1), whose columns are
+      picked from the result (`chartDefaults`, then a select per role;
+      a chart keeps its columns while a re-run still returns them).
+    - **Chart a metric** seeds the explorer's own metric query
+      (`metricTemplate`: `metricSeriesSql` as a line). While the SQL is
+      still that template, **Slice By** picks a dimension (`v_dimension`)
+      and regenerates it with `metric_grid`'s second argument
+      (`sliceTemplate`); edited SQL is free SQL and is never rewritten
+      (the line's series picker slices it instead).
+    - Pin to Dashboard and Save as Lens keep the chart (the tile's
+      `chart` option, the lens's `chart:`).
     - **Raw tables** (a checkbox, in warning color) reads physical tables
       too — the person's debugging switch, IPC `query_sql { raw }` only,
       never an agent's. A raw result carries a banner, and **Save as

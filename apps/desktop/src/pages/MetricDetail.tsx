@@ -36,12 +36,16 @@ export function MetricControls({
   branch,
   branches,
   onBranch,
+  slice,
 }: {
   range: TimeRange;
   onRange: (r: TimeRange) => void;
   branch: string | null;
   branches: string[];
   onBranch: (b: string | null) => void;
+  /** Slice By (P6.F1): the dimensions a metric can be grouped by, the one
+   *  chosen, and the change. */
+  slice?: { dimensions: { key: string; label: string }[]; value: string | null; onChange(key: string | null): void };
 }) {
   const [customOpen, setCustomOpen] = useState(false);
   const presetKey = matchPresetKey(range, Date.now());
@@ -132,6 +136,24 @@ export function MetricControls({
           ))}
         </select>
       </div>
+      {slice && slice.dimensions.length > 0 ? (
+        <div style={rowStyle}>
+          <span style={labelStyle}>Slice By</span>
+          <select
+            value={slice.value ?? ""}
+            onChange={(e) => slice.onChange(e.target.value || null)}
+            data-testid="metric-slice"
+            style={selStyle}
+          >
+            <option value="">(none)</option>
+            {slice.dimensions.map((d) => (
+              <option key={d.key} value={d.key}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
     </div>
   );
 }

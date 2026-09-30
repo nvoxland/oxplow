@@ -210,3 +210,11 @@ describe("query tiles (P4.7)", () => {
     expect(parseTileOptions(tile.optionsJson)).toEqual({ metric: "oxplow.coverage", viz: "line" });
   });
 });
+
+describe("pinned charts", () => {
+  it("a query tile keeps its chart", () => {
+    const chart = { x: "day", y: "n", series: "zone", label: null, size: null, group: null };
+    expect(parseTileOptions(JSON.stringify({ sql: "SELECT 1", display: "line", chart })).chart).toEqual(chart);
+    expect(parseTileOptions(JSON.stringify({ chart: "nope" })).chart).toBeUndefined();
+  });
+});

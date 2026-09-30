@@ -2,6 +2,8 @@
 /// registry is the catalog — `v_model` for what exists, `v_model_column`
 /// for each model's documented columns. The pure half; the page runs the
 /// queries.
+import { metricSeriesSql } from "../metricsSql.js";
+import type { LensChart, LensViz } from "../tauri-bridge/generated/bindings.js";
 import { cellText, rowObjects } from "../sqlRows.js";
 import type { SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
@@ -76,3 +78,46 @@ export function keepBlockedReason(raw: boolean): string | null {
     ? "Turn off raw tables to keep this: a lens or dashboard tile reads only models, never physical tables."
     : null;
 }
+
+// ---- Charts and Slice By (P6.F1) ----
+
+const NO_CHART: LensChart = { x: null, y: null, series: null, label: null, size: null, group: null };
+
+/** A chart viz's starting columns from a result: the first column as the
+ *  x / label, the first numeric one as the y / size. `null` for a viz
+ *  that isn't a chart. */
+export function chartDefaults(viz: LensViz, result: SqlQueryResult): LensChart | null {
+  if (viz !== "bar" && viz !== "line" && viz !== "treemap") return null;
+  const first = result.columns[0] ?? null;
+  const numeric =
+    result.columns.find((c, i) => i > 0 && result.rows.some((r) => typeof r[i] === "number")) ?? result.columns[1] ?? null;
+  return viz === "treemap" ? { ...NO_CHART, label: first, size: numeric } : { ...NO_CHART, x: first, y: numeric };
+}
+
+/** The explorer's own metric query: a metric's captures as a line, sliced
+ *  by a dimension (`metric_grid`'s second argument) or not. Slice By
+ *  regenerates it — free SQL is never rewritten. */
+export interface MetricTemplate {
+  metric: string;
+  dimension: string | null;
+  sql: string;
+  viz: LensViz;
+  chart: LensChart;
+}
+
+export function metricTemplate(metric: string, dimension: string | null): MetricTemplate {
+  return {
+    metric,
+    dimension,
+    sql: metricSeriesSql(metric, dimension),
+    viz: "line",
+    chart: { ...NO_CHART, x: "captured_at", y: "value", series: dimension ? "group" : null },
+  };
+}
+
+export function sliceTemplate(template: MetricTemplate, dimension: string | null): MetricTemplate {
+  return metricTemplate(template.metric, dimension);
+}
+
+/** The dimensions a metric can be sliced by (`v_dimension`). */
+export const DIMENSIONS_SQL = "SELECT key, label FROM v_dimension ORDER BY label";

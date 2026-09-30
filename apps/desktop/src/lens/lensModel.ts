@@ -4,7 +4,7 @@
  * entries for loaded lenses. React-free so it's unit-tested directly.
  * See `.context/extensions.md`.
  */
-import type { Extension, Lens, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { Extension, Lens, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
 import { computeDiffId, duplicateBlockRef, effortDiffRef, refFromTabId, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
@@ -202,9 +202,10 @@ export function slugify(title: string): string {
   return slug || "lens";
 }
 
-/** An unsaved query from Explore Data, shaped as a lens so the shared
- *  `LensResultView` can render it. */
-export function adHocLens(query: string, viz: LensViz): Lens {
+/** An unsaved query from Explore Data (or a pinned query tile), shaped as
+ *  a lens so the shared `LensResultView` can render it; a chart viz names
+ *  its columns in `chart`. */
+export function adHocLens(query: string, viz: LensViz, chart: LensChart | null = null): Lens {
   return {
     id: "explore/ad-hoc",
     extension: "explore",
@@ -216,7 +217,7 @@ export function adHocLens(query: string, viz: LensViz): Lens {
     params: [],
     columns: [],
     empty: "No rows.",
-    chart: null,
+    chart,
     tree: null,
     timeline: null,
     steps: null,

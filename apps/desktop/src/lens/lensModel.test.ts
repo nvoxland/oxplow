@@ -457,3 +457,11 @@ describe("structure components (P6.A2)", () => {
     ).toEqual([{ path: "x.rs", from: "git:abc", to: "working" }]);
   });
 });
+
+describe("adHocLens charts", () => {
+  test("an ad-hoc chart carries its chart columns", () => {
+    const chart = { x: "day", y: "n", series: null, label: null, size: null, group: null };
+    expect(adHocLens("SELECT 1", "bar", chart).chart).toEqual(chart);
+    expect(adHocLens("SELECT 1", "table").chart).toBeNull();
+  });
+});

@@ -1890,3 +1890,13 @@ If you add another path that inserts into `fact`, it must call
 - **TS bindings + event variants regenerate** via the `export_ts_bindings` test
   in `oxplow-tauri-ipc` (`cargo test -p oxplow-tauri-ipc export_ts_bindings`); CI
   fails on an uncommitted diff.
+
+## Slice By on the metric page (P6.F1)
+
+`MetricDetailPage`'s Details rail has a **Slice By** select over
+`v_dimension`. Choosing one re-reads the captures with
+`listMetricSamples(key, limit, groupBy)` (`metricSeriesSql`'s grouped
+`metric_grid('capture', '<dimension>')`), and the page draws one chart per
+dimension value (`seriesByGroup`, the same small multiples as a lens line
+chart). The Metrics list doesn't slice yet ([[tsk594]]).
+

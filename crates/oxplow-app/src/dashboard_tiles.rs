@@ -32,6 +32,53 @@ pub struct TileInput {
     pub options_json: Option<String>,
 }
 
+/// The chart columns a chart display needs (P6.F1): `bar` and `line` an
+/// `x` and a `y` (a `series` optional), `treemap` a `label` and a `size`
+/// (a `group` optional) — the same roles a lens's `chart:` block names.
+fn chart_roles(display: &str) -> Option<(&'static [&'static str], &'static [&'static str])> {
+    match display {
+        "bar" | "line" => Some((&["x", "y"], &["series"])),
+        "treemap" => Some((&["label", "size"], &["group"])),
+        _ => None,
+    }
+}
+
+/// A chart tile's `chart` names its required roles, and every role it
+/// names is a column the query returns.
+async fn check_chart(
+    sql: &SqlGateway,
+    query: &str,
+    display: &str,
+    (required, optional): (&[&str], &[&str]),
+    chart: Option<&Value>,
+) -> Result<(), DomainError> {
+    let need = || {
+        invalid(format!(
+            "a `{display}` tile needs `chart: {{ {} }}` in its options",
+            required.join(", ")
+        ))
+    };
+    let chart = chart.and_then(Value::as_object).ok_or_else(need)?;
+    if required
+        .iter()
+        .any(|k| !chart.get(*k).is_some_and(Value::is_string))
+    {
+        return Err(need());
+    }
+    let columns = sql.query_sql(query, Vec::new(), Some(1)).await?.columns;
+    for key in required.iter().chain(optional) {
+        if let Some(col) = chart.get(*key).and_then(Value::as_str) {
+            if !columns.iter().any(|c| c == col) {
+                return Err(invalid(format!(
+                    "chart `{key}`: `{col}` isn't a column the query returns ({})",
+                    columns.join(", ")
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn invalid(msg: impl Into<String>) -> DomainError {
     DomainError::Invalid(msg.into())
 }
@@ -71,6 +118,9 @@ pub async fn new_tile(sql: &SqlGateway, input: TileInput) -> Result<NewDashboard
                 ));
             }
             sql.check(&query).await?;
+            if let Some(roles) = chart_roles(&display) {
+                check_chart(sql, &query, &display, roles, opts.get("chart")).await?;
+            }
             opts.insert("sql".into(), Value::String(query));
             opts.insert("display".into(), Value::String(display));
         }
@@ -157,6 +207,62 @@ mod tests {
         ] {
             let err = new_tile(&gw, input).await.unwrap_err().to_string();
             assert!(err.contains(says), "{err}");
+        }
+    }
+
+    /// P6.F1: a pinned chart keeps its chart, which must name the
+    /// columns its viz needs, from what the query returns.
+    #[tokio::test]
+    async fn a_chart_tile_keeps_a_chart_over_its_columns() {
+        let gw = SqlGateway::new(oxplow_db::Database::in_memory());
+        let sql = "SELECT 'mon' AS day, 3 AS n, 'a' AS s";
+        let tile = new_tile(
+            &gw,
+            TileInput {
+                kind: "query".into(),
+                sql: Some(sql.into()),
+                display: Some("line".into()),
+                options_json: Some(r#"{"chart":{"x":"day","y":"n","series":"s"}}"#.into()),
+                ..TileInput::default()
+            },
+        )
+        .await
+        .unwrap();
+        let opts: Value = serde_json::from_str(tile.options_json.as_deref().unwrap()).unwrap();
+        assert_eq!(opts["chart"]["series"], "s");
+        for (display, chart, says) in [
+            ("bar", None, "a `bar` tile needs `chart: { x, y }`"),
+            (
+                "bar",
+                Some(r#"{"x":"day"}"#),
+                "a `bar` tile needs `chart: { x, y }`",
+            ),
+            (
+                "treemap",
+                Some(r#"{"label":"day"}"#),
+                "a `treemap` tile needs `chart: { label, size }`",
+            ),
+            (
+                "line",
+                Some(r#"{"x":"day","y":"gone"}"#),
+                "`gone` isn't a column",
+            ),
+        ] {
+            let options = chart.map(|c| format!(r#"{{"chart":{c}}}"#));
+            let err = new_tile(
+                &gw,
+                TileInput {
+                    kind: "query".into(),
+                    sql: Some(sql.into()),
+                    display: Some(display.into()),
+                    options_json: options,
+                    ..TileInput::default()
+                },
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+            assert!(err.contains(says), "{display}: {err}");
         }
     }
 }

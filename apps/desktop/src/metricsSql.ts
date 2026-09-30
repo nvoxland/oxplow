@@ -19,6 +19,14 @@ export type SeriesPoint = {
   source: string | null;
 };
 
+/** A sliced metric's points, one series per dimension value, in first-seen
+ *  order (Slice By on the metric pages). */
+export function seriesByGroup(points: SeriesPoint[]): { group: string | null; points: SeriesPoint[] }[] {
+  const groups = new Map<string | null, SeriesPoint[]>();
+  for (const p of points) groups.set(p.group, [...(groups.get(p.group) ?? []), p]);
+  return [...groups.entries()].map(([group, pts]) => ({ group, points: pts }));
+}
+
 /** A metric definition — a row of `v_metric_spec`. */
 export type MetricSpec = {
   key: string;

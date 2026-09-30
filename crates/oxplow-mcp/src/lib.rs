@@ -290,7 +290,9 @@ pub struct AddDashboardItemParams {
     pub sql: Option<String>,
     /// A `query` tile's display: `table` (default), `list`, `number`,
     /// `markdown`, `bar`, `line`, `treemap`, or `metric` (the metric card —
-    /// set the metric key as `metric` in `options_json`).
+    /// set the metric key as `metric` in `options_json`). A chart names its
+    /// columns in `options_json`'s `chart`: `bar`/`line` `{ x, y, series? }`,
+    /// `treemap` `{ label, size, group? }`.
     pub display: Option<String>,
     /// Lens id (`<extension>/<slug>`) for a `lens` tile.
     pub lens_id: Option<String>,

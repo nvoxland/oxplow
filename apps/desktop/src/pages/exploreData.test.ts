@@ -60,3 +60,23 @@ test("a raw read can't be kept: saving and pinning say why", () => {
   expect(why).toContain("raw tables");
   expect(why).toContain("models");
 });
+
+import { chartDefaults, metricTemplate, sliceTemplate } from "./exploreData.js";
+
+test("the explorer's metric template: a line over captures; Slice By regenerates it with a dimension", () => {
+  const plain = metricTemplate("oxplow.todos", null);
+  expect(plain.sql).toContain("metric_grid('capture')");
+  expect(plain.viz).toBe("line");
+  expect(plain.chart).toEqual({ x: "captured_at", y: "value", series: null, label: null, size: null, group: null });
+  const sliced = sliceTemplate(plain, "zone");
+  expect(sliced.sql).toContain("metric_grid('capture', 'zone')");
+  expect(sliced.chart.series).toBe("group");
+  expect(sliceTemplate(sliced, null).sql).toBe(plain.sql);
+});
+
+test("a chart picks sensible columns from a result", () => {
+  const r = result(["day", "n", "zone"], [["mon", 3, "core"]]);
+  expect(chartDefaults("bar", r)).toEqual({ x: "day", y: "n", series: null, label: null, size: null, group: null });
+  expect(chartDefaults("treemap", r)).toEqual({ x: null, y: null, series: null, label: "day", size: "n", group: null });
+  expect(chartDefaults("table", r)).toBeNull();
+});

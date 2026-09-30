@@ -52,3 +52,14 @@ describe("metrics read through SQL", () => {
     expect(entry.toggleable).toBe(false);
   });
 });
+
+import { seriesByGroup } from "./metricsSql.js";
+
+test("a sliced metric's points split into one series per group", () => {
+  const p = (group: string | null, value: number) =>
+    ({ capture_id: 1, captured_at: "t", value, group, branch: null, provenance: null, vcs_rev: null, source: null }) as never;
+  expect(seriesByGroup([p("core", 1), p("ui", 2), p("core", 3)]).map((s) => [s.group, s.points.length])).toEqual([
+    ["core", 2],
+    ["ui", 1],
+  ]);
+});

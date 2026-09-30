@@ -1,3 +1,4 @@
+import type { LensChart } from "../tauri-bridge/generated/bindings.js";
 import type { Dashboard, SeriesPoint } from "../api.js";
 import { metricSeriesSql } from "../metricsSql.js";
 import type { MenuItem } from "../menu.js";
@@ -39,6 +40,9 @@ export interface TileOptions {
   display?: string;
   /** The metric a `metric` display shows (its key). */
   metric?: string;
+  /** A chart display's columns (`bar`/`line`: x, y, series; `treemap`:
+   *  label, size, group) — what Explore Data pinned (P6.F1). */
+  chart?: LensChart;
 }
 
 const VIZ = new Set<TileOptions["viz"]>(["line", "number"]);
@@ -73,6 +77,11 @@ export function parseTileOptions(json: string | null | undefined): TileOptions {
   if (typeof obj.sql === "string") out.sql = obj.sql;
   if (typeof obj.display === "string") out.display = obj.display;
   if (typeof obj.metric === "string") out.metric = obj.metric;
+  if (typeof obj.chart === "object" && obj.chart !== null && !Array.isArray(obj.chart)) {
+    const c = obj.chart as Record<string, unknown>;
+    const col = (k: string) => (typeof c[k] === "string" ? (c[k] as string) : null);
+    out.chart = { x: col("x"), y: col("y"), series: col("series"), label: col("label"), size: col("size"), group: col("group") };
+  }
   return out;
 }
 

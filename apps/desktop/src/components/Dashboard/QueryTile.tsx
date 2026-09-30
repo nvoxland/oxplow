@@ -32,6 +32,8 @@ export function QueryTile({
 }) {
   const sql = opts.sql ?? "";
   const display = (opts.display ?? "table") as LensViz;
+  const chart = opts.chart ?? null;
+  const chartKey = JSON.stringify(chart);
   const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const ctxMenu = useContextMenu();
@@ -43,12 +45,12 @@ export function QueryTile({
     try {
       const result = await querySql(sql, [], null);
       if (!current()) return;
-      setRun({ lens: adHocLens(sql, display), params: {}, result, alert: null });
+      setRun({ lens: adHocLens(sql, display, JSON.parse(chartKey) as typeof chart), params: {}, result, alert: null });
       setError(null);
     } catch (e) {
       if (current()) setError(e instanceof Error ? e.message : String(e));
     }
-  }, [sql, display, guard]);
+  }, [sql, display, chartKey, guard]);
 
   useEffect(() => {
     void refresh();

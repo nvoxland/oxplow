@@ -14,8 +14,11 @@ import {
   removeDashboardItem,
   enableMetrics,
   subscribeDashboardEvents,
+  querySql,
 } from "../api.js";
 import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
+import { seriesByGroup } from "../metricsSql.js";
+import { DIMENSIONS_SQL } from "./exploreData.js";
 import { useRequestGuard } from "../request-guard.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import { recordOpError } from "../components/opErrorsStore.js";
@@ -74,6 +77,14 @@ export function MetricDetailPage({
   // Filters. Default to the last 7 days, all branches.
   const [range, setRange] = useState<TimeRange>(() => rangeFromPreset(DEFAULT_RANGE_KEY, Date.now()));
   const [branch, setBranch] = useState<string | null>(null);
+  // Slice By (P6.F1): a dimension groups the captures into one series each.
+  const [sliceBy, setSliceBy] = useState<string | null>(null);
+  const [dimensions, setDimensions] = useState<{ key: string; label: string }[]>([]);
+  useEffect(() => {
+    void querySql(DIMENSIONS_SQL, [], null)
+      .then((r) => setDimensions(r.rows.map(([key, label]) => ({ key: String(key), label: String(label ?? key) }))))
+      .catch(() => setDimensions([]));
+  }, []);
   // "Add to dashboard" picker (tsk143).
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const addToDashboardMenu = useContextMenu();
@@ -117,7 +128,7 @@ export function MetricDetailPage({
       // Bound the read to the widest preset (tsk202); the chart's range
       // dropdown switches client-side within it. A metric with nothing to
       // grid (no spec, or a formula) shows no data.
-      listMetricSamples(metricKey, SAMPLE_LIMIT, null, widestPresetWindow(Date.now())).catch(() => ({
+      listMetricSamples(metricKey, SAMPLE_LIMIT, sliceBy, widestPresetWindow(Date.now())).catch(() => ({
         rows: [] as SeriesPoint[],
         reads: NO_READS,
       })),
@@ -129,7 +140,7 @@ export function MetricDetailPage({
       setReads(unionReads([defs.reads, catalog.reads, captures.reads]));
       setLoading(false);
     });
-  }, [metricKey, guard]);
+  }, [metricKey, sliceBy, guard]);
 
   useEffect(() => {
     refresh();
@@ -143,6 +154,15 @@ export function MetricDetailPage({
     [samples, range, branch],
   );
   const points = useMemo(() => transformSeries(seriesPoints(filtered), mode), [filtered, mode]);
+  // Sliced: one chart per dimension value (the lens line viz's small
+  // multiples), each transformed the way the metric rolls up.
+  const slices = useMemo(
+    () =>
+      sliceBy
+        ? seriesByGroup(filtered).map((g) => ({ group: g.group, points: transformSeries(seriesPoints(g.points), mode) }))
+        : null,
+    [filtered, mode, sliceBy],
+  );
 
   const toggleEnabled = async () => {
     if (!entry) return;
@@ -254,13 +274,31 @@ export function MetricDetailPage({
             {def.description}
           </p>
         ) : null}
-        <TrendChart
-          points={points}
-          target={mode === "value" ? def.target : null}
-          domain={range}
-          unit={def.unit}
-          onSelectRange={(from, to) => setRange({ from, to })}
-        />
+        {slices ? (
+          <div data-testid="metric-slices" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {slices.map((s) => (
+              <div key={s.group ?? "(none)"}>
+                <SectionLabel>{s.group ?? "(none)"}</SectionLabel>
+                <TrendChart
+                  points={s.points}
+                  target={mode === "value" ? def.target : null}
+                  domain={range}
+                  unit={def.unit}
+                  height={140}
+                  onSelectRange={(from, to) => setRange({ from, to })}
+                />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <TrendChart
+            points={points}
+            target={mode === "value" ? def.target : null}
+            domain={range}
+            unit={def.unit}
+            onSelectRange={(from, to) => setRange({ from, to })}
+          />
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <SectionLabel>Recordings</SectionLabel>
           <RecordingsTable samples={filtered} unit={def.unit} />
@@ -285,6 +323,7 @@ export function MetricDetailPage({
               branch={branch}
               branches={branches}
               onBranch={setBranch}
+              slice={{ dimensions, value: sliceBy, onChange: setSliceBy }}
             />
             <MetricStatsRail def={def} samples={filtered} />
             {dashboardBlock}
