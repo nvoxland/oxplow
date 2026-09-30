@@ -1,6 +1,6 @@
 ---
 name: oxplow-wiki-capture
-description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on mcp__oxplow__list_wiki_pages, search_wiki_pages, search_wiki_page_bodies, list_backlinks, get_wiki_page_metadata, knowledge.write_page, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
+description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on v_knowledge_page, v_knowledge_ref, mcp__oxplow__search (kind wiki), list_backlinks, knowledge.write_page, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
 ---
 
 # Wiki pages — exploratory capture
@@ -42,9 +42,12 @@ where exploration goes regardless of writer status.
 
 Before writing, search for an existing topic note. Don't fragment.
 
-1. `mcp__oxplow__search_wiki_pages` — title substring (cheap, scan first).
-2. `mcp__oxplow__search_wiki_page_bodies` — content substring; catches
-   notes that discuss the topic but aren't named after it.
+1. `mcp__oxplow__query_sql` over `v_knowledge_page` — every page's
+   `slug`, `title`, `excerpt`, `outbound_refs` and `stale_ref_count`
+   (cheap, scan first: `SELECT slug, title FROM v_knowledge_page WHERE
+   title LIKE '%hook%'`).
+2. `mcp__oxplow__search` with `kinds: ["wiki"]` — full-text over page
+   bodies; catches pages that discuss the topic but aren't named after it.
 3. `mcp__oxplow__list_backlinks` with `kind: "file"`, `id: <path>` —
    for each non-trivial file you read this turn, check whether an
    existing wiki page (or any other source) already references it.
@@ -103,8 +106,10 @@ wired up by [[src/ui/index.tsx]]."
 
 ## Write mechanics
 
-1. For an existing page, read it first (`get_wiki_page_metadata` gives
-   its `path`; Read the file) and merge your addition into its body.
+1. For an existing page, Read `.oxplow/wiki/<slug>.md` and merge your
+   addition into its body. Its refs that drifted since they were pinned
+   are `v_knowledge_ref` rows with `stale = 1`; `wiki_ref_drift` shows
+   what changed in one.
 2. Write the whole page with `mcp__oxplow__run_command`:
    `knowledge.write_page { slug, body, verified_refs, removed_refs }`
    (`title` optionally sets the `# ` heading). That one run writes the

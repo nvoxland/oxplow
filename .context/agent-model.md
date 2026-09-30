@@ -1362,20 +1362,14 @@ the rowid as a string.
 Each row carries `ref_type` so you can tell e.g. a commit's
 `touched_file` edge from a wiki body's `wikilink`.
 
-`buildWikiPageMcpTools` (`crates/oxplow-mcp/src/lib.rs`) surfaces the
-per-project wiki (`wiki_page` table + `.oxplow/wiki/*.md` files — see
-`data-model.md`). Tools are metadata-only: `list_wiki_pages`,
-`get_wiki_page_metadata`, `search_wiki_pages` (title),
-`search_wiki_page_bodies` (content), and
-`list_stale_wiki_pages` (pages with ≥1 file ref whose pinned snapshot is
-older than the file's latest snapshot — same staleness rule as the UI
-`list_wiki_freshness` reader, surfaced so the agent can find drifted
-pages without reading bodies; returns `{ slug, title, stale_refs }` per
-page). `list_wiki_pages` already returns the full per-page bulk fields
-(title, refs, excerpt, timestamps), so the only reason to call
-`get_wiki_page_metadata` after a `list` is its added `stale_refs` field
-— don't fan out per-page `get` calls for data `list` already gave you.
-`wiki_ref_drift({ slug, path })` closes the loop: for one stale ref it
+The wiki is read with SQL (P5.C4, [knowledge.md](./knowledge.md)):
+`query_sql` over `v_knowledge_page` (a page's title, excerpt,
+`outbound_refs` and `stale_ref_count`) and `v_knowledge_ref` (each
+file ref's pin against the file's latest snapshot, `stale`), and the
+site `search` tool (`kinds: ["wiki"]`) over bodies. The six MCP read
+tools (`list_wiki_pages`, `search_wiki_pages`, `search_wiki_page_bodies`,
+`get_wiki_page_metadata`, `list_stale_wiki_pages`,
+`find_wiki_pages_for_wiki_page`) went with it. `wiki_ref_drift({ slug, path })` closes the loop: for one stale ref it
 returns the unified diff between the snapshot the ref was pinned to and
 the file's current on-disk content (`compute_wiki_ref_drift` in
 `crates/oxplow-app/src/wiki_drift.rs`, via `similar`), so the agent reads

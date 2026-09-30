@@ -744,6 +744,35 @@
     - { accepted_values: { column: state, values: [todo, in_progress, blocked, done, canceled] } }
     - { relationships: { column: parent_ref, to: work_item, field: ref } }
     - { sql: "SELECT t.id FROM v_task t WHERE NOT EXISTS (SELECT 1 FROM v_work_item w WHERE w.ref = 'work_item:oxplow:tsk' || t.id) UNION ALL SELECT w.ref FROM v_work_item w WHERE w.provider = 'oxplow' AND NOT EXISTS (SELECT 1 FROM v_task t WHERE 'work_item:oxplow:tsk' || t.id = w.ref)" }
+- name: knowledge_page
+  version: 1
+  description: "Knowledge pages (the wiki, P5.C4): one row per page with what it links to and how many of its file refs have drifted since they were pinned. Bodies are `.oxplow/wiki/<slug>.md`; search them with the `search` tool."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`wiki:<slug>`." }
+    - { name: "provider", type: "TEXT", doc: "The knowledge provider (`oxplow`)." }
+    - { name: "slug", type: "TEXT", doc: "Page slug (link with [[slug]])." }
+    - { name: "title", type: "TEXT", doc: "The page's first `# ` heading, else its slug." }
+    - { name: "excerpt", type: "TEXT", doc: "Start of the body." }
+    - { name: "body_size", type: "INTEGER", doc: "Size of the full body, bytes." }
+    - { name: "outbound_refs", type: "TEXT", doc: "JSON array of every ref the page links to (`file:src/lib.rs`, `wiki:other`, `work_item:oxplow:tsk42`)." }
+    - { name: "stale_ref_count", type: "INT", doc: "File refs whose file has a newer snapshot than the one the ref was pinned to (or that were never pinned but have been snapshotted): what may no longer hold." }
+    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+    - { accepted_values: { column: provider, values: [oxplow] } }
+- name: knowledge_ref
+  version: 1
+  description: "Each knowledge page's file refs and how current they are (P5.C4): the snapshot a ref was pinned to against the file's latest. `stale` rows are what `v_knowledge_page.stale_ref_count` counts; `wiki_ref_drift` shows one's diff."
+  columns:
+    - { name: "page", type: "TEXT", doc: "The page (`wiki:<slug>`, v_knowledge_page.ref)." }
+    - { name: "path", type: "TEXT", doc: "The file it relies on (workspace-relative)." }
+    - { name: "pinned_snapshot_id", type: "INTEGER", doc: "The snapshot the ref was pinned to (written or verified against); NULL if never pinned." }
+    - { name: "latest_snapshot_id", type: "INT", doc: "The file's latest snapshot; NULL if it was never captured." }
+    - { name: "stale", type: "INT", doc: "1 when the file changed after the pin (or was captured but never pinned)." }
+  tests:
+    - { not_null: page }
+    - { relationships: { column: page, to: knowledge_page, field: ref } }
 - name: model
   version: 2
   description: "Models: every published view, as compiled at this open — core ones and each extension's. Read a model's columns in `v_model_column`, what it reads in `v_model_lineage` and its declared tests' results in `v_model_test`."

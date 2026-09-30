@@ -57,6 +57,7 @@ pub mod hook_ingest;
 pub mod indexer;
 pub mod inferred_decisions;
 pub mod knowledge;
+pub mod knowledge_conformance;
 pub mod lens_actions;
 pub mod link_check;
 pub mod lsp_diagnostics;
@@ -448,6 +449,8 @@ pub struct Services {
     pub commands: Arc<commands::CommandBus>,
     /// The work-items providers, by name (`.context/work-items.md`).
     pub work_items: oxplow_domain::work_items::WorkItemsRegistry,
+    /// The knowledge provider: oxplow's wiki (`.context/knowledge.md`).
+    pub knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
@@ -983,6 +986,8 @@ impl Services {
         ] {
             commands.register(command).expect("core commands register");
         }
+        let knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider> =
+            Arc::new(knowledge::OxplowKnowledge::new(&commands, db.clone()));
         for command in knowledge::commands(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),
@@ -1089,6 +1094,7 @@ impl Services {
             extension_catalog,
             commands,
             work_items,
+            knowledge,
             wiki_page_store,
             page_visit_store,
             usage_store,

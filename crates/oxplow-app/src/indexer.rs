@@ -2,11 +2,11 @@
 //!
 //! Owns every write into the unified `search_store` (FTS5/BM25). It first
 //! **backfills** the index from current state, then keeps it fresh two
-//! ways: tasks and snapshot files from the **event log** (the `search.index`
-//! pump consumer, P3.10 — durable, redelivered after a crash, on
-//! `work_item.created/edited/transitioned/deleted` and `snapshot.taken`),
-//! and notes, comments and wiki pages from the **in-memory bus** until those
-//! capabilities log events (P5). One uniform mechanism for both DB-resident content
+//! ways: tasks, wiki pages and snapshot files from the **event log** (the
+//! `search.index` pump consumer, P3.10/P5.C4 — durable, redelivered after a
+//! crash, on `work_item.created/edited/transitioned/deleted`,
+//! `knowledge.page.written/deleted` and `snapshot.taken`), and notes and
+//! comments from the **in-memory bus** until those capabilities log events. One uniform mechanism for both DB-resident content
 //! (tasks, comments, notes) and disk-derived content (wiki bodies, file
 //! contents — file handling lives alongside in the snapshot-event handler).
 //!
@@ -61,6 +61,8 @@ impl crate::event_pump::AsyncEventConsumer for SearchIndexConsumer {
                 | "work_item.edited"
                 | "work_item.transitioned"
                 | "work_item.deleted"
+                | "knowledge.page.written"
+                | "knowledge.page.deleted"
                 | "snapshot.taken"
         )
     }
@@ -76,6 +78,21 @@ impl crate::event_pump::AsyncEventConsumer for SearchIndexConsumer {
         };
         let indexer = Indexer::new(svc.clone());
         let payload = &event.envelope.payload;
+        if let Some(slug) = event
+            .envelope
+            .event_type
+            .starts_with("knowledge.page.")
+            .then(|| {
+                payload["page"]
+                    .as_str()
+                    .and_then(|p| p.strip_prefix("wiki:"))
+            })
+            .flatten()
+        {
+            // Restated from the page as it stands: a deleted one drops out.
+            indexer.index_wiki(slug).await;
+            return Ok(());
+        }
         if event.envelope.event_type == "snapshot.taken" {
             let stream = payload["stream"]
                 .as_str()
@@ -174,8 +191,8 @@ impl Indexer {
                 target_id,
                 ..
             } => self.reindex_target_comments(&target_kind, &target_id).await,
-            OxplowEvent::WikiPagesChanged { slug } => self.index_wiki(&slug).await,
-            // Tasks and snapshot files come off the event log (`register`).
+            // Tasks, wiki pages and snapshot files come off the event log
+            // (`register`).
             _ => {}
         }
     }
@@ -486,6 +503,61 @@ mod tests {
         svc.tasks.soft_delete(task.id).await.unwrap();
         svc.event_pump.run_once().await.unwrap();
         assert!(!found("flange").await, "removed on work_item.deleted");
+    }
+
+    /// P5.C4: a wiki page is indexed from its `knowledge.page.*` events —
+    /// written by command or by hand, and gone when deleted.
+    #[tokio::test]
+    async fn wiki_pages_are_indexed_from_their_events() {
+        let (svc, dir) = services().await;
+        register(&svc);
+        svc.streams.ensure_primary().await.unwrap();
+        let found = |q: &'static str| {
+            let svc = svc.clone();
+            async move {
+                svc.search_store
+                    .search(q, None, &[], 10)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .any(|h| h.kind == KIND_WIKI)
+            }
+        };
+        svc.commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::knowledge::WRITE_PAGE,
+                serde_json::json!({ "slug": "gears", "body": "# Gears\n\nThe sprocket turns.\n" }),
+                true,
+            )
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert!(found("sprocket").await, "indexed on knowledge.page.written");
+
+        // A hand edit converges and re-indexes.
+        std::fs::write(
+            crate::knowledge::page_path(dir.path(), "gears"),
+            "# Gears\n\nThe flange holds.\n",
+        )
+        .unwrap();
+        crate::wiki_pages::sync_page(&svc.db, &svc.event_schemas, dir.path(), "gears")
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert!(found("flange").await, "re-indexed after a hand edit");
+
+        svc.commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::knowledge::DELETE_PAGE,
+                serde_json::json!({ "slug": "gears" }),
+                true,
+            )
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert!(!found("flange").await, "removed on knowledge.page.deleted");
     }
 
     /// A task moved to another thread is indexed where it lives now and

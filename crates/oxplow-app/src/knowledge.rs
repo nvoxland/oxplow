@@ -21,6 +21,7 @@ use oxplow_db::{EventCtx, FileRefVersion, PageRefEdge, WikiPage};
 use oxplow_domain::events::schema::{
     KnowledgePageDeleted, KnowledgePageDeletedV1, KnowledgePageWritten, KnowledgePageWrittenV1,
 };
+use oxplow_domain::knowledge::{KnowledgeError, KnowledgeProvider, PageDraft, RefFreshness};
 use oxplow_domain::vcs::{Revision, Vcs};
 use oxplow_domain::{
     Anchors, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, DomainError, Invokers,
@@ -329,6 +330,135 @@ fn with_title(body: &str, title: &str) -> String {
         out.push('\n');
     }
     out
+}
+
+/// oxplow's wiki as a [`KnowledgeProvider`]: writes are the
+/// `knowledge.*` commands run as the given actor (one write path;
+/// audited); freshness reads the pins. Holds the bus weakly — the bus
+/// outlives nothing it owns.
+pub struct OxplowKnowledge {
+    bus: std::sync::Weak<crate::commands::CommandBus>,
+    db: oxplow_db::Database,
+}
+
+impl OxplowKnowledge {
+    pub fn new(bus: &Arc<crate::commands::CommandBus>, db: oxplow_db::Database) -> Self {
+        Self {
+            bus: Arc::downgrade(bus),
+            db,
+        }
+    }
+
+    async fn run(
+        &self,
+        actor: &oxplow_domain::Actor,
+        name: &str,
+        input: serde_json::Value,
+    ) -> Result<serde_json::Value, KnowledgeError> {
+        let bus = self
+            .bus
+            .upgrade()
+            .ok_or_else(|| KnowledgeError::Failed("the command bus is gone".into()))?;
+        // A provider call is the caller's decision: a destructive one runs
+        // confirmed.
+        bus.run(actor, name, input, true)
+            .await
+            .map(|outcome| outcome.result)
+            .map_err(|e| match e {
+                CommandError::Invalid { message, .. } => KnowledgeError::Refused(message),
+                other => KnowledgeError::Failed(other.to_string()),
+            })
+    }
+}
+
+fn slug_of_ref(page: &str) -> Result<&str, KnowledgeError> {
+    page.strip_prefix("wiki:")
+        .ok_or_else(|| KnowledgeError::Refused(format!("`{page}` isn't a page ref (wiki:<slug>)")))
+}
+
+#[async_trait::async_trait]
+impl KnowledgeProvider for OxplowKnowledge {
+    fn provider(&self) -> &str {
+        "oxplow"
+    }
+
+    async fn write_page(
+        &self,
+        actor: &oxplow_domain::Actor,
+        draft: PageDraft,
+    ) -> Result<String, KnowledgeError> {
+        let result = self
+            .run(
+                actor,
+                WRITE_PAGE,
+                json!({
+                    "slug": draft.slug,
+                    "title": draft.title,
+                    "body": draft.body,
+                    "verified_refs": draft.verified_refs,
+                    "removed_refs": draft.removed_refs,
+                }),
+            )
+            .await?;
+        Ok(result["page"].as_str().unwrap_or_default().to_string())
+    }
+
+    async fn delete_page(
+        &self,
+        actor: &oxplow_domain::Actor,
+        page: &str,
+    ) -> Result<(), KnowledgeError> {
+        let slug = slug_of_ref(page)?;
+        self.run(actor, DELETE_PAGE, json!({ "slug": slug }))
+            .await
+            .map(|_| ())
+    }
+
+    async fn link(
+        &self,
+        actor: &oxplow_domain::Actor,
+        page: &str,
+        target: &str,
+    ) -> Result<(), KnowledgeError> {
+        let slug = slug_of_ref(page)?;
+        self.run(actor, LINK, json!({ "page": slug, "target": target }))
+            .await
+            .map(|_| ())
+    }
+
+    async fn freshness(&self, page: &str) -> Result<Vec<RefFreshness>, KnowledgeError> {
+        let slug = slug_of_ref(page)?.to_string();
+        self.db
+            .read(move |conn| {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT pr.target_id, pr.local_snapshot_id,
+                                (SELECT MAX(fs.snapshot_id) FROM file_snapshot fs
+                                  WHERE fs.path = pr.target_id)
+                         FROM page_ref pr
+                         WHERE pr.source_kind = ?1 AND pr.source_id = ?2 AND pr.target_kind = ?3
+                         ORDER BY pr.target_id",
+                    )
+                    .map_err(sql)?;
+                let rows = stmt
+                    .query_map(params![KIND_WIKI, slug, KIND_FILE], |r| {
+                        let target: String = r.get(0)?;
+                        let pinned: Option<i64> = r.get(1)?;
+                        let latest: Option<i64> = r.get(2)?;
+                        Ok(RefFreshness {
+                            target: format!("{KIND_FILE}:{target}"),
+                            pinned_snapshot: pinned,
+                            latest_snapshot: latest,
+                            stale: latest.is_some_and(|l| pinned.is_none_or(|p| l > p)),
+                        })
+                    })
+                    .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                    .map_err(sql)?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| KnowledgeError::Failed(e.to_string()))
+    }
 }
 
 /// Marks a page touched by the thread whose command wrote it (the rail's
@@ -935,6 +1065,106 @@ mod tests {
         );
         assert!(fx.svc.wiki_page_store.get("hand").await.unwrap().is_none());
         assert_eq!(events_of(&fx, "knowledge.page.deleted").await.len(), 1);
+    }
+
+    async fn stale_ref_count(fx: &crate::test_fixtures::EffortFixture, page: &str) -> i64 {
+        let page = page.to_string();
+        fx.svc
+            .db
+            .read(move |c| {
+                c.query_row(
+                    "SELECT stale_ref_count FROM v_knowledge_page WHERE ref = ?1",
+                    [page],
+                    |r| r.get(0),
+                )
+                .map_err(sql)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// A snapshot of the primary stream in which `path` changed.
+    async fn snapshot_with(fx: &crate::test_fixtures::EffortFixture, path: &str) -> i64 {
+        let path = path.to_string();
+        fx.svc
+            .db
+            .transaction(move |c| {
+                c.execute(
+                    "INSERT INTO snapshot (stream_id, created_at)
+                     SELECT id, '2026-09-30T00:00:00.000000Z' FROM streams WHERE kind = 'primary'",
+                    [],
+                )
+                .map_err(sql)?;
+                let id = c.last_insert_rowid();
+                c.execute(
+                    "INSERT INTO file_snapshot (stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id)
+                     SELECT id, ?1, 'h', 1, '2026-09-30T00:00:00.000000Z', 'oxplow', ?2
+                     FROM streams WHERE kind = 'primary'",
+                    params![path, id],
+                )
+                .map_err(sql)?;
+                Ok(id)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// P5.C4: `v_knowledge_page.stale_ref_count` rises when a pinned
+    /// file drifts and a snapshot lands, and falls when it is verified.
+    #[tokio::test]
+    async fn stale_ref_count_rises_when_a_pinned_file_drifts() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
+        std::fs::write(dir(&fx).join("src/lib.rs"), "v1").unwrap();
+        snapshot_with(&fx, "src/lib.rs").await;
+        run(
+            &fx,
+            WRITE_PAGE,
+            json!({ "slug": "lib", "body": "# Lib\n\nsee [[src/lib.rs]]\n" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 0);
+
+        snapshot_with(&fx, "src/lib.rs").await;
+        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 1);
+
+        run(
+            &fx,
+            WRITE_PAGE,
+            json!({ "slug": "lib", "body": "# Lib\n\nsee [[src/lib.rs]]\n", "verified_refs": ["src/lib.rs"] }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 0);
+        let outbound: String = fx
+            .svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT outbound_refs FROM v_knowledge_page WHERE ref = 'wiki:lib'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(sql)
+            })
+            .await
+            .unwrap();
+        assert_eq!(outbound, r#"["file:src/lib.rs"]"#);
+        let refs: (String, i64) = fx
+            .svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT path, stale FROM v_knowledge_ref WHERE page = 'wiki:lib'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(sql)
+            })
+            .await
+            .unwrap();
+        assert_eq!(refs, ("src/lib.rs".to_string(), 0));
     }
 
     /// A page an agent's command writes is marked touched by its thread.

@@ -3159,134 +3159,14 @@ impl OxplowMcp {
         json_result(&serde_json::json!({ "ok": true, "noteId": params.0.note_id }))
     }
 
-    #[tool(description = "List all wiki pages (metadata only).")]
-    async fn list_wiki_pages(&self) -> Result<CallToolResult, McpError> {
-        let notes = self
-            .services
-            .wiki_page_store
-            .list()
-            .await
-            .map_err(internal)?;
-        json_result(&notes)
-    }
-
-    #[tool(description = "Title/slug glob search over wiki pages.")]
-    async fn search_wiki_pages(
-        &self,
-        params: Parameters<SearchParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let hits = self
-            .services
-            .wiki_page_store
-            .search_titles(&params.0.query, params.0.limit as usize)
-            .await
-            .map_err(internal)?;
-        json_result(&hits)
-    }
-
-    #[tool(description = "FTS5-backed body search over wiki pages; returns ranked snippets.")]
-    async fn search_wiki_page_bodies(
-        &self,
-        params: Parameters<SearchParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let hits = self
-            .services
-            .wiki_page_store
-            .search_bodies(&params.0.query, params.0.limit as usize)
-            .await
-            .map_err(internal)?;
-        json_result(&hits)
-    }
-
-    #[tool(
-        description = "Get one wiki page's metadata by slug, enriched with `stale_refs` — the \
-                       file refs whose pinned snapshot is older than the file's latest snapshot. \
-                       That's the only field `list_wiki_pages` doesn't already carry, so don't \
-                       follow a `list` with per-page `get` calls unless you need `stale_refs`. \
-                       Returns null for an unknown slug."
-    )]
-    async fn get_wiki_page_metadata(
-        &self,
-        params: Parameters<SlugParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let Some(note) = self
-            .services
-            .wiki_page_store
-            .get(&params.0.slug)
-            .await
-            .map_err(internal)?
-        else {
-            return json_result(&serde_json::Value::Null);
-        };
-        let stale_refs: Vec<String> = self
-            .services
-            .page_ref_store
-            .list_wiki_file_freshness(&params.0.slug)
-            .await
-            .map_err(internal)?
-            .into_iter()
-            .filter(|(_path, local, _git, _exact, latest)| wiki_ref_stale(*local, *latest))
-            .map(|(path, ..)| path)
-            .collect();
-        let mut value = serde_json::to_value(&note).map_err(internal)?;
-        if let serde_json::Value::Object(map) = &mut value {
-            map.insert("stale_refs".to_string(), serde_json::json!(stale_refs));
-        }
-        json_result(&value)
-    }
-
-    #[tool(description = "List wiki pages that have at least one STALE file \
-                       reference — a referenced file has been snapshotted \
-                       more recently than the page's captured pin (or the \
-                       ref was never pinned). Use this to find out-of-date \
-                       pages without reading any body. Returns \
-                       `{ slug, title, stale_refs }` per drifted page; an \
-                       empty array means every page is current.")]
-    async fn list_stale_wiki_pages(&self) -> Result<CallToolResult, McpError> {
-        let pairs = self
-            .services
-            .page_ref_store
-            .list_stale_wiki_pages()
-            .await
-            .map_err(internal)?;
-        let titles: std::collections::HashMap<String, String> = self
-            .services
-            .wiki_page_store
-            .list()
-            .await
-            .map_err(internal)?
-            .into_iter()
-            .map(|p| (p.slug, p.title))
-            .collect();
-        // Pairs arrive ordered by slug then path, so consecutive rows
-        // with the same slug group together.
-        let mut grouped: Vec<(String, Vec<String>)> = Vec::new();
-        for (slug, path) in pairs {
-            match grouped.last_mut() {
-                Some((s, refs)) if *s == slug => refs.push(path),
-                _ => grouped.push((slug, vec![path])),
-            }
-        }
-        let out: Vec<serde_json::Value> = grouped
-            .into_iter()
-            .map(|(slug, stale_refs)| {
-                serde_json::json!({
-                    "slug": &slug,
-                    "title": titles.get(&slug).cloned().unwrap_or_default(),
-                    "stale_refs": stale_refs,
-                })
-            })
-            .collect();
-        json_result(&out)
-    }
-
     #[tool(description = "For one wiki page file ref, return the unified diff \
                        between the snapshot the ref was pinned to and the \
                        file's CURRENT on-disk content — so you can read just \
                        what drifted instead of re-opening the whole file. \
-                       Pair with `list_stale_wiki_pages` / \
-                       `get_wiki_page_metadata.stale_refs` to find which \
-                       (slug, path) drifted, then call this per ref. Returns \
+                       Find the drifted refs with `query_sql` over \
+                       `v_knowledge_ref` (`stale = 1`; per page, \
+                       `v_knowledge_page.stale_ref_count`), then call this \
+                       per ref. Returns \
                        `{ slug, path, pinned_snapshot_id, status, \
                        unified_diff, truncated }`; `status` is one of \
                        drifted | unchanged | not_a_ref | no_pin | binary.")]
@@ -4233,28 +4113,6 @@ impl OxplowMcp {
         json_result(&edges)
     }
 
-    #[tool(
-        description = "Wiki pages that reference the given note slug in their related_notes \
-                       (from [[other-note-slug]] wikilinks). Use for note-to-note backlinks."
-    )]
-    async fn find_wiki_pages_for_wiki_page(
-        &self,
-        params: Parameters<FindNotesForNoteParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let mut hits = oxplow_app::wiki_pages::backlinks_for_note(
-            &self.services.wiki_page_store,
-            &params.0.slug,
-        )
-        .await
-        .map_err(internal)?;
-        if (params.0.limit as usize) > 0 && hits.len() > params.0.limit as usize {
-            hits.truncate(params.0.limit as usize);
-        }
-        json_result(&hits)
-    }
-
-    // ---------- LSP ----------
-
     #[tool(description = "LSP textDocument/definition for a position in a file.")]
     async fn lsp_definition(
         &self,
@@ -4643,11 +4501,6 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "list_effort_observations",
     "list_zones",
     "list_comments",
-    "list_wiki_pages",
-    "search_wiki_pages",
-    "search_wiki_page_bodies",
-    "get_wiki_page_metadata",
-    "list_stale_wiki_pages",
     "wiki_ref_drift",
     "list_followups",
     "get_thread_context",
@@ -4655,7 +4508,6 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "list_outbound",
     "list_dead_letters",
     "list_commands",
-    "find_wiki_pages_for_wiki_page",
     "lsp_definition",
     "lsp_hover",
     "lsp_references",
@@ -5092,16 +4944,6 @@ fn parse_comment_intent(tool: &str, value: &str) -> Result<oxplow_domain::Commen
             None,
         )),
     }
-}
-
-/// A wiki file ref is stale when its path has been snapshotted more
-/// recently than the ref's captured pin, or it was never pinned but the
-/// file has a snapshot. Mirrors the per-ref rule in the UI's
-/// `list_wiki_freshness` reader and the SQL in
-/// `SqlitePageRefStore::list_stale_wiki_pages`.
-fn wiki_ref_stale(local: Option<i64>, latest: Option<i64>) -> bool {
-    matches!((latest, local), (Some(l), Some(loc)) if l > loc)
-        || matches!((latest, local), (Some(_), None))
 }
 
 /// Validate that a caller-supplied id string carries the expected
@@ -7194,51 +7036,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_wiki_page_metadata_includes_stale_refs_field() {
-        // The enriched metadata carries `stale_refs` (empty here — no
-        // snapshots seeded), which is what distinguishes it from the
-        // bulk `list_wiki_pages` payload.
-        let (proj, svc, server) = boot();
-        seed_wiki(proj.path(), "intro", "see [[crates/foo.rs]]").await;
-        oxplow_app::wiki_pages::sync_page(&svc.db, &svc.event_schemas, proj.path(), "intro")
-            .await
-            .unwrap();
-        let r = server
-            .get_wiki_page_metadata(Parameters(SlugParams {
-                slug: "intro".into(),
-            }))
-            .await
-            .unwrap();
-        let body = text_payload(r);
-        assert!(
-            body.contains("\"stale_refs\""),
-            "metadata should carry stale_refs: {body}"
-        );
-    }
-
-    #[test]
-    fn wiki_ref_stale_rule() {
-        assert!(
-            wiki_ref_stale(Some(100), Some(200)),
-            "newer snapshot is stale"
-        );
-        assert!(!wiki_ref_stale(Some(200), Some(200)), "equal is fresh");
-        assert!(
-            !wiki_ref_stale(Some(200), Some(50)),
-            "older file snapshot is fresh"
-        );
-        assert!(
-            wiki_ref_stale(None, Some(50)),
-            "unpinned but snapshotted is stale"
-        );
-        assert!(
-            !wiki_ref_stale(Some(100), None),
-            "no snapshot for path is fresh"
-        );
-        assert!(!wiki_ref_stale(None, None), "neither is fresh");
-    }
-
-    #[tokio::test]
     async fn create_task_rejects_stream_id_passed_as_thread_id() {
         let (_proj, services, server) = boot();
         let err = server
@@ -7413,26 +7210,6 @@ mod tests {
             serde_json::from_value::<FileEpicWithChildrenParams>(obj).is_err(),
             "missing `epic_description` should fail to deserialize (required)"
         );
-    }
-
-    #[tokio::test]
-    async fn list_wiki_pages_runs_against_empty_store() {
-        let (_proj, _services, server) = boot();
-        // No notes seeded — the tool should still respond with an
-        // empty-list payload rather than erroring.
-        let r = server.list_wiki_pages().await.unwrap();
-        let body = text_payload(r);
-        assert_eq!(body.trim(), "[]");
-    }
-
-    #[tokio::test]
-    async fn list_stale_wiki_pages_empty_when_nothing_stale() {
-        let (_proj, _services, server) = boot();
-        // No snapshots / refs seeded — no page can be stale, so the
-        // tool returns an empty array rather than erroring.
-        let r = server.list_stale_wiki_pages().await.unwrap();
-        let body = text_payload(r);
-        assert_eq!(body.trim(), "[]");
     }
 
     // ---- Pure helpers: parse_status / parse_priority ----

@@ -61,12 +61,46 @@ log) twice; a missing file deletes the page; an unreadable one is an
 error, never a delete. `updated_at` follows the file's mtime on this
 path, so a boot scan doesn't reset recency.
 
-## Attribution and reads
+## Attribution
 
 `WikiAttribution` (pump consumer `wiki.attribution`) marks a page touched
 by the thread whose command wrote it (`wiki_page_thread_update`, the
 rail's "Finished" list) from `knowledge.page.written`'s thread anchor.
-Reads are unchanged for now — the wiki MCP read tools, `list_wiki_pages`,
-the freshness RPC (`list_wiki_freshness`: pinned snapshot vs the file's
-latest) and `wiki_ref_drift`; they become SQL over `v_knowledge_page` in
-P5.C4.
+
+## Reads are SQL (P5.C4)
+
+- **`v_knowledge_page`** — one row per page: `ref` (`wiki:<slug>`),
+  `provider`, `slug`, `title`, `excerpt`, `body_size`, `outbound_refs`
+  (JSON array of every ref it links to), `stale_ref_count`, `updated_at`.
+- **`v_knowledge_ref`** — each page's file refs: `page`, `path`,
+  `pinned_snapshot_id`, `latest_snapshot_id`, `stale`.
+
+A ref is **stale** when its file has a snapshot newer than the one it was
+pinned to, or was captured but never pinned — the rule the Freshness page
+(`list_wiki_freshness`) and `KnowledgeProvider::freshness` use too.
+`wiki_ref_drift` (MCP) shows one stale ref's diff. Bodies are searched
+with the site `search` tool: the `search.index` pump consumer indexes a
+page from `knowledge.page.written` / `deleted` (written by command or by
+hand alike). The MCP read tools went; the desktop still reads through
+its `list_wiki_pages` / `read_wiki_page_body` RPCs until the knowledge
+pages move onto the models (P6).
+
+## The capability
+
+`oxplow_domain::knowledge::KnowledgeProvider`: `provider()`,
+`write_page(actor, PageDraft)`, `delete_page`, `link`, and
+`freshness(page) -> Vec<RefFreshness>` — freshness is the provider's to
+say (a provider that can't pin to snapshots reports what it can).
+`OxplowKnowledge` (`Services.knowledge`) runs the `knowledge.*` commands
+as the actor (a destructive one confirmed: the provider call is the
+caller's decision — an agent's is still left for a person, by the bus)
+and reads freshness from the pins.
+
+`knowledge_conformance::suite(provider, probe, actor)` is what a provider
+must do: a write lands the page, its body and its event; a pinned ref is
+fresh, goes stale when its file drifts, stays stale through an unverified
+rewrite (which still moves `updated_at`) and is fresh again once
+verified; a dangling link is refused, named; a delete takes the page and
+logs it. The `KnowledgeProbe` reads the host and moves the world (a file
+changes and is captured). oxplow's wiki passes it
+(`the_oxplow_wiki_is_a_conforming_provider`, as a person).
