@@ -750,6 +750,11 @@ pub struct RunLensParams {
     /// stream into `stream_id`) unless `params` sets them. Omit to use the
     /// stream's selected thread — what the person sees.
     pub thread_id: Option<String>,
+    /// `text` (default): the lens's text rendering (what it shows — a
+    /// chart's series, a grid's children) with the run's columns, row
+    /// count, params and alert, but not the rows. `json`: the full run,
+    /// rows included, for when you need to parse the values.
+    pub format: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1213,8 +1218,8 @@ impl OxplowMcp {
     #[tool(
         description = "What the human is looking at right now in a thread: the open page's id \
                        (`task:42`, `file:src/a.rs`, `lens:review/waiting`, …), its kind and \
-                       page detail. When it's a lens, `lensRun` is that lens re-run with the \
-                       human's current params, i.e. exactly the rows on their screen. Use it when \
+                       page detail. When it's a lens, `lens` is that lens re-run with the \
+                       human's current params, as text: exactly what is on their screen. Use it when \
                        the user says \"this\", \"what I'm looking at\" or \"this lens\". \
                        `open` is null when nothing has been reported."
     )]
@@ -1234,7 +1239,7 @@ impl OxplowMcp {
             .as_deref()
             .and_then(|d| serde_json::from_str(d).ok())
             .unwrap_or(serde_json::Value::Null);
-        let mut lens_run = serde_json::Value::Null;
+        let mut lens_text = serde_json::Value::Null;
         if page.kind == "lens" {
             if let (Some(lens_id), Some(root)) = (
                 page.page_id.strip_prefix("lens:"),
@@ -1251,17 +1256,27 @@ impl OxplowMcp {
                     .unwrap_or_default();
                 let ctx =
                     oxplow_app::extensions::lens_context(&self.services, None, Some(thread)).await;
-                lens_run = match oxplow_app::extensions::run_lens(
-                    &self.services.sql,
-                    &self.services.extension_catalog,
-                    &root,
-                    lens_id,
-                    lens_params,
-                    &ctx,
-                )
-                .await
-                {
-                    Ok(run) => serde_json::to_value(run).map_err(internal)?,
+                let read = async {
+                    let run = oxplow_app::extensions::run_lens(
+                        &self.services.sql,
+                        &self.services.extension_catalog,
+                        &root,
+                        lens_id,
+                        lens_params,
+                        &ctx,
+                    )
+                    .await?;
+                    oxplow_app::lens_text::text_run(
+                        &self.services.sql,
+                        &self.services.extension_catalog,
+                        &root,
+                        &run,
+                        &ctx,
+                    )
+                    .await
+                };
+                lens_text = match read.await {
+                    Ok(text) => serde_json::to_value(text).map_err(internal)?,
                     Err(e) => serde_json::json!({ "error": e.to_string() }),
                 };
             }
@@ -1273,7 +1288,7 @@ impl OxplowMcp {
                 "detail": detail,
                 "reportedAt": page.reported_at,
             },
-            "lensRun": lens_run,
+            "lens": lens_text,
         }))
     }
 
@@ -1788,8 +1803,10 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Run a lens and return the same rows, columns and resolved params the \
-                       human sees on its page. Override params by name; the rest use defaults."
+        description = "Run a lens and read what the human sees on its page: by default its text \
+                       rendering (a table, a chart's series, a grid's children) plus the resolved \
+                       params, columns, row count and alert; `format: \"json\"` returns the raw \
+                       rows instead. Override params by name; the rest use defaults."
     )]
     async fn run_lens(
         &self,
@@ -1822,7 +1839,24 @@ impl OxplowMcp {
         )
         .await
         .map_err(|e| lens_error(&p.id, e))?;
-        json_result(&run)
+        match p.format.as_deref().unwrap_or("text") {
+            "json" => json_result(&run),
+            "text" => json_result(
+                &oxplow_app::lens_text::text_run(
+                    &self.services.sql,
+                    &self.services.extension_catalog,
+                    &root,
+                    &run,
+                    &ctx,
+                )
+                .await
+                .map_err(|e| lens_error(&p.id, e))?,
+            ),
+            other => Err(McpError::invalid_params(
+                format!("format `{other}` isn't text or json"),
+                None,
+            )),
+        }
     }
 
     #[tool(
@@ -5693,11 +5727,19 @@ mod tests {
         .unwrap();
         assert_eq!(open["open"]["pageId"], "lens:demo/kinds");
         assert_eq!(open["open"]["detail"]["params"]["kind"], "primary");
-        // The lens is re-run with the human's params, not the defaults.
-        assert_eq!(
-            open["lensRun"]["result"]["rows"],
-            serde_json::json!([["primary"]])
+        // The lens is re-run with the human's params, not the defaults,
+        // and read as its text.
+        assert_eq!(open["lens"]["params"]["kind"], "primary");
+        assert_eq!(open["lens"]["rowCount"], 1);
+        assert!(
+            open["lens"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("| primary |"),
+            "{}",
+            open["lens"]
         );
+        assert!(open["lens"].get("result").is_none());
     }
 
     #[tokio::test]
@@ -5806,26 +5848,42 @@ mod tests {
         .unwrap();
         assert!(lens["query"].as_str().unwrap().contains("v_stream"));
 
-        let run: serde_json::Value = serde_json::from_str(&text_payload(
-            server
-                .run_lens(
-                    rmcp::model::Extensions::new(),
-                    Parameters(RunLensParams {
-                        id: "demo/streams".into(),
-                        params: Some(
-                            [("kind".to_string(), serde_json::json!("primary"))]
-                                .into_iter()
-                                .collect(),
-                        ),
-                        stream_id: None,
-                        thread_id: None,
-                    }),
-                )
-                .await
-                .unwrap(),
-        ))
-        .unwrap();
-        assert_eq!(run["result"]["rows"], serde_json::json!([["primary"]]));
+        let run = |format: Option<&str>| {
+            let format = format.map(str::to_string);
+            let server = &server;
+            async move {
+                serde_json::from_str::<serde_json::Value>(&text_payload(
+                    server
+                        .run_lens(
+                            rmcp::model::Extensions::new(),
+                            Parameters(RunLensParams {
+                                id: "demo/streams".into(),
+                                params: Some(
+                                    [("kind".to_string(), serde_json::json!("primary"))]
+                                        .into_iter()
+                                        .collect(),
+                                ),
+                                stream_id: None,
+                                thread_id: None,
+                                format,
+                            }),
+                        )
+                        .await
+                        .unwrap(),
+                ))
+                .unwrap()
+            }
+        };
+        // By default an agent reads the text rendering, not the rows (tsk576).
+        let text = run(None).await;
+        assert!(text.get("result").is_none(), "{text}");
+        assert_eq!(text["rowCount"], 1);
+        assert!(
+            text["text"].as_str().unwrap().contains("| primary |"),
+            "{text}"
+        );
+        let json = run(Some("json")).await;
+        assert_eq!(json["result"]["rows"], serde_json::json!([["primary"]]));
 
         let err = server
             .get_lens(

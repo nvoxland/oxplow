@@ -62,6 +62,7 @@ pub mod inferred_decisions;
 pub mod knowledge;
 pub mod knowledge_conformance;
 pub mod lens_actions;
+pub mod lens_text;
 pub mod link_check;
 pub mod lsp_diagnostics;
 #[cfg(test)]

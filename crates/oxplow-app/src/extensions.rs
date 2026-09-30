@@ -628,61 +628,6 @@ pub struct LensRun {
     pub alert: Option<AlertState>,
 }
 
-/// A lens result as text, for the `copy` action: a markdown lens's text, a
-/// number lens's value, anything else as a markdown table of what the
-/// lens shows.
-pub fn lens_text(run: &LensRun) -> String {
-    let cell = |c: &SqlCell| match c {
-        SqlCell::Null(()) => String::new(),
-        SqlCell::Text(t) => t.clone(),
-        SqlCell::Int(i) => i.to_string(),
-        SqlCell::Real(r) => r.to_string(),
-        SqlCell::Bool(b) => b.to_string(),
-    };
-    let first = run.result.rows.first().and_then(|r| r.first());
-    match run.lens.viz {
-        LensViz::Markdown | LensViz::Number => first.map(cell).unwrap_or_default(),
-        _ => {
-            // What the table shows: the declared columns in their order, or
-            // every result column when none are declared (the UI's
-            // `displayColumns`).
-            let shown: Vec<(usize, String)> = if run.lens.columns.is_empty() {
-                run.result.columns.iter().cloned().enumerate().collect()
-            } else {
-                run.lens
-                    .columns
-                    .iter()
-                    .filter_map(|c| {
-                        let i = run.result.columns.iter().position(|k| k == &c.key)?;
-                        Some((i, c.label.clone().unwrap_or_else(|| c.key.clone())))
-                    })
-                    .collect()
-            };
-            let esc = |t: String| t.replace('|', "\\|").replace('\n', " ");
-            let mut out = format!(
-                "| {} |\n|{}\n",
-                shown
-                    .iter()
-                    .map(|(_, l)| esc(l.clone()))
-                    .collect::<Vec<_>>()
-                    .join(" | "),
-                " --- |".repeat(shown.len())
-            );
-            for r in &run.result.rows {
-                out.push_str(&format!(
-                    "| {} |\n",
-                    shown
-                        .iter()
-                        .map(|(i, _)| esc(r.get(*i).map(cell).unwrap_or_default()))
-                        .collect::<Vec<_>>()
-                        .join(" | ")
-                ));
-            }
-            out
-        }
-    }
-}
-
 /// Load bundled extensions plus every project extension under
 /// `root/oxplow/extensions/`, sorted by name. A project extension using a
 /// bundled name is listed with an error and never shadows the bundled one.

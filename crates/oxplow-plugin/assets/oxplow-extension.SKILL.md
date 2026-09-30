@@ -208,8 +208,9 @@ file or pick up a task before editing, and list the files in
   existing lens over adding a near-duplicate.
 - When the user says "this lens", "what I'm looking at" or pastes
   `[oxplow lens <id>]`:
-  1. Call `get_open_page(thread_id)`. Its `lensRun` holds the rows on
-     their screen, with their current params.
+  1. Call `get_open_page(thread_id)`. Its `lens` is what is on their
+     screen as text, with their current params (`run_lens` with
+     `format: "json"` gives you the raw rows if you need them).
   2. Read the definition with `get_lens`.
   3. Change the file.
   4. Validate and run it again.

@@ -128,9 +128,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - The forms: `copy`, `add-to-context`, or
       `{action: run-source, source: <ext>/<id>, label?, id?}`. The `id`
       defaults to the kind and must be unique within the lens.
-    - `copy` returns `extensions::lens_text`: a markdown/number lens's
-      value, else a markdown table of exactly the displayed columns (the
-      same rule as the UI's `displayColumns`).
+    - `copy` returns the lens's text rendering (`lens_text::render`,
+      below).
     - `run-source` goes through `source_runner::sync_source`, the one
       entry point the IPC and MCP source runs use too. It **never
       approves**: an exec source nobody approved fails with a pointer to
@@ -732,13 +731,26 @@ tool list stable no matter how many extensions are installed.
   params).
 - `get_lens(id)`: the lens definition: query, params with defaults, viz,
   columns/links and the file it lives in.
-- `run_lens(id, params?)`: the **same rows, columns and alert state the
-  UI shows** for those params, so the agent sees exactly what the human
-  sees.
+- `run_lens(id, params?, format?)`: **what the UI shows** for those
+  params, as its text rendering by default — `LensText { lens, title,
+  params, columns, rowCount, truncated, reads, alert, text }`, no rows
+  (the text carries them) — or, with `format: "json"`, the full
+  `LensRun` with its rows.
+- **Text rendering** (design rule 17, `crates/oxplow-app/src/lens_text.rs`,
+  P6.A1): one renderer per kit component — a table or list is a markdown
+  table of the displayed columns (the UI's `displayColumns` rule); a
+  number or markdown lens is its first cell; a bar chart is its labels
+  and values with the total; a line chart pivots to one column per
+  series with each series' total; a treemap lists labels by size,
+  largest first; a grid renders its children in order under `###`
+  titles (`text_of` runs them with the params each declares). Tables
+  stop at 50 rows and say how many more; an empty result says the
+  lens's `empty` text. It's what `run_lens`, `get_open_page` and `copy`
+  return, so an agent reads a lens the way the person sees it.
 - `get_open_page(thread_id)` **(current)**: what the human has open in
   that thread, for any page kind (`task:42`, `file:…`, `lens:…`). For a
-  lens it adds `lensRun`, the lens re-run with the human's *current*
-  params, so "look at what I'm looking at" works.
+  lens it adds `lens`, the lens re-run with the human's *current*
+  params as its text rendering, so "look at what I'm looking at" works.
   - The UI reports the active page (`report_open_page`, UI-only) together
     with whatever that page published to `tabs/openPageDetail.ts`. The
     lens page publishes `{lensId, params}`.

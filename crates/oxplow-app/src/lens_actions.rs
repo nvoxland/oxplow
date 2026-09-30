@@ -59,8 +59,11 @@ pub async fn run_lens_action(
                 ctx,
             )
             .await?;
+            let text =
+                crate::lens_text::text_of(&layer, &svc.extension_catalog, lens_root, &run, ctx)
+                    .await?;
             Ok(LensActionResult {
-                text: Some(extensions::lens_text(&run)),
+                text: Some(text),
                 report: None,
             })
         }
