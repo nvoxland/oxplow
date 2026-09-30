@@ -7,7 +7,7 @@
 //!   transaction with its audit.
 //! - `metric.run` / `metric.rebuild` run gauges now — one, or every
 //!   gauge's whole-tree baseline. They drive snapshot captures and gauge
-//!   scripts, so they wrap the metrics service (`BestEffort`).
+//!   scripts — systems the bus doesn't own — so they are `External`.
 //! - `metric.scaffold` returns a starter gauge and the config entries for
 //!   a new metric; it writes nothing.
 //!
@@ -326,10 +326,10 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
                 "Run a configured gauge now and record its facts, against the stream's latest \
                  snapshot. Use after editing a gauge script, or for a `manual` gauge.",
                 serde_json::to_value(schemars::schema_for!(RunInput)).expect("schema serializes"),
-                Atomicity::BestEffort,
+                Atomicity::External,
                 CommandEffect::Write,
             ),
-            Handler::BestEffort(Arc::new(move |actor, input| {
+            Handler::External(Arc::new(move |actor, input| {
                 let metrics = metrics.clone();
                 Box::pin(async move {
                     let input: RunInput = parse(input)?;
@@ -357,10 +357,10 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
                  ran and which failed.",
                 serde_json::to_value(schemars::schema_for!(RebuildInput))
                     .expect("schema serializes"),
-                Atomicity::BestEffort,
+                Atomicity::External,
                 CommandEffect::Write,
             ),
-            Handler::BestEffort(Arc::new(move |_actor, input| {
+            Handler::External(Arc::new(move |_actor, input| {
                 let metrics = metrics.clone();
                 Box::pin(async move {
                     let input: RebuildInput = parse(input)?;

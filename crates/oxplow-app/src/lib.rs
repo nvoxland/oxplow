@@ -1257,4 +1257,19 @@ mod tests {
         );
         assert_eq!(cfg.collection.reports[0].path, "target/coverage/lcov.info");
     }
+
+    /// P5.A1 (tsk519): every `External` command — one that runs outside
+    /// the bus's transaction, against a system the bus doesn't own — is
+    /// listed here on purpose. Adding one means deciding that its system
+    /// owns the state, and saying which system in its summary.
+    #[tokio::test]
+    async fn the_external_commands_are_the_reviewed_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let services = Services::in_memory(dir.path()).unwrap();
+        assert_eq!(
+            services.commands.external_commands(),
+            vec!["metric.rebuild".to_string(), "metric.run".to_string()]
+        );
+    }
 }

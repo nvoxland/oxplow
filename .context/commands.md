@@ -20,7 +20,7 @@ A command is a typed operation named `<capability|plugin>.<verb>`
 | `confirm` | `Never`, `Always`, or `Destructive` — a person confirms; an agent never can |
 | `undoable` | the handler returns an inverse call that `undo` applies |
 | `lifecycle` | `Stable` / `Experimental` |
-| `atomicity` | `Tx` (handler runs inside the bus's transaction) or `BestEffort` (see below) |
+| `atomicity` | `Tx` (handler runs inside the bus's transaction) or `External` (see below) |
 | `effect` | `Write` (the default), `Read` or `Record`. A read runs without an audit row or `command.executed`, so a polling agent doesn't fill the log, and a thread that may not write can still run it (`config.list_keys`, `config.get`). A `Write` is refused to an agent thread that may not write. A `Record` changes oxplow's own records (`work_item.*`): audited like a write, open to any thread, and its handler refuses only a **claim** — opening an effort — when `TxCtx::may_claim` is false (tsk466) |
 
 `Actor` is who runs it: `Human`, `Agent { thread_id, stream_id }`,
@@ -70,7 +70,7 @@ run that didn't complete, was already undone or has no inverse, runs the
 inverse through the same pipeline, and marks the row `undone_by` the new
 run. The original row is claimed **with** the inverse run
 — marked `undone_by` inside the run's transaction for a `Tx` inverse,
-or claimed (`undone_by = 0`, pending) before a `BestEffort` inverse and
+or claimed (`undone_by = 0`, pending) before an `External` inverse and
 released if it fails — so two concurrent undos can't both apply it
 (tsk437 review).
 
@@ -78,7 +78,7 @@ released if it fails — so two concurrent undos can't both apply it
 whose chain ends at an agent (`Actor::is_agent_driven`) gets the agent
 policy and can never confirm, exactly like the agent.
 
-**A `BestEffort` run whose recording fails** (its writes already
+**An `External` run whose recording fails** (its effects already
 committed in the service's own transaction) is reported as done and
 unrecorded — `audit_id: None`, logged at error level — never as an
 error, which would claim the change didn't happen.
@@ -118,7 +118,7 @@ to `RawConfig` makes it managed, documented and settable at once.
 `CommandBus::list(actor)` is the specs that actor may run —
 `list_commands` for the agent, the launcher for the human.
 
-## `Tx` vs `BestEffort`
+## `Tx` vs `External`
 
 A `Tx` handler is `Fn(&TxCtx, Value) -> HandlerOutput` and composes
 into the bus's transaction, so its writes, the audit and the events
@@ -133,13 +133,16 @@ must stay pure: `Database::transaction` retries it on SQLITE_BUSY — and
 a handler that hits one itself returns `CommandError::Busy` (the
 `From<DomainError::Busy>`; map SQLite errors with `oxplow_db::map_sql_err`),
 which the bus turns back into a retry; only a busy that outlasts the
-retries reaches the caller, as `Busy` (RPC `BUSY`). A
-`BestEffort` handler is an async call into a pre-existing service that
-owns its own transactions, audited after it returns; it
-exists only for handlers that predate the bus, and
-`CommandBus::best_effort_count()` is asserted by a test so the number
-trends to zero. Registering a handler whose kind disagrees with the
-spec's `atomicity` is refused, as is a second command of the same name.
+retries reaches the caller, as `Busy` (RPC `BUSY`). An **`External`**
+handler (P5.A1) is an async call against a system the bus doesn't own —
+a VCS, a provider process, a gauge script — whose state can't join the
+bus's transaction; the bus audits it after it returns (a failure to
+record is logged, never reported as the run failing). It is the right
+kind for exactly those commands, not a shortcut: `CommandBus::
+external_commands()` is pinned by `the_external_commands_are_the_reviewed_ones`,
+and adding one means naming its system in the summary. Registering a
+handler whose kind disagrees with the spec's `atomicity` is refused, as
+is a second command of the same name.
 
 ## Commands so far
 
@@ -153,7 +156,7 @@ spec's `atomicity` is refused, as is a second command of the same name.
 | `config.set { key, value }` / `config.unset { key }` | `Tx`: validate against the key's schema, take the new document through the loader's own validation (`oxplow_config::keys::with_key`); after commit, write the file and swap the in-memory config | undoable (inverse restores the prior value or unsets); logs `config.changed@1 { key, before, after }`; `after_commit` broadcasts `ConfigChanged`; a **human-only key** (`HUMAN_ONLY_KEYS`: `ai`, `agents`, `agent`, `agentModels`, `acpAgents`, `lsp`, `collection`, `extensions`, `gauges`, `agentPromptAppend` — each runs a program, picks the model, enables code, or steers every agent; a test fails if a key documented as running programs or steering agents isn't listed) needs a person's confirmation per input |
 | `metric.enable { keys, enabled }` | `Tx`: turns metrics on or off — computes the new `metrics:` list with `MetricsService::apply_metric_enabled` (a bundled gauge is off until a `use:` names it; a producer/plugin metric is on until an `enabled: false` marker) and hands it to `config.set`'s core; an unknown key (not in `metric_catalog`) is refused | undoable (restores the prior list); logs `config.changed@1 { key: metrics, … }`; the reseed follows `ConfigChanged` |
 | `metric.record { key, value, subject?, dims?, stream? }` | `Tx` over `fact_store::record_facts_tx` (`commands/metric.rs`, P4.8) | not undoable. An asserted fact on the metric's source measure, stamped to match its filter, anchored to the stream's latest snapshot; the fact and the audit commit together. A formula or `count` metric, an unknown key, or another stream (for an agent) is refused. After commit: clears the fact memo, emits `MetricSamplesChanged` for the measure |
-| `metric.run { key, stream? }` / `metric.rebuild { force }` | `BestEffort` over `MetricsService::run_metric_by_key` / `rebuild_baseline` | not undoable. Run one gauge now, or every gauge's whole-tree baseline. They drive snapshot captures and gauge scripts, which own their own transactions — the two `BestEffort` commands in production |
+| `metric.run { key, stream? }` / `metric.rebuild { force }` | `External` over `MetricsService::run_metric_by_key` / `rebuild_baseline` | not undoable. Run one gauge now, or every gauge's whole-tree baseline. They drive snapshot captures and gauge scripts, which own their own transactions |
 | `metric.scaffold { key, title?, language?, glob? }` | `Tx`, `Read` | a starter gauge script and the measure + gauge + metric entries; writes nothing (the agent adds the entries with `config.set`) |
 
 **Callers.** Every task edit or status change made for someone is a
@@ -186,6 +189,15 @@ event on the pump, reading the value from the event's `after` (the pump
 can see the event before the after-commit swap): `generated` →
 `config_reactors::WorkspaceFilterConsumer` updates the snapshot captures'
 filter, so an agent's change applies like the person's.
+**The person's way onto the bus** (P5.A1): RPC `run_command { name,
+input, confirmed }` and `undo_command { audit_id, confirmed }`
+(`oxplow_rpc::commands::bus`, `Actor::Human`; desktop `runCommand` /
+`undoCommand` in `api.ts`). A call that needs confirmation comes back
+`NEEDS_CONFIRMATION` and the UI asks, then calls again with `confirmed`.
+A typed IPC setter is a convenience over one command; anything new the
+UI writes goes through `run_command`. Parity: `both("run_command")`,
+`ui("undo_command")`.
+
 `CommandError` → `McpError` mapping lives in `command_error` (oxplow-mcp):
 invalid/denied/unknown are the caller's to fix, `NeedsConfirmation` tells
 the agent to ask the person, `Failed` is internal.

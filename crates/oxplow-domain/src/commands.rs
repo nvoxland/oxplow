@@ -76,15 +76,15 @@ pub enum Lifecycle {
 }
 
 /// Whether the handler runs inside the bus's transaction (with the audit
-/// row and `command.executed`), or is a pre-existing service call with
-/// its own transactions that the bus audits after the fact. `BestEffort`
-/// exists only for handlers that predate the bus; a test counts them so
-/// the number trends to zero.
+/// row and `command.executed`), or outside it, against a system the bus
+/// doesn't own — a VCS, a provider process, a gauge script — and is
+/// audited after it returns (`External`). A test lists the `External`
+/// commands, so each one is a reviewed choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Atomicity {
     Tx,
-    BestEffort,
+    External,
 }
 
 /// Whether a command changes anything, and who may. A `Read` runs
@@ -249,6 +249,7 @@ impl Actor {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct CommandCall {
     pub name: String,
+    #[specta(type = crate::Json)]
     pub input: Value,
 }
 
@@ -264,6 +265,7 @@ pub struct Preview {
 /// A completed run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct CommandOutcome {
+    #[specta(type = crate::Json)]
     pub result: Value,
     /// The `command_audit` row; `None` for a `Read` command.
     pub audit_id: Option<i64>,

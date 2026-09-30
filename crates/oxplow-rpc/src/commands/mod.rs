@@ -22,6 +22,7 @@ pub mod app;
 pub mod background;
 pub mod backlog;
 pub mod branch;
+pub mod bus;
 pub mod changes;
 pub mod comments;
 pub mod config;

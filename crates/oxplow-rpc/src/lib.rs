@@ -257,6 +257,9 @@ macro_rules! oxplow_command_table {
                 // metrics: reads are SQL (`metric_grid()`, `v_metric_catalog`); this
                 // switches them, through the `metric.enable` command (P4.7)
                 enable_metrics => $crate::commands::metrics::enable_metrics { keys: Vec<String>, enabled: bool } -> (),
+                // the command bus, as the person
+                run_command => $crate::commands::bus::run_command { name: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
+                undo_command => $crate::commands::bus::undo_command { audit_id: i64, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 // followup
                 list_followups => $crate::commands::followup::list_followups { thread_id: ::oxplow_domain::ThreadId } -> Vec<::oxplow_app::Followup>,
                 add_followup => $crate::commands::followup::add_followup { thread_id: ::oxplow_domain::ThreadId, body: String } -> ::oxplow_app::Followup,

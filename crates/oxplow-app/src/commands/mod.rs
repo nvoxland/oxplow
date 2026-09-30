@@ -9,11 +9,11 @@
 //! through the same pipeline.
 //!
 //! A handler is either `Tx` (runs inside the bus's transaction, so its
-//! writes, the event and the audit commit together) or `BestEffort` (a
-//! pre-existing service call with its own transactions, audited after
-//! it returns). `BestEffort` exists only for handlers that predate the
-//! bus; [`CommandBus::best_effort_count`] is asserted by a test so the
-//! number trends to zero.
+//! writes, the event and the audit commit together) or `External` (runs
+//! outside it, against a system the bus doesn't own — a VCS, a provider
+//! process, a gauge script — and is audited after it returns).
+//! [`CommandBus::external_commands`] is pinned by a test, so every
+//! `External` command is a reviewed choice, not a shortcut.
 
 pub mod config_commands;
 pub mod effort;
@@ -51,7 +51,7 @@ pub struct HandlerOutput {
     /// `undoable: false`, or when there is nothing to undo.
     pub inverse: Option<CommandCall>,
     /// Domain events the run produced, appended after `command.executed`
-    /// in the same transaction. A `BestEffort` handler's own transactions
+    /// in the same transaction. An `External` handler's own transactions
     /// log their events themselves; this is for `Tx` handlers.
     pub events: Vec<Envelope>,
     /// Runs once the run has committed: the in-memory broadcast that wakes
@@ -97,14 +97,15 @@ impl TxCtx<'_> {
 }
 
 type TxHandler = dyn Fn(&TxCtx<'_>, Value) -> Result<HandlerOutput, CommandError> + Send + Sync;
-type BestEffortFuture = Pin<Box<dyn Future<Output = Result<HandlerOutput, CommandError>> + Send>>;
-type BestEffortHandler = dyn Fn(Actor, Value) -> BestEffortFuture + Send + Sync;
+type ExternalFuture = Pin<Box<dyn Future<Output = Result<HandlerOutput, CommandError>> + Send>>;
+type ExternalHandler = dyn Fn(Actor, Value) -> ExternalFuture + Send + Sync;
 
 pub enum Handler {
     /// Runs inside the bus's transaction.
     Tx(Arc<TxHandler>),
-    /// A pre-existing service call; the bus audits it after it returns.
-    BestEffort(Arc<BestEffortHandler>),
+    /// Runs against a system the bus doesn't own; the bus audits it after
+    /// it returns.
+    External(Arc<ExternalHandler>),
 }
 
 type ConfirmFor = dyn Fn(&Value) -> oxplow_domain::Confirm + Send + Sync;
@@ -124,7 +125,7 @@ impl Command {
         CommandSpec::validate_name(&spec.name)?;
         let declared = match handler {
             Handler::Tx(_) => Atomicity::Tx,
-            Handler::BestEffort(_) => Atomicity::BestEffort,
+            Handler::External(_) => Atomicity::External,
         };
         if declared != spec.atomicity {
             return Err(CommandError::Invalid {
@@ -234,13 +235,19 @@ impl CommandBus {
         &self.log
     }
 
-    /// How many registered handlers are `BestEffort`. Trends to zero.
-    pub fn best_effort_count(&self) -> usize {
-        self.commands
+    /// The `External` commands, sorted — each runs outside the bus's
+    /// transaction against a system it doesn't own, so the list is pinned
+    /// by a test and grows only on purpose.
+    pub fn external_commands(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .commands
             .read()
             .values()
-            .filter(|c| matches!(c.handler, Handler::BestEffort(_)))
-            .count()
+            .filter(|c| matches!(c.handler, Handler::External(_)))
+            .map(|c| c.spec.name.clone())
+            .collect();
+        names.sort();
+        names
     }
 
     /// Run `name` with `input` as `actor`. `confirmed` says a person has
@@ -258,7 +265,7 @@ impl CommandBus {
 
     /// [`Self::run`], optionally as the undo of audit row `undo_of`: the
     /// row is claimed as undone in the same transaction as the run (a
-    /// `Tx` handler) or before it (a `BestEffort` one, released if the run
+    /// `Tx` handler) or before it (an `External` one, released if the run
     /// fails), so two undos of one row can't both apply the inverse.
     async fn run_inner(
         &self,
@@ -405,13 +412,13 @@ impl CommandBus {
                         .unwrap_or_else(|| CommandError::from(db_err))),
                 }
             }
-            Handler::BestEffort(handler) => {
+            Handler::External(handler) => {
                 if let Some(original) = undo_of {
                     self.claim_undo(original).await?;
                 }
                 match handler(actor.clone(), input.clone()).await {
                     Ok(out) => Ok(self
-                        .record_best_effort(actor, spec, &input, out, undo_of)
+                        .record_external(actor, spec, &input, out, undo_of)
                         .await),
                     Err(err) => {
                         if let Some(original) = undo_of {
@@ -520,7 +527,7 @@ impl CommandBus {
                             .unwrap_or_else(|| CommandError::from(db_err))
                     })?
             }
-            Handler::BestEffort(handler) => handler(actor.clone(), input).await?,
+            Handler::External(handler) => handler(actor.clone(), input).await?,
         };
         Ok(CommandOutcome {
             result: out.result,
@@ -560,12 +567,12 @@ impl CommandBus {
         }
     }
 
-    /// Record a `BestEffort` run whose writes already committed: the audit
+    /// Record an `External` run whose effects already happened: the audit
     /// row and `command.executed` (and, for an undo, the claimed row's
     /// real `undone_by`). If recording fails, the run still happened — it
     /// is reported as done and unrecorded (logged at error level), never
     /// as an error, which would tell the caller the change didn't happen.
-    async fn record_best_effort(
+    async fn record_external(
         &self,
         actor: &Actor,
         spec: &CommandSpec,
@@ -621,7 +628,7 @@ impl CommandBus {
     }
 
     /// Mark `audit_id` as being undone (`undone_by = UNDO_PENDING`) before
-    /// running a `BestEffort` inverse. Fails when it's already undone or
+    /// running an `External` inverse. Fails when it's already undone or
     /// being undone.
     async fn claim_undo(&self, audit_id: i64) -> Result<(), CommandError> {
         self.db
@@ -649,7 +656,7 @@ impl CommandBus {
     }
 }
 
-/// `undone_by` while a `BestEffort` undo is running (audit ids start at 1).
+/// `undone_by` while an `External` undo is running (audit ids start at 1).
 const UNDO_PENDING: i64 = 0;
 
 /// Replace a pending undo claim with the undo run's audit row.
@@ -1282,19 +1289,19 @@ mod tests {
             .unwrap();
     }
 
-    /// A `BestEffort` handler's writes are committed by the time the bus
+    /// An `External` handler's effects have happened by the time the bus
     /// records them; if recording then fails, the run still happened —
     /// it's reported as done (unrecorded), not as an error.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_best_effort_run_whose_record_fails_still_reports_success() {
+    async fn an_external_run_whose_record_fails_still_reports_success() {
         let (db, bus) = bus();
         let mut spec = kv_spec("kv.effort", Invokers::ALL, Confirm::Never);
-        spec.atomicity = Atomicity::BestEffort;
+        spec.atomicity = Atomicity::External;
         let writes = db.clone();
         bus.register(
             Command::new(
                 spec,
-                Handler::BestEffort(Arc::new(move |_actor, input| {
+                Handler::External(Arc::new(move |_actor, input| {
                     let db = writes.clone();
                     Box::pin(async move {
                         db.transaction(|tx| {
@@ -1338,7 +1345,7 @@ mod tests {
     async fn registration_checks_names_atomicity_and_collisions() {
         let (_db, bus) = bus();
         let mut wrong = kv_spec("kv.set", Invokers::ALL, Confirm::Never);
-        wrong.atomicity = Atomicity::BestEffort;
+        wrong.atomicity = Atomicity::External;
         assert!(Command::new(wrong, kv_set()).is_err());
         assert!(Command::new(kv_spec("set", Invokers::ALL, Confirm::Never), kv_set()).is_err());
         bus.register(
@@ -1350,6 +1357,6 @@ mod tests {
                 Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap()
             )
             .is_err());
-        assert_eq!(bus.best_effort_count(), 0);
+        assert!(bus.external_commands().is_empty());
     }
 }

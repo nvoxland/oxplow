@@ -996,6 +996,16 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	runCommand: (name: string, input: unknown, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("run_command", { name, input, confirmed })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	undoCommand: (auditId: number, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("undo_command", { auditId, confirmed })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getGitLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { streamId, limit, all })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1788,6 +1798,29 @@ export type ColumnDecl = {
 export type ColumnType = "text" | "int" | "real" | "bool" | 
 // An RFC 3339 timestamp, stored as text.
 "time";
+
+/**
+ *  A command by name with its input — what an inverse is, and what
+ *  `run_command` receives.
+ */
+export type CommandCall = {
+	name: string,
+	input: unknown,
+};
+
+// A completed run.
+export type CommandOutcome = {
+	result: unknown,
+	// The `command_audit` row; `None` for a `Read` command.
+	audit_id: number | null,
+	// The `command.executed` event; `None` for a `Read` command.
+	event_id: EventId | null,
+	/**
+	 *  Present when the command is undoable: `commands.undo(audit_id)`
+	 *  runs it.
+	 */
+	inverse: CommandCall | null,
+};
 
 /**
  *  The thread anchor + metadata. The conversation lives in

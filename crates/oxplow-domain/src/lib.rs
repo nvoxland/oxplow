@@ -12,6 +12,7 @@ pub mod error;
 pub mod events;
 pub mod hook;
 pub mod ids;
+pub mod json;
 pub mod refs;
 pub mod snapshot;
 pub mod stores;
@@ -38,6 +39,7 @@ pub use ids::{
     EntityKind, FollowupId, IdParseError, NoteId, PageVisitId, StreamId, TaskId, TaskLinkId,
     ThreadId, UsageEventId,
 };
+pub use json::Json;
 pub use stream::{Stream, StreamKind};
 pub use task::{
     Task, TaskActorKind, TaskAuthor, TaskImpact, TaskLink, TaskLinkType, TaskNote, TaskPriority,

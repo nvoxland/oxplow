@@ -145,7 +145,11 @@ pub const MANIFEST: &[Capability] = &[
     // ---- the command bus (agent side; the UI reaches commands through
     // lenses, the launcher and menus) ----
     agent("list_commands"),
-    agent("run_command"),
+    // The bus itself: an agent through MCP (as its verified thread), the
+    // person through IPC (`Actor::Human`, confirming where asked). Undo is
+    // the person's (P5.A1).
+    both("run_command"),
+    ui("undo_command"),
     // ---- the event log's dead-letter queue ----
     both("list_dead_letters"),
     // A person decides a dead letter's fate (V93): agents can list them.

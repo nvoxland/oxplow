@@ -276,6 +276,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_changed_paths_for_effort,
             commands::generated::list_efforts_in_window,
             commands::generated::enable_metrics,
+            commands::generated::run_command,
+            commands::generated::undo_command,
             // log
             commands::generated::get_git_log,
             commands::generated::get_commit_detail,

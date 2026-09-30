@@ -44,6 +44,7 @@ import type {
   SourceListing,
   SourceRunReport,
   DataEntity,
+  CommandOutcome,
   AcpAgentListing,
   AcpEvent,
   AcpSnapshot,
@@ -1955,6 +1956,18 @@ export async function listMetricSamples(
 export async function listMetricCatalog(): Promise<MetricRows<MetricCatalogEntry>> {
   const result = await querySql(METRIC_CATALOG_SQL, [], 10_000);
   return { rows: catalogEntries(result), reads: result.reads };
+}
+
+/** Run a command on the bus as the person (P5.A1). `confirmed` says the
+ *  person confirmed this exact call; a call that needs one comes back
+ *  `NEEDS_CONFIRMATION`, so ask and call again. */
+export async function runCommand(name: string, input: unknown, confirmed = false): Promise<CommandOutcome> {
+  return unwrap(await commands.runCommand(name, input, confirmed));
+}
+
+/** Undo the run recorded as `auditId`, as the person. */
+export async function undoCommand(auditId: number, confirmed = false): Promise<CommandOutcome> {
+  return unwrap(await commands.undoCommand(auditId, confirmed));
 }
 
 /** Turn metrics on or off in this project (the `metric.enable` command). */

@@ -131,6 +131,14 @@ main-process handlers, and the UI api wrappers. Every other persisted
 feature in this codebase follows the same shape — duplicate it for new
 work.
 
+**Arbitrary JSON across IPC is `oxplow_domain::Json`** (P5.A1). specta
+exports `serde_json::Value` as its Rust enum shape (`{ Bool: … } |
+{ Number: … }`), which isn't what goes over the wire and doesn't
+typecheck. Use `Json` as an argument type, or `#[specta(type =
+crate::Json)]` on a `Value` field; it exports as TS `unknown`, and the
+caller narrows it. (The LSP RPCs still pass JSON strings from before;
+C5 moves them.)
+
 ## Event bus
 
 `crates/oxplow-app/src/events.rs` defines the typed `OxplowEvent` discriminated
