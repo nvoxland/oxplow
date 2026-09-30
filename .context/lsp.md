@@ -116,7 +116,10 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   (`plugin::lsp_extensions`, set when it is registered; tsk556)
   (`LspSessionManager::language_for_path`); an uncovered file's error
   names the server to install (by the extension's language). Diagnostics
-  are what the servers published (`lsp_diagnostic`), not a pull. Every
+  are what the servers published (`lsp_diagnostic`), not a pull — and
+  only a running server's: with none running for the file's language the
+  answer is `CodeIntelError::NotRunning`, never `[]`, so an empty list
+  always means clean (tsk558). Every
   request is bounded by `MachineEnv.lsp_request_timeout` (30 s in the
   app, 2 s in tests): a server that never answers is a
   `CodeIntelError::Failed` naming the language and method, not a hung
@@ -157,7 +160,7 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   something, document symbols name known kinds and nest through real
   containers, the call hierarchy answers, a rename proposes edits carrying
   the name, a reported diagnostic reads back and a lost (crashed) provider
-  takes its reports with it. The language servers pass it over the fake
+  takes its reports with it and then says it isn't running. The language servers pass it over the fake
   python server, the crash being a real `die`.
 - **RPC**: `lsp_request` / `lsp_notify` stay for Monaco's LSP bridge (a real
   LSP client); nothing else in the UI reads the servers yet.

@@ -4394,11 +4394,12 @@ fn code_position(
     })
 }
 
-/// A missing server is the caller's to fix (install or configure one);
-/// the message says how.
+/// A missing or stopped server is the caller's to fix (install,
+/// configure or start one); the message says how.
 fn code_err(e: oxplow_domain::code_intel::CodeIntelError) -> McpError {
     match e {
-        oxplow_domain::code_intel::CodeIntelError::NoProvider(m) => {
+        oxplow_domain::code_intel::CodeIntelError::NoProvider(m)
+        | oxplow_domain::code_intel::CodeIntelError::NotRunning(m) => {
             McpError::invalid_params(m, None)
         }
         other => internal(other.to_string()),

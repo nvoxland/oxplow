@@ -8,7 +8,7 @@
 //! Each check is a [`Finding`] when it fails; an empty list passes.
 
 use async_trait::async_trait;
-use oxplow_domain::code_intel::{CallDirection, CodeIntelligence, Position, Range};
+use oxplow_domain::code_intel::{CallDirection, CodeIntelError, CodeIntelligence, Position, Range};
 use oxplow_domain::StreamId;
 
 pub use crate::work_items_conformance::Finding;
@@ -143,7 +143,8 @@ pub async fn suite(provider: &dyn CodeIntelligence, probe: &dyn CodeIntelProbe) 
         Err(e) => fail("rename", e.to_string()),
     }
 
-    // 6. What the provider reports is read back; losing it clears it.
+    // 6. What the provider reports is read back; losing it clears it, and
+    //    a lost provider says it isn't running — never an empty "clean".
     probe.report("reported by conformance").await;
     match provider.diagnostics(stream, &file).await {
         Ok(ds)
@@ -159,10 +160,10 @@ pub async fn suite(provider: &dyn CodeIntelligence, probe: &dyn CodeIntelProbe) 
     }
     probe.lose().await;
     match provider.diagnostics(stream, &file).await {
-        Ok(ds) if ds.is_empty() => {}
+        Err(CodeIntelError::NotRunning(_)) => {}
         other => fail(
             "diagnostics",
-            format!("a lost provider's reports stayed: {other:?}"),
+            format!("a lost provider doesn't say it isn't running: {other:?}"),
         ),
     }
     findings

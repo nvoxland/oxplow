@@ -117,6 +117,10 @@ pub enum CodeIntelError {
     /// add one.
     #[error("{0}")]
     NoProvider(String),
+    /// A provider covers the file's language but isn't running, so what
+    /// it would report is unknown (not "nothing").
+    #[error("{0}")]
+    NotRunning(String),
     #[error("{0}")]
     Failed(String),
 }
@@ -150,7 +154,8 @@ pub trait CodeIntelligence: Send + Sync {
         at: &Position,
         direction: CallDirection,
     ) -> Result<Vec<Call>, CodeIntelError>;
-    /// What the provider last reported for a file.
+    /// What the provider last reported for a file. `NotRunning` when no
+    /// provider for its language is running: empty always means clean.
     async fn diagnostics(
         &self,
         stream: StreamId,

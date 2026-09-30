@@ -422,6 +422,21 @@ impl CodeIntelligence for LspProvider {
         stream: StreamId,
         path: &str,
     ) -> Result<Vec<Diagnostic>, CodeIntelError> {
+        // Only a running server's reports mean anything: with none, the
+        // file's diagnostics are unknown, and an empty list would read as
+        // clean.
+        let language = self.language_of(path)?;
+        if !self
+            .sessions
+            .is_running(&stream.to_string(), &language)
+            .await
+        {
+            return Err(CodeIntelError::NotRunning(format!(
+                "the {language} server isn't running in this stream, so `{path}`'s \
+                 diagnostics are unknown — any other code_* request on a {language} file \
+                 starts it"
+            )));
+        }
         let rows = self
             .diagnostics
             .list_file(stream.value(), path.to_string())
@@ -607,10 +622,14 @@ mod tests {
         assert!(err.to_string().contains("rust-analyzer"), "{err}");
     }
 
-    /// Diagnostics are what the servers published.
+    /// Diagnostics are what the running server published.
     #[tokio::test]
     async fn diagnostics_are_the_published_ones() {
-        let (svc, _dir, stream) = fixture().await;
+        let (svc, dir, stream) = fixture().await;
+        svc.lsp_sessions
+            .ensure(&stream.to_string(), "python", dir.path().to_path_buf())
+            .await
+            .unwrap();
         svc.diagnostic_store
             .replace_file(
                 stream.value(),
@@ -631,5 +650,25 @@ mod tests {
         let got = svc.code_intel.diagnostics(stream, "w.py").await.unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].range, r(3, 1, 3, 6));
+    }
+
+    /// With no server running, diagnostics are unknown, not clean: the
+    /// answer says so instead of an empty list.
+    #[tokio::test]
+    async fn diagnostics_without_a_running_server_say_so() {
+        let (svc, _dir, stream) = fixture().await;
+        let err = svc
+            .code_intel
+            .diagnostics(stream, "w.py")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CodeIntelError::NotRunning(_)), "{err:?}");
+        assert!(err.to_string().contains("python"), "{err}");
+        let err = svc
+            .code_intel
+            .diagnostics(stream, "src/lib.rs")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CodeIntelError::NoProvider(_)), "{err:?}");
     }
 }
