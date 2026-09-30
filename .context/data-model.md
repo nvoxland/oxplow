@@ -421,6 +421,24 @@ deleted outright) never passes through the store, so a trigger
 its task. An external provider's rows arrive by projection from its
 events (P5.C2).
 
+### `symbol` + `symbol_capture` — code symbols (migration `V117__symbol.sql`, P5.C6)
+
+The symbols the running language servers report for each stream's
+files, restated per changed file at each snapshot by the
+`symbols.collect` pump consumer, and one `symbol_capture` row per
+snapshot saying what the collection covered. Read as `v_symbol` /
+`v_symbol_capture`; details in [lsp.md](./lsp.md) and
+[semantic-layer.md](./semantic-layer.md).
+
+### `ai_result` — recorded AI computations (`crates/oxplow-db/src/ai_result_store.rs`, migration `V118__ai_result.sql`, P5.E1)
+
+A `classify` / `score` / `summarize` / `extract` result, `UNIQUE
+(input_hash, model, prompt_version)`, with its `op`, `role`, first
+`caller`, `output_json`, tokens and the computing `ai_call_id`; a
+concurrent duplicate keeps the first (`ON CONFLICT DO NOTHING`). The
+same migration adds `ai_call.input_hash`. Read as `v_ai_result`; see
+[ai-providers.md](./ai-providers.md) "Recorded computations".
+
 ### `work_note` — thread-scoped notes only (`crates/oxplow-db/src/work_satellite.rs`)
 
 Structured per-thread notes. Each row has `id`, nullable
