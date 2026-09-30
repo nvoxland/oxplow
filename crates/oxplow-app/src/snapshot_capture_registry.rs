@@ -144,6 +144,14 @@ impl SnapshotCaptureRegistry {
         }
     }
 
+    /// The filter every capture applies (and a newly registered one gets).
+    pub fn workspace_filter(&self) -> WorkspaceFilter {
+        self.workspace_filter
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
     pub fn get(&self, id: &StreamId) -> Option<Arc<SnapshotCaptureService>> {
         self.services
             .read()

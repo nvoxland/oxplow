@@ -30,6 +30,7 @@ pub mod code_quality_runner;
 pub mod collection;
 pub mod commands;
 pub mod commit_indexer;
+pub mod config_reactors;
 pub mod config_service;
 pub mod config_watch;
 pub mod daemon_supervisor;
@@ -953,6 +954,11 @@ impl Services {
         );
 
         let advisories = Arc::new(advisories::AdvisoryRunner::new((*nudge_store).clone()));
+        // A `generated` change reaches the snapshot captures (tsk515).
+        event_pump.register_async(Arc::new(config_reactors::WorkspaceFilterConsumer {
+            captures: snapshot_captures.clone(),
+            project_dir: layout.project_dir.clone(),
+        }));
         // A turn's tokens are counted when it ends (P3.7).
         event_pump.register_async(Arc::new(token_usage::TurnTokensConsumer {
             tokens: token_usage.clone(),

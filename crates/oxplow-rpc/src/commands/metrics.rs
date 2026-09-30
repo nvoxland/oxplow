@@ -22,8 +22,7 @@ pub async fn enable_metrics(
             serde_json::json!({ "keys": keys, "enabled": enabled }),
             false,
         )
-        .await
-        .map_err(|e| IpcError::invalid(e.to_string()))?;
+        .await?;
     Ok(())
 }
 

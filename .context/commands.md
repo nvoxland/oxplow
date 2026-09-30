@@ -172,6 +172,20 @@ edit and finish tasks but not move one to `in_progress` (tsk466); RPC
 `Actor::Human`. `TaskService::update`
 (no actor) still logs every status change, with source
 `system:task_service`, but isn't audited.
+**Config is written only by `config.*`** (tsk515). The Settings page's
+typed IPC setters (`set_agents`, `set_agent_prompt_append`,
+`set_agent_model`, `set_snapshot_retention_days`,
+`set_snapshot_max_file_bytes`, `set_generated`, `set_extension_enabled`)
+and `enable_metrics` each run `config.set` / `config.unset` as
+`Actor::Human`, confirmed — the person's click is the confirmation a
+person-only key asks for — through `oxplow_rpc::commands::config::set_key`.
+`config_service` only reads. `only_the_config_commands_write_project_yaml`
+scans the crates for any other `write_project_config` call. A key whose
+new value must reach something running reacts to the `config.changed`
+event on the pump, reading the value from the event's `after` (the pump
+can see the event before the after-commit swap): `generated` →
+`config_reactors::WorkspaceFilterConsumer` updates the snapshot captures'
+filter, so an agent's change applies like the person's.
 `CommandError` → `McpError` mapping lives in `command_error` (oxplow-mcp):
 invalid/denied/unknown are the caller's to fix, `NeedsConfirmation` tells
 the agent to ask the person, `Failed` is internal.

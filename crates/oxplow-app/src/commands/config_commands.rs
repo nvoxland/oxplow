@@ -645,4 +645,42 @@ mod tests {
             self
         }
     }
+
+    /// tsk515: `.oxplow/project.yaml` changes only through `config.*` —
+    /// validated, audited, logged and undoable. No other production code
+    /// writes it (the config crate defines the writer and tests it).
+    #[test]
+    fn only_the_config_commands_write_project_yaml() {
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let this = std::path::Path::new(file!())
+            .file_name()
+            .unwrap()
+            .to_owned();
+        let mut writers = Vec::new();
+        let mut todo = vec![crates.clone()];
+        while let Some(dir) = todo.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let name = path.file_name().unwrap().to_string_lossy().to_string();
+                    if name != "target" && name != "oxplow-config" && !name.starts_with('.') {
+                        todo.push(path);
+                    }
+                } else if path.extension().is_some_and(|e| e == "rs")
+                    && path.file_name() != Some(this.as_os_str())
+                {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    // Production code only: stop at the test module.
+                    let prod = text.split("#[cfg(test)]").next().unwrap_or_default();
+                    if prod.contains("write_project_config(") {
+                        writers.push(path.strip_prefix(&crates).unwrap().display().to_string());
+                    }
+                }
+            }
+        }
+        assert!(
+            writers.is_empty(),
+            "project.yaml written outside config.*: {writers:?}"
+        );
+    }
 }

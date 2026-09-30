@@ -3,9 +3,12 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_app::config_service::{mutate_config, read_config};
+use oxplow_app::commands::config_commands::{SET, UNSET};
+use oxplow_app::config_service::read_config;
 use oxplow_app::Services;
-use oxplow_config::{AgentKind, OxplowConfig};
+use oxplow_config::{AgentKind, GeneratedConfig, OxplowConfig};
+use oxplow_domain::Actor;
+use serde_json::{json, Value};
 
 use crate::error::IpcError;
 
@@ -13,50 +16,54 @@ pub async fn get_config(svc: &Services) -> Result<OxplowConfig, IpcError> {
     Ok(read_config(&svc.config))
 }
 
+/// Set `key` (or unset it, with `None`) as the person, through
+/// `config.set` / `config.unset`: validated, audited, logged as
+/// `config.changed` and undoable, like any config change. The person's
+/// own action is their confirmation for a human-only key. Returns the
+/// config as it is afterwards.
+pub(crate) async fn set_key(
+    svc: &Services,
+    key: &str,
+    value: Option<Value>,
+) -> Result<OxplowConfig, IpcError> {
+    let (command, input) = match value {
+        Some(value) => (SET, json!({ "key": key, "value": value })),
+        None => (UNSET, json!({ "key": key })),
+    };
+    svc.commands
+        .run(&Actor::Human, command, input, true)
+        .await?;
+    Ok(read_config(&svc.config))
+}
+
+fn value_of<T: Serialize>(v: &T) -> Value {
+    serde_json::to_value(v).expect("config values serialize")
+}
+
 pub async fn set_agent_prompt_append(
     svc: &Services,
     text: String,
 ) -> Result<OxplowConfig, IpcError> {
-    let project = svc.layout.project_dir.clone();
-    mutate_config(&svc.config, &project, |c| c.agent_prompt_append = text)
-        .map_err(|e| IpcError::internal(e.to_string()))
+    let value = (!text.trim().is_empty()).then(|| Value::String(text));
+    set_key(svc, "agentPromptAppend", value).await
 }
 
 pub async fn set_agents(svc: &Services, agents: Vec<AgentKind>) -> Result<OxplowConfig, IpcError> {
-    if agents.is_empty() {
-        return Err(IpcError::invalid(
-            "at least one agent must be enabled for the project",
-        ));
-    }
-    for (idx, agent) in agents.iter().enumerate() {
-        if agents[..idx].contains(agent) {
-            return Err(IpcError::invalid(format!(
-                "agent {} is listed more than once",
-                agent.as_str()
-            )));
-        }
-    }
-    let project = svc.layout.project_dir.clone();
-    mutate_config(&svc.config, &project, |c| c.agents = agents)
-        .map_err(|e| IpcError::internal(e.to_string()))
+    set_key(svc, "agents", Some(value_of(&agents))).await
 }
 
 pub async fn set_snapshot_retention_days(
     svc: &Services,
     days: u32,
 ) -> Result<OxplowConfig, IpcError> {
-    let project = svc.layout.project_dir.clone();
-    mutate_config(&svc.config, &project, |c| c.snapshot_retention_days = days)
-        .map_err(|e| IpcError::internal(e.to_string()))
+    set_key(svc, "snapshotRetentionDays", Some(json!(days))).await
 }
 
 pub async fn set_snapshot_max_file_bytes(
     svc: &Services,
     bytes: u64,
 ) -> Result<OxplowConfig, IpcError> {
-    let project = svc.layout.project_dir.clone();
-    mutate_config(&svc.config, &project, |c| c.snapshot_max_file_bytes = bytes)
-        .map_err(|e| IpcError::internal(e.to_string()))
+    set_key(svc, "snapshotMaxFileBytes", Some(json!(bytes))).await
 }
 
 /// Set (or clear, with `None`/blank) the launch-model override for one
@@ -67,38 +74,31 @@ pub async fn set_agent_model(
     agent: AgentKind,
     model: Option<String>,
 ) -> Result<OxplowConfig, IpcError> {
-    let model = model
+    let mut models = read_config(&svc.config).agent_models;
+    match model
         .map(|m| m.trim().to_string())
-        .filter(|m| !m.is_empty());
-    let project = svc.layout.project_dir.clone();
-    mutate_config(&svc.config, &project, |c| match model {
+        .filter(|m| !m.is_empty())
+    {
         Some(m) => {
-            c.agent_models.insert(agent, m);
+            models.insert(agent, m);
         }
         None => {
-            c.agent_models.remove(&agent);
+            models.remove(&agent);
         }
-    })
-    .map_err(|e| IpcError::internal(e.to_string()))
+    }
+    let value = (!models.is_empty()).then(|| value_of(&models));
+    set_key(svc, "agentModels", value).await
 }
 
+/// The generated-file include/exclude lists. The snapshot captures pick up
+/// the new filter from the `config.changed` event (`config_reactors`), the
+/// same way they do when an agent sets the key.
 pub async fn set_generated(
     svc: &Services,
-    generated: oxplow_config::GeneratedConfig,
+    generated: GeneratedConfig,
 ) -> Result<OxplowConfig, IpcError> {
-    let project = svc.layout.project_dir.clone();
-    let updated = mutate_config(&svc.config, &project, |c| c.generated = generated.clone())
-        .map_err(|e| IpcError::internal(e.to_string()))?;
-    // Push the new filter into every live snapshot capture so the
-    // include/exclude change takes effect immediately — without this
-    // the toggle would silently no-op until the app restarts.
-    svc.snapshot_captures
-        .set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::for_project(
-            &project,
-            &updated.generated.exclude,
-            &updated.generated.include,
-        ));
-    Ok(updated)
+    let value = (generated != GeneratedConfig::default()).then(|| value_of(&generated));
+    set_key(svc, "generated", value).await
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -139,6 +139,106 @@ mod tests {
             .await
             .unwrap();
         assert!(out.is_object(), "expected a config object, got {out}");
+    }
+
+    /// `(actor, key)` of each successful `config.set` / `config.unset`, oldest first.
+    async fn audited_config_sets(svc: &crate::RpcContext) -> Vec<(String, String)> {
+        let mut rows: Vec<(String, String)> =
+            oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
+                .list_recent(100)
+                .await
+                .unwrap()
+                .into_iter()
+                .filter(|a| {
+                    (a.command == "config.set" || a.command == "config.unset") && a.error.is_none()
+                })
+                .map(|a| {
+                    (
+                        serde_json::to_value(a.actor_kind)
+                            .unwrap()
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                        a.input["key"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect();
+        rows.reverse();
+        rows
+    }
+
+    /// tsk515: every settings write is the person's `config.set` — audited,
+    /// logged as `config.changed`, undoable — and the file says what the
+    /// returned config says.
+    #[tokio::test]
+    async fn settings_writes_are_the_persons_config_commands() {
+        let (svc, dir) = services();
+        for (command, args) in [
+            ("set_agents", json!({ "agents": ["claude", "codex"] })),
+            ("set_agent_prompt_append", json!({ "text": "Be brief." })),
+            (
+                "set_agent_model",
+                json!({ "agent": "opencode", "model": "m1" }),
+            ),
+            ("set_snapshot_retention_days", json!({ "days": 9 })),
+            ("set_snapshot_max_file_bytes", json!({ "bytes": 2048 })),
+            (
+                "set_generated",
+                json!({ "generated": { "exclude": ["dist"], "include": [] } }),
+            ),
+            (
+                "set_extension_enabled",
+                json!({ "name": "oxplow-analytics", "enabled": false }),
+            ),
+        ] {
+            crate::dispatch(command, args, &svc)
+                .await
+                .unwrap_or_else(|e| panic!("{command}: {}", e.message));
+        }
+        let keys: Vec<String> = audited_config_sets(&svc)
+            .await
+            .into_iter()
+            .map(|(actor, key)| {
+                assert_eq!(actor, "human");
+                key
+            })
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "agents",
+                "agentPromptAppend",
+                "agentModels",
+                "snapshotRetentionDays",
+                "snapshotMaxFileBytes",
+                "generated",
+                "extensions",
+            ]
+        );
+        let file = std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap();
+        for expected in [
+            "codex",
+            "Be brief.",
+            "m1",
+            "snapshotRetentionDays: 9",
+            "dist",
+            "oxplow-analytics",
+        ] {
+            assert!(file.contains(expected), "{expected} missing from:\n{file}");
+        }
+        // Clearing a value unsets its key.
+        let out = crate::dispatch(
+            "set_agent_model",
+            json!({ "agent": "opencode", "model": null }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["agentModels"], json!({}));
+        assert_eq!(
+            audited_config_sets(&svc).await.last().unwrap().1,
+            "agentModels"
+        );
     }
 
     #[tokio::test]

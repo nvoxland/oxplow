@@ -112,21 +112,20 @@ fn sdk_error(e: oxplow_sdk::SdkError) -> IpcError {
 
 /// Turn an extension on or off for the project (`extensions.disabled` in
 /// `.oxplow/project.yaml`, so it's team-wide once committed). Returns the
-/// primary stream's extensions. UI only: agents don't toggle extensions.
+/// primary stream's extensions. UI only: an agent's `config.set` on the
+/// person-only `extensions` key asks the person instead.
 pub async fn set_extension_enabled(
     svc: &Services,
     name: String,
     enabled: bool,
 ) -> Result<Vec<Extension>, IpcError> {
-    oxplow_app::config_service::mutate_config(&svc.config, &svc.layout.project_dir, |c| {
-        c.extensions_disabled.retain(|d| d != &name);
-        if !enabled {
-            c.extensions_disabled.push(name.clone());
-        }
-    })
-    .map_err(|e| IpcError::invalid(e.to_string()))?;
-    svc.events
-        .emit(oxplow_app::events::OxplowEvent::ConfigChanged);
+    let mut disabled = oxplow_app::config_service::read_config(&svc.config).extensions_disabled;
+    disabled.retain(|d| d != &name);
+    if !enabled {
+        disabled.push(name.clone());
+    }
+    let value = (!disabled.is_empty()).then(|| serde_json::json!({ "disabled": disabled }));
+    crate::commands::config::set_key(svc, "extensions", value).await?;
     let root = root(svc, None).await;
     Ok(svc.extension_catalog.get(&root).to_vec())
 }
