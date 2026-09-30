@@ -48,6 +48,22 @@ pub enum LensViz {
     /// Other lenses (`children`), stacked, each given the params it
     /// declares from this lens's params.
     Grid,
+    /// Rows nested by `tree.parent` (a row's parent is the row whose
+    /// `tree.id` it names; none, or one not in the result, is a root),
+    /// each shown as `tree.label`.
+    Tree,
+    /// Rows in time order (`timeline.at`), each shown as
+    /// `timeline.label`, linked through `timeline.ref` when set.
+    Timeline,
+    /// The first row as label/value pairs (the displayed columns).
+    Detail,
+    /// An ordered checklist: `steps.label`, with `steps.status` (`done`,
+    /// `active`, `failed`, anything else pending).
+    Steps,
+    /// Per row, the diff of the file `hunks.path` between the revisions
+    /// `hunks.from` and `hunks.to` (`working`, `snap:<id>`,
+    /// `<vcs>:<rev>`), read-only.
+    Hunks,
 }
 
 /// When a lens needs attention: its row count reaches `min_rows`, or the
@@ -183,6 +199,43 @@ pub struct LensChart {
     pub group: Option<String>,
 }
 
+/// `tree` viz: which columns nest the rows.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct LensTree {
+    pub id: Option<String>,
+    pub parent: Option<String>,
+    pub label: Option<String>,
+}
+
+/// `timeline` viz: when each row happened and what it says.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct LensTimeline {
+    pub at: Option<String>,
+    pub label: Option<String>,
+    /// A column holding a canonical ref each entry links to.
+    #[serde(rename = "ref")]
+    pub ref_column: Option<String>,
+}
+
+/// `steps` viz: each step's text and status.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct LensSteps {
+    pub label: Option<String>,
+    pub status: Option<String>,
+}
+
+/// `hunks` viz: the file and the two revisions each row diffs.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct LensHunks {
+    pub path: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
 impl LensChart {
     /// Every column this chart names.
     fn columns(&self) -> Vec<&String> {
@@ -315,6 +368,14 @@ struct LensFile {
     empty: Option<String>,
     #[serde(default)]
     chart: Option<LensChart>,
+    #[serde(default)]
+    tree: Option<LensTree>,
+    #[serde(default)]
+    timeline: Option<LensTimeline>,
+    #[serde(default)]
+    steps: Option<LensSteps>,
+    #[serde(default)]
+    hunks: Option<LensHunks>,
     /// For `grid`: lens slugs in this extension, or `<ext>/<slug>` ids.
     #[serde(default)]
     children: Vec<String>,
@@ -532,6 +593,10 @@ pub struct Lens {
     pub empty: Option<String>,
     /// Columns a chart viz draws from.
     pub chart: Option<LensChart>,
+    pub tree: Option<LensTree>,
+    pub timeline: Option<LensTimeline>,
+    pub steps: Option<LensSteps>,
+    pub hunks: Option<LensHunks>,
     /// For `grid`: child lens ids.
     pub children: Vec<String>,
     /// Launcher section; `None` = "Lenses".
@@ -1074,6 +1139,10 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 columns: l.columns,
                 empty: l.empty,
                 chart: l.chart,
+                tree: l.tree,
+                timeline: l.timeline,
+                steps: l.steps,
+                hunks: l.hunks,
                 children: l
                     .children
                     .into_iter()
@@ -1177,8 +1246,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
 
 /// Why `lens` can't render with its viz, if it can't.
 fn shape_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
-    let chart = lens.chart.clone().unwrap_or_default();
-    let need = |fields: &[(&str, &Option<String>)]| -> Option<String> {
+    // `block` names the lens key the missing columns go under.
+    let need = |block: &str, fields: &[(&str, &Option<String>)]| -> Option<String> {
         let missing: Vec<&str> = fields
             .iter()
             .filter(|(_, v)| v.is_none())
@@ -1186,20 +1255,42 @@ fn shape_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
             .collect();
         (!missing.is_empty()).then(|| {
             format!(
-                "viz `{:?}` needs `chart: {{ {} }}`",
-                lens.viz,
+                "viz `{}` needs `{block}: {{ {} }}`",
+                format!("{:?}", lens.viz).to_lowercase(),
                 missing
                     .iter()
                     .map(|m| format!("{m}: <column>"))
                     .collect::<Vec<_>>()
                     .join(", ")
             )
-            .to_lowercase()
         })
     };
+    let chart = lens.chart.clone().unwrap_or_default();
     match lens.viz {
-        LensViz::Bar | LensViz::Line => need(&[("x", &chart.x), ("y", &chart.y)]),
-        LensViz::Treemap => need(&[("label", &chart.label), ("size", &chart.size)]),
+        LensViz::Bar | LensViz::Line => need("chart", &[("x", &chart.x), ("y", &chart.y)]),
+        LensViz::Treemap => need("chart", &[("label", &chart.label), ("size", &chart.size)]),
+        LensViz::Tree => {
+            let t = lens.tree.clone().unwrap_or_default();
+            need(
+                "tree",
+                &[("id", &t.id), ("parent", &t.parent), ("label", &t.label)],
+            )
+        }
+        LensViz::Timeline => {
+            let t = lens.timeline.clone().unwrap_or_default();
+            need("timeline", &[("at", &t.at), ("label", &t.label)])
+        }
+        LensViz::Steps => {
+            let s = lens.steps.clone().unwrap_or_default();
+            need("steps", &[("label", &s.label)])
+        }
+        LensViz::Hunks => {
+            let h = lens.hunks.clone().unwrap_or_default();
+            need(
+                "hunks",
+                &[("path", &h.path), ("from", &h.from), ("to", &h.to)],
+            )
+        }
         LensViz::Grid if lens.children.is_empty() => {
             Some("viz `grid` needs `children: [lens, ...]`".into())
         }
@@ -1211,7 +1302,54 @@ fn shape_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
                     && !ids_in_extension.contains(c)
             })
             .map(|c| format!("child lens `{c}` isn't in this extension's lenses/")),
-        _ => None,
+        LensViz::Table | LensViz::List | LensViz::Number | LensViz::Markdown | LensViz::Detail => {
+            None
+        }
+    }
+}
+
+impl Lens {
+    /// Every result column the lens's component blocks name (`chart`,
+    /// `tree`, `timeline`, `steps`, `hunks`) — what `validate` checks the
+    /// query returns.
+    pub fn role_columns(&self) -> Vec<(&'static str, &String)> {
+        let mut out: Vec<(&'static str, &String)> = Vec::new();
+        if let Some(c) = &self.chart {
+            out.extend(c.columns().into_iter().map(|k| ("chart", k)));
+        }
+        if let Some(t) = &self.tree {
+            out.extend(
+                [&t.id, &t.parent, &t.label]
+                    .into_iter()
+                    .flatten()
+                    .map(|k| ("tree", k)),
+            );
+        }
+        if let Some(t) = &self.timeline {
+            out.extend(
+                [&t.at, &t.label, &t.ref_column]
+                    .into_iter()
+                    .flatten()
+                    .map(|k| ("timeline", k)),
+            );
+        }
+        if let Some(s) = &self.steps {
+            out.extend(
+                [&s.label, &s.status]
+                    .into_iter()
+                    .flatten()
+                    .map(|k| ("steps", k)),
+            );
+        }
+        if let Some(h) = &self.hunks {
+            out.extend(
+                [&h.path, &h.from, &h.to]
+                    .into_iter()
+                    .flatten()
+                    .map(|k| ("hunks", k)),
+            );
+        }
+        out
     }
 }
 
@@ -1504,16 +1642,10 @@ async fn check_extension(
             )),
             Ok(run) => {
                 let cols = &run.result.columns;
-                let chart_cols = run
-                    .lens
-                    .chart
-                    .as_ref()
-                    .map(|c| c.columns())
-                    .unwrap_or_default();
-                for k in chart_cols {
+                for (block, k) in run.lens.role_columns() {
                     if !cols.contains(k) {
                         ext.errors.push(format!(
-                            "lens {id}: chart column `{k}` isn't in the query result (columns: {})",
+                            "lens {id}: {block} column `{k}` isn't in the query result (columns: {})",
                             cols.join(", ")
                         ));
                     }
@@ -3177,6 +3309,60 @@ empty: No tasks.
         let errs = ext.errors.join("\n");
         assert!(errs.contains("nobar") && errs.contains("chart"), "{errs}");
         assert!(errs.contains("badgrid") && errs.contains("nope"), "{errs}");
+    }
+
+    /// P6.A2: the structure components parse their blocks, and a missing
+    /// column role is refused naming the block it goes under.
+    #[test]
+    fn structure_lenses_parse_and_missing_roles_are_errors() {
+        let (_d, ext) = load_x(
+            &[
+                ("t", "title: T\nquery: SELECT 1 AS id, NULL AS p, 'a' AS n\nviz: tree\ntree: { id: id, parent: p, label: n }\n"),
+                ("tl", "title: TL\nquery: SELECT 'x' AS at, 'y' AS w\nviz: timeline\ntimeline: { at: at, label: w }\n"),
+                ("d", "title: D\nquery: SELECT 1 AS a\nviz: detail\n"),
+                ("s", "title: S\nquery: SELECT 'a' AS l\nviz: steps\nsteps: { label: l }\n"),
+                ("h", "title: H\nquery: SELECT 'f' AS p, 'working' AS a, 'working' AS b\nviz: hunks\nhunks: { path: p, from: a, to: b }\n"),
+                ("notree", "title: N\nquery: SELECT 1\nviz: tree\ntree: { id: id, label: n }\n"),
+                ("nohunks", "title: N\nquery: SELECT 1\nviz: hunks\n"),
+            ],
+            "",
+        );
+        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
+        for slug in ["t", "tl", "d", "s", "h"] {
+            assert!(lens(slug).is_some(), "{slug}: {:?}", ext.errors);
+        }
+        assert_eq!(
+            lens("t").unwrap().tree.as_ref().unwrap().parent.as_deref(),
+            Some("p")
+        );
+        assert!(lens("notree").is_none() && lens("nohunks").is_none());
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("notree") && errs.contains("`tree: { parent: <column> }`"),
+            "{errs}"
+        );
+        assert!(
+            errs.contains("nohunks")
+                && errs.contains("`hunks: { path: <column>, from: <column>, to: <column> }`"),
+            "{errs}"
+        );
+    }
+
+    /// Validation checks every block's columns, not only the chart's.
+    #[tokio::test]
+    async fn validate_checks_structure_columns_exist() {
+        let (d, _) = load_x(
+            &[(
+                "a",
+                "title: A\nquery: SELECT 'x' AS l\nviz: steps\nsteps: { label: l, status: gone }\n",
+            )],
+            "",
+        );
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x")
+            .await
+            .unwrap();
+        let errs = v.errors.join("\n");
+        assert!(errs.contains("steps column `gone`"), "{errs}");
     }
 
     #[tokio::test]

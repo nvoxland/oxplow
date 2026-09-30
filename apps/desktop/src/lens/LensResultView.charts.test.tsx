@@ -17,6 +17,10 @@ const base: Lens = {
   columns: [],
   empty: null,
   chart: null,
+  tree: null,
+  timeline: null,
+  steps: null,
+  hunks: null,
   children: [],
   launcherCategory: null,
   hidden: false,
@@ -123,4 +127,56 @@ test("a lens switching to and from grid keeps rendering (hook order)", () => {
   // A hook-order error unmounts the tree (React reports it, render() doesn't
   // throw), so what shows is the proof.
   expect(view.container.querySelector('[data-testid="lens-grid"]')).not.toBeNull();
+});
+
+test("tree lenses nest rows and collapse a branch", () => {
+  const { container, getByLabelText } = render(
+    <LensResultView
+      run={run(
+        { viz: "tree", tree: { id: "id", parent: "p", label: "n" } },
+        ["id", "p", "n"],
+        [
+          ["a", "", "root"],
+          ["b", "a", "child"],
+        ],
+      )}
+      onOpenPage={() => {}}
+    />,
+  );
+  expect(container.querySelectorAll('[data-testid="lens-tree-node"]').length).toBe(2);
+  fireEvent.click(getByLabelText("Collapse"));
+  expect(container.querySelectorAll('[data-testid="lens-tree-node"]').length).toBe(1);
+});
+
+test("timeline lenses list entries oldest first", () => {
+  const { container } = render(
+    <LensResultView
+      run={run(
+        { viz: "timeline", timeline: { at: "at", label: "w", ref: null } },
+        ["at", "w"],
+        [
+          ["2026-09-30", "shipped"],
+          ["2026-09-29", "started"],
+        ],
+      )}
+      onOpenPage={() => {}}
+    />,
+  );
+  expect(container.querySelector('[data-testid="lens-timeline-entry-0"]')?.textContent).toContain("started");
+});
+
+test("detail and steps lenses", () => {
+  const detail = render(
+    <LensResultView run={run({ viz: "detail" }, ["title", "state"], [["Fix it", "done"]])} onOpenPage={() => {}} />,
+  );
+  expect(detail.container.querySelector('[data-testid="lens-detail"]')?.textContent).toContain("Fix it");
+  cleanup();
+  const steps = render(
+    <LensResultView
+      run={run({ viz: "steps", steps: { label: "s", status: "st" } }, ["s", "st"], [["plan", "done"], ["ship", "x"]])}
+      onOpenPage={() => {}}
+    />,
+  );
+  expect(steps.container.querySelector('[data-testid="lens-step-0"]')?.getAttribute("data-status")).toBe("done");
+  expect(steps.container.querySelector('[data-testid="lens-step-1"]')?.getAttribute("data-status")).toBe("pending");
 });

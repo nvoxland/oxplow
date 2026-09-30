@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, slotMounts, effortRowId, firingAlerts, slotExtensions } from "./lensModel.js";
+import { treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, slotMounts, effortRowId, firingAlerts, slotExtensions } from "./lensModel.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
   id: "review/waiting",
@@ -14,6 +14,10 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
   columns: [],
   empty: null,
   chart: null,
+  tree: null,
+  timeline: null,
+  steps: null,
+  hunks: null,
   children: [],
   launcherCategory: null,
   hidden: false,
@@ -374,4 +378,73 @@ test("firingAlerts keeps the rail lenses whose alert fires, with their message",
       { id: "r/d", run: null },
     ]),
   ).toEqual([{ id: "r/a", title: "Waiting on Me", message: "2 rows" }]);
+});
+
+
+const result = (columns: string[], rows: (string | number | null)[][]) => ({
+  columns,
+  rows,
+  truncated: false,
+  reads: { models: [], tables: [], measures: [] },
+  freshness: [],
+});
+
+describe("structure components (P6.A2)", () => {
+  test("treeNodes nests rows under their parents; orphans are roots", () => {
+    const l = lens({ viz: "tree", tree: { id: "id", parent: "p", label: "n" } });
+    const nodes = treeNodes(
+      l,
+      result(["id", "p", "n"], [
+        ["b", "a", "child"],
+        ["a", null, "root"],
+        ["c", "b", "grandchild"],
+        ["d", "gone", "orphan"],
+      ]),
+    );
+    const shape = (n: { label: string; children: unknown[] }): unknown => ({
+      label: n.label,
+      children: (n.children as { label: string; children: unknown[] }[]).map(shape),
+    });
+    expect(nodes.map(shape)).toEqual([
+      { label: "root", children: [{ label: "child", children: [{ label: "grandchild", children: [] }] }] },
+      { label: "orphan", children: [] },
+    ]);
+  });
+
+  test("treeNodes survives a cycle", () => {
+    const l = lens({ viz: "tree", tree: { id: "id", parent: "p", label: "id" } });
+    expect(treeNodes(l, result(["id", "p"], [["a", "b"], ["b", "a"]]))).toEqual([]);
+  });
+
+  test("timelineEntries sort oldest first and carry refs", () => {
+    const l = lens({ viz: "timeline", timeline: { at: "at", label: "w", ref: "r" } });
+    const out = timelineEntries(
+      l,
+      result(["at", "w", "r"], [
+        ["2026-09-30", "shipped", "commit:abc"],
+        ["2026-09-29", "started", null],
+      ]),
+    );
+    expect(out.map((e) => [e.at, e.label, e.ref])).toEqual([
+      ["2026-09-29", "started", null],
+      ["2026-09-30", "shipped", "commit:abc"],
+    ]);
+  });
+
+  test("stepItems map statuses, anything unknown pending", () => {
+    const l = lens({ viz: "steps", steps: { label: "s", status: "st" } });
+    expect(stepItems(l, result(["s", "st"], [["plan", "done"], ["build", "active"], ["test", "failed"], ["ship", "later"]]))).toEqual([
+      { label: "plan", status: "done" },
+      { label: "build", status: "active" },
+      { label: "test", status: "failed" },
+      { label: "ship", status: "pending" },
+    ]);
+  });
+
+  test("hunkRows keep rows naming a file and two revisions", () => {
+    const l = lens({ viz: "hunks", hunks: { path: "p", from: "a", to: "b" } });
+    expect(
+      hunkRows(l, result(["p", "a", "b"], [["x.rs", "git:abc", "working"], ["y.rs", null, "working"]])),
+    ).toEqual([{ path: "x.rs", from: "git:abc", to: "working" }]);
+  });
 });

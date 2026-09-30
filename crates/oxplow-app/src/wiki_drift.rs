@@ -119,7 +119,13 @@ fn drifted_or_unchanged(
     if pinned == current {
         return Ok(WikiRefDrift::bare(slug, path, Some(pin), "unchanged"));
     }
-    let (diff, truncated) = unified_diff(&pinned, &current, path, MAX_DIFF_BYTES);
+    let (diff, truncated) = unified_diff(
+        &pinned,
+        &current,
+        &format!("{path} (pinned)"),
+        &format!("{path} (current)"),
+        MAX_DIFF_BYTES,
+    );
     Ok(WikiRefDrift {
         slug: slug.to_string(),
         path: path.to_string(),
@@ -130,15 +136,21 @@ fn drifted_or_unchanged(
     })
 }
 
-/// Pure line-level unified diff of `old`→`new`, headed with `path`,
-/// capped at `max_bytes` (truncated on a line boundary). Returns
+/// Pure line-level unified diff of `old`→`new`, headed with each side's
+/// label, capped at `max_bytes` (truncated on a line boundary). Returns
 /// `(diff_text, truncated)`.
-pub fn unified_diff(old: &str, new: &str, path: &str, max_bytes: usize) -> (String, bool) {
+pub fn unified_diff(
+    old: &str,
+    new: &str,
+    old_label: &str,
+    new_label: &str,
+    max_bytes: usize,
+) -> (String, bool) {
     let diff = similar::TextDiff::from_lines(old, new);
     let full = diff
         .unified_diff()
         .context_radius(3)
-        .header(&format!("{path} (pinned)"), &format!("{path} (current)"))
+        .header(old_label, new_label)
         .to_string();
     if full.len() <= max_bytes {
         return (full, false);
@@ -169,7 +181,13 @@ mod tests {
 
     #[test]
     fn unified_diff_reports_changed_lines() {
-        let (d, truncated) = unified_diff("a\nb\nc\n", "a\nB\nc\n", "x.txt", 16_000);
+        let (d, truncated) = unified_diff(
+            "a\nb\nc\n",
+            "a\nB\nc\n",
+            "x.txt (pinned)",
+            "x.txt (current)",
+            16_000,
+        );
         assert!(!truncated);
         assert!(d.contains("x.txt (pinned)"));
         assert!(d.contains("-b"), "diff: {d}");
@@ -328,7 +346,7 @@ mod tests {
     fn unified_diff_truncates_on_line_boundary() {
         let old = "line\n".repeat(500);
         let new = (0..500).map(|i| format!("line{i}\n")).collect::<String>();
-        let (d, truncated) = unified_diff(&old, &new, "big.txt", 200);
+        let (d, truncated) = unified_diff(&old, &new, "big.txt (a)", "big.txt (b)", 200);
         assert!(truncated);
         assert!(d.len() <= 200 + "… [diff truncated]\n".len() + 8);
         assert!(d.ends_with("… [diff truncated]\n"));

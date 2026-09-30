@@ -215,6 +215,10 @@ export function adHocLens(query: string, viz: LensViz): Lens {
     columns: [],
     empty: "No rows.",
     chart: null,
+    tree: null,
+    timeline: null,
+    steps: null,
+    hunks: null,
     children: [],
     launcherCategory: null,
     hidden: false,
@@ -283,6 +287,107 @@ function columnValues(result: SqlQueryResult, column: string | null | undefined)
   if (!column) return null;
   const i = result.columns.indexOf(column);
   return i === -1 ? null : result.rows.map((r) => r[i] ?? null);
+}
+
+/** One `tree` node: its row's label, the row, and its children. */
+export interface TreeNode {
+  label: string;
+  row: SqlCell[];
+  children: TreeNode[];
+}
+
+/** `tree` viz: each row under the row whose `tree.id` its `tree.parent`
+ *  names; a row with no parent, or one not in the result, is a root. A
+ *  cycle is broken at the first row seen twice. */
+export function treeNodes(lens: Lens, result: SqlQueryResult): TreeNode[] {
+  const ids = columnValues(result, lens.tree?.id);
+  const parents = columnValues(result, lens.tree?.parent);
+  const labels = columnValues(result, lens.tree?.label);
+  if (!ids || !parents || !labels) return [];
+  const key = (v: SqlCell) => (v === null ? null : String(v));
+  const idIndex = new Map<string, number>();
+  ids.forEach((id, i) => {
+    const k = key(id);
+    if (k !== null && !idIndex.has(k)) idIndex.set(k, i);
+  });
+  const parentOf = parents.map((p) => {
+    const k = key(p);
+    return k === null ? null : idIndex.get(k) ?? null;
+  });
+  const seen = new Set<number>();
+  const build = (at: number): TreeNode | null => {
+    if (seen.has(at)) return null;
+    seen.add(at);
+    const children: TreeNode[] = [];
+    parentOf.forEach((p, i) => {
+      if (p === at) {
+        const child = build(i);
+        if (child) children.push(child);
+      }
+    });
+    return { label: formatCell(labels[at] ?? null), row: result.rows[at]!, children };
+  };
+  const roots: TreeNode[] = [];
+  parentOf.forEach((p, i) => {
+    if (p === null) {
+      const node = build(i);
+      if (node) roots.push(node);
+    }
+  });
+  return roots;
+}
+
+/** `timeline` viz: each row's time, label and ref (a canonical ref, when
+ *  `timeline.ref` names a column and the row has one), oldest first. */
+export function timelineEntries(
+  lens: Lens,
+  result: SqlQueryResult,
+): { at: string; label: string; ref: string | null; row: SqlCell[] }[] {
+  const ats = columnValues(result, lens.timeline?.at);
+  const labels = columnValues(result, lens.timeline?.label);
+  if (!ats || !labels) return [];
+  const refs = columnValues(result, lens.timeline?.ref);
+  return ats
+    .map((at, i) => ({
+      at: formatCell(at),
+      label: formatCell(labels[i] ?? null),
+      ref: refs && refs[i] !== null && refs[i] !== undefined && refs[i] !== "" ? String(refs[i]) : null,
+      row: result.rows[i]!,
+    }))
+    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+}
+
+export type StepStatus = "done" | "active" | "failed" | "pending";
+
+/** `steps` viz: each step's label and status, in row order (a status
+ *  other than done/active/failed is pending). */
+export function stepItems(lens: Lens, result: SqlQueryResult): { label: string; status: StepStatus }[] {
+  const labels = columnValues(result, lens.steps?.label);
+  if (!labels) return [];
+  const statuses = columnValues(result, lens.steps?.status);
+  return labels.map((l, i) => {
+    const s = statuses?.[i];
+    const status: StepStatus = s === "done" || s === "active" || s === "failed" ? s : "pending";
+    return { label: formatCell(l), status };
+  });
+}
+
+/** `hunks` viz: each row's file and the two revisions it diffs. Rows
+ *  whose path or revisions are missing drop out. */
+export function hunkRows(lens: Lens, result: SqlQueryResult): { path: string; from: string; to: string }[] {
+  const paths = columnValues(result, lens.hunks?.path);
+  const froms = columnValues(result, lens.hunks?.from);
+  const tos = columnValues(result, lens.hunks?.to);
+  if (!paths || !froms || !tos) return [];
+  const out: { path: string; from: string; to: string }[] = [];
+  paths.forEach((p, i) => {
+    const from = froms[i];
+    const to = tos[i];
+    if (typeof p === "string" && p && typeof from === "string" && from && typeof to === "string" && to) {
+      out.push({ path: p, from, to });
+    }
+  });
+  return out;
 }
 
 /** `bar` viz rows: `chart.x` labels and `chart.y` values (NULL → 0). */

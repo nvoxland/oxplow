@@ -1266,14 +1266,7 @@ impl OxplowMcp {
                         &ctx,
                     )
                     .await?;
-                    oxplow_app::lens_text::text_run(
-                        &self.services.sql,
-                        &self.services.extension_catalog,
-                        &root,
-                        &run,
-                        &ctx,
-                    )
-                    .await
+                    oxplow_app::lens_text::text_run(&self.services, &root, &run, &ctx).await
                 };
                 lens_text = match read.await {
                     Ok(text) => serde_json::to_value(text).map_err(internal)?,
@@ -1842,15 +1835,9 @@ impl OxplowMcp {
         match p.format.as_deref().unwrap_or("text") {
             "json" => json_result(&run),
             "text" => json_result(
-                &oxplow_app::lens_text::text_run(
-                    &self.services.sql,
-                    &self.services.extension_catalog,
-                    &root,
-                    &run,
-                    &ctx,
-                )
-                .await
-                .map_err(|e| lens_error(&p.id, e))?,
+                &oxplow_app::lens_text::text_run(&self.services, &root, &run, &ctx)
+                    .await
+                    .map_err(|e| lens_error(&p.id, e))?,
             ),
             other => Err(McpError::invalid_params(
                 format!("format `{other}` isn't text or json"),

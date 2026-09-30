@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { readAt, type Stream } from "../../api.js";
+import { readAt } from "../../api.js";
 import { languageForPath } from "../../editor-language.js";
 import type { Revision } from "../../revision.js";
 
@@ -25,7 +25,8 @@ export interface DiffSpec {
 }
 
 interface Props {
-  stream: Stream;
+  /** The stream whose workspace both sides are read in. */
+  streamId: string;
   spec: DiffSpec;
   visible: boolean;
   /** Open the right-side path in the regular editor pane and close this diff tab. */
@@ -42,7 +43,7 @@ const toolbarButtonStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
+export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
   const modelsRef = useRef<{ left: any; right: any } | null>(null);
@@ -88,16 +89,16 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!stream || !editorReady) return;
+    if (!editorReady) return;
     let cancelled = false;
     (async () => {
       try {
         const leftPromise = spec.leftContent !== undefined
           ? Promise.resolve(spec.leftContent as string | null)
-          : readAt(stream.id, spec.path, spec.leftVersion);
+          : readAt(streamId, spec.path, spec.leftVersion);
         const rightPromise = spec.rightContent !== undefined
           ? Promise.resolve(spec.rightContent as string | null)
-          : readAt(stream.id, spec.path, spec.rightVersion);
+          : readAt(streamId, spec.path, spec.rightVersion);
         const [leftContent, rightContent] = await Promise.all([leftPromise, rightPromise]);
         if (cancelled) return;
         const monaco = monacoRef.current;
@@ -132,7 +133,7 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
     })();
     return () => { cancelled = true; };
   }, [
-    stream,
+    streamId,
     editorReady,
     spec.path,
     spec.leftVersion,

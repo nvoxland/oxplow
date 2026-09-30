@@ -147,10 +147,19 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     plus `bar` (`DailyBarChart`), `line` (`components/charts/TrendChart`,
     one chart per `chart.series`), `treemap` (two-level
     `components/charts/squarify`) and `grid` (children run with the
-    params they declare). The loader drops a chart lens missing the
-    `chart` columns its viz needs, and `validate_extension` checks those
-    columns exist in the result. Pure data shaping lives in `lensModel.ts`
-    (`barRows`, `lineSeries`, `treemapItems`, `childParams`).
+    params they declare), and the structure components (P6.A2): `tree`
+    (collapsible nesting by `tree.parent`; orphans are roots, a cycle is
+    cut), `timeline` (oldest first, linked through `timeline.ref`),
+    `detail` (the first row as label/value pairs), `steps` (a checklist
+    by `steps.status`: done, active, failed, else pending) and `hunks`
+    (each row's file diffed between `hunks.from` and `hunks.to` in the
+    diff viewer, `DiffPane`, one expanded at a time). The loader drops a
+    lens missing the column roles its viz needs, naming the block
+    (`chart`, `tree`, `timeline`, `steps`, `hunks`), and
+    `validate_extension` checks every named column exists in the result
+    (`Lens::role_columns`). Pure data shaping lives in `lensModel.ts`
+    (`barRows`, `lineSeries`, `treemapItems`, `treeNodes`,
+    `timelineEntries`, `stepItems`, `hunkRows`, `childParams`).
 - **Sharing.** There are three levels:
   - **Yourself.** An extension works in your worktree as soon as it's
     written.
@@ -574,9 +583,13 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   context (defaults only).
 - `query`: SQL over `v_*` and the extension's entities, with `:param`
   binding.
-- `viz`: `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`
-  or `grid` (child lenses, `children`). Charts name their columns under
-  `chart` (`x`, `y`, `series`, `label`, `size`, `group`).
+- `viz`: `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`,
+  `grid` (child lenses, `children`), `tree`, `timeline`, `detail`,
+  `steps` or `hunks`. Each component names the columns it draws from in
+  its own block: `chart` (`x`, `y`, `series`, `label`, `size`, `group`),
+  `tree` (`id`, `parent`, `label`), `timeline` (`at`, `label`, `ref`),
+  `steps` (`label`, `status`), `hunks` (`path`, `from`, `to` — two
+  revisions, `working` / `snap:<id>` / `git:<rev>`).
 - `columns`: `key`, `label`, and `link: {kind, from, line?, base?, head?}`
   to a core page, so rows are page-graph links. Kinds: `task`, `file`,
   `wiki`, `effort-diff`, `commit`, `metric`, `page`, `diff-at`,
@@ -743,7 +756,12 @@ tool list stable no matter how many extensions are installed.
   and values with the total; a line chart pivots to one column per
   series with each series' total; a treemap lists labels by size,
   largest first; a grid renders its children in order under `###`
-  titles (`text_of` runs them with the params each declares). Tables
+  titles; a tree is an indented list; a timeline is `at — label (ref)`
+  lines oldest first; a detail is `**label**: value` lines; steps are a
+  numbered `[x]`/`[>]`/`[!]`/`[ ]` checklist; hunks are each file's
+  unified diff between its two revisions (up to 20 files, 8 KB each).
+  What a component needs beyond its rows — a grid's child runs, the
+  hunks' diffs — is `lens_text::resolve`d first (`text_of`). Tables
   stop at 50 rows and say how many more; an empty result says the
   lens's `empty` text. It's what `run_lens`, `get_open_page` and `copy`
   return, so an agent reads a lens the way the person sees it.

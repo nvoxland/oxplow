@@ -3,7 +3,8 @@
 //! of the rows, what `copy` puts on the clipboard, and what a panel says
 //! when read as text. One renderer per kit component, each saying what
 //! the component shows — a chart's series, a treemap's sizes, a grid's
-//! children in order — capped at [`MAX_ROWS`] rows.
+//! children in order, a tree's nesting, a hunk's diff — capped at
+//! [`MAX_ROWS`] rows.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -17,6 +18,19 @@ use crate::extensions::{AlertState, LensRun, LensViz};
 /// Rows a table-like rendering shows before saying how many more there
 /// are.
 pub const MAX_ROWS: usize = 50;
+
+/// Files a `hunks` rendering diffs, and the bytes of each file's diff.
+pub const MAX_HUNK_FILES: usize = 20;
+pub const MAX_HUNK_BYTES: usize = 8_000;
+
+/// What a component needs beyond its rows: a grid's children's runs, a
+/// `hunks` lens's diffs (one per row, in row order, up to
+/// [`MAX_HUNK_FILES`]).
+#[derive(Debug, Clone, Default)]
+pub struct Resolved {
+    pub children: Vec<LensRun>,
+    pub diffs: Vec<String>,
+}
 
 /// A lens run as an agent reads it: the text, and what it needs to know
 /// about the run — not the rows, which the text carries.
@@ -37,16 +51,15 @@ pub struct LensText {
     pub text: String,
 }
 
-/// `run` as an agent reads it; a grid's children are run (with the
-/// params each declares from the grid's) so their text is in it.
+/// `run` as an agent reads it; what its component needs beyond the rows
+/// is resolved first ([`resolve`]).
 pub async fn text_run(
-    layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
+    svc: &crate::Services,
     root: &Path,
     run: &LensRun,
     ctx: &crate::extensions::LensContext,
 ) -> Result<LensText, DomainError> {
-    let text = text_of(layer, catalog, root, run, ctx).await?;
+    let text = text_of(svc, root, run, ctx).await?;
     Ok(LensText {
         lens: run.lens.id.clone(),
         title: run.lens.title.clone(),
@@ -60,39 +73,124 @@ pub async fn text_run(
     })
 }
 
-/// `run`'s text, running a grid's children first.
+/// `run`'s text, resolved first.
 pub async fn text_of(
-    layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
+    svc: &crate::Services,
     root: &Path,
     run: &LensRun,
     ctx: &crate::extensions::LensContext,
 ) -> Result<String, DomainError> {
-    if run.lens.viz != LensViz::Grid {
-        return Ok(render(run, &[]));
-    }
-    let mut children = Vec::with_capacity(run.lens.children.len());
-    for id in &run.lens.children {
-        let child = catalog.find_lens(root, id)?;
-        let params = run
-            .params
-            .iter()
-            .filter(|(k, _)| child.params.iter().any(|p| &p.name == *k))
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        children.push(crate::extensions::run_lens(layer, catalog, root, id, params, ctx).await?);
-    }
-    Ok(render(run, &children))
+    Ok(render(run, &resolve(svc, root, run, ctx).await?))
 }
 
-/// `run` as text. A grid renders `children` (its children's runs, in
-/// order) under their titles; every other component renders its rows.
-pub fn render(run: &LensRun, children: &[LensRun]) -> String {
+/// What `run`'s component needs beyond its rows: a grid's children, run
+/// with the params each declares from the grid's; a `hunks` lens's diffs,
+/// each file read at both revisions in `root`.
+pub async fn resolve(
+    svc: &crate::Services,
+    root: &Path,
+    run: &LensRun,
+    ctx: &crate::extensions::LensContext,
+) -> Result<Resolved, DomainError> {
+    let mut out = Resolved::default();
+    match run.lens.viz {
+        LensViz::Grid => {
+            for id in &run.lens.children {
+                let child = svc.extension_catalog.find_lens(root, id)?;
+                let params = run
+                    .params
+                    .iter()
+                    .filter(|(k, _)| child.params.iter().any(|p| &p.name == *k))
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                out.children.push(
+                    crate::extensions::run_lens(
+                        &svc.sql,
+                        &svc.extension_catalog,
+                        root,
+                        id,
+                        params,
+                        ctx,
+                    )
+                    .await?,
+                );
+            }
+        }
+        LensViz::Hunks => {
+            let h = run.lens.hunks.clone().unwrap_or_default();
+            let (Some(p), Some(f), Some(t)) = (
+                column(run, h.path.as_ref()),
+                column(run, h.from.as_ref()),
+                column(run, h.to.as_ref()),
+            ) else {
+                return Ok(out);
+            };
+            for r in run.result.rows.iter().take(MAX_HUNK_FILES) {
+                let (path, from, to) = (
+                    r.get(p).map(cell).unwrap_or_default(),
+                    r.get(f).map(cell).unwrap_or_default(),
+                    r.get(t).map(cell).unwrap_or_default(),
+                );
+                out.diffs
+                    .push(file_diff(svc, root, &path, &from, &to).await);
+            }
+        }
+        _ => {}
+    }
+    Ok(out)
+}
+
+/// `path`'s unified diff from revision `from` to `to`, or why there is
+/// none.
+async fn file_diff(svc: &crate::Services, root: &Path, path: &str, from: &str, to: &str) -> String {
+    let side = |rev: &str| {
+        let rev = rev.to_string();
+        async move {
+            let parsed: oxplow_domain::vcs::Revision = rev.parse()?;
+            let bytes = svc
+                .trees
+                .read_at(root, &parsed, path)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok::<String, String>(
+                bytes
+                    .map(|b| String::from_utf8_lossy(&b).into_owned())
+                    .unwrap_or_default(),
+            )
+        }
+    };
+    match (side(from).await, side(to).await) {
+        (Ok(old), Ok(new)) if old == new => "(no changes)".to_string(),
+        (Ok(old), Ok(new)) => {
+            crate::wiki_drift::unified_diff(
+                &old,
+                &new,
+                &format!("{path}@{from}"),
+                &format!("{path}@{to}"),
+                MAX_HUNK_BYTES,
+            )
+            .0
+        }
+        (Err(e), _) | (_, Err(e)) => format!("(can't read it: {e})"),
+    }
+}
+
+/// `run` as text. A grid renders its resolved children in order under
+/// their titles, a `hunks` lens its resolved diffs; every other component
+/// renders its rows.
+pub fn render(run: &LensRun, resolved: &Resolved) -> String {
     let rows = &run.result.rows;
     if run.lens.viz == LensViz::Grid {
-        return children
+        return resolved
+            .children
             .iter()
-            .map(|c| format!("### {}\n\n{}", c.lens.title, render(c, &[])))
+            .map(|c| {
+                format!(
+                    "### {}\n\n{}",
+                    c.lens.title,
+                    render(c, &Resolved::default())
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n\n");
     }
@@ -112,6 +210,11 @@ pub fn render(run: &LensRun, children: &[LensRun]) -> String {
         LensViz::Bar => bar(run),
         LensViz::Line => line(run),
         LensViz::Treemap => treemap(run),
+        LensViz::Tree => tree(run),
+        LensViz::Timeline => timeline(run),
+        LensViz::Detail => detail(run),
+        LensViz::Steps => steps(run),
+        LensViz::Hunks => hunks(run, &resolved.diffs),
         LensViz::Table | LensViz::List | LensViz::Grid => table(run),
     };
     if run.result.truncated {
@@ -175,18 +278,7 @@ fn markdown_table(header: &[String], rows: &[Vec<String>]) -> String {
 /// What a table or list shows: the declared columns in their order (with
 /// their labels), or every result column when none are declared.
 fn table(run: &LensRun) -> String {
-    let shown: Vec<(usize, String)> = if run.lens.columns.is_empty() {
-        run.result.columns.iter().cloned().enumerate().collect()
-    } else {
-        run.lens
-            .columns
-            .iter()
-            .filter_map(|c| {
-                let i = run.result.columns.iter().position(|k| k == &c.key)?;
-                Some((i, c.label.clone().unwrap_or_else(|| c.key.clone())))
-            })
-            .collect()
-    };
+    let shown = shown(run);
     let header: Vec<String> = shown.iter().map(|(_, l)| l.clone()).collect();
     let rows: Vec<Vec<String>> = run
         .result
@@ -200,6 +292,194 @@ fn table(run: &LensRun) -> String {
         })
         .collect();
     markdown_table(&header, &rows)
+}
+
+/// The displayed columns (the UI's `displayColumns`): the declared ones in
+/// their order with their labels, else every result column.
+fn shown(run: &LensRun) -> Vec<(usize, String)> {
+    if run.lens.columns.is_empty() {
+        run.result.columns.iter().cloned().enumerate().collect()
+    } else {
+        run.lens
+            .columns
+            .iter()
+            .filter_map(|c| {
+                let i = run.result.columns.iter().position(|k| k == &c.key)?;
+                Some((i, c.label.clone().unwrap_or_else(|| c.key.clone())))
+            })
+            .collect()
+    }
+}
+
+/// A tree: each row under the row its parent names, indented; rows whose
+/// parent isn't in the result are roots.
+fn tree(run: &LensRun) -> String {
+    let t = run.lens.tree.clone().unwrap_or_default();
+    let (Some(id), Some(parent), Some(label)) = (
+        column(run, t.id.as_ref()),
+        column(run, t.parent.as_ref()),
+        column(run, t.label.as_ref()),
+    ) else {
+        return table(run);
+    };
+    let rows = &run.result.rows;
+    let ids: Vec<String> = rows
+        .iter()
+        .map(|r| r.get(id).map(cell).unwrap_or_default())
+        .collect();
+    let parent_of: Vec<Option<usize>> = rows
+        .iter()
+        .map(|r| {
+            let p = r.get(parent).map(cell).unwrap_or_default();
+            (!p.is_empty())
+                .then(|| ids.iter().position(|i| *i == p))
+                .flatten()
+        })
+        .collect();
+    let mut lines: Vec<String> = Vec::new();
+    let mut seen = vec![false; rows.len()];
+    fn walk(
+        at: usize,
+        depth: usize,
+        rows: &[Vec<SqlCell>],
+        label: usize,
+        parent_of: &[Option<usize>],
+        seen: &mut [bool],
+        lines: &mut Vec<String>,
+    ) {
+        if seen[at] {
+            return;
+        }
+        seen[at] = true;
+        lines.push(format!(
+            "{}- {}",
+            "  ".repeat(depth),
+            rows[at].get(label).map(cell).unwrap_or_default()
+        ));
+        for (child, p) in parent_of.iter().enumerate() {
+            if *p == Some(at) {
+                walk(child, depth + 1, rows, label, parent_of, seen, lines);
+            }
+        }
+    }
+    for root in (0..rows.len()).filter(|i| parent_of[*i].is_none()) {
+        walk(root, 0, rows, label, &parent_of, &mut seen, &mut lines);
+    }
+    capped_lines(lines)
+}
+
+/// A timeline: each row's time and label, oldest first, with its ref.
+fn timeline(run: &LensRun) -> String {
+    let t = run.lens.timeline.clone().unwrap_or_default();
+    let (Some(at), Some(label)) = (column(run, t.at.as_ref()), column(run, t.label.as_ref()))
+    else {
+        return table(run);
+    };
+    let link = column(run, t.ref_column.as_ref());
+    let mut entries: Vec<(String, String)> = run
+        .result
+        .rows
+        .iter()
+        .map(|r| {
+            let mut line = format!(
+                "{} — {}",
+                r.get(at).map(cell).unwrap_or_default(),
+                r.get(label).map(cell).unwrap_or_default()
+            );
+            if let Some(v) = link
+                .and_then(|l| r.get(l))
+                .map(cell)
+                .filter(|v| !v.is_empty())
+            {
+                line.push_str(&format!(" ({v})"));
+            }
+            (r.get(at).map(cell).unwrap_or_default(), format!("- {line}"))
+        })
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    capped_lines(entries.into_iter().map(|(_, l)| l).collect())
+}
+
+/// A detail: the first row's displayed columns as label/value lines.
+fn detail(run: &LensRun) -> String {
+    let Some(row) = run.result.rows.first() else {
+        return String::new();
+    };
+    shown(run)
+        .into_iter()
+        .map(|(i, l)| format!("**{l}**: {}", row.get(i).map(cell).unwrap_or_default()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Steps: a numbered checklist — `[x]` done, `[>]` active, `[!]` failed,
+/// `[ ]` anything else.
+fn steps(run: &LensRun) -> String {
+    let s = run.lens.steps.clone().unwrap_or_default();
+    let Some(label) = column(run, s.label.as_ref()) else {
+        return table(run);
+    };
+    let status = column(run, s.status.as_ref());
+    capped_lines(
+        run.result
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(n, r)| {
+                let mark = match status.and_then(|c| r.get(c)).map(cell).as_deref() {
+                    Some("done") => "[x]",
+                    Some("active") => "[>]",
+                    Some("failed") => "[!]",
+                    _ => "[ ]",
+                };
+                format!(
+                    "{}. {mark} {}",
+                    n + 1,
+                    r.get(label).map(cell).unwrap_or_default()
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Hunks: each row's file and revisions, then its diff.
+fn hunks(run: &LensRun, diffs: &[String]) -> String {
+    let h = run.lens.hunks.clone().unwrap_or_default();
+    let (Some(p), Some(f), Some(t)) = (
+        column(run, h.path.as_ref()),
+        column(run, h.from.as_ref()),
+        column(run, h.to.as_ref()),
+    ) else {
+        return table(run);
+    };
+    let rows = &run.result.rows;
+    let mut out: Vec<String> = rows
+        .iter()
+        .zip(diffs)
+        .map(|(r, diff)| {
+            format!(
+                "#### {} ({} → {})\n\n```diff\n{}\n```",
+                r.get(p).map(cell).unwrap_or_default(),
+                r.get(f).map(cell).unwrap_or_default(),
+                r.get(t).map(cell).unwrap_or_default(),
+                diff.trim_end()
+            )
+        })
+        .collect();
+    if rows.len() > diffs.len() {
+        out.push(format!("({} more files)", rows.len() - diffs.len()));
+    }
+    out.join("\n\n")
+}
+
+/// `lines` joined, capped at [`MAX_ROWS`] with how many more.
+fn capped_lines(lines: Vec<String>) -> String {
+    let more = lines.len().saturating_sub(MAX_ROWS);
+    let mut out: Vec<String> = lines.into_iter().take(MAX_ROWS).collect();
+    if more > 0 {
+        out.push(format!("({more} more rows)"));
+    }
+    out.join("\n")
 }
 
 fn column(run: &LensRun, name: Option<&String>) -> Option<usize> {
@@ -363,6 +643,10 @@ mod tests {
                 columns: Vec::new(),
                 empty: None,
                 chart,
+                tree: None,
+                timeline: None,
+                steps: None,
+                hunks: None,
                 children: Vec::new(),
                 launcher_category: None,
                 hidden: false,
@@ -408,7 +692,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            render(&r, &[]),
+            render(&r, &Resolved::default()),
             "| day | n |\n| --- | --- |\n| mon | 3 |\n| tue | 4 |\nTotal: 7"
         );
     }
@@ -427,7 +711,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            render(&r, &[]),
+            render(&r, &Resolved::default()),
             "| day | a | b |\n| --- | --- | --- |\n| 2026-09-01 | 2 | 0.5 |\n| 2026-09-02 | 1 |  |\nTotals: a 3, b 0.5"
         );
     }
@@ -450,7 +734,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            render(&r, &[]),
+            render(&r, &Resolved::default()),
             "| path | lines |\n| --- | --- |\n| b.rs | 30 |\n| a.rs | 10 |\n"
         );
     }
@@ -460,13 +744,16 @@ mod tests {
     #[test]
     fn a_table_is_capped_and_an_empty_one_says_so() {
         let rows = (0..60).map(|i| vec![SqlCell::Int(i)]).collect();
-        let text = render(&run(LensViz::Table, None, &["n"], rows), &[]);
+        let text = render(
+            &run(LensViz::Table, None, &["n"], rows),
+            &Resolved::default(),
+        );
         assert!(text.ends_with("(10 more rows)\n"), "{text}");
         assert!(text.contains("| 49 |") && !text.contains("| 50 |"));
         let mut empty = run(LensViz::Table, None, &["n"], Vec::new());
-        assert_eq!(render(&empty, &[]), "No rows.");
+        assert_eq!(render(&empty, &Resolved::default()), "No rows.");
         empty.lens.empty = Some("Nothing waiting.".into());
-        assert_eq!(render(&empty, &[]), "Nothing waiting.");
+        assert_eq!(render(&empty, &Resolved::default()), "Nothing waiting.");
     }
 
     /// A grid reads as its children, in order, under their titles.
@@ -478,8 +765,184 @@ mod tests {
         let mut b = run(LensViz::Markdown, None, &["m"], vec![vec![t("**ok**")]]);
         b.lens.title = "Note".into();
         assert_eq!(
-            render(&grid, &[a, b]),
+            render(
+                &grid,
+                &Resolved {
+                    children: vec![a, b],
+                    diffs: Vec::new()
+                }
+            ),
             "### Open\n\n5\n\n### Note\n\n**ok**"
         );
+    }
+
+    fn with<F: FnOnce(&mut Lens)>(mut r: LensRun, f: F) -> LensRun {
+        f(&mut r.lens);
+        r
+    }
+
+    /// A tree nests each row under the row its parent names.
+    #[test]
+    fn a_tree_nests_rows_under_their_parents() {
+        let r = with(
+            run(
+                LensViz::Tree,
+                None,
+                &["id", "parent", "name"],
+                vec![
+                    vec![t("b"), t("a"), t("child")],
+                    vec![t("a"), SqlCell::Null(()), t("root")],
+                    vec![t("c"), t("b"), t("grandchild")],
+                    vec![t("d"), t("gone"), t("orphan")],
+                ],
+            ),
+            |l| {
+                l.tree = Some(crate::extensions::LensTree {
+                    id: Some("id".into()),
+                    parent: Some("parent".into()),
+                    label: Some("name".into()),
+                })
+            },
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "- root\n  - child\n    - grandchild\n- orphan"
+        );
+    }
+
+    /// A timeline lists its rows oldest first, with their refs.
+    #[test]
+    fn a_timeline_is_in_time_order() {
+        let r = with(
+            run(
+                LensViz::Timeline,
+                None,
+                &["at", "what", "ref"],
+                vec![
+                    vec![t("2026-09-30T10:00"), t("shipped"), t("commit:abc")],
+                    vec![t("2026-09-29T09:00"), t("started"), SqlCell::Null(())],
+                ],
+            ),
+            |l| {
+                l.timeline = Some(crate::extensions::LensTimeline {
+                    at: Some("at".into()),
+                    label: Some("what".into()),
+                    ref_column: Some("ref".into()),
+                })
+            },
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "- 2026-09-29T09:00 — started\n- 2026-09-30T10:00 — shipped (commit:abc)"
+        );
+    }
+
+    /// A detail is its first row as label/value lines.
+    #[test]
+    fn a_detail_is_its_first_row() {
+        let r = run(
+            LensViz::Detail,
+            None,
+            &["title", "state"],
+            vec![vec![t("Fix it"), t("done")], vec![t("ignored"), t("x")]],
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "**title**: Fix it\n**state**: done"
+        );
+    }
+
+    /// Steps are a numbered checklist marked by status.
+    #[test]
+    fn steps_are_a_checklist() {
+        let r = with(
+            run(
+                LensViz::Steps,
+                None,
+                &["step", "status"],
+                vec![
+                    vec![t("plan"), t("done")],
+                    vec![t("build"), t("active")],
+                    vec![t("test"), t("failed")],
+                    vec![t("ship"), SqlCell::Null(())],
+                ],
+            ),
+            |l| {
+                l.steps = Some(crate::extensions::LensSteps {
+                    label: Some("step".into()),
+                    status: Some("status".into()),
+                })
+            },
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "1. [x] plan\n2. [>] build\n3. [!] test\n4. [ ] ship"
+        );
+    }
+
+    /// Hunks are each row's file and revisions, then its diff; files past
+    /// the resolved ones are counted.
+    #[test]
+    fn hunks_show_each_files_diff() {
+        let r = with(
+            run(
+                LensViz::Hunks,
+                None,
+                &["path", "a", "b"],
+                vec![
+                    vec![t("x.rs"), t("git:abc"), t("working")],
+                    vec![t("y.rs"), t("git:abc"), t("working")],
+                ],
+            ),
+            |l| {
+                l.hunks = Some(crate::extensions::LensHunks {
+                    path: Some("path".into()),
+                    from: Some("a".into()),
+                    to: Some("b".into()),
+                })
+            },
+        );
+        let resolved = Resolved {
+            children: Vec::new(),
+            diffs: vec!["-old\n+new\n".into()],
+        };
+        assert_eq!(
+            render(&r, &resolved),
+            "#### x.rs (git:abc → working)\n\n```diff\n-old\n+new\n```\n\n(1 more files)"
+        );
+    }
+
+    /// A hunks lens resolves each row's diff from the workspace.
+    #[tokio::test]
+    async fn hunks_resolve_from_the_workspace() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        std::fs::write(root.join("h.txt"), "one\n").unwrap();
+        let sha = crate::test_fixtures::commit_all(&root, "h");
+        std::fs::write(root.join("h.txt"), "two\n").unwrap();
+        let r = with(
+            run(
+                LensViz::Hunks,
+                None,
+                &["path", "a", "b"],
+                vec![vec![t("h.txt"), t(&format!("git:{sha}")), t("working")]],
+            ),
+            |l| {
+                l.hunks = Some(crate::extensions::LensHunks {
+                    path: Some("path".into()),
+                    from: Some("a".into()),
+                    to: Some("b".into()),
+                })
+            },
+        );
+        let text = text_of(
+            &fx.svc,
+            &root,
+            &r,
+            &crate::extensions::LensContext::default(),
+        )
+        .await
+        .unwrap();
+        assert!(text.contains("-one") && text.contains("+two"), "{text}");
     }
 }

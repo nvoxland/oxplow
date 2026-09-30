@@ -2579,6 +2579,10 @@ export type Lens = {
 	empty: string | null,
 	// Columns a chart viz draws from.
 	chart: LensChart | null,
+	tree: LensTree | null,
+	timeline: LensTimeline | null,
+	steps: LensSteps | null,
+	hunks: LensHunks | null,
 	// For `grid`: child lens ids.
 	children: string[],
 	// Launcher section; `None` = "Lenses".
@@ -2657,6 +2661,13 @@ export type LensColumn = {
 	// Header text; defaults to `key`.
 	label?: string | null,
 	link?: LensLink | null,
+};
+
+// `hunks` viz: the file and the two revisions each row diffs.
+export type LensHunks = {
+	path: string | null,
+	from: string | null,
+	to: string | null,
 };
 
 // Makes a column's cells link to a page.
@@ -2738,6 +2749,27 @@ export type LensSlot = {
 	lensId: string,
 };
 
+// `steps` viz: each step's text and status.
+export type LensSteps = {
+	label: string | null,
+	status: string | null,
+};
+
+// `timeline` viz: when each row happened and what it says.
+export type LensTimeline = {
+	at: string | null,
+	label: string | null,
+	// A column holding a canonical ref each entry links to.
+	ref: string | null,
+};
+
+// `tree` viz: which columns nest the rows.
+export type LensTree = {
+	id: string | null,
+	parent: string | null,
+	label: string | null,
+};
+
 // How a lens renders its rows.
 export type LensViz = 
 // Rows and columns.
@@ -2767,7 +2799,31 @@ export type LensViz =
  *  Other lenses (`children`), stacked, each given the params it
  *  declares from this lens's params.
  */
-"grid";
+"grid" | 
+/**
+ *  Rows nested by `tree.parent` (a row's parent is the row whose
+ *  `tree.id` it names; none, or one not in the result, is a root),
+ *  each shown as `tree.label`.
+ */
+"tree" | 
+/**
+ *  Rows in time order (`timeline.at`), each shown as
+ *  `timeline.label`, linked through `timeline.ref` when set.
+ */
+"timeline" | 
+// The first row as label/value pairs (the displayed columns).
+"detail" | 
+/**
+ *  An ordered checklist: `steps.label`, with `steps.status` (`done`,
+ *  `active`, `failed`, anything else pending).
+ */
+"steps" | 
+/**
+ *  Per row, the diff of the file `hunks.path` between the revisions
+ *  `hunks.from` and `hunks.to` (`working`, `snap:<id>`,
+ *  `<vcs>:<rev>`), read-only.
+ */
+"hunks";
 
 export type LspServerConfig = {
 	languageId: string,

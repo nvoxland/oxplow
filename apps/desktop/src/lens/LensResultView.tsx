@@ -5,7 +5,9 @@ import { TrendChart } from "../components/charts/TrendChart.js";
 import { squarify } from "../components/charts/squarify.js";
 import { formatMetricValue, formatMetricValueExact } from "../components/format.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
+import { DiffPane } from "../components/Diff/DiffPane.js";
 import { RouteLink } from "../tabs/RouteLink.js";
+import { refFromTabId } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import {
   barRows,
@@ -13,11 +15,17 @@ import {
   childParams,
   displayColumns,
   formatCell,
+  hunkRows,
   limitRows,
   lineSeries,
   rowMention,
+  stepItems,
+  timelineEntries,
+  treeNodes,
   treemapItems,
   type DisplayColumn,
+  type StepStatus,
+  type TreeNode,
 } from "./lensModel.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
@@ -102,7 +110,7 @@ function LensBody(props: LensResultViewProps) {
   return <RowsBody {...props} />;
 }
 
-function RowsBody({ run, onOpenPage, maxRows, compact = false }: LensResultViewProps) {
+function RowsBody({ run, onOpenPage, maxRows, streamId = null, compact = false }: LensResultViewProps) {
   const lens = run.lens;
   const result = limitRows(run.result, maxRows);
   const ctxMenu = useContextMenu();
@@ -149,6 +157,21 @@ function RowsBody({ run, onOpenPage, maxRows, compact = false }: LensResultViewP
       return <NumberViz value={first} compact={compact} />;
     case "markdown":
       return <MarkdownViz body={first === null ? "" : String(first)} />;
+    case "tree":
+      return (
+        <>
+          <TreeViz nodes={treeNodes(lens, result)} onRowMenu={onRowMenu} />
+          {ctxMenu.menu}
+        </>
+      );
+    case "timeline":
+      return <TimelineViz entries={timelineEntries(lens, result)} onOpenPage={onOpenPage} />;
+    case "detail":
+      return <DetailViz row={result.rows[0]!} cols={cols} cell={cell} />;
+    case "steps":
+      return <StepsViz steps={stepItems(lens, result)} />;
+    case "hunks":
+      return <HunksViz rows={hunkRows(lens, result)} streamId={streamId} />;
     case "list":
       return (
         <>
@@ -165,6 +188,157 @@ function RowsBody({ run, onOpenPage, maxRows, compact = false }: LensResultViewP
         </>
       );
   }
+}
+
+/** `tree`: nested rows, each branch collapsible (expanded by default). */
+function TreeViz({ nodes, onRowMenu }: { nodes: TreeNode[]; onRowMenu(e: React.MouseEvent, row: SqlCell[]): void }) {
+  return (
+    <ul data-testid="lens-tree" style={treeListStyle}>
+      {nodes.map((n, i) => (
+        <TreeItem key={i} node={n} onRowMenu={onRowMenu} />
+      ))}
+    </ul>
+  );
+}
+
+function TreeItem({ node, onRowMenu }: { node: TreeNode; onRowMenu(e: React.MouseEvent, row: SqlCell[]): void }) {
+  const [open, setOpen] = useState(true);
+  const branch = node.children.length > 0;
+  return (
+    <li data-testid="lens-tree-node">
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 0" }} onContextMenu={(e) => onRowMenu(e, node.row)}>
+        {branch ? (
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-label={open ? "Collapse" : "Expand"}
+            onClick={() => setOpen((o) => !o)}
+            style={disclosureStyle}
+          >
+            {open ? "▾" : "▸"}
+          </button>
+        ) : (
+          <span style={{ display: "inline-block", width: 16 }} />
+        )}
+        <span>{node.label}</span>
+      </div>
+      {branch && open ? (
+        <ul style={{ ...treeListStyle, paddingLeft: 16 }}>
+          {node.children.map((c, i) => (
+            <TreeItem key={i} node={c} onRowMenu={onRowMenu} />
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
+/** `timeline`: entries oldest first, each linked through its ref. */
+function TimelineViz({
+  entries,
+  onOpenPage,
+}: {
+  entries: ReturnType<typeof timelineEntries>;
+  onOpenPage?(ref: TabRef): void;
+}) {
+  return (
+    <ol data-testid="lens-timeline" style={{ listStyle: "none", padding: 0, margin: 0, borderLeft: "2px solid var(--border-subtle)" }}>
+      {entries.map((e, i) => {
+        const ref = e.ref ? refFromTabId(e.ref) : null;
+        return (
+          <li key={i} data-testid={`lens-timeline-entry-${i}`} style={{ padding: "4px 0 4px 12px" }}>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{e.at}</div>
+            <div>
+              {ref ? (
+                <RouteLink to={ref} onNavigate={onOpenPage ? () => onOpenPage(ref) : undefined} style={linkStyle}>
+                  {e.label}
+                </RouteLink>
+              ) : (
+                e.label
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** `detail`: the first row as label/value pairs. */
+function DetailViz({ row, cols, cell }: { row: SqlCell[]; cols: DisplayColumn[]; cell: CellRenderer }) {
+  return (
+    <dl data-testid="lens-detail" style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "4px 12px", margin: 0 }}>
+      {cols.map((c) => (
+        <div key={c.key} style={{ display: "contents" }}>
+          <dt style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{c.label}</dt>
+          <dd style={{ margin: 0 }}>{cell(row, c)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+const STEP_MARK: Record<StepStatus, { mark: string; color: string; label: string }> = {
+  done: { mark: "✓", color: "var(--diff-add-fg)", label: "Done" },
+  active: { mark: "▶", color: "var(--accent)", label: "In progress" },
+  failed: { mark: "✗", color: "var(--severity-critical)", label: "Failed" },
+  pending: { mark: "○", color: "var(--text-muted)", label: "Pending" },
+};
+
+/** `steps`: an ordered checklist. */
+function StepsViz({ steps }: { steps: ReturnType<typeof stepItems> }) {
+  return (
+    <ol data-testid="lens-steps" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+      {steps.map((s, i) => {
+        const m = STEP_MARK[s.status];
+        return (
+          <li key={i} data-testid={`lens-step-${i}`} data-status={s.status} style={{ display: "flex", gap: 8, padding: "3px 0" }}>
+            <span title={m.label} aria-label={m.label} style={{ color: m.color, width: 16, textAlign: "center" }}>
+              {m.mark}
+            </span>
+            <span style={{ color: s.status === "pending" ? "var(--text-secondary)" : undefined }}>
+              {i + 1}. {s.label}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** `hunks`: each file and its revisions; expanding one shows its diff in
+ *  the diff viewer (one at a time — each is an editor). */
+function HunksViz({ rows, streamId }: { rows: ReturnType<typeof hunkRows>; streamId: string | null }) {
+  const [open, setOpen] = useState<number | null>(rows.length === 1 ? 0 : null);
+  return (
+    <div data-testid="lens-hunks">
+      {rows.map((r, i) => (
+        <section key={i} data-testid={`lens-hunk-${i}`} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+          <button
+            type="button"
+            aria-expanded={open === i}
+            onClick={() => setOpen((o) => (o === i ? null : i))}
+            style={{ ...disclosureStyle, width: "100%", textAlign: "left", padding: "6px 0", display: "flex", gap: 6 }}
+          >
+            <span>{open === i ? "▾" : "▸"}</span>
+            <span style={{ fontFamily: "var(--font-mono)" }}>{r.path}</span>
+            <span style={{ color: "var(--text-secondary)" }}>
+              {r.from} → {r.to}
+            </span>
+          </button>
+          {open === i ? (
+            <div style={{ height: 360 }}>
+              <DiffPane
+                streamId={streamId ?? ""}
+                spec={{ path: r.path, leftVersion: r.from, rightVersion: r.to, baseLabel: r.from }}
+                visible
+              />
+            </div>
+          ) : null}
+        </section>
+      ))}
+    </div>
+  );
 }
 
 function MarkdownViz({ body }: { body: string }) {
@@ -407,6 +581,16 @@ function TableViz({ rows, cols, cell, truncated, onRowMenu }: RowsVizProps) {
   );
 }
 
+const treeListStyle: CSSProperties = { listStyle: "none", padding: 0, margin: 0 };
+const disclosureStyle: CSSProperties = {
+  background: "none",
+  border: "none",
+  padding: 0,
+  width: 16,
+  color: "var(--text-secondary)",
+  cursor: "pointer",
+  font: "inherit",
+};
 const tableStyle: CSSProperties = { width: "100%", borderCollapse: "collapse", fontSize: "var(--text-sm)" };
 const thStyle: CSSProperties = {
   textAlign: "left",

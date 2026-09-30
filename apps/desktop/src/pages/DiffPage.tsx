@@ -23,7 +23,7 @@ export function DiffPage({ stream, spec, visible, onJumpToSource }: DiffPageProp
   return (
     <Page testId="page-diff" kind="diff">
       <DiffPane
-        stream={stream}
+        streamId={stream.id}
         spec={spec}
         visible={visible}
         onJumpToSource={onJumpToSource}
