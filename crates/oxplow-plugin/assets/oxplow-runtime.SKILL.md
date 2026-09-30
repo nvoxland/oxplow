@@ -1,6 +1,6 @@
 ---
 name: oxplow-runtime
-description: Oxplow runtime — task filing, status transitions, and orchestrator dispatch. Loads on mcp__oxplow__create_task, file_epic_with_children, update_task, add_thread_note, read_task_options, or dispatch_task calls, and when composing a subagent brief.
+description: Oxplow runtime — task filing, status transitions, work items across providers (v_work_item, work_item.* commands), and orchestrator dispatch. Loads on mcp__oxplow__create_task, file_epic_with_children, update_task, add_thread_note, read_task_options, dispatch_task, v_work_item or work_item.* calls, and when composing a subagent brief.
 ---
 
 # Filing oxplow tasks
@@ -139,6 +139,22 @@ Legitimate reasons to *stay* `in_progress` across a stop boundary:
 In either case, leave a note (`add_thread_note`) explaining what's
 pending so the stop-hook nudge suppresses itself — it only fires for
 items the agent didn't touch during the turn.
+
+## Work items beyond filing
+
+Tasks are oxplow's own **work items**; an issue tracker connected as a
+provider adds its own (`work_item:<provider>:<id>`). Read every
+provider's items with `query_sql` over **`v_work_item`** (`ref`,
+`provider`, `title`, `state` — `todo`, `in_progress`, `blocked`, `done`,
+`canceled` — `native_state`, `parent_ref`): what's in progress is
+`SELECT ref, provider, title FROM v_work_item WHERE state =
+'in_progress'`, an item's children `WHERE parent_ref = '<ref>'`.
+
+Change oxplow's own with `run_command` and the item's canonical ref:
+`work_item.transition { ref, to }` (a status: `done`, `blocked`, …),
+`work_item.update { ref, … }`, `work_item.link { ref, target, link_type }`
+(`blocks`, `relates_to`, …) and `work_item.comment { ref, body }`. The
+task tools above remain the usual way to file and close your own work.
 
 ## Decisions and claims
 

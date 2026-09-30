@@ -107,6 +107,18 @@ impl AiService {
     }
 
     /// Layer `source`'s role assignments (the project's) over `ai.yaml`.
+    /// This machine's AI setup: the global `ai.yaml` and the OS keychain
+    /// (read only here), recording calls into `calls`. What a check run
+    /// outside the app uses (`OXPLOW_LIVE_ANSWERABILITY`).
+    pub fn for_this_machine(calls: Arc<oxplow_db::SqliteAiCallStore>) -> Self {
+        Self::new(
+            Client::default(),
+            Arc::new(oxplow_ai::secrets::KeychainSecrets),
+            calls,
+            oxplow_config::global_config_dir(),
+        )
+    }
+
     pub fn with_project_overrides(mut self, source: OverridesSource) -> Self {
         self.overrides = source;
         self

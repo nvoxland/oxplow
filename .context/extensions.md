@@ -511,6 +511,36 @@ and one calling MCP read identical `file:line: what — fix` lines.
 
 The `oxplow-extension` skill requires `check` after every edit.
 
+## Answerability
+
+`crates/oxplow-sdk/src/answerability.rs` (P5.F1) checks that an agent
+reading the right skill can answer the questions a capability exists
+for. A questions file is a list of `{ question, skill, reaches: { sql } |
+{ command, input }, shape: { columns } }`:
+
+- **Core capabilities**: `crates/oxplow-plugin/assets/questions/<capability>.yaml`
+  (`vcs`, `work_items`, `knowledge`, `code_intel`;
+  `oxplow_plugin::CAPABILITY_QUESTIONS`), each naming a shipped skill
+  (`oxplow-codebase` — history and code, added for this —
+  `oxplow-runtime`, `oxplow-wiki-capture`). The in-tree test
+  (`every_capability_question_reaches_what_its_skill_names`) runs them
+  against a throwaway `Services::in_memory`.
+- **Per question**: the skill's text names every model (`v_*`) the SQL
+  reads and the command it runs; the SQL runs through the gateway and
+  returns exactly `shape.columns`; a command's input validates against
+  its schema. A question whose skill doesn't lead there is a finding,
+  which is the point: when a capability grows, its questions say which
+  skill must learn about it.
+- **Live** (`OXPLOW_LIVE_ANSWERABILITY=1`): `answerability::live` asks
+  this machine's `decide` model (`AiService::for_this_machine`: the
+  global `ai.yaml`, keychain read only), given only the skill text and
+  the catalog (every `v_model` view and every command an agent may run),
+  what it would reach for first; it must pick the same model or command.
+- **An extension's own** `questions.yaml` runs in `oxplow plugin test`:
+  `skill` is a markdown file in the extension, SQL runs against the
+  project's database when there is one (else a warning), and a command
+  is one of its providers' `<id>.<name>` (schema from its declarations).
+
 ## Lenses
 
 A **lens** is a user- or agent-built way of looking at your work: a

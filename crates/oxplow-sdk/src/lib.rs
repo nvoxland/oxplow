@@ -10,6 +10,7 @@
 //! feature: the skill says "run `check` after every edit", and the error
 //! it gets back names the file and line and says what to change.
 
+pub mod answerability;
 pub mod conformance;
 pub mod plugin_test;
 

@@ -1,0 +1,26 @@
+# What an agent should be able to answer about version control, and how
+# (P5.F1; checked by `oxplow_sdk::answerability`, see
+# `.context/extensions.md` "Answerability"). Each question names the
+# skill that should lead the agent to its answer; everything `reaches`
+# names must be in that skill's text.
+- question: Which commits touched src/lib.rs, newest first?
+  skill: oxplow-codebase
+  reaches:
+    sql: >-
+      SELECT c.sha, c.subject, c.committed_at FROM v_commit c
+      JOIN v_commit_file f ON f.sha = c.sha
+      WHERE f.path = 'src/lib.rs' ORDER BY c.committed_at DESC LIMIT 20
+  shape: { columns: [sha, subject, committed_at] }
+- question: Who has changed src/lib.rs the most?
+  skill: oxplow-codebase
+  reaches:
+    sql: >-
+      SELECT c.author, count(*) AS commits FROM v_commit c
+      JOIN v_commit_file f ON f.sha = c.sha
+      WHERE f.path = 'src/lib.rs' GROUP BY c.author ORDER BY commits DESC
+  shape: { columns: [author, commits] }
+- question: Which branches exist, and which is the default?
+  skill: oxplow-codebase
+  reaches:
+    sql: SELECT name, kind, is_default FROM v_branch ORDER BY is_default DESC, name
+  shape: { columns: [name, kind, is_default] }

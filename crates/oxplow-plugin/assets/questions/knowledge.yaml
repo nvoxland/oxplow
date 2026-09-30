@@ -1,0 +1,16 @@
+# What an agent should be able to answer and do about the knowledge base.
+- question: Which wiki pages cite files that changed since they were written?
+  skill: oxplow-wiki-capture
+  reaches:
+    sql: SELECT ref, title, stale_ref_count FROM v_knowledge_page WHERE stale_ref_count > 0
+  shape: { columns: [ref, title, stale_ref_count] }
+- question: Which wiki pages talk about src/lib.rs?
+  skill: oxplow-wiki-capture
+  reaches:
+    sql: SELECT page, stale FROM v_knowledge_ref WHERE path = 'src/lib.rs'
+  shape: { columns: [page, stale] }
+- question: Save what I just learned as a wiki page.
+  skill: oxplow-wiki-capture
+  reaches:
+    command: knowledge.write_page
+    input: { slug: auth-flow, body: "# Auth flow\n\nHow a login becomes a session." }

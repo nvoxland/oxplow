@@ -16,6 +16,7 @@ publish = false
 oxplow-app = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-domain = { workspace = true }
+oxplow-plugin = { workspace = true }
 oxplow-provider-protocol = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

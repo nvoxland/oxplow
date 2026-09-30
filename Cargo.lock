@@ -4828,6 +4828,7 @@ dependencies = [
  "oxplow-app",
  "oxplow-db",
  "oxplow-domain",
+ "oxplow-plugin",
  "oxplow-provider-fake",
  "oxplow-provider-protocol",
  "serde",

@@ -186,6 +186,13 @@ names the file and line and says what to change.
    intended — commit it), and the work-items conformance suite must pass.
    A person approves the provider in Settings → Data → Programs and
    enables it in Settings → Integrations; you can't do either.
+5. `oxplow plugin test` also runs the extension's `questions.yaml`, if it
+   has one: questions an agent should be able to answer with it, each
+   `{ question, skill, reaches: { sql } or { command, input }, shape:
+   { columns } }`. `skill` is a markdown file in the extension (a
+   README); it must name every view the SQL reads and the command it
+   runs, the SQL must return exactly `shape.columns`, and the input must
+   fit the command. Write them for what the extension is *for*.
 
 ## 4. Hand it over
 

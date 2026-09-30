@@ -222,6 +222,26 @@ pub fn skill_index() -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+/// The capability answerability questions (`assets/questions/<capability>.yaml`,
+/// P5.F1): what an agent should be able to answer, the skill that should
+/// lead it there, and what it reaches. `oxplow_sdk::answerability` checks
+/// them.
+pub const CAPABILITY_QUESTIONS: &[(&str, &str)] = &[
+    ("vcs", include_str!("../assets/questions/vcs.yaml")),
+    (
+        "work_items",
+        include_str!("../assets/questions/work_items.yaml"),
+    ),
+    (
+        "knowledge",
+        include_str!("../assets/questions/knowledge.yaml"),
+    ),
+    (
+        "code_intel",
+        include_str!("../assets/questions/code_intel.yaml"),
+    ),
+];
+
 /// One skill's `SKILL.md` body by name.
 pub fn skill_body(name: &str) -> Option<&'static str> {
     OXPLOW_SKILLS
@@ -288,6 +308,10 @@ const OXPLOW_SKILLS: &[(&str, &str)] = &[
     (
         "oxplow-extension",
         include_str!("../assets/oxplow-extension.SKILL.md"),
+    ),
+    (
+        "oxplow-codebase",
+        include_str!("../assets/oxplow-codebase.SKILL.md"),
     ),
 ];
 

@@ -1,0 +1,18 @@
+# What an agent should be able to answer about the code itself.
+- question: Where is the function `main` defined?
+  skill: oxplow-codebase
+  reaches:
+    sql: SELECT path, line, kind, container FROM v_symbol WHERE name = 'main'
+  shape: { columns: [path, line, kind, container] }
+- question: What does src/lib.rs declare, in order?
+  skill: oxplow-codebase
+  reaches:
+    sql: SELECT name, kind, container, line FROM v_symbol WHERE path = 'src/lib.rs' ORDER BY line
+  shape: { columns: [name, kind, container, line] }
+- question: Which files have compiler errors right now?
+  skill: oxplow-codebase
+  reaches:
+    sql: >-
+      SELECT path, count(*) AS errors FROM v_diagnostic
+      WHERE severity = 'error' GROUP BY path ORDER BY errors DESC
+  shape: { columns: [path, errors] }

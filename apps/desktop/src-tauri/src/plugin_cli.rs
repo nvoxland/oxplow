@@ -461,6 +461,28 @@ mod tests {
         let (code, out, _) = cli(&["test", "fake", "--root", root]);
         assert_eq!(code, 0, "a blessed transcript matches: {out}");
 
+        // Its own questions: the skill file must name what they reach.
+        std::fs::write(
+            ext.join("questions.yaml"),
+            "- question: File a ticket.\n  skill: README.md\n  reaches: { command: fake.create, input: { title: Hello } }\n",
+        )
+        .unwrap();
+        std::fs::write(ext.join("README.md"), "# Fake tracker\n").unwrap();
+        let (code, out, _) = cli(&["test", "fake", "--root", root]);
+        assert_eq!(code, 1, "{out}");
+        assert!(out.contains("oxplow/extensions/fake/questions.yaml: question 1 (\"File a ticket.\"): skill `README.md` never names `fake.create`"), "{out}");
+        std::fs::write(
+            ext.join("README.md"),
+            "# Fake tracker\n\nFile one with `fake.create`.\n",
+        )
+        .unwrap();
+        let (code, out, _) = cli(&["test", "fake", "--root", root]);
+        assert_eq!(code, 0, "{out}");
+        assert!(
+            out.contains("ran check, provider fake, work_items suite, questions"),
+            "{out}"
+        );
+
         // A changed golden is a diff at its line.
         let golden = ext.join("fixtures/transcripts/fake.jsonl");
         let text = std::fs::read_to_string(&golden).unwrap();

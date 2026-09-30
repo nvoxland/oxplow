@@ -85,9 +85,72 @@ pub async fn test_extension(
             report.ran.push(format!("provider {}", spec.id));
             test_provider(root, &ext, spec, bless, &mut report).await;
         }
+        questions(root, &ext, layer, &mut report).await;
     }
     report.ok = report.errors.is_empty();
     Ok(report)
+}
+
+/// The extension's own `questions.yaml` (the answerability check): each
+/// question's `skill` is a markdown file in the extension, its SQL runs
+/// against the project's database (when there is one), and a command is
+/// one of its providers' (`<id>.<name>`).
+async fn questions(
+    root: &Path,
+    ext: &Extension,
+    layer: Option<&SqlGateway>,
+    report: &mut TestReport,
+) {
+    let rel = ext.path.trim_end_matches('/').to_string();
+    let dir = root.join(&rel);
+    let file = format!("{rel}/questions.yaml");
+    let Ok(text) = std::fs::read_to_string(dir.join("questions.yaml")) else {
+        return;
+    };
+    report.ran.push("questions".into());
+    let questions = match crate::answerability::parse(&text) {
+        Ok(q) => q,
+        Err(e) => {
+            report.errors.push(format!(
+                "{file}:1: {e} — fix: a list of {{ question, skill, reaches, shape }}"
+            ));
+            return;
+        }
+    };
+    let skill_text = |name: &str| std::fs::read_to_string(dir.join(name)).ok();
+    let commands: Vec<(String, Value)> = ext
+        .providers
+        .iter()
+        .filter_map(|spec| {
+            providers::spec::read_declarations(spec, &|f| std::fs::read_to_string(dir.join(f)).ok())
+                .ok()
+                .map(|d| {
+                    d.commands
+                        .into_iter()
+                        .map(|c| (format!("{}.{}", spec.id, c.name), c.input_schema))
+                        .collect::<Vec<_>>()
+                })
+        })
+        .flatten()
+        .collect();
+    let command_schema = |name: &str| {
+        commands
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, s)| s.clone())
+    };
+    let checked = crate::answerability::check(
+        &file,
+        &questions,
+        &crate::answerability::Checker {
+            skill_text: &skill_text,
+            sql: layer,
+            command_schema: &command_schema,
+        },
+    )
+    .await;
+    report.errors.extend(checked.errors);
+    report.warnings.extend(checked.warnings);
 }
 
 /// The instance config the kit checks with: `fixtures/provider-<id>.yaml`.
