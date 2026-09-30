@@ -19,7 +19,7 @@ import {
 } from "./metricsSql.js";
 import { normalizeSnapshotId } from "./effort-snapshot.js";
 import { taskIdOfWorkItemRef, workItemRef } from "./workItemRef.js";
-import { ipcErrorMessage } from "./ipc-error.js";
+import { IpcCallError, ipcErrorCode, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
   ChangeRow,
@@ -57,7 +57,6 @@ import type {
   ProgramKind,
   ProjectProgram,
   ProviderInstanceView,
-  LensActionResult,
   SearchHit,
   SqlCell,
   SqlQueryResult,
@@ -86,7 +85,7 @@ export type { ProviderInstanceView };
 /// instead of collapsing to a generic "ipc error" (see ipc-error.ts).
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: unknown }): T {
   if (result.status === "ok") return result.data;
-  throw new Error(ipcErrorMessage(result.error));
+  throw new IpcCallError(ipcErrorMessage(result.error), ipcErrorCode(result.error));
 }
 
 /// Pure slug derivation: lowercase ASCII alphanumerics, runs of any
@@ -632,13 +631,23 @@ export async function runLens(
 }
 
 /// Run one of a lens's declared buttons (never approves an exec source).
+/** A person presses a lens's action: its command runs as the lens,
+ *  acting for them. Throws `NEEDS_CONFIRMATION` (see `needsConfirmation`)
+ *  when the command asks; call again with `confirmed`. */
 export async function runLensAction(
   id: string,
   action: string,
   params: Record<string, SqlCell>,
+  row: Record<string, SqlCell> | null,
   streamId: string | null,
-): Promise<LensActionResult> {
-  return unwrap(await commands.runLensAction(id, action, params, streamId));
+  confirmed: boolean,
+): Promise<CommandOutcome> {
+  return unwrap(await commands.runLensAction(id, action, params, row, streamId, confirmed));
+}
+
+/** A lens's text rendering — what Copy puts on the clipboard. */
+export async function lensText(id: string, params: Record<string, SqlCell>, streamId: string | null): Promise<string> {
+  return unwrap(await commands.lensText(id, params, streamId));
 }
 
 /// Load an extension and dry-run every lens, returning all problems.
@@ -672,12 +681,15 @@ export async function listSources(): Promise<SourceListing[]> {
 /// person reviewed: their consent is recorded for exactly that version
 /// first, and a source that changed since is refused (only the UI may
 /// pass it).
-export async function runSource(
-  extension: string,
-  sourceId: string,
-  approveVersion: string | null,
-): Promise<SourceRunReport> {
-  return unwrap(await commands.runSource(extension, sourceId, approveVersion));
+/** A person approves an exec source at the listing's `version` they
+ *  reviewed (refused if it changed since). */
+export async function approveSource(extension: string, sourceId: string, version: string): Promise<void> {
+  unwrap(await commands.approveSource(extension, sourceId, version));
+}
+
+/** Run a source now (`source.sync`); it never approves. */
+export async function syncSource(extension: string, sourceId: string): Promise<SourceRunReport> {
+  return (await runCommand("source.sync", { extension, source: sourceId })).result as SourceRunReport;
 }
 
 /// Analyze a change (a commit, an effort, or a stream's working tree) if

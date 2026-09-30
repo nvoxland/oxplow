@@ -1,41 +1,59 @@
-//! Running a lens's declared actions (tsk329). The registry is fixed
-//! (`copy`, `add-to-context`, `run-source`), so an extension can offer a
-//! button but never run code through one. The UI and MCP both come here.
-//! A `run-source` action never approves an exec source: consent is given in
-//! Settings → Data, where what runs and which hosts it reaches are shown.
-//! See `.context/extensions.md`.
+//! Running a lens's actions (P6.B1, `.context/extensions.md`): each is a
+//! command the lens offers, run through the bus as `Actor::Lens` acting for
+//! whoever pressed it — a person from the UI, the calling agent from MCP.
+//! The bus applies that actor's whole policy (the command's invokers, the
+//! agent policy, confirmation), so a lens can offer a button but never grant
+//! a power: an agent can't reach a human-only command through a lens, and a
+//! lens can't confirm on anyone's behalf.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use oxplow_db::SqlCell;
-use oxplow_domain::DomainError;
-use serde::{Deserialize, Serialize};
+use oxplow_domain::{Actor, CommandError, CommandOutcome};
+use serde_json::Value;
 
-use crate::extensions::{self, LensActionKind};
-use crate::source_runner::{RunSourceError, SourceRunReport};
+use crate::extensions;
 
-/// What an action produced.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct LensActionResult {
-    /// `copy`: the text to copy.
-    pub text: Option<String>,
-    /// `run-source`: the sync's row counts.
-    pub report: Option<SourceRunReport>,
+/// One press of a lens's action.
+pub struct LensActionCall {
+    pub lens_id: String,
+    pub action_id: String,
+    /// Param overrides, as for running the lens.
+    pub params: BTreeMap<String, SqlCell>,
+    /// For a row action, the row it was invoked on (column → value).
+    pub row: Option<BTreeMap<String, SqlCell>>,
+    /// Who pressed it: a person from the UI, the calling agent from MCP.
+    pub on_behalf_of: Actor,
+    /// The person confirmed a command that asks (an agent never can).
+    pub confirmed: bool,
 }
 
-/// Run action `action_id` of lens `lens_id` (resolved in `lens_root`, the
-/// stream's worktree) with `params`, seen from `ctx`.
+/// Run `call`'s action, with the lens resolved in `lens_root` (the stream's
+/// worktree) and its params seen from `ctx`.
 pub async fn run_lens_action(
     svc: &crate::Services,
     lens_root: &Path,
-    lens_id: &str,
-    action_id: &str,
-    params: BTreeMap<String, SqlCell>,
+    call: LensActionCall,
     ctx: &extensions::LensContext,
-) -> Result<LensActionResult, DomainError> {
-    let lens = svc.extension_catalog.find_lens(lens_root, lens_id)?;
+) -> Result<CommandOutcome, CommandError> {
+    let LensActionCall {
+        lens_id,
+        action_id,
+        params,
+        row,
+        on_behalf_of,
+        confirmed,
+    } = call;
+    let (lens_id, action_id, row) = (lens_id.as_str(), action_id.as_str(), row.as_ref());
+    let invalid = |field: &str, message: String| CommandError::Invalid {
+        field: Some(field.into()),
+        message,
+    };
+    let lens = svc
+        .extension_catalog
+        .find_lens(lens_root, lens_id)
+        .map_err(CommandError::from)?;
     let action = lens
         .actions
         .iter()
@@ -43,172 +61,283 @@ pub async fn run_lens_action(
         .cloned()
         .ok_or_else(|| {
             let ids: Vec<&str> = lens.actions.iter().map(|a| a.id.as_str()).collect();
-            DomainError::Invalid(format!(
-                "lens `{lens_id}` has no action `{action_id}` (it has {ids:?})"
-            ))
-        })?;
-    match action.kind {
-        LensActionKind::Copy => {
-            let layer = svc.sql.clone();
-            let run = extensions::run_lens(
-                &layer,
-                &svc.extension_catalog,
-                lens_root,
-                lens_id,
-                params,
-                ctx,
+            invalid(
+                "/action",
+                format!("lens `{lens_id}` has no action `{action_id}` (it has {ids:?})"),
             )
-            .await?;
-            let text = crate::lens_text::text_of(svc, lens_root, &run, ctx).await?;
-            Ok(LensActionResult {
-                text: Some(text),
-                report: None,
-            })
+        })?;
+    match (action.row, row) {
+        (true, None) => {
+            return Err(invalid(
+                "/row",
+                format!("`{action_id}` is a row action; it runs on a row"),
+            ))
         }
-        LensActionKind::AddToContext => Err(DomainError::Invalid(
-            "`add-to-context` is how a person hands this lens to the agent; read it with run_lens"
-                .into(),
-        )),
-        LensActionKind::RunSource => {
-            let source = action.source.unwrap_or_default();
-            let (ext, id) = source.split_once('/').unwrap_or_default();
-            match crate::source_runner::sync_source(svc, ext, id, None).await {
-                Ok(report) => Ok(LensActionResult {
-                    text: None,
-                    report: Some(report),
-                }),
-                Err(RunSourceError::NotFound) => Err(DomainError::Invalid(format!(
-                    "lens `{lens_id}` runs source `{source}`, which doesn't exist"
-                ))),
-                Err(RunSourceError::NeedsApproval(_)) => Err(DomainError::Invalid(format!(
-                    "source `{source}` needs a person's approval first: Settings → Data → Approve & Run"
-                ))),
-                Err(e) => Err(e.into()),
+        (false, Some(_)) => {
+            return Err(invalid(
+                "/row",
+                format!("`{action_id}` runs on the whole lens, not a row"),
+            ))
+        }
+        _ => {}
+    }
+    let params = extensions::resolve_params(&lens, &params, ctx).map_err(CommandError::from)?;
+    let input = bind_input(&action.input, &params, row)?;
+    svc.commands
+        .run(
+            &Actor::Lens {
+                lens_id: lens_id.to_string(),
+                on_behalf_of: Box::new(on_behalf_of),
+            },
+            &action.command,
+            input,
+            confirmed,
+        )
+        .await
+}
+
+/// `input` with its placeholders bound: a string that is exactly
+/// `{{param.x}}` / `{{row.x}}` becomes that value (typed), one that
+/// contains them has them spliced in as text. The values are data — they
+/// go into the command's input, never into SQL.
+pub fn bind_input(
+    input: &Value,
+    params: &BTreeMap<String, SqlCell>,
+    row: Option<&BTreeMap<String, SqlCell>>,
+) -> Result<Value, CommandError> {
+    let lookup = |scope: &str, name: &str| -> Result<SqlCell, CommandError> {
+        let found = match scope {
+            "param" => params.get(name),
+            "row" => row.and_then(|r| r.get(name)),
+            _ => None,
+        };
+        found.cloned().ok_or_else(|| CommandError::Invalid {
+            field: Some("/input".into()),
+            message: format!("`{{{{{scope}.{name}}}}}` has no value here"),
+        })
+    };
+    let text = |c: &SqlCell| match c {
+        SqlCell::Null(()) => String::new(),
+        SqlCell::Text(t) => t.clone(),
+        SqlCell::Int(i) => i.to_string(),
+        SqlCell::Real(r) => r.to_string(),
+        SqlCell::Bool(b) => b.to_string(),
+    };
+    Ok(match input {
+        Value::String(s) => {
+            let t = s.trim();
+            let whole = t
+                .strip_prefix("{{")
+                .and_then(|r| r.strip_suffix("}}"))
+                .filter(|inner| !inner.contains("{{"))
+                .and_then(|inner| inner.trim().split_once('.'));
+            match whole {
+                Some((scope, name)) => {
+                    serde_json::to_value(lookup(scope, name)?).unwrap_or(Value::Null)
+                }
+                None => {
+                    let mut out = String::with_capacity(s.len());
+                    let mut rest = s.as_str();
+                    while let Some(start) = rest.find("{{") {
+                        let Some(end) = rest[start..].find("}}") else {
+                            break;
+                        };
+                        out.push_str(&rest[..start]);
+                        let inner = rest[start + 2..start + end].trim();
+                        let (scope, name) = inner.split_once('.').unwrap_or((inner, ""));
+                        out.push_str(&text(&lookup(scope, name)?));
+                        rest = &rest[start + end + 2..];
+                    }
+                    out.push_str(rest);
+                    Value::String(out)
+                }
             }
         }
-    }
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|i| bind_input(i, params, row))
+                .collect::<Result<_, _>>()?,
+        ),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| Ok((k.clone(), bind_input(v, params, row)?)))
+                .collect::<Result<_, CommandError>>()?,
+        ),
+        other => other.clone(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_domain::refs::build::work_item_ref;
     use serde_json::json;
-    use std::sync::Arc;
 
-    async fn fixture() -> (Arc<crate::Services>, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        git2::Repository::init(dir.path()).unwrap();
-        let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
-        svc.streams.ensure_primary().await.unwrap();
-        let ext = dir.path().join("oxplow/extensions/acme");
+    /// A task, and a lens over it whose actions run commands.
+    async fn fixture() -> (crate::test_fixtures::EffortFixture, std::path::PathBuf) {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        let ext = root.join("oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("lenses")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "name: acme\nsources:\n  - id: nums\n    runtime: jaq\n    entry: nums.jq\n    entities:\n      - { name: num, key: n, columns: { n: int } }\n  - id: prog\n    runtime: exec\n    entry: prog.sh\n    entities:\n      - { name: row, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
         )
         .unwrap();
-        std::fs::write(ext.join("nums.jq"), "{entities: {num: [{n: 1}, {n: 2}]}}").unwrap();
-        std::fs::write(ext.join("prog.sh"), "#!/bin/sh\necho '{\"entities\":{}}'\n").unwrap();
         std::fs::write(
-            ext.join("lenses/nums.yaml"),
-            "title: Nums\nquery: \"SELECT 'a|b' AS label, :k AS k, 99 AS hidden\"\nparams: [{ name: k, default: 7 }]\ncolumns: [{ key: k }, { key: label, label: Label }]\nactions:\n  - copy\n  - add-to-context\n  - { action: run-source, source: acme/nums }\n  - { action: run-source, id: prog, source: acme/prog }\n  - { action: run-source, id: gone, source: acme/nope }\n",
+            ext.join("lenses/tasks.yaml"),
+            r#"title: Tasks
+query: "SELECT id, title FROM v_task"
+params: [{ name: item, default: "" }]
+actions:
+  - { id: finish, label: Finish, command: work_item.transition, input: { ref: "{{param.item}}", to: done } }
+  - { id: finish-row, label: Finish, command: work_item.transition, row: true, input: { ref: "work_item:oxplow:tsk{{row.id}}", to: done } }
+  - { id: commit, label: Commit, command: vcs.commit, input: { stream: str1, message: "x" } }
+  - { id: agents, label: Agents, command: config.set, input: { key: agents, value: [] } }
+"#,
         )
         .unwrap();
-        (svc, dir)
+        (fx, root)
     }
 
-    #[tokio::test]
-    async fn copy_returns_the_result_as_markdown() {
-        let (svc, dir) = fixture().await;
-        let params = BTreeMap::from([("k".to_string(), SqlCell::Int(3))]);
-        let out = run_lens_action(
-            &svc,
-            dir.path(),
-            "acme/nums",
-            "copy",
+    fn call(
+        action: &str,
+        params: BTreeMap<String, SqlCell>,
+        row: Option<BTreeMap<String, SqlCell>>,
+        on_behalf_of: Actor,
+        confirmed: bool,
+    ) -> LensActionCall {
+        LensActionCall {
+            lens_id: "acme/tasks".into(),
+            action_id: action.into(),
             params,
-            &crate::extensions::LensContext::default(),
+            row,
+            on_behalf_of,
+            confirmed,
+        }
+    }
+
+    async fn audit_actor(svc: &crate::Services) -> (String, Option<String>) {
+        svc.db
+            .read(|c| {
+                c.query_row(
+                    "SELECT actor_kind, actor_id FROM command_audit ORDER BY id DESC LIMIT 1",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn state(svc: &crate::Services, task: oxplow_domain::TaskId) -> String {
+        use oxplow_domain::stores::TaskStore as _;
+        let t = svc.task_store.get(task).await.unwrap().unwrap();
+        serde_json::to_value(t.status)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// P6.B1's red: a person's click runs the command as the lens, acting
+    /// for them — audited as `lens:<id>`.
+    #[tokio::test]
+    async fn an_action_runs_its_command_as_the_lens() {
+        let (fx, root) = fixture().await;
+        let item = work_item_ref(fx.task);
+        run_lens_action(
+            &fx.svc,
+            &root,
+            call(
+                "finish",
+                BTreeMap::from([("item".to_string(), SqlCell::Text(item))]),
+                None,
+                Actor::Human,
+                false,
+            ),
+            &extensions::LensContext::default(),
         )
         .await
         .unwrap();
-        assert_eq!(
-            out.text.as_deref(),
-            Some("| k | Label |\n| --- | --- |\n| 3 | a\\|b |\n"),
-            "the columns the lens shows, in its order; a helper column stays out"
+        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        let (kind, _) = audit_actor(&fx.svc).await;
+        assert_eq!(kind, "lens");
+    }
+
+    /// A row action binds the row it was invoked on; a whole-lens action
+    /// refuses a row and a row action needs one.
+    #[tokio::test]
+    async fn a_row_action_binds_its_row() {
+        let (fx, root) = fixture().await;
+        let row = BTreeMap::from([("id".to_string(), SqlCell::Int(fx.task.value()))]);
+        let run = |action: &'static str, row: Option<BTreeMap<String, SqlCell>>| {
+            let (svc, root) = (fx.svc.clone(), root.clone());
+            async move {
+                run_lens_action(
+                    &svc,
+                    &root,
+                    call(action, BTreeMap::new(), row, Actor::Human, false),
+                    &extensions::LensContext::default(),
+                )
+                .await
+            }
+        };
+        assert!(run("finish-row", None).await.is_err());
+        assert!(run("finish", Some(row.clone())).await.is_err());
+        run("finish-row", Some(row)).await.unwrap();
+        assert_eq!(state(&fx.svc, fx.task).await, "done");
+    }
+
+    /// A command that doesn't take lens invokers is denied, and a lens
+    /// acting for an agent can't reach what the agent can't.
+    #[tokio::test]
+    async fn a_lens_grants_no_power() {
+        let (fx, root) = fixture().await;
+        let err = run_lens_action(
+            &fx.svc,
+            &root,
+            call("commit", BTreeMap::new(), None, Actor::Human, true),
+            &extensions::LensContext::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+        let agent = Actor::Agent {
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let err = run_lens_action(
+            &fx.svc,
+            &root,
+            call("agents", BTreeMap::new(), None, agent, true),
+            &extensions::LensContext::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CommandError::NeedsConfirmation { .. } | CommandError::Denied { .. }
+            ),
+            "an agent's lens can't set a human-only key: {err:?}"
         );
     }
 
-    #[tokio::test]
-    async fn run_source_syncs_but_never_approves() {
-        let (svc, dir) = fixture().await;
-        let mut events = svc.events.subscribe();
-        let out = run_lens_action(
-            &svc,
-            dir.path(),
-            "acme/nums",
-            "run-source",
-            BTreeMap::new(),
-            &crate::extensions::LensContext::default(),
+    #[test]
+    fn placeholders_bind_typed_or_spliced() {
+        let params = BTreeMap::from([("n".to_string(), SqlCell::Int(3))]);
+        let row = BTreeMap::from([("id".to_string(), SqlCell::Int(42))]);
+        let bound = bind_input(
+            &json!({ "a": "{{param.n}}", "b": "tsk{{row.id}}", "c": ["{{ row.id }}"], "d": 1 }),
+            &params,
+            Some(&row),
         )
-        .await
         .unwrap();
-        assert_eq!(
-            serde_json::to_value(out.report.unwrap().row_counts).unwrap(),
-            json!({"num": 2})
-        );
-        assert!(matches!(
-            events.recv().await,
-            Ok(crate::OxplowEvent::SourceSynced { .. })
-        ));
-        // An exec source nobody approved: refused, nothing ran.
-        let err = run_lens_action(
-            &svc,
-            dir.path(),
-            "acme/nums",
-            "prog",
-            BTreeMap::new(),
-            &crate::extensions::LensContext::default(),
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("approval"), "{err}");
-        let err = run_lens_action(
-            &svc,
-            dir.path(),
-            "acme/nums",
-            "gone",
-            BTreeMap::new(),
-            &crate::extensions::LensContext::default(),
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("doesn't exist"), "{err}");
-    }
-
-    #[tokio::test]
-    async fn add_to_context_and_unknown_actions_are_refused() {
-        let (svc, dir) = fixture().await;
-        let err = run_lens_action(
-            &svc,
-            dir.path(),
-            "acme/nums",
-            "add-to-context",
-            BTreeMap::new(),
-            &crate::extensions::LensContext::default(),
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("run_lens"), "{err}");
-        let err = run_lens_action(
-            &svc,
-            dir.path(),
-            "acme/nums",
-            "shell",
-            BTreeMap::new(),
-            &crate::extensions::LensContext::default(),
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("no action `shell`"), "{err}");
+        assert_eq!(bound, json!({ "a": 3, "b": "tsk42", "c": [42], "d": 1 }));
+        let err = bind_input(&json!({ "a": "{{row.id}}" }), &params, None).unwrap_err();
+        assert!(err.to_string().contains("row.id"), "{err}");
     }
 }

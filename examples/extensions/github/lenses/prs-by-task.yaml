@@ -17,5 +17,4 @@ columns:
   - { key: task, label: Task, link: { kind: task, from: task_id } }
 empty: No pull requests synced yet. Approve & run the `github/prs` source in Settings → Data.
 actions:
-  - { action: run-source, source: github/prs, label: Sync PRs }
-  - copy
+  - { id: sync, label: Sync PRs, command: source.sync, input: { extension: github, source: prs } }

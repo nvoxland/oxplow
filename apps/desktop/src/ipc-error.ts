@@ -26,3 +26,31 @@ export function ipcErrorMessage(err: unknown): string {
   }
   return "ipc error";
 }
+
+/** The `code` of a command's error payload (`NEEDS_CONFIRMATION`,
+ *  `INVALID`, `DENIED`, …), or null for a string payload. */
+export function ipcErrorCode(err: unknown): string | null {
+  if (err && typeof err === "object") {
+    const code = (err as { code?: unknown }).code;
+    if (typeof code === "string" && code.trim()) return code;
+  }
+  return null;
+}
+
+/** A failed IPC call: its message, and its code when it has one, so a
+ *  caller can tell "ask the person first" (`NEEDS_CONFIRMATION`) from a
+ *  failure. */
+export class IpcCallError extends Error {
+  constructor(
+    message: string,
+    readonly code: string | null,
+  ) {
+    super(message);
+    this.name = "IpcCallError";
+  }
+}
+
+/** The command needs the person to confirm it; call again confirmed. */
+export function needsConfirmation(e: unknown): boolean {
+  return e instanceof IpcCallError && e.code === "NEEDS_CONFIRMATION";
+}

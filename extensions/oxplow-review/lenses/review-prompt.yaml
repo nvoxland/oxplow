@@ -48,5 +48,4 @@ query: |
     AS prompt
   FROM e, files, claims, decisions
 viz: markdown
-actions: [copy]
 hidden: true

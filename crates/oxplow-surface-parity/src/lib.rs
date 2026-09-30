@@ -163,8 +163,10 @@ pub const MANIFEST: &[Capability] = &[
     both("list_extensions"),
     both("get_lens"),
     both("run_lens"),
-    // A lens's declared buttons; agents can't approve an exec source.
+    // A lens's actions: commands run as the lens, for whoever pressed.
     both("run_lens_action"),
+    // Copy on every lens; an agent reads the same text through run_lens.
+    ui("lens_text"),
     both("validate_extension"),
     both("review_extension"),
     both("install_extension"),
@@ -176,7 +178,11 @@ pub const MANIFEST: &[Capability] = &[
     both("list_sources"),
     agent("record_decision"),
     agent("record_claim"),
-    both("run_source"),
+    // The `source.sync` command: the UI runs it through `run_command`,
+    // an agent through this tool (as itself, so it never approves).
+    agent("run_source"),
+    // Consent to run a source's program is a person's.
+    ui("approve_source"),
     // Secrets are the person's to set; agents only see whether one is set.
     ui("set_source_credential"),
     // Consent to run a program from the repo is a person's (tsk331); an

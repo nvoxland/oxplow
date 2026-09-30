@@ -541,11 +541,11 @@ entities from data already in the semantic layer:
 | Piece | Where |
 |---|---|
 | Parse/validate declarations | `crates/oxplow-app/src/extension_sources.rs` |
-| Consent, exec, coercion, `run_source`, scheduler | `crates/oxplow-app/src/source_runner.rs` |
+| Consent (`approve_reviewed`), exec, coercion, `run_source`, `SourceRunner` + the `source.sync` command, scheduler | `crates/oxplow-app/src/source_runner.rs` |
 | Entity tables + views, run state (V75 `ext_source_state`) | `crates/oxplow-db/src/ext_source_store.rs` |
 | Settings → Data read model (`data_entities`) | `crates/oxplow-app/src/semantic_catalog.rs` |
-| IPC `list_sources` / `run_source(approve?)` | `crates/oxplow-rpc/src/commands/sources.rs` |
-| MCP `list_sources` / `run_source` (never approves) | `crates/oxplow-mcp/src/lib.rs` |
+| IPC `list_sources` / `approve_source` (UI only); running is `run_command source.sync` | `crates/oxplow-rpc/src/commands/sources.rs` |
+| MCP `list_sources` / `run_source` (the `source.sync` command as the agent; never approves) | `crates/oxplow-mcp/src/lib.rs` |
 | UI: Settings → Data (entities + counts, source rows, Run) | `apps/desktop/src/components/DataSection.tsx` |
 | UI: credentials per extension | `apps/desktop/src/components/ExtensionsSection.tsx` |
 | IPC `list_data_entities` (models + counts, unsynced entities) | `crates/oxplow-rpc/src/commands/semantic.rs` |
@@ -574,8 +574,10 @@ entities from data already in the semantic layer:
     program without consent").
   - A teammate who pulls the repo approves it themselves, and a changed
     script needs re-approval.
-  - The IPC `approve` flag exists only on the UI path. MCP `run_source`
-    never approves, so an agent can't consent on a person's behalf.
+  - Approving is its own UI-only step (`approve_source`, the version the
+    person reviewed); running is the `source.sync` command, which never
+    approves — from the UI, a lens action, the scheduler or MCP
+    `run_source` alike — so an agent can't consent on a person's behalf.
 - **Environment.** The entry gets `PATH`, `HOME`, its declared `env`
   names, its declared `credentials`, `OXPLOW_EXTENSION_DIR` and
   `OXPLOW_SOURCE_ID`. It runs with a

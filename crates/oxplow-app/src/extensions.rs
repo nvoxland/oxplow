@@ -384,106 +384,152 @@ struct LensFile {
     /// Keep it out of the launcher (e.g. a lens only a slot shows).
     #[serde(default)]
     hidden: bool,
-    /// Buttons from the fixed action registry: `copy`, `add-to-context`,
-    /// or `{action: run-source, source: <ext>/<id>}`. Parsed by
-    /// [`parse_actions`].
+    /// Commands the lens offers (`{ id, label, command, input, row }`).
+    /// Parsed by [`parse_actions`].
     #[serde(default)]
     actions: Vec<serde_yaml::Value>,
     #[serde(default)]
     alert: Option<AlertFile>,
 }
 
-/// What a lens action does. A fixed registry: an extension can't run code
-/// through one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "kebab-case")]
-pub enum LensActionKind {
-    /// Copy the lens result as text (markdown).
-    Copy,
-    /// Hand the lens and its params to the agent (UI only).
-    AddToContext,
-    /// Sync a source (an exec source needs a person's approval first).
-    RunSource,
-}
-
-/// A button on a lens (tsk329).
+/// A button on a lens: a command it runs (P6.B1, target §11.4). The
+/// command goes through the bus as `Actor::Lens` acting for whoever
+/// pressed it, so every policy — invokers, the agent policy, confirmation
+/// — applies as if they had run it themselves; a lens can offer a button
+/// but never grant a power. Copying the result and handing it to the
+/// agent are on every lens, not declared.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LensAction {
-    /// Unique within the lens; `run_lens_action` names it. Defaults to the
-    /// kind.
+    /// Unique within the lens; `run_lens_action` names it.
     pub id: String,
-    pub kind: LensActionKind,
     pub label: String,
-    /// For `run-source`: `<extension>/<source id>`.
-    pub source: Option<String>,
+    /// The command it runs (`work_item.transition`).
+    pub command: String,
+    /// The command's input. A string that is exactly `{{param.<name>}}`
+    /// or `{{row.<column>}}` becomes that value (a number stays a number);
+    /// one that contains them has them spliced in as text.
+    #[specta(type = oxplow_domain::Json)]
+    pub input: serde_json::Value,
+    /// A row action: offered on each row (right-click), with `{{row.*}}`
+    /// bound to that row. Otherwise it's a button above the result.
+    pub row: bool,
 }
 
-/// Parse a lens's `actions:`. Each is a bare kind (`copy`) or a map with
-/// `action` and optional `id`, `label`, `source`.
-fn parse_actions(raw: Vec<serde_yaml::Value>) -> Result<Vec<LensAction>, String> {
+/// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
+/// `(scope, name)`, in order.
+pub fn action_templates(input: &serde_json::Value) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    fn walk(v: &serde_json::Value, out: &mut Vec<(String, String)>) {
+        match v {
+            serde_json::Value::String(s) => {
+                let mut rest = s.as_str();
+                while let Some(start) = rest.find("{{") {
+                    let Some(end) = rest[start..].find("}}") else {
+                        break;
+                    };
+                    let inner = rest[start + 2..start + end].trim();
+                    if let Some((scope, name)) = inner.split_once('.') {
+                        out.push((scope.to_string(), name.to_string()));
+                    } else {
+                        out.push((inner.to_string(), String::new()));
+                    }
+                    rest = &rest[start + end + 2..];
+                }
+            }
+            serde_json::Value::Array(items) => items.iter().for_each(|i| walk(i, out)),
+            serde_json::Value::Object(map) => map.values().for_each(|i| walk(i, out)),
+            _ => {}
+        }
+    }
+    walk(input, &mut out);
+    out
+}
+
+/// Parse a lens's `actions:`: each `{ id, label, command, input?, row? }`.
+/// A placeholder must name a declared param (`{{param.x}}`) or, in a row
+/// action, a column (`{{row.x}}`, checked against the result when the
+/// extension is validated).
+fn parse_actions(
+    raw: Vec<serde_yaml::Value>,
+    params: &[LensParam],
+) -> Result<Vec<LensAction>, String> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Full {
-        action: String,
+        id: String,
+        label: String,
+        command: String,
         #[serde(default)]
-        id: Option<String>,
+        input: Option<serde_json::Value>,
         #[serde(default)]
-        label: Option<String>,
-        #[serde(default)]
-        source: Option<String>,
+        row: bool,
     }
     let mut out: Vec<LensAction> = Vec::new();
     for v in raw {
-        let f = match v {
-            serde_yaml::Value::String(action) => Full {
-                action,
-                id: None,
-                label: None,
-                source: None,
-            },
-            other => serde_yaml::from_value::<Full>(other).map_err(|e| format!("actions: {e}"))?,
+        let old_form = match &v {
+            serde_yaml::Value::String(s) => Some(s.clone()),
+            serde_yaml::Value::Mapping(m) => m
+                .get(serde_yaml::Value::String("action".into()))
+                .and_then(|a| a.as_str())
+                .map(str::to_string),
+            _ => None,
         };
-        let kind = match f.action.as_str() {
-            "copy" => LensActionKind::Copy,
-            "add-to-context" => LensActionKind::AddToContext,
-            "run-source" => LensActionKind::RunSource,
-            other => {
-                return Err(format!(
-                    "unknown action `{other}` (copy, add-to-context or run-source)"
-                ))
-            }
-        };
-        match (kind, &f.source) {
-            (LensActionKind::RunSource, Some(src))
-                if src
-                    .split_once('/')
-                    .is_some_and(|(e, i)| !e.is_empty() && !i.is_empty()) => {}
-            (LensActionKind::RunSource, _) => {
-                return Err("action `run-source` needs `source: <extension>/<source>`".into())
-            }
-            (_, Some(_)) => return Err("only `run-source` takes a source".into()),
-            _ => {}
-        }
-        let id = f.id.unwrap_or_else(|| f.action.clone());
-        if out.iter().any(|a| a.id == id) {
+        if let Some(kind) = old_form {
             return Err(format!(
-                "action `{id}` is declared twice (give one an `id`)"
+                "actions: `{kind}` is the old fixed registry; an action is now a command \
+                 (`{{ id, label, command, input }}`). Copy and Add to Agent Context are on \
+                 every lens; to sync a source use `command: source.sync` with \
+                 `input: {{ extension, source }}`"
             ));
         }
-        let label = f.label.unwrap_or_else(|| {
-            match kind {
-                LensActionKind::Copy => "Copy",
-                LensActionKind::AddToContext => "Add to Agent Context",
-                LensActionKind::RunSource => "Sync",
+        let f = serde_yaml::from_value::<Full>(v).map_err(|e| format!("actions: {e}"))?;
+        if f.id.trim().is_empty() {
+            return Err("actions: an action needs an `id`".into());
+        }
+        if out.iter().any(|a| a.id == f.id) {
+            return Err(format!("actions: `{}` is declared twice", f.id));
+        }
+        oxplow_domain::CommandSpec::validate_name(&f.command)
+            .map_err(|e| format!("actions: `{}`: {e}", f.id))?;
+        let input = f.input.unwrap_or_else(|| serde_json::json!({}));
+        if !input.is_object() {
+            return Err(format!(
+                "actions: `{}`: `input` must be a map (the command's input)",
+                f.id
+            ));
+        }
+        for (scope, name) in action_templates(&input) {
+            match scope.as_str() {
+                "param" if params.iter().any(|p| p.name == name) => {}
+                "param" => {
+                    return Err(format!(
+                        "actions: `{}`: `{{{{param.{name}}}}}` names no param of this lens",
+                        f.id
+                    ))
+                }
+                "row" if f.row => {}
+                "row" => {
+                    return Err(format!(
+                        "actions: `{}`: `{{{{row.{name}}}}}` needs `row: true`",
+                        f.id
+                    ))
+                }
+                other => {
+                    return Err(format!(
+                        "actions: `{}`: `{{{{{other}…}}}}` isn't `{{{{param.<name>}}}}` or \
+                         `{{{{row.<column>}}}}`",
+                        f.id
+                    ))
+                }
             }
-            .to_string()
-        });
+        }
         out.push(LensAction {
-            id,
-            kind,
-            label,
-            source: f.source,
+            id: f.id,
+            label: f.label,
+            command: f.command,
+            input,
+            row: f.row,
         });
     }
     Ok(out)
@@ -603,7 +649,7 @@ pub struct Lens {
     pub launcher_category: Option<LauncherCategory>,
     /// Not listed in the launcher.
     pub hidden: bool,
-    /// Buttons from the fixed action registry (tsk329).
+    /// Commands the lens offers, as buttons or row actions (P6.B1).
     pub actions: Vec<LensAction>,
     /// When the lens needs attention (a rail badge when mounted in `rail`).
     pub alert: Option<LensAlert>,
@@ -1123,7 +1169,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             .and_then(|t| serde_yaml::from_str::<LensFile>(&t).map_err(|e| e.to_string()))
             .and_then(|mut l| {
                 let alert = l.alert.take().map(AlertFile::into_alert).transpose()?;
-                let actions = parse_actions(std::mem::take(&mut l.actions))?;
+                let actions = parse_actions(std::mem::take(&mut l.actions), &l.params)?;
                 Ok((l, alert, actions))
             });
         match parsed {
@@ -1496,12 +1542,14 @@ fn explain_unsynced(
     message.to_string()
 }
 
-async fn execute(
-    layer: &crate::sql_gateway::SqlGateway,
-    lens: Lens,
-    supplied: BTreeMap<String, SqlCell>,
+/// The value of each of `lens`'s params: as supplied, else from the
+/// context (`stream_id` / `thread_id`), else its default, else NULL. An
+/// unknown supplied name is refused, naming the lens's params.
+pub fn resolve_params(
+    lens: &Lens,
+    supplied: &BTreeMap<String, SqlCell>,
     ctx: &LensContext,
-) -> Result<LensRun, DomainError> {
+) -> Result<BTreeMap<String, SqlCell>, DomainError> {
     if let Some(unknown) = supplied
         .keys()
         .find(|k| !lens.params.iter().any(|p| &p.name == *k))
@@ -1527,6 +1575,16 @@ async fn execute(
             .unwrap_or(SqlCell::Null(()));
         params.insert(p.name.clone(), v);
     }
+    Ok(params)
+}
+
+async fn execute(
+    layer: &crate::sql_gateway::SqlGateway,
+    lens: Lens,
+    supplied: BTreeMap<String, SqlCell>,
+    ctx: &LensContext,
+) -> Result<LensRun, DomainError> {
+    let params = resolve_params(&lens, &supplied, ctx)?;
     let named: Vec<(String, SqlCell)> =
         params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     // A lens's `:stream_id` is the stream its metrics (`metric_grid()`)
@@ -1648,6 +1706,18 @@ async fn check_extension(
                             "lens {id}: {block} column `{k}` isn't in the query result (columns: {})",
                             cols.join(", ")
                         ));
+                    }
+                }
+                for a in &run.lens.actions {
+                    for (scope, name) in action_templates(&a.input) {
+                        if scope == "row" && !cols.contains(&name) {
+                            ext.errors.push(format!(
+                                "lens {id}: action `{}` uses `{{{{row.{name}}}}}`, which isn't in \
+                                 the query result (columns: {})",
+                                a.id,
+                                cols.join(", ")
+                            ));
+                        }
                     }
                 }
                 for c in &run.lens.columns {
@@ -3716,18 +3786,23 @@ empty: No tasks.
         );
     }
 
+    /// P6.B1: an action is a command. Its placeholders must name a param
+    /// (or, in a row action, a column); the old fixed registry is refused
+    /// with where it went.
     #[test]
-    fn lens_actions_come_from_a_fixed_registry() {
+    fn lens_actions_are_commands() {
         let (_d, ext) = load_x(
             &[
                 (
                     "a",
-                    "title: A\nquery: SELECT 1\nactions:\n  - copy\n  - add-to-context\n  - { action: run-source, source: github/prs, label: Sync PRs }\n",
+                    "title: A\nquery: SELECT 1 AS id\nparams: [{ name: item, default: '' }]\nactions:\n  - { id: finish, label: Finish, command: work_item.transition, input: { ref: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: work_item.transition, row: true, input: { ref: 'work_item:oxplow:tsk{{row.id}}', to: done } }\n",
                 ),
-                ("b", "title: B\nquery: SELECT 1\nactions: [shell]\n"),
-                ("c", "title: C\nquery: SELECT 1\nactions: [{ action: run-source }]\n"),
-                ("d", "title: D\nquery: SELECT 1\nactions: [copy, copy]\n"),
-                ("e", "title: E\nquery: SELECT 1\nactions: [{ action: copy, source: x/y }]\n"),
+                ("b", "title: B\nquery: SELECT 1\nactions: [copy]\n"),
+                ("c", "title: C\nquery: SELECT 1\nactions: [{ action: run-source, source: a/b }]\n"),
+                ("d", "title: D\nquery: SELECT 1\nactions: [{ id: x, label: X, command: work_item.create, input: { title: '{{param.nope}}' } }]\n"),
+                ("e", "title: E\nquery: SELECT 1\nactions: [{ id: x, label: X, command: work_item.create, input: { title: '{{row.id}}' } }]\n"),
+                ("f", "title: F\nquery: SELECT 1\nactions: [{ id: x, label: X, command: Not-A-Name }]\n"),
+                ("g", "title: G\nquery: SELECT 1\nactions: [{ id: x, label: X, command: a.b }, { id: x, label: Y, command: a.c }]\n"),
             ],
             "",
         );
@@ -3736,34 +3811,23 @@ empty: No tasks.
             .iter()
             .find(|l| l.slug == "a")
             .expect("valid actions load");
-        let got: Vec<_> = a
-            .actions
-            .iter()
-            .map(|x| (x.id.as_str(), x.kind, x.label.as_str(), x.source.as_deref()))
-            .collect();
         assert_eq!(
-            got,
+            a.actions
+                .iter()
+                .map(|x| (x.id.as_str(), x.command.as_str(), x.row))
+                .collect::<Vec<_>>(),
             vec![
-                ("copy", LensActionKind::Copy, "Copy", None),
-                (
-                    "add-to-context",
-                    LensActionKind::AddToContext,
-                    "Add to Agent Context",
-                    None
-                ),
-                (
-                    "run-source",
-                    LensActionKind::RunSource,
-                    "Sync PRs",
-                    Some("github/prs")
-                ),
+                ("finish", "work_item.transition", false),
+                ("row", "work_item.transition", true)
             ]
         );
         for (slug, needle) in [
-            ("b", "unknown action `shell`"),
-            ("c", "needs `source: <extension>/<source>`"),
-            ("d", "twice"),
-            ("e", "only `run-source` takes a source"),
+            ("b", "old fixed registry"),
+            ("c", "source.sync"),
+            ("d", "names no param"),
+            ("e", "needs `row: true`"),
+            ("f", "command name"),
+            ("g", "twice"),
         ] {
             assert!(
                 ext.lenses.iter().all(|l| l.slug != slug),
@@ -3777,6 +3841,26 @@ empty: No tasks.
                 ext.errors
             );
         }
+    }
+
+    /// A row action's `{{row.x}}` must be a column the query returns.
+    #[tokio::test]
+    async fn validate_checks_row_action_columns() {
+        let (d, _) = load_x(
+            &[(
+                "a",
+                "title: A\nquery: SELECT 1 AS id\nactions: [{ id: x, label: X, command: a.b, row: true, input: { v: '{{row.gone}}' } }]\n",
+            )],
+            "",
+        );
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x")
+            .await
+            .unwrap();
+        assert!(
+            v.errors.join("\n").contains("`{{row.gone}}`"),
+            "{:?}",
+            v.errors
+        );
     }
 
     #[test]

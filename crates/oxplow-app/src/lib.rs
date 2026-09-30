@@ -516,6 +516,8 @@ pub struct Services {
     pub dashboard_store: Arc<oxplow_db::SqliteDashboardStore>,
     /// Extension-source entity data + run state (see `source_runner`).
     pub ext_source_store: Arc<oxplow_db::SqliteExtSourceStore>,
+    /// Runs project sources (the `source.sync` command and the scheduler).
+    pub source_runner: source_runner::SourceRunner,
     /// Agent decisions and claims (`v_decision`, `v_claim`).
     pub reasoning_store: Arc<oxplow_db::SqliteReasoningStore>,
     /// Persisted agent tool calls (`v_tool_call` and derived views).
@@ -1051,6 +1053,20 @@ impl Services {
         commands
             .register(providers::registry::enable_command(&providers))
             .expect("provider.enable registers");
+        let source_runner = source_runner::SourceRunner {
+            project_dir: layout.project_dir.clone(),
+            approvals: approvals.clone(),
+            store: ext_source_store.clone(),
+            secrets: machine.secrets.clone(),
+            layer: sql.clone(),
+            catalog: extension_catalog.clone(),
+            ai: ai_compute.clone(),
+            worktrees: worktrees.clone(),
+            events: event_bus.clone(),
+        };
+        commands
+            .register(source_runner::sync_command(source_runner.clone()))
+            .expect("source.sync registers");
         let knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider> =
             Arc::new(knowledge::OxplowKnowledge::new(&commands, db.clone()));
         for command in knowledge::commands(knowledge::KnowledgeTarget {
@@ -1179,6 +1195,7 @@ impl Services {
             nudge_store,
             dashboard_store,
             ext_source_store,
+            source_runner,
             reasoning_store,
             tool_call_store,
             git_store,
@@ -1437,6 +1454,8 @@ mod tests {
                 "metric.rebuild",
                 "metric.run",
                 "provider.enable",
+                // The source's own program (P6.B1).
+                "source.sync",
                 "vcs.checkout_branch",
                 "vcs.commit",
                 "vcs.delete_branch",

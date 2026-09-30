@@ -99,23 +99,26 @@ test("treemap lenses draw a tile per positive item and link through the lens's c
   expect(opened).toEqual(["file:a.rs"]);
 });
 
-test("a lens with actions shows its buttons; one without shows none", () => {
-  const { getByTestId, queryByTestId, container } = render(
+test("every lens has Copy and Add to Agent Context; declared actions are buttons, row actions aren't", () => {
+  const finish = { id: "finish", label: "Finish", command: "work_item.transition", input: {}, row: false };
+  const perRow = { id: "row", label: "Per Row", command: "work_item.transition", input: {}, row: true };
+  const { getByTestId, queryByTestId } = render(
     <LensResultView
-      run={run(
-        { viz: "markdown", actions: [{ id: "copy", kind: "copy", label: "Copy", source: null }] },
-        ["prompt"],
-        [["Review **this**"]],
-      )}
+      run={run({ viz: "table", actions: [finish, perRow] }, ["id"], [[1]])}
       onOpenPage={() => {}}
     />,
   );
-  expect(container.textContent).toContain("Review");
-  expect(getByTestId("lens-action-copy").textContent).toBe("Copy");
+  expect(getByTestId("lens-copy").textContent).toBe("Copy");
+  expect(getByTestId("lens-add-to-context")).not.toBeNull();
+  expect(getByTestId("lens-action-finish").textContent).toBe("Finish");
+  expect(queryByTestId("lens-action-row")).toBeNull();
   cleanup();
-  const plain = render(<LensResultView run={run({ viz: "markdown" }, ["t"], [["x"]])} onOpenPage={() => {}} />);
-  expect(plain.queryByTestId("lens-actions")).toBeNull();
-  expect(queryByTestId("lens-actions")).toBeNull();
+  // A compact strip and a grid's child have no toolbar.
+  const compact = render(<LensResultView run={run({ viz: "number" }, ["n"], [[3]])} compact onOpenPage={() => {}} />);
+  expect(compact.queryByTestId("lens-actions")).toBeNull();
+  cleanup();
+  const child = render(<LensResultView run={run({ viz: "table" }, ["n"], [[3]])} toolbar={false} onOpenPage={() => {}} />);
+  expect(child.queryByTestId("lens-actions")).toBeNull();
 });
 
 test("a lens switching to and from grid keeps rendering (hook order)", () => {

@@ -15,7 +15,8 @@ import {
   listDataEntities,
   listProjectPrograms,
   listSources,
-  runSource,
+  approveSource,
+  syncSource,
   subscribeOxplowEvents,
   type SourceListing,
 } from "../api.js";
@@ -62,8 +63,13 @@ export function DataSection() {
     const key = `${l.extension}/${l.spec.id}`;
     setBusy(key);
     try {
-      // Approve & Run approves exactly the version this listing showed.
-      const report = await runSource(l.extension, l.spec.id, l.approved ? null : l.version);
+      // Approve & Run approves exactly the version this listing showed,
+      // then runs it (`source.sync` itself never approves).
+      if (!l.approved) {
+        if (!l.version) throw new Error(`${key} can't be read, so it can't be approved`);
+        await approveSource(l.extension, l.spec.id, l.version);
+      }
+      const report = await syncSource(l.extension, l.spec.id);
       const counts = Object.entries(report.rowCounts)
         .map(([e, n]) => `${n} ${e}`)
         .join(", ");

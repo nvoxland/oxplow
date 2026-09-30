@@ -3,7 +3,7 @@
 //! are read from the primary stream's worktree: their data is
 //! project-global. See `.context/semantic-layer.md`.
 
-use oxplow_app::source_runner::{self, SourceListing, SourceRunReport, Sources};
+use oxplow_app::source_runner::{self, SourceListing, Sources};
 use oxplow_app::Services;
 
 use crate::error::IpcError;
@@ -15,18 +15,23 @@ pub async fn list_sources(svc: &Services) -> Result<Vec<SourceListing>, IpcError
     Ok(source_runner::list_sources(&Sources::of(svc, &root)).await?)
 }
 
-/// Run a source now. `approve` is the listing's `version` the person
-/// reviewed: consent is recorded for exactly that version first, and a
-/// source that changed since is refused (UI only; agents can't approve).
-pub async fn run_source(
+/// A person approves an exec source at the listing's `version` they
+/// reviewed; one that changed since is refused (UI only; agents can't
+/// approve). Running it is the `source.sync` command.
+pub async fn approve_source(
     svc: &Services,
     extension: String,
     source_id: String,
-    approve: Option<String>,
-) -> Result<SourceRunReport, IpcError> {
-    source_runner::sync_source(svc, &extension, &source_id, approve.as_deref())
-        .await
-        .map_err(|e| IpcError::from(oxplow_domain::DomainError::from(e)))
+    version: String,
+) -> Result<(), IpcError> {
+    let root = svc.worktrees.resolve(None).await;
+    source_runner::approve_reviewed(
+        &source_runner::Sources::of(svc, &root),
+        &extension,
+        &source_id,
+        &version,
+    )
+    .map_err(|e| IpcError::from(oxplow_domain::DomainError::from(e)))
 }
 
 /// Set (or clear with `null`) a credential an extension's source declares.
@@ -158,23 +163,30 @@ mod tests {
         assert_eq!(list[0]["approved"], false);
         assert_eq!(list[0]["state"], serde_json::Value::Null);
 
-        let err = crate::dispatch(
-            "run_source",
-            json!({ "extension": "my-gh", "sourceId": "gh" }),
-            &svc,
-        )
-        .await
-        .unwrap_err();
+        // `source.sync` never approves: unapproved, it's refused.
+        let sync = || {
+            crate::dispatch(
+                "run_command",
+                json!({
+                    "name": "source.sync",
+                    "input": { "extension": "my-gh", "source": "gh" },
+                    "confirmed": false,
+                }),
+                &svc,
+            )
+        };
+        let err = sync().await.unwrap_err();
         assert_eq!(err.code, "INVALID");
-
-        let report = crate::dispatch(
-            "run_source",
-            json!({ "extension": "my-gh", "sourceId": "gh", "approve": list[0]["version"] }),
+        // A person approves the version they reviewed, then it runs.
+        crate::dispatch(
+            "approve_source",
+            json!({ "extension": "my-gh", "sourceId": "gh", "version": list[0]["version"] }),
             &svc,
         )
         .await
         .unwrap();
-        assert_eq!(report["rowCounts"]["pr"], 1);
+        let out = sync().await.unwrap();
+        assert_eq!(out["result"]["rowCounts"]["pr"], 1);
 
         let list = crate::dispatch("list_sources", json!({}), &svc)
             .await

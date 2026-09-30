@@ -333,7 +333,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	runLensAction: (id: string, action: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<LensActionResult, IpcError>(__TAURI_INVOKE("run_lens_action", { id, action, params, streamId })),
+	runLensAction: (id: string, action: string, params: { [key in string]: SqlCell } | null, row: { [key in string]: SqlCell } | null, streamId: string | null, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("run_lens_action", { id, action, params, row, streamId, confirmed })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	lensText: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<string, IpcError>(__TAURI_INVOKE("lens_text", { id, params, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -378,7 +383,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	runSource: (extension: string, sourceId: string, approve: string | null) => typedError<SourceRunReport, IpcError>(__TAURI_INVOKE("run_source", { extension, sourceId, approve })),
+	approveSource: (extension: string, sourceId: string, version: string) => typedError<null, IpcError>(__TAURI_INVOKE("approve_source", { extension, sourceId, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2589,7 +2594,7 @@ export type Lens = {
 	launcherCategory: LauncherCategory | null,
 	// Not listed in the launcher.
 	hidden: boolean,
-	// Buttons from the fixed action registry (tsk329).
+	// Commands the lens offers, as buttons or row actions (P6.B1).
 	actions: LensAction[],
 	// When the lens needs attention (a rail badge when mounted in `rail`).
 	alert: LensAlert | null,
@@ -2597,37 +2602,31 @@ export type Lens = {
 	path: string,
 };
 
-// A button on a lens (tsk329).
-export type LensAction = {
-	/**
-	 *  Unique within the lens; `run_lens_action` names it. Defaults to the
-	 *  kind.
-	 */
-	id: string,
-	kind: LensActionKind,
-	label: string,
-	// For `run-source`: `<extension>/<source id>`.
-	source: string | null,
-};
-
 /**
- *  What a lens action does. A fixed registry: an extension can't run code
- *  through one.
+ *  A button on a lens: a command it runs (P6.B1, target §11.4). The
+ *  command goes through the bus as `Actor::Lens` acting for whoever
+ *  pressed it, so every policy — invokers, the agent policy, confirmation
+ *  — applies as if they had run it themselves; a lens can offer a button
+ *  but never grant a power. Copying the result and handing it to the
+ *  agent are on every lens, not declared.
  */
-export type LensActionKind = 
-// Copy the lens result as text (markdown).
-"copy" | 
-// Hand the lens and its params to the agent (UI only).
-"add-to-context" | 
-// Sync a source (an exec source needs a person's approval first).
-"run-source";
-
-// What an action produced.
-export type LensActionResult = {
-	// `copy`: the text to copy.
-	text: string | null,
-	// `run-source`: the sync's row counts.
-	report: SourceRunReport | null,
+export type LensAction = {
+	// Unique within the lens; `run_lens_action` names it.
+	id: string,
+	label: string,
+	// The command it runs (`work_item.transition`).
+	command: string,
+	/**
+	 *  The command's input. A string that is exactly `{{param.<name>}}`
+	 *  or `{{row.<column>}}` becomes that value (a number stays a number);
+	 *  one that contains them has them spliced in as text.
+	 */
+	input: unknown,
+	/**
+	 *  A row action: offered on each row (right-click), with `{{row.*}}`
+	 *  bound to that row. Otherwise it's a button above the result.
+	 */
+	row: boolean,
 };
 
 /**

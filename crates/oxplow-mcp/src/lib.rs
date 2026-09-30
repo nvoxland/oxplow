@@ -769,6 +769,9 @@ pub struct RunLensActionParams {
     pub stream_id: Option<String>,
     /// Your thread, as for `run_lens`.
     pub thread_id: Option<String>,
+    /// For a row action (`row: true` in `get_lens` → `actions`): the row
+    /// it runs on, column → value, as `run_lens` returned it.
+    pub row: Option<std::collections::BTreeMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1309,33 +1312,24 @@ impl OxplowMcp {
     )]
     async fn run_source(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<RunSourceParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        // An agent never approves: `approve` is false here, always.
-        let result = oxplow_app::source_runner::sync_source(
-            &self.services,
-            &p.extension,
-            &p.source_id,
-            // An agent never approves.
-            None,
-        )
-        .await;
-        let report = result.map_err(|e| match e {
-            oxplow_app::source_runner::RunSourceError::NotFound => McpError::invalid_params(
-                format!(
-                    "no source `{}/{}` (see list_sources)",
-                    p.extension, p.source_id
-                ),
-                None,
-            ),
-            oxplow_app::source_runner::RunSourceError::NeedsApproval(m)
-            | oxplow_app::source_runner::RunSourceError::Failed(m) => {
-                McpError::invalid_params(m, None)
-            }
-            oxplow_app::source_runner::RunSourceError::Storage(e) => internal(e),
-        })?;
-        json_result(&report)
+        // The `source.sync` command, as the caller: it never approves.
+        let actor = self.verified_actor(&caller_of(&extensions)).await?;
+        let out = self
+            .services
+            .commands
+            .run(
+                &actor,
+                oxplow_app::source_runner::SYNC,
+                serde_json::json!({ "extension": p.extension, "source": p.source_id }),
+                false,
+            )
+            .await
+            .map_err(command_error)?;
+        json_result(&out.result)
     }
 
     #[tool(
@@ -1847,10 +1841,11 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Run one of a lens's declared buttons (its `actions`): `copy` returns the \
-                       result as markdown text; `run-source` syncs the source it names (an exec \
-                       source a person hasn't approved fails; they approve it in Settings → Data). \
-                       `add-to-context` is for a person handing you the lens; use run_lens."
+        description = "Run one of a lens's actions (see `get_lens` → `actions`): the command it \
+                       declares, run as the lens acting for you — so the same rules apply as if \
+                       you ran the command yourself (a command you can't run, or one that needs \
+                       a person's confirmation, is refused). A row action (`row: true`) needs the \
+                       `row` it runs on. Returns the command's outcome."
     )]
     async fn run_lens_action(
         &self,
@@ -1873,16 +1868,28 @@ impl OxplowMcp {
         let ctx = self
             .lens_context(stream.as_deref(), p.thread_id.as_deref())
             .await?;
+        let on_behalf_of = self.verified_actor(&caller_of(&extensions)).await?;
+        let row = p.row.map(|r| {
+            r.into_iter()
+                .map(|(k, v)| (k, oxplow_db::SqlCell::from(v)))
+                .collect()
+        });
         let out = oxplow_app::lens_actions::run_lens_action(
             &self.services,
             &root,
-            &p.id,
-            &p.action,
-            overrides,
+            oxplow_app::lens_actions::LensActionCall {
+                lens_id: p.id.clone(),
+                action_id: p.action,
+                params: overrides,
+                row,
+                on_behalf_of,
+                // An agent never confirms.
+                confirmed: false,
+            },
             &ctx,
         )
         .await
-        .map_err(|e| lens_error(&p.id, e))?;
+        .map_err(command_error)?;
         json_result(&out)
     }
 
@@ -5732,7 +5739,7 @@ mod tests {
     #[tokio::test]
     async fn source_tools_never_approve_and_schema_lists_extension_entities() {
         use std::os::unix::fs::PermissionsExt;
-        let (proj, _services, server) = boot();
+        let (proj, services, server) = boot();
         let ext = proj.path().join("oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
@@ -5754,10 +5761,13 @@ mod tests {
 
         // An agent can't consent on the human's behalf.
         let err = server
-            .run_source(Parameters(RunSourceParams {
-                extension: "my-gh".into(),
-                source_id: "gh".into(),
-            }))
+            .run_source(
+                as_writer(&services).await,
+                Parameters(RunSourceParams {
+                    extension: "my-gh".into(),
+                    source_id: "gh".into(),
+                }),
+            )
             .await
             .unwrap_err();
         assert!(err.message.contains("approval"), "{err:?}");

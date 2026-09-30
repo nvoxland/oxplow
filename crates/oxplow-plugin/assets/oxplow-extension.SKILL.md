@@ -134,15 +134,20 @@ empty: Nothing is waiting on you.
   run returned at least that many rows) or `{ column: pct, below: 80 }` /
   `above:` (the first row's value), with an optional `label`. `run_lens`
   returns the alert state.
-- **`actions:`** adds buttons from a fixed set:
-  - `copy` copies the result (a markdown lens's text, else a markdown
-    table);
-  - `add-to-context` hands the lens to the agent;
-  - `{ action: run-source, source: <ext>/<id>, label: Sync PRs }` syncs a
-    source.
+- **`actions:`** are commands the lens offers:
+  `{ id, label, command, input, row? }`. `input` is the command's input;
+  `"{{param.x}}"` binds a lens param and, with `row: true` (a row's
+  right-click action), `"{{row.col}}"` binds that row's column —
+  e.g. `{ id: finish, label: Finish, command: work_item.transition,
+  row: true, input: { ref: "work_item:oxplow:tsk{{row.id}}", to: done } }`,
+  or `{ id: sync, label: Sync PRs, command: source.sync, input:
+  { extension: github, source: prs } }`. Copy and Add to Agent Context are
+  on every lens already — don't declare them.
 
-  You can press them too with `run_lens_action`. You can't approve an exec
-  source that way; the person approves it in Settings → Data.
+  An action runs as the lens acting for whoever pressed it, so it can't do
+  anything they couldn't: you can press one with `run_lens_action`, but a
+  command you can't run (or that needs a person's confirmation, like
+  approving an exec source) is refused.
 - **Unknown keys are errors.** Only the keys shown above exist today.
 
 ## 3. Check it

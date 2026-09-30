@@ -87,6 +87,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<OxplowEvent>()
         .typ::<oxplow_app::acp::session::AcpEvent>()
         .typ::<oxplow_domain::vcs::OpOutcome>()
+        // `source.sync`'s result, read through `run_command`.
+        .typ::<oxplow_app::source_runner::SourceRunReport>()
         .commands(collect_commands![
             // app
             commands::generated::app_version,
@@ -147,6 +149,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::get_lens,
             commands::generated::run_lens,
             commands::generated::run_lens_action,
+            commands::generated::lens_text,
             commands::generated::validate_extension,
             commands::generated::review_extension,
             commands::generated::install_extension,
@@ -155,7 +158,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::report_open_page,
             commands::generated::set_extension_enabled,
             commands::generated::list_sources,
-            commands::generated::run_source,
+            commands::generated::approve_source,
             commands::generated::set_source_credential,
             commands::generated::list_project_programs,
             commands::generated::approve_project_program,

@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { getLens, runLens, runLensAction, type LensRun, type SqlCell } from "../api.js";
+import { getLens, lensText, runLens, runLensAction, type LensRun, type SqlCell } from "../api.js";
+import type { LensAction } from "../tauri-bridge/generated/bindings.js";
 import { DailyBarChart } from "../components/Analytics/DailyBarChart.js";
 import { TrendChart } from "../components/charts/TrendChart.js";
 import { squarify } from "../components/charts/squarify.js";
@@ -31,7 +32,7 @@ import { insertIntoAgent } from "../agent-input-bus.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
-import { performLensAction } from "./lensActions.js";
+import { addLensToContext, copyLens, performLensAction, rowRecord } from "./lensActions.js";
 
 type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
 
@@ -39,15 +40,18 @@ type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
  * Renders a lens run's result in the lens's viz. Shared by the lens page,
  * slots and dashboard lens tiles; `maxRows` caps rows for compact views.
  * A `grid` runs its child lenses with this run's params, in `streamId`.
+ * Every lens has Copy and Add to Agent Context; its declared actions run
+ * their commands as the lens (row actions from a row's right-click menu).
  */
 export function LensResultView(props: LensResultViewProps) {
-  const { run, streamId = null, compact = false } = props;
+  const { run, streamId = null, compact = false, toolbar = true } = props;
+  const actions = useLensActions(run, streamId);
   // Compact strips (a number inline) have no room for buttons.
-  if (compact || run.lens.actions.length === 0) return <LensBody {...props} />;
+  if (compact || !toolbar) return <LensBody {...props} runRowAction={actions.run} />;
   return (
     <div>
-      <LensActions run={run} streamId={streamId} />
-      <LensBody {...props} />
+      <LensToolbar run={run} streamId={streamId} actions={actions} />
+      <LensBody {...props} runRowAction={actions.run} />
     </div>
   );
 }
@@ -60,47 +64,130 @@ interface LensResultViewProps {
   streamId?: string | null;
   /** Small inline rendering for strips (a number as plain text). */
   compact?: boolean;
+  /** Show the toolbar (Copy, Add to Agent Context, actions); a grid's
+   *  children leave it to the grid. Default true. */
+  toolbar?: boolean;
 }
 
-/** The lens's declared buttons, above its result. */
-function LensActions({ run, streamId }: { run: LensRun; streamId: string | null }) {
+/** Pressing a lens's actions, with the confirmation a command may ask
+ *  for held until the person answers. */
+function useLensActions(run: LensRun, streamId: string | null) {
   const [busy, setBusy] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ action: LensAction; row: Record<string, SqlCell> | null } | null>(null);
+  const deps = {
+    runLensAction,
+    toast: (message: string) => showToast({ message }),
+    recordError: (label: string, message: string) => recordOpError({ label, message }),
+  };
+  const press = async (action: LensAction, row: Record<string, SqlCell> | null, confirmed: boolean) => {
+    setBusy(action.id);
+    try {
+      const outcome = await performLensAction(action, run, row, streamId, confirmed, deps);
+      setPending(outcome === "needs-confirmation" ? { action, row } : null);
+    } finally {
+      setBusy(null);
+    }
+  };
+  return {
+    busy,
+    pending,
+    run: (action: LensAction, row: Record<string, SqlCell> | null) => void press(action, row, false),
+    confirm: () => {
+      if (pending) void press(pending.action, pending.row, true);
+    },
+    cancel: () => setPending(null),
+  };
+}
+
+type LensActionsState = ReturnType<typeof useLensActions>;
+
+/** Copy, Add to Agent Context, and the lens's whole-lens actions — and,
+ *  when a command asks, its confirmation. */
+function LensToolbar({ run, streamId, actions }: { run: LensRun; streamId: string | null; actions: LensActionsState }) {
   const [copied, setCopied] = useState(false);
+  const buttons = run.lens.actions.filter((a) => !a.row);
   return (
-    <div data-testid="lens-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginBottom: 6 }}>
-      {run.lens.actions.map((a) => (
+    <div data-testid="lens-actions" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, marginBottom: 6 }}>
+      {actions.pending ? (
+        <ConfirmStrip
+          message={`${actions.pending.action.label} (${actions.pending.action.command}) asks for your confirmation.`}
+          confirmLabel={`Run ${actions.pending.action.label}`}
+          onConfirm={actions.confirm}
+          onCancel={actions.cancel}
+        />
+      ) : null}
+      <button
+        type="button"
+        data-testid="lens-copy"
+        onClick={() => {
+          void copyLens(run, streamId, {
+            lensText,
+            copyText: (t) => navigator.clipboard.writeText(t),
+            recordError: (label, message) => recordOpError({ label, message }),
+          }).then((ok) => {
+            if (ok) {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            }
+          });
+        }}
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+      <button type="button" data-testid="lens-add-to-context" onClick={() => addLensToContext(run, insertIntoAgent)}>
+        Add to Agent Context
+      </button>
+      {buttons.map((a) => (
         <button
           key={a.id}
           type="button"
           data-testid={`lens-action-${a.id}`}
-          disabled={busy !== null}
-          title={a.kind === "run-source" ? `Syncs ${a.source ?? ""}` : undefined}
-          onClick={() => {
-            setBusy(a.id);
-            void performLensAction(a, run, streamId, {
-              runLensAction,
-              copyText: (t) => navigator.clipboard.writeText(t),
-              insertIntoAgent,
-              toast: (message) => showToast({ message }),
-              recordError: (label, message) => recordOpError({ label, message }),
-            })
-              .then((outcome) => {
-                if (a.kind === "copy" && outcome === "done") {
-                  setCopied(true);
-                  window.setTimeout(() => setCopied(false), 1500);
-                }
-              })
-              .finally(() => setBusy(null));
-          }}
+          disabled={actions.busy !== null}
+          title={a.command}
+          onClick={() => actions.run(a, null)}
         >
-          {busy === a.id && a.kind === "run-source" ? "Syncing…" : a.kind === "copy" && copied ? "Copied" : a.label}
+          {actions.busy === a.id ? `${a.label}…` : a.label}
         </button>
       ))}
     </div>
   );
 }
 
-function LensBody(props: LensResultViewProps) {
+/** A command asked for confirmation: Run (focused; Enter) or Cancel
+ *  (Escape). */
+function ConfirmStrip({
+  message,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  message: string;
+  confirmLabel: string;
+  onConfirm(): void;
+  onCancel(): void;
+}) {
+  return (
+    <span
+      data-testid="lens-action-confirm"
+      style={{ display: "flex", gap: 6, alignItems: "center", marginRight: "auto" }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onCancel();
+      }}
+    >
+      <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>{message}</span>
+      <button type="button" data-testid="lens-action-confirm-run" autoFocus onClick={onConfirm}>
+        {confirmLabel}
+      </button>
+      <button type="button" data-testid="lens-action-confirm-cancel" onClick={onCancel}>
+        Cancel
+      </button>
+    </span>
+  );
+}
+
+type RowActionRunner = (action: LensAction, row: Record<string, SqlCell>) => void;
+
+function LensBody(props: LensResultViewProps & { runRowAction?: RowActionRunner }) {
   const { run, onOpenPage, streamId = null } = props;
   // A grid composes child lenses and has no rows of its own; it's its own
   // component so the row views' hooks always run in the same order.
@@ -110,7 +197,14 @@ function LensBody(props: LensResultViewProps) {
   return <RowsBody {...props} />;
 }
 
-function RowsBody({ run, onOpenPage, maxRows, streamId = null, compact = false }: LensResultViewProps) {
+function RowsBody({
+  run,
+  onOpenPage,
+  maxRows,
+  streamId = null,
+  compact = false,
+  runRowAction,
+}: LensResultViewProps & { runRowAction?: RowActionRunner }) {
   const lens = run.lens;
   const result = limitRows(run.result, maxRows);
   const ctxMenu = useContextMenu();
@@ -133,6 +227,7 @@ function RowsBody({ run, onOpenPage, maxRows, streamId = null, compact = false }
     );
   };
   const first = result.rows[0]?.[0] ?? null;
+  const rowActions = lens.actions.filter((a) => a.row);
   const onRowMenu = (e: React.MouseEvent, row: SqlCell[]) =>
     ctxMenu.open(e, [
       {
@@ -141,6 +236,12 @@ function RowsBody({ run, onOpenPage, maxRows, streamId = null, compact = false }
         enabled: true,
         run: () => insertIntoAgent(rowMention(lens.id, result.columns, row)),
       },
+      ...rowActions.map((a) => ({
+        id: `lens-action-${a.id}`,
+        label: a.label,
+        enabled: runRowAction !== undefined,
+        run: () => runRowAction?.(a, rowRecord(result.columns, row)),
+      })),
     ]);
   switch (lens.viz) {
     case "bar":
@@ -485,7 +586,7 @@ function GridViz({
           {error ? (
             <div style={{ fontSize: "var(--text-xs)", color: "var(--severity-critical)" }}>{error}</div>
           ) : run ? (
-            <LensResultView run={run} onOpenPage={onOpenPage} streamId={streamId} maxRows={25} />
+            <LensResultView run={run} onOpenPage={onOpenPage} streamId={streamId} maxRows={25} toolbar={false} />
           ) : null}
         </section>
       ))}

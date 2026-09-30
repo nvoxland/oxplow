@@ -69,24 +69,53 @@ async fn context(svc: &Services, stream_id: Option<&str>) -> extensions::LensCon
     extensions::lens_context(svc, stream, None).await
 }
 
-/// Run one of a lens's declared actions. It never approves an exec
-/// source: that consent is given in Settings → Data, where what runs and
-/// which hosts it reaches are shown.
+/// A lens's text rendering (`lens_text`): what Copy puts on the
+/// clipboard.
+pub async fn lens_text(
+    svc: &Services,
+    id: String,
+    params: Option<BTreeMap<String, SqlCell>>,
+    stream_id: Option<String>,
+) -> Result<String, IpcError> {
+    let root = root(svc, stream_id.as_deref()).await;
+    let ctx = context(svc, stream_id.as_deref()).await;
+    let run = extensions::run_lens(
+        &svc.sql,
+        &svc.extension_catalog,
+        &root,
+        &id,
+        params.unwrap_or_default(),
+        &ctx,
+    )
+    .await?;
+    Ok(oxplow_app::lens_text::text_of(svc, &root, &run, &ctx).await?)
+}
+
+/// A person presses one of a lens's actions: its command runs as the
+/// lens, acting for them (`NEEDS_CONFIRMATION` asks them first). A row
+/// action takes the row it was pressed on.
 pub async fn run_lens_action(
     svc: &Services,
     id: String,
     action: String,
     params: Option<BTreeMap<String, SqlCell>>,
+    row: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
-) -> Result<oxplow_app::lens_actions::LensActionResult, IpcError> {
+    confirmed: bool,
+) -> Result<oxplow_domain::CommandOutcome, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
     let ctx = context(svc, stream_id.as_deref()).await;
     Ok(oxplow_app::lens_actions::run_lens_action(
         svc,
         &root,
-        &id,
-        &action,
-        params.unwrap_or_default(),
+        oxplow_app::lens_actions::LensActionCall {
+            lens_id: id,
+            action_id: action,
+            params: params.unwrap_or_default(),
+            row,
+            on_behalf_of: oxplow_domain::Actor::Human,
+            confirmed,
+        },
         &ctx,
     )
     .await?)
