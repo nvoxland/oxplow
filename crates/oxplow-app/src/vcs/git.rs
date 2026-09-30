@@ -40,6 +40,7 @@ impl GitProvider {
     /// Replay the workspace's branch onto `onto`; oxplow's smart merge
     /// then settles the conflicts it can.
     pub async fn rebase(&self, ws: &Path, onto: &str) -> Result<OpOutcome, VcsError> {
+        not_an_option("revision", onto)?;
         let (ws, onto) = (ws.to_path_buf(), onto.to_string());
         blocking(move || {
             repo_check(&ws)?;
@@ -50,6 +51,7 @@ impl GitProvider {
     }
 
     pub async fn cherry_pick(&self, ws: &Path, rev: &str) -> Result<OpOutcome, VcsError> {
+        not_an_option("revision", rev)?;
         let (ws, rev) = (ws.to_path_buf(), rev.to_string());
         blocking(move || {
             repo_check(&ws)?;
@@ -61,6 +63,7 @@ impl GitProvider {
     }
 
     pub async fn revert(&self, ws: &Path, rev: &str) -> Result<OpOutcome, VcsError> {
+        not_an_option("revision", rev)?;
         let (ws, rev) = (ws.to_path_buf(), rev.to_string());
         blocking(move || {
             repo_check(&ws)?;
@@ -189,6 +192,18 @@ impl CleanBaseline for GitBaseline {
 
 /// Run `f` on the blocking pool; a panicked task is a failure, not a
 /// crash of the caller.
+/// Refuse a rev, branch or remote name that would read as an option on
+/// git's command line (`--upload-pack=…`, `--contents=…`, `-b`). Every
+/// caller-supplied name the CLI sees passes through here.
+fn not_an_option(what: &str, value: &str) -> Result<(), VcsError> {
+    if value.starts_with('-') {
+        return Err(VcsError::Failed(format!(
+            "{what} `{value}` would be read as a git option; names can't start with `-`"
+        )));
+    }
+    Ok(())
+}
+
 async fn blocking<R: Send + 'static>(
     f: impl FnOnce() -> Result<R, VcsError> + Send + 'static,
 ) -> Result<R, VcsError> {
@@ -556,6 +571,9 @@ impl Vcs for GitProvider {
         path: &str,
         rev: Option<&str>,
     ) -> Result<Vec<BlameLine>, VcsError> {
+        if let Some(r) = rev {
+            not_an_option("revision", r)?;
+        }
         let (ws, path, rev) = (ws.to_path_buf(), path.to_string(), rev.map(str::to_string));
         blocking(move || {
             repo_check(&ws)?;
@@ -621,6 +639,9 @@ impl Vcs for GitProvider {
     }
 
     async fn fetch(&self, ws: &Path, remote: Option<&str>) -> Result<OpOutcome, VcsError> {
+        if let Some(r) = remote {
+            not_an_option("remote", r)?;
+        }
         let (ws, remote) = (ws.to_path_buf(), remote.map(str::to_string));
         blocking(move || {
             repo_check(&ws)?;
@@ -632,6 +653,10 @@ impl Vcs for GitProvider {
     }
 
     async fn pull(&self, ws: &Path, from: Option<RemoteBranch>) -> Result<OpOutcome, VcsError> {
+        if let Some(rb) = &from {
+            not_an_option("remote", &rb.remote)?;
+            not_an_option("branch", &rb.branch)?;
+        }
         let ws = ws.to_path_buf();
         blocking(move || {
             repo_check(&ws)?;
@@ -646,6 +671,10 @@ impl Vcs for GitProvider {
     }
 
     async fn push(&self, ws: &Path, to: Option<RemoteBranch>) -> Result<OpOutcome, VcsError> {
+        if let Some(rb) = &to {
+            not_an_option("remote", &rb.remote)?;
+            not_an_option("branch", &rb.branch)?;
+        }
         let ws = ws.to_path_buf();
         blocking(move || {
             repo_check(&ws)?;
@@ -660,6 +689,7 @@ impl Vcs for GitProvider {
     }
 
     async fn merge(&self, ws: &Path, rev: &str) -> Result<OpOutcome, VcsError> {
+        not_an_option("revision", rev)?;
         let (ws, rev) = (ws.to_path_buf(), rev.to_string());
         blocking(move || {
             repo_check(&ws)?;
@@ -670,6 +700,7 @@ impl Vcs for GitProvider {
     }
 
     async fn checkout_branch(&self, ws: &Path, name: &str, create: bool) -> Result<(), VcsError> {
+        not_an_option("branch", name)?;
         let (ws, name) = (ws.to_path_buf(), name.to_string());
         blocking(move || {
             repo_check(&ws)?;
@@ -679,11 +710,14 @@ impl Vcs for GitProvider {
     }
 
     async fn rename_branch(&self, ws: &Path, from: &str, to: &str) -> Result<(), VcsError> {
+        not_an_option("branch", from)?;
+        not_an_option("branch", to)?;
         let (ws, from, to) = (ws.to_path_buf(), from.to_string(), to.to_string());
         blocking(move || oxplow_git::rename_branch(&ws, &from, &to).map_err(branch_err)).await
     }
 
     async fn delete_branch(&self, ws: &Path, name: &str, force: bool) -> Result<(), VcsError> {
+        not_an_option("branch", name)?;
         let (ws, name) = (ws.to_path_buf(), name.to_string());
         blocking(move || oxplow_git::delete_branch(&ws, &name, force).map_err(branch_err)).await
     }
@@ -789,6 +823,47 @@ mod tests {
         std::fs::write(dir.join("cfg.txt"), contents).unwrap();
         git(dir, &["add", "-A"]);
         git(dir, &["commit", "-q", "-m", message]);
+    }
+
+    /// tsk550: a rev or name that reads as an option never reaches git's
+    /// command line, whoever passes it.
+    #[tokio::test]
+    async fn options_are_refused_where_revs_and_names_go() {
+        let (_p, wt, _dirs) = diverged("a\n", "b\n", "c\n");
+        let bad = "--contents=/etc/hosts";
+        let refused = |r: Result<(), VcsError>| {
+            let e = r.expect_err("refused");
+            assert!(e.to_string().contains("option"), "{e}");
+        };
+        refused(GitProvider.merge(&wt, bad).await.map(|_| ()));
+        refused(GitProvider.rebase(&wt, bad).await.map(|_| ()));
+        refused(GitProvider.cherry_pick(&wt, bad).await.map(|_| ()));
+        refused(GitProvider.revert(&wt, bad).await.map(|_| ()));
+        refused(
+            GitProvider
+                .blame(&wt, "cfg.txt", Some(bad))
+                .await
+                .map(|_| ()),
+        );
+        refused(GitProvider.checkout_branch(&wt, "-b", false).await);
+        refused(
+            GitProvider
+                .fetch(&wt, Some("--upload-pack=x"))
+                .await
+                .map(|_| ()),
+        );
+        refused(
+            GitProvider
+                .push(
+                    &wt,
+                    Some(RemoteBranch {
+                        remote: "origin".into(),
+                        branch: "--force".into(),
+                    }),
+                )
+                .await
+                .map(|_| ()),
+        );
     }
 
     /// A repo on `main` and a `feature` worktree beside it that each

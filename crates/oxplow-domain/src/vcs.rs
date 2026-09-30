@@ -502,6 +502,10 @@ impl std::str::FromStr for Revision {
                 .map(Revision::Snapshot)
                 .map_err(|_| format!("`{value}` isn't a snapshot id")),
             "" => Err(format!("`{s}` names no revision kind")),
+            // It would read as an option on a VCS's command line.
+            _ if value.starts_with('-') => Err(format!(
+                "`{value}` isn't a revision (a revision can't start with `-`, an option)"
+            )),
             _ => Ok(Revision::Vcs {
                 kind: kind.into(),
                 rev: value.into(),
@@ -533,6 +537,16 @@ impl specta::Type for Revision {
 #[cfg(test)]
 mod revision_tests {
     use super::Revision;
+
+    /// tsk550: a revision that reads as a command-line option is refused,
+    /// so it can't reach git's argv as a flag.
+    #[test]
+    fn a_revision_cannot_be_an_option() {
+        for bad in ["git:--contents=/etc/hosts", "git:-p"] {
+            assert!(bad.parse::<Revision>().is_err(), "{bad}");
+        }
+        assert!("git:HEAD~1".parse::<Revision>().is_ok());
+    }
 
     /// P5.B2 (tsk521): a revision round-trips through its wire string and
     /// the ref grammar's `@rev` slot, where the working tree is the

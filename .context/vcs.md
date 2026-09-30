@@ -237,6 +237,12 @@ and back, and diffs empty against it) needs the snapshot store, so it
 runs in `trees.rs`. Still to come: branch listing and divergence, and 8 (isolated
 workspaces share history).
 
+**Names never become options** (tsk550): `Revision::from_str` refuses
+a revision starting with `-`, and the git provider refuses any rev,
+branch or remote name starting with `-` (`not_an_option`) before it
+reaches git's command line — `vcs_blame { rev: "git:--contents=…" }`
+or a remote `--upload-pack=…` are errors, not flags.
+
 **`only_the_git_provider_touches_git`** (`vcs/mod.rs`) scans the
 crates' production code: `oxplow_git::` and `git2::` appear only in
 `vcs/git.rs`. Test code — after `#[cfg(test)]`, a `#![cfg(test)]`
