@@ -63,6 +63,7 @@ pub mod lsp_sessions;
 pub mod metric_bucket;
 pub mod metric_cube;
 pub mod metric_engine;
+pub mod metric_findings;
 pub mod metric_grid;
 pub mod metric_visibility;
 pub mod metrics_service;

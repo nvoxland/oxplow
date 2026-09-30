@@ -198,6 +198,21 @@ FROM metric_grid('day', 'zone')
   empty grid.
 - The series are scoped to `SqlQuery.stream` — a lens passes its
   `:stream_id`.
+- **`metric_findings('<key>'[, <capture id>])`** (P4.8,
+  `crates/oxplow-app/src/metric_findings.rs`) is the same mechanism for the
+  located items behind a metric: a table of `subject_kind, subject_ref,
+  path, line, value, severity, rule, message, branch, captured_at`, one row
+  per fact the metric's filter keeps. Without a capture it is the metric's
+  **current** state (`MetricEngine::current_facts`: the tree fold for a
+  per-path measure, the latest capture per stream and producer for a
+  complete one — a fixed item disappears — every fact for an additive
+  one); with one, exactly that recording's. `severity` is the fact's own,
+  else the value against the metric's `warn_at` / `fail_at` in its
+  `direction`. It becomes `temp."metric_findings_1"`; a query may use it
+  beside a `metric_grid()` (the gateway plans each over the SQL the other
+  rewrote). A formula or entity metric has no findings (an error names
+  it). Replaces `v_fact` for "what's wrong now", which a raw fact table
+  can't say: an old fact of a since-fixed item is still a fact.
 - `metric_grid('capture'[, dim])` keeps **one row per capture**: `bucket`
   is the capture's time and a `capture_id` column joins `v_capture` for its
   branch, provenance and git version — what the metric pages read for

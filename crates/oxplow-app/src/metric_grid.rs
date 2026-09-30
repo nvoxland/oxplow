@@ -114,7 +114,7 @@ pub fn plan(sql: &str) -> Result<Option<GridPlan>, DomainError> {
 }
 
 /// `"name"` — a quoted identifier.
-fn quote(name: &str) -> String {
+pub(crate) fn quote(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 

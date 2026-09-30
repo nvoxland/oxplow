@@ -225,12 +225,19 @@ SELECT bucket, "oxplow.task", MEASURE('oxplow.tokens.total')
 FROM metric_grid('week', 'oxplow.task')
 ```
 
-The catalog and raw data are views: `v_metric_spec` (definitions and
-thresholds), `v_metric_catalog` (what's available and on), `v_measure`,
-`v_dimension`, `v_capture` and `v_fact` (the atomic facts — the located
-offenders behind a metric are its measure's facts:
-`SELECT path, line, rule, severity, value, detail FROM v_fact WHERE
-measure_key = 'oxplow.ast_hit' AND capture_id = …`).
+**What's behind a metric** — the located items, as they stand now — is
+`metric_findings('<key>')`; add a capture id for one recording's:
+
+```sql
+SELECT path, line, severity, rule, message, value
+FROM metric_findings('oxplow.rust.unsafe_blocks') ORDER BY path, line
+```
+
+`severity` is the item's own (a lint's), else its value against the
+metric's thresholds. The catalog and raw data are views: `v_metric_spec`
+(definitions and thresholds), `v_metric_catalog` (what's available and
+on), `v_measure`, `v_dimension`, `v_capture` and `v_fact` (every fact ever
+recorded — history, including items since fixed).
 
 For a CI-imported or agent-asserted number oxplow can't compute itself, use
 the `metric.record` command, `{ key, value, subject?, dims? }` (stored

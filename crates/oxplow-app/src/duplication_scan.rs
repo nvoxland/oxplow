@@ -254,6 +254,26 @@ async fn write_facts(
 mod tests {
     use super::*;
 
+    /// The current duplicate-lines facts: what a scan leaves standing.
+    async fn current(svc: &Services) -> Vec<(Option<String>, f64)> {
+        let measure = svc
+            .fact_store
+            .get_measure("oxplow.duplicate_lines")
+            .await
+            .unwrap()
+            .unwrap();
+        let mut facts: Vec<(Option<String>, f64)> = svc
+            .metric_engine
+            .current_facts(&measure)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|f| (f.path, f.value))
+            .collect();
+        facts.sort_by(|a, b| a.0.cmp(&b.0));
+        facts
+    }
+
     /// Two files sharing a >= 10-line identical block (the production
     /// minimum) → a duplicate-block finding.
     const BODY: &str = "pub fn compute(input: &[i64]) -> i64 {\n\
@@ -342,17 +362,11 @@ mod tests {
         std::fs::write(root.join("a.rs"), BODY).unwrap();
         std::fs::write(root.join("b.rs"), BODY).unwrap();
         scan(&f).await;
-        let rollup = |svc: Arc<Services>| async move {
-            svc.metric_engine
-                .rollup("oxplow.duplicate_lines", "oxplow.package")
-                .await
-                .unwrap()
-        };
-        assert!(!rollup(f.svc.clone()).await.is_empty());
+        assert!(!current(&f.svc).await.is_empty());
         std::fs::remove_file(root.join("b.rs")).unwrap();
         scan(&f).await;
         assert!(
-            rollup(f.svc.clone()).await.is_empty(),
+            current(&f.svc).await.is_empty(),
             "a zero-hit rescan clears the current state"
         );
     }
@@ -366,14 +380,7 @@ mod tests {
         std::fs::write(root.join("a.rs"), BODY).unwrap();
         std::fs::write(root.join("b.rs"), BODY).unwrap();
         scan(&f).await;
-        let rollup = || async {
-            f.svc
-                .metric_engine
-                .rollup("oxplow.duplicate_lines", "oxplow.package")
-                .await
-                .unwrap()
-        };
-        let before = rollup().await;
+        let before = current(&f.svc).await;
         assert!(!before.is_empty());
         std::fs::write(root.join("c.rs"), "fn unrelated() {}\n").unwrap();
         let findings = DuplicationRecorder::new(&f.svc)
@@ -387,7 +394,7 @@ mod tests {
             .unwrap();
         assert!(findings.is_empty());
         assert_eq!(
-            serde_json::to_value(rollup().await).unwrap(),
+            serde_json::to_value(current(&f.svc).await).unwrap(),
             serde_json::to_value(before).unwrap(),
             "the scoped scan didn't restate the tree"
         );

@@ -13,14 +13,14 @@
 //!     collapses to one number ([`range_value`]): semi-additive snapshots take the
 //!     LAST capture; additive events SUM the captures; ratios re-derive Σnum/Σden.
 //!
-//! The producers (tsk14) feed facts; the read surface (tsk16) exposes these
-//! results; derived-metric formulas evaluate through [`evaluate_formula`]; and
-//! the materialized fold lives in `metric_cube` (tsk96) — this engine's fact
-//! path remains the ORACLE the cube is verified against.
+//! The producers (tsk14) feed facts; SQL reads these results through
+//! `metric_grid()` and `metric_findings()` (P4.5, P4.8); and the materialized
+//! fold lives in `metric_cube` (tsk96) — this engine's fact path remains the
+//! ORACLE the cube is verified against.
 //!
 //! Visibility policy (tsk109): items are `pub` only when a sibling crate uses
-//! them (the IPC/RPC wire types — `Aggregation`, `FactFilter`, `FactFinding`,
-//! `RollupRow`, `SeriesPoint` — plus `MetricEngine` itself) or the
+//! them (the shared types — `Aggregation`, `FactFilter`, `FactFinding`,
+//! `SeriesPoint` — plus `MetricEngine` itself) or the
 //! `cube_equivalence` example needs them (noted on each). Everything else the
 //! fold machinery shares stays `pub(crate)`.
 
@@ -163,46 +163,6 @@ pub fn parse_capture_scope(
             "measure `{measure_key}` has unknown capture_scope `{capture_scope}`"
         ))
     })
-}
-
-/// A binary op combining two aligned base-metric values into a derived one — the
-/// constrained "formula" vocabulary (no general DSL; decision #8). `Div` is the
-/// ratio primitive (bugs-per-KLOC, cost-per-token).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-}
-
-impl BinaryOp {
-    /// Parse the spec string — word or symbol form. `ratio` aliases `div`.
-    pub fn parse(s: &str) -> Option<Self> {
-        Some(match s {
-            "add" | "+" => Self::Add,
-            "sub" | "-" => Self::Sub,
-            "mul" | "*" => Self::Mul,
-            "div" | "/" | "ratio" => Self::Div,
-            _ => return None,
-        })
-    }
-
-    /// Apply to `(a, b)`; `Div` by zero is undefined ⇒ `None` (the derived row is
-    /// dropped, never coerced to 0/∞).
-    fn apply(self, a: f64, b: f64) -> Option<f64> {
-        Some(match self {
-            Self::Add => a + b,
-            Self::Sub => a - b,
-            Self::Mul => a * b,
-            Self::Div => {
-                if b == 0.0 {
-                    return None;
-                }
-                a / b
-            }
-        })
-    }
 }
 
 /// A simple conjunctive predicate over a fact. Covers the common metric filters
@@ -379,14 +339,6 @@ pub struct SeriesRead {
     pub dim_eq: Option<(String, String)>,
     /// Collapse into calendar buckets.
     pub bucket: Option<crate::metric_bucket::TimeBucket>,
-}
-
-/// One row of a by-dimension rollup (the metric's "breakdown" card).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct RollupRow {
-    pub key: String,
-    pub value: f64,
-    pub subject_count: i64,
 }
 
 /// A located item behind a metric — the read-time "finding" view over a spec's
@@ -612,7 +564,7 @@ fn aggregate_facts(facts: &[&FactRow], agg: Aggregation) -> (f64, Option<f64>, O
 
 /// A RATIO cell that is 0/0 is NO DATA, not 0% — a coverage capture over zero
 /// instrumented lines must not render the worst possible reading (tsk109;
-/// matches `BinaryOp::Div`, which drops the row). Every point-emit site skips
+/// a ratio over nothing has no value). Every point-emit site skips
 /// such a cell — the fact fold, `aggregate_series`, and the cube's serve arms
 /// share this ONE predicate so they cannot drift.
 ///
@@ -1231,112 +1183,6 @@ pub(crate) fn range_value(series: &[SeriesPoint], temporal: Temporal) -> Option<
     }
 }
 
-/// Roll a measure's facts up by a dimension — the "breakdown" card (which
-/// package / language / model holds the most). Additivity-aware per the
-/// measure's `temporal_semantics` (the same BI distinction as [`range_value`]):
-/// - **semi-additive** (level gauge): only facts from the CURRENT captures
-///   (`current_caps` — the latest scan per (stream, producer), see
-///   [`current_capture_ids`]), the latest per subject, summed per group.
-///   Without the currency scope, a deleted file / renamed symbol keeps its
-///   stale last fact contributing to the breakdown forever (tsk44);
-/// - **additive** (event): EVERY fact counts — the group value is the running
-///   total (tokens by model is a total, not the last turn); `current_caps` is
-///   ignored;
-/// - **non-additive** (ratio): current captures, latest per subject, then per
-///   group Σnumerator/Σdenominator — never a sum (or mean) of percentages.
-///   Facts without ratio components fall back to the mean of their values.
-///
-/// Largest first; ties broken on key for determinism. Facts are expected
-/// oldest-first, so the last fact seen per subject is its latest.
-pub(crate) fn compute_rollup(
-    facts: &[FactRow],
-    dimension: &str,
-    temporal: Temporal,
-    current_caps: &std::collections::HashSet<i64>,
-) -> Vec<RollupRow> {
-    // The facts that contribute: all of them for an additive event measure;
-    // the CURRENT captures' facts otherwise.
-    //
-    // Currency is enforced by `current_caps` alone, which admits at most one
-    // capture per `(stream, producer)` — so every fact that survives the filter
-    // is from that partition's newest scan. Distinct partitions UNION into the
-    // group sums; worktree B never evicts worktree A, and one analyzer never
-    // evicts another for the same path (the tsk98 forbidden shape; tsk106).
-    //
-    // There is deliberately NO per-subject dedupe on top of that. It would be a
-    // no-op for gauge-style measures (one fact per subject per capture) and
-    // silently wrong for occurrence-grained ones — `oxplow.lint_hit` and
-    // `oxplow.todo` emit one fact PER HIT with the containing file as the
-    // subject, so keeping one per subject made the breakdown count files while
-    // the headline counted hits (tsk157).
-    let kept: Vec<&FactRow> = match temporal {
-        Temporal::Additive => facts
-            .iter()
-            .filter(|f| f.subject_ref.is_some() || f.path.is_some())
-            .collect(),
-        Temporal::SemiAdditive | Temporal::NonAdditive => facts
-            .iter()
-            .filter(|f| current_caps.contains(&f.capture_id))
-            .filter(|f| f.subject_ref.is_some() || f.path.is_some())
-            .collect(),
-    };
-
-    #[derive(Default)]
-    struct Acc {
-        value_sum: f64,
-        num: f64,
-        den: f64,
-        fact_count: i64,
-        subjects: std::collections::BTreeSet<String>,
-    }
-    let mut by_key: std::collections::BTreeMap<String, Acc> = std::collections::BTreeMap::new();
-    for f in kept {
-        let Some(key) = dim_value(f, dimension) else {
-            continue;
-        };
-        let entry = by_key.entry(key).or_default();
-        entry.value_sum += f.value;
-        entry.num += f.numerator.unwrap_or(0.0);
-        entry.den += f.denominator.unwrap_or(0.0);
-        entry.fact_count += 1;
-        if let Some(subject) = f.subject_ref.as_deref().or(f.path.as_deref()) {
-            entry.subjects.insert(subject.to_string());
-        }
-    }
-
-    let mut out: Vec<RollupRow> = by_key
-        .into_iter()
-        .map(|(key, acc)| {
-            let value = if acc.den != 0.0 {
-                // Ratio components present (coverage, pass-rate): re-derive
-                // Σnumerator/Σdenominator — never sum or average percentages.
-                // Applies to BOTH non-additive accumulating ratios AND
-                // semi-additive level ratios like coverage (tsk13).
-                acc.num / acc.den
-            } else {
-                match temporal {
-                    // A ratio measure whose facts lack num/den: mean of the
-                    // latest per-subject values (defensive — never sum %).
-                    Temporal::NonAdditive => acc.value_sum / acc.fact_count as f64,
-                    _ => acc.value_sum,
-                }
-            };
-            RollupRow {
-                key,
-                value,
-                subject_count: acc.subjects.len() as i64,
-            }
-        })
-        .collect();
-    out.sort_by(|a, b| {
-        b.value
-            .partial_cmp(&a.value)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.key.cmp(&b.key))
-    });
-    out
-}
-
 /// The CURRENT capture per (stream, producer): the newest capture in the union
 /// of the kept facts' captures and the producers' capture rows (which include
 /// EMPTY zero-hit captures — so a scan that found nothing empties the rollup
@@ -1378,39 +1224,6 @@ pub(crate) fn current_capture_ids(
         consider(&mut best, c.stream_id, &c.producer, c.captured_at, c.id);
     }
     best.values().map(|&(_, id)| id).collect()
-}
-
-/// Combine two base metrics' by-dimension rollups into a **derived metric**,
-/// inner-joining on the shared dimension key. The inner join is what enforces
-/// drill-across compatibility (decision #8): a derived value exists only for
-/// keys BOTH base metrics carry — a package with LOC but no bugs (or vice-versa)
-/// is *dropped*, never silently treated as zero, which would fabricate a ratio.
-/// `Div` by zero drops the row (undefined). This is also the server-side home of
-/// the Explorer's `buildScatterPoints` pairing: roll each metric up by the same
-/// grain (subject or dimension), then pair here. The result keeps `left`'s
-/// `subject_count` (the derived metric reads "left per right") and sorts
-/// largest-value first, ties on key — matching [`compute_rollup`].
-pub fn evaluate_formula(left: &[RollupRow], right: &[RollupRow], op: BinaryOp) -> Vec<RollupRow> {
-    let right_by: HashMap<&str, f64> = right.iter().map(|r| (r.key.as_str(), r.value)).collect();
-    let mut out: Vec<RollupRow> = left
-        .iter()
-        .filter_map(|l| {
-            let rv = right_by.get(l.key.as_str())?;
-            let value = op.apply(l.value, *rv)?;
-            Some(RollupRow {
-                key: l.key.clone(),
-                value,
-                subject_count: l.subject_count,
-            })
-        })
-        .collect();
-    out.sort_by(|a, b| {
-        b.value
-            .partial_cmp(&a.value)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.key.cmp(&b.key))
-    });
-    out
 }
 
 /// Memoized FACT-FALLBACK series (tsk205), valid only for one `(max capture,
@@ -1761,24 +1574,7 @@ impl MetricEngine {
         Ok(splice_zero_points(points, &caps, agg, group_by, stream))
     }
 
-    /// The by-dimension rollup (breakdown) for a measure, additivity-aware per
-    /// its `temporal_semantics` and scoped to the CURRENT captures (see
-    /// [`compute_rollup`] / [`current_capture_ids`]). Empty when unknown.
-    pub async fn rollup(
-        &self,
-        measure_key: &str,
-        dimension: &str,
-    ) -> Result<Vec<RollupRow>, DomainError> {
-        let Some(measure) = self.facts.get_measure(measure_key).await? else {
-            return Ok(Vec::new());
-        };
-        let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
-        let facts = self.scoped_facts(&measure, None).await?;
-        let current = self.currency(&measure, &facts).await?;
-        Ok(compute_rollup(&facts, dimension, temporal, &current))
-    }
-
-    /// The facts a point-in-time read (rollup / findings) should consider, per the
+    /// The facts a point-in-time read (findings) should consider, per the
     /// measure's `capture_scope`. For `per-path` this is the SQL tree fold — the
     /// latest capture per (producer, path) — so the read sees the whole repo, not
     /// the last commit's files. For `complete` it's the measure's facts as before.
@@ -1905,7 +1701,27 @@ impl MetricEngine {
         }
     }
 
-    /// The currency gate [`compute_rollup`] should apply, per `capture_scope`.
+    /// The facts that make up a measure's state NOW, across streams: every
+    /// fact of an additive (event) measure; otherwise only the current ones —
+    /// the tree fold for a per-path measure, the latest capture per (stream,
+    /// producer) for a complete one, so a fixed `unsafe` block or a deleted
+    /// file stops showing up, and a zero-hit rescan empties it (tsk44).
+    pub(crate) async fn current_facts(
+        &self,
+        measure: &oxplow_db::Measure,
+    ) -> Result<Vec<FactRow>, DomainError> {
+        let facts = self.scoped_facts(measure, None).await?;
+        if parse_temporal(&measure.key, &measure.temporal_semantics)? == Temporal::Additive {
+            return Ok(facts);
+        }
+        let current = self.currency(measure, &facts).await?;
+        Ok(facts
+            .into_iter()
+            .filter(|f| current.contains(&f.capture_id))
+            .collect())
+    }
+
+    /// The currency gate for a point-in-time read, per `capture_scope`.
     ///
     /// - `complete`: every capture restates the whole population, so "current" is
     ///   the latest capture per (stream, producer) — the existing gate (tsk44).
@@ -2144,56 +1960,6 @@ impl MetricEngine {
         ))
     }
 
-    /// The by-dimension rollup for a spec — the source measure's facts filtered by
-    /// the spec's predicate, then rolled up by `dimension` additivity-aware per
-    /// the measure's `temporal_semantics` (see [`compute_rollup`]). Empty for a
-    /// formula / unknown-measure spec.
-    pub async fn rollup_for_spec(
-        &self,
-        spec: &MetricSpec,
-        dimension: &str,
-    ) -> Result<Vec<RollupRow>, DomainError> {
-        self.rollup_for_spec_in_stream(spec, dimension, None).await
-    }
-
-    /// [`rollup_for_spec`] scoped to one stream (worktree) — a per-worktree
-    /// breakdown that doesn't mix another stream's scans (tsk46). `None` rolls
-    /// up across all streams.
-    pub async fn rollup_for_spec_in_stream(
-        &self,
-        spec: &MetricSpec,
-        dimension: &str,
-        stream: Option<i64>,
-    ) -> Result<Vec<RollupRow>, DomainError> {
-        if let Some(entity) = crate::entity_metrics::entity_of(spec) {
-            // Computed live over the entity as it stands (tsk322).
-            let dim = self.entity_dimension(spec, &entity.view, dimension).await?;
-            return crate::entity_metrics::rollup(&self.layer, &entity, &dim).await;
-        }
-        let Some(measure_key) = spec.source_measure.as_deref() else {
-            return Ok(Vec::new());
-        };
-        let Some(measure) = self.facts.get_measure(measure_key).await? else {
-            return Ok(Vec::new());
-        };
-        let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
-        let filter = spec_filter(spec)?;
-        // `scoped_facts` resolves the capture_scope axis: for a per-path measure it
-        // returns the tree-folded facts (latest capture per (producer, path)), so a
-        // breakdown reads the whole repo rather than the last commit's files.
-        let facts = self.scoped_facts(&measure, stream).await?;
-        let kept: Vec<FactRow> = facts.into_iter().filter(|f| filter.matches(f)).collect();
-        let current = self.currency(&measure, &kept).await?;
-        let mut rollup = compute_rollup(&kept, dimension, temporal, &current);
-        let scale = spec_value_scale(spec);
-        if scale != 1.0 {
-            for r in &mut rollup {
-                r.value *= scale;
-            }
-        }
-        Ok(rollup)
-    }
-
     /// The single headline number for a spec: its series collapsed across TIME per
     /// the source measure's `temporal_semantics` (semi-additive → last capture;
     /// additive → sum; ratio → Σn/Σd). `None` for a formula / unknown / empty spec.
@@ -2244,9 +2010,9 @@ impl MetricEngine {
     }
 
     /// The located items behind a spec — its filtered facts projected as
-    /// [`FactFinding`]s (the offenders drill-in that replaces the baked
-    /// `metric_finding`). `capture_id` scopes to one capture (a recording's
-    /// drill-in); `None` returns every matching fact. Empty for a formula /
+    /// [`FactFinding`]s: what `metric_findings()` reads (P4.8). `capture_id`
+    /// scopes to one capture (a recording's drill-in); `None` is the current
+    /// state ([`Self::current_facts`]). Empty for a formula /
     /// unknown-measure spec. Severity is the fact's reported severity or, absent
     /// one, derived from the value × the spec's thresholds × direction.
     pub async fn findings_for_spec(
@@ -2261,15 +2027,11 @@ impl MetricEngine {
             return Ok(Vec::new());
         };
         let filter = spec_filter(spec)?;
-        // Scope to the CURRENT tree for a per-path measure. Without this the
-        // drill-in lists every historical fact for a file — including the ones a
-        // later rescan superseded — so a fixed `unsafe` block would keep showing up
-        // forever. (Pinning an explicit `capture_id` still reads that one capture.)
         let facts = match capture_id {
             // Pinned drill-in: exactly that capture's facts — never the whole
             // measure history filtered in Rust (tsk75).
             Some(c) => self.facts.facts_for_captures(measure.id, vec![c]).await?,
-            None => self.scoped_facts(&measure, None).await?,
+            None => self.current_facts(&measure).await?,
         };
         Ok(facts
             .into_iter()
@@ -2682,287 +2444,6 @@ mod tests {
                 (Some("typescript".to_string()), 7.0),
             ]
         );
-    }
-
-    #[test]
-    fn rollup_counts_every_occurrence_when_a_subject_repeats_in_one_capture() {
-        // tsk157: `oxplow.lint_hit` and `oxplow.todo` emit ONE FACT PER
-        // OCCURRENCE with the containing FILE as the subject. Deduping by
-        // (stream, producer, subject) kept exactly one of them, so the
-        // breakdown counted FILES while the series/headline counted
-        // occurrences: 3 clippy errors in a.rs + 1 in b.rs read as 4 in the
-        // headline and 2 in the package card.
-        //
-        // The dedupe was never load-bearing here — `current_capture_ids` already
-        // admits at most ONE capture per (stream, producer), so every surviving
-        // fact for a subject comes from that same capture and is current. It is
-        // a no-op for gauge-style measures (one fact per subject per capture)
-        // and destructive for occurrence-grained ones.
-        let hit = |file: &str| FactRow {
-            subject_ref: Some(format!("file:{file}")),
-            path: Some(file.into()),
-            ..fact(2, "2026-06-30T11:00:00Z", 1.0)
-        };
-        let facts = vec![
-            hit("src/app/a.rs"),
-            hit("src/app/a.rs"),
-            hit("src/app/a.rs"),
-            hit("src/app/b.rs"),
-        ];
-        let rollup = compute_rollup(
-            &facts,
-            "package",
-            Temporal::SemiAdditive,
-            &current_capture_ids(&facts, &[]),
-        );
-        assert_eq!(rollup.len(), 1, "one package");
-        assert_eq!(rollup[0].key, "src/app");
-        assert_eq!(rollup[0].value, 4.0, "every hit counts, not one per file");
-        // Distinct FILES is still the right subject count — two files hold them.
-        assert_eq!(rollup[0].subject_count, 2);
-    }
-
-    #[test]
-    fn rollup_sums_latest_per_subject_by_package() {
-        // Semi-additive (level gauge): a.rs measured twice — only the latest
-        // (3.0) counts; summing snapshots across time would double-count.
-        let facts = vec![
-            FactRow {
-                subject_ref: Some("src/app/a.rs".into()),
-                path: Some("src/app/a.rs".into()),
-                ..fact(1, "2026-06-30T10:00:00Z", 9.0)
-            },
-            FactRow {
-                subject_ref: Some("src/app/a.rs".into()),
-                path: Some("src/app/a.rs".into()),
-                ..fact(2, "2026-06-30T11:00:00Z", 3.0)
-            },
-            FactRow {
-                subject_ref: Some("src/app/b.rs".into()),
-                path: Some("src/app/b.rs".into()),
-                ..fact(2, "2026-06-30T11:00:00Z", 4.0)
-            },
-            FactRow {
-                subject_ref: Some("src/util/c.rs".into()),
-                path: Some("src/util/c.rs".into()),
-                ..fact(2, "2026-06-30T11:00:00Z", 20.0)
-            },
-        ];
-        let rollup = compute_rollup(
-            &facts,
-            "package",
-            Temporal::SemiAdditive,
-            &current_capture_ids(&facts, &[]),
-        );
-        let rows: Vec<(String, f64, i64)> = rollup
-            .iter()
-            .map(|r| (r.key.clone(), r.value, r.subject_count))
-            .collect();
-        // src/util (20) > src/app (3 latest a.rs + 4 b.rs = 7).
-        assert_eq!(
-            rows,
-            vec![
-                ("src/util".to_string(), 20.0, 1),
-                ("src/app".to_string(), 7.0, 2),
-            ]
-        );
-    }
-
-    #[test]
-    fn rollup_drops_subjects_missing_from_the_current_capture() {
-        // tsk44: a deleted file's facts stop at an older capture; scoping the
-        // semi-additive collapse to the CURRENT capture per (stream, producer)
-        // keeps its stale value out of the breakdown forever-after.
-        let facts = vec![
-            FactRow {
-                subject_ref: Some("src/app/old.rs".into()),
-                path: Some("src/app/old.rs".into()),
-                ..fact(1, "2026-06-30T10:00:00Z", 4.0)
-            },
-            FactRow {
-                subject_ref: Some("src/app/kept.rs".into()),
-                path: Some("src/app/kept.rs".into()),
-                ..fact(2, "2026-06-30T11:00:00Z", 1.0)
-            },
-        ];
-        let rollup = compute_rollup(
-            &facts,
-            "package",
-            Temporal::SemiAdditive,
-            &current_capture_ids(&facts, &[]),
-        );
-        assert_eq!(rollup.len(), 1);
-        assert_eq!(rollup[0].key, "src/app");
-        assert_eq!(rollup[0].value, 1.0, "old.rs (deleted) contributes nothing");
-        assert_eq!(rollup[0].subject_count, 1);
-    }
-
-    #[test]
-    fn rollup_sums_every_fact_for_an_additive_measure() {
-        // Additive (event measure, e.g. tokens): every capture's facts count —
-        // latest-per-subject would report only the most recent event, not the
-        // total ("tokens by model" must be the running total, not the last turn).
-        let by_model = |cap: i64, at: &str, model: &str, v: f64| FactRow {
-            subject_kind: Some("model".into()),
-            subject_ref: Some(format!("model:{model}")),
-            ..fact(cap, at, v)
-        };
-        let facts = vec![
-            by_model(1, "2026-06-30T10:00:00Z", "opus", 100.0),
-            by_model(2, "2026-06-30T11:00:00Z", "opus", 50.0),
-            by_model(2, "2026-06-30T11:00:00Z", "haiku", 30.0),
-        ];
-        let rollup = compute_rollup(&facts, "subject", Temporal::Additive, &Default::default());
-        let rows: Vec<(String, f64, i64)> = rollup
-            .iter()
-            .map(|r| (r.key.clone(), r.value, r.subject_count))
-            .collect();
-        assert_eq!(
-            rows,
-            vec![
-                ("model:opus".to_string(), 150.0, 1),
-                ("model:haiku".to_string(), 30.0, 1),
-            ]
-        );
-    }
-
-    #[test]
-    fn rollup_rederives_ratio_for_a_non_additive_measure() {
-        // Non-additive (ratio, e.g. coverage): per group the value is
-        // Σnumerator/Σdenominator over the latest fact per subject — never a sum
-        // (or mean) of percentages, which weights a 10-line file like a
-        // 1000-line one.
-        let cov = |cap: i64, at: &str, p: &str, num: f64, den: f64| FactRow {
-            subject_ref: Some(p.to_string()),
-            path: Some(p.to_string()),
-            numerator: Some(num),
-            denominator: Some(den),
-            ..fact(cap, at, if den != 0.0 { num / den } else { 0.0 })
-        };
-        let facts = vec![
-            // a.rs re-measured — only the latest (80/100) counts.
-            cov(1, "2026-06-30T10:00:00Z", "src/app/a.rs", 10.0, 100.0),
-            cov(2, "2026-06-30T11:00:00Z", "src/app/a.rs", 80.0, 100.0),
-            cov(2, "2026-06-30T11:00:00Z", "src/app/b.rs", 5.0, 10.0),
-            cov(2, "2026-06-30T11:00:00Z", "src/util/c.rs", 9.0, 10.0),
-        ];
-        let rollup = compute_rollup(
-            &facts,
-            "package",
-            Temporal::NonAdditive,
-            &current_capture_ids(&facts, &[]),
-        );
-        let rows: Vec<(String, f64, i64)> = rollup
-            .iter()
-            .map(|r| (r.key.clone(), r.value, r.subject_count))
-            .collect();
-        // src/util: 9/10 = 0.9 > src/app: (80+5)/(100+10) ≈ 0.7727.
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].0, "src/util");
-        assert_eq!(rows[0].1, 0.9);
-        assert_eq!(rows[0].2, 1);
-        assert_eq!(rows[1].0, "src/app");
-        assert!((rows[1].1 - 85.0 / 110.0).abs() < 1e-9);
-        assert_eq!(rows[1].2, 2);
-    }
-
-    #[test]
-    fn rollup_rederives_ratio_for_a_semi_additive_ratio_measure() {
-        // Coverage is a semi-additive LEVEL ratio (tsk13): the per-package
-        // breakdown must re-derive Σn/Σd over the current capture, never sum
-        // the per-file percentages (which would exceed 1.0 for two files).
-        let cov = |cap: i64, at: &str, p: &str, num: f64, den: f64| FactRow {
-            subject_ref: Some(p.to_string()),
-            path: Some(p.to_string()),
-            numerator: Some(num),
-            denominator: Some(den),
-            ..fact(cap, at, if den != 0.0 { num / den } else { 0.0 })
-        };
-        let facts = vec![
-            cov(1, "2026-06-30T11:00:00Z", "src/app/a.rs", 80.0, 100.0),
-            cov(1, "2026-06-30T11:00:00Z", "src/app/b.rs", 5.0, 10.0),
-        ];
-        let rollup = compute_rollup(
-            &facts,
-            "package",
-            Temporal::SemiAdditive,
-            &current_capture_ids(&facts, &[]),
-        );
-        assert_eq!(rollup.len(), 1);
-        assert_eq!(rollup[0].key, "src/app");
-        // (80+5)/(100+10) ≈ 0.7727 — NOT 0.8 + 0.5 = 1.3.
-        assert!(
-            (rollup[0].value - 85.0 / 110.0).abs() < 1e-9,
-            "got {}",
-            rollup[0].value
-        );
-    }
-
-    fn roll(key: &str, value: f64, subject_count: i64) -> RollupRow {
-        RollupRow {
-            key: key.to_string(),
-            value,
-            subject_count,
-        }
-    }
-
-    #[test]
-    fn binary_op_parse_word_and_symbol_forms() {
-        assert_eq!(BinaryOp::parse("div"), Some(BinaryOp::Div));
-        assert_eq!(BinaryOp::parse("/"), Some(BinaryOp::Div));
-        assert_eq!(BinaryOp::parse("ratio"), Some(BinaryOp::Div));
-        assert_eq!(BinaryOp::parse("+"), Some(BinaryOp::Add));
-        assert_eq!(BinaryOp::parse("mul"), Some(BinaryOp::Mul));
-        assert_eq!(BinaryOp::parse("pow"), None);
-    }
-
-    #[test]
-    fn evaluate_formula_inner_joins_on_shared_key() {
-        // "bugs per KLOC" by package: bugs / loc, joined on package.
-        let bugs = vec![roll("src/app", 10.0, 3), roll("src/util", 4.0, 1)];
-        let loc = vec![
-            roll("src/app", 2.0, 3),
-            roll("src/util", 8.0, 1),
-            // src/lib has LOC but no bugs — must NOT appear (inner join, not zero-fill).
-            roll("src/lib", 5.0, 2),
-        ];
-        let derived = evaluate_formula(&bugs, &loc, BinaryOp::Div);
-        let rows: Vec<(String, f64, i64)> = derived
-            .iter()
-            .map(|r| (r.key.clone(), r.value, r.subject_count))
-            .collect();
-        // app 10/2=5.0 (kept left's subject_count=3), util 4/8=0.5; sorted desc.
-        assert_eq!(
-            rows,
-            vec![
-                ("src/app".to_string(), 5.0, 3),
-                ("src/util".to_string(), 0.5, 1),
-            ]
-        );
-        assert!(
-            !derived.iter().any(|r| r.key == "src/lib"),
-            "a key present in only one operand is dropped, not zero-filled"
-        );
-    }
-
-    #[test]
-    fn evaluate_formula_drops_divide_by_zero() {
-        let num = vec![roll("a", 3.0, 1), roll("b", 6.0, 1)];
-        let den = vec![roll("a", 0.0, 1), roll("b", 2.0, 1)];
-        let derived = evaluate_formula(&num, &den, BinaryOp::Div);
-        // a: 3/0 is undefined → dropped. b: 6/2 = 3.
-        assert_eq!(derived.len(), 1);
-        assert_eq!(derived[0].key, "b");
-        assert_eq!(derived[0].value, 3.0);
-    }
-
-    #[test]
-    fn evaluate_formula_supports_other_ops() {
-        let a = vec![roll("x", 5.0, 1)];
-        let b = vec![roll("x", 3.0, 1)];
-        assert_eq!(evaluate_formula(&a, &b, BinaryOp::Add)[0].value, 8.0);
-        assert_eq!(evaluate_formula(&a, &b, BinaryOp::Sub)[0].value, 2.0);
-        assert_eq!(evaluate_formula(&a, &b, BinaryOp::Mul)[0].value, 15.0);
     }
 
     #[test]
@@ -3741,7 +3222,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rollup_for_spec_applies_filter_then_groups_by_dimension() {
+    async fn a_grouped_series_applies_the_filter_then_groups() {
         let (engine, facts, complexity) = engine_fixture().await;
         facts
             .record_facts(
@@ -3773,14 +3254,21 @@ mod tests {
         facts.upsert_spec(spec).await.unwrap();
         let spec = facts.get_spec("acme.h").await.unwrap().unwrap();
 
-        let rollup = engine.rollup_for_spec(&spec, "package").await.unwrap();
-        let rows: Vec<(String, f64)> = rollup.iter().map(|r| (r.key.clone(), r.value)).collect();
-        // b.rs (3.0) filtered out; util (20) sorts above app (12).
+        let by_package = engine
+            .series_for_spec(&spec, Some("package"))
+            .await
+            .unwrap();
+        let mut rows: Vec<(String, f64)> = by_package
+            .iter()
+            .map(|p| (p.group.clone().unwrap(), p.value))
+            .collect();
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        // b.rs (3.0) is filtered out before grouping.
         assert_eq!(
             rows,
             vec![
-                ("src/util".to_string(), 20.0),
                 ("src/app".to_string(), 12.0),
+                ("src/util".to_string(), 20.0),
             ]
         );
     }
@@ -3796,11 +3284,6 @@ mod tests {
 
         assert!(engine
             .series_for_spec(&spec, None)
-            .await
-            .unwrap()
-            .is_empty());
-        assert!(engine
-            .rollup_for_spec(&spec, "package")
             .await
             .unwrap()
             .is_empty());
@@ -4177,10 +3660,13 @@ mod tests {
             Some(80.0),
             "headline on the percent scale, comparable to target/warn/fail"
         );
-        let rollup = engine.rollup_for_spec(&spec, "package").await.unwrap();
-        assert_eq!(rollup.len(), 1);
-        assert_eq!(rollup[0].key, "src");
-        assert_eq!(rollup[0].value, 80.0, "per-group Σn/Σd, percent scale");
+        let by_package = engine
+            .series_for_spec(&spec, Some("package"))
+            .await
+            .unwrap();
+        assert_eq!(by_package.len(), 1);
+        assert_eq!(by_package[0].group.as_deref(), Some("src"));
+        assert_eq!(by_package[0].value, 80.0, "per-group Σn/Σd, percent scale");
     }
 
     #[tokio::test]

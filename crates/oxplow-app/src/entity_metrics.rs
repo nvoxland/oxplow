@@ -23,7 +23,7 @@ use oxplow_db::{Dimension, MetricSpec, SqlCell};
 use oxplow_domain::{DomainError, Timestamp};
 
 use crate::metric_bucket::TimeBucket;
-use crate::metric_engine::{RollupRow, SeriesPoint, TimeWindow};
+use crate::metric_engine::{SeriesPoint, TimeWindow};
 
 /// The entity half of a stored spec, if it is an entity metric.
 pub fn entity_of(spec: &MetricSpec) -> Option<EntitySpec> {
@@ -369,25 +369,6 @@ pub async fn current(
     .await
 }
 
-/// A by-dimension breakdown: the metric over every row, per group, largest first.
-pub async fn rollup(
-    layer: &crate::sql_gateway::SqlGateway,
-    spec: &EntitySpec,
-    dim: &EntityDimensionSpec,
-) -> Result<Vec<RollupRow>, DomainError> {
-    let mut rows: Vec<RollupRow> = current(layer, spec, Some(dim))
-        .await?
-        .into_iter()
-        .map(|r| RollupRow {
-            key: r.group.unwrap_or_else(|| "(none)".into()),
-            value: r.value.unwrap_or(0.0),
-            subject_count: r.rows,
-        })
-        .collect();
-    rows.sort_by(|a, b| b.value.total_cmp(&a.value).then_with(|| a.key.cmp(&b.key)));
-    Ok(rows)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -512,10 +493,11 @@ mod tests {
             expr: "t.title".into(),
             join: Some("LEFT JOIN v_thread t ON t.id = e.thread_id".into()),
         };
-        let rows = rollup(&l, &done(), &by_thread).await.unwrap();
+        let rows = current(&l, &done(), Some(&by_thread)).await.unwrap();
+        assert_eq!(rows.len(), 1);
         assert_eq!(
-            (rows[0].key.as_str(), rows[0].value, rows[0].subject_count),
-            ("T", 3.0, 3)
+            (rows[0].group.as_deref(), rows[0].value, rows[0].rows),
+            (Some("T"), Some(3.0), 3)
         );
     }
 
@@ -548,11 +530,14 @@ mod tests {
         assert_eq!(one("p90").await, 50.0);
         assert_eq!(one("sum").await, 150.0);
         assert_eq!(one("avg").await, 30.0);
-        let by_prio = rollup(&l, &stat("count_distinct"), &priority())
+        let by_prio = current(&l, &stat("count_distinct"), Some(&priority()))
             .await
             .unwrap();
-        assert_eq!(by_prio[0].key, "high");
-        assert_eq!(by_prio[0].value, 3.0);
+        let high = by_prio
+            .iter()
+            .find(|r| r.group.as_deref() == Some("high"))
+            .unwrap();
+        assert_eq!(high.value, Some(3.0));
     }
 
     /// A distinct count doesn't add across buckets: the headline is one

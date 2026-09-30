@@ -1770,7 +1770,7 @@ mod tests {
     async fn a_ratio_over_a_zero_denominator_emits_no_point_on_either_path() {
         // tsk109. A coverage capture over zero instrumented lines is NO DATA,
         // not 0% (the worst possible reading) — matching the substrate's
-        // stance elsewhere and `BinaryOp::Div`, which drops the row. Both
+        // stance elsewhere (a ratio over nothing has no value). Both
         // paths must skip the point identically, and the headline collapse
         // must read None rather than 0.
         let (engine, facts, builder) = fixture().await;
@@ -1988,43 +1988,6 @@ mod tests {
             engine.headline_for_spec(&spec).await.unwrap(),
             Some(2.0),
             "the headline is main's state — the newest capture's partition"
-        );
-        let rows = engine.rollup_for_spec(&spec, "subject").await.unwrap();
-        assert_eq!(
-            rows.iter()
-                .map(|r| (r.key.as_str(), r.value))
-                .collect::<Vec<_>>(),
-            vec![("A", 1.0), ("B", 1.0)],
-            "the breakdown reads the SAME partition: main's A=1 — never \
-             feature-x's A=0 evicting it"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_rollup_unions_worktrees_instead_of_evicting_one() {
-        // tsk106, the fallback path (cube not built). `compute_rollup` keyed
-        // its latest-per-subject map by the subject STRING alone, so worktree
-        // 2's newer fact evicted worktree 1's for the same test — a merged
-        // state belonging to neither (the tsk98 forbidden shape). Unscoped
-        // reads union each worktree's own current state instead.
-        let (engine, facts, _builder) = fixture().await;
-        let m = per_subject_measure(&facts, "acme.test_case").await;
-        facts
-            .record_facts(cap_in(1, "2026-06-30T10:00:00Z"), vec![case(m, "S", 3.0)])
-            .await
-            .unwrap();
-        facts
-            .record_facts(cap_in(2, "2026-06-30T11:00:00Z"), vec![case(m, "S", 5.0)])
-            .await
-            .unwrap();
-        let spec = spec(&facts, "acme.cases", "acme.test_case", "sum").await;
-        let rows = engine.rollup_for_spec(&spec, "subject").await.unwrap();
-        assert_eq!(
-            rows.iter()
-                .map(|r| (r.key.as_str(), r.value))
-                .collect::<Vec<_>>(),
-            vec![("S", 8.0)],
-            "both worktrees' current S facts stand — 3 + 5, not last-writer-wins"
         );
     }
 

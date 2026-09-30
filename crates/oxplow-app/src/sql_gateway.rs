@@ -4,8 +4,8 @@
 //! through it. The database crate's `SemanticLayer` owns the mechanics
 //! (the single-read check, the recording authorizer, `query_only`, the
 //! row cap and timeout); the gateway is where what needs the rest of the
-//! app joins them — the metric function (P4.5) and model freshness
-//! (P4.6).
+//! app joins them — the metric functions (`metric_grid()`, P4.5;
+//! `metric_findings()`, P4.8) and model freshness (P4.6).
 
 use oxplow_db::{Database, Reads, SemanticLayer, SqlCell, SqlQuery, SqlQueryResult, TempTable};
 use oxplow_domain::DomainError;
@@ -51,27 +51,60 @@ impl SqlGateway {
         self
     }
 
-    /// Run one read-only query; the result says what it read. A
-    /// `metric_grid()` query has its metrics' series read first — before
-    /// any connection is taken — and runs against them as a temp table.
+    /// Run one read-only query; the result says what it read. A query
+    /// reading metrics — `metric_grid()`, `metric_findings()` — has them
+    /// computed first, before any connection is taken, and runs against
+    /// them as temp tables.
     pub async fn run(&self, mut query: SqlQuery) -> Result<SqlQueryResult, DomainError> {
-        let Some(plan) = crate::metric_grid::plan(&query.sql)? else {
-            return Ok(self.fresh(self.layer.run(query).await?));
-        };
         // Boxed: the engine reads entity metrics through a gateway, so
         // this future contains another `run`.
-        let grid =
-            Box::pin(plan.materialize(&query.sql, self.engine()?, query.stream, true)).await?;
-        query.sql = grid.sql;
-        query.temp.push(grid.table);
+        let (sql, temp, measures) =
+            Box::pin(self.materialize(&query.sql, query.stream, true)).await?;
+        query.sql = sql;
+        query.temp.extend(temp);
         let mut out = self.layer.run(query).await?;
-        out.reads.measures = grid.measures;
+        out.reads.measures = measures;
         Ok(self.fresh(out))
+    }
+
+    /// `sql` with its metric functions computed (`with_rows`) or only
+    /// resolved (a check): the rewritten SQL, its temp tables, and the
+    /// measures behind them. Each function is planned over the SQL the
+    /// previous one rewrote, so their offsets hold.
+    async fn materialize(
+        &self,
+        sql: &str,
+        stream: Option<i64>,
+        with_rows: bool,
+    ) -> Result<(String, Vec<TempTable>, Vec<String>), DomainError> {
+        let mut sql = sql.to_string();
+        let mut temp = Vec::new();
+        let mut measures = Vec::new();
+        if let Some(plan) = crate::metric_grid::plan(&sql)? {
+            let grid = plan
+                .materialize(&sql, self.engine()?, stream, with_rows)
+                .await?;
+            sql = grid.sql;
+            temp.push(grid.table);
+            measures.extend(grid.measures);
+        }
+        if let Some(plan) = crate::metric_findings::plan(&sql)? {
+            let found = plan.materialize(&sql, self.engine()?, with_rows).await?;
+            sql = found.sql;
+            temp.push(found.table);
+            measures.extend(found.measures);
+        }
+        measures.sort();
+        measures.dedup();
+        Ok((sql, temp, measures))
     }
 
     fn engine(&self) -> Result<&crate::metric_engine::MetricEngine, DomainError> {
         self.engine.as_deref().ok_or_else(|| {
-            DomainError::Invalid("metric_grid() isn't available here (no metric engine)".into())
+            DomainError::Invalid(
+                "metric_grid() and metric_findings() aren't available here (no metric engine)"
+                    .into(),
+            )
         })
     }
 
@@ -89,19 +122,16 @@ impl SqlGateway {
     /// Check a query compiles as a read, without running it; say what it
     /// would read.
     pub async fn check(&self, sql: &str) -> Result<Reads, DomainError> {
-        let Some(plan) = crate::metric_grid::plan(sql)? else {
+        // The metrics are resolved (a dimension checked) but not read; the
+        // query compiles against empty tables.
+        let (rewritten, temp, measures) = Box::pin(self.materialize(sql, None, false)).await?;
+        if temp.is_empty() {
             return self.layer.check(sql).await;
-        };
-        // The metrics are resolved (and their dimension checked) but not
-        // read; the query compiles against an empty grid.
-        let grid = Box::pin(plan.materialize(sql, self.engine()?, None, false)).await?;
-        let mut q = SqlQuery::new(grid.sql).limit(Some(1));
-        q.temp.push(TempTable {
-            rows: Vec::new(),
-            ..grid.table
-        });
+        }
+        let mut q = SqlQuery::new(rewritten).limit(Some(1));
+        q.temp = temp;
         let mut reads = self.layer.check_with(q).await?;
-        reads.measures = grid.measures;
+        reads.measures = measures;
         Ok(reads)
     }
 

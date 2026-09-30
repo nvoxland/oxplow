@@ -724,7 +724,7 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   as its ratio components so the non-additive collapse (Σn/Σd) yields the mean
   across ALL facts — the V47 mean-across-closes measures (cycle_time,
   effort) would otherwise collapse to a den=0 → 0.0 headline; `compute_rollup(facts, dimension, temporal,
-  current_caps)` → `RollupRow`s, additivity-aware like `range_value` (tsk41) and
+  current_caps)` → `RollupRow`s (deleted in tsk516 — slices are `metric_grid(…, dim)`), additivity-aware like `range_value` (tsk41) and
   scoped to the CURRENT captures (tsk44): semi-additive → only facts in the
   latest capture per (stream, producer) (`current_capture_ids` — else a deleted
   file's stale last fact haunts the breakdown forever) — summed per
@@ -776,7 +776,7 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   derived from the facts that ever matched the spec's filter
   (`captures_for_producers` on the fact store fetches their captures).
 - **Spec-driven reads** (tsk29 — a metric *key* → its computed result): given a
-  `MetricSpec`, `series_for_spec(spec, group_by)` / `rollup_for_spec(spec, dim)` /
+  `MetricSpec`, `series_for_spec(spec, group_by)` / `rollup_for_spec(spec, dim)` (deleted, tsk516) /
   `headline_for_spec(spec)` resolve the spec's `source_measure` + `aggregation`
   (`FactFilter::from_json` parses `filter_json`) and run the pure cores;
   `headline_for_spec` collapses across time per the *source measure's*
@@ -893,10 +893,10 @@ The UI shows the entity aggregation (`specAggregation`).
   unbucketed aggregate over the whole range, so a `count_distinct`
   headline isn't the sum of its daily counts; otherwise it's the latest
   bucket.
-- **State metrics** read their captured facts. Their grouped reads and
-  breakdowns are live, current value only.
-- **Dispatch.** `series_for_spec_read`, `headline_from_series` and
-  `rollup_for_spec_in_stream` route entity specs to this module. Grouping
+- **State metrics** read their captured facts. Their grouped reads are
+  live, current value only.
+- **Dispatch.** `series_for_spec_read` and `headline_from_series` route
+  entity specs to this module. Grouping
   by a non-entity dimension, or `dim_eq`, is refused with an error naming
   the metric's entity dims. Stream scoping doesn't apply (entities are
   project-wide).
@@ -1087,8 +1087,8 @@ carried on the fact's `rule` column via the new `GaugeFact.rule`). Each gauge em
 one per-file `ast_hit` fact (value=that file's count, `rule`=its slug) beside its
 per-file sample; each metric is a `Sum(oxplow.ast_hit)` spec filtered by
 `dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`, seeded in `seed_catalog`). Idioms
-sharing the measure never collide because `rollup_for_spec` applies the rule filter
-**before** the per-subject rollup. `per_language_gauge_facts_reaggregate_to_the_baked_headline`
+sharing the measure never collide because every spec read applies the rule filter
+**before** it aggregates. `per_language_gauge_facts_reaggregate_to_the_baked_headline`
 pins each spec's `Sum` to its baked headline. The `<slug>` in the script and the
 spec MUST match (the equivalence test catches a drift → spec count 0 ≠ baked).
 
@@ -1125,7 +1125,12 @@ authoritative store; the fact is the analytics grain.
 — `metric_grid(bucket[, dim])` with `MEASURE('<key>')` for series (the
 engine computes each one; see `.context/semantic-layer.md` "Metrics in
 SQL"), and the views `v_metric_spec`, `v_metric_catalog`, `v_measure`,
-`v_dimension`, `v_capture` and `v_fact` for definitions and raw facts. The
+`v_dimension`, `v_capture` and `v_fact` for definitions and raw facts, and
+`metric_findings(key[, capture])` for the located items behind a metric as
+they stand now. The engine's by-dimension rollup (`rollup_for_spec`,
+`compute_rollup`, `RollupRow`) and the never-wired formula evaluator
+(`evaluate_formula`, `BinaryOp`) are deleted: a slice is
+`metric_grid(bucket, dim)` (tsk516). The
 metric-specific MCP reads (`list_metric_definitions`, `list_metric_samples`,
 `get_metric_summary`, `metric_breakdown`, `list_metric_findings`,
 `list_measures`, `list_dimensions`, `list_facts`, `metric_series`,
@@ -1435,7 +1440,7 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   `v_metric_catalog`. The one metric IPC left is `enable_metrics`, below. The dimension roll-up, per-capture
   findings, measure series/rollup and effort-delta IPC commands were removed
   with the UI that used them (tsk309); agents slice with `metric_grid(…, dim)`
-  and read offenders from `v_fact`, and per-effort deltas are
+  and read offenders with `metric_findings()`, and per-effort deltas are
   `v_effort_metric_delta`. The agent
   gets the same numbers as prompt text via oxplow-analytics' `metric-deltas`
   advisory (over the stored `v_effort_metric_delta`).

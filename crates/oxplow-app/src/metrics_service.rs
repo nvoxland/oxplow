@@ -4077,15 +4077,28 @@ def transform(input):
             .await
             .unwrap()
             .unwrap();
-        let rollup = engine
-            .rollup_for_spec(&spec, "oxplow.language")
-            .await
-            .unwrap();
-        assert_eq!(rollup.len(), 1, "one language group, got {rollup:?}");
-        assert_eq!(rollup[0].key, "rust");
+        let groups = |dim: &'static str| {
+            let engine = engine.clone();
+            let spec = spec.clone();
+            async move {
+                engine
+                    .series_for_spec(&spec, Some(dim))
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|p| (p.group, p.value))
+                    .collect::<Vec<_>>()
+            }
+        };
+        let by_language = groups("oxplow.language").await;
+        assert_eq!(
+            by_language.len(),
+            1,
+            "one language group, got {by_language:?}"
+        );
+        assert_eq!(by_language[0].0.as_deref(), Some("rust"));
         // The bare key still slices identically.
-        let bare = engine.rollup_for_spec(&spec, "language").await.unwrap();
-        assert_eq!(bare, rollup);
+        assert_eq!(groups("language").await, by_language);
     }
 
     #[tokio::test]
@@ -4231,13 +4244,21 @@ def transform(input):
             .unwrap();
         assert_eq!(hist.iter().map(|p| p.value).collect::<Vec<_>>(), vec![3.0]);
         assert_eq!(e.headline_for_spec(&open).await.unwrap(), Some(3.0));
-        // Grouped reads and breakdowns are live.
-        let rows = e.rollup_for_spec(&open, "work.priority").await.unwrap();
+        // Grouped reads are live.
+        let mut rows: Vec<(Option<String>, f64)> = e
+            .series_for_spec_in_stream(&open, Some("work.priority"), None, None)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|p| (p.group, p.value))
+            .collect();
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(
-            rows.iter()
-                .map(|r| (r.key.as_str(), r.value))
-                .collect::<Vec<_>>(),
-            vec![("high", 2.0), ("low", 1.0)]
+            rows,
+            vec![
+                (Some("high".to_string()), 2.0),
+                (Some("low".to_string()), 1.0)
+            ]
         );
         // Entity metrics are in the catalog like any other.
         let catalog = svc.metrics.catalog().await;
