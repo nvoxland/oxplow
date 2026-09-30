@@ -4,8 +4,8 @@ A provider is a program oxplow talks to — an issue tracker's bridge, a
 docs system's — that implements one of oxplow's capabilities (work items
 first) outside the app (P5.D, `target-architecture.md` §10). This doc
 covers the protocol (D1), the fake provider (D2) and the host with its
-consent and spawn rules (D3); instances and health (D4) and the
-conformance kit (D5) extend it as they land.
+consent and spawn rules (D3) and instances with health (D4); the
+conformance kit (D5) extends it as it lands.
 
 ## The protocol (`crates/oxplow-provider-protocol`)
 
@@ -130,31 +130,81 @@ first difference), and `check` of the instance's config must return a
 handle (`HostError::Unconfigured { problems }` otherwise). Requests from
 the provider are answered `MethodNotFound`.
 
-**The registry** (`registry.rs`, `Services.providers`): `enable(ext,
+**Instances** (§10.3, minimal: project scope only). An instance is
+`<extension>/<provider id>`, configured in `.oxplow/project.yaml`:
+
+```yaml
+extensionInstances:
+  tracker/linear: { enabled: true, config: { team: ENG } }
+```
+
+The key is human-only (`HUMAN_ONLY_KEYS`: enabling runs a program) and
+shared with the team; whether it *runs* is per machine (approval,
+credentials, health). The config object is the provider's
+`config_schema`'s; `check` validates it.
+
+**The registry** (`registry.rs`, `Services.providers`) keeps the running
+instances matching the config: `reconcile()` runs at boot and on every
+`ConfigChanged` (`spawn_reconciler`), starting enabled instances and
+stopping the rest (a config or spec change restarts one). `enable(ext,
 spec, config)` starts an instance and only then registers its declared
 commands on the bus as `<id>.<name>` (`External`, `Experimental`, all
 invokers; confirm / effect / undoable as declared) and its capability
-provider (`ExternalWorkItems`) in `Services.work_items`; any refusal
-registers nothing. `disable(id)` removes both and kills the process. An
-id already used as a command namespace or provider is refused, and so is
-a declared event type the host doesn't know with exactly that schema (a
-provider emits core types only for now; its own types are P7). One
-process per instance: a call that finds it dead (`Peer::is_closed`)
-starts it again, and a failed start backs off exponentially (2 s … 60 s)
-before the next try. A command's run invokes the process and hands the
-bus its result, its inverse (as `<id>.<command>`) and its events —
-refused if a type isn't declared or a `work_item.recorded` names another
-provider's item.
+provider (`ExternalWorkItems`) in `Services.work_items`. A refusal —
+unapproved, unconfigured, a handshake that doesn't match — registers
+nothing; a start that merely failed (it may come up) registers and
+counts as a failure, and its next call restarts it after a backoff that
+doubles from `MachineEnv.provider_backoff` (1 s in the app, 0 in
+`Services::in_memory`) up to 60 s. `stop(instance)` removes both and
+kills the process. An id already used as a command namespace or
+provider is refused, and so is a declared event type the host doesn't
+know with exactly that schema (a provider emits core types only for
+now; its own types are P7). A command's run invokes the process and
+hands the bus its result, its inverse (as `<id>.<command>`) and its
+events — refused if a type isn't declared or a `work_item.recorded`
+names another provider's item.
 
-**What D4 adds:** the `extensionInstances` config that enables instances
-at boot, health (`InstanceHealth`, auto-disable after repeated failures)
-and the Settings → Integrations page. Until then an instance is enabled
-only by code (the tests).
+**Health** (`InstanceHealth { state, consecutive_failures, last_ok_at,
+mean_invoke_ms }`, per machine, in memory): `state` is `off`,
+`missing` (configured, but no enabled extension declares it),
+`unapproved`, `unconfigured { problems }`, `checking`, `ready`,
+`failing { errors }` (the last five) or `disabled { reason }`. A failed
+start or call counts (a refused input or a cancel doesn't); a success
+resets the count and updates `last_ok_at` and the moving-average
+`mean_invoke_ms`. **Three failures in a row disable the instance**: it
+stops and `provider.disabled@1 { instance, reason }` is logged (source
+`system:providers`, subject `plugin:<extension>`). So is a handshake that
+doesn't match the approved declarations. The log is what keeps it off,
+across reconciles and restarts: an instance whose latest
+`provider.disabled` has no later `provider.enabled` stays `disabled`.
+Only a person turns it back on — **`provider.enable { instance }`**
+(human-only, `External`, not undoable), which logs `provider.enabled@1`,
+resets the count and reconciles.
+
+**Settings → Integrations** (`IntegrationsSection.tsx`, IPC UI-only in
+the parity table): `list_provider_instances` (every declared provider and
+configured instance, with health, approval, credential status and the
+config schema), `check_provider_instance { instance, config }` (start
+it with that config and `check`, enabling and saving nothing — the
+outcome is the view's state) and `set_provider_instance { instance,
+enabled, config }` (`ProviderRegistry::set_instance`: enabling checks
+first and refuses an unapproved or unconfigured instance, writing
+nothing, with the problem's field as `/config/<path>`; then `config.set`
+of `extensionInstances` and, to enable, `provider.enable`). Each row
+shows its state, its credentials (set into the keychain through
+`set_source_credential`, which accepts a provider's credentials too),
+the config as JSON (Escape resets an edit; invalid JSON disables the
+actions), Check and Enable / Disable / Enable again. Approving the
+program stays in Data → Programs.
 
 **Tests** (`providers/tests.rs`) run the real fake binary (built beside
 the test binary by the workspace build) through a script entry in a
 temp extension: an unapproved provider is refused and registers
 nothing; an edited declarations file is shown unapproved and refused;
-the `bad-declarations` hook is refused naming `/commands`, a config
-without `team` names `/team`; and the work-items conformance suite
-passes through `ExternalWorkItems` over the fake.
+the `bad-declarations` hook is refused naming `/commands` and disables
+the instance; an unconfigured instance can't be enabled (nothing
+written) and a configured one enables, writes `extensionInstances` and
+disables again; `fail-next:3` disables it after three failures with the
+reason logged, keeps it off across a reconcile, refuses an agent's
+`provider.enable` and comes back on a person's; and the work-items
+conformance suite passes through `ExternalWorkItems` over the fake.

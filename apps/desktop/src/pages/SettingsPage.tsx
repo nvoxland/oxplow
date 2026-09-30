@@ -14,6 +14,7 @@ import { Page } from "../tabs/Page.js";
 import { LspServersSection } from "../components/LspServersSection.js";
 import { ExtensionsSection } from "../components/ExtensionsSection.js";
 import { DataSection } from "../components/DataSection.js";
+import { IntegrationsSection } from "../components/IntegrationsSection.js";
 import { SettingsSlotSections } from "../lens/SettingsSlotSections.js";
 import { AiSection } from "../components/AiSection.js";
 import { agentLabel, ALL_AGENT_KINDS } from "../agentKinds.js";
@@ -237,6 +238,16 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             are approved here; set credentials under Extensions.
           </Hint>
           <DataSection />
+        </Section>
+
+        <Section title="Integrations">
+          <Hint>
+            Outside systems (an issue tracker, say) that extensions connect through a provider program. Each
+            instance&apos;s config is saved in <code>.oxplow/project.yaml</code> for your team; approving and running
+            the program is per machine. Enabling checks the config first; three failures in a row turn an
+            instance off here until you enable it again. Its credentials go to your OS keychain.
+          </Hint>
+          <IntegrationsSection />
         </Section>
 
         <SettingsSlotSections section={(title, body) => <Section title={title}>{body}</Section>} />

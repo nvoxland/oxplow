@@ -121,8 +121,9 @@ pub fn credential_account(project: &str, extension: &str, name: &str) -> String 
     format!("source:{project}:{extension}:{name}")
 }
 
-/// Set (or with `None`, clear) a credential some source of `extension`
-/// declares. For the person, from the UI; agents can't reach this.
+/// Set (or with `None`, clear) a credential some source or provider of
+/// `extension` declares (both read the same keychain account). For the
+/// person, from the UI; agents can't reach this.
 pub fn set_source_credential(
     ctx: &Sources<'_>,
     extension: &str,
@@ -136,13 +137,15 @@ pub fn set_source_credential(
         .find(|e| e.name == extension)
         .cloned()
         .ok_or(DomainError::NotFound)?;
-    if !ext
+    let declared = ext
         .sources
         .iter()
-        .any(|s| s.credentials.iter().any(|c| c == name))
-    {
+        .flat_map(|s| s.credentials.iter())
+        .chain(ext.providers.iter().flat_map(|p| p.credentials.iter()))
+        .any(|c| c == name);
+    if !declared {
         return Err(DomainError::Invalid(format!(
-            "no source in `{extension}` declares a credential named `{name}`"
+            "no source or provider in `{extension}` declares a credential named `{name}`"
         )));
     }
     let account = credential_account(&ctx.project, extension, name);

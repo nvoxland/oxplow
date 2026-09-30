@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`provider.enabled@1`: a person enabled an extension provider's\ninstance on this machine (`provider.enable`), clearing an automatic\ndisable.",
+  "properties": {
+    "instance": {
+      "description": "`<extension>/<provider id>`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "instance"
+  ],
+  "title": "ProviderEnabledV1",
+  "type": "object"
+}

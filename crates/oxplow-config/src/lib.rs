@@ -834,6 +834,10 @@ pub struct OxplowConfig {
     /// [`acp_presets`] by [`resolve_acp_agents`].
     #[serde(rename = "acpAgents")]
     pub acp_agents: Vec<AcpAgentConfig>,
+    /// The project's extension provider instances
+    /// (`extensionInstances: { "<ext>/<id>": { enabled, config } }`).
+    #[serde(rename = "extensionInstances")]
+    pub extension_instances: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
     /// This project's AI role assignments (`ai: { roles: … }`), layered
     /// over the user-global `ai.yaml`. Keyed by role name (one of
     /// [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
@@ -1030,6 +1034,9 @@ struct RawConfig {
     /// The project's ACP agents, layered over the presets. Runs programs.
     #[serde(rename = "acpAgents", default)]
     acp_agents: Option<Vec<AcpAgentConfig>>,
+    /// Instances of extension providers, by `<extension>/<provider id>`: `{ enabled, config }` (the provider's instance config). Enabling one runs its program once this machine approved it.
+    #[serde(rename = "extensionInstances", default)]
+    extension_instances: Option<std::collections::BTreeMap<String, ExtensionInstanceConfig>>,
     /// AI role assignments `{ roles: { <role>: { provider, model } } }`, layered over the user's ai.yaml.
     #[serde(default)]
     ai: Option<RawAiBlock>,
@@ -1439,6 +1446,14 @@ pub fn render_project_config(config: &OxplowConfig, fallback_name: &str) -> serd
         );
     }
 
+    if !config.extension_instances.is_empty() {
+        doc.insert(
+            "extensionInstances".into(),
+            serde_yaml::to_value(&config.extension_instances)
+                .expect("extension instances serialize"),
+        );
+    }
+
     if !config.extensions_disabled.is_empty() {
         let mut ext = serde_yaml::Mapping::new();
         ext.insert(
@@ -1613,9 +1628,50 @@ fn default_config(project_name: String) -> OxplowConfig {
         zones: Vec::new(),
         agent_models: Default::default(),
         acp_agents: Vec::new(),
+        extension_instances: std::collections::BTreeMap::new(),
         ai_roles: Default::default(),
         extensions_disabled: Vec::new(),
     }
+}
+
+/// One instance of an extension's provider (`extensionInstances`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionInstanceConfig {
+    /// Run it (once this machine approved the provider).
+    #[serde(default)]
+    pub enabled: bool,
+    /// The instance's config, as the provider's `config_schema` describes.
+    #[serde(default = "empty_object")]
+    #[specta(type = oxplow_domain::Json)]
+    pub config: serde_json::Value,
+}
+
+fn empty_object() -> serde_json::Value {
+    serde_json::Value::Object(serde_json::Map::new())
+}
+
+/// Validate `extensionInstances:`: keyed `<extension>/<provider id>`, each
+/// config an object.
+fn validate_extension_instances(
+    raw: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
+) -> Result<std::collections::BTreeMap<String, ExtensionInstanceConfig>, ConfigError> {
+    for (key, instance) in &raw {
+        let well_formed = key
+            .split_once('/')
+            .is_some_and(|(ext, id)| !ext.is_empty() && !id.is_empty() && !id.contains('/'));
+        if !well_formed {
+            return Err(ConfigError::Invalid(format!(
+                "extensionInstances: `{key}` must be `<extension>/<provider id>`"
+            )));
+        }
+        if !instance.config.is_object() {
+            return Err(ConfigError::Invalid(format!(
+                "extensionInstances.{key}.config must be an object"
+            )));
+        }
+    }
+    Ok(raw)
 }
 
 /// Validate `acpAgents:`: lowercase-dash names, unique, with a command.
@@ -1791,6 +1847,8 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
     };
 
     let acp_agents = validate_acp_agents(raw.acp_agents.unwrap_or_default())?;
+    let extension_instances =
+        validate_extension_instances(raw.extension_instances.unwrap_or_default())?;
 
     let lsp_servers = match raw.lsp.and_then(|l| l.servers) {
         Some(servers) => {
@@ -1855,6 +1913,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         zones,
         agent_models,
         acp_agents,
+        extension_instances,
         ai_roles: validate_ai_roles(raw.ai)?,
         extensions_disabled: raw.extensions.map(|b| b.disabled).unwrap_or_default(),
     })

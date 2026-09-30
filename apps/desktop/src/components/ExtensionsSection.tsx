@@ -282,9 +282,10 @@ export function ReviewPanel({
   );
 }
 
-/// One declared credential: set or replace its value (it goes to the OS
-/// keychain and never comes back), or clear it.
-function CredentialRow({
+/// One declared credential (a source's or a provider's — they share the
+/// extension's keychain accounts): set or replace its value (it goes to
+/// the OS keychain and never comes back), or clear it.
+export function CredentialRow({
   extension,
   name,
   set,

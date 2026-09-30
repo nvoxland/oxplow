@@ -401,13 +401,16 @@ mod instance_lock_tests {
     }
 }
 
-/// Where secrets and `ai.yaml` live: the OS keychain
-/// and global config dir in the app, stand-ins in [`Services::in_memory`].
-struct AiEnv {
+/// What differs between the app and [`Services::in_memory`]: this
+/// machine's keychain, global config dir and approvals (stand-ins in
+/// tests), and how long a failed provider waits before restarting.
+struct MachineEnv {
     secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     config_dir: Option<PathBuf>,
     /// Where program approvals live; `None` = this machine's oxplow home.
     approvals_file: Option<PathBuf>,
+    /// A failed provider's first restart wait (doubling from there).
+    provider_backoff: std::time::Duration,
 }
 
 /// All the long-lived services oxplow needs to serve a UI.
@@ -641,12 +644,13 @@ impl Services {
         }
 
         let db = Database::open(&layout.state_db_path)?;
-        let ai = AiEnv {
+        let machine = MachineEnv {
             secrets: Arc::new(oxplow_ai::secrets::KeychainSecrets),
             config_dir: oxplow_config::global_config_dir(),
             approvals_file: None,
+            provider_backoff: std::time::Duration::from_secs(1),
         };
-        Self::build(layout, config, db, ai)
+        Self::build(layout, config, db, machine)
     }
 
     /// Shared construction core for [`Self::boot`] and
@@ -658,7 +662,7 @@ impl Services {
         layout: AppLayout,
         config: OxplowConfig,
         db: Database,
-        ai_env: AiEnv,
+        machine: MachineEnv,
     ) -> Result<Self, AppInitError> {
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
@@ -772,21 +776,21 @@ impl Services {
         let config_arc = Arc::new(RwLock::new(config));
         let project_config = config_arc.clone();
         // Program approvals: this machine's, outside the repo (tsk344).
-        let approvals = Arc::new(match ai_env.approvals_file.clone() {
+        let approvals = Arc::new(match machine.approvals_file.clone() {
             Some(f) => {
-                exec_consent::ApprovalStore::at(f, &layout.project_dir, ai_env.secrets.clone())
+                exec_consent::ApprovalStore::at(f, &layout.project_dir, machine.secrets.clone())
             }
             None => exec_consent::ApprovalStore::for_project(
                 &layout.project_dir,
-                ai_env.secrets.clone(),
+                machine.secrets.clone(),
             ),
         });
         let ai = Arc::new(
             ai_service::AiService::new(
                 oxplow_ai::client::Client::default(),
-                ai_env.secrets.clone(),
+                machine.secrets.clone(),
                 Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
-                ai_env.config_dir,
+                machine.config_dir,
             )
             // Read live, so project.yaml edits and reloads apply at once.
             .with_project_overrides(Arc::new(move || {
@@ -1005,17 +1009,25 @@ impl Services {
         ] {
             commands.register(command).expect("core commands register");
         }
-        let providers = Arc::new(providers::ProviderRegistry::new(
+        let providers = providers::ProviderRegistry::new(
             providers::HostDeps {
                 project_dir: layout.project_dir.clone(),
                 project: source_runner::project_key(&layout.project_dir),
                 approvals: approvals.clone(),
-                secrets: ai_env.secrets.clone(),
+                secrets: machine.secrets.clone(),
+                config: config_arc.clone(),
+                catalog: extension_catalog.clone(),
+                db: db.clone(),
+                log: (*event_log_store).clone(),
                 host_env: Arc::new(|name| std::env::var(name).ok()),
+                backoff: machine.provider_backoff,
             },
             &commands,
             work_items.clone(),
-        ));
+        );
+        commands
+            .register(providers::registry::enable_command(&providers))
+            .expect("provider.enable registers");
         let knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider> =
             Arc::new(knowledge::OxplowKnowledge::new(&commands, db.clone()));
         for command in knowledge::commands(knowledge::KnowledgeTarget {
@@ -1150,7 +1162,7 @@ impl Services {
             diagnostic_store,
             symbol_store,
             ai,
-            secrets: ai_env.secrets,
+            secrets: machine.secrets,
             effort_evidence_store,
             advisories,
             change_store,
@@ -1204,12 +1216,14 @@ impl Services {
         };
         let config = oxplow_config::load_project_config(&project_dir)?;
         // Tests never touch the real keychain or the user's ai.yaml.
-        let ai = AiEnv {
+        let machine = MachineEnv {
             secrets: Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
             config_dir: Some(state_dir.join("global-config")),
             approvals_file: Some(state_dir.join("global-config/approvals.json")),
+            // A test's failing provider restarts at once.
+            provider_backoff: std::time::Duration::ZERO,
         };
-        Self::build(layout, config, Database::in_memory(), ai)
+        Self::build(layout, config, Database::in_memory(), machine)
     }
 
     /// Reload `.oxplow/project.yaml` from disk into the in-memory config, re-apply
@@ -1394,6 +1408,7 @@ mod tests {
                 "git.revert",
                 "metric.rebuild",
                 "metric.run",
+                "provider.enable",
                 "vcs.checkout_branch",
                 "vcs.commit",
                 "vcs.delete_branch",

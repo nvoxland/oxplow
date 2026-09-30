@@ -398,6 +398,21 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	listProviderInstances: () => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("list_provider_instances")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	checkProviderInstance: (instance: string, config: unknown) => typedError<ProviderInstanceView, IpcError>(__TAURI_INVOKE("check_provider_instance", { instance, config })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	setProviderInstance: (instance: string, enabled: boolean, config: unknown) => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("set_provider_instance", { instance, enabled, config })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	ensureChange: (target: ChangeTarget) => typedError<ChangeRow, IpcError>(__TAURI_INVOKE("ensure_change", { target })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1781,6 +1796,13 @@ export type CommitRefLabel = {
 
 export type CommitRefLabelKind = "branch" | "tag";
 
+// A config problem `check` reported.
+export type ConfigProblem = {
+	// A JSON pointer into the config (`/team`), `""` for the whole.
+	path: string,
+	message: string,
+};
+
 /**
  *  Context-window occupancy and cumulative cost from `usage_update`. It
  *  drives the context meter only — never token accounting.
@@ -2193,6 +2215,14 @@ export type Extension = {
 	models: ModelSource[],
 };
 
+// One instance of an extension's provider (`extensionInstances`).
+export type ExtensionInstanceConfig = {
+	// Run it (once this machine approved the provider).
+	enabled?: boolean,
+	// The instance's config, as the provider's `config_schema` describes.
+	config?: unknown,
+};
+
 /**
  *  What installing an extension from git would bring in, for a person to
  *  look at first (tsk378): the extension as it would load (its lenses,
@@ -2441,6 +2471,35 @@ export type InstalledLspPackage = {
 	language_ids: string[],
 	binary: string,
 };
+
+export type InstanceHealth = {
+	state: InstanceState,
+	consecutiveFailures: number,
+	// RFC 3339.
+	lastOkAt: string | null,
+	// A moving average of its successful calls.
+	meanInvokeMs: number | null,
+};
+
+// Where an instance stands on this machine.
+export type InstanceState = 
+// Not enabled in the project's config.
+{ state: "off" } | 
+// Configured, but no enabled extension declares it.
+{ state: "missing" } | 
+// Enabled, but this machine hasn't approved this version of it.
+{ state: "unapproved" } | 
+// Enabled, but its `check` found problems with its config.
+{ state: "unconfigured"; problems: ConfigProblem[] } | 
+// Being checked or started.
+{ state: "checking" } | { state: "ready" } | 
+// Its last start or call failed; it restarts with backoff.
+{ state: "failing"; errors: string[] } | 
+/**
+ *  Stopped after repeated failures (or a handshake that didn't match
+ *  its approved declarations), until a person enables it again.
+ */
+{ state: "disabled"; reason: string };
 
 /**
  *  Why the extension exists — what makes it regenerable, repairable and
@@ -3103,6 +3162,11 @@ export type OxplowConfig = {
 	 */
 	acpAgents: AcpAgentConfig[],
 	/**
+	 *  The project's extension provider instances
+	 *  (`extensionInstances: { "<ext>/<id>": { enabled, config } }`).
+	 */
+	extensionInstances: { [key in string]: ExtensionInstanceConfig },
+	/**
 	 *  This project's AI role assignments (`ai: { roles: … }`), layered
 	 *  over the user-global `ai.yaml`. Keyed by role name (one of
 	 *  [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
@@ -3432,6 +3496,25 @@ export type ProviderConfig = {
 	kind: ProviderKind,
 	// Required for `openai-compatible`; optional override for others.
 	baseUrl?: string | null,
+};
+
+// An instance as Settings → Integrations shows it.
+export type ProviderInstanceView = {
+	// `<extension>/<provider id>`.
+	instance: string,
+	extension: string,
+	provider: string,
+	capability: string,
+	// The project's config enables it.
+	enabled: boolean,
+	config: unknown,
+	// JSON Schema of `config`, from its declarations.
+	configSchema: unknown,
+	// This machine approved it as it is now.
+	approved: boolean,
+	// Each credential it declares and whether this machine has a value.
+	credentials: CredentialStatus[],
+	health: InstanceHealth,
 };
 
 // Kinds of provider oxplow can talk to.

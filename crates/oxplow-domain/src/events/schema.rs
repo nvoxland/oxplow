@@ -42,6 +42,7 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "collector",
     "lens",
     "config",
+    "provider",
 ];
 
 /// One event type at one schema version. `Payload` is the Rust shape
@@ -142,6 +143,10 @@ impl EventSchemaRegistry {
         r.register::<KnowledgePageDeleted>()
             .expect("core type registers");
         r.register::<CodeDiagnosticsChanged>()
+            .expect("core type registers");
+        r.register::<ProviderEnabled>()
+            .expect("core type registers");
+        r.register::<ProviderDisabled>()
             .expect("core type registers");
         r
     }
@@ -1015,6 +1020,41 @@ impl EventType for CodeDiagnosticsChanged {
     type Payload = CodeDiagnosticsChangedV1;
 }
 
+/// `provider.enabled@1`: a person enabled an extension provider's
+/// instance on this machine (`provider.enable`), clearing an automatic
+/// disable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderEnabledV1 {
+    /// `<extension>/<provider id>`.
+    pub instance: String,
+}
+
+pub struct ProviderEnabled;
+impl EventType for ProviderEnabled {
+    const TYPE: &'static str = "provider.enabled";
+    const V: u32 = 1;
+    type Payload = ProviderEnabledV1;
+}
+
+/// `provider.disabled@1`: an instance was stopped on this machine after
+/// repeated failures, and stays off until a person enables it again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderDisabledV1 {
+    /// `<extension>/<provider id>`.
+    pub instance: String,
+    /// The failure that stopped it.
+    pub reason: String,
+}
+
+pub struct ProviderDisabled;
+impl EventType for ProviderDisabled {
+    const TYPE: &'static str = "provider.disabled";
+    const V: u32 = 1;
+    type Payload = ProviderDisabledV1;
+}
+
 /// `knowledge.page.written@1`: a knowledge page's row and edges were
 /// restated from its body — by `knowledge.write_page` / `link` /
 /// `resync`, or by the wiki watcher after a hand edit
@@ -1110,6 +1150,8 @@ mod tests {
                 ("effort.opened", 1),
                 ("knowledge.page.deleted", 1),
                 ("knowledge.page.written", 1),
+                ("provider.disabled", 1),
+                ("provider.enabled", 1),
                 ("snapshot.taken", 1),
                 ("test.coverage.recorded", 1),
                 ("test.run.recorded", 1),

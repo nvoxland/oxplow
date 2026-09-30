@@ -38,6 +38,7 @@ pub mod notes;
 pub mod open_page;
 pub mod page_refs;
 pub mod page_visit;
+pub mod providers;
 pub mod search;
 pub mod semantic;
 pub mod snapshot;

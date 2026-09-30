@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`provider.disabled@1`: an instance was stopped on this machine after\nrepeated failures, and stays off until a person enables it again.",
+  "properties": {
+    "instance": {
+      "description": "`<extension>/<provider id>`.",
+      "type": "string"
+    },
+    "reason": {
+      "description": "The failure that stopped it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "instance",
+    "reason"
+  ],
+  "title": "ProviderDisabledV1",
+  "type": "object"
+}

@@ -3,8 +3,9 @@
 //!
 //! - [`spec`] — the `providers:` manifest kind and its declarations file;
 //! - [`host`] — consent, the trusted spawn and the handshake;
-//! - [`registry`] — the enabled instances (`Services.providers`), their
-//!   bus commands and restart with backoff;
+//! - [`registry`] — the instances (`Services.providers`): reconciling
+//!   them with `extensionInstances`, their bus commands, health, restart
+//!   with backoff and automatic disable;
 //! - [`work_items`] — `ExternalWorkItems`, the work-items capability over
 //!   an instance.
 
@@ -17,5 +18,8 @@ pub mod work_items;
 mod tests;
 
 pub use host::HostError;
-pub use registry::{HostDeps, Instance, ProviderRegistry};
+pub use registry::{
+    ConfigProblem, HostDeps, Instance, InstanceHealth, InstanceState, ProviderInstanceView,
+    ProviderRegistry,
+};
 pub use spec::{parse_providers, ProviderSpec};

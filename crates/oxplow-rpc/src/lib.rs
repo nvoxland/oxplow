@@ -304,6 +304,10 @@ macro_rules! oxplow_command_table {
                 set_source_credential => $crate::commands::sources::set_source_credential { extension: String, name: String, value: Option<String> } -> (),
                 list_project_programs => $crate::commands::sources::list_project_programs {} -> Vec<::oxplow_app::exec_consent::ProjectProgram>,
                 approve_project_program => $crate::commands::sources::approve_project_program { kind: ::oxplow_app::exec_consent::ProgramKind, name: String, version: String } -> Vec<::oxplow_app::exec_consent::ProjectProgram>,
+                // providers (Settings → Integrations)
+                list_provider_instances => $crate::commands::providers::list_provider_instances {} -> Vec<::oxplow_app::providers::ProviderInstanceView>,
+                check_provider_instance => $crate::commands::providers::check_provider_instance { instance: String, config: ::oxplow_domain::Json } -> ::oxplow_app::providers::ProviderInstanceView,
+                set_provider_instance => $crate::commands::providers::set_provider_instance { instance: String, enabled: bool, config: ::oxplow_domain::Json } -> Vec<::oxplow_app::providers::ProviderInstanceView>,
                 report_open_page => $crate::commands::open_page::report_open_page { thread_id: String, page_id: Option<String>, kind: Option<String>, detail_json: Option<String> } -> (),
                 save_lens => $crate::commands::extensions::save_lens { extension: String, slug: String, lens: ::oxplow_app::extensions::NewLens, stream_id: Option<String> } -> ::oxplow_app::extensions::Lens,
                 // comments

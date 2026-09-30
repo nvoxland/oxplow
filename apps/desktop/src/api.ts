@@ -56,6 +56,7 @@ import type {
   TranscriptItem,
   ProgramKind,
   ProjectProgram,
+  ProviderInstanceView,
   LensActionResult,
   SearchHit,
   SqlCell,
@@ -76,6 +77,7 @@ export type {
 };
 export type { DiffEntry };
 export type { DataEntity, Extension, ExtensionReview, Lens, LensRun, LensViz, NewLens, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
+export type { ProviderInstanceView };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors are usually IpcError objects with
@@ -773,6 +775,29 @@ export async function approveProjectProgram(
   version: string,
 ): Promise<ProjectProgram[]> {
   return unwrap(await commands.approveProjectProgram(kind, name, version));
+}
+
+/// Extension providers' instances on this machine, with health
+/// (Settings → Integrations).
+export async function listProviderInstances(): Promise<ProviderInstanceView[]> {
+  return unwrap(await commands.listProviderInstances());
+}
+
+/// Check an instance against `config` without enabling or saving
+/// anything; the outcome is the returned view's state.
+export async function checkProviderInstance(instance: string, config: unknown): Promise<ProviderInstanceView> {
+  return unwrap(await commands.checkProviderInstance(instance, config));
+}
+
+/// A person saves an instance's config and enables or disables it.
+/// Enabling checks first; an unapproved or unconfigured instance is
+/// refused and nothing is written.
+export async function setProviderInstance(
+  instance: string,
+  enabled: boolean,
+  config: unknown,
+): Promise<ProviderInstanceView[]> {
+  return unwrap(await commands.setProviderInstance(instance, enabled, config));
 }
 
 /// The ACP agents this project can run (the new-thread picker).

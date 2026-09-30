@@ -239,6 +239,7 @@ mod tests {
             zones: Default::default(),
             agent_models: Default::default(),
             acp_agents: Vec::new(),
+            extension_instances: Default::default(),
             ai_roles: Default::default(),
             extensions_disabled: Vec::new(),
         }
