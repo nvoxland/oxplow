@@ -1,7 +1,7 @@
-import type { WorkspaceStatusSummary } from "../../tauri-bridge/index.js";
+import type { StatusCounts } from "../../api.js";
 import { FileStatusCountsForSummary } from "../FileStatusCounts.js";
 
-export function GitSummary({ summary }: { summary: WorkspaceStatusSummary }) {
+export function GitSummary({ summary }: { summary: StatusCounts }) {
   if (summary.total === 0) {
     return (
       <div style={{ color: "var(--muted)", fontSize: 11, fontStyle: "italic" }}>

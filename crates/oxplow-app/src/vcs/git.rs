@@ -366,22 +366,37 @@ impl Vcs for GitProvider {
         .await
     }
 
-    async fn blame(&self, ws: &Path, path: &str, rev: &str) -> Result<Vec<BlameLine>, VcsError> {
-        let (ws, path, rev) = (ws.to_path_buf(), path.to_string(), rev.to_string());
+    async fn blame(
+        &self,
+        ws: &Path,
+        path: &str,
+        rev: Option<&str>,
+    ) -> Result<Vec<BlameLine>, VcsError> {
+        let (ws, path, rev) = (ws.to_path_buf(), path.to_string(), rev.map(str::to_string));
         blocking(move || {
             repo_check(&ws)?;
-            let lines = oxplow_git::git_blame(&ws, &rev, &path).map_err(VcsError::Failed)?;
+            let lines =
+                oxplow_git::git_blame(&ws, rev.as_deref(), &path).map_err(VcsError::Failed)?;
             Ok(lines
                 .into_iter()
                 .map(|l| BlameLine {
                     line: l.line,
-                    revision: l.sha,
+                    revision: (l.sha != oxplow_git::BLAME_ZERO_SHA).then_some(l.sha),
                     author: l.author,
                     email: l.author_mail,
                     time: l.author_time,
                     summary: l.summary,
                 })
                 .collect())
+        })
+        .await
+    }
+
+    async fn merge_base(&self, ws: &Path, a: &str, b: &str) -> Result<Option<String>, VcsError> {
+        let (ws, a, b) = (ws.to_path_buf(), a.to_string(), b.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            oxplow_git::merge_base(&ws, &a, &b).map_err(|e| VcsError::Failed(e.to_string()))
         })
         .await
     }

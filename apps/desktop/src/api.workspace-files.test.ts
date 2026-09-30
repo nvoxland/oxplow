@@ -22,8 +22,8 @@ mock.module("./tauri-bridge/generated/bindings.js", () => ({
         { name: "src", path: "src", kind: "directory", status: null, hasChanges: true },
         { name: "a.ts", path: "a.ts", kind: "file", status: "conflicted", hasChanges: true },
       ]),
-    getWorkspaceStatusSummary: async () =>
-      ok({ modified: 1, added: 0, deleted: 0, renamed: 0, untracked: 0, total: 1 }),
+    vcsStatus: async () =>
+      ok({ entries: [{ path: "changed.ts", status: "modified" }], in_progress: null }),
   },
 }));
 

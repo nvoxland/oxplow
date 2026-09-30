@@ -1,4 +1,4 @@
-import type { WorkspaceStatusSummary } from "../tauri-bridge/index.js";
+import type { StatusCounts } from "../api.js";
 
 /**
  * Shared `A## M## D## U##` cell — green/muted/red/yellow, mono-spaced
@@ -48,8 +48,9 @@ export function FileStatusCounts({
 }
 
 /**
- * Render a `FileStatusCounts` from the workspace status summary.
- * Renames roll into M; untracked stays separate (its own U cell).
+ * Render a `FileStatusCounts` from a workspace's status counts.
+ * Renames and conflicts roll into M; untracked stays separate (its own
+ * U cell).
  * Returns `null` when nothing has changed so callers can render
  * "clean" instead.
  */
@@ -57,20 +58,20 @@ export function FileStatusCountsForSummary({
   summary,
   testId,
 }: {
-  summary: WorkspaceStatusSummary | null;
+  summary: StatusCounts | null;
   testId?: string;
 }) {
   if (!summary || summary.total === 0) return null;
   const filesAdded = summary.added;
-  const filesModified = summary.modified + summary.renamed;
+  const filesModified = summary.modified + summary.renamed + summary.conflicted;
   const filesDeleted = summary.deleted;
   const filesUntracked = summary.untracked;
   const title =
     `${summary.total} uncommitted file${summary.total === 1 ? "" : "s"}:\n` +
     `  A — ${summary.added} added (staged new file)\n` +
-    `  M — ${summary.modified} modified + ${summary.renamed} renamed\n` +
+    `  M — ${summary.modified} modified + ${summary.renamed} renamed + ${summary.conflicted} conflicted\n` +
     `  D — ${summary.deleted} deleted\n` +
-    `  U — ${summary.untracked} untracked (not in git, not gitignored)`;
+    `  U — ${summary.untracked} untracked (not under version control, not ignored)`;
   return (
     <FileStatusCounts
       filesAdded={filesAdded}

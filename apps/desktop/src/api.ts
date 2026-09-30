@@ -74,6 +74,7 @@ export type {
   ToolDiff,
   TranscriptItem,
 };
+export type { DiffEntry };
 export type { DataEntity, Extension, ExtensionReview, Lens, LensRun, LensViz, NewLens, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
@@ -298,8 +299,6 @@ export type {
   GitWorktreeEntry,
   RemoteBranchEntry,
   GitLogCommit,
-  CommitDetail,
-  BlameLine,
   StreamDivergenceReport,
   StreamDivergenceRow,
   MergeReadiness,
@@ -308,8 +307,8 @@ export type {
 // their consumers read fields that don't exist on the bindings
 // shape yet (e.g. GitLogResult.currentBranch / branchHeads / tags,
 // RemoteBranchEntry.remote / branch / lastCommitDate, GitWorktreeEntry
-// camelCase aliases, BranchChangeEntry.status / additions / deletions
-// — bindings expose .change and don't surface line counts here yet).
+// camelCase aliases, ChangeScopes' BranchChangeEntry.status — bindings
+// expose .change).
 // Migrating each one is per-call-site work; until then the shape
 // the runtime hands the renderer is the bindings shape but the
 // renderer's TypeScript believes it's the legacy shape.
@@ -320,8 +319,6 @@ export type {
   TextSearchHit,
   RefOption,
   GroupedGitRefs,
-  BranchChangeEntry,
-  BranchChanges,
 } from "./api-types.js";
 
 // Stream / Thread come straight from the Tauri bindings — the
@@ -430,7 +427,6 @@ export interface BranchRef {
   remote?: string;
 }
 
-export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
 
 export interface WorkspaceFile {
   path: string;
@@ -446,17 +442,100 @@ export interface WorkspaceRenameResult {
   toPath: string;
 }
 
-import type { WorkspaceStatusSummary } from "./tauri-bridge/index.js";
 import type { Revision } from "./revision.js";
 import type {
+  BlameLine,
   FileStatus,
+  HeadInfo,
+  InProgressOp,
+  RevisionDetail,
+  StatusEntry,
   WorkspaceEntry,
   WorkspaceIndexedFile,
+  WorkspaceStatus,
 } from "./tauri-bridge/generated/bindings.js";
-export type { FileStatus, WorkspaceEntry, WorkspaceIndexedFile };
+export type {
+  BlameLine,
+  FileStatus,
+  HeadInfo,
+  InProgressOp,
+  RevisionDetail,
+  StatusEntry,
+  WorkspaceEntry,
+  WorkspaceIndexedFile,
+  WorkspaceStatus,
+};
+
+// ---- The stream's version control, neutral (`.context/vcs.md`) ----
+
+/** Where the stream's workspace is: its head revision and branch. */
+export async function vcsHead(streamId: string): Promise<HeadInfo> {
+  return unwrap(await commands.vcsHead(streamId || null));
+}
+
+/** The workspace's changes against its head, plus any paused operation. */
+export async function vcsStatus(streamId: string): Promise<WorkspaceStatus> {
+  return unwrap(await commands.vcsStatus(streamId || null));
+}
+
+/** Who last changed each line of `path` at `revision` (the working tree:
+ *  uncommitted lines have no revision). */
+export async function vcsBlame(
+  streamId: string,
+  path: string,
+  revision: Revision,
+): Promise<BlameLine[]> {
+  return unwrap(await commands.vcsBlame(streamId || null, path, revision));
+}
+
+/** A revision's message and changed files; null when the workspace
+ *  doesn't have it. */
+export async function vcsRevision(
+  streamId: string,
+  revision: Revision,
+): Promise<RevisionDetail | null> {
+  return unwrap(await commands.vcsRevision(streamId || null, revision));
+}
+
+/** Where the histories of `a` and `b` fork. */
+export async function vcsMergeBase(
+  streamId: string,
+  a: Revision,
+  b: Revision,
+): Promise<Revision | null> {
+  return unwrap(await commands.vcsMergeBase(streamId || null, a, b));
+}
+
+/** How many paths of each kind a status holds. Renames count as
+ *  modifications only where a caller folds them. */
+export interface StatusCounts {
+  added: number;
+  modified: number;
+  deleted: number;
+  renamed: number;
+  untracked: number;
+  conflicted: number;
+  total: number;
+}
+
+export function countStatus(status: WorkspaceStatus): StatusCounts {
+  const counts: StatusCounts = {
+    added: 0,
+    modified: 0,
+    deleted: 0,
+    renamed: 0,
+    untracked: 0,
+    conflicted: 0,
+    total: 0,
+  };
+  for (const e of status.entries) {
+    counts[e.status] += 1;
+    counts.total += 1;
+  }
+  return counts;
+}
 import type { InstalledLspPackage, LspServerListing } from "./tauri-bridge/generated/bindings.js";
 export type { InstalledLspPackage, LspServerListing };
-export type { WorkspaceStatusSummary };
 
 export interface WorkspaceContext {
   gitEnabled: boolean;
@@ -1247,13 +1326,6 @@ export async function getGitLog(
   return raw as unknown as import("./api-types.js").GitLogResult;
 }
 
-export async function getCommitDetail(
-  streamId: string,
-  sha: string,
-): Promise<import("./tauri-bridge/index.js").CommitDetail | null> {
-  return unwrap(await commands.getCommitDetail(streamId, sha));
-}
-
 export async function getChangeScopes(
   streamId: string,
 ): Promise<import("./api-types.js").ChangeScopes> {
@@ -1403,39 +1475,6 @@ export async function listFileCommits(
   limit?: number,
 ): Promise<import("./tauri-bridge/index.js").GitLogCommit[]> {
   return unwrap(await commands.listFileCommits(streamId, path, limit ?? null));
-}
-
-export async function gitBlame(
-  streamId: string,
-  path: string,
-): Promise<import("./tauri-bridge/index.js").BlameLine[]> {
-  return unwrap(await commands.gitBlame(streamId, path));
-}
-
-/// Renderer-side LocalBlameEntry: the bindings shape plus an
-/// optional `tasks` overlay the editor's blame margin paints
-/// when a snapshot/tasks attribution exists. The runtime
-/// today only populates {line, source, git}; `tasks` arrives
-/// once the snapshot blob store grows attribution lookup. Until
-/// then the editor's local-blame branch is dormant but typesafe.
-export interface LocalBlameEntry {
-  line: number;
-  source: string;
-  git: import("./tauri-bridge/index.js").BlameLine | null;
-  tasks?: {
-    id: string;
-    title: string;
-    endedAt: string;
-  };
-}
-
-export async function localBlame(
-  streamId: string,
-  path: string,
-): Promise<LocalBlameEntry[]> {
-  return unwrap(
-    await commands.localBlame(streamId, path, ""),
-  ) as unknown as LocalBlameEntry[];
 }
 
 export type WikiPageSummary = import("./api-types.js").WikiPageSummary;
@@ -1778,32 +1817,6 @@ export async function listAllRefs(_streamId: string): Promise<import("./api-type
   return listGitRefs() as unknown as Promise<
     import("./api-types.js").RefOption[]
   >;
-}
-
-export async function getBranchChanges(
-  streamId: string,
-  baseRef?: string,
-): Promise<import("./api-types.js").BranchChanges & { resolvedBaseRef: string | null }> {
-  // Resolve the base ref if not given, by reading the change scopes.
-  const resolved = baseRef ?? (await getChangeScopes(streamId)).branchBase ?? "main";
-  // The Rust binding emits `change: ChangeKind`; renderer call sites
-  // (App.tsx uncommittedSummary, ProjectPanel scopedDeletions,
-  // CommitDetailSlideover, UncommittedChangesPage, GitDashboardPage)
-  // read `entry.status`. Translate here — without this the Uncommitted
-  // rail section silently hides because every f.status is undefined.
-  const raw = unwrap(await commands.getBranchChanges(streamId, resolved));
-  const files = raw.files.map((entry) => ({
-    path: entry.path,
-    status: entry.change as import("./api-types.js").GitFileStatus,
-    additions: entry.additions,
-    deletions: entry.deletions,
-  }));
-  return {
-    base_ref: raw.base_ref,
-    merge_base: raw.merge_base,
-    files,
-    resolvedBaseRef: resolved,
-  };
 }
 
 export async function listTaskEfforts(itemId: string): Promise<EffortDetail[]> {
@@ -2340,13 +2353,13 @@ export async function listWorkspaceEntries(streamId: string, path = ""): Promise
 
 export async function listWorkspaceFiles(streamId: string): Promise<{
   files: WorkspaceIndexedFile[];
-  summary: WorkspaceStatusSummary;
+  summary: StatusCounts;
 }> {
   const [filesRes, summary] = await Promise.all([
     commands.listWorkspaceFiles(streamId || null),
-    getWorkspaceStatusSummary(streamId),
+    vcsStatus(streamId),
   ]);
-  return { files: unwrap(filesRes), summary };
+  return { files: unwrap(filesRes), summary: countStatus(summary) };
 }
 
 export async function readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile> {
@@ -2362,14 +2375,6 @@ export async function readAt(
   revision: Revision,
 ): Promise<string | null> {
   return unwrap(await commands.readAt(streamId || null, path, revision));
-}
-
-export async function getWorkspaceStatusSummary(
-  streamId: string,
-): Promise<WorkspaceStatusSummary> {
-  return unwrap(
-    await commands.getWorkspaceStatusSummary(streamId || null),
-  ) as unknown as WorkspaceStatusSummary;
 }
 
 export async function writeWorkspaceFile(
@@ -2684,14 +2689,6 @@ export function subscribePageVisitEvents(onEvent: () => void): () => void {
  *  page kind. */
 export async function forgetPage(refKind: string, refId: string): Promise<void> {
   unwrap(await commands.forgetPage(refKind, refId));
-}
-
-export async function getRepoConflictState(
-  streamId: string,
-): Promise<import("./api-types.js").RepoConflictState> {
-  return unwrap(
-    await commands.getRepoConflictState(streamId),
-  ) as unknown as import("./api-types.js").RepoConflictState;
 }
 
 export function subscribeAgentStatus(

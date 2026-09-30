@@ -1,6 +1,7 @@
 //! Blame-overlay state for `EditorPane`, extracted into a hook.
 //!
-//! Owns the merged local+git blame entries, the gutter scroll/line-height
+//! Owns the working file's blame lines (`vcsBlame`, uncommitted lines
+//! carry no revision), the gutter scroll/line-height
 //! sync that keeps the `BlameOverlay` aligned with the editor, and the
 //! refresh-on-save behavior. `EditorPane` renders the overlay from the
 //! returned state and wires "Annotate with Blame" to `toggleBlame`.
@@ -18,13 +19,14 @@ import {
   type SetStateAction,
 } from "react";
 
-import { localBlame, type LocalBlameEntry, type Stream } from "../api.js";
+import { vcsBlame, type BlameLine, type Stream } from "../api.js";
+import { WORKING } from "../revision.js";
 
 /// Left-gutter width (px) reserved for the blame overlay while it's on.
 export const BLAME_WIDTH = 150;
 
 export interface BlameState {
-  blame: { path: string; entries: LocalBlameEntry[] } | null;
+  blame: { path: string; entries: BlameLine[] } | null;
   blameScrollTop: number;
   blameLineHeight: number;
   /// Toggle the overlay for the current file (fetch on, clear off).
@@ -45,14 +47,14 @@ export function useBlame(opts: {
   const { editorRef, monacoRef, monacoReady, streamRef, filePathRef, filePath, isDirty, setLspStatus } =
     opts;
 
-  const [blame, setBlame] = useState<{ path: string; entries: LocalBlameEntry[] } | null>(null);
+  const [blame, setBlame] = useState<{ path: string; entries: BlameLine[] } | null>(null);
   const [blameScrollTop, setBlameScrollTop] = useState(0);
   const [blameLineHeight, setBlameLineHeight] = useState(19);
   const prevDirtyRef = useRef(isDirty);
 
   async function refreshBlame(path: string) {
     try {
-      const entries = await localBlame(streamRef.current.id, path);
+      const entries = await vcsBlame(streamRef.current.id, path, WORKING);
       if (filePathRef.current !== path) return;
       if (entries.length === 0) {
         setBlame(null);

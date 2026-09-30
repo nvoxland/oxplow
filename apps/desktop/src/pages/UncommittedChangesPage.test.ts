@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import type { BranchChangeEntry } from "../tauri-bridge/index.js";
+import type { DiffEntry } from "../tauri-bridge/index.js";
 import { summarize, totalsLabel } from "./UncommittedChangesPage.js";
 
 function entry(
   path: string,
-  status: BranchChangeEntry["status"],
+  status: DiffEntry["status"],
   additions: number | null = null,
   deletions: number | null = null,
-): BranchChangeEntry {
+): DiffEntry {
   return { path, status, additions, deletions };
 }
 

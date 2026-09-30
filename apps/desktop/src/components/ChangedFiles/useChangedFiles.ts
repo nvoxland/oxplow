@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   diffRevisions,
-  getBranchChanges,
+  vcsHead,
   subscribeGitRefsEvents,
   subscribeSnapshotEvents,
   subscribeWorkspaceEvents,
-  type BranchChangeEntry,
+  type DiffEntry,
 } from "../../api.js";
-import { WORKING, gitRevision, type Revision } from "../../revision.js";
+import { WORKING, type Revision } from "../../revision.js";
 
 /** What changed: the working tree against HEAD, or any two revisions
  *  (snapshots, commits, working tree). The commit page reads its files
@@ -19,7 +19,7 @@ export type ChangedFilesSource =
 export interface ChangedFiles {
   loading: boolean;
   error: string | null;
-  files: BranchChangeEntry[];
+  files: DiffEntry[];
   /** The two sides, for opening a file's diff. `base` is null when the
    *  change has no older side (endpoints with no start). */
   base: Revision | null;
@@ -35,21 +35,18 @@ export function commitBase(sha: string, parents: string[]): string {
 
 async function load(
   source: ChangedFilesSource,
-): Promise<{ files: BranchChangeEntry[]; base: Revision | null; head: Revision }> {
+): Promise<{ files: DiffEntry[]; base: Revision | null; head: Revision }> {
   switch (source.kind) {
     case "working": {
-      const changes = await getBranchChanges(source.streamId, "HEAD");
-      return { files: changes.files, base: gitRevision("HEAD"), head: WORKING };
+      // The working tree against its head (from nothing before the first
+      // commit).
+      const head = (await vcsHead(source.streamId)).revision;
+      const files = await diffRevisions(source.streamId, head, WORKING);
+      return { files, base: head, head: WORKING };
     }
     case "endpoints": {
-      const entries = await diffRevisions(source.streamId, source.start, source.end);
       return {
-        files: entries.map((e) => ({
-          path: e.path,
-          status: e.status as BranchChangeEntry["status"],
-          additions: e.additions,
-          deletions: e.deletions,
-        })),
+        files: await diffRevisions(source.streamId, source.start, source.end),
         base: source.start,
         head: source.end,
       };

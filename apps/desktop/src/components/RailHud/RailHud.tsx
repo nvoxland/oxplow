@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { RAIL_SECTION_DRAG_MIME } from "../../dragMimes.js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { BranchChangeEntry, FinishedEntry, GitFileStatus, ThreadWorkState, Task } from "../../api.js";
+import type { DiffEntry, FinishedEntry, FileStatus, InProgressOp, ThreadWorkState, Task } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, dashboardRef, lensRef } from "../../tabs/pageRefs.js";
@@ -31,9 +31,9 @@ export interface UncommittedSummary {
   additions: number;
   deletions: number;
   conflictedCount?: number;
-  gitOperation?: "merge" | "rebase" | "cherry-pick" | "revert" | null;
+  inProgress?: InProgressOp | null;
   /** The changed files — rendered as a tree when the section expands. */
-  files?: BranchChangeEntry[];
+  files?: DiffEntry[];
 }
 
 export interface BookmarkRailEntry {
@@ -971,7 +971,7 @@ const U_STATUS_META: Record<UStatus, { letter: string; color: string }> = {
   modified: { letter: "M", color: "var(--status-waiting, #f59e0b)" },
   deleted: { letter: "D", color: "var(--diff-del-fg, #f85149)" },
 };
-function uStatus(s: GitFileStatus): UStatus {
+function uStatus(s: FileStatus): UStatus {
   if (s === "deleted") return "deleted";
   if (s === "added" || s === "untracked") return "added";
   return "modified";
@@ -983,8 +983,8 @@ type UNode = UDirNode | UFileNode;
 
 /** Folder>file tree, with each folder carrying the union of A/M/D
  *  statuses across its subtree. */
-function buildUncommittedTree(files: BranchChangeEntry[]): UNode[] {
-  interface Raw { name: string; path: string; files: BranchChangeEntry[]; dirs: Map<string, Raw>; }
+function buildUncommittedTree(files: DiffEntry[]): UNode[] {
+  interface Raw { name: string; path: string; files: DiffEntry[]; dirs: Map<string, Raw>; }
   const root: Raw = { name: "", path: "", files: [], dirs: new Map() };
   for (const f of files) {
     const segs = f.path.split("/");
@@ -1039,7 +1039,7 @@ const railTreeLabelStyle: CSSProperties = {
 /** Compact uncommitted file tree for the rail — folders show their A/M/D
  *  union, files their status, with a floating expand/collapse-all toggle
  *  and a capped, scrollable height. */
-function UncommittedTree({ files, onOpenFile }: { files: BranchChangeEntry[]; onOpenFile(path: string): void }) {
+function UncommittedTree({ files, onOpenFile }: { files: DiffEntry[]; onOpenFile(path: string): void }) {
   const tree = useMemo(() => buildUncommittedTree(files), [files]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (path: string) => setCollapsed((prev) => {
@@ -1096,7 +1096,7 @@ function UncommittedSection({
   if (modified > 0) segs.push({ label: `${modified}M`, color: U_STATUS_META.modified.color });
   if (deleted > 0) segs.push({ label: `${deleted}D`, color: U_STATUS_META.deleted.color });
   const conflictedCount = summary?.conflictedCount ?? 0;
-  const op = summary?.gitOperation ?? null;
+  const op = summary?.inProgress ? summary.inProgress.replace("_", "-") : null;
   const hasFileSummary = segs.length > 0;
   const hasConflictRow = conflictedCount > 0 || op !== null;
   const files = summary?.files ?? [];

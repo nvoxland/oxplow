@@ -108,8 +108,9 @@ async fn resolve_commit(services: &Services, id: &str) -> RefSummary {
     let mut summary = RefSummary::bare("commit", id);
     // Resolve against the primary worktree; `commit_detail` accepts both
     // full and short shas.
-    if let Some(detail) = services.git.commit_detail(None, id.to_string()).await {
-        summary.title = Some(detail.subject);
+    let ws = services.worktrees.project_dir();
+    if let Ok(Some(detail)) = services.vcs.revision(ws, id).await {
+        summary.title = Some(detail.info.subject);
         let files = detail.files.len();
         let additions: u32 = detail.files.iter().map(|f| f.additions).sum();
         let deletions: u32 = detail.files.iter().map(|f| f.deletions).sum();

@@ -6,7 +6,7 @@ import { cleanup, render } from "@testing-library/react";
 // rules in, badge out — and pins the unconfigured case, where oxplow has
 // no vocabulary and the column must stay quiet rather than guess.
 
-import type { BranchChangeEntry } from "../../api.js";
+import type { DiffEntry } from "../../api.js";
 import { ChangedFilesTree } from "./ChangedFilesTree.js";
 import { compileZoneRules } from "./zones.js";
 import { __setZoneRulesForTest } from "./useZoneRules.js";
@@ -17,10 +17,10 @@ afterEach(() => {
 });
 
 // Root-level paths so the rows render without expanding a directory.
-const FILES: BranchChangeEntry[] = [
+const FILES: DiffEntry[] = [
   { path: "store.rs", status: "modified", additions: 3, deletions: 1 },
   { path: "deploy.sh", status: "modified", additions: 1, deletions: 0 },
-] as unknown as BranchChangeEntry[];
+] as unknown as DiffEntry[];
 
 function renderTree() {
   return render(

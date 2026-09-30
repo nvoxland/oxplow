@@ -93,18 +93,15 @@ core and is tightly coupled to its menu / comment-layer / focus-push /
 LSP-provider wiring — a hook would need ~8 injected callbacks and read
 *less* cohesively than leaving it inline.)
 
-When the user toggles `Annotate with Blame`, the hook fetches a merged
-per-line attribution via `localBlame(stream.id, filePath)` and EditorPane
-renders an absolutely-positioned DOM overlay on the left gutter (the
-`BlameOverlay` sub-component). The merge is computed server-side in
-`crates/oxplow-git/src/blame.rs` (`computeLocalBlame`) — it walks closed
-task efforts newest-first (`EffortStore.listEffortsForPath`),
-diffs each effort's start/end snapshot content to figure out which lines
-the effort introduced, and falls back to `gitBlame` for any line the
-local walk can't attribute. Snapshots pruned by the 7-day retention
-window degrade gracefully — the effort is skipped and git blame picks
-up the line. The IPC is a single round-trip (`oxplow:localBlame`) so the
-UI never has to reconcile two streams.
+When the user toggles `Annotate with Blame`, the hook fetches the working
+file's blame via `vcsBlame(stream.id, filePath, WORKING)` (RPC
+`vcs_blame`, `.context/vcs.md`) and EditorPane renders an
+absolutely-positioned DOM overlay on the left gutter (the `BlameOverlay`
+sub-component): one `BlameLine` per line — a committed line names its
+revision, author and time; an uncommitted line names no revision and
+renders as the grey "Uncommitted" row. (Attributing lines to oxplow
+efforts was designed but never populated; that dormant branch was removed
+in P5.B4.)
 
 Layout details:
 

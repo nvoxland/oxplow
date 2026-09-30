@@ -709,10 +709,29 @@ pub struct GitPathParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GitDiffParams {
+pub struct DiffParams {
+    /// The stream whose workspace to diff; the primary when absent.
     pub stream_id: Option<String>,
-    /// Base ref to diff the branch against (e.g. `main`).
-    pub base_ref: String,
+    /// The older side: `working`, `snap:<id>` or `git:<rev>`; absent =
+    /// the empty tree (everything added).
+    pub from: Option<String>,
+    /// The newer side (e.g. `working`).
+    pub to: String,
+    /// Compare `to` against where it forked from `from` rather than
+    /// against `from` itself — a branch's own changes against `git:main`.
+    #[serde(default)]
+    pub since_fork: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BlameParams {
+    /// The stream whose workspace to blame in; the primary when absent.
+    pub stream_id: Option<String>,
+    /// Workspace-relative file path.
+    pub path: String,
+    /// Which version: `working` (default; uncommitted lines name no
+    /// revision) or `git:<rev>`.
+    pub revision: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -2006,35 +2025,62 @@ impl OxplowMcp {
         json_result(&log)
     }
 
-    #[tool(description = "Git blame for a file: per-line commit attribution.")]
-    async fn git_blame(
-        &self,
-        params: Parameters<GitPathParams>,
-    ) -> Result<CallToolResult, McpError> {
-        check_optional_stream("git_blame", params.0.stream_id.as_deref())?;
-        let lines = self
-            .services
-            .git
-            .blame(params.0.stream_id.as_deref(), params.0.path)
-            .await;
+    #[tool(
+        description = "Blame a file: the revision, author and time that last changed each \
+                          line, at `revision` (default `working`; an uncommitted line names no \
+                          revision)."
+    )]
+    async fn vcs_blame(&self, params: Parameters<BlameParams>) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("vcs_blame", p.stream_id.as_deref())?;
+        let revision = parse_revision(p.revision.as_deref().unwrap_or("working"))?;
+        let lines = oxplow_app::vcs::reads::blame(
+            &self.services,
+            p.stream_id.as_deref(),
+            &p.path,
+            &revision,
+        )
+        .await
+        .map_err(domain_err)?;
         json_result(&lines)
     }
 
     #[tool(
-        description = "Git branch diff: per-file and per-function changes on the \
-                          worktree branch relative to `base_ref` (e.g. `main`)."
+        description = "What changed between two versions of the tree, per file with line \
+                          counts. Versions are `working`, `snap:<id>` or `git:<rev>`; `from` \
+                          absent diffs against the empty tree. `since_fork: true` compares `to` \
+                          with where it forked from `from` — a branch's own changes against \
+                          `git:main`."
     )]
-    async fn git_diff(
-        &self,
-        params: Parameters<GitDiffParams>,
-    ) -> Result<CallToolResult, McpError> {
-        check_optional_stream("git_diff", params.0.stream_id.as_deref())?;
-        let changes = self
+    async fn diff(&self, params: Parameters<DiffParams>) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("diff", p.stream_id.as_deref())?;
+        let to = parse_revision(&p.to)?;
+        let mut from = p.from.as_deref().map(parse_revision).transpose()?;
+        let sid = p.stream_id.as_deref();
+        if p.since_fork {
+            let Some(base) = &from else {
+                return Err(McpError::invalid_params("since_fork needs `from`", None));
+            };
+            let head = oxplow_domain::vcs::Revision::from_rev_slot(Some("git:HEAD"))
+                .map_err(|e| McpError::invalid_params(e, None))?;
+            let fork_of = if to == oxplow_domain::vcs::Revision::Working {
+                &head
+            } else {
+                &to
+            };
+            from = oxplow_app::vcs::reads::merge_base(&self.services, sid, base, fork_of)
+                .await
+                .map_err(domain_err)?;
+        }
+        let ws = self.services.worktrees.resolve(sid).await;
+        let entries = self
             .services
-            .git
-            .branch_changes(params.0.stream_id.as_deref(), params.0.base_ref)
-            .await;
-        json_result(&changes)
+            .trees
+            .diff(&ws, from.as_ref(), &to)
+            .await
+            .map_err(domain_err)?;
+        json_result(&entries)
     }
 
     #[tool(
@@ -4855,8 +4901,8 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "search",
     "git_status",
     "git_log",
-    "git_blame",
-    "git_diff",
+    "vcs_blame",
+    "diff",
     "read_at",
     "list_branches",
     "list_snapshots_for_stream",
@@ -5227,6 +5273,20 @@ fn lens_error(id: &str, e: oxplow_domain::DomainError) -> McpError {
 
 /// Validate an optional `stream_id`: enforce the `s-` prefix when present,
 /// and accept `None` (resolves to the current/primary worktree downstream).
+/// A `Revision` a tool was given (`working`, `snap:<id>`, `git:<rev>`).
+fn parse_revision(raw: &str) -> Result<oxplow_domain::vcs::Revision, McpError> {
+    raw.parse()
+        .map_err(|e: String| McpError::invalid_params(e, None))
+}
+
+/// A domain failure as a tool error: bad input is the caller's.
+fn domain_err(e: oxplow_domain::DomainError) -> McpError {
+    match e {
+        oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
+        other => internal(other),
+    }
+}
+
 fn check_optional_stream(tool: &str, stream_id: Option<&str>) -> Result<(), McpError> {
     match stream_id {
         Some(id) => expect_id_kind(tool, "stream_id", id, ID_STREAM),

@@ -1,7 +1,7 @@
 import { LensSlots } from "../lens/LensSlots.js";
 import { useChange } from "../lens/useChange.js";
 import { useCallback, useState } from "react";
-import type { BranchChangeEntry, Stream } from "../api.js";
+import type { DiffEntry, Stream } from "../api.js";
 import { gitCommitAll } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -184,7 +184,7 @@ export interface SummaryNumbers {
   deletions: number;
 }
 
-export function summarize(files: BranchChangeEntry[]): SummaryNumbers {
+export function summarize(files: DiffEntry[]): SummaryNumbers {
   const out: SummaryNumbers = {
     total: files.length,
     modified: 0,

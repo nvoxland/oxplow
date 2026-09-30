@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenFileState } from "../editor-session.js";
-import type { LocalBlameEntry, Stream } from "../api.js";
+import type { BlameLine, Stream } from "../api.js";
 import { desktopBridge, readAt } from "../api.js";
 import { computeDiffDecorations } from "../editor-diff.js";
 import { languageForPath } from "../editor-language.js";
@@ -32,7 +32,6 @@ interface Props {
   openFiles: Record<string, OpenFileState>;
   onNavigateToLocation(target: EditorNavigationTarget): Promise<void>;
   onRevealCommit?(sha: string): void;
-  onRevealTask?(itemId: string): void;
   onCompareWithClipboard?(selection: string, path: string): void;
 }
 
@@ -49,7 +48,6 @@ export function EditorPane({
   openFiles,
   onNavigateToLocation,
   onRevealCommit,
-  onRevealTask,
   onCompareWithClipboard,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -81,8 +79,6 @@ export function EditorPane({
   const [blameMenu, setBlameMenu] = useState<{ x: number; y: number; sha: string; authorMail: string } | null>(null);
   const onRevealCommitRef = useRef(onRevealCommit);
   onRevealCommitRef.current = onRevealCommit;
-  const onRevealtasksRef = useRef(onRevealTask);
-  onRevealtasksRef.current = onRevealTask;
   const headByPathRef = useRef<Map<string, string | null>>(new Map());
   const diffDecoIdsRef = useRef<string[]>([]);
   const commentLayerRef = useRef<MonacoCommentHandle | null>(null);
@@ -588,9 +584,6 @@ export function EditorPane({
             entries={blame!.entries}
             scrollTop={blameScrollTop}
             lineHeight={blameLineHeight}
-            onLocalClick={(itemId) => {
-              onRevealtasksRef.current?.(itemId);
-            }}
             onGitClick={(sha) => {
               onRevealCommitRef.current?.(sha);
             }}
@@ -666,14 +659,12 @@ function BlameOverlay({
   entries,
   scrollTop,
   lineHeight,
-  onLocalClick,
   onGitClick,
   onOpenGitMenu,
 }: {
-  entries: LocalBlameEntry[];
+  entries: BlameLine[];
   scrollTop: number;
   lineHeight: number;
-  onLocalClick(itemId: string): void;
   onGitClick(sha: string): void;
   /**
    * Open the git-blame menu for `sha`. `rect` anchors the popover; a
@@ -701,38 +692,17 @@ function BlameOverlay({
     >
       <div style={{ position: "absolute", top: -scrollTop, left: 0, right: 0 }}>
         {entries.map((entry) => {
-          if (entry.source === "local" && entry.tasks) {
-            const endedAtSec = Date.parse(entry.tasks.endedAt) / 1000;
-            const ageDays = Math.max(0, (nowSec - endedAtSec) / 86400);
-            const bg = blameLocalColor(ageDays);
-            const label = truncateAuthor(entry.tasks.title);
-            const itemId = entry.tasks.id;
-            return (
-              <div
-                key={entry.line}
-                title={`${entry.tasks.title}\ntasks ${itemId}\nfinished ${formatBlameDate(endedAtSec)}`}
-                onClick={() => onLocalClick(itemId)}
-                style={{
-                  ...rowStyle(lineHeight, bg),
-                  borderLeft: "2px solid var(--blame-local-border, #e5a06a)",
-                  cursor: "pointer",
-                }}
-              >
-                {label}
-              </div>
-            );
-          }
-          if (entry.source === "git" && entry.git) {
-            const ageDays = Math.max(0, (nowSec - entry.git.author_time) / 86400);
+          if (entry.revision) {
+            const ageDays = Math.max(0, (nowSec - entry.time) / 86400);
             const bg = blameGitColor(ageDays);
-            const date = formatBlameDate(entry.git.author_time);
-            const author = truncateAuthor(entry.git.author);
-            const sha = entry.git.sha;
-            const authorMail = entry.git.author_mail;
+            const date = formatBlameDate(entry.time);
+            const author = truncateAuthor(entry.author);
+            const sha = entry.revision;
+            const authorMail = entry.email;
             return (
               <div
                 key={entry.line}
-                title={`${sha.slice(0, 8)} ${entry.git.author} <${authorMail}>\n${entry.git.summary}`}
+                title={`${sha.slice(0, 8)} ${entry.author} <${authorMail}>\n${entry.summary}`}
                 onClick={() => onGitClick(sha)}
                 onContextMenu={(event) => {
                   event.preventDefault();
@@ -788,12 +758,6 @@ function rowStyle(lineHeight: number, background: string): CSSProperties {
   };
 }
 
-function blameLocalColor(ageDays: number): string {
-  if (ageDays < 7) return "var(--blame-local-fresh, rgba(229,160,106,0.55))";
-  if (ageDays < 30) return "var(--blame-local-recent, rgba(229,160,106,0.40))";
-  if (ageDays < 180) return "var(--blame-local-stale, rgba(229,160,106,0.28))";
-  return "var(--blame-local-old, rgba(170,140,110,0.18))";
-}
 
 function blameGitColor(ageDays: number): string {
   if (ageDays < 7) return "var(--blame-git-fresh, rgba(96,165,250,0.55))";

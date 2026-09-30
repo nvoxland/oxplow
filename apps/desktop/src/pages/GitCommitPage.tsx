@@ -1,8 +1,8 @@
 import { LensSlots } from "../lens/LensSlots.js";
 import { useChange } from "../lens/useChange.js";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { BranchChangeEntry, CommitDetail, Stream, ThreadWorkState } from "../api.js";
-import { getCommitDetail, gitCherryPick, gitRevert } from "../api.js";
+import type { RevisionDetail, Stream, ThreadWorkState } from "../api.js";
+import { gitCherryPick, gitRevert, vcsRevision } from "../api.js";
 import { awaitGitOp, gitOpErrorMessage, gitOpOutcomeMessage } from "../git-op.js";
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
@@ -62,7 +62,7 @@ export function GitCommitPage({
   onOpenPage,
   onOpenFile,
 }: GitCommitPageProps) {
-  const [detail, setDetail] = useState<CommitDetail | null>(null);
+  const [detail, setDetail] = useState<RevisionDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const { change } = useChange(sha ? { kind: "commit", sha, streamId: stream?.id ?? null } : null);
   const refForGraph = gitCommitRef(sha);
@@ -87,7 +87,7 @@ export function GitCommitPage({
     }
     let cancelled = false;
     setLoading(true);
-    void getCommitDetail(stream.id, sha)
+    void vcsRevision(stream.id, gitRevision(sha))
       .then((result) => {
         if (cancelled) return;
         setDetail(result);
@@ -130,19 +130,19 @@ export function GitCommitPage({
     [stream, sha],
   );
 
-  const openDiff = (d: CommitDetail, path: string) => {
+  const openDiff = (d: RevisionDetail, path: string) => {
     const spec: DiffSpec = {
       path,
-      leftVersion: gitRevision(commitBase(sha, d.parents)),
+      leftVersion: gitRevision(commitBase(sha, d.info.parents)),
       rightVersion: gitRevision(sha),
-      baseLabel: commitBase(sha, d.parents).slice(0, 7),
+      baseLabel: commitBase(sha, d.info.parents).slice(0, 7),
     };
     if (onOpenDiffInTab) onOpenDiffInTab(spec);
     else if (onOpenDiff) onOpenDiff(spec);
     else onOpenFile?.(path);
   };
 
-  const headerTitle = buildCommitTitle({ sha, subject: detail?.subject ?? subject });
+  const headerTitle = buildCommitTitle({ sha, subject: detail?.info.subject ?? subject });
 
   return (
     <Page testId="page-git-commit" title={headerTitle} kind="commit" backlinks={backlinks} outbound={outbound}>
@@ -163,7 +163,7 @@ export function GitCommitPage({
             {onOpenFile ? (
               <section data-testid="git-commit-files">
                 <ChangedFilesTree
-                  files={detail.files.map((f) => ({ ...f, status: f.status as BranchChangeEntry["status"] }))}
+                  files={detail.files}
                   onOpenFile={onOpenFile}
                   onOpenFileDiff={(path) => openDiff(detail, path)}
                 />
@@ -186,7 +186,7 @@ export function GitCommitPage({
 const COMMIT_META_MAX_HEIGHT = 240;
 
 interface CommitMetaProps {
-  detail: CommitDetail;
+  detail: RevisionDetail;
   /** Pixel height the panel collapses to, with a "Show more" toggle
    *  when the message body would overflow. `null` means "let it grow". */
   collapsedMaxHeight: number | null;
@@ -196,8 +196,9 @@ interface CommitMetaProps {
 }
 
 function CommitMeta({ detail, collapsedMaxHeight, onRunOp }: CommitMetaProps) {
-  const date = formatAbsolute(new Date(detail.timestamp_secs * 1000).toISOString());
-  const author = detail.email ? `${detail.author} <${detail.email}>` : detail.author;
+  const { info } = detail;
+  const date = formatAbsolute(new Date(info.time * 1000).toISOString());
+  const author = info.email ? `${info.author} <${info.email}>` : info.author;
   const sectionRef = useRef<HTMLElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
@@ -210,14 +211,14 @@ function CommitMeta({ detail, collapsedMaxHeight, onRunOp }: CommitMetaProps) {
     // Compare the natural scrollHeight against the cap. A small
     // tolerance avoids a false positive from sub-pixel rounding.
     setOverflowing(el.scrollHeight > collapsedMaxHeight + 2);
-  }, [collapsedMaxHeight, detail.body, detail.subject, detail.sha]);
+  }, [collapsedMaxHeight, detail.body, info.subject, info.id]);
 
   const collapsed = !expanded && overflowing && collapsedMaxHeight != null;
   return (
     <section
       ref={sectionRef}
       data-ref-kind="commit"
-      data-ref-id={detail.sha}
+      data-ref-id={info.id}
       style={{
         ...card,
         position: "relative",
@@ -230,7 +231,7 @@ function CommitMeta({ detail, collapsedMaxHeight, onRunOp }: CommitMetaProps) {
           {date} · {author}
         </div>
         <div style={{ userSelect: "text" }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>{detail.subject}</div>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{info.subject}</div>
           {detail.body ? (
             <div style={{ whiteSpace: "pre-wrap", color: "var(--text-secondary)", fontSize: 11 }}>
               {detail.body}
@@ -248,7 +249,7 @@ function CommitMeta({ detail, collapsedMaxHeight, onRunOp }: CommitMetaProps) {
         >
           <span>Version</span>
           <span style={{ fontFamily: "var(--mono, monospace)", color: "var(--text-primary)" }}>
-            {detail.sha}
+            {info.id}
           </span>
         </div>
         {onRunOp ? (

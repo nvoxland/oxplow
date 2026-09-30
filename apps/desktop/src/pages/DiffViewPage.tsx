@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { BranchChangeEntry, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
+import type { DiffEntry, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
 import {
   getAgentTurn,
   getEffort,
@@ -522,7 +522,7 @@ function ResolvedEndpointDiff({
 
   // Files for the Files Changed tree. All changed files by default; only
   // the effort's claimed files when a diff was opened *for* an effort.
-  const filesForList = useMemo<BranchChangeEntry[]>(() => {
+  const filesForList = useMemo<DiffEntry[]>(() => {
     if (!effortPassed) return changed.files;
     if (!claimedPaths) return [];
     return changed.files.filter((f) => claimedPaths.has(f.path));

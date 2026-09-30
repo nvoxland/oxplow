@@ -12,11 +12,14 @@
 //!    deletions included, sorted by path.
 //! 3. **Status** — added, modified, deleted and untracked paths show;
 //!    a commit leaves the workspace clean.
+//! 4. **Merge base** — two lines of history meet where they forked.
 //! 5. **Head and log** — the head resolves to the last commit, which the
 //!    log lists first.
-//! 6. **Blame** — each line names the revision that last changed it.
+//! 6. **Blame** — each line names the revision that last changed it; in
+//!    the working tree an uncommitted line names none.
 //!
-//! (7, the snapshot↔revision mapping, joins with `Trees` in P5.B3.)
+//! (7, the snapshot↔revision mapping, runs in `trees.rs`: it needs the
+//! snapshot store.)
 
 use std::path::Path;
 
@@ -172,22 +175,51 @@ pub async fn head_resolves_and_the_log_walks_newest_first(p: &dyn Vcs, ws: &Path
     assert_eq!(detail.files[0].status, FileStatus::Modified);
 }
 
-/// 6. Blame names the revision that last changed each line.
+/// 6. Blame names the revision that last changed each line — at a
+///    revision, or in the working tree, where an uncommitted line has none.
 pub async fn blame_attributes_lines_to_their_revision(p: &dyn Vcs, ws: &Path) {
     write(ws, "a.txt", "one\n");
     let first = commit(p, ws, "first").await;
     write(ws, "a.txt", "one\ntwo\n");
     let second = commit(p, ws, "second").await;
-    let lines = p.blame(ws, "a.txt", &second).await.unwrap();
+    let lines = p.blame(ws, "a.txt", Some(&second)).await.unwrap();
     assert_eq!(
         lines
             .iter()
-            .map(|l| (l.line, l.revision.as_str()))
+            .map(|l| (l.line, l.revision.as_deref()))
             .collect::<Vec<_>>(),
-        vec![(1, first.as_str()), (2, second.as_str())]
+        vec![(1, Some(first.as_str())), (2, Some(second.as_str()))]
     );
     // At the first revision, only its line exists.
-    assert_eq!(p.blame(ws, "a.txt", &first).await.unwrap().len(), 1);
+    assert_eq!(p.blame(ws, "a.txt", Some(&first)).await.unwrap().len(), 1);
+    // The working tree: an edit is nobody's yet.
+    write(ws, "a.txt", "one\nTWO\nthree\n");
+    let working = p.blame(ws, "a.txt", None).await.unwrap();
+    assert_eq!(
+        working
+            .iter()
+            .map(|l| (l.line, l.revision.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![(1, Some(first.as_str())), (2, None), (3, None)]
+    );
+}
+
+/// 4. Two lines of history meet at their merge base.
+pub async fn branches_meet_at_their_merge_base(p: &dyn Vcs, ws: &Path) {
+    write(ws, "a.txt", "base\n");
+    let base = commit(p, ws, "base").await;
+    let main = p.head(ws).await.unwrap().branch.unwrap();
+    p.checkout_branch(ws, "side", true).await.unwrap();
+    write(ws, "side.txt", "s\n");
+    let side = commit(p, ws, "side").await;
+    p.checkout_branch(ws, &main, false).await.unwrap();
+    write(ws, "main.txt", "m\n");
+    commit(p, ws, "main").await;
+    assert_eq!(
+        p.merge_base(ws, "HEAD", "side").await.unwrap(),
+        Some(base.clone())
+    );
+    assert_eq!(p.merge_base(ws, &side, &base).await.unwrap(), Some(base));
 }
 
 #[cfg(test)]
@@ -229,6 +261,12 @@ mod tests {
     async fn git_head_resolves_and_the_log_walks_newest_first() {
         let ws = workspace();
         head_resolves_and_the_log_walks_newest_first(&GitProvider, ws.path()).await;
+    }
+
+    #[tokio::test]
+    async fn git_branches_meet_at_their_merge_base() {
+        let ws = workspace();
+        branches_meet_at_their_merge_base(&GitProvider, ws.path()).await;
     }
 
     #[tokio::test]

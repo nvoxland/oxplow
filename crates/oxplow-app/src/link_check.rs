@@ -74,10 +74,10 @@ async fn missing_reason(services: &Services, reference: &Reference) -> Option<St
         }
         Reference::Commit(sha) => {
             let exists = services
-                .git
-                .commit_detail(None, sha.clone())
+                .vcs
+                .resolve(services.worktrees.project_dir(), sha)
                 .await
-                .is_some();
+                .is_ok();
             (!exists).then(|| format!("commit `{sha}` was not found"))
         }
         Reference::File(detail) => {

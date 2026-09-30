@@ -1,7 +1,8 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  getBranchChanges,
+  diffRevisions,
+  vcsMergeBase,
   getChangeScopes,
   gitAddPath,
   gitAppendToGitignore,
@@ -25,7 +26,7 @@ import {
   type TextSearchHit,
   type WorkspaceEntry,
   type WorkspaceIndexedFile,
-  type WorkspaceStatusSummary,
+  type StatusCounts,
 } from "../../api.js";
 import type { DiffRequest } from "../Diff/diff-request.js";
 import { WORKING, gitRevision } from "../../revision.js";
@@ -82,7 +83,7 @@ export function ProjectPanel({
   const [entriesByDir, setEntriesByDir] = useState<Record<string, WorkspaceEntry[]>>({});
   const [loadingDirs, setLoadingDirs] = useState<Record<string, boolean>>({});
   const [indexedFiles, setIndexedFiles] = useState<WorkspaceIndexedFile[]>([]);
-  const [statusSummary, setStatusSummary] = useState<WorkspaceStatusSummary | null>(null);
+  const [statusSummary, setStatusSummary] = useState<StatusCounts | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuTarget | null>(null);
   // Inline-prompt state for new-file/new-folder/rename. Replaces the
@@ -230,7 +231,8 @@ export function ProjectPanel({
 
   // Load paths+deletions for the currently-selected scope.
   // - Uncommitted: read directly from the workspace index (already subscribed).
-  // - Branch/Unpushed: `getBranchChanges` against the appropriate ref.
+  // - Branch/Unpushed: the working tree against where it forked from the
+  //   appropriate ref (`vcsMergeBase` → `diffRevisions`).
   // Deletions are tracked separately so we can inject phantom rows into the
   // tree (the filesystem no longer has them).
   useEffect(() => {
@@ -253,11 +255,12 @@ export function ProjectPanel({
     const ref = filterMode === "branch" ? scopes?.branchBase : scopes?.upstream;
     if (!ref) { setScopedPaths([]); setScopedDeletions(new Set()); return; }
     let cancelled = false;
-    void getBranchChanges(stream.id, ref)
-      .then((result) => {
+    void vcsMergeBase(stream.id, gitRevision("HEAD"), gitRevision(ref))
+      .then((base) => (base === null ? [] : diffRevisions(stream.id, base, WORKING)))
+      .then((files) => {
         if (cancelled) return;
-        setScopedPaths(result.files.map((f) => f.path));
-        setScopedDeletions(new Set(result.files.filter((f) => f.status === "deleted").map((f) => f.path)));
+        setScopedPaths(files.map((f) => f.path));
+        setScopedDeletions(new Set(files.filter((f) => f.status === "deleted").map((f) => f.path)));
       })
       .catch(() => {
         if (cancelled) return;

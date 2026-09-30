@@ -27,14 +27,9 @@ pub use ast_merge::{
     language_for_path as merge_language_for_path, merge_top_level, parse_top_level_items, AstMerge,
     BailReason, Item, Language as MergeLanguage,
 };
-pub use blame::{
-    git_blame, local_blame, parse_porcelain, BlameLine, LocalBlameEntry, BLAME_ZERO_SHA,
-};
+pub use blame::{git_blame, parse_porcelain, BlameLine, BLAME_ZERO_SHA};
 pub use branch::{list_branches, BranchRef, BranchRefKind};
-pub use branch_changes::{
-    get_change_scopes, list_branch_changes, BranchChangeEntry, BranchChanges, ChangeKind,
-    ChangeScopes,
-};
+pub use branch_changes::{get_change_scopes, BranchChangeEntry, ChangeKind, ChangeScopes};
 pub use branch_ops::{
     append_to_gitignore, delete_branch, detect_default_branch, get_ahead_behind,
     get_commits_ahead_of, rename_branch, restore_path, AheadBehind, BranchOpError,
@@ -52,11 +47,11 @@ pub use refs::{
     CommitRefLabel, CommitRefLabelKind, GroupedGitRefs, RefKind, RefOption, RemoteBranchEntry,
 };
 pub use refs_watch::{GitRefsWatcher, RefsChangeEvent};
-pub use repo::{detect_current_branch, is_git_repo, is_git_worktree, resolve_revision};
+pub use repo::{detect_current_branch, is_git_repo, is_git_worktree, merge_base, resolve_revision};
 pub use smart_merge::{auto_resolve_conflicts, merge3, merge3_str, tokenize, AutoResolveReport};
 pub use status::{
     clean_head_blob_oids, head_commit_sha, list_git_statuses, read_blob, status_for_path,
-    summarize_git_statuses, GitCleanBaseline, GitFileStatus, WorkspaceStatusSummary,
+    GitCleanBaseline, GitFileStatus,
 };
 pub use sync::{
     add_path, checkout_branch, cherry_pick, commit, fetch, merge, pull, pull_remote_into_current,

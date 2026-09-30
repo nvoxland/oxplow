@@ -14,44 +14,6 @@ use specta::Type;
 
 pub const BLAME_ZERO_SHA: &str = "0000000000000000000000000000000000000000";
 
-/// Per-line attribution combining git blame with a local "this line was
-/// last touched in oxplow effort X" overlay. The full TS implementation
-/// could match against snapshot file contents to attribute lines to
-/// efforts; the new schema only persists blob hashes (not full text)
-/// so this Rust port currently surfaces git blame + the BLAME_ZERO_SHA
-/// → "uncommitted" mapping. The task effort attribution arrives
-/// once content-addressed snapshot blob storage lands (see
-/// MIGRATION_REVIEW2 §3 / sharp edge §5).
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct LocalBlameEntry {
-    pub line: u32,
-    /// "git", "uncommitted", or eventually "local" (once snapshot
-    /// blobs are available).
-    pub source: String,
-    pub git: Option<BlameLine>,
-}
-
-pub fn local_blame(repo: &Path, path: &str, disk_text: &str) -> Vec<LocalBlameEntry> {
-    let git = git_blame(repo, "HEAD", path).unwrap_or_default();
-    let line_count = disk_text.split('\n').count() as u32;
-    let mut out = Vec::with_capacity(line_count as usize);
-    for line_no in 1..=line_count {
-        let blame = git.iter().find(|b| b.line == line_no).cloned();
-        let source = match &blame {
-            Some(b) if b.sha == BLAME_ZERO_SHA => "uncommitted",
-            Some(_) => "git",
-            None => "uncommitted",
-        }
-        .to_string();
-        out.push(LocalBlameEntry {
-            line: line_no,
-            source,
-            git: blame,
-        });
-    }
-    out
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct BlameLine {
     pub line: u32,
@@ -62,11 +24,16 @@ pub struct BlameLine {
     pub summary: String,
 }
 
-/// Who last changed each line of `path` as of `rev`. An error carries
-/// git's own message (an unknown revision, a path not in it).
-pub fn git_blame(repo: &Path, rev: &str, path: &str) -> Result<Vec<BlameLine>, String> {
+/// Who last changed each line of `path` as of `rev`, or of the working
+/// file when `rev` is `None` (an uncommitted line then carries
+/// [`BLAME_ZERO_SHA`]). An error carries git's own message (an unknown
+/// revision, a path not in it).
+pub fn git_blame(repo: &Path, rev: Option<&str>, path: &str) -> Result<Vec<BlameLine>, String> {
+    let mut args = vec!["blame", "--porcelain"];
+    args.extend(rev);
+    args.extend(["--", path]);
     let output = Command::new("git")
-        .args(["blame", "--porcelain", rev, "--", path])
+        .args(&args)
         .current_dir(repo)
         .output()
         .map_err(|e| e.to_string())?;
@@ -195,7 +162,7 @@ mod tests {
             .current_dir(dir.path())
             .output()
             .unwrap();
-        let lines = git_blame(dir.path(), "HEAD", "a.txt").unwrap();
+        let lines = git_blame(dir.path(), Some("HEAD"), "a.txt").unwrap();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].author, "Tester");
     }

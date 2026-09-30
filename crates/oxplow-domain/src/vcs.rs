@@ -176,7 +176,9 @@ pub struct Divergence {
 pub struct BlameLine {
     /// 1-based.
     pub line: u32,
-    pub revision: String,
+    /// The revision that last changed the line; `None` for a line not
+    /// committed yet (blaming the working tree).
+    pub revision: Option<String>,
     pub author: String,
     pub email: String,
     pub time: i64,
@@ -326,7 +328,17 @@ pub trait Vcs: Send + Sync {
     async fn status(&self, ws: &Path) -> Result<WorkspaceStatus, VcsError>;
     async fn branches(&self, ws: &Path) -> Result<Vec<Branch>, VcsError>;
     async fn divergence(&self, ws: &Path, base: &str, head: &str) -> Result<Divergence, VcsError>;
-    async fn blame(&self, ws: &Path, path: &str, rev: &str) -> Result<Vec<BlameLine>, VcsError>;
+    /// Who last changed each line of `path` at `rev`, or in the working
+    /// tree when `rev` is `None`.
+    async fn blame(
+        &self,
+        ws: &Path,
+        path: &str,
+        rev: Option<&str>,
+    ) -> Result<Vec<BlameLine>, VcsError>;
+    /// Where the histories of `a` and `b` fork; `None` when they share
+    /// none.
+    async fn merge_base(&self, ws: &Path, a: &str, b: &str) -> Result<Option<String>, VcsError>;
 
     // --- mutations (through the `vcs.*` commands only) ---
     /// Commit the workspace's changes; the new revision's id.

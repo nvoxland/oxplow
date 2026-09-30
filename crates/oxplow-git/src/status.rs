@@ -17,33 +17,6 @@ pub enum GitFileStatus {
     Untracked,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct WorkspaceStatusSummary {
-    pub modified: u32,
-    pub added: u32,
-    pub deleted: u32,
-    pub renamed: u32,
-    pub untracked: u32,
-    pub total: u32,
-}
-
-pub fn summarize_git_statuses(
-    git_statuses: &HashMap<String, GitFileStatus>,
-) -> WorkspaceStatusSummary {
-    let mut s = WorkspaceStatusSummary::default();
-    for status in git_statuses.values() {
-        match status {
-            GitFileStatus::Modified => s.modified += 1,
-            GitFileStatus::Added => s.added += 1,
-            GitFileStatus::Deleted => s.deleted += 1,
-            GitFileStatus::Renamed => s.renamed += 1,
-            GitFileStatus::Untracked => s.untracked += 1,
-        }
-        s.total += 1;
-    }
-    s
-}
-
 /// Map every changed/untracked path under `repo_path` to its
 /// classification. Fast-path: empty map if not a git repo.
 pub fn list_git_statuses(repo_path: &Path) -> HashMap<String, GitFileStatus> {
@@ -314,19 +287,6 @@ pub fn head_commit_sha(repo_path: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn summarize_counts_each_status() {
-        let mut statuses = HashMap::new();
-        statuses.insert("a".into(), GitFileStatus::Modified);
-        statuses.insert("b".into(), GitFileStatus::Modified);
-        statuses.insert("c".into(), GitFileStatus::Added);
-        statuses.insert("d".into(), GitFileStatus::Untracked);
-        let s = summarize_git_statuses(&statuses);
-        assert_eq!(s.modified, 2);
-        assert_eq!(s.added, 1);
-        assert_eq!(s.untracked, 1);
-        assert_eq!(s.total, 4);
-    }
 
     use super::*;
     use tempfile::tempdir;

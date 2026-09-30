@@ -3,7 +3,6 @@
 
 use oxplow_app::workspace_files::{WorkspaceEntry, WorkspaceFile, WorkspaceIndexedFile};
 use oxplow_app::Services;
-use oxplow_git::WorkspaceStatusSummary;
 
 use crate::error::IpcError;
 
@@ -114,28 +113,8 @@ pub async fn delete_workspace_path(
         .map_err(|e| IpcError::internal(e.to_string()))
 }
 
-pub async fn get_workspace_status_summary(
-    svc: &Services,
-    stream_id: Option<String>,
-) -> Result<WorkspaceStatusSummary, IpcError> {
-    Ok(svc.git.status_summary(stream_id.as_deref()).await)
-}
-
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
-    async fn get_workspace_status_summary_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch(
-            "get_workspace_status_summary",
-            serde_json::json!({ "streamId": null }),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert!(out.is_object(), "expected a JSON object, got {out}");
-    }
-
     #[tokio::test]
     async fn list_workspace_files_excludes_generated_dirs() {
         let (svc, dir) = crate::test_support::services();

@@ -53,6 +53,19 @@ pub fn resolve_revision(path: impl AsRef<Path>, rev: &str) -> Result<String, git
     Ok(commit.id().to_string())
 }
 
+/// Where the histories of `a` and `b` fork; `None` when they share no
+/// history.
+pub fn merge_base(path: impl AsRef<Path>, a: &str, b: &str) -> Result<Option<String>, git2::Error> {
+    let repo = git2::Repository::open(path.as_ref())?;
+    let a = repo.revparse_single(a)?.peel_to_commit()?.id();
+    let b = repo.revparse_single(b)?.peel_to_commit()?.id();
+    match repo.merge_base(a, b) {
+        Ok(id) => Ok(Some(id.to_string())),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

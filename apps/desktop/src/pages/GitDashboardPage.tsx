@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { GitLogCommit, GitLogResult, GitOpResult, RemoteBranchEntry, Stream, StreamDivergenceReport, StreamDivergenceRow, WorkspaceStatusSummary } from "../api.js";
+import type { GitLogCommit, GitLogResult, GitOpResult, RemoteBranchEntry, Stream, StreamDivergenceReport, StreamDivergenceRow, StatusCounts } from "../api.js";
 import {
   getAheadBehind,
   listStreamDivergences,
-  getCommitDetail,
+  countStatus,
+  vcsRevision,
+  vcsStatus,
   getCommitsAheadOf,
   getGitLog,
   gitFetch,
@@ -16,12 +18,12 @@ import {
   listAgentStatuses,
   listRecentRemoteBranches,
   listStreams,
-  getWorkspaceStatusSummary,
   subscribeAgentStatus,
   subscribeGitRefsEvents,
   subscribeWorkspaceEvents,
 } from "../api.js";
 import { AgentStatusDot } from "../components/AgentStatusDot.js";
+import { gitRevision } from "../revision.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, indexRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
@@ -47,7 +49,7 @@ interface DashboardData {
     aheadUpstream: number;
     behindUpstream: number;
   };
-  uncommitted: WorkspaceStatusSummary | null;
+  uncommitted: StatusCounts | null;
   recentLog: GitLogResult;
   streams: StreamRow[];
   remoteBranches: RemoteBranchEntry[];
@@ -59,7 +61,7 @@ interface StreamRow {
   branch: string | null;
   ahead: number;
   behind: number;
-  uncommitted: WorkspaceStatusSummary | null;
+  uncommitted: StatusCounts | null;
 }
 
 const RECENT_LIMIT = 5;
@@ -111,7 +113,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     try {
       setError(null);
       const [statusSummary, log, remoteBranches, streams, divergence] = await Promise.all([
-        getWorkspaceStatusSummary(streamId),
+        vcsStatus(streamId).then(countStatus),
         getGitLog(streamId, { limit: RECENT_LIMIT, all: false }),
         listRecentRemoteBranches(streamId, 20),
         listStreams(),
@@ -143,7 +145,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       const otherStreams = streams.filter((s) => s.id !== streamId);
       const streamRows: StreamRow[] = await Promise.all(
         otherStreams.map(async (other) => {
-          const uncommitted = await getWorkspaceStatusSummary(other.id).catch(() => null);
+          const uncommitted = await vcsStatus(other.id).then(countStatus).catch(() => null);
           const otherBranch = other.branch || null;
           if (!otherBranch || !branch || otherBranch === branch) {
             return { stream: other, branch: otherBranch, ahead: 0, behind: 0, uncommitted };
@@ -524,7 +526,7 @@ function UncommittedMiniCard({
   summary,
   onView,
 }: {
-  summary: WorkspaceStatusSummary | null;
+  summary: StatusCounts | null;
   onView(): void;
 }) {
   const total = summary?.total ?? 0;
@@ -563,7 +565,7 @@ function useCommitStats(streamId: string, commits: GitLogCommit[]): Map<string, 
     const shas = commits.map((c) => c.sha);
     void Promise.all(
       shas.map(async (sha) => {
-        const detail = await getCommitDetail(streamId, sha);
+        const detail = await vcsRevision(streamId, gitRevision(sha));
         if (!detail) return [sha, null] as const;
         let filesAdded = 0;
         let filesModified = 0;
@@ -741,7 +743,7 @@ function StreamsCard({
   );
 }
 
-function UncommittedSummaryInline({ summary }: { summary: WorkspaceStatusSummary | null }) {
+function UncommittedSummaryInline({ summary }: { summary: StatusCounts | null }) {
   if (!summary || summary.total === 0) {
     return (
       <span

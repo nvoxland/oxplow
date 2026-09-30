@@ -717,11 +717,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getRepoConflictState: (streamId: string | null) => typedError<RepoConflictState, IpcError>(__TAURI_INVOKE("get_repo_conflict_state", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getAheadBehind: (streamId: string | null, base: string, head: string) => typedError<AheadBehind, IpcError>(__TAURI_INVOKE("get_ahead_behind", { streamId, base, head })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -828,21 +823,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	listAdoptableWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_adoptable_worktrees")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	gitBlame: (streamId: string | null, path: string) => typedError<BlameLine[], IpcError>(__TAURI_INVOKE("git_blame", { streamId, path })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	localBlame: (streamId: string | null, path: string, diskText: string) => typedError<LocalBlameEntry[], IpcError>(__TAURI_INVOKE("local_blame", { streamId, path, diskText })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	getBranchChanges: (streamId: string | null, baseRef: string) => typedError<BranchChanges, IpcError>(__TAURI_INVOKE("get_branch_changes", { streamId, baseRef })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1011,21 +991,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getCommitDetail: (streamId: string | null, sha: string) => typedError<{
-	sha: string,
-	short_sha: string,
-	author: string,
-	email: string,
-	timestamp_secs: number,
-	subject: string,
-	body: string,
-	parents: string[],
-	files: CommitDetailFile[],
-} | null, IpcError>(__TAURI_INVOKE("get_commit_detail", { streamId, sha })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getCommitsAheadOf: (streamId: string | null, base: string, head: string, limit: number) => typedError<GitLogCommit[], IpcError>(__TAURI_INVOKE("get_commits_ahead_of", { streamId, base, head, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1051,6 +1016,35 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	vcsHead: (streamId: string | null) => typedError<HeadInfo, IpcError>(__TAURI_INVOKE("vcs_head", { streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	vcsStatus: (streamId: string | null) => typedError<WorkspaceStatus, IpcError>(__TAURI_INVOKE("vcs_status", { streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	vcsBlame: (streamId: string | null, path: string, revision: string) => typedError<BlameLine[], IpcError>(__TAURI_INVOKE("vcs_blame", { streamId, path, revision })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	vcsRevision: (streamId: string | null, revision: string) => typedError<{
+	info: RevisionInfo,
+	body: string,
+	files: RevisionFile[],
+} | null, IpcError>(__TAURI_INVOKE("vcs_revision", { streamId, revision })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	vcsMergeBase: (streamId: string | null, a: string, b: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("vcs_merge_base", { streamId, a, b })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	writeWorkspaceFile: (streamId: string | null, relativePath: string, content: string) => typedError<WorkspaceFile, IpcError>(__TAURI_INVOKE("write_workspace_file", { streamId, relativePath, content })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1072,11 +1066,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	deleteWorkspacePath: (streamId: string | null, relativePath: string) => typedError<string, IpcError>(__TAURI_INVOKE("delete_workspace_path", { streamId, relativePath })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	getWorkspaceStatusSummary: (streamId: string | null) => typedError<WorkspaceStatusSummary, IpcError>(__TAURI_INVOKE("get_workspace_status_summary", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1610,12 +1599,18 @@ export type BacklogState = {
 	done: Task[],
 };
 
+// Who last changed one line.
 export type BlameLine = {
+	// 1-based.
 	line: number,
-	sha: string,
+	/**
+	 *  The revision that last changed the line; `None` for a line not
+	 *  committed yet (blaming the working tree).
+	 */
+	revision: string | null,
 	author: string,
-	author_mail: string,
-	author_time: number,
+	email: string,
+	time: number,
 	summary: string,
 };
 
@@ -1625,12 +1620,6 @@ export type BranchChangeEntry = {
 	change: ChangeKind,
 	additions: number,
 	deletions: number,
-};
-
-export type BranchChanges = {
-	base_ref: string,
-	merge_base: string | null,
-	files: BranchChangeEntry[],
 };
 
 export type BranchRef = {
@@ -1915,25 +1904,6 @@ export type CommentTarget = {
 export type CommentThread = {
 	comment: Comment,
 	messages: CommentMessage[],
-};
-
-export type CommitDetail = {
-	sha: string,
-	short_sha: string,
-	author: string,
-	email: string,
-	timestamp_secs: number,
-	subject: string,
-	body: string,
-	parents: string[],
-	files: CommitDetailFile[],
-};
-
-export type CommitDetailFile = {
-	path: string,
-	additions: number,
-	deletions: number,
-	status: string,
 };
 
 export type CommitRefLabel = {
@@ -2588,8 +2558,6 @@ export type GitOpResult = {
 	auto_resolved?: number,
 };
 
-export type GitOperationKind = "merge" | "rebase" | "cherry-pick" | "revert";
-
 export type GitWorktreeEntry = {
 	path: string,
 	branch: string | null,
@@ -2604,6 +2572,14 @@ export type GroupedGitRefs = {
 	locals: RefOption[],
 	remotes: RefOption[],
 	tags: RefOption[],
+};
+
+// Where a stream's workspace is.
+export type HeadInfo = {
+	// The head revision; `None` before the first commit.
+	revision: string | null,
+	// The branch checked out; `None` when detached.
+	branch: string | null,
 };
 
 /**
@@ -2646,6 +2622,9 @@ export type HookKind =
 "session_start" | 
 // A harness session ended — `reason: "clear"` for `/clear`.
 "session_end";
+
+// An operation paused mid-way, waiting on its conflicts.
+export type InProgressOp = "merge" | "rebase" | "cherry_pick" | "revert";
 
 export type InstalledLspPackage = {
 	name: string,
@@ -2920,26 +2899,6 @@ export type LensViz =
  *  declares from this lens's params.
  */
 "grid";
-
-/**
- *  Per-line attribution combining git blame with a local "this line was
- *  last touched in oxplow effort X" overlay. The full TS implementation
- *  could match against snapshot file contents to attribute lines to
- *  efforts; the new schema only persists blob hashes (not full text)
- *  so this Rust port currently surfaces git blame + the BLAME_ZERO_SHA
- *  → "uncommitted" mapping. The task effort attribution arrives
- *  once content-addressed snapshot blob storage lands (see
- *  MIGRATION_REVIEW2 §3 / sharp edge §5).
- */
-export type LocalBlameEntry = {
-	line: number,
-	/**
-	 *  "git", "uncommitted", or eventually "local" (once snapshot
-	 *  blobs are available).
-	 */
-	source: string,
-	git: BlameLine | null,
-};
 
 export type LspServerConfig = {
 	languageId: string,
@@ -3741,13 +3700,6 @@ export type ReorderThreadQueueRequest = {
 	order: ThreadId[],
 };
 
-export type RepoConflictState = {
-	// Active long-running git op, or `None` when the worktree is clean.
-	operation: GitOperationKind | null,
-	// Number of paths reported as unmerged by `git status --porcelain`.
-	conflicted_count: number,
-};
-
 /**
  *  One test/coverage report the project's test run emits. `format` selects
  *  the parser (collector): the built-ins are `lcov` | `cobertura` |
@@ -3760,6 +3712,33 @@ export type RepoConflictState = {
 export type ReportConfig = {
 	path: string,
 	format: string,
+};
+
+// One revision in full: its message and the files it changed.
+export type RevisionDetail = {
+	info: RevisionInfo,
+	body: string,
+	files: RevisionFile[],
+};
+
+// A file a revision changed, against its first parent.
+export type RevisionFile = {
+	path: string,
+	status: FileStatus,
+	additions: number,
+	deletions: number,
+};
+
+// One revision, as a list shows it.
+export type RevisionInfo = {
+	id: string,
+	short_id: string,
+	author: string,
+	email: string,
+	// Seconds since the Unix epoch.
+	time: number,
+	subject: string,
+	parents: string[],
 };
 
 /**
@@ -4097,6 +4076,12 @@ export type SqlQueryResult = {
 	 *  SQL gateway fills it, P4.6); a model unchanged since then is absent.
 	 */
 	freshness: ModelFreshness[],
+};
+
+// One changed path in a workspace.
+export type StatusEntry = {
+	path: string,
+	status: FileStatus,
 };
 
 // An envelope as read back from the log, with its position.
@@ -4493,13 +4478,12 @@ export type WorkspaceIndexedFile = {
 	status: FileStatus | null,
 };
 
-export type WorkspaceStatusSummary = {
-	modified: number,
-	added: number,
-	deleted: number,
-	renamed: number,
-	untracked: number,
-	total: number,
+// A workspace's changes against its head.
+export type WorkspaceStatus = {
+	// Changed paths, sorted.
+	entries: StatusEntry[],
+	// The operation in progress, if one is.
+	in_progress: InProgressOp | null,
 };
 
 /**

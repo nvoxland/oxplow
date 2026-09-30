@@ -2,6 +2,7 @@
 //! `.context/vcs.md`). Git is the one built in.
 
 mod git;
+pub mod reads;
 
 pub use git::GitProvider;
 
@@ -25,9 +26,6 @@ mod tests {
         "oxplow-rpc/src/commands/config.rs",
         "oxplow-rpc/src/commands/log.rs",
         "oxplow-rpc/src/commands/git.rs",
-        "oxplow-rpc/src/commands/workspace.rs",
-        "oxplow-tauri-ipc/src/commands/git.rs",
-        "oxplow-tauri-ipc/src/commands/workspace.rs",
     ];
 
     /// P5.B3 (tsk522): only the git provider (`vcs/git.rs`) calls

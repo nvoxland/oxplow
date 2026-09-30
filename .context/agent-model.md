@@ -1058,8 +1058,10 @@ check catches you if you forget. Run `cargo test -p
 oxplow-surface-parity -- --nocapture` to see the current gap backlog.
 
 Domains mirrored onto MCP so far (beyond the original task/wiki/comment
-surface): **git reads** (`git_status`, `git_log`, `git_blame`,
-`git_diff`, `read_at` (any revision: `working`, `snap:<id>`, `git:<rev>`), `list_branches` — `stream_id` optional;
+surface): **VCS reads** (`git_status`, `git_log`, `vcs_blame`, `diff`
+(two revisions; `since_fork` for a branch's own changes), `read_at` —
+revisions are `working`, `snap:<id>` or `git:<rev>` — and
+`list_branches`; `stream_id` optional;
 mutations stay on Bash); **snapshots / local history**
 (`list_snapshots_for_stream`, `list_files_for_snapshot`,
 `get_snapshot_stats`, `list_snapshot_change_entries` take a `snapshot_id`

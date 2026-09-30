@@ -23,7 +23,9 @@ provider stays testable against a tempdir.
   content hashing use them from blocking threads.
 - **Status, branches, blame:** `status` (sorted entries plus the
   in-progress op; conflicted paths show as `Conflicted`), `branches`,
-  `divergence(base, head)`, `blame(path, rev)`.
+  `divergence(base, head)`, `merge_base(a, b)`, `blame(path, rev?)` —
+  `None` blames the working file, where an uncommitted line's
+  `BlameLine.revision` is `None`.
 - **Mutations:** `commit`, `stage`, `discard`, `fetch`, `pull`, `push`,
   `merge`, `checkout_branch`, `rename_branch`, `delete_branch`,
   `resolve_conflict(path, Ours | Theirs | Auto)`. They run only through
@@ -109,6 +111,25 @@ snapshot head is scanned too. (The wiki's `@<rev>` link syntax is still
 its own `WikiVersion`; it joins `Revision` when knowledge becomes a
 capability, P5.C3.)
 
+## The stream's reads (P5.B4)
+
+`oxplow_app::vcs::reads` is what the UI and agent tools call: `head`
+(`HeadInfo { revision, branch }`), `status`, `blame(path, revision)`,
+`revision(revision)` (a commit's message and files) and
+`merge_base(a, b)` — each routed by stream and naming versions as
+`Revision`s (a snapshot answers with the revision its tree equals). RPCs
+`vcs_head`, `vcs_status`, `vcs_blame`, `vcs_revision`, `vcs_merge_base`
+(UI; `vcs_blame` also on MCP) replaced `get_repo_conflict_state`,
+`get_workspace_status_summary`, `git_blame`, `local_blame`,
+`get_commit_detail` and `get_branch_changes`; MCP `git_diff` became
+`diff { from?, to, since_fork }`. On the desktop: the changed-files lists
+diff `head → working` (`vcsHead` + `diffRevisions`), branch scopes diff
+from `vcsMergeBase`, the rail's counts and conflicts come from
+`vcsStatus` (`countStatus`), the commit page and dashboard stats from
+`vcsRevision`, and the blame overlay from `vcsBlame(…, WORKING)`.
+`DiffViewPage.smoke.test.tsx` renders the diff view and the commit page
+over a command Proxy that records any git-shaped call.
+
 ## Snapshots and revisions
 
 A snapshot taken on a clean workspace *is* its head revision:
@@ -141,14 +162,17 @@ provider runs the same list:
 2. two revisions diff to what changed, deletions included;
 3. status reports added/modified/deleted/untracked and is clean after a
    commit;
+4. two lines of history meet at their merge base (checkout creates and
+   switches branches);
 5. the head resolves (a short id too; an unknown rev errors) and the
    log walks newest first;
-6. blame attributes each line to its revision, at any revision.
+6. blame attributes each line to its revision, at any revision, and in
+   the working tree leaves uncommitted lines unattributed.
 
 7 (a snapshot taken on a clean workspace maps to its head revision
 and back, and diffs empty against it) needs the snapshot store, so it
-runs in `trees.rs`. Still to come: 4 (branches follow checkout and
-diverge) and 8 (isolated workspaces share history).
+runs in `trees.rs`. Still to come: branch listing and divergence, and 8 (isolated
+workspaces share history).
 
 **`only_the_git_provider_calls_oxplow_git`** (`vcs/mod.rs`) scans the
 crates' production code: `oxplow_git::` appears only in `vcs/git.rs`
@@ -156,11 +180,11 @@ and in the `NOT_YET_ON_VCS` list, which fails when a file on it stops
 calling `oxplow_git` (take it off) and ends empty at B7. The snapshot
 files left it in B3.
 
-## Still git-shaped (P5 B4–B7)
+## Still git-shaped (P5 B5–B7)
 
 `GitService` keeps its stream-taking methods until each RPC moves:
-reads to the neutral `vcs_*` RPCs (B4), history and branches to SQL
-(B5), and mutations to `vcs.*` commands (B6); the rest of
+history and branches to SQL (B5) and mutations to `vcs.*` commands (B6);
+the rest of
 `NOT_YET_ON_VCS` moves in B7. Commit-id columns outside snapshots
 (`closest_git_version`, `git_version_exact`, `v_commit`) keep their
 names until then.

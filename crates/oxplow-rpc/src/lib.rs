@@ -337,7 +337,6 @@ macro_rules! oxplow_command_table {
                 record_usage => $crate::commands::usage::record_usage { kind: String, payload_json: String } -> ::oxplow_db::UsageEvent,
                 list_recent_usage_rollup => $crate::commands::usage::list_recent_usage_rollup { kind: String, stream_id: Option<String>, limit: u32 } -> Vec<::oxplow_db::UsageRollup>,
                 // git
-                get_repo_conflict_state => $crate::commands::git::get_repo_conflict_state { stream_id: Option<String> } -> ::oxplow_git::RepoConflictState,
                 get_ahead_behind => $crate::commands::git::get_ahead_behind { stream_id: Option<String>, base: String, head: String } -> ::oxplow_git::AheadBehind,
                 list_stream_divergences => $crate::commands::git::list_stream_divergences { base: Option<String> } -> $crate::commands::git::StreamDivergenceReport,
                 append_to_gitignore => $crate::commands::git::append_to_gitignore { stream_id: Option<String>, entry: String } -> (),
@@ -357,15 +356,17 @@ macro_rules! oxplow_command_table {
                 resolve_commit_ref_labels => $crate::commands::git::resolve_commit_ref_labels { shas: Vec<String> } -> ::std::collections::HashMap<String, Vec<::oxplow_git::CommitRefLabel>>,
                 list_recent_remote_branches => $crate::commands::git::list_recent_remote_branches { limit: Option<usize> } -> Vec<::oxplow_git::RemoteBranchEntry>,
                 list_file_commits => $crate::commands::git::list_file_commits { stream_id: Option<String>, path: String, limit: Option<usize> } -> Vec<oxplow_git::GitLogCommit>,
-                git_blame => $crate::commands::git::git_blame { stream_id: Option<String>, path: String } -> Vec<::oxplow_git::BlameLine>,
-                local_blame => $crate::commands::git::local_blame { stream_id: Option<String>, path: String, disk_text: String } -> Vec<::oxplow_git::LocalBlameEntry>,
                 get_change_scopes => $crate::commands::git::get_change_scopes { stream_id: Option<String> } -> ::oxplow_git::ChangeScopes,
-                get_branch_changes => $crate::commands::git::get_branch_changes { stream_id: Option<String>, base_ref: String } -> ::oxplow_git::BranchChanges,
                 list_adoptable_worktrees => $crate::commands::git::list_adoptable_worktrees {} -> Vec<::oxplow_git::GitWorktreeEntry>,
                 search_workspace_text => $crate::commands::git::search_workspace_text { stream_id: Option<String>, query: String, limit: Option<usize> } -> Vec<::oxplow_git::TextSearchHit>,
                 read_at => $crate::commands::trees::read_at { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Option<String>,
                 // workspace
                 files_at => $crate::commands::trees::files_at { stream_id: Option<String>, revision: ::oxplow_domain::vcs::Revision } -> Vec<String>,
+                vcs_head => $crate::commands::vcs::vcs_head { stream_id: Option<String> } -> ::oxplow_app::vcs::reads::HeadInfo,
+                vcs_status => $crate::commands::vcs::vcs_status { stream_id: Option<String> } -> ::oxplow_domain::vcs::WorkspaceStatus,
+                vcs_blame => $crate::commands::vcs::vcs_blame { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_domain::vcs::BlameLine>,
+                vcs_revision => $crate::commands::vcs::vcs_revision { stream_id: Option<String>, revision: ::oxplow_domain::vcs::Revision } -> Option<::oxplow_domain::vcs::RevisionDetail>,
+                vcs_merge_base => $crate::commands::vcs::vcs_merge_base { stream_id: Option<String>, a: ::oxplow_domain::vcs::Revision, b: ::oxplow_domain::vcs::Revision } -> Option<::oxplow_domain::vcs::Revision>,
                 list_workspace_entries => $crate::commands::workspace::list_workspace_entries { stream_id: Option<String>, relative_path: String } -> Vec<::oxplow_app::workspace_files::WorkspaceEntry>,
                 list_workspace_files => $crate::commands::workspace::list_workspace_files { stream_id: Option<String> } -> Vec<::oxplow_app::workspace_files::WorkspaceIndexedFile>,
                 read_workspace_file => $crate::commands::workspace::read_workspace_file { stream_id: Option<String>, relative_path: String } -> ::oxplow_app::workspace_files::WorkspaceFile,
@@ -374,7 +375,6 @@ macro_rules! oxplow_command_table {
                 create_workspace_directory => $crate::commands::workspace::create_workspace_directory { stream_id: Option<String>, relative_path: String } -> String,
                 rename_workspace_path => $crate::commands::workspace::rename_workspace_path { stream_id: Option<String>, from_path: String, to_path: String } -> (String, String),
                 delete_workspace_path => $crate::commands::workspace::delete_workspace_path { stream_id: Option<String>, relative_path: String } -> String,
-                get_workspace_status_summary => $crate::commands::workspace::get_workspace_status_summary { stream_id: Option<String> } -> ::oxplow_git::WorkspaceStatusSummary,
                 // code_quality (duplication only — the metrics scan was retired in tsk229)
                 // config
                 get_config => $crate::commands::config::get_config {} -> ::oxplow_config::OxplowConfig,
@@ -420,7 +420,6 @@ macro_rules! oxplow_command_table {
                 update_background_task => $crate::commands::background::update_background_task { id: String, label: Option<String>, detail: Option<Option<String>>, progress: Option<Option<f64>> } -> (),
                 // log
                 get_git_log => $crate::commands::log::get_git_log { stream_id: Option<String>, limit: Option<u32>, all: bool } -> ::oxplow_git::GitLogResult,
-                get_commit_detail => $crate::commands::log::get_commit_detail { stream_id: Option<String>, sha: String } -> Option<::oxplow_git::CommitDetail>,
                 get_commits_ahead_of => $crate::commands::log::get_commits_ahead_of { stream_id: Option<String>, base: String, head: String, limit: u32 } -> Vec<::oxplow_git::GitLogCommit>,
 
                 // streams

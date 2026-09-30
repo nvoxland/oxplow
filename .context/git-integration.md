@@ -416,11 +416,13 @@ All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:
   Files-panel commit dialog — the runtime never calls it elsewhere
   and no MCP tool invokes git commits. Commits not started from the
   Files dialog are user-driven via `git commit` in the terminal.
-- `listBranchChanges`, `getGitLog`, `getCommitDetail`, `getChangeScopes`,
-  `searchWorkspaceText`, `restorePath`, `addPath`, `appendToGitignore`,
-  `listFileCommits`, `listAllRefs`, `listGitStatuses` — straight `execFileSync` wrappers
-  exposed via IPC for UI consumption.
-- `getCommitDetail(repo, sha)` (`src/log.rs`) resolves **both full and
+- `getGitLog`, `getChangeScopes`, `searchWorkspaceText`, `restorePath`,
+  `addPath`, `appendToGitignore`, `listFileCommits`, `listAllRefs` —
+  git-shaped wrappers still exposed via IPC (status, blame, a commit's
+  detail and branch changes moved to the neutral `vcs_*` / `diff` RPCs in
+  P5.B4, `.context/vcs.md`).
+- `get_commit_detail(repo, sha)` (`src/log.rs`, behind `Vcs::revision`)
+  resolves **both full and
   abbreviated** shas — Activity-feed commit links carry 7-char prefixes.
   Gotcha: `git2::Oid::from_str` zero-pads any ≤40-char hex string into a
   syntactically-valid-but-**nonexistent** OID and returns `Ok`, so it can

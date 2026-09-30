@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { BranchChangeEntry, GitFileStatus } from "../../api.js";
+import type { DiffEntry, FileStatus } from "../../api.js";
 import { classifyZone, zoneLabel, ZONE_OTHER, type CompiledZoneRules } from "./zones.js";
 import { useZoneRules } from "./useZoneRules.js";
 import {
@@ -12,7 +12,7 @@ import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
 
 interface Props {
-  files: BranchChangeEntry[];
+  files: DiffEntry[];
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   /** When supplied, plain click opens the file's diff in the current
    *  tab (browser-tab semantic, back returns to this list).
@@ -78,12 +78,12 @@ export function ChangedFilesTree({ files, onOpenFile, onOpenFileDiff, showFileCo
 interface RawDirNode {
   name: string;
   path: string;
-  files: Array<{ name: string; entry: BranchChangeEntry }>;
+  files: Array<{ name: string; entry: DiffEntry }>;
   dirs: Map<string, RawDirNode>;
 }
 
 function buildTree(
-  files: BranchChangeEntry[],
+  files: DiffEntry[],
   openFile: (path: string, opts: { newTab: boolean }) => void,
   zoneRules: CompiledZoneRules,
 ): HierarchyNode[] {
@@ -144,7 +144,7 @@ function materialize(
       id,
       label: f.name,
       icon: <FileIcon />,
-      statuses: gitStatusToHierarchy(f.entry.status),
+      statuses: statusToHierarchy(f.entry.status),
       detail,
       metrics: {
         added: bucket === "added" ? 1 : 0,
@@ -166,7 +166,7 @@ function materialize(
   return out;
 }
 
-function statusBucket(status: GitFileStatus): "added" | "modified" | "deleted" {
+function statusBucket(status: FileStatus): "added" | "modified" | "deleted" {
   if (status === "added" || status === "untracked") return "added";
   if (status === "deleted") return "deleted";
   return "modified";
@@ -189,7 +189,7 @@ function summarize(node: RawDirNode): DirSummary {
     deletions: 0,
   };
   for (const file of node.files) {
-    const fileStatuses = gitStatusToHierarchy(file.entry.status);
+    const fileStatuses = statusToHierarchy(file.entry.status);
     for (const s of fileStatuses) statuses.add(s);
     count += 1;
     metrics[statusBucket(file.entry.status)] += 1;
@@ -209,7 +209,7 @@ function summarize(node: RawDirNode): DirSummary {
   return { count, statuses, metrics };
 }
 
-function gitStatusToHierarchy(status: GitFileStatus): Set<HierarchyStatus> {
+function statusToHierarchy(status: FileStatus): Set<HierarchyStatus> {
   if (status === "added" || status === "untracked") return new Set(["added"]);
   if (status === "deleted") return new Set(["deleted"]);
   // modified, renamed → "modified"

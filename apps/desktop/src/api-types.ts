@@ -92,18 +92,6 @@ export interface BranchChangeEntry {
   deletions?: number | null;
 }
 
-export interface BranchChanges {
-  base?: string;
-  ahead?: number;
-  behind?: number;
-  /// New shape (matches Rust `oxplow_git::BranchChanges`): the
-  /// merge-base SHA between HEAD and the requested base ref. Either
-  /// this or the legacy `base` is populated.
-  base_ref?: string;
-  merge_base?: string | null;
-  files: BranchChangeEntry[];
-}
-
 export interface ChangeScopes {
   /// Legacy "what's staged / unstaged / upstream / branchBase" arrays
   /// — empty under the new schema; the renderer uses `branchBase` /
@@ -218,15 +206,6 @@ export interface WorkspaceRenameResult {
   toPath: string;
 }
 
-export interface WorkspaceStatusSummary {
-  modified: number;
-  added: number;
-  deleted: number;
-  renamed: number;
-  untracked: number;
-  total: number;
-}
-
 export interface WorkspaceContext {
   rootPath: string;
   defaultBranch: string | null;
@@ -323,13 +302,6 @@ export interface BackgroundTask {
   detail?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [extra: string]: any;
-}
-
-export type GitOperationKind = "merge" | "rebase" | "cherry-pick" | "revert";
-
-export interface RepoConflictState {
-  operation: GitOperationKind | null;
-  conflictedCount: number;
 }
 
 export interface FinishedEntry {

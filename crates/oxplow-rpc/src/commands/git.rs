@@ -6,19 +6,11 @@ use std::collections::HashMap;
 use oxplow_app::Services;
 use oxplow_domain::stores::StreamStore;
 use oxplow_git::{
-    AheadBehind, BlameLine, BranchChanges, ChangeScopes, CommitRefLabel, GitOpResult,
-    GitWorktreeEntry, GroupedGitRefs, LocalBlameEntry, RemoteBranchEntry, RepoConflictState,
-    TextSearchHit,
+    AheadBehind, ChangeScopes, CommitRefLabel, GitOpResult, GitWorktreeEntry, GroupedGitRefs,
+    RemoteBranchEntry, TextSearchHit,
 };
 
 use crate::error::IpcError;
-
-pub async fn get_repo_conflict_state(
-    svc: &Services,
-    stream_id: Option<String>,
-) -> Result<RepoConflictState, IpcError> {
-    Ok(svc.git.conflict_state(stream_id.as_deref()).await)
-}
 
 pub async fn get_ahead_behind(
     svc: &Services,
@@ -203,39 +195,11 @@ pub async fn list_file_commits(
         .await)
 }
 
-pub async fn git_blame(
-    svc: &Services,
-    stream_id: Option<String>,
-    path: String,
-) -> Result<Vec<BlameLine>, IpcError> {
-    Ok(svc.git.blame(stream_id.as_deref(), path).await)
-}
-
-pub async fn local_blame(
-    svc: &Services,
-    stream_id: Option<String>,
-    path: String,
-    disk_text: String,
-) -> Result<Vec<LocalBlameEntry>, IpcError> {
-    Ok(svc
-        .git
-        .local_blame(stream_id.as_deref(), path, disk_text)
-        .await)
-}
-
 pub async fn get_change_scopes(
     svc: &Services,
     stream_id: Option<String>,
 ) -> Result<ChangeScopes, IpcError> {
     Ok(svc.git.change_scopes(stream_id.as_deref()).await)
-}
-
-pub async fn get_branch_changes(
-    svc: &Services,
-    stream_id: Option<String>,
-    base_ref: String,
-) -> Result<BranchChanges, IpcError> {
-    Ok(svc.git.branch_changes(stream_id.as_deref(), base_ref).await)
 }
 
 pub async fn list_adoptable_worktrees(svc: &Services) -> Result<Vec<GitWorktreeEntry>, IpcError> {
@@ -321,19 +285,6 @@ pub async fn list_stream_divergences(
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
-    async fn get_repo_conflict_state_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch(
-            "get_repo_conflict_state",
-            serde_json::json!({ "streamId": null }),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert!(out.is_object(), "expected a JSON object, got {out}");
-    }
-
     #[tokio::test]
     async fn list_stream_divergences_dispatches_and_returns_report() {
         let (svc, _dir) = crate::test_support::services();

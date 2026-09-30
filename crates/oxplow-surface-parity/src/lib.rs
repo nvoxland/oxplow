@@ -250,20 +250,18 @@ pub const MANIFEST: &[Capability] = &[
     agent("list_code_units"),
     // ---- git: read tools mirrored to MCP (Child 2) ----
     both_named("git.status", "get_change_scopes", "git_status"),
-    both_named("git.diff", "get_branch_changes", "git_diff"),
+    both("diff"),
     both_named("git.log", "get_git_log", "git_log"),
-    both("git_blame"),
+    both("vcs_blame"),
     both("read_at"),
     both("list_branches"),
     // ---- agent_todo: git reads/mutations still on Bash (deferred) ----
-    todo("get_commit_detail"),
     todo("get_commits_ahead_of"),
     todo("get_ahead_behind"),
     todo("list_stream_divergences"),
     todo("list_file_commits"),
     todo("search_workspace_text"),
     todo("list_local_branches"),
-    todo("get_repo_conflict_state"),
     todo("restore_path"),
     todo("git_fetch"),
     todo("git_pull"),
@@ -288,7 +286,6 @@ pub const MANIFEST: &[Capability] = &[
     both("read_event_content"),
     both("restore_file_snapshot"),
     // Endpoint diff for the diff view page (effort / local-history) — UI-only.
-    ui("diff"),
     // Per-file content at an endpoint, feeding the diff view's function
     // analysis (base + head). UI-only.
     // ---- agent_todo: composed dashboard DTOs / generated-filtered (deferred) ----
@@ -389,7 +386,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("resolve_commit_ref_labels"),
     ui("list_recent_remote_branches"),
     ui("list_adoptable_worktrees"),
-    ui("local_blame"),
     // ---- ui-only: hooks / agent lifecycle ----
     ui("ingest_hook_event"),
     ui("list_agent_events"),
@@ -412,12 +408,15 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_efforts_overlapping_range"),
     ui("list_changed_paths_for_effort"),
     // ---- ui-only: git log (presentation) ----
-    ui("get_workspace_status_summary"),
     // ---- ui-only: workspace file I/O (agent uses Read/Write tools) ----
     ui("list_workspace_entries"),
     ui("list_workspace_files"),
     ui("read_workspace_file"),
     ui("files_at"),
+    ui("vcs_head"),
+    ui("vcs_status"),
+    ui("vcs_revision"),
+    ui("vcs_merge_base"),
     ui("write_workspace_file"),
     ui("create_workspace_file"),
     ui("create_workspace_directory"),

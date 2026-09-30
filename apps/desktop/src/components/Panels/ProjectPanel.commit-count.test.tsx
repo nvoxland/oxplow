@@ -3,7 +3,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 
 // tsk145: the Files page "Commit (N)" button must reflect the changeset
 // (the same "N changed" the header shows), not the total file count. Both
-// are now driven by the workspace status summary's `total`. This test
+// are now driven by the workspace status's changed-path count. This test
 // mounts ProjectPanel with a status summary of 2 changed files while the
 // file index lists more entries, and asserts the button reads "Commit (2)"
 // — i.e. it tracks the changed count, not the file count.
@@ -17,7 +17,13 @@ const realBindings = await import("../../tauri-bridge/generated/bindings.js");
 
 const ok = <T,>(data: T) => ({ status: "ok" as const, data });
 
-const SUMMARY = { modified: 1, added: 0, deleted: 0, renamed: 0, untracked: 1, total: 2 };
+const STATUS = {
+  entries: [
+    { path: "a.ts", status: "modified" },
+    { path: "b.ts", status: "untracked" },
+  ],
+  in_progress: null,
+};
 // Five indexed files — more than the 2 changed — so a button bound to the
 // file count would read "Commit (5)" and fail the assertion below.
 const FILES = [
@@ -38,7 +44,7 @@ mock.module("../../tauri-bridge/generated/bindings.js", () => ({
   commands: {
     ...realBindings.commands,
     listWorkspaceFiles: async () => ok(FILES),
-    getWorkspaceStatusSummary: async () => ok(SUMMARY),
+    vcsStatus: async () => ok(STATUS),
     listWorkspaceEntries: async () => ok([]),
     getChangeScopes: async () =>
       ok({

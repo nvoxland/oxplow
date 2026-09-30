@@ -224,7 +224,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::delete_branch,
             commands::generated::list_local_branches,
             // git
-            commands::generated::get_repo_conflict_state,
             commands::generated::get_ahead_behind,
             commands::generated::list_stream_divergences,
             commands::generated::append_to_gitignore,
@@ -247,9 +246,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::read_at,
             commands::generated::search_workspace_text,
             commands::generated::list_adoptable_worktrees,
-            commands::generated::git_blame,
-            commands::generated::local_blame,
-            commands::generated::get_branch_changes,
             commands::generated::get_change_scopes,
             // hooks / agent lifecycle
             commands::generated::ingest_hook_event,
@@ -280,19 +276,22 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::undo_command,
             // log
             commands::generated::get_git_log,
-            commands::generated::get_commit_detail,
             commands::generated::get_commits_ahead_of,
             // workspace
             commands::generated::list_workspace_entries,
             commands::generated::list_workspace_files,
             commands::generated::read_workspace_file,
             commands::generated::files_at,
+            commands::generated::vcs_head,
+            commands::generated::vcs_status,
+            commands::generated::vcs_blame,
+            commands::generated::vcs_revision,
+            commands::generated::vcs_merge_base,
             commands::generated::write_workspace_file,
             commands::generated::create_workspace_file,
             commands::generated::create_workspace_directory,
             commands::generated::rename_workspace_path,
             commands::generated::delete_workspace_path,
-            commands::generated::get_workspace_status_summary,
             // background tasks
             commands::generated::list_background_tasks,
             commands::generated::get_background_task,

@@ -39,8 +39,9 @@ import {
   clearRecentlyFinished,
   openExternalUrl,
   type FinishedEntry,
-  getBranchChanges,
-  getRepoConflictState,
+  diffRevisions,
+  vcsHead,
+  vcsStatus,
   subscribeGitRefsEvents,
   setGenerated,
   selectThread,
@@ -53,7 +54,8 @@ import {
   updateTask,
   writeWorkspaceFile,
   type BacklogState,
-  type BranchChangeEntry,
+  type DiffEntry,
+  type InProgressOp,
   type ThreadWorkState,
   type ThreadState,
   type AgentKind,
@@ -1818,33 +1820,35 @@ export function App() {
   // invalidation is fine.
   const [uncommittedSummary, setUncommittedSummary] = useState<{
     added: number; modified: number; deleted: number; additions: number; deletions: number;
-    conflictedCount: number; gitOperation: "merge" | "rebase" | "cherry-pick" | "revert" | null;
-    files: BranchChangeEntry[];
+    conflictedCount: number; inProgress: InProgressOp | null;
+    files: DiffEntry[];
   } | null>(null);
   useEffect(() => {
     const sid = stream?.id;
     if (!sid) { setUncommittedSummary(null); return; }
     let cancelled = false;
     // Returns the promise so `coalescedRefresh` can single-flight it: each
-    // call shells out to 4+ git subprocesses including a full
-    // `status --untracked-files=all` worktree walk (tsk238).
+    // call is a status walk plus a working-tree diff (tsk238).
     const refresh = () =>
-      Promise.all([getBranchChanges(sid, "HEAD"), getRepoConflictState(sid)])
-        .then(([res, conflict]) => {
+      Promise.all([
+        vcsHead(sid).then((head) => diffRevisions(sid, head.revision, WORKING)),
+        vcsStatus(sid),
+      ])
+        .then(([files, status]) => {
           if (cancelled) return;
           let added = 0, modified = 0, deleted = 0, additions = 0, deletions = 0;
-          for (const f of res.files) {
+          for (const f of files) {
             if (f.status === "added" || f.status === "untracked") added++;
             else if (f.status === "modified" || f.status === "renamed") modified++;
             else if (f.status === "deleted") deleted++;
-            additions += f.additions ?? 0;
-            deletions += f.deletions ?? 0;
+            additions += f.additions;
+            deletions += f.deletions;
           }
           setUncommittedSummary({
             added, modified, deleted, additions, deletions,
-            conflictedCount: conflict.conflictedCount,
-            gitOperation: conflict.operation,
-            files: res.files,
+            conflictedCount: status.entries.filter((e) => e.status === "conflicted").length,
+            inProgress: status.in_progress,
+            files,
           });
         })
         .catch(() => { if (!cancelled) setUncommittedSummary(null); });
@@ -2628,7 +2632,6 @@ export function App() {
               openFileOrder={currentSession.openOrder}
               openFiles={currentSession.files}
               onRevealCommit={handleRevealCommit}
-              onRevealTask={handleRequestEditTask}
               onCompareWithClipboard={handleCompareWithClipboard}
             />
           ) : null,

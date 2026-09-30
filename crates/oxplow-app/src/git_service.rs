@@ -20,16 +20,13 @@
 //! (per-method memo, request coalescer, whatever) — never let cached
 //! state leak through the API. Callers shouldn't be able to tell.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use oxplow_domain::StreamId;
 use oxplow_git::{
-    AheadBehind, BlameLine, BranchChanges, BranchRef, ChangeScopes, CommitDetail, CommitRefLabel,
-    Divergence, GitFileStatus, GitLogCommit, GitLogOptions, GitLogResult, GitOpResult,
-    GitWorktreeEntry, GroupedGitRefs, LocalBlameEntry, RemoteBranchEntry, RepoConflictState,
-    TextSearchHit, WorkspaceStatusSummary,
+    AheadBehind, BranchRef, ChangeScopes, CommitRefLabel, Divergence, GitLogCommit, GitLogOptions,
+    GitLogResult, GitOpResult, GitWorktreeEntry, GroupedGitRefs, RemoteBranchEntry, TextSearchHit,
 };
 use tracing::warn;
 
@@ -84,23 +81,6 @@ impl GitService {
     // Reads — every one is a live shell-out via spawn_blocking.
     // ---------------------------------------------------------------
 
-    pub async fn status_summary(&self, stream_id: Option<&str>) -> WorkspaceStatusSummary {
-        let path = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || {
-            let map = oxplow_git::list_git_statuses(&path);
-            oxplow_git::summarize_git_statuses(&map)
-        })
-        .await
-        .unwrap_or_default()
-    }
-
-    pub async fn statuses(&self, stream_id: Option<&str>) -> HashMap<String, GitFileStatus> {
-        let path = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::list_git_statuses(&path))
-            .await
-            .unwrap_or_default()
-    }
-
     pub async fn branches_for(&self, stream_id: Option<&str>) -> Vec<BranchRef> {
         let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::list_branches(path))
@@ -115,13 +95,6 @@ impl GitService {
         tokio::task::spawn_blocking(move || oxplow_git::list_branches(path))
             .await
             .unwrap_or_default()
-    }
-
-    pub async fn conflict_state(&self, stream_id: Option<&str>) -> RepoConflictState {
-        let path = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::get_repo_conflict_state(&path))
-            .await
-            .expect("conflict_state join")
     }
 
     pub async fn ahead_behind(
@@ -169,29 +142,11 @@ impl GitService {
             .expect("change_scopes join")
     }
 
-    pub async fn branch_changes(&self, stream_id: Option<&str>, base_ref: String) -> BranchChanges {
-        let path = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::list_branch_changes(&path, &base_ref))
-            .await
-            .expect("branch_changes join")
-    }
-
     pub async fn git_log(&self, stream_id: Option<&str>, opts: GitLogOptions) -> GitLogResult {
         let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::get_git_log(&path, opts))
             .await
             .expect("git_log join")
-    }
-
-    pub async fn commit_detail(
-        &self,
-        stream_id: Option<&str>,
-        sha: String,
-    ) -> Option<CommitDetail> {
-        let path = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::get_commit_detail(&path, &sha))
-            .await
-            .unwrap_or(None)
     }
 
     pub async fn commits_ahead_of(
@@ -207,27 +162,6 @@ impl GitService {
         })
         .await
         .unwrap_or_default()
-    }
-
-    pub async fn blame(&self, stream_id: Option<&str>, path: String) -> Vec<BlameLine> {
-        let dir = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || {
-            oxplow_git::git_blame(&dir, "HEAD", &path).unwrap_or_default()
-        })
-        .await
-        .unwrap_or_default()
-    }
-
-    pub async fn local_blame(
-        &self,
-        stream_id: Option<&str>,
-        path: String,
-        disk_text: String,
-    ) -> Vec<LocalBlameEntry> {
-        let dir = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::local_blame(&dir, &path, &disk_text))
-            .await
-            .unwrap_or_default()
     }
 
     pub async fn list_file_commits(

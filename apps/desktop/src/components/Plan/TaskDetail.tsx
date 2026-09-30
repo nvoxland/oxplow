@@ -13,7 +13,7 @@ import type { DiffSpec } from "../Diff/DiffPane.js";
 import { WORKING, snapshotRevision } from "../../revision.js";
 import { resolveEffortEndpoints } from "../../diffViewModel.js";
 import { diffRevisions } from "../../api.js";
-import type { BranchChangeEntry } from "../../api.js";
+import type { DiffEntry } from "../../api.js";
 
 /**
  * One entry in the tasks Activity timeline. Each effort
@@ -611,13 +611,13 @@ function ActivityEffortSection({
       cancelled = true;
     };
   }, [detail.effort.start_snapshot_id, detail.effort.end_snapshot_id]);
-  const effortFiles = useMemo<BranchChangeEntry[]>(
+  const effortFiles = useMemo<DiffEntry[]>(
     () =>
       detail.changed_paths.map((path) => {
         const e = diffByPath.get(path);
         return {
           path,
-          status: (e?.status ?? "modified") as BranchChangeEntry["status"],
+          status: (e?.status ?? "modified") as DiffEntry["status"],
           additions: e?.additions ?? 0,
           deletions: e?.deletions ?? 0,
         };

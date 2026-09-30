@@ -391,12 +391,12 @@ async fn delete_unknown_branch_errors() {
 async fn git_reads_over_primary_worktree() {
     let app = TestApp::build();
     let s = app.state();
-    let _ = commands::generated::get_repo_conflict_state(s.clone(), None).await;
+    let _ = commands::generated::vcs_status(s.clone(), None).await;
+    let _ = commands::generated::vcs_head(s.clone(), None).await;
     let _ =
         commands::generated::get_ahead_behind(s.clone(), None, "HEAD".into(), "HEAD".into()).await;
     let _ = commands::generated::list_all_refs(s.clone()).await;
     let _ = commands::generated::get_change_scopes(s.clone(), None).await;
-    let _ = commands::generated::get_branch_changes(s.clone(), None, "HEAD".into()).await;
     let _ = commands::generated::read_at(
         s.clone(),
         None,
@@ -406,9 +406,13 @@ async fn git_reads_over_primary_worktree() {
     .await;
     let _ =
         commands::generated::list_file_commits(s.clone(), None, "nope.txt".into(), Some(10)).await;
-    let _ = commands::generated::git_blame(s.clone(), None, "nope.txt".into()).await;
-    let _ =
-        commands::generated::local_blame(s.clone(), None, "nope.txt".into(), "a\nb\n".into()).await;
+    let _ = commands::generated::vcs_blame(
+        s.clone(),
+        None,
+        "nope.txt".into(),
+        oxplow_domain::vcs::Revision::Working,
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -766,9 +770,6 @@ async fn snapshot_reads_empty_for_fresh_project() {
 async fn workspace_reads_and_file_round_trip() {
     let app = TestApp::build();
     let _ = commands::generated::list_workspace_files(app.state(), None)
-        .await
-        .unwrap();
-    let _ = commands::generated::get_workspace_status_summary(app.state(), None)
         .await
         .unwrap();
     let _ = commands::generated::files_at(app.state(), None, oxplow_domain::vcs::Revision::Working)
