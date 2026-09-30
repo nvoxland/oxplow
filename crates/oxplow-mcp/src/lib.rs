@@ -724,8 +724,8 @@ pub struct SnapshotStreamParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct StreamScopeParams {
     /// Stream whose worktree to read `oxplow/extensions/` from. Omit for
-    /// the primary stream. Pass your own stream when working in a
-    /// worktree stream, since extensions you just wrote live there.
+    /// your own stream (the calling thread's; the primary when the call
+    /// carries no thread).
     pub stream_id: Option<String>,
 }
 
@@ -733,7 +733,7 @@ pub struct StreamScopeParams {
 pub struct LensIdParams {
     /// Lens id: `<extension>/<slug>` (see `list_lenses`).
     pub id: String,
-    /// Stream whose worktree to read from; omit for the primary.
+    /// Stream whose worktree to read from; omit for your own.
     pub stream_id: Option<String>,
 }
 
@@ -744,7 +744,7 @@ pub struct RunLensParams {
     /// Param overrides by name (see the lens's `params`); the rest use
     /// their defaults. Unknown names are rejected.
     pub params: Option<std::collections::BTreeMap<String, serde_json::Value>>,
-    /// Stream whose worktree to read from; omit for the primary.
+    /// Stream whose worktree to read from; omit for your own.
     pub stream_id: Option<String>,
     /// Your thread (`thr…`): bound into a lens's `thread_id` param (and its
     /// stream into `stream_id`) unless `params` sets them. Omit to use the
@@ -760,7 +760,7 @@ pub struct RunLensActionParams {
     pub action: String,
     /// Param overrides by name, as for `run_lens`.
     pub params: Option<std::collections::BTreeMap<String, serde_json::Value>>,
-    /// Stream whose worktree to read the lens from; omit for the primary.
+    /// Stream whose worktree to read the lens from; omit for your own.
     pub stream_id: Option<String>,
     /// Your thread, as for `run_lens`.
     pub thread_id: Option<String>,
@@ -805,8 +805,7 @@ pub struct EnsureChangeParams {
     pub sha: Option<String>,
     /// For `effort`: the effort id (`eff42`).
     pub effort_id: Option<String>,
-    /// For `working` (required) and `commit` (optional): the stream id;
-    /// the primary stream when omitted.
+    /// For `working` and `commit`: the stream id; your own when omitted.
     pub stream_id: Option<String>,
 }
 
@@ -855,8 +854,7 @@ pub struct PreviewSourceParams {
     pub extension: String,
     /// The source's `id` in that extension's `extension.yaml`.
     pub source_id: String,
-    /// Stream whose worktree to run it from (yours, in a worktree
-    /// stream); omit for the primary.
+    /// Stream whose worktree to run it from; omit for your own.
     pub stream_id: Option<String>,
 }
 
@@ -869,7 +867,7 @@ pub struct InstallExtensionParams {
     pub git_ref: Option<String>,
     /// The `sha` from `review_extension`: only that commit is installed.
     pub reviewed_sha: String,
-    /// Stream whose worktree to install into; omit for the primary.
+    /// Stream whose worktree to install into; omit for your own.
     pub stream_id: Option<String>,
 }
 
@@ -883,7 +881,7 @@ pub struct ReviewExtensionParams {
     /// An installed extension's name, to review its update. Pass this or
     /// `git_url`.
     pub name: Option<String>,
-    /// Stream whose worktree it goes into; omit for the primary.
+    /// Stream whose worktree it goes into; omit for your own.
     pub stream_id: Option<String>,
 }
 
@@ -893,7 +891,7 @@ pub struct UpdateExtensionParams {
     pub name: String,
     /// The `sha` from `review_extension(name)`: only that commit is installed.
     pub reviewed_sha: String,
-    /// Stream whose worktree to update in; omit for the primary.
+    /// Stream whose worktree to update in; omit for your own.
     pub stream_id: Option<String>,
 }
 
@@ -901,7 +899,7 @@ pub struct UpdateExtensionParams {
 pub struct ValidateExtensionParams {
     /// Extension folder name under `oxplow/extensions/`.
     pub name: String,
-    /// Stream whose worktree to read from; omit for the primary.
+    /// Stream whose worktree to read from; omit for your own.
     pub stream_id: Option<String>,
 }
 
@@ -1342,15 +1340,16 @@ impl OxplowMcp {
     )]
     async fn preview_source(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<PreviewSourceParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         check_optional_stream("preview_source", p.stream_id.as_deref())?;
-        let root = self
-            .services
-            .worktrees
-            .resolve(p.stream_id.as_deref())
+        // Omitted: the caller's own stream (tsk574).
+        let stream = self
+            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
+        let root = self.services.worktrees.resolve(stream.as_deref()).await;
         let preview = oxplow_app::source_runner::preview_source(
             &oxplow_app::source_runner::Sources::of(&self.services, &root),
             &p.extension,
@@ -1385,10 +1384,15 @@ impl OxplowMcp {
     )]
     async fn ensure_change(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<EnsureChangeParams>,
     ) -> Result<CallToolResult, McpError> {
         use oxplow_app::change_analysis::ChangeTarget;
         let p = params.0;
+        // Omitted: the caller's own stream (tsk574).
+        let stream = self
+            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
+            .await;
         let need = |v: Option<String>, name: &str| {
             v.ok_or_else(|| {
                 McpError::invalid_params(
@@ -1400,13 +1404,13 @@ impl OxplowMcp {
         let target = match p.kind.as_str() {
             "commit" => ChangeTarget::Commit {
                 sha: need(p.sha.clone(), "sha")?,
-                stream_id: p.stream_id.clone(),
+                stream_id: stream.clone(),
             },
             "effort" => ChangeTarget::Effort {
                 effort_id: need(p.effort_id.clone(), "effort_id")?,
             },
             "working" => ChangeTarget::Working {
-                stream_id: need(p.stream_id.clone(), "stream_id")?,
+                stream_id: need(stream.clone(), "stream_id")?,
             },
             other => {
                 return Err(McpError::invalid_params(
@@ -1591,15 +1595,16 @@ impl OxplowMcp {
     )]
     async fn review_extension(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<ReviewExtensionParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         check_optional_stream("review_extension", p.stream_id.as_deref())?;
-        let root = self
-            .services
-            .worktrees
-            .resolve(p.stream_id.as_deref())
+        // Omitted: the caller's own stream (tsk574).
+        let stream = self
+            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
+        let root = self.services.worktrees.resolve(stream.as_deref()).await;
         let layer = self.services.sql.clone();
         let review = match (p.git_url.as_deref(), p.name.as_deref()) {
             (Some(url), None) => {
@@ -1644,15 +1649,16 @@ impl OxplowMcp {
     )]
     async fn install_extension(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<InstallExtensionParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         check_optional_stream("install_extension", p.stream_id.as_deref())?;
-        let root = self
-            .services
-            .worktrees
-            .resolve(p.stream_id.as_deref())
+        // Omitted: the caller's own stream (tsk574).
+        let stream = self
+            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
+        let root = self.services.worktrees.resolve(stream.as_deref()).await;
         let ext = tokio::task::spawn_blocking(move || {
             oxplow_app::extensions::install_extension(
                 &root,
@@ -1674,15 +1680,16 @@ impl OxplowMcp {
     )]
     async fn update_extension(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<UpdateExtensionParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         check_optional_stream("update_extension", p.stream_id.as_deref())?;
-        let root = self
-            .services
-            .worktrees
-            .resolve(p.stream_id.as_deref())
+        // Omitted: the caller's own stream (tsk574).
+        let stream = self
+            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
+        let root = self.services.worktrees.resolve(stream.as_deref()).await;
         let name = p.name.clone();
         let ext = tokio::task::spawn_blocking(move || {
             oxplow_app::extensions::update_extension(&root, &name, &p.reviewed_sha)
@@ -1713,14 +1720,15 @@ impl OxplowMcp {
     )]
     async fn list_extensions(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<StreamScopeParams>,
     ) -> Result<CallToolResult, McpError> {
         check_optional_stream("list_extensions", params.0.stream_id.as_deref())?;
-        let root = self
-            .services
-            .worktrees
-            .resolve(params.0.stream_id.as_deref())
+        // Omitted: the caller's own stream (tsk574).
+        let stream = self
+            .stream_or_callers(&caller_of(&extensions), params.0.stream_id.clone())
             .await;
+        let root = self.services.worktrees.resolve(stream.as_deref()).await;
         let listed = self
             .services
             .extension_models
@@ -1736,14 +1744,15 @@ impl OxplowMcp {
     )]
     async fn list_lenses(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<StreamScopeParams>,
     ) -> Result<CallToolResult, McpError> {
         check_optional_stream("list_lenses", params.0.stream_id.as_deref())?;
-        let root = self
-            .services
-            .worktrees
-            .resolve(params.0.stream_id.as_deref())
+        // Omitted: the caller's own stream (tsk574).
+        let stream = self
+            .stream_or_callers(&caller_of(&extensions), params.0.stream_id.clone())
             .await;
+        let root = self.services.worktrees.resolve(stream.as_deref()).await;
         let lenses: Vec<oxplow_app::extensions::Lens> = self
             .services
             .extension_catalog
@@ -1758,14 +1767,18 @@ impl OxplowMcp {
         description = "Get one lens's full definition: its SQL query, params with defaults, viz \
                        and column/link settings, and the file it lives in."
     )]
-    async fn get_lens(&self, params: Parameters<LensIdParams>) -> Result<CallToolResult, McpError> {
+    async fn get_lens(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<LensIdParams>,
+    ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         check_optional_stream("get_lens", p.stream_id.as_deref())?;
-        let root = self
-            .services
-            .worktrees
-            .resolve(p.stream_id.as_deref())
+        // Omitted: the caller's own stream (tsk574).
+        let stream = self
+            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
+        let root = self.services.worktrees.resolve(stream.as_deref()).await;
         let lens = self
             .services
             .extension_catalog
@@ -1780,15 +1793,16 @@ impl OxplowMcp {
     )]
     async fn run_lens(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<RunLensParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         check_optional_stream("run_lens", p.stream_id.as_deref())?;
-        let root = self
-            .services
-            .worktrees
-            .resolve(p.stream_id.as_deref())
+        // Omitted: the caller's own stream (tsk574).
+        let stream = self
+            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
+        let root = self.services.worktrees.resolve(stream.as_deref()).await;
         let overrides = p
             .params
             .unwrap_or_default()
@@ -1796,7 +1810,7 @@ impl OxplowMcp {
             .map(|(k, v)| (k, oxplow_db::SqlCell::from(v)))
             .collect();
         let ctx = self
-            .lens_context(p.stream_id.as_deref(), p.thread_id.as_deref())
+            .lens_context(stream.as_deref(), p.thread_id.as_deref())
             .await?;
         let run = oxplow_app::extensions::run_lens(
             &self.services.sql,
@@ -1819,15 +1833,16 @@ impl OxplowMcp {
     )]
     async fn run_lens_action(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<RunLensActionParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         check_optional_stream("run_lens_action", p.stream_id.as_deref())?;
-        let root = self
-            .services
-            .worktrees
-            .resolve(p.stream_id.as_deref())
+        // Omitted: the caller's own stream (tsk574).
+        let stream = self
+            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
+        let root = self.services.worktrees.resolve(stream.as_deref()).await;
         let overrides = p
             .params
             .unwrap_or_default()
@@ -1835,7 +1850,7 @@ impl OxplowMcp {
             .map(|(k, v)| (k, oxplow_db::SqlCell::from(v)))
             .collect();
         let ctx = self
-            .lens_context(p.stream_id.as_deref(), p.thread_id.as_deref())
+            .lens_context(stream.as_deref(), p.thread_id.as_deref())
             .await?;
         let out = oxplow_app::lens_actions::run_lens_action(
             &self.services,
@@ -1859,15 +1874,16 @@ impl OxplowMcp {
     )]
     async fn validate_extension(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<ValidateExtensionParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         check_optional_stream("validate_extension", p.stream_id.as_deref())?;
-        let root = self
-            .services
-            .worktrees
-            .resolve(p.stream_id.as_deref())
+        // Omitted: the caller's own stream (tsk574).
+        let stream = self
+            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
+        let root = self.services.worktrees.resolve(stream.as_deref()).await;
         let report = oxplow_sdk::check(
             &root,
             &p.name,
@@ -5542,12 +5558,15 @@ mod tests {
             async move {
                 let v: serde_json::Value = serde_json::from_str(&text_payload(
                     server
-                        .review_extension(Parameters(ReviewExtensionParams {
-                            git_url,
-                            git_ref: None,
-                            name,
-                            stream_id: None,
-                        }))
+                        .review_extension(
+                            rmcp::model::Extensions::new(),
+                            Parameters(ReviewExtensionParams {
+                                git_url,
+                                git_ref: None,
+                                name,
+                                stream_id: None,
+                            }),
+                        )
                         .await
                         .unwrap(),
                 ))
@@ -5563,12 +5582,15 @@ mod tests {
 
         let ext: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .install_extension(Parameters(InstallExtensionParams {
-                    git_url: url.clone(),
-                    git_ref: None,
-                    reviewed_sha: sha.clone(),
-                    stream_id: None,
-                }))
+                .install_extension(
+                    rmcp::model::Extensions::new(),
+                    Parameters(InstallExtensionParams {
+                        git_url: url.clone(),
+                        git_ref: None,
+                        reviewed_sha: sha.clone(),
+                        stream_id: None,
+                    }),
+                )
                 .await
                 .unwrap(),
         ))
@@ -5580,12 +5602,15 @@ mod tests {
             .is_file());
 
         let err = server
-            .install_extension(Parameters(InstallExtensionParams {
-                git_url: url,
-                git_ref: None,
-                reviewed_sha: sha,
-                stream_id: None,
-            }))
+            .install_extension(
+                rmcp::model::Extensions::new(),
+                Parameters(InstallExtensionParams {
+                    git_url: url,
+                    git_ref: None,
+                    reviewed_sha: sha,
+                    stream_id: None,
+                }),
+            )
             .await
             .unwrap_err();
         assert!(err.message.contains("already installed"), "{err:?}");
@@ -5599,11 +5624,14 @@ mod tests {
         let sha = review(None, Some("shared".into())).await;
         let ext: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .update_extension(Parameters(UpdateExtensionParams {
-                    name: "shared".into(),
-                    reviewed_sha: sha,
-                    stream_id: None,
-                }))
+                .update_extension(
+                    rmcp::model::Extensions::new(),
+                    Parameters(UpdateExtensionParams {
+                        name: "shared".into(),
+                        reviewed_sha: sha,
+                        stream_id: None,
+                    }),
+                )
                 .await
                 .unwrap(),
         ))
@@ -5727,7 +5755,10 @@ mod tests {
 
         let exts: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .list_extensions(Parameters(StreamScopeParams { stream_id: None }))
+                .list_extensions(
+                    rmcp::model::Extensions::new(),
+                    Parameters(StreamScopeParams { stream_id: None }),
+                )
                 .await
                 .unwrap(),
         ))
@@ -5736,7 +5767,10 @@ mod tests {
 
         let lenses: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .list_lenses(Parameters(StreamScopeParams { stream_id: None }))
+                .list_lenses(
+                    rmcp::model::Extensions::new(),
+                    Parameters(StreamScopeParams { stream_id: None }),
+                )
                 .await
                 .unwrap(),
         ))
@@ -5759,10 +5793,13 @@ mod tests {
 
         let lens: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .get_lens(Parameters(LensIdParams {
-                    id: "demo/streams".into(),
-                    stream_id: None,
-                }))
+                .get_lens(
+                    rmcp::model::Extensions::new(),
+                    Parameters(LensIdParams {
+                        id: "demo/streams".into(),
+                        stream_id: None,
+                    }),
+                )
                 .await
                 .unwrap(),
         ))
@@ -5771,16 +5808,19 @@ mod tests {
 
         let run: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .run_lens(Parameters(RunLensParams {
-                    id: "demo/streams".into(),
-                    params: Some(
-                        [("kind".to_string(), serde_json::json!("primary"))]
-                            .into_iter()
-                            .collect(),
-                    ),
-                    stream_id: None,
-                    thread_id: None,
-                }))
+                .run_lens(
+                    rmcp::model::Extensions::new(),
+                    Parameters(RunLensParams {
+                        id: "demo/streams".into(),
+                        params: Some(
+                            [("kind".to_string(), serde_json::json!("primary"))]
+                                .into_iter()
+                                .collect(),
+                        ),
+                        stream_id: None,
+                        thread_id: None,
+                    }),
+                )
                 .await
                 .unwrap(),
         ))
@@ -5788,20 +5828,26 @@ mod tests {
         assert_eq!(run["result"]["rows"], serde_json::json!([["primary"]]));
 
         let err = server
-            .get_lens(Parameters(LensIdParams {
-                id: "demo/nope".into(),
-                stream_id: None,
-            }))
+            .get_lens(
+                rmcp::model::Extensions::new(),
+                Parameters(LensIdParams {
+                    id: "demo/nope".into(),
+                    stream_id: None,
+                }),
+            )
             .await
             .unwrap_err();
         assert!(err.message.contains("demo/nope"), "{err:?}");
 
         let v: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .validate_extension(Parameters(ValidateExtensionParams {
-                    name: "demo".into(),
-                    stream_id: None,
-                }))
+                .validate_extension(
+                    rmcp::model::Extensions::new(),
+                    Parameters(ValidateExtensionParams {
+                        name: "demo".into(),
+                        stream_id: None,
+                    }),
+                )
                 .await
                 .unwrap(),
         ))
@@ -6017,11 +6063,14 @@ mod tests {
         .unwrap();
         std::fs::write(ext.join("one.jq"), "{entities: {nums: .rows}}").unwrap();
         let r = server
-            .preview_source(Parameters(PreviewSourceParams {
-                extension: "work".into(),
-                source_id: "one".into(),
-                stream_id: None,
-            }))
+            .preview_source(
+                rmcp::model::Extensions::new(),
+                Parameters(PreviewSourceParams {
+                    extension: "work".into(),
+                    source_id: "one".into(),
+                    stream_id: None,
+                }),
+            )
             .await
             .unwrap();
         let v: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
@@ -6935,6 +6984,66 @@ mod tests {
         assert!(text.contains("mine"), "{text}");
     }
 
+    /// tsk574: the extension and lens tools without a `stream_id` read
+    /// the calling thread's stream — an agent in a worktree sees the
+    /// extension it just wrote there, not the primary's.
+    #[tokio::test]
+    async fn extension_tools_default_to_the_callers_stream() {
+        use oxplow_domain::stores::StreamStore as _;
+        let (_proj, services, server) = boot();
+        let primary = services.stream_store.list().await.unwrap().pop().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let ext = elsewhere.path().join("oxplow/extensions/mine");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(ext.join("extension.yaml"), "name: mine\n").unwrap();
+        let mut other = primary.clone();
+        other.id = oxplow_domain::StreamId::placeholder();
+        other.title = "other".into();
+        other.branch = "other".into();
+        other.kind = oxplow_domain::StreamKind::Worktree;
+        other.worktree_path = elsewhere.path().to_string_lossy().into_owned();
+        let other_id = services.stream_store.upsert(&other).await.unwrap();
+        let thread = services
+            .threads
+            .create(&other_id, "t", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
+        let caller = || {
+            extensions_for(parts_with(
+                &[("x-oxplow-thread", &thread.id.to_string())],
+                "http://h/mcp",
+            ))
+        };
+        let listed = text_payload(
+            server
+                .list_extensions(caller(), Parameters(StreamScopeParams { stream_id: None }))
+                .await
+                .unwrap(),
+        );
+        assert!(listed.contains("\"mine\""), "{listed}");
+        // Without a caller, still the primary's.
+        let primary_list = text_payload(
+            server
+                .list_extensions(
+                    rmcp::model::Extensions::new(),
+                    Parameters(StreamScopeParams { stream_id: None }),
+                )
+                .await
+                .unwrap(),
+        );
+        assert!(!primary_list.contains("\"mine\""), "{primary_list}");
+        server
+            .validate_extension(
+                caller(),
+                Parameters(ValidateExtensionParams {
+                    name: "mine".into(),
+                    stream_id: None,
+                }),
+            )
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn record_decision_and_claim_attach_to_the_open_effort() {
         use oxplow_db::EffortStore as _;
@@ -7776,24 +7885,30 @@ mod tests {
 
         let out: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .ensure_change(Parameters(EnsureChangeParams {
-                    kind: "commit".into(),
-                    sha: Some("HEAD".into()),
-                    effort_id: None,
-                    stream_id: None,
-                }))
+                .ensure_change(
+                    rmcp::model::Extensions::new(),
+                    Parameters(EnsureChangeParams {
+                        kind: "commit".into(),
+                        sha: Some("HEAD".into()),
+                        effort_id: None,
+                        stream_id: None,
+                    }),
+                )
                 .await
                 .unwrap(),
         ))
         .unwrap();
         assert_eq!(out["status"], "done");
         let err = server
-            .ensure_change(Parameters(EnsureChangeParams {
-                kind: "sideways".into(),
-                sha: None,
-                effort_id: None,
-                stream_id: None,
-            }))
+            .ensure_change(
+                rmcp::model::Extensions::new(),
+                Parameters(EnsureChangeParams {
+                    kind: "sideways".into(),
+                    sha: None,
+                    effort_id: None,
+                    stream_id: None,
+                }),
+            )
             .await
             .unwrap_err();
         assert!(err.message.contains("sideways"), "{}", err.message);

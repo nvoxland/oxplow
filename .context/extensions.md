@@ -80,7 +80,14 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - IPC and MCP: `list_extensions`, `get_lens`, `run_lens`,
     `validate_extension`.
   - MCP only: `list_lenses`.
-  - All take an optional `stream_id`; the default is the primary stream.
+  - All take an optional `stream_id`. Over MCP an omitted one is the
+    caller's own stream (its header, else its thread's; the primary only
+    for an anonymous caller), so an agent in a worktree sees the
+    extension it just wrote — the same for `preview_source`,
+    `review_extension`, `install_extension`, `update_extension`,
+    `run_lens_action` and `ensure_change` (tsk574). `site_search` is the
+    exception by design: omitted, it searches every stream. The UI
+    (IPC) names its stream.
   - `get_open_page` (MCP) plus `report_open_page` (UI) are current; see
     "Agents: the MCP surface".
     Agents write lens files with their normal Edit tool, under the filing

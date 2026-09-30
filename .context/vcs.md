@@ -126,7 +126,8 @@ The neutral RPCs are `read_at { streamId, path, revision }`, `files_at`
 and `diff { streamId, from, to }` (UI), and MCP `read_at`. The MCP VCS
 reads (`read_at`, `diff`, `vcs_blame`, `vcs_log`, `git_status`) default
 a missing `stream_id` to the caller's own stream — its header, else its
-thread's — and to the primary only for an anonymous caller (tsk555); they replaced
+thread's — and to the primary only for an anonymous caller (tsk555; the
+extension, lens and change tools do the same, tsk574); they replaced
 `read_file`, `read_file_at_ref` and `diff_endpoints`. Change analysis
 and the duplicate scan read through `Trees`, so a closed effort's
 snapshot head is scanned too. (The wiki's old `@<rev>` link syntax went
