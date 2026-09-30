@@ -242,7 +242,11 @@ crates' production code: `oxplow_git::` and `git2::` appear only in
 `vcs/git.rs`. Test code — after `#[cfg(test)]`, a `#![cfg(test)]`
 module, `tests/` and `benches/` — is exempt; it builds real repositories
 as fixtures. (Through B3–B6 a `NOT_YET_ON_VCS` list held the files still
-to move; it emptied in B7.)
+to move; it emptied in B7.) Since the provider is its only caller,
+`oxplow-git` keeps only what `vcs/git.rs` (or the crate itself) uses:
+what the moved callers left behind — `get_ahead_behind`, `list_all_refs`
+and its ref-option shapes, `clean_head_blob_oids`, `status_for_path` —
+was deleted with its tests.
 
 ## The last callers (P5.B7)
 

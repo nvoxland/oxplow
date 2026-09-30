@@ -10,89 +10,6 @@ use specta::Type;
 
 use crate::log::GitLogCommit;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct RefOption {
-    pub label: String,
-    pub r#ref: String,
-    pub kind: RefKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "snake_case")]
-pub enum RefKind {
-    Local,
-    Remote,
-    Tag,
-    Head,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct GroupedGitRefs {
-    pub locals: Vec<RefOption>,
-    pub remotes: Vec<RefOption>,
-    pub tags: Vec<RefOption>,
-}
-
-/// Returns every ref grouped into local branches, remote branches and
-/// tags. Omits the `HEAD` symbolic ref since it's never useful as a
-/// picker option.
-pub fn list_all_refs(repo_path: &Path) -> GroupedGitRefs {
-    let repo = match git2::Repository::open(repo_path) {
-        Ok(r) => r,
-        Err(_) => {
-            return GroupedGitRefs {
-                locals: vec![],
-                remotes: vec![],
-                tags: vec![],
-            }
-        }
-    };
-    let mut locals = vec![];
-    let mut remotes = vec![];
-    let mut tags = vec![];
-    if let Ok(refs) = repo.references() {
-        for r in refs.flatten() {
-            let name = match r.name() {
-                Ok(n) => n.to_string(),
-                Err(_) => continue,
-            };
-            if name == "HEAD" {
-                continue;
-            }
-            if let Some(short) = name.strip_prefix("refs/heads/") {
-                locals.push(RefOption {
-                    label: short.to_string(),
-                    r#ref: name.clone(),
-                    kind: RefKind::Local,
-                });
-            } else if let Some(short) = name.strip_prefix("refs/remotes/") {
-                if short == "origin/HEAD" {
-                    continue;
-                }
-                remotes.push(RefOption {
-                    label: short.to_string(),
-                    r#ref: name.clone(),
-                    kind: RefKind::Remote,
-                });
-            } else if let Some(short) = name.strip_prefix("refs/tags/") {
-                tags.push(RefOption {
-                    label: short.to_string(),
-                    r#ref: name.clone(),
-                    kind: RefKind::Tag,
-                });
-            }
-        }
-    }
-    locals.sort_by(|a, b| a.label.cmp(&b.label));
-    remotes.sort_by(|a, b| a.label.cmp(&b.label));
-    tags.sort_by(|a, b| b.label.cmp(&a.label));
-    GroupedGitRefs {
-        locals,
-        remotes,
-        tags,
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CommitRefLabelKind {
@@ -404,14 +321,6 @@ mod tests {
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].kind, CommitRefLabelKind::Tag);
         assert_eq!(labels[0].name, "v1");
-    }
-
-    #[test]
-    fn list_all_refs_returns_local_main() {
-        let dir = tempdir().unwrap();
-        init_with_commit(dir.path(), "a.txt", "x");
-        let refs = list_all_refs(dir.path());
-        assert!(refs.locals.iter().any(|r| r.label == "main"));
     }
 
     #[test]

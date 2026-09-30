@@ -30,8 +30,8 @@ pub use blame::{git_blame, parse_porcelain, BlameLine, BLAME_ZERO_SHA};
 pub use branch::{list_branches, BranchRef, BranchRefKind};
 pub use branch_changes::{get_change_scopes, BranchChangeEntry, ChangeKind, ChangeScopes};
 pub use branch_ops::{
-    append_to_gitignore, delete_branch, detect_default_branch, get_ahead_behind,
-    get_commits_ahead_of, rename_branch, restore_path, AheadBehind, BranchOpError,
+    append_to_gitignore, delete_branch, detect_default_branch, get_commits_ahead_of, rename_branch,
+    restore_path, BranchOpError,
 };
 pub use conflict::{
     get_repo_conflict_state, list_conflicted_paths, GitOperationKind, RepoConflictState,
@@ -42,8 +42,8 @@ pub use log::{
     GitLogOptions, GitLogResult,
 };
 pub use refs::{
-    list_all_refs, list_file_commits, list_recent_remote_branches, resolve_commit_ref_labels,
-    CommitRefLabel, CommitRefLabelKind, GroupedGitRefs, RefKind, RefOption, RemoteBranchEntry,
+    list_file_commits, list_recent_remote_branches, resolve_commit_ref_labels, CommitRefLabel,
+    CommitRefLabelKind, RemoteBranchEntry,
 };
 pub use refs_watch::{GitRefsWatcher, RefsChangeEvent};
 pub use repo::{
@@ -51,10 +51,7 @@ pub use repo::{
     resolve_revision,
 };
 pub use smart_merge::{auto_resolve_conflicts, merge3, merge3_str, tokenize, AutoResolveReport};
-pub use status::{
-    clean_head_blob_oids, head_commit_sha, list_git_statuses, read_blob, status_for_path,
-    GitCleanBaseline, GitFileStatus,
-};
+pub use status::{head_commit_sha, list_git_statuses, read_blob, GitCleanBaseline, GitFileStatus};
 pub use sync::{
     add_path, checkout_branch, cherry_pick, commit, fetch, merge, pull, pull_remote_into_current,
     push, push_current_to, rebase, revert, take_conflict_side, GitOpResult,

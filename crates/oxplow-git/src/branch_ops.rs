@@ -7,8 +7,6 @@
 use std::path::Path;
 use std::process::Command;
 
-use serde::{Deserialize, Serialize};
-use specta::Type;
 use thiserror::Error;
 
 use crate::log::GitLogCommit;
@@ -75,46 +73,6 @@ pub fn detect_default_branch(repo_path: &Path) -> Option<String> {
         }
     }
     None
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct AheadBehind {
-    pub ahead: u32,
-    pub behind: u32,
-}
-
-/// Count commits `head` is ahead/behind `base`. Both args are
-/// branch names (short form). Returns `(0, 0)` on lookup failure.
-pub fn get_ahead_behind(repo_path: &Path, base: &str, head: &str) -> AheadBehind {
-    let Ok(repo) = git2::Repository::open(repo_path) else {
-        return AheadBehind {
-            ahead: 0,
-            behind: 0,
-        };
-    };
-    let resolve =
-        |name: &str| -> Option<git2::Oid> { repo.revparse_single(name).ok().map(|obj| obj.id()) };
-    let Some(base_oid) = resolve(base) else {
-        return AheadBehind {
-            ahead: 0,
-            behind: 0,
-        };
-    };
-    let Some(head_oid) = resolve(head) else {
-        return AheadBehind {
-            ahead: 0,
-            behind: 0,
-        };
-    };
-    repo.graph_ahead_behind(head_oid, base_oid)
-        .map(|(ahead, behind)| AheadBehind {
-            ahead: ahead as u32,
-            behind: behind as u32,
-        })
-        .unwrap_or(AheadBehind {
-            ahead: 0,
-            behind: 0,
-        })
 }
 
 /// First N commits `head` has that aren't on `base`. Equivalent to
@@ -256,19 +214,6 @@ mod tests {
         // We set init.defaultBranch=main in the fixture; HEAD's branch
         // should be main.
         assert_eq!(detect_default_branch(dir.path()), Some("main".into()));
-    }
-
-    #[test]
-    fn ahead_behind_zero_for_same_branch() {
-        let dir = init_repo();
-        let ab = get_ahead_behind(dir.path(), "main", "main");
-        assert_eq!(
-            ab,
-            AheadBehind {
-                ahead: 0,
-                behind: 0
-            }
-        );
     }
 
     #[test]

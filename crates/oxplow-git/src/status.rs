@@ -62,66 +62,6 @@ pub fn list_git_statuses(repo_path: &Path) -> HashMap<String, GitFileStatus> {
     out
 }
 
-/// Single-path status lookup. Convenience wrapper around the bulk
-/// call; not optimized for hot-path use.
-pub fn status_for_path(repo_path: &Path, target: &str) -> Option<GitFileStatus> {
-    list_git_statuses(repo_path).get(target).copied()
-}
-
-/// Map every **working-tree-clean tracked file** to its HEAD blob OID
-/// (40-char hex). A path is included only when it exists in the HEAD
-/// tree as a blob AND git reports no change/untracked status for it —
-/// i.e. the bytes on disk are byte-identical to the committed blob.
-///
-/// This powers git-sourced snapshot baselines: the capture path can
-/// record `storage = 'git'` with this OID instead of copying the bytes
-/// into oxplow's blob store, because they're already in the git object
-/// db and recoverable via `find_blob`. Empty map when not a git repo or
-/// HEAD is unborn (a repo with no commits backs everything the old way).
-pub fn clean_head_blob_oids(repo_path: &Path) -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    let Ok(repo) = git2::Repository::open(repo_path) else {
-        return out;
-    };
-    // Unborn branch / no HEAD commit → nothing committed to lean on.
-    let Ok(commit) = repo.head().and_then(|h| h.peel_to_commit()) else {
-        return out;
-    };
-    let Ok(tree) = commit.tree() else {
-        return out;
-    };
-    // Walk the whole HEAD tree once, collecting blob OIDs per path.
-    // `root` is the directory prefix ending in `/` ("" at the top).
-    let _ = tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
-        if entry.kind() == Some(git2::ObjectType::Blob) {
-            if let Ok(name) = entry.name() {
-                out.insert(format!("{root}{name}"), entry.id().to_string());
-            }
-        }
-        git2::TreeWalkResult::Ok
-    });
-    // Drop any *tracked* path that differs from HEAD on disk. We
-    // deliberately do NOT enumerate untracked files: they're never in the
-    // HEAD tree (so never in `out`), and `include_untracked(true)` would
-    // force libgit2 to scan the entire untracked working tree — on a big
-    // repo that's hundreds of thousands of files of pure overhead. With
-    // untracked+ignored off, status only diffs tracked entries, which is
-    // all we need to know "is this committed file still byte-clean."
-    let mut opts = git2::StatusOptions::new();
-    opts.include_untracked(false)
-        .include_ignored(false)
-        .renames_head_to_index(false)
-        .renames_index_to_workdir(false);
-    if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
-        for entry in statuses.iter() {
-            if let Ok(path) = entry.path() {
-                out.remove(path);
-            }
-        }
-    }
-    out
-}
-
 /// mtime as `(unix seconds, nanoseconds)` — compared at nanosecond
 /// precision (like git) so a checkout that lands files and the index in
 /// the same wall-clock second isn't spuriously treated as racy.
@@ -361,46 +301,11 @@ mod tests {
     }
 
     #[test]
-    fn clean_head_blob_oids_includes_clean_excludes_dirty_and_untracked() {
-        let dir = init_repo();
-        commit_files(dir.path(), &[("a.txt", "alpha"), ("sub/b.txt", "beta")]);
-
-        // Modify a.txt on disk (dirty), add an untracked file.
-        std::fs::write(dir.path().join("a.txt"), "alpha-changed").unwrap();
-        std::fs::write(dir.path().join("c.txt"), "gamma").unwrap();
-
-        let oids = clean_head_blob_oids(dir.path());
-
-        // Clean nested tracked file → present, with its real blob OID.
-        let repo = git2::Repository::open(dir.path()).unwrap();
-        let expect_b = repo
-            .head()
-            .unwrap()
-            .peel_to_commit()
-            .unwrap()
-            .tree()
-            .unwrap()
-            .get_path(Path::new("sub/b.txt"))
-            .unwrap()
-            .id()
-            .to_string();
-        assert_eq!(oids.get("sub/b.txt"), Some(&expect_b));
-
-        // Dirty tracked file and untracked file → excluded.
-        assert!(!oids.contains_key("a.txt"), "dirty file must be excluded");
-        assert!(
-            !oids.contains_key("c.txt"),
-            "untracked file must be excluded"
-        );
-    }
-
-    #[test]
     fn read_blob_round_trips_clean_content() {
         let dir = init_repo();
         commit_files(dir.path(), &[("doc.md", "# hello\nworld\n")]);
-        let oids = clean_head_blob_oids(dir.path());
-        let oid = oids.get("doc.md").expect("clean file present");
-        let bytes = read_blob(dir.path(), oid).expect("blob readable");
+        let oid = crate::tree::git_blob_oid(b"# hello\nworld\n").unwrap();
+        let bytes = read_blob(dir.path(), &oid).expect("blob readable");
         assert_eq!(bytes, b"# hello\nworld\n");
     }
 
@@ -471,13 +376,5 @@ mod tests {
         // a.txt is staged-modified (index OID != HEAD) → not a candidate.
         assert!(!b.head_oids.contains_key("a.txt"));
         assert!(b.index_mtime.0 > 0, "index mtime should be populated");
-    }
-
-    #[test]
-    fn clean_head_blob_oids_empty_for_unborn_repo() {
-        let dir = tempdir().unwrap();
-        git2::Repository::init(dir.path()).unwrap();
-        std::fs::write(dir.path().join("x.txt"), "x").unwrap();
-        assert!(clean_head_blob_oids(dir.path()).is_empty());
     }
 }
