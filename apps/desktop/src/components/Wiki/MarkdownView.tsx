@@ -23,7 +23,7 @@ import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef, directoryRef, gitCommitRef, wikiPageRef, taskRef } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { DISK, type FileVersion } from "../../file-version.js";
+import { WORKING, gitRevision, type Revision } from "../../revision.js";
 import { useWikiRef } from "../../wikiTitleCache.js";
 import { useTaskRef } from "../../taskTitleCache.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
@@ -42,10 +42,10 @@ export type ParsedLink =
       path: string;
       line?: number;
       /** Tree version the wikilink pinned. `null` means the wikilink
-       *  was bare (`[[path]]`) — host falls back to `DISK` (working
+       *  was bare (`[[path]]`) — host falls back to `WORKING` (working
        *  tree) for back-compat. Non-null carries the author's intent
        *  exactly. */
-      version: import("../../file-version.js").FileVersion | null;
+      version: import("../../revision.js").Revision | null;
     }
   | { kind: "directory"; path: string }
   | { kind: "commit"; sha: string }
@@ -117,7 +117,7 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
     // Pull the version off first since it can contain hex / branch
     // names that the line regex would mishandle.
     let body = raw;
-    let version: import("../../file-version.js").FileVersion | null = null;
+    let version: import("../../revision.js").Revision | null = null;
     const atIdx = body.indexOf("@");
     if (atIdx > 0) {
       const versionPart = body.slice(atIdx + 1);
@@ -133,10 +133,12 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
           trailingLine = maybeLine;
         }
       }
+      // `@disk` / `@local` is the working tree; anything else is a git
+      // revision (the wiki's authoring syntax — `.context/vcs.md`).
       if (versionToken.toLowerCase() === "disk" || versionToken.toLowerCase() === "local") {
-        version = { kind: "disk" };
+        version = WORKING;
       } else if (versionToken) {
-        version = { kind: "ref", ref: versionToken };
+        version = gitRevision(versionToken);
       }
       if (trailingLine != null) {
         body = `${body}:${trailingLine}`;
@@ -373,7 +375,7 @@ function rewriteWikilinksOutsideInlineCode(text: string): string {
       if (looksLikeFilePath(target)) {
         // The target may carry a `@<version>` segment; the file:
         // URL preserves it verbatim and parseMarkdownLink decodes it
-        // back into a FileVersion at click time.
+        // back into a Revision at click time.
         return `[${display}](file:${target})`;
       }
       // Slug-shaped → wiki note. Anything else matches no known ref
@@ -471,10 +473,10 @@ function WikiLinkSpan({
 export function linkTarget(parsed: ParsedLink): TabRef | null {
   switch (parsed.kind) {
     case "file":
-      // Bare wikilinks (no `@version`) coerce to DISK; explicit versions
+      // Bare wikilinks (no `@version`) coerce to WORKING; explicit versions
       // flow through as authored. Load-bearing: a wikilink that pinned
       // `@HEAD` must NOT be silently substituted with the working tree.
-      return fileRef(parsed.path, parsed.version ?? DISK);
+      return fileRef(parsed.path, parsed.version ?? WORKING);
     case "directory":
       return directoryRef(parsed.path);
     case "commit":

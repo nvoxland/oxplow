@@ -7,8 +7,8 @@
 /// directly on disk. Used by the rename/code-action providers and by
 /// server-initiated `workspace/applyEdit` requests.
 
-import { readFile as apiReadFile, writeWorkspaceFile, type Stream } from "./api.js";
-import { DISK } from "./file-version.js";
+import { readAt, writeWorkspaceFile, type Stream } from "./api.js";
+import { WORKING } from "./revision.js";
 import {
   applyTextEditsToContent,
   toMonacoRange,
@@ -44,7 +44,7 @@ export function workspaceEditIOForStream(monaco: any, stream: Stream): Workspace
     findModel: (uri) => monaco.editor.getModel(monaco.Uri.parse(uri)) ?? null,
     pathFromUri: (uri) => relativePathFromFileUri(stream, uri),
     readFile: async (path) => {
-      const content = await apiReadFile(stream.id, path, DISK);
+      const content = await readAt(stream.id, path, WORKING);
       if (content == null) throw new Error("file not found in worktree");
       return content;
     },

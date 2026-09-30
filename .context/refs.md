@@ -126,7 +126,7 @@ A `TabRef.id` for an entity page *is* its canonical ref, and
 | `task:tskN` (kind `task`) | `work_item:oxplow:tskN` (kind `work_item`, payload `itemId: "tskN"`) |
 | `git-commit:<sha>` | `commit:<sha>` |
 | `dir:<path>` (kind `directory`) | `dir:<path>` (kind `dir`) |
-| `file:<p>:@ref:<x>` | `file:<p>@git:<x>` (`@snap:<id>` for snapshots; `revForVersion`/`versionFromRev` in `file-version.ts`) |
+| `file:<p>:@ref:<x>` | `file:<p>@git:<x>` (`@snap:<id>` for snapshots; `revisionSlot`/`revisionFromSlot` in `revision.ts`) |
 | `metric-detail:<key>` | `metric:<key>` |
 
 The same vocabulary is used by every TS surface that names an entity, so

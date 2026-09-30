@@ -294,7 +294,7 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
   (P2.9): a `snapshot_id` is a whole capture, a `file_snapshot_id` one
   captured file row. The old `get_snapshot_summary` /
   `get_snapshot_pair_diff` RPCs had no caller and are gone; diffs go
-  through `diff_endpoints`.
+  through the `diff` RPC (`Trees`, `.context/vcs.md`).
 - `listTaskEfforts(itemId)` (RPC `list_work_item_efforts { workItem }`,
   called with `work_item:oxplow:<itemId>`) — returns per-effort rows (one per
   `in_progress → human_check` cycle) with pre-joined start/end

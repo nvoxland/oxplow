@@ -1059,7 +1059,7 @@ oxplow-surface-parity -- --nocapture` to see the current gap backlog.
 
 Domains mirrored onto MCP so far (beyond the original task/wiki/comment
 surface): **git reads** (`git_status`, `git_log`, `git_blame`,
-`git_diff`, `read_file_at_ref`, `list_branches` — `stream_id` optional;
+`git_diff`, `read_at` (any revision: `working`, `snap:<id>`, `git:<rev>`), `list_branches` — `stream_id` optional;
 mutations stay on Bash); **snapshots / local history**
 (`list_snapshots_for_stream`, `list_files_for_snapshot`,
 `get_snapshot_stats`, `list_snapshot_change_entries` take a `snapshot_id`

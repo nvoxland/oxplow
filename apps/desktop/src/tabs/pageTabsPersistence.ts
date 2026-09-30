@@ -12,6 +12,7 @@ import type { NavSiblings } from "./PageNavigationContext.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import type { FileSessionState } from "../editor-session.js";
 import { logUi } from "../logger.js";
+import { parseRevision } from "../revision.js";
 
 export const FILE_SESSIONS_STORAGE_KEY = "oxplow.layout.v2.fileSessions";
 export const CENTER_ACTIVE_STORAGE_KEY = "oxplow.layout.v2.centerActive";
@@ -136,24 +137,11 @@ export function readPersistedDiffSpecs(): Array<{ id: string; spec: DiffSpec }> 
       const rawSpec = (entry as { spec?: unknown }).spec;
       if (typeof id !== "string" || !rawSpec || typeof rawSpec !== "object") continue;
       const s = rawSpec as Record<string, unknown>;
-      // Coerce pre-versioning persisted specs (leftRef + rightKind)
-      // into the new (leftVersion, rightVersion) shape. Existing
-      // tabs survive a restart without losing their target.
-      let leftVersion = (s.leftVersion ?? null) as DiffSpec["leftVersion"] | null;
-      let rightVersion = (s.rightVersion ?? null) as DiffSpec["rightVersion"] | null;
-      if (!leftVersion) {
-        const lr = typeof s.leftRef === "string" ? s.leftRef : null;
-        leftVersion = lr ? { kind: "ref", ref: lr } : { kind: "disk" };
-      }
-      if (!rightVersion) {
-        const rk = s.rightKind;
-        if (rk === "working") rightVersion = { kind: "disk" };
-        else if (rk && typeof rk === "object" && typeof (rk as { ref?: unknown }).ref === "string") {
-          rightVersion = { kind: "ref", ref: (rk as { ref: string }).ref };
-        } else {
-          rightVersion = { kind: "disk" };
-        }
-      }
+      // A spec whose sides aren't revisions (persisted before they were)
+      // is dropped, not guessed at.
+      const leftVersion = parseRevision(s.leftVersion);
+      const rightVersion = parseRevision(s.rightVersion);
+      if (leftVersion === null || rightVersion === null) continue;
       out.push({
         id,
         spec: {

@@ -5,12 +5,12 @@ query: |
   SELECT d.path, d.start_line, d.lines, d.peer_path,
          d.path || ':' || d.start_line || '-' || d.end_line || '|'
            || d.peer_path || ':' || d.peer_start_line || '-' || d.peer_end_line AS pair,
-         c.head_label
+         c.head_revision
   FROM v_change_duplicate d JOIN v_change c ON c.id = d.change_id
   WHERE d.change_id = :change_id
   ORDER BY d.lines DESC, d.path, d.start_line
 columns:
-  - { key: path, label: File, link: { kind: compare, from: pair, head: head_label } }
+  - { key: path, label: File, link: { kind: compare, from: pair, head: head_revision } }
   - { key: start_line, label: Line }
   - { key: lines, label: Lines }
   - { key: peer_path, label: Copy Of }

@@ -418,8 +418,7 @@ All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:
   Files dialog are user-driven via `git commit` in the terminal.
 - `listBranchChanges`, `getGitLog`, `getCommitDetail`, `getChangeScopes`,
   `searchWorkspaceText`, `restorePath`, `addPath`, `appendToGitignore`,
-  `listFileCommits`, `listAllRefs`,
-  `readFileAtRef`, `listGitStatuses` — straight `execFileSync` wrappers
+  `listFileCommits`, `listAllRefs`, `listGitStatuses` — straight `execFileSync` wrappers
   exposed via IPC for UI consumption.
 - `getCommitDetail(repo, sha)` (`src/log.rs`) resolves **both full and
   abbreviated** shas — Activity-feed commit links carry 7-char prefixes.

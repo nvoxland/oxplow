@@ -12,7 +12,7 @@ import {
   type Thread,
   type TranscriptItem,
 } from "../../api.js";
-import { DISK } from "../../file-version.js";
+import { WORKING } from "../../revision.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { MarkdownView } from "../Wiki/MarkdownView.js";
 import { AcpPromptBox } from "./AcpPromptBox.js";
@@ -452,8 +452,8 @@ function ToolCard({
               onClick={() =>
                 onOpenDiff({
                   path: relPath(d.path),
-                  leftVersion: DISK,
-                  rightVersion: DISK,
+                  leftVersion: WORKING,
+                  rightVersion: WORKING,
                   baseLabel: "before",
                   leftContent: d.oldText ?? "",
                   rightContent: d.newText,

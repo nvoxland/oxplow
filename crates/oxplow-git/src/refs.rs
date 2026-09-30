@@ -177,19 +177,6 @@ pub fn resolve_commit_ref_labels(
     out
 }
 
-/// Read a file's contents at a given ref. Returns `None` if the path
-/// does not exist at that ref.
-pub fn read_file_at_ref(repo_path: &Path, r#ref: &str, path: &str) -> Option<String> {
-    let repo = git2::Repository::open(repo_path).ok()?;
-    let obj = repo.revparse_single(r#ref).ok()?;
-    let commit = obj.peel_to_commit().ok()?;
-    let tree = commit.tree().ok()?;
-    let entry = tree.get_path(Path::new(path)).ok()?;
-    let blob = entry.to_object(&repo).ok()?;
-    let blob = blob.as_blob()?;
-    String::from_utf8(blob.content().to_vec()).ok()
-}
-
 /// List the most recent commits that touched `path`, up to `limit`.
 pub fn list_file_commits(repo_path: &Path, path: &str, limit: usize) -> Vec<GitLogCommit> {
     let repo = match git2::Repository::open(repo_path) {
@@ -425,14 +412,6 @@ mod tests {
         init_with_commit(dir.path(), "a.txt", "x");
         let refs = list_all_refs(dir.path());
         assert!(refs.locals.iter().any(|r| r.label == "main"));
-    }
-
-    #[test]
-    fn read_file_at_head_returns_content() {
-        let dir = tempdir().unwrap();
-        init_with_commit(dir.path(), "a.txt", "hello");
-        let body = read_file_at_ref(dir.path(), "HEAD", "a.txt").unwrap();
-        assert_eq!(body, "hello");
     }
 
     #[test]

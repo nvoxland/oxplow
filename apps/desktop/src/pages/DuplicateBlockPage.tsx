@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
-import { readFile, type Stream } from "../api.js";
+import { readAt, type Stream } from "../api.js";
 import { languageForPath } from "../editor-language.js";
-import { shortLabelForVersion, type FileVersion } from "../file-version.js";
+import { shortRevisionLabel, type Revision } from "../revision.js";
 import type { DuplicateBlockPayload } from "../tabs/pageRefs.js";
 
 const HIGHLIGHT_STYLE_ID = "oxplow-duplicate-block-style";
@@ -28,7 +28,7 @@ export interface DuplicateBlockPageProps {
   stream: Stream;
   payload: DuplicateBlockPayload;
   visible: boolean;
-  onJumpToSource(path: string, version: FileVersion): void;
+  onJumpToSource(path: string, version: Revision): void;
 }
 
 /**
@@ -145,8 +145,8 @@ export function DuplicateBlockPage({ stream, payload, visible, onJumpToSource }:
             </strong>
           </span>
           {(() => {
-            const leftLabel = shortLabelForVersion(payload.leftVersion);
-            const rightLabel = shortLabelForVersion(payload.rightVersion);
+            const leftLabel = shortRevisionLabel(payload.leftVersion);
+            const rightLabel = shortRevisionLabel(payload.rightVersion);
             const combined = leftLabel === rightLabel
               ? `Both at @${leftLabel}`
               : `Left @${leftLabel}, right @${rightLabel}`;
@@ -186,10 +186,10 @@ export function DuplicateBlockPage({ stream, payload, visible, onJumpToSource }:
 interface SideProps {
   stream: Stream;
   path: string;
-  version: FileVersion;
+  version: Revision;
   startLine: number;
   endLine: number;
-  onJumpToSource(path: string, version: FileVersion): void;
+  onJumpToSource(path: string, version: Revision): void;
   side: "left" | "right";
   syncRef: React.MutableRefObject<ScrollSyncBus>;
 }
@@ -204,7 +204,7 @@ function DuplicateSide({
   side,
   syncRef,
 }: SideProps) {
-  const versionLabel = shortLabelForVersion(version);
+  const versionLabel = shortRevisionLabel(version);
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
   const modelRef = useRef<any>(null);
@@ -271,7 +271,7 @@ function DuplicateSide({
     let cancelled = false;
     (async () => {
       try {
-        const content = await readFile(stream.id, path, version);
+        const content = await readAt(stream.id, path, version);
         if (cancelled) return;
         const monaco = monacoRef.current;
         const editor = editorRef.current;
@@ -328,9 +328,7 @@ function DuplicateSide({
     editorReady,
     stream.id,
     path,
-    version.kind,
-    version.kind === "ref" ? version.ref : null,
-    version.kind === "snapshot" ? version.id : null,
+    version,
     startLine,
     endLine,
   ]);

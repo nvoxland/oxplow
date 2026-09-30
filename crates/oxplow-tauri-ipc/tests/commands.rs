@@ -397,8 +397,13 @@ async fn git_reads_over_primary_worktree() {
     let _ = commands::generated::list_all_refs(s.clone()).await;
     let _ = commands::generated::get_change_scopes(s.clone(), None).await;
     let _ = commands::generated::get_branch_changes(s.clone(), None, "HEAD".into()).await;
-    let _ =
-        commands::generated::read_file_at_ref(s.clone(), "HEAD".into(), "nope.txt".into()).await;
+    let _ = commands::generated::read_at(
+        s.clone(),
+        None,
+        "nope.txt".into(),
+        oxplow_domain::vcs::Revision::git("HEAD"),
+    )
+    .await;
     let _ =
         commands::generated::list_file_commits(s.clone(), None, "nope.txt".into(), Some(10)).await;
     let _ = commands::generated::git_blame(s.clone(), None, "nope.txt".into()).await;
@@ -766,13 +771,9 @@ async fn workspace_reads_and_file_round_trip() {
     let _ = commands::generated::get_workspace_status_summary(app.state(), None)
         .await
         .unwrap();
-    let _ = commands::generated::read_file(
-        app.state(),
-        None,
-        "made-up.txt".into(),
-        oxplow_tree_source::TreeVersion::Disk,
-    )
-    .await;
+    let _ = commands::generated::files_at(app.state(), None, oxplow_domain::vcs::Revision::Working)
+        .await
+        .unwrap();
     // Create → read → rename → delete a file inside the worktree.
     commands::generated::write_workspace_file(
         app.state(),

@@ -6,7 +6,7 @@ query: |
            || json_extract(f.extra_json, '$.peerPath') || ':'
            || json_extract(f.extra_json, '$.peerStartLine') || '-'
            || json_extract(f.extra_json, '$.peerEndLine') AS pair,
-         CASE s.tree_version_kind WHEN 'ref' THEN s.tree_version_value ELSE 'working tree' END AS version
+         s.revision AS version
   FROM v_code_quality_finding f JOIN v_code_quality_scan s ON s.id = f.scan_id
   WHERE f.kind = 'duplicate-block'
   ORDER BY f.id DESC

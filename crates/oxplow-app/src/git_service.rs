@@ -242,13 +242,6 @@ impl GitService {
             .unwrap_or_default()
     }
 
-    pub async fn read_file_at_ref(&self, r#ref: String, path: String) -> Option<String> {
-        let project = self.project_dir();
-        tokio::task::spawn_blocking(move || oxplow_git::read_file_at_ref(&project, &r#ref, &path))
-            .await
-            .unwrap_or(None)
-    }
-
     pub async fn search_workspace_text(
         &self,
         stream_id: Option<&str>,

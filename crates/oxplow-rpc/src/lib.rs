@@ -363,9 +363,9 @@ macro_rules! oxplow_command_table {
                 get_branch_changes => $crate::commands::git::get_branch_changes { stream_id: Option<String>, base_ref: String } -> ::oxplow_git::BranchChanges,
                 list_adoptable_worktrees => $crate::commands::git::list_adoptable_worktrees {} -> Vec<::oxplow_git::GitWorktreeEntry>,
                 search_workspace_text => $crate::commands::git::search_workspace_text { stream_id: Option<String>, query: String, limit: Option<usize> } -> Vec<::oxplow_git::TextSearchHit>,
-                read_file_at_ref => $crate::commands::git::read_file_at_ref { r#ref: String, path: String } -> Option<String>,
+                read_at => $crate::commands::trees::read_at { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Option<String>,
                 // workspace
-                read_file => $crate::commands::workspace::read_file { stream_id: Option<String>, relative_path: String, version: ::oxplow_tree_source::TreeVersion } -> Option<String>,
+                files_at => $crate::commands::trees::files_at { stream_id: Option<String>, revision: ::oxplow_domain::vcs::Revision } -> Vec<String>,
                 list_workspace_entries => $crate::commands::workspace::list_workspace_entries { stream_id: Option<String>, relative_path: String } -> Vec<::oxplow_app::workspace_files::WorkspaceEntry>,
                 list_workspace_files => $crate::commands::workspace::list_workspace_files { stream_id: Option<String> } -> Vec<::oxplow_app::workspace_files::WorkspaceIndexedFile>,
                 read_workspace_file => $crate::commands::workspace::read_workspace_file { stream_id: Option<String>, relative_path: String } -> ::oxplow_app::workspace_files::WorkspaceFile,
@@ -409,7 +409,7 @@ macro_rules! oxplow_command_table {
                 list_wiki_slugs_for_snapshots => $crate::commands::snapshot::list_wiki_slugs_for_snapshots { snapshot_ids: Vec<i64> } -> Vec<(i64, String)>,
                 list_files_for_snapshot => $crate::commands::snapshot::list_files_for_snapshot { snapshot_id: i64 } -> Vec<::oxplow_db::FileSnapshot>,
                 get_file_snapshot => $crate::commands::snapshot::get_file_snapshot { file_snapshot_id: i64 } -> Option<::oxplow_db::FileSnapshot>,
-                diff_endpoints => $crate::commands::snapshot::diff_endpoints { start: Option<$crate::commands::snapshot::DiffEndpoint>, end: $crate::commands::snapshot::DiffEndpoint } -> Vec<$crate::commands::snapshot::DiffEntry>,
+                diff => $crate::commands::trees::diff { stream_id: Option<String>, from: Option<::oxplow_domain::vcs::Revision>, to: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::trees::DiffEntry>,
                 restore_file_snapshot => $crate::commands::snapshot::restore_file_snapshot { file_snapshot_id: i64 } -> (),
                 // background
                 list_background_tasks => $crate::commands::background::list_background_tasks {} -> Vec<::oxplow_app::BackgroundTask>,

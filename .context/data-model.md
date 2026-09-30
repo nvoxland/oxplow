@@ -650,8 +650,8 @@ and persists the result by OID. A clean baseline is never re-read.
 Everything that compares content goes through typed trees
 (`tree_at` → `SnapshotTree` of `TreeEntry { storage, address,
 content_hash, … }`, `TreeEntry::identity()`), never through an address:
-`diff_snapshots`, `endpoint_diff` (which knows each cell's class instead
-of guessing from the string's length), change analysis, diff coverage
+`diff_snapshots`, `Trees` (`.context/vcs.md`; it knows each cell's class
+instead of guessing from the string's length), change analysis, diff coverage
 and wiki drift. `stats_for_snapshot` / `list_changes_for_snapshot`
 classify by the same identity, so a row whose bytes equal its
 predecessor's is not a change.

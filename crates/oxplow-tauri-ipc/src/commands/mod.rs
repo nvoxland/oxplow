@@ -26,7 +26,6 @@ pub mod notes;
 pub mod page_refs;
 pub mod page_visit;
 pub mod search;
-pub mod snapshot;
 pub mod streams;
 pub mod tasks;
 pub mod terminal;

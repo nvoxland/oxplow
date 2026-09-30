@@ -1,2 +1,2 @@
-SELECT id, stream_id, kind, target, base_label, head_label, status, error, computed_at
+SELECT id, stream_id, kind, target, base_revision, head_revision, status, error, computed_at
 FROM source('change')

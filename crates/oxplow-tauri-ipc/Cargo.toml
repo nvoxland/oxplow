@@ -31,7 +31,6 @@ specta = { workspace = true }
 tempfile = { workspace = true }
 oxplow-code-metrics = { workspace = true }
 oxplow-code-deps = { workspace = true }
-oxplow-tree-source = { workspace = true }
 # Line-diff for per-function churn attribution.
 similar = "3"
 

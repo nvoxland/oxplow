@@ -2,12 +2,12 @@ title: Churn
 description: Changed lines per file, grouped by architectural zone.
 params: [{ name: change_id }]
 query: |
-  SELECT f.path, f.additions + f.deletions AS churn, f.zone, c.base_label, c.head_label
+  SELECT f.path, f.additions + f.deletions AS churn, f.zone, c.base_revision, c.head_revision
   FROM v_change_file f JOIN v_change c ON c.id = f.change_id
   WHERE f.change_id = :change_id AND f.additions + f.deletions > 0
 viz: treemap
 chart: { label: path, size: churn, group: zone }
 columns:
-  - { key: path, link: { kind: diff-at, base: base_label, head: head_label } }
+  - { key: path, link: { kind: diff-at, base: base_revision, head: head_revision } }
 empty: No changed lines.
 hidden: true

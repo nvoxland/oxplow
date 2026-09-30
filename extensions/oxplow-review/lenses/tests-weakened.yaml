@@ -21,10 +21,10 @@ query: |
     FROM v_change_test_file t
     WHERE t.change_id = :change_id AND t.skips_after > t.skips_before
   ) w
-  JOIN (SELECT base_label, head_label FROM v_change WHERE id = :change_id) c
+  JOIN (SELECT base_revision, head_revision FROM v_change WHERE id = :change_id) c
   ORDER BY ord, path, detail
 columns:
   - { key: what, label: What }
-  - { key: path, label: File, link: { kind: diff-at, line: line, base: base_label, head: head_label } }
+  - { key: path, label: File, link: { kind: diff-at, line: line, base: base_revision, head: head_revision } }
   - { key: detail, label: Detail }
 empty: No tests were deleted, weakened or skipped.

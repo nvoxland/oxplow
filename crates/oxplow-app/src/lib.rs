@@ -41,7 +41,6 @@ pub mod duplication_scan;
 pub mod effort_evidence;
 pub mod effort_lifecycle;
 pub mod effort_reactors;
-pub mod endpoint_diff;
 pub mod entity_metrics;
 pub mod event_bodies;
 pub mod event_pump;
@@ -101,6 +100,7 @@ pub mod thread_runtime;
 pub mod token_usage;
 pub mod tool_call_reactors;
 pub mod tool_calls;
+pub mod trees;
 pub mod turn_snapshots;
 pub mod vcs;
 #[cfg(test)]
@@ -552,6 +552,9 @@ pub struct Services {
     pub vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     /// Which directory each stream works in.
     pub worktrees: Arc<worktrees::WorktreeRouter>,
+    /// Every version of a workspace's tree — working, snapshot, VCS
+    /// revision — read and diffed through one interface.
+    pub trees: Arc<trees::Trees>,
     /// A stream's files: list, read, write.
     pub workspace_files: Arc<workspace_files::WorkspaceFiles>,
     /// Keeps `stream.branch` equal to the checked-out branch; spawned at
@@ -797,6 +800,12 @@ impl Services {
             event_bus.clone(),
         ));
         let git = git_service::GitService::new(worktrees.clone(), event_bus.clone());
+        let trees = Arc::new(trees::Trees::new(
+            vcs.clone(),
+            snapshot_store.clone(),
+            blobs.clone(),
+            config_arc.clone(),
+        ));
 
         // Snapshot capture singleton — owned here so anything in
         // Services can request snapshots (e.g. TaskService stamps
@@ -1099,6 +1108,7 @@ impl Services {
             worktrees,
             workspace_files,
             branch_reconciler,
+            trees,
             finished_cleared_at: Arc::new(RwLock::new(std::collections::HashMap::new())),
         })
     }

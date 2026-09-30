@@ -3,6 +3,7 @@
 //! core's producer (`oxplow-app/src/change_analysis.rs`); read by lenses.
 //! See `.context/semantic-layer.md`.
 
+use oxplow_domain::vcs::Revision;
 use oxplow_domain::DomainError;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -18,8 +19,11 @@ pub struct ChangeRow {
     pub stream_id: i64,
     pub kind: String,
     pub target: String,
-    pub base_label: Option<String>,
-    pub head_label: Option<String>,
+    /// The older side (`oxplow_domain::vcs::Revision`); `None` for a
+    /// root commit.
+    pub base_revision: Option<Revision>,
+    /// The newer side.
+    pub head_revision: Option<Revision>,
     pub status: String,
     pub error: Option<String>,
     pub computed_at: Option<String>,
@@ -117,43 +121,55 @@ pub struct SqliteChangeStore {
     db: Database,
 }
 
+/// A stored revision column (`NULL` → `None`).
+fn revision_at(r: &rusqlite::Row<'_>, i: usize) -> rusqlite::Result<Option<Revision>> {
+    r.get::<_, Option<String>>(i)?
+        .map(|s| {
+            s.parse().map_err(|e: String| {
+                rusqlite::Error::FromSqlConversionFailure(i, rusqlite::types::Type::Text, e.into())
+            })
+        })
+        .transpose()
+}
+
 impl SqliteChangeStore {
     pub fn new(db: Database) -> Self {
         Self { db }
     }
 
-    /// The change for `(stream_id, kind, target)`, creating it `pending`.
-    /// The change keyed `(stream_id, kind, target)`, created if new, with
-    /// its labels updated. The flag says whether an existing row's head
-    /// moved (its `head_label` differs from the given one): its stored
-    /// results are then of another head and must be recomputed.
+    /// The change keyed `(stream_id, kind, target)`, created `pending` if
+    /// new, with its revisions updated. The flag says whether an existing
+    /// row's head moved (its `head_revision` differs from the given one):
+    /// its stored results are then of another head and must be recomputed.
     pub async fn get_or_create(
         &self,
         stream_id: i64,
         kind: &str,
         target: &str,
-        base_label: Option<String>,
-        head_label: Option<String>,
+        base: Option<&Revision>,
+        head: &Revision,
     ) -> Result<(ChangeRow, bool), DomainError> {
         let (kind, target) = (kind.to_string(), target.to_string());
-        let wanted_head = head_label.clone();
+        let base = base.map(Revision::to_string);
+        let wanted_head = head.to_string();
+        let head = wanted_head.clone();
         let (id, previous_head): (i64, Option<Option<String>>) = self
             .db
             .call(move |c| {
                 let previous: Option<Option<String>> = c
                     .query_row(
-                        "SELECT head_label FROM change WHERE stream_id = ?1 AND kind = ?2 AND target = ?3",
+                        "SELECT head_revision FROM change WHERE stream_id = ?1 AND kind = ?2 AND target = ?3",
                         rusqlite::params![stream_id, kind, target],
                         |r| r.get(0),
                     )
                     .optional()?;
                 c.execute(
-                    "INSERT INTO change (stream_id, kind, target, base_label, head_label, status)
+                    "INSERT INTO change (stream_id, kind, target, base_revision, head_revision, status)
                      VALUES (?1, ?2, ?3, ?4, ?5, 'pending')
                      ON CONFLICT (stream_id, kind, target) DO UPDATE SET
-                       base_label = coalesce(excluded.base_label, change.base_label),
-                       head_label = coalesce(excluded.head_label, change.head_label)",
-                    rusqlite::params![stream_id, kind, target, base_label, head_label],
+                       base_revision = coalesce(excluded.base_revision, change.base_revision),
+                       head_revision = excluded.head_revision",
+                    rusqlite::params![stream_id, kind, target, base, head],
                 )?;
                 let id = c.query_row(
                     "SELECT id FROM change WHERE stream_id = ?1 AND kind = ?2 AND target = ?3",
@@ -163,10 +179,7 @@ impl SqliteChangeStore {
                 Ok((id, previous))
             })
             .await?;
-        let moved = match (previous_head, wanted_head) {
-            (Some(before), Some(now)) => before.as_deref() != Some(now.as_str()),
-            _ => false,
-        };
+        let moved = matches!(previous_head, Some(before) if before.as_deref() != Some(wanted_head.as_str()));
         let row = self.get(id).await?.ok_or(DomainError::NotFound)?;
         Ok((row, moved))
     }
@@ -175,7 +188,7 @@ impl SqliteChangeStore {
         self.db
             .call(move |c| {
                 let mut st = c.prepare(
-                    "SELECT id, stream_id, kind, target, base_label, head_label, status, error, computed_at
+                    "SELECT id, stream_id, kind, target, base_revision, head_revision, status, error, computed_at
                      FROM change WHERE id = ?1",
                 )?;
                 let mut rows = st.query_map([id], |r| {
@@ -184,8 +197,8 @@ impl SqliteChangeStore {
                         stream_id: r.get(1)?,
                         kind: r.get(2)?,
                         target: r.get(3)?,
-                        base_label: r.get(4)?,
-                        head_label: r.get(5)?,
+                        base_revision: revision_at(r, 4)?,
+                        head_revision: revision_at(r, 5)?,
                         status: r.get(6)?,
                         error: r.get(7)?,
                         computed_at: r.get(8)?,
@@ -340,21 +353,21 @@ mod tests {
     async fn get_or_create_reports_a_moved_head() {
         let store = SqliteChangeStore::new(Database::in_memory());
         let (_, moved) = store
-            .get_or_create(1, "effort", "7", None, Some("working tree".into()))
+            .get_or_create(1, "effort", "7", None, &Revision::Working)
             .await
             .unwrap();
         assert!(!moved, "new rows didn't move");
         let (_, moved) = store
-            .get_or_create(1, "effort", "7", None, Some("working tree".into()))
+            .get_or_create(1, "effort", "7", None, &Revision::Working)
             .await
             .unwrap();
         assert!(!moved);
         let (row, moved) = store
-            .get_or_create(1, "effort", "7", None, Some("snapshot 12".into()))
+            .get_or_create(1, "effort", "7", None, &Revision::Snapshot(12))
             .await
             .unwrap();
         assert!(moved);
-        assert_eq!(row.head_label.as_deref(), Some("snapshot 12"));
+        assert_eq!(row.head_revision, Some(Revision::Snapshot(12)));
     }
 
     #[tokio::test]
@@ -362,19 +375,25 @@ mod tests {
         let db = Database::in_memory();
         let store = SqliteChangeStore::new(db.clone());
         let c = store
-            .get_or_create(1, "commit", "abc", Some("abc^".into()), Some("abc".into()))
+            .get_or_create(
+                1,
+                "commit",
+                "abc",
+                Some(&Revision::git("abc^")),
+                &Revision::git("abc"),
+            )
             .await
             .unwrap()
             .0;
         assert_eq!(c.status, "pending");
         let again = store
-            .get_or_create(1, "commit", "abc", None, None)
+            .get_or_create(1, "commit", "abc", None, &Revision::git("abc"))
             .await
             .unwrap()
             .0;
         assert_eq!(again.id, c.id, "same key, same change");
         let other = store
-            .get_or_create(1, "working", "", None, None)
+            .get_or_create(1, "working", "", None, &Revision::Working)
             .await
             .unwrap()
             .0;

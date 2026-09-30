@@ -14,7 +14,7 @@ describe("normalizeSnapshotId", () => {
     expect(normalizeSnapshotId("1500")).toBe("1500");
   });
 
-  test("maps null/undefined to null (→ DISK at the call site)", () => {
+  test("maps null/undefined to null (→ WORKING at the call site)", () => {
     expect(normalizeSnapshotId(null)).toBeNull();
     expect(normalizeSnapshotId(undefined)).toBeNull();
   });

@@ -261,14 +261,6 @@ pub async fn search_workspace_text(
         .await)
 }
 
-pub async fn read_file_at_ref(
-    svc: &Services,
-    r#ref: String,
-    path: String,
-) -> Result<Option<String>, IpcError> {
-    Ok(svc.git.read_file_at_ref(r#ref, path).await)
-}
-
 /// One stream's divergence row for the Git Dashboard "Streams" panel.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct StreamDivergenceRow {
@@ -407,18 +399,5 @@ mod tests {
             out.get("auto_resolved").is_some(),
             "expected auto_resolved field, got {out}"
         );
-    }
-
-    #[tokio::test]
-    async fn read_file_at_ref_dispatches_and_returns_null_for_missing_path() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch(
-            "read_file_at_ref",
-            serde_json::json!({ "ref": "HEAD", "path": "no/such/file.txt" }),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert_eq!(out, serde_json::json!(null));
     }
 }

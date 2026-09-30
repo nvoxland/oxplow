@@ -12,7 +12,7 @@ use oxplow_db::{ChangeFileRow, ChangeFunctionRow, ChangeImportRow, ChangeResults
 use crate::code_analysis::{
     analyze_files, AnalyzeFileSpec, AnalyzeFunctionsResult, AnalyzedFunction,
 };
-use crate::endpoint_diff::{compute_diff, endpoint_contents, DiffEndpoint};
+use oxplow_domain::vcs::Revision;
 
 /// Most files a change analyzes function-by-function (matching the old UI).
 pub const MAX_ANALYZED_FILES: usize = 200;
@@ -449,7 +449,7 @@ pub(crate) struct DupJob {
     /// if that's still the change's latest computation.
     generation: u64,
     root: std::path::PathBuf,
-    version: oxplow_tree_source::TreeVersion,
+    revision: Revision,
     changed: Vec<String>,
 }
 
@@ -617,20 +617,22 @@ pub async fn ensure_change(
             })
             .map(|s| s.id)
     };
+    let vcs_rev = |rev: String| Revision::Vcs {
+        kind: svc.vcs.rev_kind().into(),
+        rev,
+    };
     let (stream, kind, key, base, head, mutable) = match target {
         ChangeTarget::Working { stream_id } => {
             let sid = oxplow_domain::StreamId::try_from_str(&stream_id)
                 .ok_or_else(|| invalid(format!("not a stream id: {stream_id}")))?;
-            let head_label = Some("working tree".to_string());
+            let root = svc.worktrees.resolve(Some(&sid.to_string())).await;
+            let head = svc.vcs.head(&root).await?.revision;
             (
                 sid,
                 "working",
                 String::new(),
-                (
-                    Some(DiffEndpoint::Commit { sha: "HEAD".into() }),
-                    Some("HEAD".to_string()),
-                ),
-                (DiffEndpoint::Working, head_label),
+                head.map(vcs_rev),
+                Revision::Working,
                 true,
             )
         }
@@ -643,19 +645,18 @@ pub async fn ensure_change(
                     .ok_or_else(|| invalid("no primary stream".into()))?,
             };
             let root = svc.worktrees.resolve(Some(&sid.to_string())).await;
-            let repo = git2::Repository::open(&root).map_err(|e| invalid(format!("git: {e}")))?;
-            let commit = repo
-                .revparse_single(&sha)
-                .and_then(|o| o.peel_to_commit())
-                .map_err(|e| invalid(format!("no commit `{sha}`: {e}")))?;
-            let full = commit.id().to_string();
-            let base = commit.parent(0).ok().map(|p| p.id().to_string());
+            let full = svc.vcs.resolve(&root, &sha).await?;
+            let parent = svc
+                .vcs
+                .revision(&root, &full)
+                .await?
+                .and_then(|r| r.info.parents.into_iter().next());
             (
                 sid,
                 "commit",
                 full.clone(),
-                (base.clone().map(|sha| DiffEndpoint::Commit { sha }), base),
-                (DiffEndpoint::Commit { sha: full.clone() }, Some(full)),
+                parent.map(vcs_rev),
+                vcs_rev(full),
                 false,
             )
         }
@@ -683,14 +684,8 @@ pub async fn ensure_change(
                 thread.stream_id,
                 "turn",
                 tid.value().to_string(),
-                (
-                    Some(DiffEndpoint::Snapshot { snapshot_id: start }),
-                    Some(format!("snapshot {start}")),
-                ),
-                (
-                    DiffEndpoint::Snapshot { snapshot_id: end },
-                    Some(format!("snapshot {end}")),
-                ),
+                Some(Revision::Snapshot(start)),
+                Revision::Snapshot(end),
                 false,
             )
         }
@@ -714,20 +709,14 @@ pub async fn ensure_change(
                 .ok_or(DomainError::NotFound)?;
             let open = effort.ended_at.is_none();
             let head = match effort.end_snapshot_id {
-                Some(end) if !open => (
-                    DiffEndpoint::Snapshot { snapshot_id: end },
-                    Some(format!("snapshot {end}")),
-                ),
-                _ => (DiffEndpoint::Working, Some("working tree".to_string())),
+                Some(end) if !open => Revision::Snapshot(end),
+                _ => Revision::Working,
             };
             (
                 thread.stream_id,
                 "effort",
                 eid.value().to_string(),
-                (
-                    Some(DiffEndpoint::Snapshot { snapshot_id: start }),
-                    Some(format!("snapshot {start}")),
-                ),
+                Some(Revision::Snapshot(start)),
                 head,
                 open,
             )
@@ -736,7 +725,7 @@ pub async fn ensure_change(
     let stream_val = stream.value();
     let (row, head_moved) = svc
         .change_store
-        .get_or_create(stream_val, kind, &key, base.1, head.1)
+        .get_or_create(stream_val, kind, &key, base.as_ref(), &head)
         .await?;
     let generation = {
         let mut st = svc
@@ -765,8 +754,8 @@ pub async fn ensure_change(
     };
     svc.change_store.set_status(row.id, "running", None).await?;
     let root = svc.worktrees.resolve(Some(&stream.to_string())).await;
-    let dup_head = head.0.clone();
-    let result = compute(svc, &root, base.0, head.0).await;
+    let dup_head = head.clone();
+    let result = compute(svc, &root, base, head).await;
     drop(running);
     if result.is_ok() {
         if let Ok(mut st) = svc.change_analyzer.state.lock() {
@@ -798,29 +787,22 @@ pub async fn ensure_change(
 /// the tree at `head`, in the background (it parses the whole tree), then
 /// store them and announce the change again. The scan is also recorded as
 /// a code-quality scan with `oxplow.duplicate_lines` facts
-/// ([`crate::duplication_scan`]). Snapshot heads (closed efforts) aren't
-/// scannable yet, so they get none.
+/// ([`crate::duplication_scan`]).
 fn spawn_duplicates(
     svc: &crate::Services,
     change_id: i64,
     generation: u64,
     root: &std::path::Path,
-    head: &DiffEndpoint,
+    head: &Revision,
     changed: Vec<String>,
 ) {
-    use oxplow_tree_source::TreeVersion;
-    let version = match head {
-        DiffEndpoint::Working => TreeVersion::Disk,
-        DiffEndpoint::Commit { sha } => TreeVersion::Ref { r#ref: sha.clone() },
-        DiffEndpoint::Snapshot { .. } => return,
-    };
     if changed.is_empty() {
         return;
     }
     let job = DupJob {
         generation,
         root: root.to_path_buf(),
-        version,
+        revision: head.clone(),
         changed,
     };
     if !svc.change_analyzer.dup_queue.submit(change_id, job) {
@@ -834,7 +816,7 @@ fn spawn_duplicates(
         while let Some(job) = analyzer.dup_queue.next(change_id) {
             let scope = format!("change {change_id}");
             let findings = match recorder
-                .record(job.root, job.version, Some(job.changed.clone()), scope)
+                .record(job.root, job.revision, Some(job.changed.clone()), scope)
                 .await
             {
                 Ok(f) => f,
@@ -886,69 +868,46 @@ fn spawn_duplicates(
 async fn compute(
     svc: &crate::Services,
     root: &std::path::Path,
-    base: Option<DiffEndpoint>,
-    head: DiffEndpoint,
+    base: Option<Revision>,
+    head: Revision,
 ) -> Result<ChangeResults, String> {
-    let tree = |ep: &Option<DiffEndpoint>| {
-        let id = match ep {
-            Some(DiffEndpoint::Snapshot { snapshot_id }) => Some(*snapshot_id),
-            _ => None,
-        };
-        async move {
-            match id {
-                Some(id) => svc
-                    .snapshot_store
-                    .tree_at(id)
-                    .await
-                    .map(Some)
-                    .map_err(|e| e.to_string()),
-                None => Ok(None),
-            }
-        }
-    };
-    let mut base_tree = tree(&base).await?;
-    let mut head_tree = tree(&Some(head.clone())).await?;
-    if let (Some(b), Some(h)) = (base_tree.as_mut(), head_tree.as_mut()) {
-        svc.snapshot_store
-            .resolve_for_compare(b, h)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    let (filter, zones) = {
+    let zones = {
         let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
-        (
-            oxplow_fs_watch::WorkspaceFilter::for_project(
-                root,
-                &cfg.generated.exclude,
-                &cfg.generated.include,
-            ),
-            ZoneRules::from_config(&cfg.zones),
-        )
+        ZoneRules::from_config(&cfg.zones)
     };
-    let blobs = svc.blobs.clone();
+    let entries = svc
+        .trees
+        .diff(root, base.as_ref(), &head)
+        .await
+        .map_err(|e| e.to_string())?;
+    let analyzed: Vec<String> = entries
+        .iter()
+        .take(MAX_ANALYZED_FILES)
+        .map(|e| e.path.clone())
+        .collect();
+    let text = |b: Option<Vec<u8>>| b.map(|b| String::from_utf8_lossy(&b).into_owned());
+    let mut base_contents = Vec::with_capacity(analyzed.len());
+    let mut head_contents = Vec::with_capacity(analyzed.len());
+    for path in &analyzed {
+        base_contents.push(match &base {
+            Some(b) => text(
+                svc.trees
+                    .read_at(root, b, path)
+                    .await
+                    .map_err(|e| e.to_string())?,
+            ),
+            None => None,
+        });
+        head_contents.push(text(
+            svc.trees
+                .read_at(root, &head, path)
+                .await
+                .map_err(|e| e.to_string())?,
+        ));
+    }
     let root = root.to_path_buf();
     let analyzer = svc.change_analyzer.clone();
     tokio::task::spawn_blocking(move || -> Result<ChangeResults, String> {
-        let entries = compute_diff(
-            base.clone(),
-            head.clone(),
-            base_tree.clone(),
-            head_tree.clone(),
-            &root,
-            &blobs,
-            &filter,
-        )?;
-        let analyzed: Vec<String> = entries
-            .iter()
-            .take(MAX_ANALYZED_FILES)
-            .map(|e| e.path.clone())
-            .collect();
-        let base_contents = match &base {
-            Some(b) => endpoint_contents(b, base_tree, &root, &blobs, &filter, analyzed.clone())?,
-            None => vec![None; analyzed.len()],
-        };
-        let head_contents =
-            endpoint_contents(&head, head_tree, &root, &blobs, &filter, analyzed.clone())?;
         let specs: Vec<AnalyzeFileSpec> = analyzed
             .iter()
             .zip(base_contents.iter().zip(head_contents.iter()))
@@ -963,7 +922,7 @@ async fn compute(
             .into_iter()
             .map(|e| ChangedFile {
                 path: e.path,
-                status: e.status,
+                status: e.status.as_str().to_string(),
                 additions: e.additions as i64,
                 deletions: e.deletions as i64,
                 base: None,
@@ -1558,7 +1517,7 @@ mod tests {
         let c = ensure_change(
             &f.svc,
             ChangeTarget::Commit {
-                sha,
+                sha: sha.clone(),
                 stream_id: None,
             },
         )
@@ -1589,12 +1548,15 @@ mod tests {
                 assert_eq!(
                     rows(
                         &f.svc,
-                        "SELECT s.status, s.tree_version_kind, f.path FROM v_code_quality_scan s \
+                        "SELECT s.status, s.revision, f.path FROM v_code_quality_scan s \
                          JOIN v_code_quality_finding f ON f.scan_id = s.id WHERE ?1 > 0 ORDER BY f.path",
                         c.id,
                     )
                     .await,
-                    serde_json::json!([["done", "ref", "src/a.rs"], ["done", "ref", "src/b.rs"]])
+                    serde_json::json!([
+                        ["done", format!("git:{sha}"), "src/a.rs"],
+                        ["done", format!("git:{sha}"), "src/b.rs"]
+                    ])
                 );
                 return;
             }
@@ -1655,7 +1617,7 @@ mod tests {
         let job = |g: u64| DupJob {
             generation: g,
             root: std::path::PathBuf::from("/r"),
-            version: oxplow_tree_source::TreeVersion::Disk,
+            revision: Revision::Working,
             changed: vec!["a.rs".into()],
         };
         assert!(q.submit(1, job(1)), "first request starts a worker");

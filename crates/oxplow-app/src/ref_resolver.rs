@@ -446,7 +446,7 @@ mod tests {
         let services = Services::in_memory(dir.path()).unwrap();
         let scan = services
             .code_quality_store
-            .create_scan("complexity", "all")
+            .create_scan("complexity", "all", "working", "all")
             .await
             .unwrap();
         services

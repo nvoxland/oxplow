@@ -139,8 +139,8 @@ not the buffer.
 
 ## Uncommitted-change gutter markers
 
-`EditorPane` fetches the file's HEAD content via `readFileAtRef(stream,
-"HEAD", path)` on file open, caches it per-path, and diffs the buffer
+`EditorPane` fetches the file's HEAD content via `readAt(stream, path,
+gitRevision("HEAD"))` on file open, caches it per-path, and diffs the buffer
 against it on every content change. The line-level LCS diff runs in
 `diffLineKinds` (capped at 5000 lines per side — larger files skip
 diffing), which lives in `apps/desktop/src/editor-diff.ts` — pure and
@@ -179,8 +179,9 @@ at least one pointer, which bounds it at `m + n` iterations.
 The `DiffSpec` type (`apps/desktop/src/components/Diff/diff-request.ts`) supports
 two render modes:
 
-- **Git-ref backed.** `leftRef` plus `rightKind: "working" | { ref }`.
-  Each side fetched via `readFileAtRef` / `readWorkspaceFile`.
+- **Revision backed.** `leftVersion` / `rightVersion`, each a `Revision`
+  (`working`, `snap:<id>`, `git:<rev>`; `apps/desktop/src/revision.ts`).
+  Each side is read through `readAt`.
 - **Inline content.** Optional `leftContent`/`rightContent` strings that
   bypass git/workspace reads. Used by the editor's "Compare with
   Clipboard" action — left = selection, right = clipboard text.

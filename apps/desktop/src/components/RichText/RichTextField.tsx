@@ -32,7 +32,7 @@ import type { MenuItem } from "../../menu.js";
 import { parseMarkdownLink } from "../Wiki/MarkdownView.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pageRefs.js";
-import { DISK } from "../../file-version.js";
+import { WORKING } from "../../revision.js";
 
 /// Comment integration bundle. When provided, the field highlights
 /// anchored ranges and exposes "Add comment" via both the floating
@@ -532,7 +532,7 @@ export function RichTextField({
       return true;
     }
     if (parsed.kind === "file") {
-      const version = parsed.version ?? DISK;
+      const version = parsed.version ?? WORKING;
       ctxNav?.navigate(fileRef(parsed.path, version), { newTab });
       return true;
     }

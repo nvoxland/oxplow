@@ -27,7 +27,6 @@ oxplow-fs-watch = { workspace = true }
 oxplow-plugin = { workspace = true }
 oxplow-code-metrics = { workspace = true }
 oxplow-code-deps = { workspace = true }
-oxplow-tree-source = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
 serde = { workspace = true }

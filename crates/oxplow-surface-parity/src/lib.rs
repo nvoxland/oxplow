@@ -253,7 +253,7 @@ pub const MANIFEST: &[Capability] = &[
     both_named("git.diff", "get_branch_changes", "git_diff"),
     both_named("git.log", "get_git_log", "git_log"),
     both("git_blame"),
-    both("read_file_at_ref"),
+    both("read_at"),
     both("list_branches"),
     // ---- agent_todo: git reads/mutations still on Bash (deferred) ----
     todo("get_commit_detail"),
@@ -288,7 +288,7 @@ pub const MANIFEST: &[Capability] = &[
     both("read_event_content"),
     both("restore_file_snapshot"),
     // Endpoint diff for the diff view page (effort / local-history) — UI-only.
-    ui("diff_endpoints"),
+    ui("diff"),
     // Per-file content at an endpoint, feeding the diff view's function
     // analysis (base + head). UI-only.
     // ---- agent_todo: composed dashboard DTOs / generated-filtered (deferred) ----
@@ -417,7 +417,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_workspace_entries"),
     ui("list_workspace_files"),
     ui("read_workspace_file"),
-    ui("read_file"),
+    ui("files_at"),
     ui("write_workspace_file"),
     ui("create_workspace_file"),
     ui("create_workspace_directory"),

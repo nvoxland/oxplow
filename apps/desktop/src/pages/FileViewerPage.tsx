@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
-import { readFile, type Stream } from "../api.js";
+import { readAt, type Stream } from "../api.js";
 import { languageForPath } from "../editor-language.js";
-import { shortLabelForVersion, type FileVersion } from "../file-version.js";
+import { shortRevisionLabel, type Revision } from "../revision.js";
 
 export interface FileViewerPageProps {
   stream: Stream;
@@ -11,13 +11,13 @@ export interface FileViewerPageProps {
   /** Non-disk version. Disk-version files go through `FilePage` /
    *  `EditorPane` instead because that pipeline owns dirty state +
    *  saves. */
-  version: FileVersion;
+  version: Revision;
   visible: boolean;
 }
 
 /**
  * Read-only viewer for a file at a non-disk version (a git ref or a
- * snapshot). Loads via `readFile(streamId, path, version)` and
+ * snapshot). Loads via `readAt(streamId, path, version)` and
  * renders a read-only Monaco editor with a banner that names the
  * version. Keeps the EditorPane / save pipeline disk-only.
  *
@@ -28,7 +28,7 @@ export interface FileViewerPageProps {
  */
 export function FileViewerPage({ stream, path, version, visible }: FileViewerPageProps) {
   const basename = path.split("/").pop() ?? path;
-  const versionLabel = shortLabelForVersion(version);
+  const versionLabel = shortRevisionLabel(version);
   usePageTitle(`${basename} (${versionLabel})`);
 
   void visible;
@@ -66,7 +66,7 @@ export function FileViewerPage({ stream, path, version, visible }: FileViewerPag
 interface BodyProps {
   stream: Stream;
   path: string;
-  version: FileVersion;
+  version: Revision;
 }
 
 function ViewerBody({ stream, path, version }: BodyProps) {
@@ -110,7 +110,7 @@ function ViewerBody({ stream, path, version }: BodyProps) {
     let cancelled = false;
     (async () => {
       try {
-        const content = await readFile(stream.id, path, version);
+        const content = await readAt(stream.id, path, version);
         if (cancelled) return;
         const monaco = monacoRef.current;
         const editor = editorRef.current;
@@ -122,7 +122,7 @@ function ViewerBody({ stream, path, version }: BodyProps) {
         modelRef.current = model;
         previous?.dispose();
         if (content == null) {
-          setError(`File does not exist at ${shortLabelForVersion(version)}`);
+          setError(`File does not exist at ${shortRevisionLabel(version)}`);
         } else {
           setError(null);
         }
@@ -137,9 +137,7 @@ function ViewerBody({ stream, path, version }: BodyProps) {
     editorReady,
     stream.id,
     path,
-    version.kind,
-    version.kind === "ref" ? version.ref : null,
-    version.kind === "snapshot" ? version.id : null,
+    version,
   ]);
 
   return (

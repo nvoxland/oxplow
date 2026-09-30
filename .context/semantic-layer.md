@@ -654,8 +654,9 @@ analyzes it and stores the rows behind `v_change*`; lenses (the
 oxplow-analytics change cards) only read them.
 
 - **Getting one.** `ensure_change(target)` (IPC and MCP; not hinted read-only, since it stores the analysis, tsk371) returns
-  the `v_change` row, computing first if needed. It diffs the endpoints
-  (`endpoint_diff.rs`, shared with the `diff_endpoints` IPC), reads the
+  the `v_change` row, computing first if needed. It diffs its two
+  revisions (`v_change.base_revision` → `head_revision`) through `Trees`
+  (shared with the `diff` IPC, `.context/vcs.md`), reads the
   first 200 changed files' contents, runs `code_analysis::analyze_files`
   (tree-sitter metrics per side, churn, import deltas), and builds rows:
   - files: status, +/−, zone (project zone rules), `is_test`, and the
@@ -680,8 +681,8 @@ oxplow-analytics change cards) only read them.
   `v_code_quality_finding`). It writes **no** `oxplow.duplicate_lines`
   facts: only a full-tree scan may restate that metric (tsk365,
   [code-quality.md](./code-quality.md)).
-  Closed efforts (snapshot heads) get none: snapshot trees aren't
-  scannable yet.
+  Closed efforts and turns scan their end snapshot: `Trees` reads any
+  revision (P5.B2).
 - **Caching.** A change is keyed by (stream, kind, target) — commit shas are
   resolved to full ids, so `HEAD` and a short sha share one row. Commits
   and closed efforts are computed once. Working-tree and open-effort

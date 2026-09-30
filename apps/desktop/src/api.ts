@@ -29,7 +29,6 @@ import type {
   CommentMessage,
   CommentStatus,
   CommentThread,
-  DiffEndpoint,
   DiffEntry,
   Extension,
   ExtensionReview,
@@ -448,6 +447,7 @@ export interface WorkspaceRenameResult {
 }
 
 import type { WorkspaceStatusSummary } from "./tauri-bridge/index.js";
+import type { Revision } from "./revision.js";
 import type {
   FileStatus,
   WorkspaceEntry,
@@ -1806,15 +1806,6 @@ export async function getBranchChanges(
   };
 }
 
-export async function readFileAtRef(
-  _streamId: string,
-  ref: string,
-  path: string,
-): Promise<{ content: string | null }> {
-  const content = unwrap(await commands.readFileAtRef(ref, path));
-  return { content };
-}
-
 export async function listTaskEfforts(itemId: string): Promise<EffortDetail[]> {
   // The Tauri command returns flat `TaskEffort` rows. Consumers
   // (TaskPage activity timeline, useBacklinks, TaskDetail) expect
@@ -1843,9 +1834,7 @@ export async function listTaskEfforts(itemId: string): Promise<EffortDetail[]> {
     const counts = { created: 0, updated: 0, deleted: 0 };
     for (const f of files) counts[f.change]++;
     // The binding types snapshot ids as numbers; normalize to the
-    // app's string contract so they survive the trip into
-    // `TreeVersion` (Rust expects a string `id`) — a raw number
-    // surfaces as an opaque "ipc error" when opening an effort diff.
+    // app's string contract.
     const effort: TaskEffort = {
       ...rawEffort,
       start_snapshot_id: normalizeSnapshotId(rawEffort.start_snapshot_id),
@@ -2121,23 +2110,21 @@ export async function listFilesForSnapshot(snapshotId: number): Promise<Snapshot
   }));
 }
 
-/** Diff two endpoints, each a snapshot id or a git commit. `start =
- *  null` diffs `end` against the empty tree (everything added). Powers
- *  the effort / local-history diff view. Mixed snapshot/commit and
- *  working-tree endpoints are not yet supported by the backend. */
-export async function diffEndpoints(
-  start: DiffEndpoint | null,
-  end: DiffEndpoint,
+/** What changed from `from` (nothing, when null) to `to` in the
+ *  stream's workspace — any two revisions: working tree, snapshots,
+ *  commits. Powers the diff views and the changed-files lists. */
+export async function diffRevisions(
+  streamId: string,
+  from: Revision | null,
+  to: Revision,
 ): Promise<DiffEntry[]> {
-  return unwrap(await commands.diffEndpoints(start, end));
+  return unwrap(await commands.diff(streamId || null, from, to));
 }
 
-/** Endpoint constructors so call sites read as intent. */
-export const snapshotEndpoint = (snapshotId: number): DiffEndpoint => ({
-  kind: "snapshot",
-  snapshot_id: snapshotId,
-});
-export const commitEndpoint = (sha: string): DiffEndpoint => ({ kind: "commit", sha });
+/** Every file in the stream's workspace at `revision`, sorted. */
+export async function filesAt(streamId: string, revision: Revision): Promise<string[]> {
+  return unwrap(await commands.filesAt(streamId || null, revision));
+}
 
 export async function getEffortFiles(effortId: string): Promise<SnapshotSummary | null> {
   return unwrap(
@@ -2364,20 +2351,15 @@ export async function readWorkspaceFile(streamId: string, path: string): Promise
   return unwrap(await commands.readWorkspaceFile(streamId || null, path));
 }
 
-/**
- * Versioned file read. Routes to the working tree, a git ref, or
- * (eventually) a local-history snapshot based on `version`. The
- * single-chokepoint replacement for the historical pair
- * `readWorkspaceFile` + `readFileAtRef` — new code must use this so
- * "what version are we reading?" is a typed answer at every call
- * site. Returns `null` when the path doesn't exist at that version.
- */
-export async function readFile(
+/** `path` at `revision` (`working`, `snap:<id>`, `git:<rev>`); null
+ *  when it isn't there. Every read names its revision — there is no
+ *  implicit working-tree default. */
+export async function readAt(
   streamId: string,
   path: string,
-  version: import("./file-version.js").FileVersion,
+  revision: Revision,
 ): Promise<string | null> {
-  return unwrap(await commands.readFile(streamId || null, path, version));
+  return unwrap(await commands.readAt(streamId || null, path, revision));
 }
 
 export async function getWorkspaceStatusSummary(

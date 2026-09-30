@@ -12,16 +12,16 @@
 //!   its findings still land in the code-quality store;
 //! - a status-bar background task and `CodeQualityScanned` events.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use oxplow_db::CodeQualityScanStatus;
+use oxplow_domain::vcs::Revision;
 use oxplow_domain::DomainError;
-use oxplow_tree_source::{
-    AllFiles, DiskTreeSource, ExplicitPaths, FileFilter, GitTreeSource, TreeSource, TreeVersion,
-};
 
-use crate::code_quality_runner::{run_duplication_scan_scoped, CodeQualityFinding};
+use crate::code_quality_runner::{scan_duplicates, CodeQualityFinding, RunOptions};
+use crate::trees::Trees;
 use crate::{
     BackgroundTaskKind, BackgroundTaskStore, CodeQualityScanPhase, EventBus, OxplowEvent, Services,
     StartInput,
@@ -34,7 +34,7 @@ pub struct DuplicationRecorder {
     code_quality_store: Arc<oxplow_db::SqliteCodeQualityStore>,
     fact_store: Arc<oxplow_db::SqliteFactStore>,
     stream_store: Arc<oxplow_db::SqliteStreamStore>,
-    config: Arc<std::sync::RwLock<oxplow_config::OxplowConfig>>,
+    trees: Arc<Trees>,
     background_tasks: BackgroundTaskStore,
     events: EventBus,
 }
@@ -45,54 +45,36 @@ impl DuplicationRecorder {
             code_quality_store: svc.code_quality_store.clone(),
             fact_store: svc.fact_store.clone(),
             stream_store: svc.stream_store.clone(),
-            config: svc.config.clone(),
+            trees: svc.trees.clone(),
             background_tasks: svc.background_tasks.clone(),
             events: svc.events.clone(),
         }
     }
 
-    /// Scan `root` at `tree_version` for duplicated blocks anchored in
-    /// `paths` (every file when `None`), with the whole tree as the corpus
-    /// so a copy of an unchanged file is still found. Records the scan as
-    /// the module docs describe and returns its findings.
+    /// Scan workspace `ws` at `revision` for duplicated blocks anchored
+    /// in `paths` (every file when `None`), with the whole tree as the
+    /// corpus so a copy of an unchanged file is still found. Records the
+    /// scan as the module docs describe and returns its findings.
     pub async fn record(
         &self,
-        root: PathBuf,
-        tree_version: TreeVersion,
+        ws: PathBuf,
+        revision: Revision,
         paths: Option<Vec<String>>,
         scope: String,
     ) -> Result<Vec<CodeQualityFinding>, DomainError> {
         let svc = self;
-        let source: Arc<dyn TreeSource> = match &tree_version {
-            TreeVersion::Disk => Arc::new(DiskTreeSource::new(root.clone())),
-            TreeVersion::Ref { r#ref } => Arc::new(GitTreeSource::new(root.clone(), r#ref.clone())),
-            TreeVersion::Snapshot { .. } => {
-                return Err(DomainError::Invalid(
-                    "snapshot tree versions can't be scanned for duplicates yet".into(),
-                ))
-            }
-        };
-        let kind_tag = tree_version.kind_tag().to_string();
-        let value = tree_version.value().map(str::to_string);
+        let revision_str = revision.to_string();
         // Only a full-tree scan speaks for the whole tree (tsk365).
         let full_tree = paths.is_none();
-        let (filter, fingerprint): (Arc<dyn FileFilter>, String) = match paths {
-            None => (Arc::new(AllFiles), "all".into()),
-            Some(paths) => {
-                let fp = paths_fingerprint(&paths);
-                (Arc::new(ExplicitPaths::new(paths)), fp)
-            }
+        let fingerprint = match &paths {
+            None => "all".to_string(),
+            Some(paths) => paths_fingerprint(paths),
         };
+        let scope_paths = paths.map(|p| p.into_iter().collect::<BTreeSet<String>>());
 
         let scan_id = svc
             .code_quality_store
-            .create_scan_with(
-                "duplication",
-                &scope,
-                &kind_tag,
-                value.as_deref(),
-                &fingerprint,
-            )
+            .create_scan("duplication", &scope, &revision_str, &fingerprint)
             .await?;
         let scanned = |phase| OxplowEvent::CodeQualityScanned {
             stream_id: None,
@@ -102,10 +84,10 @@ impl DuplicationRecorder {
             phase,
         };
         svc.events.emit(scanned(CodeQualityScanPhase::Started));
-        let label = match &tree_version {
-            TreeVersion::Disk => "Scanning duplicates (working tree)".to_string(),
-            TreeVersion::Ref { r#ref } => format!("Scanning duplicates @{}", short_ref(r#ref)),
-            TreeVersion::Snapshot { id } => format!("Scanning duplicates @snapshot {id}"),
+        let label = match &revision {
+            Revision::Working => "Scanning duplicates (working tree)".to_string(),
+            Revision::Vcs { rev, .. } => format!("Scanning duplicates @{}", short_ref(rev)),
+            Revision::Snapshot(id) => format!("Scanning duplicates @snapshot {id}"),
         };
         let task = svc.background_tasks.start(StartInput {
             kind: BackgroundTaskKind::CodeQuality,
@@ -113,27 +95,23 @@ impl DuplicationRecorder {
             detail: Some(format!("scope: {scope}")),
             progress: None,
         });
-        let workspace_filter = {
-            let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
-            oxplow_fs_watch::WorkspaceFilter::for_project(
-                &root,
-                &cfg.generated.exclude,
-                &cfg.generated.include,
-            )
+        let scanned_corpus = match svc.trees.corpus(&ws, &revision, |_| true).await {
+            Ok(corpus) => scan_duplicates(corpus, scope_paths, RunOptions::default())
+                .await
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
         };
-
-        let findings =
-            match run_duplication_scan_scoped(source, filter, workspace_filter, None, None).await {
-                Ok(findings) => findings,
-                Err(e) => {
-                    svc.code_quality_store
-                        .finish_scan(scan_id, CodeQualityScanStatus::Failed, Some(e.to_string()))
-                        .await?;
-                    svc.events.emit(scanned(CodeQualityScanPhase::Failed));
-                    svc.background_tasks.fail(&task.id, e.to_string(), None);
-                    return Err(DomainError::Invalid(e.to_string()));
-                }
-            };
+        let findings = match scanned_corpus {
+            Ok(findings) => findings,
+            Err(e) => {
+                svc.code_quality_store
+                    .finish_scan(scan_id, CodeQualityScanStatus::Failed, Some(e.clone()))
+                    .await?;
+                svc.events.emit(scanned(CodeQualityScanPhase::Failed));
+                svc.background_tasks.fail(&task.id, e.clone(), None);
+                return Err(DomainError::Invalid(e));
+            }
+        };
 
         // Storing can fail too; the scan and its task must not be left
         // "running" when it does (tsk364).
@@ -170,7 +148,7 @@ impl DuplicationRecorder {
             return Err(e);
         }
         if full_tree {
-            if let Err(error) = write_facts(svc, &findings, &kind_tag, value.as_deref()).await {
+            if let Err(error) = write_facts(svc, &findings, &revision).await {
                 tracing::warn!(%error, scan_id, "duplication: writing facts failed");
             }
         }
@@ -206,12 +184,11 @@ fn short_ref(r#ref: &str) -> String {
 
 /// One `oxplow.duplicate_lines` fact per duplicate block of a full-tree
 /// scan, under a single capture stamped with the primary stream (the scan has no stream of its
-/// own) and the scanned tree version. Written even when empty.
+/// own) and the scanned revision. Written even when empty.
 async fn write_facts(
     svc: &DuplicationRecorder,
     findings: &[CodeQualityFinding],
-    kind_tag: &str,
-    value: Option<&str>,
+    revision: &Revision,
 ) -> Result<(), DomainError> {
     let Some(measure) = svc.fact_store.get_measure("oxplow.duplicate_lines").await? else {
         return Ok(());
@@ -236,13 +213,12 @@ async fn write_facts(
             ..oxplow_db::NewFact::new(measure.id, f.metric_value)
         })
         .collect();
-    let basis = match value {
-        Some(v) => format!("{kind_tag}:{v}"),
-        None => kind_tag.to_string(),
-    };
     let capture = oxplow_db::NewMetricCapture {
-        basis_ref: Some(basis),
-        closest_git_version: value.map(str::to_string),
+        basis_ref: Some(revision.to_string()),
+        closest_git_version: match revision {
+            Revision::Vcs { rev, .. } => Some(rev.clone()),
+            _ => None,
+        },
         trigger: Some("change-analysis".into()),
         ..oxplow_db::NewMetricCapture::done(primary.id.value(), "duplication", "duplication")
     };
@@ -292,7 +268,7 @@ mod tests {
         DuplicationRecorder::new(&f.svc)
             .record(
                 f.svc.layout.project_dir.clone(),
-                TreeVersion::Disk,
+                Revision::Working,
                 None,
                 "project".into(),
             )
@@ -311,7 +287,7 @@ mod tests {
 
         let scans = crate::sql_gateway::SqlGateway::new(f.svc.db.clone())
             .query_sql(
-                "SELECT status, tree_version_kind FROM v_code_quality_scan",
+                "SELECT status, revision FROM v_code_quality_scan",
                 vec![],
                 None,
             )
@@ -319,7 +295,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             serde_json::to_value(scans.rows).unwrap(),
-            serde_json::json!([["done", "disk"]])
+            serde_json::json!([["done", "working"]])
         );
 
         let measure = f
@@ -386,7 +362,7 @@ mod tests {
         let findings = DuplicationRecorder::new(&f.svc)
             .record(
                 root.clone(),
-                TreeVersion::Disk,
+                Revision::Working,
                 Some(vec!["c.rs".into()]),
                 "change 1".into(),
             )
@@ -398,6 +374,53 @@ mod tests {
             serde_json::to_value(before).unwrap(),
             "the scoped scan didn't restate the tree"
         );
+    }
+
+    /// P5.B2 (tsk521): a scan reads the revision it names — a commit or
+    /// a snapshot — never the disk, which has since lost the copies.
+    #[tokio::test]
+    async fn a_scan_reads_the_revision_it_names() {
+        use oxplow_domain::stores::StreamStore as _;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.rs"), BODY).unwrap();
+        std::fs::write(root.join("b.rs"), BODY).unwrap();
+        let sha = crate::test_fixtures::commit_all(&root, "copies");
+        let stream = svc.stream_store.list().await.unwrap()[0].id;
+        let snap = svc.snapshot_store.create_snapshot(stream).await.unwrap();
+        for path in ["a.rs", "b.rs"] {
+            svc.snapshot_store
+                .capture(oxplow_db::FileSnapshot {
+                    id: 0,
+                    stream_id: stream,
+                    path: path.into(),
+                    blob_hash: Some(svc.blobs.write(BODY.as_bytes()).unwrap()),
+                    size_bytes: BODY.len() as i64,
+                    captured_at: oxplow_domain::Timestamp::now(),
+                    storage: oxplow_db::SnapshotStorage::Oxplow,
+                    snapshot_id: Some(snap),
+                    mtime_ms: None,
+                    content_hash: None,
+                })
+                .await
+                .unwrap();
+        }
+        std::fs::write(root.join("a.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(root.join("b.rs"), "fn b() {}\n").unwrap();
+        let recorder = DuplicationRecorder::new(svc);
+        for rev in [Revision::git(sha), Revision::Snapshot(snap)] {
+            let findings = recorder
+                .record(root.clone(), rev.clone(), None, "project".into())
+                .await
+                .unwrap();
+            assert!(!findings.is_empty(), "no duplicates found at {rev}");
+        }
+        let on_disk = recorder
+            .record(root.clone(), Revision::Working, None, "project".into())
+            .await
+            .unwrap();
+        assert!(on_disk.is_empty(), "{on_disk:?}");
     }
 
     #[test]

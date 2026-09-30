@@ -72,6 +72,39 @@ that runs each call under `spawn_blocking`. `Services.vcs` holds it as
   `vcs.head`), once per stream at boot and on each `GitRefsChanged`. A
   detached head leaves the row alone.
 
+## Revisions and `Trees`
+
+**`Revision`** (`oxplow_domain::vcs`) is the one "which version" type:
+`working`, `snap:<id>` or `<rev_kind>:<rev>` (`git:HEAD`). On the wire,
+in tab ids and in `v_change.base_revision` / `head_revision` and
+`v_code_quality_scan.revision` it is that string; in the ref grammar it
+is the `@rev` slot, where the working tree is the omitted slot
+(`rev_slot` / `from_rev_slot`). The desktop mirror is
+`apps/desktop/src/revision.ts`. It replaced `TreeVersion` (and the
+`oxplow-tree-source` crate), `DiffEndpoint` and the desktop's
+`FileVersion`. A revision of another VCS than the workspace's is
+refused, naming the workspace's.
+
+**`Trees`** (`crates/oxplow-app/src/trees.rs`, `Services.trees`) reads
+any revision of a workspace: `files_at`, `read_at`, `corpus` (text files,
+for the code-quality scans) and `diff(from?, to)` with line counts.
+Snapshots read their blobs from the blob store and VCS-backed rows
+through `Vcs::read_object`; the working tree reuses the head's object id
+for a file `status` calls clean and hashes the rest
+(`Vcs::object_id_of`). Every side honours the workspace filter
+(`generated:` plus `.gitignore`) — the working-tree corpus no longer has
+its own skip list. Two VCS revisions diff through `Vcs::diff`; two
+snapshots settle un-hashed rows first (`resolve_for_compare`); a mixed
+pair normalizes the snapshot side into VCS ids.
+
+The neutral RPCs are `read_at { streamId, path, revision }`, `files_at`
+and `diff { streamId, from, to }` (UI), and MCP `read_at`; they replaced
+`read_file`, `read_file_at_ref` and `diff_endpoints`. Change analysis
+and the duplicate scan read through `Trees`, so a closed effort's
+snapshot head is scanned too. (The wiki's `@<rev>` link syntax is still
+its own `WikiVersion`; it joins `Revision` when knowledge becomes a
+capability, P5.C3.)
+
 ## Conformance
 
 `oxplow_app::vcs_conformance` (test-only) holds the contract as
@@ -80,17 +113,18 @@ provider runs the same list:
 
 1. a commit reads back what it captured, whatever the working tree
    holds now;
+2. two revisions diff to what changed, deletions included;
 3. status reports added/modified/deleted/untracked and is clean after a
    commit;
 5. the head resolves (a short id too; an unknown rev errors) and the
    log walks newest first;
 6. blame attributes each line to its revision, at any revision.
 
-Still to come: 2 (diffs, with `Trees`, B2), 4 (branches follow checkout
+Still to come: 4 (branches follow checkout
 and diverge), 7 (a snapshot at a clean head maps to its revision, B3)
 and 8 (isolated workspaces share history).
 
-## Still git-shaped (P5 B2–B7)
+## Still git-shaped (P5 B3–B7)
 
 `GitService` keeps its stream-taking methods until each RPC moves:
 reads to the neutral `vcs_*` RPCs (B4), history and branches to SQL

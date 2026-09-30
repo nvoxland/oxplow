@@ -12,7 +12,7 @@ import {
   taskRef,
   wikiPageRef,
 } from "../../tabs/pageRefs.js";
-import { DISK } from "../../file-version.js";
+import { WORKING } from "../../revision.js";
 
 // parseMarkdownLink is shared by WikiPageTab and TaskDetail. WikiPageTab needs
 // to distinguish wiki-internal links (`./foo`, `bar.md`) from external
@@ -61,7 +61,7 @@ test("parseMarkdownLink: file: scheme with @disk version", () => {
   expect(parseMarkdownLink("file:src/foo.ts@disk")).toEqual({
     kind: "file",
     path: "src/foo.ts",
-    version: { kind: "disk" },
+    version: "working",
   });
 });
 
@@ -69,7 +69,7 @@ test("parseMarkdownLink: file: scheme with @<sha> version", () => {
   expect(parseMarkdownLink("file:src/foo.ts@abc1234")).toEqual({
     kind: "file",
     path: "src/foo.ts",
-    version: { kind: "ref", ref: "abc1234" },
+    version: "git:abc1234",
   });
 });
 
@@ -78,7 +78,7 @@ test("parseMarkdownLink: file: scheme with @HEAD version + line", () => {
     kind: "file",
     path: "src/foo.ts",
     line: 42,
-    version: { kind: "ref", ref: "HEAD" },
+    version: "git:HEAD",
   });
 });
 
@@ -86,7 +86,7 @@ test("parseMarkdownLink: file: scheme with @local alias", () => {
   expect(parseMarkdownLink("file:src/foo.ts@local")).toEqual({
     kind: "file",
     path: "src/foo.ts",
-    version: { kind: "disk" },
+    version: "working",
   });
 });
 
@@ -106,7 +106,7 @@ test("preprocessWikilinks: file path with line suffix", () => {
 
 test("preprocessWikilinks: file path with @version is preserved verbatim", () => {
   // The version segment passes through to the file: URL; the click
-  // handler decodes it back into a FileVersion via parseMarkdownLink.
+  // handler decodes it back into a Revision via parseMarkdownLink.
   expect(preprocessWikilinks("see [[src/foo.ts@HEAD]]"))
     .toBe("see [src/foo.ts@HEAD](file:src/foo.ts@HEAD)");
   expect(preprocessWikilinks("see [[src/foo.ts@disk:42]]"))
@@ -406,11 +406,11 @@ test("linkTarget: a commit link targets its commit", () => {
 // A bare file wikilink means "the working tree"; one that pinned a
 // version must keep it rather than being silently substituted.
 test("linkTarget: a bare file link coerces to the working tree", () => {
-  expect(linkTarget({ kind: "file", path: "src/main.rs" })).toEqual(fileRef("src/main.rs", DISK));
+  expect(linkTarget({ kind: "file", path: "src/main.rs" })).toEqual(fileRef("src/main.rs", WORKING));
 });
 
 test("linkTarget: a pinned file link keeps the version it was authored with", () => {
-  const version = { kind: "commit", sha: "deadbeef" } as const;
+  const version = "git:deadbeef" as const;
   expect(linkTarget({ kind: "file", path: "src/main.rs", version })).toEqual(
     fileRef("src/main.rs", version),
   );

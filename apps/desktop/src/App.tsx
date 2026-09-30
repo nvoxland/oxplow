@@ -165,7 +165,7 @@ import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import { coalescedRefresh } from "./coalesced-refresh.js";
 import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
-import { DISK } from "./file-version.js";
+import { WORKING, shortRevisionLabel } from "./revision.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
 import { logUi, setUiLogContext } from "./logger.js";
@@ -1672,10 +1672,10 @@ export function App() {
       // The compare-with-clipboard view never reads either side from
       // disk/git — the inline `leftContent` / `rightContent` literals
       // bypass the version dispatcher entirely. We still need to
-      // satisfy the `FileVersion` shape; DISK is a harmless sentinel
+      // satisfy the `Revision` shape; WORKING is a harmless sentinel
       // here.
-      leftVersion: DISK,
-      rightVersion: DISK,
+      leftVersion: WORKING,
+      rightVersion: WORKING,
       baseLabel: "clipboard",
       leftContent: selection,
       rightContent: clipboard,
@@ -1888,13 +1888,13 @@ export function App() {
       case "file": {
         const payload = ref.payload as {
           path?: string;
-          version?: import("./file-version.js").FileVersion;
+          version?: import("./revision.js").Revision;
           /** Open at this line (lens `file` links with `line:`). */
           line?: number;
         } | null;
         if (!payload?.path) return;
-        const version = payload.version ?? DISK;
-        if (version.kind === "disk") {
+        const version = payload.version ?? WORKING;
+        if (version === WORKING) {
           if (payload.line && payload.line > 0) {
             void handleNavigateToLocation({ path: payload.path, line: payload.line, column: 1 });
           } else {
@@ -1993,16 +1993,16 @@ export function App() {
     if (ref.kind === "file") {
       const payload = ref.payload as {
         path?: string;
-        version?: import("./file-version.js").FileVersion;
+        version?: import("./revision.js").Revision;
         line?: number;
       } | null;
       // Only the disk version needs to populate the fileSessions
       // dirty-state cache + LSP wiring. Non-disk versions render
       // through FileViewerPage which loads content directly via
-      // readFile(version) — calling handleOpenFile here would
+      // readAt(version) — calling handleOpenFile here would
       // pollute the cache with disk content the user didn't ask
       // for.
-      const isDisk = !payload?.version || payload.version.kind === "disk";
+      const isDisk = !payload?.version || payload.version === WORKING;
       if (payload?.path && isDisk) void handleOpenFile(payload.path);
       // A line on the ref (lens `file` links with `line:`) reveals it.
       if (payload?.path && isDisk && payload.line && payload.line > 0) {
@@ -2120,8 +2120,8 @@ export function App() {
     if (idx < 0) return;
     if (target.id === currentTabId) return;
     if (target.kind === "file") {
-      const payload = target.payload as { path?: string; version?: import("./file-version.js").FileVersion } | null;
-      const isDisk = !payload?.version || payload.version.kind === "disk";
+      const payload = target.payload as { path?: string; version?: import("./revision.js").Revision } | null;
+      const isDisk = !payload?.version || payload.version === WORKING;
       if (payload?.path && isDisk) void handleOpenFile(payload.path);
     }
     setThreadPageTabs((prev) => {
@@ -2580,23 +2580,18 @@ export function App() {
         };
       },
       file: (ref, nav) => {
-        const payload = ref.payload as { path?: string; version?: import("./file-version.js").FileVersion } | null;
+        const payload = ref.payload as { path?: string; version?: import("./revision.js").Revision } | null;
         const path = payload?.path;
         if (!path) return null;
-        const version = payload?.version ?? DISK;
+        const version = payload?.version ?? WORKING;
         const basename = path.split("/").pop() ?? path;
         // Non-disk versions render through FileViewerPage — read-only,
         // no dirty state, no save plumbing. The EditorPane / save
         // pipeline stays disk-only on purpose so the dirty cache,
         // LSP, find-in-file, etc. don't have to grow "is this read
         // only?" branches.
-        if (version.kind !== "disk") {
-          const versionLabel =
-            version.kind === "ref"
-              ? version.ref.length > 12
-                ? version.ref.slice(0, 7)
-                : version.ref
-              : `snap:${version.id.slice(0, 7)}`;
+        if (version !== WORKING) {
+          const versionLabel = shortRevisionLabel(version);
           return {
             id: ref.id,
             label: `${basename} (${versionLabel})`,

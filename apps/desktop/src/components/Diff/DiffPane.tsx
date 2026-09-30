@@ -1,15 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
-import { readFile, type Stream } from "../../api.js";
+import { readAt, type Stream } from "../../api.js";
 import { languageForPath } from "../../editor-language.js";
-import type { FileVersion } from "../../file-version.js";
+import type { Revision } from "../../revision.js";
 
 export interface DiffSpec {
   path: string;
   /** Version to load on the LEFT side of the diff. Required — there
    *  is no implicit "current working tree" default. */
-  leftVersion: FileVersion;
+  leftVersion: Revision;
   /** Version to load on the RIGHT side. */
-  rightVersion: FileVersion;
+  rightVersion: Revision;
   baseLabel: string;
   /** When set, skip reading the left side and diff this literal text instead. */
   leftContent?: string;
@@ -94,10 +94,10 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
       try {
         const leftPromise = spec.leftContent !== undefined
           ? Promise.resolve(spec.leftContent as string | null)
-          : readFile(stream.id, spec.path, spec.leftVersion);
+          : readAt(stream.id, spec.path, spec.leftVersion);
         const rightPromise = spec.rightContent !== undefined
           ? Promise.resolve(spec.rightContent as string | null)
-          : readFile(stream.id, spec.path, spec.rightVersion);
+          : readAt(stream.id, spec.path, spec.rightVersion);
         const [leftContent, rightContent] = await Promise.all([leftPromise, rightPromise]);
         if (cancelled) return;
         const monaco = monacoRef.current;
@@ -135,12 +135,8 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
     stream,
     editorReady,
     spec.path,
-    spec.leftVersion.kind,
-    spec.leftVersion.kind === "ref" ? spec.leftVersion.ref : null,
-    spec.leftVersion.kind === "snapshot" ? spec.leftVersion.id : null,
-    spec.rightVersion.kind,
-    spec.rightVersion.kind === "ref" ? spec.rightVersion.ref : null,
-    spec.rightVersion.kind === "snapshot" ? spec.rightVersion.id : null,
+    spec.leftVersion,
+    spec.rightVersion,
     spec.leftContent,
     spec.rightContent,
     spec.revealLine,

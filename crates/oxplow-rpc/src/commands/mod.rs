@@ -48,6 +48,7 @@ pub mod streams;
 pub mod tasks;
 pub mod terminal;
 pub mod threads;
+pub mod trees;
 pub mod usage;
 pub mod wiki;
 pub mod wiki_freshness;

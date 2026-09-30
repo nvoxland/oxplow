@@ -99,15 +99,15 @@ describe("previousSnapshotId", () => {
 describe("resolveSnapshotEndpoints", () => {
   test("single snapshot → prev as start, N as end", () => {
     expect(resolveSnapshotEndpoints(9, 5)).toEqual({
-      start: { kind: "snapshot", snapshot_id: 5 },
-      end: { kind: "snapshot", snapshot_id: 9 },
+      start: "snap:5",
+      end: "snap:9",
       inProgress: false,
     });
   });
   test("first snapshot → null start (everything added)", () => {
     expect(resolveSnapshotEndpoints(3, null)).toEqual({
       start: null,
-      end: { kind: "snapshot", snapshot_id: 3 },
+      end: "snap:3",
       inProgress: false,
     });
   });
@@ -116,16 +116,16 @@ describe("resolveSnapshotEndpoints", () => {
 describe("resolveEffortEndpoints", () => {
   test("completed effort → snapshot↔snapshot, not in progress", () => {
     expect(resolveEffortEndpoints({ startSnapshotId: 3, endSnapshotId: 9 })).toEqual({
-      start: { kind: "snapshot", snapshot_id: 3 },
-      end: { kind: "snapshot", snapshot_id: 9 },
+      start: "snap:3",
+      end: "snap:9",
       inProgress: false,
     });
   });
 
   test("open effort (no end snapshot) → diffs start against the working tree", () => {
     expect(resolveEffortEndpoints({ startSnapshotId: 3, endSnapshotId: null })).toEqual({
-      start: { kind: "snapshot", snapshot_id: 3 },
-      end: { kind: "working" },
+      start: "snap:3",
+      end: "working",
       inProgress: true,
     });
   });
@@ -133,7 +133,7 @@ describe("resolveEffortEndpoints", () => {
   test("missing start snapshot → null start (everything added)", () => {
     expect(resolveEffortEndpoints({ startSnapshotId: null, endSnapshotId: 9 })).toEqual({
       start: null,
-      end: { kind: "snapshot", snapshot_id: 9 },
+      end: "snap:9",
       inProgress: false,
     });
   });
@@ -142,14 +142,14 @@ describe("resolveEffortEndpoints", () => {
 describe("resolveTurnEndpoints", () => {
   test("a finished turn diffs its start snapshot to its end snapshot", () => {
     expect(resolveTurnEndpoints({ startSnapshotId: 3, snapshotId: 5 })).toEqual({
-      start: { kind: "snapshot", snapshot_id: 3 },
-      end: { kind: "snapshot", snapshot_id: 5 },
+      start: "snap:3",
+      end: "snap:5",
       inProgress: false,
     });
   });
   test("a running turn diffs its start against the working tree", () => {
     expect(resolveTurnEndpoints({ startSnapshotId: 3, snapshotId: null })).toMatchObject({
-      end: { kind: "working" },
+      end: "working",
       inProgress: true,
     });
   });

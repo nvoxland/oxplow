@@ -119,13 +119,15 @@ unchanged file is still found.
 
 ## Where scans come from
 
-The change analyzer is the one producer: each analyzed change with a
-scannable head (the working tree or a commit) runs a scan scoped to its
-changed files, in the background. `DuplicationRecorder::record`
+The change analyzer is the one producer: each analyzed change runs a
+scan of its head revision (the working tree, a commit or a snapshot,
+read through `Trees` — `.context/vcs.md`) scoped to its changed files,
+in the background. `DuplicationRecorder::record`
 (`crates/oxplow-app/src/duplication_scan.rs`) leaves the record:
 
 - a `code_quality_scan` row (tool `duplication`, scope `change <id>`, the
-  tree version and a path-list fingerprint) and its findings, read through
+  `revision` it read — `working`, `snap:<id>`, `git:<rev>` — and a
+  path-list fingerprint) and its findings, read through
   `v_code_quality_scan` / `v_code_quality_finding` (the oxplow-analytics
   `findings` and `duplicate-blocks` lenses);
 - for a **full-tree** scan only (`paths = None`), `oxplow.duplicate_lines`

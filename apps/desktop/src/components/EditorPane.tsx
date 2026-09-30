@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenFileState } from "../editor-session.js";
 import type { LocalBlameEntry, Stream } from "../api.js";
-import { desktopBridge, readFileAtRef } from "../api.js";
+import { desktopBridge, readAt } from "../api.js";
 import { computeDiffDecorations } from "../editor-diff.js";
 import { languageForPath } from "../editor-language.js";
 import { hasLspServer } from "../lsp-servers-store.js";
@@ -16,6 +16,7 @@ import { BLAME_WIDTH, useBlame } from "./useBlame.js";
 import { usePageSnapshot } from "../tabs/usePageSnapshot.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
+import { gitRevision } from "../revision.js";
 import { MonacoCommentLayer, type MonacoCommentHandle } from "./Comments/MonacoCommentLayer.js";
 
 interface Props {
@@ -337,7 +338,7 @@ export function EditorPane({
     logUi("debug", "editor: readHEAD start", { path: filePath });
     (async () => {
       try {
-        const { content } = await readFileAtRef(sid, "HEAD", filePath);
+        const content = await readAt(sid, filePath, gitRevision("HEAD"));
         if (cancelled) return;
         logUi("debug", "editor: readHEAD end", {
           path: filePath,

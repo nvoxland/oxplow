@@ -97,6 +97,20 @@ pub enum FileStatus {
     Conflicted,
 }
 
+impl FileStatus {
+    /// Its wire name (`added`, `modified`, …).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FileStatus::Added => "added",
+            FileStatus::Modified => "modified",
+            FileStatus::Deleted => "deleted",
+            FileStatus::Renamed => "renamed",
+            FileStatus::Untracked => "untracked",
+            FileStatus::Conflicted => "conflicted",
+        }
+    }
+}
+
 /// One changed path in a workspace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct StatusEntry {
@@ -320,4 +334,137 @@ pub trait Vcs: Send + Sync {
         from: &str,
     ) -> Result<(), VcsError>;
     async fn list_workspaces(&self, repo: &Path) -> Result<Vec<VcsWorkspace>, VcsError>;
+}
+
+/// One version of a workspace's tree: the working tree, a local-history
+/// snapshot, or a VCS revision. The one "which version of a file" type
+/// (it replaced `TreeVersion`, `DiffEndpoint` and the desktop's
+/// `FileVersion`); `oxplow_app::trees::Trees` reads and diffs any of
+/// them.
+///
+/// On the wire it is a string: `working`, `snap:<id>`, or the VCS's
+/// `<rev_kind>:<rev>` (`git:HEAD`, `git:4c44d4…`) — the ref grammar's
+/// `@rev` slot (`.context/refs.md`), where the working tree is the
+/// omitted slot ([`Revision::rev_slot`]).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Revision {
+    Working,
+    Snapshot(i64),
+    /// A revision of the VCS whose `rev_kind` is `kind`.
+    Vcs {
+        kind: String,
+        rev: String,
+    },
+}
+
+impl Revision {
+    /// A git revision (a sha, a branch, `HEAD`).
+    pub fn git(rev: impl Into<String>) -> Self {
+        Revision::Vcs {
+            kind: "git".into(),
+            rev: rev.into(),
+        }
+    }
+
+    /// The ref grammar's `@rev` slot: `None` for the working tree.
+    pub fn rev_slot(&self) -> Option<String> {
+        match self {
+            Revision::Working => None,
+            other => Some(other.to_string()),
+        }
+    }
+
+    /// Inverse of [`Self::rev_slot`].
+    pub fn from_rev_slot(slot: Option<&str>) -> Result<Self, String> {
+        match slot {
+            None => Ok(Revision::Working),
+            Some(s) => s.parse(),
+        }
+    }
+}
+
+impl std::fmt::Display for Revision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Revision::Working => f.write_str("working"),
+            Revision::Snapshot(id) => write!(f, "snap:{id}"),
+            Revision::Vcs { kind, rev } => write!(f, "{kind}:{rev}"),
+        }
+    }
+}
+
+impl std::str::FromStr for Revision {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        if s == "working" {
+            return Ok(Revision::Working);
+        }
+        let (kind, value) = s.split_once(':').ok_or_else(|| {
+            format!("`{s}` isn't a revision (`working`, `snap:<id>`, `<vcs>:<rev>`)")
+        })?;
+        if value.is_empty() {
+            return Err(format!("`{s}` names no revision"));
+        }
+        match kind {
+            "snap" => value
+                .parse()
+                .map(Revision::Snapshot)
+                .map_err(|_| format!("`{value}` isn't a snapshot id")),
+            "" => Err(format!("`{s}` names no revision kind")),
+            _ => Ok(Revision::Vcs {
+                kind: kind.into(),
+                rev: value.into(),
+            }),
+        }
+    }
+}
+
+impl Serialize for Revision {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for Revision {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        String::deserialize(d)?
+            .parse()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+impl specta::Type for Revision {
+    fn definition(_types: &mut specta::Types) -> specta::datatype::DataType {
+        specta::datatype::DataType::Reference(specta_typescript::define("string"))
+    }
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::Revision;
+
+    /// P5.B2 (tsk521): a revision round-trips through its wire string and
+    /// the ref grammar's `@rev` slot, where the working tree is the
+    /// omitted slot.
+    #[test]
+    fn revisions_round_trip_through_the_wire_and_the_rev_slot() {
+        for (rev, wire) in [
+            (Revision::Working, "working"),
+            (Revision::Snapshot(42), "snap:42"),
+            (Revision::git("HEAD"), "git:HEAD"),
+            (Revision::git("a:b"), "git:a:b"),
+        ] {
+            assert_eq!(rev.to_string(), wire);
+            assert_eq!(wire.parse::<Revision>().unwrap(), rev);
+            assert_eq!(serde_json::to_value(&rev).unwrap(), serde_json::json!(wire));
+            assert_eq!(
+                Revision::from_rev_slot(rev.rev_slot().as_deref()).unwrap(),
+                rev
+            );
+        }
+        assert_eq!(Revision::Working.rev_slot(), None);
+        for bad in ["", "HEAD", "snap:x", "git:", ":x"] {
+            assert!(bad.parse::<Revision>().is_err(), "{bad}");
+        }
+    }
 }

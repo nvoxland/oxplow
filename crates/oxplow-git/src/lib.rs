@@ -48,9 +48,8 @@ pub use log::{
     GitLogResult,
 };
 pub use refs::{
-    list_all_refs, list_file_commits, list_recent_remote_branches, read_file_at_ref,
-    resolve_commit_ref_labels, CommitRefLabel, CommitRefLabelKind, GroupedGitRefs, RefKind,
-    RefOption, RemoteBranchEntry,
+    list_all_refs, list_file_commits, list_recent_remote_branches, resolve_commit_ref_labels,
+    CommitRefLabel, CommitRefLabelKind, GroupedGitRefs, RefKind, RefOption, RemoteBranchEntry,
 };
 pub use refs_watch::{GitRefsWatcher, RefsChangeEvent};
 pub use repo::{detect_current_branch, is_git_repo, is_git_worktree, resolve_revision};

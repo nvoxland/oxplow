@@ -273,37 +273,46 @@ describe("change links", () => {
     const ref = cellLinkRef(
       { kind: "diff-at", from: "path", line: "ln", base: "base", head: "head" },
       "path",
-      ["src/a.rs", 12, "abc1234", "def5678", null],
+      ["src/a.rs", 12, "git:abc1234", "git:def5678", null],
       cols,
     )!;
     expect(ref.kind).toBe("diff");
     const p = ref.payload as { path: string; leftVersion: unknown; rightVersion: unknown; revealLine?: number };
     expect(p.path).toBe("src/a.rs");
-    expect(p.leftVersion).toEqual({ kind: "ref", ref: "abc1234" });
-    expect(p.rightVersion).toEqual({ kind: "ref", ref: "def5678" });
+    expect(p.leftVersion).toEqual("git:abc1234");
+    expect(p.rightVersion).toEqual("git:def5678");
     expect(p.revealLine).toBe(12);
     const working = cellLinkRef(
       { kind: "diff-at", from: "path", line: null, base: "base", head: "head" },
       "path",
-      ["src/a.rs", null, "HEAD", "working tree", null],
+      ["src/a.rs", null, "git:HEAD", "working", null],
       cols,
     )!;
-    expect((working.payload as { rightVersion: unknown }).rightVersion).toEqual({ kind: "disk" });
-    // An effort's change is labelled by its snapshots; those open too.
+    expect((working.payload as { rightVersion: unknown }).rightVersion).toEqual("working");
+    // An effort's change is between two snapshots; those open too.
     const effort = cellLinkRef(
       { kind: "diff-at", from: "path", line: null, base: "base", head: "head" },
       "path",
-      ["a", null, "snapshot 3", "snapshot 4", null],
+      ["a", null, "snap:3", "snap:4", null],
       cols,
     )!;
-    expect((effort.payload as { leftVersion: unknown }).leftVersion).toEqual({ kind: "snapshot", id: "3" });
-    expect((effort.payload as { rightVersion: unknown }).rightVersion).toEqual({ kind: "snapshot", id: "4" });
+    expect((effort.payload as { leftVersion: unknown }).leftVersion).toEqual("snap:3");
+    expect((effort.payload as { rightVersion: unknown }).rightVersion).toEqual("snap:4");
+    // A cell that isn't a revision opens nothing rather than a guess.
+    expect(
+      cellLinkRef(
+        { kind: "diff-at", from: "path", line: null, base: "base", head: "head" },
+        "path",
+        ["a", null, "abc1234", "working tree", null],
+        cols,
+      ),
+    ).toBeNull();
   });
   test("compare opens both ranges side by side at the change's version", () => {
     const ref = cellLinkRef(
       { kind: "compare", from: "dup", line: null, base: null, head: "head" },
       "dup",
-      ["x", null, null, "def5678", "src/b.rs:3-12|src/a.rs:40-49"],
+      ["x", null, null, "git:def5678", "src/b.rs:3-12|src/a.rs:40-49"],
       cols,
     )!;
     expect(ref.kind).toBe("duplicate-block");
@@ -311,11 +320,11 @@ describe("change links", () => {
       leftPath: "src/b.rs",
       leftStart: 3,
       leftEnd: 12,
-      leftVersion: { kind: "ref", ref: "def5678" },
+      leftVersion: "git:def5678",
       rightPath: "src/a.rs",
       rightStart: 40,
       rightEnd: 49,
-      rightVersion: { kind: "ref", ref: "def5678" },
+      rightVersion: "git:def5678",
     });
     expect(cellLinkRef({ kind: "compare", from: "dup", line: null, base: null, head: null }, "dup", ["x", null, null, null, "garbage"], cols)).toBeNull();
   });

@@ -716,11 +716,14 @@ pub struct GitDiffParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GitReadAtRefParams {
-    /// Git ref (branch, tag, or sha) to read the file at.
-    pub git_ref: String,
-    /// Repo-relative file path.
+pub struct ReadAtParams {
+    /// The stream whose workspace to read; the primary when absent.
+    pub stream_id: Option<String>,
+    /// Workspace-relative file path.
     pub path: String,
+    /// Which version: `working`, `snap:<snapshot id>`, or `git:<rev>`
+    /// (a sha, branch, tag or `HEAD`).
+    pub revision: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -2035,19 +2038,32 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Read a file's contents at a git ref (branch, tag, or sha). \
-                          Returns null when the path doesn't exist at that ref."
+        description = "Read a file as it is in one version of the tree: `working` (on disk), \
+                          `snap:<id>` (a local-history snapshot) or `git:<rev>` (a sha, branch, \
+                          tag or HEAD). Returns null when the path isn't in that version."
     )]
-    async fn read_file_at_ref(
-        &self,
-        params: Parameters<GitReadAtRefParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let content = self
+    async fn read_at(&self, params: Parameters<ReadAtParams>) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("read_at", p.stream_id.as_deref())?;
+        let revision: oxplow_domain::vcs::Revision = p
+            .revision
+            .parse()
+            .map_err(|e: String| McpError::invalid_params(e, None))?;
+        let ws = self
             .services
-            .git
-            .read_file_at_ref(params.0.git_ref, params.0.path)
+            .worktrees
+            .resolve(p.stream_id.as_deref())
             .await;
-        json_result(&content)
+        let bytes = self
+            .services
+            .trees
+            .read_at(&ws, &revision, &p.path)
+            .await
+            .map_err(|e| match e {
+                oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
+                other => internal(other),
+            })?;
+        json_result(&bytes.map(|b| String::from_utf8_lossy(&b).into_owned()))
     }
 
     #[tool(description = "List the project's git branches (local + remote).")]
@@ -4846,7 +4862,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "git_log",
     "git_blame",
     "git_diff",
-    "read_file_at_ref",
+    "read_at",
     "list_branches",
     "list_snapshots_for_stream",
     "list_snapshot_ops",

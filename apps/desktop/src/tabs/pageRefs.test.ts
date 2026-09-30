@@ -43,20 +43,20 @@ describe("pageRefs", () => {
     expect(fileRef("src/a.ts")).toEqual({
       id: "file:src/a.ts",
       kind: "file",
-      payload: { path: "src/a.ts", version: { kind: "disk" } },
+      payload: { path: "src/a.ts", version: "working" },
     });
   });
 
   test("diffRef is keyed by path, both versions and the label", () => {
-    const spec = { path: "src/a.ts", leftVersion: { kind: "ref" as const, ref: "abc" }, rightVersion: { kind: "disk" as const }, baseLabel: "abc" };
+    const spec = { path: "src/a.ts", leftVersion: "git:abc", rightVersion: "working", baseLabel: "abc" };
     const a = diffRef(spec);
-    expect(a.id).toBe("page:diff?path=src/a.ts&left=ref:abc&right=disk");
+    expect(a.id).toBe("page:diff?path=src/a.ts&left=git:abc&right=working");
     expect(a.kind).toBe("diff");
-    expect(a.payload).toEqual({ path: "src/a.ts", leftVersion: { kind: "ref", ref: "abc" }, rightVersion: { kind: "disk" }, labelOverride: null });
+    expect(a.payload).toEqual({ path: "src/a.ts", leftVersion: "git:abc", rightVersion: "working", labelOverride: null });
     // revealLine does not change the id: re-clicking reuses the tab.
     expect(diffRef({ ...spec, revealLine: 7 }).id).toBe(a.id);
-    expect(diffRef({ ...spec, rightVersion: { kind: "ref", ref: "xyz" } }).id).not.toBe(a.id);
-    expect(diffRef({ ...spec, labelOverride: "wi 3" }).id).toBe("page:diff?path=src/a.ts&left=ref:abc&right=disk&label=wi+3");
+    expect(diffRef({ ...spec, rightVersion: "git:xyz" }).id).not.toBe(a.id);
+    expect(diffRef({ ...spec, labelOverride: "wi 3" }).id).toBe("page:diff?path=src/a.ts&left=git:abc&right=working&label=wi+3");
   });
 
   test("wikiPageRef and taskRef encode canonical refs", () => {
@@ -100,7 +100,7 @@ describe("pageRefs", () => {
       .toBe("page:external-url?url=https://x.test/p?a%3D1%26b%3D2%23frag");
     // Every route id is a valid canonical ref of kind `page`.
     expect(parseRef(externalUrlRef("https://x.test/p?a=1#frag").id)?.kind).toBe("page");
-    expect(parseRef(diffRef({ path: "a@b/c%d.ts", leftVersion: { kind: "disk" }, rightVersion: { kind: "disk" }, baseLabel: "" }).id)?.kind).toBe("page");
+    expect(parseRef(diffRef({ path: "a@b/c%d.ts", leftVersion: "working", rightVersion: "working", baseLabel: "" }).id)?.kind).toBe("page");
   });
 
   test("newTaskRef has stable create id", () => {
@@ -141,18 +141,18 @@ describe("pageRefs", () => {
 
   test("endpointDiffRef encodes both endpoints; ids are stable + distinct", () => {
     const a = endpointDiffRef(
-      { kind: "snapshot", snapshot_id: 1 },
-      { kind: "snapshot", snapshot_id: 9 },
+      "snap:1",
+      "snap:9",
     );
     const b = endpointDiffRef(
-      { kind: "snapshot", snapshot_id: 1 },
-      { kind: "snapshot", snapshot_id: 9 },
+      "snap:1",
+      "snap:9",
     );
-    expect(a.id).toBe("page:diff-view?start=s1&end=s9");
+    expect(a.id).toBe("page:diff-view?start=snap:1&end=snap:9");
     expect(a.id).toBe(b.id);
     expect(a.kind).toBe("diff-view");
-    const c = endpointDiffRef(null, { kind: "commit", sha: "abc123" });
-    expect(c.id).toBe("page:diff-view?start=none&end=cabc123");
+    const c = endpointDiffRef(null, "git:abc123");
+    expect(c.id).toBe("page:diff-view?start=none&end=git:abc123");
     expect(c.id).not.toBe(a.id);
   });
 });
@@ -164,18 +164,18 @@ describe("refFromTabId — diff-view", () => {
 
   test("round-trips snapshot↔snapshot endpoints", () => {
     const ref = endpointDiffRef(
-      { kind: "snapshot", snapshot_id: 1 },
-      { kind: "snapshot", snapshot_id: 9 },
+      "snap:1",
+      "snap:9",
     );
     expect(refFromTabId(ref.id)).toEqual(ref);
   });
 
   test("round-trips a null-start commit endpoint and a working endpoint", () => {
-    const commitRef = endpointDiffRef(null, { kind: "commit", sha: "abc123" });
+    const commitRef = endpointDiffRef(null, "git:abc123");
     expect(refFromTabId(commitRef.id)).toEqual(commitRef);
     const workingRef = endpointDiffRef(
-      { kind: "snapshot", snapshot_id: 5 },
-      { kind: "working" },
+      "snap:5",
+      "working",
     );
     expect(refFromTabId(workingRef.id)).toEqual(workingRef);
   });
@@ -193,7 +193,7 @@ describe("refFromTabId", () => {
     expect((refFromTabId("file:src/a/b.ts")!.payload as { path: string }).path).toBe("src/a/b.ts");
     const versioned = refFromTabId("file:src/x.ts@git:abc")!;
     expect((versioned.payload as { path: string }).path).toBe("src/x.ts");
-    expect((versioned.payload as { version: unknown }).version).toEqual({ kind: "ref", ref: "abc" });
+    expect((versioned.payload as { version: unknown }).version).toEqual("git:abc");
   });
 
   test("rebuilds payload-bearing kinds from their id", () => {
@@ -221,7 +221,7 @@ describe("refFromTabId", () => {
   });
 
   test("a diff route rebuilds the payload handleOpenDiff registers", () => {
-    const ref = diffRef({ path: "src/a.ts", leftVersion: { kind: "snapshot", id: "3" }, rightVersion: { kind: "ref", ref: "HEAD" }, baseLabel: "x", labelOverride: "eff9" });
+    const ref = diffRef({ path: "src/a.ts", leftVersion: "snap:3", rightVersion: "git:HEAD", baseLabel: "x", labelOverride: "eff9" });
     expect(refFromTabId(ref.id)).toEqual(ref);
   });
 
@@ -261,17 +261,17 @@ describe("refFromTabId", () => {
       lensRef("acme/blocked", { stream_id: 2 }),
       lensRef("acme/x", { path: "src/a@b.ts", q: "a=b&c" }),
       fileRef("src/a@b.ts"),
-      diffRef({ path: "src/a.ts", leftVersion: { kind: "disk" }, rightVersion: { kind: "ref", ref: "HEAD" }, baseLabel: "HEAD" }),
+      diffRef({ path: "src/a.ts", leftVersion: "working", rightVersion: "git:HEAD", baseLabel: "HEAD" }),
       opErrorRef("oe-1"),
       streamSettingsRef("str1"),
       threadSettingsRef("thr1"),
       wikiFreshnessRef("data-model"),
       uncommittedChangesRef(),
-      fileRef("src/a.ts", { kind: "ref", ref: "HEAD" }),
+      fileRef("src/a.ts", "git:HEAD"),
       externalUrlRef("https://x.test/p?a=1#frag"),
       duplicateBlockRef({
-        leftPath: "a.rs", leftStart: 1, leftEnd: 5, leftVersion: { kind: "disk" },
-        rightPath: "b.rs", rightStart: 9, rightEnd: 13, rightVersion: { kind: "ref", ref: "abc" },
+        leftPath: "a.rs", leftStart: 1, leftEnd: 5, leftVersion: "working",
+        rightPath: "b.rs", rightStart: 9, rightEnd: 13, rightVersion: "git:abc",
       }),
     ];
     for (const ref of refs) {

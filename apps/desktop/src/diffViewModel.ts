@@ -3,7 +3,7 @@
 // unit-tested without mounting the page.
 
 import { formatDateOnly, isSameCalendarDay } from "./components/format.js";
-import type { DiffEndpoint } from "./tauri-bridge/generated/bindings.js";
+import { WORKING, snapshotIdOf, snapshotRevision, type Revision } from "./revision.js";
 
 /** A date (or date range) label for the diff's range, shown above the
  *  Start/End time pickers in the rail. One date when both endpoints fall
@@ -29,8 +29,8 @@ export interface EffortLike {
 }
 
 export interface ResolvedEndpoints {
-  start: DiffEndpoint | null;
-  end: DiffEndpoint;
+  start: Revision | null;
+  end: Revision;
   /** `end` snapshot is null → the effort is still open; it diffs its
    *  start against the live working tree. The working-tree endpoint
    *  isn't computed by the substrate yet (tsk339), so the page shows an
@@ -42,14 +42,11 @@ export interface ResolvedEndpoints {
  *  effort diffs start→end snapshots; an open effort diffs its start
  *  against the working tree. */
 export function resolveEffortEndpoints(effort: EffortLike): ResolvedEndpoints {
-  const start: DiffEndpoint | null =
-    effort.startSnapshotId != null
-      ? { kind: "snapshot", snapshot_id: effort.startSnapshotId }
-      : null;
+  const start = effort.startSnapshotId != null ? snapshotRevision(effort.startSnapshotId) : null;
   if (effort.endSnapshotId != null) {
-    return { start, end: { kind: "snapshot", snapshot_id: effort.endSnapshotId }, inProgress: false };
+    return { start, end: snapshotRevision(effort.endSnapshotId), inProgress: false };
   }
-  return { start, end: { kind: "working" }, inProgress: true };
+  return { start, end: WORKING, inProgress: true };
 }
 
 export interface TurnLike {
@@ -119,11 +116,8 @@ export function resolveSnapshotEndpoints(
   prevSnapshotId: number | null,
 ): ResolvedEndpoints {
   return {
-    start:
-      prevSnapshotId != null
-        ? { kind: "snapshot", snapshot_id: prevSnapshotId }
-        : null,
-    end: { kind: "snapshot", snapshot_id: snapshotId },
+    start: prevSnapshotId != null ? snapshotRevision(prevSnapshotId) : null,
+    end: snapshotRevision(snapshotId),
     inProgress: false,
   };
 }
@@ -186,11 +180,11 @@ export function rangeEndpointOptions<T extends { id: number }>(
 /** The snapshot id pair to feed `listEffortsOverlappingRange`, or null
  *  when the range has no snapshot endpoints to overlap against. */
 export function snapshotRange(
-  start: DiffEndpoint | null,
-  end: DiffEndpoint,
+  start: Revision | null,
+  end: Revision,
 ): { rangeStart: number; rangeEnd: number } | null {
-  const startId = start?.kind === "snapshot" ? start.snapshot_id : null;
-  const endId = end.kind === "snapshot" ? end.snapshot_id : null;
+  const startId = start === null ? null : snapshotIdOf(start);
+  const endId = snapshotIdOf(end);
   if (endId == null) return null;
   // A null/absent start side anchors the range open at 0 so efforts
   // whose window ends at-or-before `end` still surface.

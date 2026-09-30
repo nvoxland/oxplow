@@ -23,7 +23,7 @@ import {
   type DiffSubject,
   snapshotsOnBranch,
 } from "../diffViewModel.js";
-import type { DiffEndpoint } from "../tauri-bridge/generated/bindings.js";
+import { WORKING, snapshotIdOf, snapshotRevision, type Revision } from "../revision.js";
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
@@ -84,8 +84,8 @@ export function DiffViewPage(props: DiffViewPageProps) {
 // ---------------------------------------------------------------------------
 
 interface ResolvedDiff {
-  start: DiffEndpoint | null;
-  end: DiffEndpoint;
+  start: Revision | null;
+  end: Revision;
   inProgress: boolean;
   /** What the diff is of — picks the in-progress notice's wording. */
   subject: DiffSubject;
@@ -150,7 +150,7 @@ function DiffBody({
       setResolved({
         start: spec.start,
         end: spec.end,
-        inProgress: spec.end.kind === "working",
+        inProgress: spec.end === WORKING,
         subject: "endpoints",
         taskId: null,
         effortId: null,
@@ -416,8 +416,8 @@ function ResolvedEndpointDiff({
   // Effort identity for the title + concurrent-effort exclusion. The diff
   // is "for an effort" when one was passed (effort mode) OR when the
   // endpoints line up exactly with an overlapping effort's bracket.
-  const startSnapId = start?.kind === "snapshot" ? start.snapshot_id : null;
-  const endSnapId = end.kind === "snapshot" ? end.snapshot_id : null;
+  const startSnapId = start === null ? null : snapshotIdOf(start);
+  const endSnapId = snapshotIdOf(end);
   // Capture time of the range's start snapshot — used to drop efforts that
   // ended before this range began from the concurrent list.
   const rangeStartIso =
@@ -550,9 +550,8 @@ function ResolvedEndpointDiff({
   // Rescope the diff in place by re-pointing one endpoint at a chosen
   // snapshot — navigates the tab to the new endpoint pair (Back returns).
   const pickStart = (snapshotId: number) =>
-    onOpenPage(endpointDiffRef({ kind: "snapshot", snapshot_id: snapshotId }, end));
-  const pickEnd = (snapshotId: number) =>
-    onOpenPage(endpointDiffRef(start, { kind: "snapshot", snapshot_id: snapshotId }));
+    onOpenPage(endpointDiffRef(snapshotRevision(snapshotId), end));
+  const pickEnd = (snapshotId: number) => onOpenPage(endpointDiffRef(start, snapshotRevision(snapshotId)));
 
   // The date/commit range lives in the details rail: a date (or date range
   // when the endpoints span days) header above two selectable fields — a
@@ -743,26 +742,23 @@ interface EndpointDisplay {
 }
 
 /** Resolve a diff endpoint to its title-row display: a time label plus an
- *  optional git commit. */
+ *  optional commit. */
 function endpointDisplay(
-  ep: DiffEndpoint | null,
+  ep: Revision | null,
   snapshotsById: Map<number, Snapshot>,
 ): EndpointDisplay {
   if (ep === null) return { timeText: "(initial)", commitSha: null, iso: null };
-  switch (ep.kind) {
-    case "working":
-      return { timeText: "working tree", commitSha: null, iso: null };
-    case "commit":
-      return { timeText: null, commitSha: ep.sha, iso: null };
-    case "snapshot": {
-      const snap = snapshotsById.get(ep.snapshot_id);
-      return {
-        timeText: snap ? formatFullDateTime(snap.createdAt) : `snapshot ${ep.snapshot_id}`,
-        commitSha: snap?.gitCommit ?? null,
-        iso: snap?.createdAt ?? null,
-      };
-    }
+  if (ep === WORKING) return { timeText: "working tree", commitSha: null, iso: null };
+  const snapshotId = snapshotIdOf(ep);
+  if (snapshotId === null) {
+    return { timeText: null, commitSha: ep.slice(ep.indexOf(":") + 1), iso: null };
   }
+  const snap = snapshotsById.get(snapshotId);
+  return {
+    timeText: snap ? formatFullDateTime(snap.createdAt) : `snapshot ${snapshotId}`,
+    commitSha: snap?.gitCommit ?? null,
+    iso: snap?.createdAt ?? null,
+  };
 }
 
 /** Plain-text endpoint label for the chrome/tab title. */

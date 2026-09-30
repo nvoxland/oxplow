@@ -111,26 +111,30 @@ describe("readPersistedDiffSpecs", () => {
     expect(readPersistedDiffSpecs()).toEqual([]);
   });
 
-  test("legacy specs (leftRef + rightKind) coerce to versioned shape", () => {
+  test("specs keep their revisions; a spec whose sides aren't revisions is dropped", () => {
     window.localStorage.setItem(
       DIFF_SPECS_STORAGE_KEY,
       JSON.stringify([
-        { id: "d1", spec: { path: "src/a.ts", leftRef: "abc123", rightKind: "working", baseLabel: "HEAD" } },
-        { id: "d2", spec: { path: "src/b.ts", rightKind: { ref: "def456" } } },
+        { id: "d1", spec: { path: "src/a.ts", leftVersion: "git:abc123", rightVersion: "working", baseLabel: "HEAD" } },
+        { id: "old", spec: { path: "src/b.ts", leftRef: "abc123", rightKind: "working" } },
+        { id: "d2", spec: { path: "src/c.ts", leftVersion: { kind: "disk" }, rightVersion: "snap:4" } },
       ]),
     );
     const restored = readPersistedDiffSpecs();
-    expect(restored).toHaveLength(2);
-    expect(restored[0].spec.leftVersion).toEqual({ kind: "ref", ref: "abc123" });
-    expect(restored[0].spec.rightVersion).toEqual({ kind: "disk" });
-    expect(restored[1].spec.leftVersion).toEqual({ kind: "disk" });
-    expect(restored[1].spec.rightVersion).toEqual({ kind: "ref", ref: "def456" });
+    expect(restored.map((r) => [r.id, r.spec.leftVersion, r.spec.rightVersion])).toEqual([
+      ["d1", "git:abc123", "working"],
+    ]);
   });
 
   test("entries without a string id or object spec are dropped", () => {
     window.localStorage.setItem(
       DIFF_SPECS_STORAGE_KEY,
-      JSON.stringify([{ id: 5, spec: {} }, { id: "ok" }, null, { id: "d", spec: { path: "p" } }]),
+      JSON.stringify([
+        { id: 5, spec: {} },
+        { id: "ok" },
+        null,
+        { id: "d", spec: { path: "p", leftVersion: "git:HEAD", rightVersion: "working" } },
+      ]),
     );
     const restored = readPersistedDiffSpecs();
     expect(restored).toHaveLength(1);

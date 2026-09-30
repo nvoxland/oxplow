@@ -26,11 +26,9 @@ use oxplow_db::page_ref_projections::{stamp_file_versions, wiki_edges, KIND_FILE
 use oxplow_db::{SqlitePageRefStore, SqliteWikiPageStore, WikiPage};
 use oxplow_domain::{DomainError, Timestamp};
 
-/// Tree version a wikilink references. Mirrors the cross-cutting
-/// `oxplow_tree_source::TreeVersion` shape; defined inline here so
-/// the wiki parser doesn't pull in tree-source as a hard dep, but
-/// the variants and serde tags line up so consumers can convert
-/// freely.
+/// Tree version a wikilink references, in the wiki's authoring syntax.
+/// (Joins `oxplow_domain::vcs::Revision` when knowledge becomes a
+/// capability, P5.C3.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WikiVersion {
     /// Working-tree version. The "local" version in user terms — the

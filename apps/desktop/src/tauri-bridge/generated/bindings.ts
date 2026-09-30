@@ -672,7 +672,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	diffEndpoints: (start: { kind: "snapshot"; snapshot_id: number } | { kind: "commit"; sha: string } | { kind: "working" } | null, end: DiffEndpoint) => typedError<DiffEntry[], IpcError>(__TAURI_INVOKE("diff_endpoints", { start, end })),
+	diff: (streamId: string | null, from: string | null, to: string) => typedError<DiffEntry[], IpcError>(__TAURI_INVOKE("diff", { streamId, from, to })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -817,7 +817,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	readFileAtRef: (ref: string, path: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_file_at_ref", { ref, path })),
+	readAt: (streamId: string | null, path: string, revision: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_at", { streamId, path, revision })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1046,7 +1046,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	readFile: (streamId: string | null, relativePath: string, version: TreeVersion) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_file", { streamId, relativePath, version })),
+	filesAt: (streamId: string | null, revision: string) => typedError<string[], IpcError>(__TAURI_INVOKE("files_at", { streamId, revision })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1654,8 +1654,13 @@ export type ChangeRow = {
 	streamId: number,
 	kind: string,
 	target: string,
-	baseLabel: string | null,
-	headLabel: string | null,
+	/**
+	 *  The older side (`oxplow_domain::vcs::Revision`); `None` for a
+	 *  root commit.
+	 */
+	baseRevision: string | null,
+	// The newer side.
+	headRevision: string | null,
 	status: string,
 	error: string | null,
 	computedAt: string | null,
@@ -2090,22 +2095,13 @@ export type Deprecated = {
 };
 
 /**
- *  One endpoint of a diff: a captured local-history snapshot, a git
- *  commit (any revspec libgit2 resolves), or the live working tree
- *  (reserved for an in-progress effort's open end).
- */
-export type DiffEndpoint = { kind: "snapshot"; snapshot_id: number } | { kind: "commit"; sha: string } | { kind: "working" };
-
-/**
- *  One changed path between two [`DiffEndpoint`]s. `status` is
- *  `"added" | "modified" | "deleted"`, matching the renderer's
- *  `BranchChangeEntry`. `additions`/`deletions` are per-file line
- *  counts (via `similar`), `0` only for binary, oversize, or otherwise
- *  unreadable content.
+ *  One path that differs between two revisions. `additions`/`deletions`
+ *  are line counts, `0` for binary or unreadable content.
  */
 export type DiffEntry = {
 	path: string,
-	status: string,
+	// `added`, `modified` or `deleted`.
+	status: FileStatus,
 	additions: number,
 	deletions: number,
 };
@@ -2851,13 +2847,14 @@ export type LensLinkKind =
 /**
  *  A file's diff within a change: the value is the path; `line`,
  *  `base` and `head` name the columns holding the line and the
- *  change's `base_label` / `head_label` (join `v_change`).
+ *  change's `base_revision` / `head_revision` (join `v_change`).
  */
 "diff-at" | 
 /**
  *  Two line ranges side by side: the value is
  *  `path:start-end|peer:start-end`; `head` names a column with the
- *  version to read (a change's `head_label`; the working tree if absent).
+ *  revision to read (`working`, `snap:<id>`, `git:<rev>`; the working
+ *  tree if absent).
  */
 "compare";
 
@@ -4353,23 +4350,6 @@ export type TranscriptItem = {
 	id: number,
 	seq: number,
 } & (ItemBody);
-
-/**
- *  Identifies which version of the tree a `TreeSource` represents.
- *  Carried alongside scan results so consumers can re-read the same
- *  content without ambiguity.
- */
-export type TreeVersion = 
-// Working tree on disk.
-{ kind: "disk" } | 
-// A git ref — sha, branch, tag, or `HEAD`.
-{ kind: "ref"; ref: string } | 
-/**
- *  A local-history snapshot. Wired through the type system so
- *  callers can match exhaustively, but no source impl ships in
- *  this crate yet — see [`SnapshotTreeSource`].
- */
-{ kind: "snapshot"; id: string };
 
 // What a kept earlier version is a version of.
 export type Twin = {

@@ -10,9 +10,9 @@ import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
 import { ChangedFilesTree } from "../ChangedFiles/ChangedFilesTree.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
-import { DISK, snapshotVersion } from "../../file-version.js";
+import { WORKING, snapshotRevision } from "../../revision.js";
 import { resolveEffortEndpoints } from "../../diffViewModel.js";
-import { diffEndpoints } from "../../api.js";
+import { diffRevisions } from "../../api.js";
 import type { BranchChangeEntry } from "../../api.js";
 
 /**
@@ -569,8 +569,8 @@ function ActivityEffortSection({
     const right = detail.effort.end_snapshot_id;
     onOpenDiff({
       path,
-      leftVersion: left ? snapshotVersion(left) : DISK,
-      rightVersion: right ? snapshotVersion(right) : DISK,
+      leftVersion: left ? snapshotRevision(left) : WORKING,
+      rightVersion: right ? snapshotRevision(right) : WORKING,
       baseLabel: "effort changes",
     });
   };
@@ -590,7 +590,9 @@ function ActivityEffortSection({
       startSnapshotId: startId != null ? Number(startId) : null,
       endSnapshotId: endId != null ? Number(endId) : null,
     });
-    void diffEndpoints(start, end)
+    // A completed effort diffs snapshot → snapshot, which reads the same
+    // from any workspace; the primary's ("") stands in.
+    void diffRevisions("", start, end)
       .then((entries) => {
         if (cancelled) return;
         setDiffByPath(

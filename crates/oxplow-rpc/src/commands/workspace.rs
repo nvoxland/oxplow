@@ -4,73 +4,8 @@
 use oxplow_app::workspace_files::{WorkspaceEntry, WorkspaceFile, WorkspaceIndexedFile};
 use oxplow_app::Services;
 use oxplow_git::WorkspaceStatusSummary;
-use oxplow_tree_source::TreeVersion;
 
 use crate::error::IpcError;
-
-/// Versioned file read. Dispatches on `version`:
-/// - `Disk` → `read_workspace_file` (working tree, possibly dirty).
-/// - `Ref { ref }` → `read_file_at_ref` (committed blob).
-/// - `Snapshot { id }` → `snapshot_store.content_ref_for_path` + read seam.
-///
-/// Returns `Ok(None)` if the path doesn't exist at that version.
-/// Callers MUST pass an explicit version — there is no implicit
-/// "current working tree" default. This is the chokepoint that makes
-/// it impossible to forget which version you're reading, the way the
-/// duplication-scan bug did against `readWorkspaceFile`.
-pub async fn read_file(
-    svc: &Services,
-    stream_id: Option<String>,
-    relative_path: String,
-    version: TreeVersion,
-) -> Result<Option<String>, IpcError> {
-    match version {
-        TreeVersion::Disk => match svc
-            .workspace_files
-            .read(stream_id.as_deref(), relative_path)
-            .await
-        {
-            Ok(file) => Ok(Some(file.content)),
-            Err(e) => {
-                // The git facade returns NotFound as an error; surface
-                // that as Ok(None) so the IPC contract matches the
-                // ref-reader's None semantics.
-                if e.to_string().to_lowercase().contains("not found") {
-                    Ok(None)
-                } else {
-                    Err(IpcError::internal(e.to_string()))
-                }
-            }
-        },
-        TreeVersion::Ref { r#ref } => Ok(svc.git.read_file_at_ref(r#ref, relative_path).await),
-        TreeVersion::Snapshot { id } => {
-            let snapshot_id: i64 = id
-                .parse()
-                .map_err(|_| IpcError::invalid(format!("invalid snapshot id: {id}")))?;
-            let Some(content_ref) = svc
-                .snapshot_store
-                .content_ref_for_path(snapshot_id, &relative_path)
-                .await
-                .map_err(|e| IpcError::internal(e.to_string()))?
-            else {
-                return Ok(None);
-            };
-            let blobs = svc.blobs.clone();
-            let project_dir = svc.layout.project_dir.clone();
-            // Route through the read seam: oxplow rows hit the blob store,
-            // git rows resolve the OID against the git odb.
-            let bytes = tokio::task::spawn_blocking(move || {
-                oxplow_app::snapshot_content::read_content_ref(&content_ref, &project_dir, &blobs)
-            })
-            .await
-            .map_err(|e| IpcError::internal(e.to_string()))?;
-            match bytes {
-                Ok(b) => Ok(Some(String::from_utf8_lossy(&b).into_owned())),
-                Err(_) => Ok(None),
-            }
-        }
-    }
-}
 
 pub async fn list_workspace_entries(
     svc: &Services,

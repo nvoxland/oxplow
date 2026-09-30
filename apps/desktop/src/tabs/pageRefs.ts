@@ -18,14 +18,13 @@
 
 import type { PageKind, RoutePageKind, TabRef } from "./tabState.js";
 import {
-  DISK,
-  type FileVersion,
-  revForVersion,
-  versionFromIdFragment,
-  versionFromRev,
-  versionIdFragment,
-} from "../file-version.js";
-import type { DiffEndpoint, SqlCell } from "../tauri-bridge/generated/bindings.js";
+  WORKING,
+  type Revision,
+  revisionSlot,
+  parseRevision,
+  revisionFromSlot,
+} from "../revision.js";
+import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { escapeId, formatRef, parseRef } from "../refs/ref.js";
 
@@ -93,7 +92,7 @@ function route(name: RoutePageKind, payload: unknown = null, params?: Record<str
 /**
  * Construct a file-tab ref. `version` is required: callers MUST
  * declare which version of the tree they want to view, even if the
- * answer is `DISK` (the working tree). This rule exists because the
+ * answer is `WORKING` (the working tree). This rule exists because the
  * "implicit working tree" assumption is what made the duplication
  * scan show stale, mismatched line ranges in commit-target analysis.
  *
@@ -101,8 +100,8 @@ function route(name: RoutePageKind, payload: unknown = null, params?: Record<str
  * historical view carries its revision (`file:<path>@git:HEAD`,
  * `@snap:<id>`) so it is a distinct tab from the working-tree view.
  */
-export function fileRef(path: string, version: FileVersion = DISK): TabRef {
-  return { id: canonicalId("file", path, revForVersion(version)), kind: "file", payload: { path, version } };
+export function fileRef(path: string, version: Revision = WORKING): TabRef {
+  return { id: canonicalId("file", path, revisionSlot(version)), kind: "file", payload: { path, version } };
 }
 
 /** The working-tree file a tab id shows, or `null` when the id is not a
@@ -202,8 +201,8 @@ export function indexRef(kind: IndexKind): TabRef {
 
 export interface DiffPayload {
   path: string;
-  leftVersion: FileVersion;
-  rightVersion: FileVersion;
+  leftVersion: Revision;
+  rightVersion: Revision;
   labelOverride: string | null;
 }
 
@@ -213,8 +212,8 @@ export interface DiffPayload {
 export function computeDiffId(spec: DiffSpec): string {
   return pageId("diff", {
     path: spec.path,
-    left: versionIdFragment(spec.leftVersion),
-    right: versionIdFragment(spec.rightVersion),
+    left: spec.leftVersion,
+    right: spec.rightVersion,
     label: spec.labelOverride ?? null,
   });
 }
@@ -239,11 +238,11 @@ export interface DuplicateBlockPayload {
    *  file content at this version so highlighted line ranges match
    *  the displayed text — never silently substitutes the working
    *  tree. */
-  leftVersion: FileVersion;
+  leftVersion: Revision;
   rightPath: string;
   rightStart: number;
   rightEnd: number;
-  rightVersion: FileVersion;
+  rightVersion: Revision;
 }
 
 /**
@@ -256,10 +255,10 @@ export function duplicateBlockRef(payload: DuplicateBlockPayload): TabRef {
   return route("duplicate-block", payload, {
     left: payload.leftPath,
     left_lines: `${payload.leftStart}-${payload.leftEnd}`,
-    left_at: versionIdFragment(payload.leftVersion),
+    left_at: payload.leftVersion,
     right: payload.rightPath,
     right_lines: `${payload.rightStart}-${payload.rightEnd}`,
-    right_at: versionIdFragment(payload.rightVersion),
+    right_at: payload.rightVersion,
   });
 }
 
@@ -341,15 +340,15 @@ export function gitDashboardRef(): TabRef {
  *   bracket, carrying the task title + "in progress" state.
  * - **turn** (`turn:<trnN>`) — an agent turn's start/end snapshots:
  *   what the turn changed.
- * - **endpoints** (`page:diff-view?start=<tok>&end=<tok>`) — an explicit
- *   pair of snapshot/commit/working endpoints. `start = null` (`none`)
- *   diffs `end` against the empty tree (everything added).
+ * - **endpoints** (`page:diff-view?start=<rev>&end=<rev>`) — an explicit
+ *   pair of revisions (`working`, `snap:<id>`, `git:<rev>`). `start =
+ *   null` (`none`) diffs `end` against the empty tree (everything added).
  */
 export type DiffViewPayload =
   | { mode: "snapshot"; snapshotId: number }
   | { mode: "effort"; effortId: string }
   | { mode: "turn"; turnId: string }
-  | { mode: "endpoints"; start: DiffEndpoint | null; end: DiffEndpoint };
+  | { mode: "endpoints"; start: Revision | null; end: Revision };
 
 /** A single captured snapshot's page. Drill-in from the Local History
  *  dashboard, file version history, and snapshot backlinks. */
@@ -359,27 +358,6 @@ export function snapshotRef(snapshotId: number): TabRef {
     kind: "snapshot",
     payload: { mode: "snapshot", snapshotId },
   };
-}
-
-/** Stable single-token encoding of one endpoint for the id. */
-function encodeEndpoint(ep: DiffEndpoint | null): string {
-  if (ep === null) return "none";
-  switch (ep.kind) {
-    case "snapshot":
-      return `s${ep.snapshot_id}`;
-    case "commit":
-      return `c${ep.sha}`;
-    case "working":
-      return "w";
-  }
-}
-
-function decodeEndpoint(token: string): DiffEndpoint | null {
-  if (token === "none") return null;
-  if (token === "w") return { kind: "working" };
-  if (token.startsWith("s")) return { kind: "snapshot", snapshot_id: Number(token.slice(1)) };
-  if (token.startsWith("c")) return { kind: "commit", sha: token.slice(1) };
-  return null;
 }
 
 /** An effort's page — its start/end snapshot bracket as a diff. The
@@ -397,10 +375,10 @@ export function turnRef(turnId: string): TabRef {
   return { id: canonicalId("turn", turnId), kind: "turn", payload: { mode: "turn", turnId } };
 }
 
-/** Diff view between two explicit endpoints (snapshot / commit /
- *  working). `start = null` diffs `end` against the empty tree. */
-export function endpointDiffRef(start: DiffEndpoint | null, end: DiffEndpoint): TabRef {
-  return route("diff-view", { mode: "endpoints", start, end }, { start: encodeEndpoint(start), end: encodeEndpoint(end) });
+/** Diff view between two revisions. `start = null` diffs `end` against
+ *  the empty tree. */
+export function endpointDiffRef(start: Revision | null, end: Revision): TabRef {
+  return route("diff-view", { mode: "endpoints", start, end }, { start: start ?? "none", end });
 }
 
 /** Uncommitted Changes — the working tree's changed files, commit form
@@ -508,20 +486,21 @@ const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> 
   "closed-threads": () => closedThreadsRef(),
   diff: (p) => {
     const path = p.get("path");
-    const left = versionFromIdFragment(p.get("left") ?? "");
-    const right = versionFromIdFragment(p.get("right") ?? "");
+    const left = parseRevision(p.get("left") ?? "");
+    const right = parseRevision(p.get("right") ?? "");
     if (!path || !left || !right) return null;
     return diffRef({ path, leftVersion: left, rightVersion: right, baseLabel: "", labelOverride: p.get("label") ?? undefined });
   },
   "diff-view": (p) => {
-    const end = decodeEndpoint(p.get("end") ?? "");
-    if (end) return endpointDiffRef(decodeEndpoint(p.get("start") ?? "none"), end);
-    return null;
+    const end = parseRevision(p.get("end"));
+    const start = p.get("start") ?? "none";
+    if (!end) return null;
+    return endpointDiffRef(start === "none" ? null : parseRevision(start), end);
   },
   "duplicate-block": (p) => {
     const side = (path: string | null, lines: string | null, at: string | null) => {
       const m = /^(\d+)-(\d+)$/.exec(lines ?? "");
-      const version = versionFromIdFragment(at ?? "");
+      const version = parseRevision(at ?? "");
       return path && m && version ? { path, start: Number(m[1]), end: Number(m[2]), version } : null;
     };
     const l = side(p.get("left"), p.get("left_lines"), p.get("left_at"));
@@ -573,7 +552,7 @@ export function refFromTabId(id: string): TabRef | null {
   const kind: string = canonical.kind;
   switch (kind) {
     case "file":
-      return fileRef(canonical.id, versionFromRev(canonical.rev));
+      return fileRef(canonical.id, revisionFromSlot(canonical.rev));
     case "dir":
       return directoryRef(canonical.id);
     case "wiki":

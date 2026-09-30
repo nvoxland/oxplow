@@ -6,17 +6,20 @@
 //!
 //! 1. **Round-trip** — what a commit captured reads back from the store,
 //!    whatever the working tree holds now.
+//! 2. **Diffs** — two revisions diff to what changed between them,
+//!    deletions included, sorted by path.
 //! 3. **Status** — added, modified, deleted and untracked paths show;
 //!    a commit leaves the workspace clean.
 //! 5. **Head and log** — the head resolves to the last commit, which the
 //!    log lists first.
 //! 6. **Blame** — each line names the revision that last changed it.
 //!
-//! (2, diffs, and 7, the snapshot↔revision mapping, join with `Trees`.)
+//! (7, the snapshot↔revision mapping, joins with `Trees` in P5.B3.)
 
 use std::path::Path;
 
 use oxplow_domain::vcs::{CommitRequest, FileStatus, LogQuery, Vcs};
+use oxplow_domain::ChangeStatus;
 
 fn write(ws: &Path, path: &str, body: &str) {
     std::fs::write(ws.join(path), body).unwrap();
@@ -46,6 +49,31 @@ pub async fn a_commit_reads_back_what_it_captured(p: &dyn Vcs, ws: &Path) {
     assert_eq!(bytes, b"one\n");
     assert_eq!(*id, p.object_id_of(b"one\n"), "ids are content addresses");
     assert_ne!(p.object_id_of(b"two\n"), *id);
+}
+
+/// 2. Two revisions diff to what changed, deletions included.
+pub async fn two_revisions_diff_to_what_changed(p: &dyn Vcs, ws: &Path) {
+    write(ws, "kept.txt", "same\n");
+    write(ws, "edited.txt", "v1\n");
+    write(ws, "gone.txt", "bye\n");
+    let first = commit(p, ws, "first").await;
+    write(ws, "edited.txt", "v2\n");
+    write(ws, "new.txt", "hi\n");
+    std::fs::remove_file(ws.join("gone.txt")).unwrap();
+    let second = commit(p, ws, "second").await;
+    let changes = p.diff(ws, &first, &second).await.unwrap();
+    assert_eq!(
+        changes
+            .iter()
+            .map(|c| (c.path.as_str(), c.status))
+            .collect::<Vec<_>>(),
+        vec![
+            ("edited.txt", ChangeStatus::Modified),
+            ("gone.txt", ChangeStatus::Deleted),
+            ("new.txt", ChangeStatus::Added),
+        ]
+    );
+    assert!(p.diff(ws, &second, &second).await.unwrap().is_empty());
 }
 
 /// 3. Status shows each kind of change, and a commit clears it.
@@ -142,6 +170,12 @@ mod tests {
     async fn git_a_commit_reads_back_what_it_captured() {
         let ws = workspace();
         a_commit_reads_back_what_it_captured(&GitProvider, ws.path()).await;
+    }
+
+    #[tokio::test]
+    async fn git_two_revisions_diff_to_what_changed() {
+        let ws = workspace();
+        two_revisions_diff_to_what_changed(&GitProvider, ws.path()).await;
     }
 
     #[tokio::test]

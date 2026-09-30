@@ -28,7 +28,7 @@ import {
   type WorkspaceStatusSummary,
 } from "../../api.js";
 import type { DiffRequest } from "../Diff/diff-request.js";
-import { DISK, refVersion } from "../../file-version.js";
+import { WORKING, gitRevision } from "../../revision.js";
 import type { MenuItem } from "../../menu.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
@@ -425,15 +425,15 @@ export function ProjectPanel({
   }
 
   function openUncommittedDiff(path: string) {
-    onOpenDiff?.({ path, leftVersion: refVersion("HEAD"), rightVersion: DISK, baseLabel: "HEAD" });
+    onOpenDiff?.({ path, leftVersion: gitRevision("HEAD"), rightVersion: WORKING, baseLabel: "HEAD" });
   }
   function openBranchDiff(path: string) {
     if (!scopes?.branchBase) return;
-    onOpenDiff?.({ path, leftVersion: refVersion(scopes.branchBase), rightVersion: DISK, baseLabel: scopes.branchBase });
+    onOpenDiff?.({ path, leftVersion: gitRevision(scopes.branchBase), rightVersion: WORKING, baseLabel: scopes.branchBase });
   }
   function openOriginDiff(path: string) {
     if (!scopes?.upstream) return;
-    onOpenDiff?.({ path, leftVersion: refVersion(scopes.upstream), rightVersion: DISK, baseLabel: scopes.upstream });
+    onOpenDiff?.({ path, leftVersion: gitRevision(scopes.upstream), rightVersion: WORKING, baseLabel: scopes.upstream });
   }
 
   // The file tree's click/double-click opens something contextual to the
@@ -822,8 +822,8 @@ export function ProjectPanel({
             const left = parent ?? "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
             onOpenDiff({
               path: fileHistoryState.path,
-              leftVersion: refVersion(left),
-              rightVersion: refVersion(sha),
+              leftVersion: gitRevision(left),
+              rightVersion: gitRevision(sha),
               baseLabel: parent ? parent.slice(0, 7) : "(root)",
             });
             setFileHistoryState(null);
@@ -838,8 +838,8 @@ export function ProjectPanel({
             if (onOpenDiff) {
               onOpenDiff({
                 path: compareState.path,
-                leftVersion: refVersion(ref),
-                rightVersion: DISK,
+                leftVersion: gitRevision(ref),
+                rightVersion: WORKING,
                 baseLabel: ref,
               });
             }

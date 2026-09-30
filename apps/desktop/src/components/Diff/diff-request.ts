@@ -1,8 +1,8 @@
-import type { FileVersion } from "../../file-version.js";
+import type { Revision } from "../../revision.js";
 
 export interface DiffRequest {
   path: string;
-  leftVersion: FileVersion;
-  rightVersion: FileVersion;
+  leftVersion: Revision;
+  rightVersion: Revision;
   baseLabel: string;
 }

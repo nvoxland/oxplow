@@ -242,11 +242,12 @@ pub enum LensLinkKind {
     Page,
     /// A file's diff within a change: the value is the path; `line`,
     /// `base` and `head` name the columns holding the line and the
-    /// change's `base_label` / `head_label` (join `v_change`).
+    /// change's `base_revision` / `head_revision` (join `v_change`).
     DiffAt,
     /// Two line ranges side by side: the value is
     /// `path:start-end|peer:start-end`; `head` names a column with the
-    /// version to read (a change's `head_label`; the working tree if absent).
+    /// revision to read (`working`, `snap:<id>`, `git:<rev>`; the working
+    /// tree if absent).
     Compare,
 }
 

@@ -1,21 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  diffEndpoints,
+  diffRevisions,
   getBranchChanges,
   subscribeGitRefsEvents,
   subscribeSnapshotEvents,
   subscribeWorkspaceEvents,
   type BranchChangeEntry,
 } from "../../api.js";
-import type { DiffEndpoint } from "../../tauri-bridge/generated/bindings.js";
-import { DISK, refVersion, snapshotVersion, type FileVersion } from "../../file-version.js";
+import { WORKING, gitRevision, type Revision } from "../../revision.js";
 
-/** What changed: the working tree against HEAD, or any two diff
- *  endpoints (snapshots, commits, working tree). The commit page reads
- *  its files from the commit detail it already loads. */
+/** What changed: the working tree against HEAD, or any two revisions
+ *  (snapshots, commits, working tree). The commit page reads its files
+ *  from the commit detail it already loads. */
 export type ChangedFilesSource =
   | { kind: "working"; streamId: string }
-  | { kind: "endpoints"; streamId: string; start: DiffEndpoint | null; end: DiffEndpoint };
+  | { kind: "endpoints"; streamId: string; start: Revision | null; end: Revision };
 
 export interface ChangedFiles {
   loading: boolean;
@@ -23,21 +22,9 @@ export interface ChangedFiles {
   files: BranchChangeEntry[];
   /** The two sides, for opening a file's diff. `base` is null when the
    *  change has no older side (endpoints with no start). */
-  base: FileVersion | null;
-  head: FileVersion | null;
+  base: Revision | null;
+  head: Revision | null;
   refresh(): Promise<void>;
-}
-
-/** The file version the diff pane reads for a diff endpoint. */
-export function endpointVersion(ep: DiffEndpoint): FileVersion {
-  switch (ep.kind) {
-    case "snapshot":
-      return snapshotVersion(String(ep.snapshot_id));
-    case "commit":
-      return refVersion(ep.sha);
-    case "working":
-      return DISK;
-  }
 }
 
 /** What a commit is compared against: its first parent, or `<sha>^`
@@ -48,14 +35,14 @@ export function commitBase(sha: string, parents: string[]): string {
 
 async function load(
   source: ChangedFilesSource,
-): Promise<{ files: BranchChangeEntry[]; base: FileVersion | null; head: FileVersion }> {
+): Promise<{ files: BranchChangeEntry[]; base: Revision | null; head: Revision }> {
   switch (source.kind) {
     case "working": {
       const changes = await getBranchChanges(source.streamId, "HEAD");
-      return { files: changes.files, base: refVersion("HEAD"), head: DISK };
+      return { files: changes.files, base: gitRevision("HEAD"), head: WORKING };
     }
     case "endpoints": {
-      const entries = await diffEndpoints(source.start, source.end);
+      const entries = await diffRevisions(source.streamId, source.start, source.end);
       return {
         files: entries.map((e) => ({
           path: e.path,
@@ -63,8 +50,8 @@ async function load(
           additions: e.additions,
           deletions: e.deletions,
         })),
-        base: source.start ? endpointVersion(source.start) : null,
-        head: endpointVersion(source.end),
+        base: source.start,
+        head: source.end,
       };
     }
   }
@@ -115,7 +102,7 @@ export function useChangedFiles(source: ChangedFilesSource | null): ChangedFiles
     const src = sourceRef.current;
     if (!src) return;
     const offs = [subscribeGitRefsEvents(src.streamId, () => void refresh())];
-    const live = src.kind === "working" || src.end.kind === "working";
+    const live = src.kind === "working" || src.end === WORKING;
     if (live) offs.push(subscribeWorkspaceEvents(src.streamId, () => void refresh()));
     if (src.kind === "endpoints") offs.push(subscribeSnapshotEvents(src.streamId, () => void refresh()));
     return () => offs.forEach((off) => off());

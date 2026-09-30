@@ -28,7 +28,6 @@ oxplow-code-metrics = { workspace = true }
 oxplow-code-dup = { workspace = true }
 oxplow-coverage = { workspace = true }
 oxplow-collect-plugin = { workspace = true }
-oxplow-tree-source = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true, features = ["compat"] }
 tokio-stream = "0.1"

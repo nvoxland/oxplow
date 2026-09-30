@@ -50,10 +50,12 @@ empty: Nothing is blocked.
 - `link.kind` is `task`, `file` (add `line: <column>` to open at a line),
   `wiki`, `effort-diff`, `commit`, `metric`, `diff-at` or `compare`.
   - `diff-at` opens a file's diff within a change:
-    `{ kind: diff-at, line: start_line, base: base_label, head: head_label }`
-    (join `v_change` for the labels).
+    `{ kind: diff-at, line: start_line, base: base_revision, head: head_revision }`
+    (join `v_change` for the two revisions).
   - `compare` opens two line ranges side by side; the column holds
-    `path:start-end|peer:start-end`, and `head:` names a version column.
+    `path:start-end|peer:start-end`, and `head:` names a revision column.
+  - A revision is `working` (the files on disk), `snap:<id>` (a
+    local-history snapshot) or `git:<rev>` (a sha, branch or `HEAD`).
 - Unknown keys are errors, so typos show up instead of being ignored.
 
 Charts name the columns they draw:

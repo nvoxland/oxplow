@@ -16,7 +16,7 @@ import { BacklinksList } from "../tabs/BacklinksList.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { ChangedFilesTree } from "../components/ChangedFiles/ChangedFilesTree.js";
 import { commitBase } from "../components/ChangedFiles/useChangedFiles.js";
-import { refVersion } from "../file-version.js";
+import { gitRevision } from "../revision.js";
 
 export interface GitCommitPageProps {
   stream: Stream | null;
@@ -133,8 +133,8 @@ export function GitCommitPage({
   const openDiff = (d: CommitDetail, path: string) => {
     const spec: DiffSpec = {
       path,
-      leftVersion: refVersion(commitBase(sha, d.parents)),
-      rightVersion: refVersion(sha),
+      leftVersion: gitRevision(commitBase(sha, d.parents)),
+      rightVersion: gitRevision(sha),
       baseLabel: commitBase(sha, d.parents).slice(0, 7),
     };
     if (onOpenDiffInTab) onOpenDiffInTab(spec);

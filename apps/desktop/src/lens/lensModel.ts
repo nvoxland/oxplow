@@ -7,7 +7,7 @@
 import type { Extension, Lens, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
 import { computeDiffId, duplicateBlockRef, effortDiffRef, refFromTabId, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
-import { DISK, refVersion, snapshotVersion, type FileVersion } from "../file-version.js";
+import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 export interface DisplayColumn {
@@ -56,7 +56,7 @@ export function cellLinkRef(
       const ref = fileRef(s);
       const lineIdx = link.line ? resultColumns.indexOf(link.line) : -1;
       const line = lineIdx === -1 ? null : Number(row[lineIdx]);
-      return line && line > 0 ? { ...ref, payload: { path: s, version: DISK, line } } : ref;
+      return line && line > 0 ? { ...ref, payload: { path: s, version: WORKING, line } } : ref;
     }
     case "commit":
       return gitCommitRef(s);
@@ -69,16 +69,16 @@ export function cellLinkRef(
         const i = col ? resultColumns.indexOf(col) : -1;
         return i === -1 ? null : (row[i] ?? null);
       };
-      const base = labelToVersion(at(link.base));
-      const head = labelToVersion(at(link.head));
+      const base = parseRevision(at(link.base));
+      const head = parseRevision(at(link.head));
       if (!base || !head) return null;
       const line = Number(at(link.line));
       const spec = {
         path: s,
         leftVersion: base,
         rightVersion: head,
-        baseLabel: String(at(link.base)),
-        labelOverride: `${shortLabel(at(link.base))}..${shortLabel(at(link.head))}`,
+        baseLabel: shortRevisionLabel(base),
+        labelOverride: `${shortRevisionLabel(base)}..${shortRevisionLabel(head)}`,
         revealLine: line > 0 ? line : undefined,
       };
       return { id: computeDiffId(spec), kind: "diff", payload: spec };
@@ -87,7 +87,7 @@ export function cellLinkRef(
       const m = /^(.+):(\d+)-(\d+)\|(.+):(\d+)-(\d+)$/.exec(s);
       if (!m) return null;
       const headIdx = link.head ? resultColumns.indexOf(link.head) : -1;
-      const version = headIdx === -1 ? DISK : (labelToVersion(row[headIdx] ?? null) ?? DISK);
+      const version = headIdx === -1 ? WORKING : (parseRevision(row[headIdx] ?? null) ?? WORKING);
       return duplicateBlockRef({
         leftPath: m[1]!,
         leftStart: Number(m[2]),
@@ -108,23 +108,6 @@ export function cellLinkRef(
       return n === null ? null : effortDiffRef(`eff${n}`);
     }
   }
-}
-
-/** A change side's label (`v_change.base_label` / `head_label`) as a file
- *  version: a sha or `HEAD` is a git ref, `working tree` is disk. Snapshot
- *  sides can't be opened as a file version, so they give null. */
-export function labelToVersion(label: SqlCell): FileVersion | null {
-  if (label === null || label === "") return null;
-  const s = String(label);
-  if (s === "working tree") return DISK;
-  const snap = /^snapshot (\d+)$/.exec(s);
-  if (snap) return snapshotVersion(snap[1]!);
-  return refVersion(s);
-}
-
-function shortLabel(label: SqlCell): string {
-  const s = String(label ?? "");
-  return /^[0-9a-f]{40}$/.test(s) ? s.slice(0, 7) : s;
 }
 
 /** Plain-text rendering of one cell. */
