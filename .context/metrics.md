@@ -1368,8 +1368,8 @@ AVG a percentage. Non-ratio gauges use `default_agg`.
 
 Runs and samples record the **branch** they were captured on (`branch` column,
 a conformed dimension), when applicable (NULL for detached HEAD / non-git /
-operational metrics). Captured via `oxplow_git::detect_current_branch` in the
-code-fact producers; operational producers (tokens) leave it NULL.
+operational metrics). Captured from `Vcs::head` in the code-fact producers
+(`current_branch`); operational producers (tokens) leave it NULL.
 
 ## Producers (how samples get written)
 

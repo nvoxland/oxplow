@@ -242,6 +242,16 @@ pub struct VcsWorkspace {
     pub is_main: bool,
 }
 
+/// What kind of working copy a directory is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Checkout {
+    /// The repository's own working copy.
+    Primary,
+    /// Another working copy of a repository whose primary lives elsewhere
+    /// (a git worktree).
+    Secondary,
+}
+
 /// Why a VCS call failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum VcsError {
@@ -285,6 +295,15 @@ pub trait CleanBaseline: Send + Sync {
     fn candidates(&self) -> usize;
 }
 
+/// A VCS's revision graph, read synchronously (metric visibility asks it
+/// from inside a blocking fold). Unresolvable revisions answer `None`.
+pub trait RevisionGraph: Send {
+    /// Whether `ancestor` is `descendant` or in its history.
+    fn is_ancestor_or_equal(&self, ancestor: &str, descendant: &str) -> Option<bool>;
+    /// When `rev` was made.
+    fn time_of(&self, rev: &str) -> Option<crate::Timestamp>;
+}
+
 /// The VCS capability. See the module docs.
 #[async_trait]
 pub trait Vcs: Send + Sync {
@@ -292,8 +311,9 @@ pub trait Vcs: Send + Sync {
     /// (`git`).
     fn rev_kind(&self) -> &'static str;
     fn features(&self) -> VcsFeatures;
-    /// Whether `root` is the top of a workspace this provider manages.
-    async fn detect(&self, root: &Path) -> bool;
+    /// What kind of working copy `root` is, or `None` when this provider
+    /// doesn't manage it.
+    async fn detect(&self, root: &Path) -> Option<Checkout>;
 
     // --- revisions ---
     async fn head(&self, ws: &Path) -> Result<Head, VcsError>;
@@ -328,6 +348,17 @@ pub trait Vcs: Send + Sync {
     /// stat — so a capture can back those files by their head objects
     /// without reading them. Blocking; build it once per sweep.
     fn clean_baseline(&self, ws: &Path) -> Box<dyn CleanBaseline>;
+    /// The revision graph of `ws`'s repository; one that can't be read
+    /// answers `None` to everything.
+    fn revision_graph(&self, ws: &Path) -> Box<dyn RevisionGraph>;
+    /// Call `on_change` whenever `ws`'s refs move (a commit, a checkout, a
+    /// fetch), debounced, until the returned guard is dropped. Runs on the
+    /// caller's async runtime.
+    fn watch_refs(
+        &self,
+        ws: &Path,
+        on_change: Box<dyn Fn() + Send + Sync>,
+    ) -> Result<Box<dyn Send>, VcsError>;
     /// What changed from `a` to `b`, sorted by path.
     async fn diff(&self, ws: &Path, a: &str, b: &str) -> Result<Vec<FileChange>, VcsError>;
 
@@ -380,6 +411,9 @@ pub trait Vcs: Send + Sync {
         from: &str,
     ) -> Result<(), VcsError>;
     async fn list_workspaces(&self, repo: &Path) -> Result<Vec<VcsWorkspace>, VcsError>;
+    /// Remove the working copy at `at` (uncommitted changes and all) and
+    /// forget it. Removing one already gone just forgets it.
+    async fn remove_workspace(&self, repo: &Path, at: &Path) -> Result<(), VcsError>;
 }
 
 /// One version of a workspace's tree: the working tree, a local-history

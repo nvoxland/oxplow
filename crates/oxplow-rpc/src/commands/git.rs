@@ -1,14 +1,15 @@
-//! Cores for the `git` command module. Populated by the
-//! oxplow-tauri-ipc -> oxplow-rpc migration; see crate docs.
+//! Git's native reads, beyond the VCS capability (`.context/vcs.md`):
+//! the git provider's own shapes, kept under `git_` names.
 
 use std::collections::HashMap;
 
+use oxplow_app::vcs::{ChangeScopes, CommitRefLabel, RemoteBranchEntry};
 use oxplow_app::Services;
-use oxplow_git::{ChangeScopes, CommitRefLabel, RemoteBranchEntry, TextSearchHit};
+use oxplow_domain::DomainError;
 
 use crate::error::IpcError;
 
-/// Map commit SHAs to a single user-facing branch/tag label. Used by
+/// Map commit SHAs to their user-facing branch/tag labels. Used by
 /// the Local History dashboard to chip each snapshot with its
 /// pinned commit's branch/tag name; SHAs that match no ref are absent
 /// from the result (caller renders a short-sha fallback).
@@ -16,34 +17,29 @@ pub async fn git_resolve_commit_ref_labels(
     svc: &Services,
     shas: Vec<String>,
 ) -> Result<HashMap<String, Vec<CommitRefLabel>>, IpcError> {
-    Ok(svc.git.resolve_commit_ref_labels(shas).await)
+    svc.git
+        .commit_ref_labels(&svc.layout.project_dir, shas)
+        .await
+        .map_err(|e| DomainError::from(e).into())
 }
 
 pub async fn git_list_recent_remote_branches(
     svc: &Services,
     limit: Option<usize>,
 ) -> Result<Vec<RemoteBranchEntry>, IpcError> {
-    Ok(svc
-        .git
-        .list_recent_remote_branches(limit.unwrap_or(50))
-        .await)
+    svc.git
+        .recent_remote_branches(&svc.layout.project_dir, limit.unwrap_or(50))
+        .await
+        .map_err(|e| DomainError::from(e).into())
 }
 
 pub async fn git_change_scopes(
     svc: &Services,
     stream_id: Option<String>,
 ) -> Result<ChangeScopes, IpcError> {
-    Ok(svc.git.change_scopes(stream_id.as_deref()).await)
-}
-
-pub async fn search_workspace_text(
-    svc: &Services,
-    stream_id: Option<String>,
-    query: String,
-    limit: Option<usize>,
-) -> Result<Vec<TextSearchHit>, IpcError> {
-    Ok(svc
-        .git
-        .search_workspace_text(stream_id.as_deref(), query, limit)
-        .await)
+    let ws = svc.worktrees.resolve(stream_id.as_deref()).await;
+    svc.git
+        .change_scopes(&ws)
+        .await
+        .map_err(|e| DomainError::from(e).into())
 }

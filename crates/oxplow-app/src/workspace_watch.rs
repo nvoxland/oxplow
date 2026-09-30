@@ -4,8 +4,8 @@
 //! Spawned at boot. Iterates the stream list, opens an `FsWatcher`
 //! against each worktree (ignored paths — `.git`/`.oxplow` +
 //! `.gitignore` + the project's `generated.exclude` — are pruned via
-//! the shared [`oxplow_fs_watch::WorkspaceFilter`]) and a `GitRefsWatcher`
-//! against `<worktree>/.git/refs`. Translates the per-watcher
+//! the shared [`oxplow_fs_watch::WorkspaceFilter`]) and a refs watch
+//! through the VCS (`Vcs::watch_refs`). Translates the per-watcher
 //! broadcasts into `OxplowEvent::WorkspaceChanged` /
 //! `OxplowEvent::GitRefsChanged` so the renderer's existing
 //! subscribers fire.
@@ -20,9 +20,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use oxplow_domain::vcs::Vcs;
 use oxplow_domain::{Stream, StreamKind};
 use oxplow_fs_watch::{FsWatcher, RecursiveMode, WatchEvent, WatchEventKind};
-use oxplow_git::GitRefsWatcher;
 use oxplow_session::StreamService;
 use tracing::{debug, warn};
 
@@ -37,7 +37,7 @@ pub struct WorkspaceWatchRegistry {
 
 struct StreamWatchers {
     _fs: FsWatcher,
-    _refs: Option<GitRefsWatcher>,
+    _refs: Option<Box<dyn Send>>,
 }
 
 impl WorkspaceWatchRegistry {
@@ -53,6 +53,7 @@ impl WorkspaceWatchRegistry {
     /// different failure mode.
     pub async fn spawn(
         streams: StreamService,
+        vcs: std::sync::Arc<dyn Vcs>,
         events: EventBus,
         project_dir: PathBuf,
         filter: oxplow_fs_watch::WorkspaceFilter,
@@ -82,6 +83,7 @@ impl WorkspaceWatchRegistry {
             if let Some(w) = spawn_for_stream(
                 s.id,
                 worktree,
+                &*vcs,
                 events.clone(),
                 is_worktree,
                 on_orphan,
@@ -130,6 +132,7 @@ type OnOrphan =
 fn spawn_for_stream(
     stream_id: oxplow_domain::StreamId,
     worktree: PathBuf,
+    vcs: &dyn Vcs,
     events: EventBus,
     is_worktree: bool,
     on_orphan: OnOrphan,
@@ -220,29 +223,19 @@ fn spawn_for_stream(
         });
     }
 
-    let refs = match GitRefsWatcher::watch(worktree.clone(), Duration::from_millis(250)) {
-        Ok(w) => Some(w),
-        Err(e) => {
-            // A non-git worktree won't have `.git/refs/`; that's
-            // fine — drop the refs watcher silently.
-            debug!(error = %e, %stream_id, "git refs watcher unavailable");
-            None
+    let refs = {
+        let bus = events.clone();
+        let on_change = Box::new(move || bus.emit(OxplowEvent::GitRefsChanged { stream_id }));
+        match vcs.watch_refs(&worktree, on_change) {
+            Ok(guard) => Some(guard),
+            Err(e) => {
+                // A workspace outside version control has no refs to
+                // watch; that's fine.
+                debug!(error = %e, %stream_id, "refs watcher unavailable");
+                None
+            }
         }
     };
-    if let Some(refs_handle) = refs.as_ref() {
-        let mut rx = refs_handle.subscribe();
-        let bus = events.clone();
-        let id = stream_id;
-        tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(_) => bus.emit(OxplowEvent::GitRefsChanged { stream_id: id }),
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        });
-    }
 
     Some(StreamWatchers {
         _fs: fs,
@@ -341,6 +334,7 @@ mod tests {
         let _watchers = spawn_for_stream(
             stream_id,
             root.clone(),
+            &crate::vcs::GitProvider,
             bus.clone(),
             false,
             on_orphan,
@@ -413,7 +407,12 @@ mod tests {
         let db = Database::in_memory();
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db));
-        let svc = StreamService::new(layout, stream_store, thread_store);
+        let svc = StreamService::new(
+            layout,
+            Arc::new(crate::vcs::GitProvider),
+            stream_store,
+            thread_store,
+        );
         svc.ensure_primary().await.unwrap();
         // Use the real `create_worktree` path so the on-disk dir exists
         // before we delete it.
@@ -435,6 +434,7 @@ mod tests {
         let mut rx = bus.subscribe();
         let _registry = WorkspaceWatchRegistry::spawn(
             svc.clone(),
+            Arc::new(crate::vcs::GitProvider),
             bus.clone(),
             project.clone(),
             oxplow_fs_watch::WorkspaceFilter::default(),
@@ -499,7 +499,12 @@ mod tests {
         let db = Database::in_memory();
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db));
-        let svc = StreamService::new(layout, stream_store, thread_store);
+        let svc = StreamService::new(
+            layout,
+            Arc::new(crate::vcs::GitProvider),
+            stream_store,
+            thread_store,
+        );
         svc.ensure_primary().await.unwrap();
         let stream = svc
             .create_worktree("ghost-rt", "GhostRT", "ghost-rt", "main")
@@ -518,6 +523,7 @@ mod tests {
         let mut rx = bus.subscribe();
         let _registry = WorkspaceWatchRegistry::spawn(
             svc.clone(),
+            Arc::new(crate::vcs::GitProvider),
             bus.clone(),
             project.clone(),
             oxplow_fs_watch::WorkspaceFilter::default(),

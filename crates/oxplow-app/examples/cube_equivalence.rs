@@ -42,7 +42,7 @@ async fn main() {
     // never runs.
     let resolver = std::sync::Arc::new(VisibilityResolver::new(
         oxplow_db::SqliteSnapshotStore::new(db),
-        &repo_dir,
+        oxplow_domain::vcs::Vcs::revision_graph(&oxplow_app::vcs::GitProvider, &repo_dir),
     ));
     let engine = MetricEngine::new(facts.clone()).with_visibility(resolver.clone());
     // The cube pass reads through its own engine, so nothing the oracle

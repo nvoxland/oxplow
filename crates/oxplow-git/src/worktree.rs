@@ -186,6 +186,44 @@ pub fn ensure_worktree(
     Ok(())
 }
 
+/// Remove the worktree at `worktree_path` (`git worktree remove
+/// --force`, so uncommitted changes go with it) and prune the repo's
+/// worktree records. A path already gone is only pruned: git keeps a
+/// stale admin entry in `.git/worktrees/` until pruned, and a later
+/// `worktree add` of the same path would trip on it.
+pub fn remove_worktree(
+    repo_root: impl AsRef<Path>,
+    worktree_path: impl AsRef<Path>,
+) -> Result<(), String> {
+    let repo_root = repo_root.as_ref();
+    let worktree_path = worktree_path.as_ref();
+    let git = |args: &[&std::ffi::OsStr]| -> Result<(), String> {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(repo_root)
+            .args(args)
+            .output()
+            .map_err(|e| format!("spawn git: {e}"))?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        }
+    };
+    let removed = if worktree_path.exists() {
+        git(&[
+            "worktree".as_ref(),
+            "remove".as_ref(),
+            "--force".as_ref(),
+            worktree_path.as_os_str(),
+        ])
+    } else {
+        Ok(())
+    };
+    git(&["worktree".as_ref(), "prune".as_ref()])?;
+    removed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

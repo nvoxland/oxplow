@@ -547,7 +547,7 @@ impl TaskService {
         // Capture branch best-effort (process fact, tied to the worktree's
         // current branch). NULL when the stream has no capture service.
         let branch = match self.service_for_thread(thread_id).await {
-            Some(svc) => oxplow_git::detect_current_branch(svc.project_dir()),
+            Some(svc) => svc.branch().await,
             None => None,
         };
 

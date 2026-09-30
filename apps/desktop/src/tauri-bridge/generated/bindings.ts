@@ -4018,9 +4018,12 @@ export type TestDecl = {
 	sql?: string | null,
 };
 
+// A line of a workspace file that matched a text search.
 export type TextSearchHit = {
 	path: string,
+	// 1-based.
 	line: number,
+	// The line, cut at 400 bytes.
 	snippet: string,
 };
 

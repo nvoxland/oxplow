@@ -4815,13 +4815,10 @@ name = "oxplow-session"
 version = "0.7.0"
 dependencies = [
  "async-trait",
- "git2",
  "oxplow-db",
  "oxplow-domain",
- "oxplow-git",
  "serde",
  "specta",
- "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tracing",

@@ -31,15 +31,23 @@ provider stays testable against a tempdir.
   `resolve_conflict(path, Ours | Theirs | Auto)`. They run only through
   the `vcs.*` bus commands (below), which announce the change: a
   provider emits nothing.
-- **Feature `isolated_workspaces`:** `create_workspace`,
-  `list_workspaces` — what backs streams.
+- **Working copies:** `detect(root)` (`Primary`, `Secondary` — another
+  checkout of a repository whose primary lives elsewhere — or `None`),
+  and, feature `isolated_workspaces`, `create_workspace`,
+  `list_workspaces` and `remove_workspace` — what backs streams
+  (`StreamService` in `oxplow-session` takes the `Vcs`).
+- **Watching and the graph:** `watch_refs(ws, on_change)` calls back
+  when refs move until the returned guard drops (the workspace watch
+  registry turns it into `GitRefsChanged`); `revision_graph(ws)` is a
+  synchronous `RevisionGraph` (ancestry, a revision's time) that metric
+  visibility caches over.
 
 `rev_kind()` names the provider's revisions in a ref's `@<kind>:<rev>`
 slot (`git`); `features()` says what it supports beyond the floor. The
 types are neutral (`RevisionInfo`, `FileStatus`, `Branch`, `OpOutcome`,
-…). No `oxplow_git` type is meant to cross IPC: the workspace listings
-already carry `FileStatus`, and the remaining git-shaped RPCs go in
-B4–B7.
+…). The only git types that cross IPC are the git provider's own, behind
+the `git_*` RPCs (`ChangeScopes`, `CommitRefLabel`, `RemoteBranchEntry`,
+re-exported from `oxplow_app::vcs`).
 
 ## The git provider
 
@@ -229,16 +237,36 @@ and back, and diffs empty against it) needs the snapshot store, so it
 runs in `trees.rs`. Still to come: branch listing and divergence, and 8 (isolated
 workspaces share history).
 
-**`only_the_git_provider_calls_oxplow_git`** (`vcs/mod.rs`) scans the
-crates' production code: `oxplow_git::` appears only in `vcs/git.rs`
-and in the `NOT_YET_ON_VCS` list, which fails when a file on it stops
-calling `oxplow_git` (take it off) and ends empty at B7. The snapshot
-files left it in B3.
+**`only_the_git_provider_touches_git`** (`vcs/mod.rs`) scans the
+crates' production code: `oxplow_git::` and `git2::` appear only in
+`vcs/git.rs`. Test code — after `#[cfg(test)]`, a `#![cfg(test)]`
+module, `tests/` and `benches/` — is exempt; it builds real repositories
+as fixtures. (Through B3–B6 a `NOT_YET_ON_VCS` list held the files still
+to move; it emptied in B7.)
 
-## Still git-shaped (P5 B6–B7)
+## The last callers (P5.B7)
 
-`GitService` keeps only git-native reads (change scopes, text search,
-ref labels, recent remote branches, the default branch); it and the
-rest of `NOT_YET_ON_VCS` move in B7. Commit-id columns outside snapshots
-(`closest_git_version`, `git_version_exact`, `v_commit`) keep their
-names until then.
+- **Streams**: `StreamService` validates the project with `detect` (not
+  under version control → `NotARepo`, a secondary checkout →
+  `InWorktree`), reads a branch with `head`, and creates and removes
+  worktrees with `create_workspace` / `remove_workspace` — the raw `git
+  worktree remove/prune` shell-outs went. Its tests need a real
+  provider, so they live in `oxplow-app` (`stream_service_tests.rs`).
+- **Branch stamps** on facts and captures (collection, metrics, the
+  effort-lifecycle metrics) read `Vcs::head`.
+- **Revert detection** (token waste) reads the head and the reverted
+  commits with `Vcs::head` / `Vcs::revision`.
+- **Workspace context** asks `detect` and the default branch from
+  `branches()`.
+- **Text search** is `WorkspaceFiles::search_text`, no longer `git grep`.
+- **Co-change** reads the commit index (`crate::co_change`,
+  [git-integration.md](./git-integration.md) "Commit indexer").
+- **Metric visibility** asks `revision_graph` (it had opened libgit2
+  itself).
+- `GitService` is gone: its git-native reads are `GitProvider` methods,
+  and `Services.git` is the provider.
+
+Still git-named: the commit-id columns outside snapshots
+(`closest_git_version`, `git_version_exact`), the `GitRefsChanged`
+event, the workspace context's `is_git_repo`, and the project-root
+`.git` watcher (git-integration.md) — renamed in their own task.

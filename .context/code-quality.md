@@ -274,11 +274,12 @@ No IPC of its own — `zones` rides on `get_config`, and the config
 watcher hot-reloads file edits, so a write repaints an open
 changed-files tree without a restart.
 
-### `oxplow-git/co_change`
+### Co-change (`crates/oxplow-app/src/co_change.rs`)
 
-Walks `git log` (libgit2, time-sorted) within a configurable window
-(default 180 days, 5k commit cap), drops mega-commits (>50 files —
-mass renames / formatter sweeps drown the signal), builds two maps:
+Aggregates the commit index (`git_commit_file`, every stream's head; see
+git-integration.md "Commit indexer") over the last 180 days, drops
+mega-commits (>50 files — mass renames / formatter sweeps drown the
+signal), and builds two maps:
 
 - `co_changers: file → Vec<(co_changer, count)>` filtered to pairs
   with ≥ 3 co-occurrences, sorted descending.
@@ -290,8 +291,9 @@ classifies each file as `Normal | UsualCoChangersAbsent { expected }
 co-changer check (cheaper, clearer signal); files never seen in the
 window are treated as dormant. `SurpriseReason` is specta-derived.
 
-The change analyzer caches `CoChangeHistory` per (repo, HEAD) — the
-public API is pure once the history is built.
+The change analyzer caches `CoChangeHistory` until the commit index
+changes (its size or newest commit) — the API is pure once the history
+is built.
 
 ### Import deltas
 

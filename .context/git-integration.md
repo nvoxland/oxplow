@@ -1,10 +1,11 @@
 # Git integration
 
-
-What this doc covers: the three filesystem watchers that keep git state
-fresh in the UI, the runtime-side git operations, and the rule that
-agents never call `git` directly. For the data side of commits (commit
-points), see [data-model.md](./data-model.md) and
+What this doc covers: the filesystem watchers that keep VCS state fresh
+in the UI, notes on the **git provider** (`oxplow_app::vcs::GitProvider`,
+the one place that touches git — `oxplow_git` or libgit2), and the rule
+that agents never call `git` directly. Core reaches version control only
+through the VCS capability — see [vcs.md](./vcs.md). For the data side
+of commits (commit points), see [data-model.md](./data-model.md) and
 [agent-model.md](./agent-model.md).
 
 ## Three watchers
@@ -153,16 +154,17 @@ root. On change:
 This is the only watcher that lives at the project-root level rather
 than per-stream.
 
-### 3. Git refs watcher
+### 3. Refs watcher
 
-`crates/oxplow-git/src/refs_watch.rs` — `GitRefsWatcher`. The
-per-stream registry lives in
-`crates/oxplow-app/src/workspace_watch.rs`
-(`WorkspaceWatchRegistry`), which spawns one `GitRefsWatcher` and one
-`FsWatcher` per stream at boot and bridges their broadcasts onto the
-shared `EventBus` as `gitRefsChanged` / `workspaceChanged`. Watchers
-debounce ~250ms (a single `git commit` fires a dozen events touching
-`HEAD`, `refs/*`, `logs/*`, `index`, `ORIG_HEAD`, …).
+`Vcs::watch_refs(ws, on_change)` — the provider's; git's is
+`crates/oxplow-git/src/refs_watch.rs` (`GitRefsWatcher`), which
+`GitProvider::watch_refs` bridges to the callback until the returned
+guard drops. The per-stream registry lives in
+`crates/oxplow-app/src/workspace_watch.rs` (`WorkspaceWatchRegistry`),
+which starts one refs watch and one `FsWatcher` per stream at boot and
+turns them into `gitRefsChanged` / `workspaceChanged` on the shared
+`EventBus`. Git's watcher debounces ~250ms (a single `git commit` fires a
+dozen events touching `HEAD`, `refs/*`, `logs/*`, `index`, `ORIG_HEAD`, …).
 
 When the stream lives in a secondary worktree (the common case — oxplow
 creates worktrees as siblings of the main repo), the stream's
@@ -266,28 +268,37 @@ the renderer paints first, and the `BackgroundTaskIndicator` shows
 each scan settles. Filesystem events start arriving once the cache
 walk completes.
 
-## GitService — the git-native facade, shrinking
+## The git provider
 
-Core reaches version control through the **VCS capability**
-(`oxplow_domain::vcs::Vcs`, provider `oxplow_app::vcs::GitProvider`) —
-see [vcs.md](./vcs.md). `GitService` is what remains of the old
-singleton: git-native reads the desktop still calls (change scopes,
-workspace text search, commit ref labels, recent remote branches, the
-default branch), folded into the provider in P5.B7. Everything else
-left it:
+`GitProvider` (`crates/oxplow-app/src/vcs/git.rs`) implements the `Vcs`
+trait over `oxplow_git`, stateless and path-based, each call under
+`spawn_blocking`. Beyond the trait it has git's own operations: the
+`git.*` commands' rebase, cherry-pick, revert and `.gitignore`, and the
+reads behind the `git_*` RPCs — `change_scopes` (staged / unstaged /
+branch changes against base and upstream), `commit_ref_labels` (the
+branches and tags at each sha) and `recent_remote_branches`.
+`Services.git` is the same provider, typed, for those. The ratchet
+`only_the_git_provider_touches_git` (`vcs/mod.rs`) keeps every other
+production file off `oxplow_git` and `git2`.
+
+What left the old `GitService` facade (P5.B1–B7), and where it went:
 
 - **Routing** — stream → worktree is `WorktreeRouter`
   (`Services.worktrees`), a memo over the stream store.
-- **File I/O** — list/read/write/create/rename/delete is
-  `WorkspaceFiles` (`Services.workspace_files`); it isn't git.
+- **File I/O and text search** — `WorkspaceFiles`
+  (`Services.workspace_files`): list/read/write/create/rename/delete and
+  `search_text` (a fixed-string scan over the files the workspace filter
+  keeps, the quick-open walk — it was `git grep`); none of it is git.
 - **Branch reconciliation** — `BranchReconciler`
   (`Services.branch_reconciler`, spawned at boot).
 - **Mutations** — the `vcs.*` / `git.*` bus commands
   (`commands/vcs.rs`, P5.B6).
-
-**It is a thin facade.** Every read shells out live via
-`tokio::task::spawn_blocking(oxplow_git::*)`. There is no shared
-mutable cache.
+- **Worktrees** — `Vcs::create_workspace` / `remove_workspace` /
+  `detect` (primary or secondary checkout), which `StreamService`
+  (`oxplow-session`) calls.
+- **Co-change** — `crate::co_change`, over the commit index (below).
+- **Ancestry for metric visibility** — `Vcs::revision_graph`, a
+  synchronous `RevisionGraph` the visibility oracle caches over.
 
 ### Why no cache
 
@@ -295,11 +306,11 @@ The previous design cached statuses / branches / log / ahead-behind /
 remote-branches and **subscribed to its own invalidation triggers**
 (`WorkspaceChanged` / `GitRefsChanged`). Subscribers on the same
 broadcast channel have no ordering guarantees, so any other consumer
-of those events that read from the GitService cache could land on the
+of those events that read from that cache could land on the
 pre-event snapshot before the invalidation hop ran. That race silently
 broke snapshot capture's commit-record path.
 
-The wrapped `oxplow_git::*` ops are sub-10ms libgit2 calls. The cache
+The provider's `oxplow_git::*` ops are sub-10ms libgit2 calls. The cache
 wasn't worth the correctness cost. If a future profile shows a real
 hotspot, **add caching inside the provider** — never let cached state
 leak through the API. Callers must not be able to tell whether anything
@@ -392,31 +403,19 @@ tree-sitter AST merge (Mergiraf-style) for the highest-value commutative
 cases; note Mergiraf itself is GPLv3 vs oxplow's MIT, so it can only be
 invoked as a separate binary, never linked as a library.
 
-## Runtime git operations
+## Provider notes
 
-All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:
-
-- `gitBlame(projectDir, path)` — `git blame --porcelain HEAD` parsed via
-  `parseBlamePorcelain`. Powers the editor blame overlay.
-- `gitCommitAll(projectDir, message, options?)` — `git add -u` (or
-  `git add -A` when `options.includeUntracked` is true) then
-  `git commit -m message`, returning the new sha. Only used by the
-  Files-panel commit dialog — the runtime never calls it elsewhere
-  and no MCP tool invokes git commits. Commits not started from the
-  Files dialog are user-driven via `git commit` in the terminal.
-- `getGitLog`, `getChangeScopes`, `searchWorkspaceText`, `restorePath`,
-  `addPath`, `appendToGitignore`, `listFileCommits`, `listAllRefs` —
-  git-shaped wrappers still exposed via IPC (status, blame, a commit's
-  detail and branch changes moved to the neutral `vcs_*` / `diff` RPCs in
-  P5.B4, `.context/vcs.md`).
 - `get_commit_detail(repo, sha)` (`src/log.rs`, behind `Vcs::revision`)
-  resolves **both full and
-  abbreviated** shas — Activity-feed commit links carry 7-char prefixes.
-  Gotcha: `git2::Oid::from_str` zero-pads any ≤40-char hex string into a
-  syntactically-valid-but-**nonexistent** OID and returns `Ok`, so it can
-  never resolve an abbreviation. Trust it only for `sha.len() == 40`; route
-  everything shorter through `repo.revparse_single`, which expands against
-  the object DB. Same rule applies anywhere else a sha is turned into an OID.
+  resolves **both full and abbreviated** shas — Activity-feed commit
+  links carry 7-char prefixes. Gotcha: `git2::Oid::from_str` zero-pads
+  any ≤40-char hex string into a syntactically-valid-but-**nonexistent**
+  OID and returns `Ok`, so it can never resolve an abbreviation. Trust it
+  only for `sha.len() == 40`; route everything shorter through
+  `repo.revparse_single`, which expands against the object DB. Same rule
+  applies anywhere else a sha is turned into an OID.
+- `vcs.commit` runs `git add -u` (or `git add -A` with
+  `include_untracked`) then `git commit -m`. Only the Files panel and the
+  uncommitted-changes page run it; no MCP tool commits.
 - Push, pull, fetch, merge and rebase are long: the desktop runs each
   command inside a `BackgroundTaskStore` row (`runAsBackgroundTask` in
   `api.ts`) so the bottom-bar `BackgroundTaskIndicator` shows progress.
@@ -424,38 +423,38 @@ All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:
   `v_tag`; P5.B5, [vcs.md](./vcs.md)); ahead/behind, divergence,
   commits-ahead and a file's history stay live on `vcs_divergence`,
   `vcs_revisions_between` and `vcs_file_history`.
-- `compute_divergence(repo_path, base, head)` (`src/divergence.rs`) —
-  cross-stream merge-readiness. Returns `Divergence { ahead, behind,
-  overlapping_files, readiness }`. `ahead`/`behind` come from
-  `graph_ahead_behind(head, base)`; `overlapping_files` is the set of
-  paths changed on **both** sides since `merge_base(base, head)` (a
-  file-overlap heuristic — it names the files a line-level merge could
-  collide on, without running a trial merge). `readiness` is
-  `AlreadyIntegrated` (head has no commits beyond base), `Clean` (ahead,
-  no overlap), or `Conflict` (ahead, overlap). Any lookup failure
-  (unresolvable branch, etc.) degrades to `AlreadyIntegrated` zeros so a
-  bad row never breaks the dashboard. Exposed as `Vcs::divergence` →
-  `vcs_divergence`; the Git Dashboard's "Merge readiness" card composes
-  one row per stream against the default branch (`v_branch.is_default`).
+- `compute_divergence(repo_path, base, head)` (`src/divergence.rs`,
+  behind `Vcs::divergence`) — cross-stream merge-readiness:
+  `Divergence { ahead, behind, overlapping_files, readiness }`.
+  `ahead`/`behind` come from `graph_ahead_behind(head, base)`;
+  `overlapping_files` is the set of paths changed on **both** sides since
+  `merge_base(base, head)` (a file-overlap heuristic — it names the files
+  a line-level merge could collide on, without running a trial merge).
+  `readiness` is `AlreadyIntegrated` (head has no commits beyond base),
+  `Clean` (ahead, no overlap), or `Conflict` (ahead, overlap). Any lookup
+  failure degrades to `AlreadyIntegrated` zeros so a bad row never
+  breaks the dashboard, whose "Merge readiness" card composes one row per
+  stream against the default branch (`v_branch.is_default`).
 - `tree_at_commit(repo, rev)` / `diff_commits(repo, a, b)`
-  (`src/tree.rs`) — a libgit2 tree walk that yields `path -> blob oid`
-  and runs it through the **shared** `oxplow_domain::diff_trees`
-  comparison (the same primitive `SqliteSnapshotStore::diff_snapshots`
-  uses for snapshots). This is the source-agnostic content diff:
-  before/after can come from two git commits or two snapshots and go
-  through one comparison instead of `git diff`. It's a content-identity
-  diff (added/modified/deleted); **rename detection is intentionally
-  not done** here — views that need renames still use git's own diff.
-- `listRecentRemoteBranches(projectDir, limit=20)` — wraps
-  `git for-each-ref --sort=-committerdate refs/remotes` and returns
-  `RemoteBranchEntry[]` (filters out `<remote>/HEAD`). Drives the
-  dashboard's recent-remote-branches card.
+  (`src/tree.rs`, behind `Vcs::files_at` / `diff`) — a libgit2 tree walk
+  yielding `path -> blob oid`, run through the **shared**
+  `oxplow_domain::diff_trees` comparison (the primitive
+  `SqliteSnapshotStore::diff_snapshots` uses for snapshots), so two
+  commits or two snapshots diff through one comparison. It's a
+  content-identity diff; **rename detection is intentionally not done**.
+- `recent_remote_branches` wraps `git for-each-ref
+  --sort=-committerdate refs/remotes` (filters out `<remote>/HEAD`) for
+  the dashboard's recent-remote-branches card.
 - `vcs.push` / `vcs.pull` with `remote` + `branch` push the current
   branch to `<remote>/<branch>` (`git push <remote> HEAD:refs/heads/<branch>`,
   a refspec push that never touches another working dir) and pull
   `<remote>/<branch>` into it (fetch, then merge; a failed fetch
   short-circuits the merge). The dashboard's remote-branches card runs
   both.
+- `remove_workspace` is `git worktree remove --force` then `git worktree
+  prune`: a removal that fails (a directory already gone, a locked
+  worktree) leaves a stale admin entry in `.git/worktrees/` that a later
+  `worktree add` of the same path trips on, and prune clears it.
 
 ### Cross-worktree push: deliberately unsupported
 
@@ -490,8 +489,8 @@ another tool's checkout.
 The Files panel (`ProjectPanel`) shows a **Commit (N)** button in its
 header toolbar whenever `gitEnabled && uncommittedPaths.length > 0`.
 Clicking it opens a small `CommitDialog` with a commit-message
-textarea; submitting runs `gitCommitAll` through a dedicated
-`oxplow:gitCommitAll` IPC method. This is the UI entry point for
+textarea; submitting runs the `vcs.commit` command (`vcsCommit`). This
+is the UI entry point for
 user-driven commits. The agent doesn't drive commits — the Stop-hook
 emits no commit directives.
 
@@ -541,9 +540,18 @@ Idempotent. Each commit is keyed by its full sha, and a one-row
 existence probe before re-diffing skips already-indexed commits, so
 repeated scans are cheap. No separate cursor table.
 
+The index also feeds **co-change** (`crate::co_change`): change analysis
+aggregates the last 180 days of `git_commit_file`
+(`SqliteGitStore::changesets_since`) into which files usually move
+together and when each was last touched, and flags a change's files
+whose usual co-changers are missing or that were long dormant. The
+history is cached until the index changes (its size or newest commit).
+It used to walk up to 5000 commits of the primary's HEAD; the index
+spans every stream's head, 500 commits deep.
+
 The boot path runs the initial scan in a detached task. The same
 function is re-run on every `OxplowEvent::GitRefsChanged` (debounced
-by `GitRefsWatcher` upstream), which catches new commits whether
+by the refs watch upstream), which catches new commits whether
 they came from the in-app commit affordance or an external
 `git commit` in the user's terminal.
 

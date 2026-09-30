@@ -17,29 +17,48 @@ pub async fn list_workspace_entries(
         .map_err(|e| IpcError::internal(e.to_string()))
 }
 
+/// The project's workspace filter — the same exclusions as
+/// fs-watch and snapshots (the `generated:` list and `.gitignore`). It
+/// keeps node_modules/dist junk out of quick-open and text search, and
+/// bounds the walk (a vendor tree is hundreds of thousands of entries).
+fn workspace_filter(svc: &Services) -> oxplow_fs_watch::WorkspaceFilter {
+    let cfg = svc.config.read();
+    cfg.as_ref()
+        .map(|c| {
+            oxplow_fs_watch::WorkspaceFilter::for_project(
+                &svc.layout.project_dir,
+                &c.generated.exclude,
+                &c.generated.include,
+            )
+        })
+        .unwrap_or_default()
+}
+
+/// Lines containing `query` (a fixed string) across the stream's files,
+/// at most `limit` (default 200, at most 1000).
+pub async fn search_workspace_text(
+    svc: &Services,
+    stream_id: Option<String>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<oxplow_app::workspace_files::TextSearchHit>, IpcError> {
+    svc.workspace_files
+        .search_text(
+            stream_id.as_deref(),
+            workspace_filter(svc),
+            query,
+            limit.unwrap_or(200).clamp(1, 1000),
+        )
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))
+}
+
 pub async fn list_workspace_files(
     svc: &Services,
     stream_id: Option<String>,
 ) -> Result<Vec<WorkspaceIndexedFile>, IpcError> {
-    // Same exclusion rule as fs-watch/snapshots: the `generated:`
-    // config list, and nothing else (`.gitignore` is not consulted).
-    // Keeps node_modules/dist junk out of quick-open results and bounds
-    // the walk (a vendor tree is hundreds of thousands of entries the
-    // index has no use for).
-    let filter = {
-        let cfg = svc.config.read();
-        cfg.as_ref()
-            .map(|c| {
-                oxplow_fs_watch::WorkspaceFilter::for_project(
-                    &svc.layout.project_dir,
-                    &c.generated.exclude,
-                    &c.generated.include,
-                )
-            })
-            .unwrap_or_default()
-    };
     svc.workspace_files
-        .list_files(stream_id.as_deref(), filter)
+        .list_files(stream_id.as_deref(), workspace_filter(svc))
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
 }

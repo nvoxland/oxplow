@@ -1,5 +1,7 @@
 //! Shared test setup for tests that need a real `Services`.
 
+#![cfg(test)]
+
 use oxplow_domain::refs::build::work_item_ref;
 use std::path::Path;
 use std::sync::Arc;

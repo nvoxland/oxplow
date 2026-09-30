@@ -22,7 +22,8 @@ modify/modify entry that's UTF-8 and under 1 MiB runs `merge3_str`,
 writing + `git add`ing the file **only when `merge3` returns `Ok`**
 (zero residual token conflicts). add/add, delete/modify, binary, and
 oversized files are left exactly as git produced them. This is wired
-into `GitService` merge/rebase/cherry-pick/revert.
+into the git provider's merge/pull/rebase/cherry-pick/revert
+(`with_auto_resolve`, `crates/oxplow-app/src/vcs/git.rs`).
 
 ## Tier 2 — AST structural merge (WIRED — tsk134+tsk135+tsk136+tsk137)
 

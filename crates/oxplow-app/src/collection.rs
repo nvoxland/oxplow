@@ -386,6 +386,16 @@ pub struct RunCause {
 }
 
 impl CollectionService {
+    /// The branch the project checkout has checked out (`None` when
+    /// detached or unreadable).
+    async fn current_branch(&self) -> Option<String> {
+        self.vcs
+            .head(&self.project_dir)
+            .await
+            .ok()
+            .and_then(|h| h.branch)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         facts: Arc<SqliteFactStore>,
@@ -403,7 +413,7 @@ impl CollectionService {
     ) -> Self {
         let metric_visibility = Arc::new(crate::metric_visibility::VisibilityResolver::new(
             (*snapshots).clone(),
-            &project_dir,
+            vcs.revision_graph(&project_dir),
         ));
         Self {
             facts,
@@ -680,7 +690,7 @@ impl CollectionService {
                         }
                     }
                 }
-                let branch = oxplow_git::detect_current_branch(&self.project_dir);
+                let branch = self.current_branch().await;
                 let snapshot_id = self
                     .snapshots
                     .latest_snapshot_id_for_stream(oxplow_domain::StreamId::new(stream_val))
@@ -1162,7 +1172,7 @@ impl CollectionService {
         detail: Option<serde_json::Value>,
     ) -> Option<i64> {
         let stream_val = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())?;
-        let branch = oxplow_git::detect_current_branch(&self.project_dir);
+        let branch = self.current_branch().await;
         let analyzer = analyzers
             .first()
             .cloned()
@@ -1391,7 +1401,7 @@ impl CollectionService {
                         ..NewFact::new(measure.id, pct)
                     });
                 }
-                let branch = oxplow_git::detect_current_branch(&self.project_dir);
+                let branch = self.current_branch().await;
                 let snapshot_id =
                     (version.local_snapshot_id != 0).then_some(version.local_snapshot_id);
                 let mut capture = NewMetricCapture::done(stream_val, "coverage", source);
@@ -1676,24 +1686,17 @@ impl CollectionService {
             return Ok(());
         };
         // HEAD is the just-landed (revert) commit; its body carries the trailers.
-        let head_sha = match tokio::task::spawn_blocking({
-            let p = self.project_dir.clone();
-            move || oxplow_git::head_commit_sha(&p)
-        })
-        .await
-        {
-            Ok(Some(sha)) => sha,
-            _ => return Ok(()),
+        let Some(head_sha) = self
+            .vcs
+            .head(&self.project_dir)
+            .await
+            .ok()
+            .and_then(|h| h.revision)
+        else {
+            return Ok(());
         };
-        let head = match tokio::task::spawn_blocking({
-            let p = self.project_dir.clone();
-            let sha = head_sha.clone();
-            move || oxplow_git::get_commit_detail(&p, &sha)
-        })
-        .await
-        {
-            Ok(Some(d)) => d,
-            _ => return Ok(()),
+        let Ok(Some(head)) = self.vcs.revision(&self.project_dir, &head_sha).await else {
+            return Ok(());
         };
         let shas = parse_reverted_shas(&head.body);
         if shas.is_empty() {
@@ -1704,22 +1707,15 @@ impl CollectionService {
         };
         let stream_val = thread_row.stream_id.value();
         for sha in shas {
-            let Ok(Some(reverted)) = tokio::task::spawn_blocking({
-                let p = self.project_dir.clone();
-                let sha = sha.clone();
-                move || oxplow_git::get_commit_detail(&p, &sha)
-            })
-            .await
-            else {
+            let Ok(Some(reverted)) = self.vcs.revision(&self.project_dir, &sha).await else {
                 continue;
             };
             // git timestamps are SECONDS-granular — the commit happened
             // somewhere inside [secs, secs+1), so the containment window must
             // span that whole second or a commit made in the same wall-second
             // an effort started would truncate to before it.
-            let at_start = oxplow_domain::Timestamp::from_unix_ms(reverted.timestamp_secs * 1000);
-            let at_end =
-                oxplow_domain::Timestamp::from_unix_ms(reverted.timestamp_secs * 1000 + 999);
+            let at_start = oxplow_domain::Timestamp::from_unix_ms(reverted.info.time * 1000);
+            let at_end = oxplow_domain::Timestamp::from_unix_ms(reverted.info.time * 1000 + 999);
             // Closed efforts whose window contains the reverted commit, scoped
             // to this stream (commits are per-worktree = per-stream).
             let mut owners = Vec::new();
@@ -2052,7 +2048,7 @@ impl CollectionService {
             Ok(Some(t)) => t.stream_id.value(),
             _ => return,
         };
-        let branch = oxplow_git::detect_current_branch(&self.project_dir);
+        let branch = self.current_branch().await;
         let result = async {
             // Stop-collecting gate (tsk31): skip when the `agent.nudges.fired`
             // metric is disabled (nothing consumes `oxplow.nudge`). The nudge

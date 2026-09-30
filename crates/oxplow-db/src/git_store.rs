@@ -53,6 +53,15 @@ pub struct GitTagRow {
     pub sha: String,
 }
 
+/// One indexed commit's files — what co-change analysis aggregates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Changeset {
+    pub sha: String,
+    pub committed_secs: i64,
+    /// Sorted.
+    pub paths: Vec<String>,
+}
+
 #[derive(Clone)]
 pub struct SqliteGitStore {
     db: Database,
@@ -113,6 +122,44 @@ impl SqliteGitStore {
                     .map_err(map_sql_err)?;
                 }
                 Ok(())
+            })
+            .await
+    }
+
+    /// Every indexed commit since `since_secs`, newest first, with the
+    /// files it changed.
+    pub async fn changesets_since(&self, since_secs: i64) -> Result<Vec<Changeset>, DomainError> {
+        let since = ts_to_string(Timestamp::from_unix_ms(since_secs * 1000));
+        self.db
+            .call(move |c| {
+                let mut stmt = c.prepare(
+                    "SELECT c.sha, CAST(strftime('%s', c.committed_at) AS INTEGER), f.path
+                     FROM git_commit c LEFT JOIN git_commit_file f ON f.sha = c.sha
+                     WHERE c.committed_at >= ?1
+                     ORDER BY c.committed_at DESC, c.sha, f.path",
+                )?;
+                let rows = stmt.query_map([since], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                })?;
+                let mut sets: Vec<Changeset> = Vec::new();
+                for row in rows {
+                    let (sha, committed_secs, path) = row?;
+                    if sets.last().is_none_or(|s| s.sha != sha) {
+                        sets.push(Changeset {
+                            sha,
+                            committed_secs,
+                            paths: Vec::new(),
+                        });
+                    }
+                    if let Some(path) = path {
+                        sets.last_mut().expect("just pushed").paths.push(path);
+                    }
+                }
+                Ok(sets)
             })
             .await
     }
@@ -246,6 +293,67 @@ mod tests {
                 ["main", "local", null, "abc", 1],
                 ["main", "remote", "origin", "abc", null]
             ])
+        );
+    }
+
+    #[tokio::test]
+    async fn changesets_since_lists_each_commits_files_newest_first() {
+        let store = SqliteGitStore::new(Database::in_memory());
+        let commit = |sha: &str, secs: i64, paths: &[&str]| GitCommitRow {
+            sha: sha.into(),
+            author: "Ada".into(),
+            email: "ada@x".into(),
+            committed_secs: secs,
+            subject: sha.into(),
+            body: String::new(),
+            parents: vec![],
+            files: paths
+                .iter()
+                .map(|p| GitCommitFileRow {
+                    path: (*p).into(),
+                    status: "modified".into(),
+                    additions: 1,
+                    deletions: 0,
+                })
+                .collect(),
+        };
+        store
+            .upsert_commit(commit("old", 1_000, &["a.rs"]))
+            .await
+            .unwrap();
+        store
+            .upsert_commit(commit("mid", 2_000, &["b.rs", "a.rs"]))
+            .await
+            .unwrap();
+        store
+            .upsert_commit(commit("new", 3_000, &["c.rs"]))
+            .await
+            .unwrap();
+        store
+            .upsert_commit(commit("empty", 2_500, &[]))
+            .await
+            .unwrap();
+
+        let sets = store.changesets_since(1_500).await.unwrap();
+        assert_eq!(
+            sets,
+            vec![
+                Changeset {
+                    sha: "new".into(),
+                    committed_secs: 3_000,
+                    paths: vec!["c.rs".into()]
+                },
+                Changeset {
+                    sha: "empty".into(),
+                    committed_secs: 2_500,
+                    paths: vec![]
+                },
+                Changeset {
+                    sha: "mid".into(),
+                    committed_secs: 2_000,
+                    paths: vec!["a.rs".into(), "b.rs".into()]
+                },
+            ]
         );
     }
 }

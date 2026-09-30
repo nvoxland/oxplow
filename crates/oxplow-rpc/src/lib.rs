@@ -332,10 +332,10 @@ macro_rules! oxplow_command_table {
                 record_usage => $crate::commands::usage::record_usage { kind: String, payload_json: String } -> ::oxplow_db::UsageEvent,
                 list_recent_usage_rollup => $crate::commands::usage::list_recent_usage_rollup { kind: String, stream_id: Option<String>, limit: u32 } -> Vec<::oxplow_db::UsageRollup>,
                 // git
-                git_resolve_commit_ref_labels => $crate::commands::git::git_resolve_commit_ref_labels { shas: Vec<String> } -> ::std::collections::HashMap<String, Vec<::oxplow_git::CommitRefLabel>>,
-                git_list_recent_remote_branches => $crate::commands::git::git_list_recent_remote_branches { limit: Option<usize> } -> Vec<::oxplow_git::RemoteBranchEntry>,
-                git_change_scopes => $crate::commands::git::git_change_scopes { stream_id: Option<String> } -> ::oxplow_git::ChangeScopes,
-                search_workspace_text => $crate::commands::git::search_workspace_text { stream_id: Option<String>, query: String, limit: Option<usize> } -> Vec<::oxplow_git::TextSearchHit>,
+                git_resolve_commit_ref_labels => $crate::commands::git::git_resolve_commit_ref_labels { shas: Vec<String> } -> ::std::collections::HashMap<String, Vec<::oxplow_app::vcs::CommitRefLabel>>,
+                git_list_recent_remote_branches => $crate::commands::git::git_list_recent_remote_branches { limit: Option<usize> } -> Vec<::oxplow_app::vcs::RemoteBranchEntry>,
+                git_change_scopes => $crate::commands::git::git_change_scopes { stream_id: Option<String> } -> ::oxplow_app::vcs::ChangeScopes,
+                search_workspace_text => $crate::commands::workspace::search_workspace_text { stream_id: Option<String>, query: String, limit: Option<usize> } -> Vec<::oxplow_app::workspace_files::TextSearchHit>,
                 read_at => $crate::commands::trees::read_at { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Option<String>,
                 // workspace
                 files_at => $crate::commands::trees::files_at { stream_id: Option<String>, revision: ::oxplow_domain::vcs::Revision } -> Vec<String>,

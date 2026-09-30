@@ -183,11 +183,12 @@ fn qualified(f: &AnalyzedFunction) -> String {
 /// One function's base and head versions (either may be absent).
 type BaseHead<'a> = (Option<&'a AnalyzedFunction>, Option<&'a AnalyzedFunction>);
 
-/// Co-change history cached for (repo, HEAD sha).
+/// Co-change history cached for the commit index it was built from
+/// (its size and newest commit).
 type CachedHistory = (
-    std::path::PathBuf,
+    usize,
     String,
-    std::sync::Arc<oxplow_git::co_change::CoChangeHistory>,
+    std::sync::Arc<crate::co_change::CoChangeHistory>,
 );
 
 /// Build the stored rows from the diff and the function analysis.
@@ -376,9 +377,9 @@ pub fn test_file_rows(
 
 /// Stored rows for the surprising files (normal ones are left out).
 pub fn co_change_rows(
-    surprises: Vec<oxplow_git::co_change::FileSurprise>,
+    surprises: Vec<crate::co_change::FileSurprise>,
 ) -> Vec<oxplow_db::ChangeCoChangeRow> {
-    use oxplow_git::co_change::SurpriseReason;
+    use crate::co_change::SurpriseReason;
     surprises
         .into_iter()
         .filter_map(|s| match s.reason {
@@ -438,8 +439,8 @@ pub struct ChangeAnalyzer {
     state: std::sync::Mutex<AnalyzerState>,
     /// Duplicate scans: one worker per change at a time.
     dup_queue: DupQueue,
-    /// Co-change history for (repo, HEAD): a walk of up to 5000 commits,
-    /// so it's reused until HEAD moves.
+    /// Co-change history over the commit index's window, reused until
+    /// the index changes.
     history: std::sync::Mutex<Option<CachedHistory>>,
 }
 
@@ -512,29 +513,36 @@ struct AnalyzerState {
 }
 
 impl ChangeAnalyzer {
-    /// The co-change history at `root`'s HEAD, built once per HEAD.
-    fn history(
+    /// The co-change history over the last `DEFAULT_WINDOW_DAYS` of the
+    /// commit index (`v_commit_file`, every stream's head), rebuilt only
+    /// when the index has changed.
+    async fn history(
         &self,
-        root: &std::path::Path,
-    ) -> std::sync::Arc<oxplow_git::co_change::CoChangeHistory> {
-        let head = git2::Repository::open(root)
-            .ok()
-            .and_then(|r| r.head().ok()?.target())
-            .map(|o| o.to_string())
-            .unwrap_or_default();
+        commits: &oxplow_db::SqliteGitStore,
+    ) -> std::sync::Arc<crate::co_change::CoChangeHistory> {
+        use crate::co_change::{CoChangeHistory, DEFAULT_WINDOW_DAYS};
+        let now = oxplow_domain::Timestamp::now().unix_ms() / 1000;
+        let sets = match commits
+            .changesets_since(now - DEFAULT_WINDOW_DAYS * 86_400)
+            .await
+        {
+            Ok(sets) => sets,
+            Err(e) => {
+                tracing::warn!(error = %e, "couldn't read the commit index for co-change");
+                Vec::new()
+            }
+        };
+        let newest = sets.first().map(|s| s.sha.clone()).unwrap_or_default();
         if let Ok(cache) = self.history.lock() {
-            if let Some((r, h, hist)) = cache.as_ref() {
-                if r == root && *h == head {
+            if let Some((len, sha, hist)) = cache.as_ref() {
+                if *len == sets.len() && *sha == newest {
                     return hist.clone();
                 }
             }
         }
-        let hist = std::sync::Arc::new(oxplow_git::co_change::build_history(
-            root,
-            oxplow_git::co_change::CoChangeOptions::default(),
-        ));
+        let hist = std::sync::Arc::new(CoChangeHistory::from_changesets(&sets, now));
         if let Ok(mut cache) = self.history.lock() {
-            *cache = Some((root.to_path_buf(), head, hist.clone()));
+            *cache = Some((sets.len(), newest, hist.clone()));
         }
         hist
     }
@@ -905,8 +913,7 @@ async fn compute(
                 .map_err(|e| e.to_string())?,
         ));
     }
-    let root = root.to_path_buf();
-    let analyzer = svc.change_analyzer.clone();
+    let history = svc.change_analyzer.history(&svc.git_store).await;
     tokio::task::spawn_blocking(move || -> Result<ChangeResults, String> {
         let specs: Vec<AnalyzeFileSpec> = analyzed
             .iter()
@@ -932,11 +939,10 @@ async fn compute(
         let mut results = build_results(&files, &analysis, &zones);
         results.test_files = test_file_rows(&analyzed, &base_contents, &head_contents, &analysis);
         let paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
-        let history = analyzer.history(&root);
-        results.co_changes = co_change_rows(oxplow_git::co_change::analyze_surprise(
+        results.co_changes = co_change_rows(crate::co_change::analyze_surprise(
             &history,
             &paths,
-            oxplow_git::co_change::DEFAULT_DORMANT_DAYS,
+            crate::co_change::DEFAULT_DORMANT_DAYS,
         ));
         Ok(results)
     })
@@ -1466,7 +1472,7 @@ mod tests {
 
     #[test]
     fn only_surprising_files_become_co_change_rows() {
-        use oxplow_git::co_change::{FileSurprise, SurpriseReason};
+        use crate::co_change::{FileSurprise, SurpriseReason};
         let rows = co_change_rows(vec![
             FileSurprise {
                 path: "a.rs".into(),

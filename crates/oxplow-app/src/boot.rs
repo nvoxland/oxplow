@@ -250,6 +250,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // can take a moment to settle.
     {
         let stream_service = state.streams.clone();
+        let watch_vcs = state.vcs.clone();
         let watch_bus = event_bus.clone();
         let watch_project_dir = state.layout.project_dir.clone();
         let watch_filter = {
@@ -270,6 +271,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         tokio::spawn(async move {
             let registry = crate::workspace_watch::WorkspaceWatchRegistry::spawn(
                 stream_service,
+                watch_vcs,
                 watch_bus,
                 watch_project_dir,
                 watch_filter,

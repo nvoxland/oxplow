@@ -119,76 +119,6 @@ pub fn add_path(repo: &Path, path: &str) -> std::io::Result<GitOpResult> {
     run(&["add", "--", path], repo)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct TextSearchHit {
-    pub path: String,
-    pub line: u32,
-    pub snippet: String,
-}
-
-/// Run `git grep` against the repo's tracked + untracked files.
-/// `query` is treated as a fixed string (`-F`), case-sensitive, with
-/// line numbers. Caps results at `limit` (default 200, max 1000).
-pub fn search_workspace_text(repo: &Path, query: &str, limit: Option<usize>) -> Vec<TextSearchHit> {
-    let trimmed = query.trim();
-    if trimmed.is_empty() {
-        return vec![];
-    }
-    let limit = limit.unwrap_or(200).clamp(1, 1000);
-    let output = match Command::new("git")
-        .args([
-            "grep",
-            "--no-color",
-            "-n",
-            "-I",
-            "-F",
-            "--untracked",
-            "--",
-            trimmed,
-        ])
-        .current_dir(repo)
-        .output()
-    {
-        Ok(o) => o,
-        Err(_) => return vec![],
-    };
-    // `git grep` exits 1 when there are no matches — treat as empty.
-    if !output.status.success() && output.stdout.is_empty() {
-        return vec![];
-    }
-    let raw = String::from_utf8_lossy(&output.stdout);
-    let mut hits = Vec::new();
-    for line in raw.lines() {
-        if hits.len() >= limit {
-            break;
-        }
-        let mut split = line.splitn(3, ':');
-        let path = match split.next() {
-            Some(p) => p,
-            None => continue,
-        };
-        let line_no: u32 = match split.next().and_then(|s| s.parse().ok()) {
-            Some(n) => n,
-            None => continue,
-        };
-        let snippet = match split.next() {
-            Some(s) => s,
-            None => continue,
-        };
-        let snippet = if snippet.len() > 400 {
-            format!("{}…", &snippet[..400])
-        } else {
-            snippet.to_string()
-        };
-        hits.push(TextSearchHit {
-            path: path.to_string(),
-            line: line_no,
-            snippet,
-        });
-    }
-    hits
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,26 +150,6 @@ mod tests {
         std::fs::write(dir.path().join("a.txt"), "hello").unwrap();
         let r = commit(dir.path(), "initial", true).unwrap();
         assert!(r.success, "stderr: {}", r.stderr);
-    }
-
-    #[test]
-    fn search_workspace_text_finds_matches() {
-        let dir = tempdir().unwrap();
-        init_repo(dir.path());
-        std::fs::write(dir.path().join("a.txt"), "alpha\nbeta\ngamma\n").unwrap();
-        std::fs::write(dir.path().join("b.txt"), "alpha bravo\n").unwrap();
-        let hits = search_workspace_text(dir.path(), "alpha", None);
-        assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|h| h.path == "a.txt" && h.line == 1));
-    }
-
-    #[test]
-    fn search_workspace_text_returns_empty_on_no_match() {
-        let dir = tempdir().unwrap();
-        init_repo(dir.path());
-        std::fs::write(dir.path().join("a.txt"), "alpha\n").unwrap();
-        let hits = search_workspace_text(dir.path(), "nothere", None);
-        assert!(hits.is_empty());
     }
 
     #[test]

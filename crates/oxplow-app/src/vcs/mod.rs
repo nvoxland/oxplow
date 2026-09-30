@@ -4,31 +4,18 @@
 mod git;
 pub mod reads;
 
-pub use git::GitProvider;
+pub use git::{ChangeScopes, CommitRefLabel, GitProvider, RemoteBranchEntry};
 
 #[cfg(test)]
 mod tests {
-    /// Files still calling `oxplow_git` directly: each moves onto the
-    /// VCS capability in P5 (B4–B7) and leaves this list, which ends
-    /// empty. A new caller fails the test.
-    const NOT_YET_ON_VCS: &[&str] = &[
-        "oxplow-session/src/lib.rs",
-        "oxplow-app/src/task_service.rs",
-        "oxplow-app/src/workspace_watch.rs",
-        "oxplow-app/src/change_analysis.rs",
-        "oxplow-app/src/metrics_service.rs",
-        "oxplow-app/src/collection.rs",
-        "oxplow-app/src/git_service.rs",
-        "oxplow-rpc/src/lib.rs",
-        "oxplow-rpc/src/commands/config.rs",
-        "oxplow-rpc/src/commands/git.rs",
-    ];
-
-    /// P5.B3 (tsk522): only the git provider (`vcs/git.rs`) calls
-    /// `oxplow_git`; core reads git through the `Vcs` trait. Test code is
-    /// exempt.
+    /// P5 (B3–B7): only the git provider (`vcs/git.rs`) touches git —
+    /// `oxplow_git` or libgit2 — so core reads and changes version control
+    /// through the `Vcs` trait alone and a second provider needs no core
+    /// change. Test code (after `#[cfg(test)]`, a `#![cfg(test)]` module,
+    /// and `tests/` / `benches/` targets) is exempt: it builds real
+    /// repositories as fixtures.
     #[test]
-    fn only_the_git_provider_calls_oxplow_git() {
+    fn only_the_git_provider_touches_git() {
         let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let mut callers = Vec::new();
         let mut todo = vec![crates.clone()];
@@ -37,13 +24,17 @@ mod tests {
                 let path = entry.path();
                 let name = path.file_name().unwrap().to_string_lossy().to_string();
                 if path.is_dir() {
-                    if name != "target" && name != "oxplow-git" && !name.starts_with('.') {
+                    let skip = ["target", "oxplow-git", "tests", "benches"];
+                    if !skip.contains(&name.as_str()) && !name.starts_with('.') {
                         todo.push(path);
                     }
                 } else if path.extension().is_some_and(|e| e == "rs") {
                     let text = std::fs::read_to_string(&path).unwrap();
+                    if text.contains("#![cfg(test)]") {
+                        continue;
+                    }
                     let prod = text.split("#[cfg(test)]").next().unwrap_or_default();
-                    if prod.contains("oxplow_git::") {
+                    if prod.contains("oxplow_git::") || prod.contains("git2::") {
                         callers.push(
                             path.strip_prefix(&crates)
                                 .unwrap()
@@ -55,21 +46,10 @@ mod tests {
             }
         }
         callers.sort();
-        let unexpected: Vec<_> = callers
-            .iter()
-            .filter(|c| *c != "oxplow-app/src/vcs/git.rs" && !NOT_YET_ON_VCS.contains(&c.as_str()))
-            .collect();
-        assert!(
-            unexpected.is_empty(),
-            "oxplow_git called outside the git provider: {unexpected:?}"
-        );
-        let moved: Vec<_> = NOT_YET_ON_VCS
-            .iter()
-            .filter(|f| !callers.iter().any(|c| c == *f))
-            .collect();
-        assert!(
-            moved.is_empty(),
-            "no longer calls oxplow_git — take it off NOT_YET_ON_VCS: {moved:?}"
+        assert_eq!(
+            callers,
+            vec!["oxplow-app/src/vcs/git.rs".to_string()],
+            "git touched outside the git provider"
         );
     }
 }

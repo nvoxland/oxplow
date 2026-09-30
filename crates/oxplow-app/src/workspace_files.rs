@@ -134,6 +134,24 @@ impl WorkspaceFiles {
         .await
     }
 
+    /// Lines containing `query` across the files `filter` keeps
+    /// ([`search_workspace_text`]).
+    pub async fn search_text(
+        &self,
+        stream_id: Option<&str>,
+        filter: oxplow_fs_watch::WorkspaceFilter,
+        query: String,
+        limit: usize,
+    ) -> Result<Vec<TextSearchHit>, WorkspaceError> {
+        let root = self.router.resolve(stream_id).await;
+        Self::blocking(move || {
+            search_workspace_text(&root, &query, limit, &|path| {
+                filter.ignore(Path::new(path), false)
+            })
+        })
+        .await
+    }
+
     pub async fn read(
         &self,
         stream_id: Option<&str>,
@@ -292,6 +310,66 @@ pub fn list_workspace_files(
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
+}
+
+/// A line of a workspace file that matched a text search.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct TextSearchHit {
+    pub path: String,
+    /// 1-based.
+    pub line: u32,
+    /// The line, cut at 400 bytes.
+    pub snippet: String,
+}
+
+/// Every line of the workspace's files containing `query` (a fixed,
+/// case-sensitive string, trimmed), at most `limit`, over the files
+/// `ignore` keeps — the same walk as quick-open. Binary files (a NUL in
+/// the first 8 KiB) are skipped.
+pub fn search_workspace_text(
+    root_dir: &Path,
+    query: &str,
+    limit: usize,
+    ignore: &dyn Fn(&str) -> bool,
+) -> Result<Vec<TextSearchHit>, WorkspaceError> {
+    const SNIPPET_BYTES: usize = 400;
+    let query = query.trim();
+    let mut hits = Vec::new();
+    if query.is_empty() || limit == 0 {
+        return Ok(hits);
+    }
+    for file in list_workspace_files(root_dir, &HashMap::new(), "", ignore)? {
+        let Ok(bytes) = std::fs::read(root_dir.join(&file.path)) else {
+            continue;
+        };
+        if bytes[..bytes.len().min(8192)].contains(&0) {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&bytes);
+        for (i, line) in text.lines().enumerate() {
+            if !line.contains(query) {
+                continue;
+            }
+            let snippet = if line.len() > SNIPPET_BYTES {
+                let mut end = SNIPPET_BYTES;
+                while !line.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}…", &line[..end])
+            } else {
+                line.to_string()
+            };
+            hits.push(TextSearchHit {
+                path: file.path.clone(),
+                line: i as u32 + 1,
+                snippet,
+            });
+            if hits.len() >= limit {
+                return Ok(hits);
+            }
+        }
+    }
+    Ok(hits)
 }
 
 pub fn read_workspace_file(
@@ -464,6 +542,56 @@ fn normalize_path(path: &Path) -> String {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn text_search_finds_fixed_strings_in_the_files_the_filter_keeps() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.rs"), "fn a() {}\nlet x = foo(1);\n").unwrap();
+        std::fs::write(root.join("b.txt"), "foo( twice foo(\n").unwrap();
+        std::fs::write(root.join("bin.dat"), b"foo(\0\x01").unwrap();
+        std::fs::create_dir(root.join("gen")).unwrap();
+        std::fs::write(root.join("gen/out.rs"), "foo(\n").unwrap();
+        let skip_gen = |p: &str| p.starts_with("gen");
+
+        let hits = search_workspace_text(root, "foo(", 200, &skip_gen).unwrap();
+        assert_eq!(
+            hits,
+            vec![
+                TextSearchHit {
+                    path: "b.txt".into(),
+                    line: 1,
+                    snippet: "foo( twice foo(".into()
+                },
+                TextSearchHit {
+                    path: "src/a.rs".into(),
+                    line: 2,
+                    snippet: "let x = foo(1);".into()
+                },
+            ],
+            "binary and filtered files are skipped; one hit per line"
+        );
+        assert_eq!(
+            search_workspace_text(root, "foo(", 1, &skip_gen)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(search_workspace_text(root, "  ", 200, &skip_gen)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn a_long_line_is_cut_on_a_character_boundary() {
+        let dir = tempdir().unwrap();
+        let line = format!("needle {}", "é".repeat(400));
+        std::fs::write(dir.path().join("long.txt"), &line).unwrap();
+        let hits = search_workspace_text(dir.path(), "needle", 10, &|_| false).unwrap();
+        assert!(hits[0].snippet.ends_with('…'));
+        assert!(hits[0].snippet.len() <= 404);
+    }
 
     #[test]
     fn list_entries_sorts_dirs_before_files() {

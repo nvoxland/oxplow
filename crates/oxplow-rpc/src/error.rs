@@ -139,11 +139,7 @@ impl From<SessionError> for IpcError {
                 message: format!("worktree slug \"{slug}\" already exists"),
                 cause: None,
             },
-            SessionError::Git(e) => Self {
-                code: "GIT".into(),
-                message: e.to_string(),
-                cause: None,
-            },
+            SessionError::Vcs(e) => IpcError::from(DomainError::from(e.clone())),
             SessionError::Storage(e) => IpcError::from(e.clone()),
         }
     }

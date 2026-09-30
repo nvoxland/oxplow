@@ -197,6 +197,16 @@ struct ExtensionCatalog {
 }
 
 impl MetricsService {
+    /// The branch the project checkout has checked out (`None` when
+    /// detached or unreadable).
+    async fn current_branch(&self) -> Option<String> {
+        self.vcs
+            .head(&self.project_dir)
+            .await
+            .ok()
+            .and_then(|h| h.branch)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         snapshot_store: Arc<SqliteSnapshotStore>,
@@ -1722,7 +1732,7 @@ impl MetricsService {
                 .as_ref()
                 .map(|v| v.git_version_exact)
                 .unwrap_or(false),
-            branch: oxplow_git::detect_current_branch(&self.project_dir),
+            branch: self.current_branch().await,
             effort_id: None,
             scan_kind: "delta",
         }

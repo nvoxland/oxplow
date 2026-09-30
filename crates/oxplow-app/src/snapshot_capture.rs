@@ -421,6 +421,12 @@ impl SnapshotCaptureService {
         &self.inner.stream_id
     }
 
+    /// The branch the workspace has checked out (`None` when detached).
+    pub async fn branch(&self) -> Option<String> {
+        let (vcs, ws) = (&self.inner.vcs, &self.inner.project_dir);
+        vcs.head(ws).await.ok().and_then(|h| h.branch)
+    }
+
     /// The workspace's branch, and its head revision when the workspace is
     /// clean at it (so a snapshot's tree equals that revision).
     async fn clean_head(&self) -> (Option<String>, Option<Revision>) {

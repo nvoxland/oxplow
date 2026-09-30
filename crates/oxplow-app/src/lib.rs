@@ -26,6 +26,7 @@ pub mod branch_reconciler;
 pub mod bundled_extensions;
 pub mod change_analysis;
 pub mod churn;
+pub mod co_change;
 pub mod code_analysis;
 pub mod code_quality_runner;
 pub mod collection;
@@ -52,7 +53,6 @@ pub mod extension_sources;
 pub mod extensions;
 pub mod file_ref_version;
 pub mod followup;
-pub mod git_service;
 pub mod hook_ingest;
 pub mod indexer;
 pub mod inferred_decisions;
@@ -88,6 +88,8 @@ pub mod snapshot_content;
 pub mod snapshot_files;
 pub mod source_runner;
 pub mod sql_gateway;
+#[cfg(test)]
+mod stream_service_tests;
 pub mod task_service;
 pub mod task_writes;
 pub mod terminal_sessions;
@@ -546,10 +548,9 @@ pub struct Services {
     pub output_activity: output_activity::OutputActivity,
     pub recovery: recovery::RecoveryService,
     pub events: EventBus,
-    /// Singleton git access surface — every read of git state and
-    /// every mutating git op routes through here so we can layer
-    /// caching in one place. See `git_service.rs`.
-    pub git: Arc<git_service::GitService>,
+    /// Git's own operations beyond the capability (rebase, ignore,
+    /// change scopes, ref labels, …); the same provider as `vcs`.
+    pub git: vcs::GitProvider,
     /// The VCS capability (`.context/vcs.md`): git, as a provider.
     pub vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     /// Which directory each stream works in.
@@ -699,7 +700,7 @@ impl Services {
         let fact_store = Arc::new(SqliteFactStore::new(db.clone()));
         let metric_visibility = Arc::new(metric_visibility::VisibilityResolver::new(
             SqliteSnapshotStore::new(db.clone()),
-            &layout.project_dir,
+            vcs.revision_graph(&layout.project_dir),
         ));
         let metric_engine = metric_engine::MetricEngine::new(SqliteFactStore::new(db.clone()))
             .with_visibility(metric_visibility.clone());
@@ -720,8 +721,12 @@ impl Services {
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
-        let streams =
-            StreamService::new(workspace_layout, stream_store.clone(), thread_store.clone());
+        let streams = StreamService::new(
+            workspace_layout,
+            vcs.clone(),
+            stream_store.clone(),
+            thread_store.clone(),
+        );
         let threads = ThreadService::new(thread_store.clone());
         let tasks = TaskService::new(task_store.clone()).with_event_pump(event_pump.clone());
         let event_bus = EventBus::new();
@@ -802,7 +807,7 @@ impl Services {
             stream_store.clone(),
             event_bus.clone(),
         ));
-        let git = git_service::GitService::new(worktrees.clone());
+        let git = vcs::GitProvider;
         let trees = Arc::new(trees::Trees::new(
             vcs.clone(),
             snapshot_store.clone(),

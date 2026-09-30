@@ -18,8 +18,8 @@ use thiserror::Error;
 use tracing::info;
 
 use oxplow_domain::stores::StreamStore;
+use oxplow_domain::vcs::{Checkout, Vcs, VcsError};
 use oxplow_domain::{DomainError, Stream, StreamId, StreamKind, Timestamp};
-use oxplow_git::{detect_current_branch, ensure_worktree, is_git_repo, is_git_worktree};
 
 #[derive(Debug, Error)]
 pub enum SessionError {
@@ -33,8 +33,8 @@ pub enum SessionError {
     PrimaryMissing,
     #[error("worktree slug \"{0}\" already exists")]
     DuplicateWorktreeSlug(String),
-    #[error("git: {0}")]
-    Git(#[from] oxplow_git::EnsureWorktreeError),
+    #[error("vcs: {0}")]
+    Vcs(#[from] VcsError),
     #[error("storage: {0}")]
     Storage(#[from] DomainError),
 }
@@ -86,6 +86,7 @@ impl WorkspaceLayout {
 #[derive(Clone)]
 pub struct StreamService {
     layout: WorkspaceLayout,
+    vcs: Arc<dyn Vcs>,
     streams: Arc<dyn StreamStore>,
     threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
 }
@@ -99,11 +100,13 @@ const DEFAULT_THREAD_TITLE: &str = "Thread";
 impl StreamService {
     pub fn new(
         layout: WorkspaceLayout,
+        vcs: Arc<dyn Vcs>,
         streams: Arc<dyn StreamStore>,
         threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
     ) -> Self {
         Self {
             layout,
+            vcs,
             streams,
             threads,
         }
@@ -151,26 +154,37 @@ impl StreamService {
     }
 
     /// Validate the workspace before doing anything else: it must be
-    /// a git repo and must NOT be a secondary worktree.
-    pub fn validate_workspace(&self) -> Result<(), SessionError> {
-        if !is_git_repo(&self.layout.project_dir) {
-            return Err(SessionError::NotARepo(self.layout.project_dir.clone()));
+    /// under version control and must NOT be a secondary working copy.
+    pub async fn validate_workspace(&self) -> Result<(), SessionError> {
+        match self.vcs.detect(&self.layout.project_dir).await {
+            None => Err(SessionError::NotARepo(self.layout.project_dir.clone())),
+            Some(Checkout::Secondary) => {
+                Err(SessionError::InWorktree(self.layout.project_dir.clone()))
+            }
+            Some(Checkout::Primary) => Ok(()),
         }
-        if is_git_worktree(&self.layout.project_dir) {
-            return Err(SessionError::InWorktree(self.layout.project_dir.clone()));
-        }
-        Ok(())
+    }
+
+    /// The branch `ws` has checked out; `HEAD` when it is detached (the
+    /// rest of oxplow tolerates that, and the branch reconciler records
+    /// a later checkout).
+    async fn branch_of(&self, ws: &Path) -> String {
+        self.vcs
+            .head(ws)
+            .await
+            .ok()
+            .and_then(|h| h.branch)
+            .unwrap_or_else(|| "HEAD".to_string())
     }
 
     /// Idempotent: ensures a primary stream exists for this project.
     /// Reuses the existing one if present.
     pub async fn ensure_primary(&self) -> Result<Stream, SessionError> {
-        self.validate_workspace()?;
+        self.validate_workspace().await?;
         if let Some(existing) = self.streams.primary().await? {
             return Ok(existing);
         }
-        let branch =
-            detect_current_branch(&self.layout.project_dir).unwrap_or_else(|| "HEAD".to_string());
+        let branch = self.branch_of(&self.layout.project_dir).await;
         let now = Timestamp::now();
         let title = self
             .layout
@@ -212,7 +226,7 @@ impl StreamService {
         branch: impl Into<String>,
         branch_source: impl Into<String>,
     ) -> Result<Stream, SessionError> {
-        self.validate_workspace()?;
+        self.validate_workspace().await?;
         // Ensure primary exists so the layout invariant holds.
         let _primary = self
             .streams
@@ -241,12 +255,14 @@ impl StreamService {
             return Err(SessionError::DuplicateWorktreeSlug(slug.to_string()));
         }
 
-        ensure_worktree(
-            &self.layout.project_dir,
-            &worktree_path,
-            &branch,
-            &branch_source,
-        )?;
+        self.vcs
+            .create_workspace(
+                &self.layout.project_dir,
+                &worktree_path,
+                &branch,
+                &branch_source,
+            )
+            .await?;
 
         let now = Timestamp::now();
         let mut stream = Stream {
@@ -285,7 +301,7 @@ impl StreamService {
         worktree_path: PathBuf,
         title: impl Into<String>,
     ) -> Result<Stream, SessionError> {
-        self.validate_workspace()?;
+        self.validate_workspace().await?;
         let _primary = self
             .streams
             .primary()
@@ -305,7 +321,7 @@ impl StreamService {
         // Read the branch from the worktree's HEAD. If the worktree
         // is detached we still record it so the user can fix that on
         // their own (the rest of oxplow tolerates a missing branch).
-        let branch = detect_current_branch(&worktree_path).unwrap_or_else(|| "HEAD".to_string());
+        let branch = self.branch_of(&worktree_path).await;
 
         let title = title.into();
         let now = Timestamp::now();
@@ -403,7 +419,7 @@ impl StreamService {
     /// snapshots, and page_visit attribution don't dangle, but the
     /// rail and thread queries filter them out. If `delete_worktree`
     /// is true and the stream is a worktree (not primary), the
-    /// on-disk worktree is also `git worktree remove --force`'d.
+    /// on-disk working copy is removed too (`Vcs::remove_workspace`).
     /// Primary streams cannot be archived.
     pub async fn archive_stream(
         &self,
@@ -427,36 +443,23 @@ impl StreamService {
             self.threads.archive(&t.id).await?;
         }
         self.streams.archive(id).await?;
-        // Optional on-disk teardown. Best-effort: if git refuses (dirty
-        // tree, locked, missing) the row is already archived, so the
-        // rail no longer shows it; the user can clean up the directory
-        // manually.
+        // Optional on-disk teardown. Best-effort: if the VCS refuses
+        // (locked, …) the row is already archived, so the rail no longer
+        // shows it; the user can clean up the directory manually.
         if delete_worktree {
-            let path = Path::new(&stream.worktree_path);
-            if path.exists() {
-                let _ = std::process::Command::new("git")
-                    .arg("-C")
-                    .arg(&self.layout.project_dir)
-                    .arg("worktree")
-                    .arg("remove")
-                    .arg("--force")
-                    .arg(path)
-                    .output();
-            }
-            // Always run `git worktree prune` after a remove. If
-            // `remove` failed (e.g. directory was already gone, or
-            // the worktree was locked) git keeps a stale admin entry
-            // in `.git/worktrees/`; prune is what actually clears it
-            // so subsequent `git worktree add` won't trip on the
-            // ghost.
-            let _ = std::process::Command::new("git")
-                .arg("-C")
-                .arg(&self.layout.project_dir)
-                .arg("worktree")
-                .arg("prune")
-                .output();
+            self.remove_workspace(&stream.worktree_path).await;
         }
         Ok(())
+    }
+
+    async fn remove_workspace(&self, path: &str) {
+        if let Err(e) = self
+            .vcs
+            .remove_workspace(&self.layout.project_dir, Path::new(path))
+            .await
+        {
+            tracing::warn!(path, error = %e, "couldn't remove the stream's working copy");
+        }
     }
 
     /// Delete a stream. The primary cannot be deleted — that's the
@@ -473,248 +476,10 @@ impl StreamService {
                 "cannot delete primary stream".into(),
             )));
         }
-        // For worktree streams, tear down the on-disk worktree first
-        // (best-effort — if `git worktree remove` fails, the user
-        // can still see the row in the DB and clean up manually).
-        let path = Path::new(&stream.worktree_path);
-        if path.exists() {
-            let _ = std::process::Command::new("git")
-                .arg("-C")
-                .arg(&self.layout.project_dir)
-                .arg("worktree")
-                .arg("remove")
-                .arg("--force")
-                .arg(path)
-                .output();
-        }
+        // Tear down the on-disk working copy first (best-effort — if it
+        // fails, the user can still see the row and clean up manually).
+        self.remove_workspace(&stream.worktree_path).await;
         self.streams.delete(id).await?;
         Ok(())
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore};
-    use std::process::Command;
-    use tempfile::tempdir;
-
-    fn init_repo(dir: &Path) {
-        // Pin the initial branch to "main" via init options so the
-        // tests don't depend on the system-wide init.defaultBranch
-        // (CI runners often default to "master").
-        let mut opts = git2::RepositoryInitOptions::new();
-        opts.initial_head("main");
-        let repo = git2::Repository::init_opts(dir, &opts).unwrap();
-        let mut config = repo.config().unwrap();
-        config.set_str("user.name", "test").unwrap();
-        config.set_str("user.email", "test@example.com").unwrap();
-        config.set_str("init.defaultBranch", "main").unwrap();
-        let sig = repo.signature().unwrap();
-        let tree_id = {
-            let mut idx = repo.index().unwrap();
-            idx.write_tree().unwrap()
-        };
-        let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
-    }
-
-    /// Wraps the project dir inside a parent tempdir so sibling
-    /// worktrees (which now land at `<parent>/<basename>-<slug>/`)
-    /// get cleaned up when the parent drops.
-    struct TestEnv {
-        _parent: tempfile::TempDir,
-        project: PathBuf,
-    }
-
-    impl TestEnv {
-        #[allow(dead_code)]
-        fn project_path(&self) -> &Path {
-            &self.project
-        }
-
-        /// Resolve where a worktree with `slug` will land, given the
-        /// `<parent>/<basename>-<slug>/` sibling pattern.
-        fn worktree_path(&self, slug: &str) -> PathBuf {
-            let basename = self
-                .project
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "project".into());
-            self.project
-                .parent()
-                .unwrap()
-                .join(format!("{basename}-{slug}"))
-        }
-    }
-
-    fn make_service() -> (StreamService, TestEnv) {
-        let parent = tempdir().unwrap();
-        let project = parent.path().join("project");
-        std::fs::create_dir(&project).unwrap();
-        init_repo(&project);
-        let layout = WorkspaceLayout::for_project(&project);
-        let db = Database::in_memory();
-        let streams = Arc::new(SqliteStreamStore::new(db.clone()));
-        let threads = Arc::new(SqliteThreadStore::new(db));
-        let service = StreamService::new(layout, streams, threads);
-        (
-            service,
-            TestEnv {
-                _parent: parent,
-                project,
-            },
-        )
-    }
-
-    #[tokio::test]
-    async fn validate_workspace_passes_for_repo() {
-        let (svc, _dir) = make_service();
-        svc.validate_workspace().unwrap();
-    }
-
-    #[tokio::test]
-    async fn validate_rejects_non_repo() {
-        let project = tempdir().unwrap();
-        let layout = WorkspaceLayout::for_project(project.path());
-        let db = Database::in_memory();
-        let streams = Arc::new(SqliteStreamStore::new(db.clone()));
-        let threads = Arc::new(SqliteThreadStore::new(db));
-        let svc = StreamService::new(layout, streams, threads);
-        let err = svc.validate_workspace().unwrap_err();
-        assert!(matches!(err, SessionError::NotARepo(_)));
-    }
-
-    #[tokio::test]
-    async fn ensure_primary_creates_then_idempotent() {
-        let (svc, _dir) = make_service();
-        let first = svc.ensure_primary().await.unwrap();
-        assert_eq!(first.kind, StreamKind::Primary);
-        let second = svc.ensure_primary().await.unwrap();
-        assert_eq!(first.id, second.id);
-    }
-
-    #[tokio::test]
-    async fn create_worktree_makes_worktree_and_row() {
-        let (svc, dir) = make_service();
-        let _primary = svc.ensure_primary().await.unwrap();
-        let stream = svc
-            .create_worktree("feature-1", "Feature 1", "feature-1", "main")
-            .await
-            .unwrap();
-        assert_eq!(stream.kind, StreamKind::Worktree);
-        let path = dir.worktree_path("feature-1");
-        assert!(path.exists(), "worktree dir should exist at {path:?}");
-    }
-
-    #[tokio::test]
-    async fn create_worktree_requires_primary() {
-        let (svc, _dir) = make_service();
-        let err = svc
-            .create_worktree("feature-1", "Feature 1", "feature-1", "main")
-            .await
-            .unwrap_err();
-        assert!(matches!(err, SessionError::PrimaryMissing));
-    }
-
-    #[tokio::test]
-    async fn delete_primary_rejected() {
-        let (svc, _dir) = make_service();
-        let primary = svc.ensure_primary().await.unwrap();
-        let err = svc.delete_stream(&primary.id).await.unwrap_err();
-        assert!(matches!(
-            err,
-            SessionError::Storage(DomainError::Invariant(_))
-        ));
-    }
-
-    #[tokio::test]
-    async fn delete_worktree_removes_row_and_dir() {
-        let (svc, dir) = make_service();
-        svc.ensure_primary().await.unwrap();
-        let stream = svc
-            .create_worktree("feature-rm", "Feature", "feature-rm", "main")
-            .await
-            .unwrap();
-        let path = dir.worktree_path("feature-rm");
-        assert!(path.exists());
-        svc.delete_stream(&stream.id).await.unwrap();
-        // git worktree remove deletes the dir; the row is gone.
-        assert!(svc
-            .list_streams()
-            .await
-            .unwrap()
-            .iter()
-            .all(|s| s.id != stream.id));
-        // best-effort dir removal — verify
-        assert!(!path.exists(), "worktree dir should be removed");
-    }
-
-    #[tokio::test]
-    async fn archive_primary_rejected() {
-        let (svc, _dir) = make_service();
-        let primary = svc.ensure_primary().await.unwrap();
-        let err = svc.archive_stream(&primary.id, false).await.unwrap_err();
-        assert!(matches!(
-            err,
-            SessionError::Storage(DomainError::Invariant(_))
-        ));
-    }
-
-    #[tokio::test]
-    async fn archive_drops_stream_from_list_but_keeps_dir() {
-        let (svc, dir) = make_service();
-        svc.ensure_primary().await.unwrap();
-        let stream = svc
-            .create_worktree("feat-archive", "Feat", "feat-archive", "main")
-            .await
-            .unwrap();
-        let path = dir.worktree_path("feat-archive");
-        assert!(path.exists());
-        // delete_worktree=false: row is archived, dir remains on disk.
-        svc.archive_stream(&stream.id, false).await.unwrap();
-        assert!(svc
-            .list_streams()
-            .await
-            .unwrap()
-            .iter()
-            .all(|s| s.id != stream.id));
-        assert!(
-            path.exists(),
-            "worktree dir should remain when delete_worktree=false"
-        );
-    }
-
-    #[tokio::test]
-    async fn archive_with_delete_worktree_removes_dir() {
-        let (svc, dir) = make_service();
-        svc.ensure_primary().await.unwrap();
-        let stream = svc
-            .create_worktree("feat-arch-del", "Feat", "feat-arch-del", "main")
-            .await
-            .unwrap();
-        let path = dir.worktree_path("feat-arch-del");
-        assert!(path.exists());
-        svc.archive_stream(&stream.id, true).await.unwrap();
-        assert!(
-            !path.exists(),
-            "worktree dir should be pruned when delete_worktree=true"
-        );
-    }
-
-    #[tokio::test]
-    async fn list_orders_primary_first() {
-        let (svc, _dir) = make_service();
-        svc.ensure_primary().await.unwrap();
-        svc.create_worktree("a", "A", "a", "main").await.unwrap();
-        svc.create_worktree("b", "B", "b", "main").await.unwrap();
-        let list = svc.list_streams().await.unwrap();
-        assert_eq!(list[0].kind, StreamKind::Primary);
-        assert!(list[1..].iter().all(|s| s.kind == StreamKind::Worktree));
-    }
-
-    /// Suppress unused warning when the test for `Command` is gone.
-    #[allow(dead_code)]
-    fn _silence(_: Command) {}
 }

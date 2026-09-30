@@ -10,7 +10,6 @@ pub mod blame;
 mod branch;
 mod branch_changes;
 mod branch_ops;
-pub mod co_change;
 mod conflict;
 pub mod divergence;
 pub mod log;
@@ -55,11 +54,10 @@ pub use status::{
 };
 pub use sync::{
     add_path, checkout_branch, cherry_pick, commit, fetch, merge, pull, pull_remote_into_current,
-    push, push_current_to, rebase, revert, search_workspace_text, take_conflict_side, GitOpResult,
-    TextSearchHit,
+    push, push_current_to, rebase, revert, take_conflict_side, GitOpResult,
 };
 pub use tree::{diff_commits, git_blob_oid, tree_at_commit};
 pub use worktree::{
-    ensure_worktree, list_adoptable_worktrees, list_existing_worktrees, EnsureWorktreeError,
-    GitWorktreeEntry,
+    ensure_worktree, list_adoptable_worktrees, list_existing_worktrees, remove_worktree,
+    EnsureWorktreeError, GitWorktreeEntry,
 };

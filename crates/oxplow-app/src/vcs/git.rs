@@ -3,16 +3,16 @@
 //! path-based. libgit2 and the git CLI block, so every call runs under
 //! `spawn_blocking`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use oxplow_domain::vcs::{
-    BlameLine, Branch, CleanBaseline, CommitRequest, ConflictChoice, Divergence, FileStatus, Head,
-    InProgressOp, LogQuery, MergeReadiness, ObjectId, ObjectStore, OpOutcome, RemoteBranch,
-    RevisionDetail, RevisionFile, RevisionInfo, StatusEntry, Tag, Vcs, VcsError, VcsFeatures,
-    VcsWorkspace, WorkspaceStatus,
+    BlameLine, Branch, Checkout, CleanBaseline, CommitRequest, ConflictChoice, Divergence,
+    FileStatus, Head, InProgressOp, LogQuery, MergeReadiness, ObjectId, ObjectStore, OpOutcome,
+    RemoteBranch, RevisionDetail, RevisionFile, RevisionGraph, RevisionInfo, StatusEntry, Tag, Vcs,
+    VcsError, VcsFeatures, VcsWorkspace, WorkspaceStatus,
 };
 use oxplow_domain::FileChange;
 
@@ -20,9 +20,12 @@ use oxplow_domain::FileChange;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GitProvider;
 
+/// Git's own shapes for its native reads.
+pub use oxplow_git::{ChangeScopes, CommitRefLabel, RemoteBranchEntry};
+
 /// Git's own operations, beyond the VCS capability: history rewriting
-/// and `.gitignore`. The `git.*` commands (`commands/vcs.rs`) run
-/// them.
+/// and `.gitignore` (the `git.*` commands, `commands/vcs.rs`, run them),
+/// and the git-native reads behind the `git_*` RPCs.
 impl GitProvider {
     /// Replay the workspace's branch onto `onto`; oxplow's smart merge
     /// then settles the conflicts it can.
@@ -57,6 +60,46 @@ impl GitProvider {
         .await
     }
 
+    /// The workspace's changes grouped the way git sees them: staged,
+    /// unstaged, and the branch against its base and upstream.
+    pub async fn change_scopes(&self, ws: &Path) -> Result<ChangeScopes, VcsError> {
+        let ws = ws.to_path_buf();
+        blocking(move || {
+            repo_check(&ws)?;
+            Ok(oxplow_git::get_change_scopes(&ws))
+        })
+        .await
+    }
+
+    /// Every branch and tag pointing at each of `shas` (branches first);
+    /// a sha no ref points at is absent.
+    pub async fn commit_ref_labels(
+        &self,
+        ws: &Path,
+        shas: Vec<String>,
+    ) -> Result<HashMap<String, Vec<CommitRefLabel>>, VcsError> {
+        let ws = ws.to_path_buf();
+        blocking(move || {
+            repo_check(&ws)?;
+            Ok(oxplow_git::resolve_commit_ref_labels(&ws, &shas))
+        })
+        .await
+    }
+
+    /// Remote-tracking branches, most recently committed first.
+    pub async fn recent_remote_branches(
+        &self,
+        ws: &Path,
+        limit: usize,
+    ) -> Result<Vec<RemoteBranchEntry>, VcsError> {
+        let ws = ws.to_path_buf();
+        blocking(move || {
+            repo_check(&ws)?;
+            Ok(oxplow_git::list_recent_remote_branches(&ws, limit))
+        })
+        .await
+    }
+
     /// Append `entry` to the workspace's `.gitignore` (once).
     pub async fn ignore(&self, ws: &Path, entry: &str) -> Result<(), VcsError> {
         let (ws, entry) = (ws.to_path_buf(), entry.to_string());
@@ -66,6 +109,30 @@ impl GitProvider {
                 .map_err(|e| VcsError::Failed(e.to_string()))
         })
         .await
+    }
+}
+
+/// The commit graph of a repository (`None`: it couldn't be opened).
+struct GitGraph(Option<git2::Repository>);
+
+impl RevisionGraph for GitGraph {
+    fn is_ancestor_or_equal(&self, ancestor: &str, descendant: &str) -> Option<bool> {
+        if ancestor == descendant {
+            return Some(true);
+        }
+        let repo = self.0.as_ref()?;
+        let anc = git2::Oid::from_str(ancestor).ok()?;
+        let desc = git2::Oid::from_str(descendant).ok()?;
+        // graph_descendant_of takes (descendant, ancestor).
+        repo.graph_descendant_of(desc, anc).ok()
+    }
+
+    fn time_of(&self, rev: &str) -> Option<oxplow_domain::Timestamp> {
+        let repo = self.0.as_ref()?;
+        let commit = repo.find_commit(git2::Oid::from_str(rev).ok()?).ok()?;
+        Some(oxplow_domain::Timestamp::from_unix_ms(
+            commit.time().seconds() * 1000,
+        ))
     }
 }
 
@@ -184,11 +251,19 @@ impl Vcs for GitProvider {
         }
     }
 
-    async fn detect(&self, root: &Path) -> bool {
+    async fn detect(&self, root: &Path) -> Option<Checkout> {
         let root = root.to_path_buf();
-        blocking(move || Ok(oxplow_git::is_git_repo(&root)))
-            .await
-            .unwrap_or(false)
+        blocking(move || {
+            Ok(if !oxplow_git::is_git_repo(&root) {
+                None
+            } else if oxplow_git::is_git_worktree(&root) {
+                Some(Checkout::Secondary)
+            } else {
+                Some(Checkout::Primary)
+            })
+        })
+        .await
+        .unwrap_or(None)
     }
 
     async fn head(&self, ws: &Path) -> Result<Head, VcsError> {
@@ -324,6 +399,31 @@ impl Vcs for GitProvider {
 
     fn clean_baseline(&self, ws: &Path) -> Box<dyn CleanBaseline> {
         Box::new(GitBaseline(oxplow_git::GitCleanBaseline::build(ws)))
+    }
+
+    fn revision_graph(&self, ws: &Path) -> Box<dyn RevisionGraph> {
+        Box::new(GitGraph(git2::Repository::open(ws).ok()))
+    }
+
+    fn watch_refs(
+        &self,
+        ws: &Path,
+        on_change: Box<dyn Fn() + Send + Sync>,
+    ) -> Result<Box<dyn Send>, VcsError> {
+        let watcher = oxplow_git::GitRefsWatcher::watch(
+            ws.to_path_buf(),
+            std::time::Duration::from_millis(250),
+        )
+        .map_err(|e| VcsError::Failed(e.to_string()))?;
+        let mut rx = watcher.subscribe();
+        tokio::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            // Runs until the watcher (the returned guard) is dropped.
+            while let Ok(_) | Err(RecvError::Lagged(_)) = rx.recv().await {
+                on_change();
+            }
+        });
+        Ok(Box::new(watcher))
     }
 
     async fn diff(&self, ws: &Path, a: &str, b: &str) -> Result<Vec<FileChange>, VcsError> {
@@ -612,6 +712,15 @@ impl Vcs for GitProvider {
                 }
                 e => VcsError::Failed(e.to_string()),
             })
+        })
+        .await
+    }
+
+    async fn remove_workspace(&self, repo: &Path, at: &Path) -> Result<(), VcsError> {
+        let (repo, at) = (repo.to_path_buf(), at.to_path_buf());
+        blocking(move || {
+            repo_check(&repo)?;
+            oxplow_git::remove_worktree(&repo, &at).map_err(VcsError::Failed)
         })
         .await
     }

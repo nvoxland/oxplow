@@ -667,7 +667,8 @@ oxplow-analytics change cards) only read them.
     churn and churn share; unchanged ones aren't stored;
   - imports: added/removed with zones, `cross_zone` for new boundary
     crossings;
-  - co-change: `analyze_surprise` over a history cached per (repo, HEAD);
+  - co-change: `analyze_surprise` over the commit index's history
+    (`crate::co_change`), cached until the index changes;
   - test files (`v_change_test_file`, V83): for each changed file that is
     a test file or has tests on either side (Rust's inline `mod tests`
     counts), test functions plus assertion calls and skip markers

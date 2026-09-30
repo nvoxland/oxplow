@@ -1984,7 +1984,7 @@ impl OxplowMcp {
 
     // ---------- git (read) ----------
     //
-    // Thin mirrors of the IPC git read commands over `services.git`, so the
+    // Thin mirrors of the IPC reads over the VCS (and the git provider), so the
     // agent inspects the worktree through the same path the UI does (consistent
     // results, snapshot/event hooks) instead of shelling out to raw `git`.
     // `stream_id` is optional — omit to target the current/primary worktree.
@@ -1999,11 +1999,17 @@ impl OxplowMcp {
         params: Parameters<GitStreamParams>,
     ) -> Result<CallToolResult, McpError> {
         check_optional_stream("git_status", params.0.stream_id.as_deref())?;
+        let ws = self
+            .services
+            .worktrees
+            .resolve(params.0.stream_id.as_deref())
+            .await;
         let scopes = self
             .services
             .git
-            .change_scopes(params.0.stream_id.as_deref())
-            .await;
+            .change_scopes(&ws)
+            .await
+            .map_err(|e| domain_err(e.into()))?;
         json_result(&scopes)
     }
 

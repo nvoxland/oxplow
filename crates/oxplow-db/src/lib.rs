@@ -79,7 +79,9 @@ pub use fact_store::{
     Measure, MetricCapture, MetricSpec, NewCubeRow, NewDimension, NewFact, NewMeasure,
     NewMetricCapture, NewMetricSpec, SqliteFactStore,
 };
-pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
+pub use git_store::{
+    Changeset, GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore,
+};
 pub use observation_store::EffortObservation;
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use reasoning_store::{NewClaim, NewDecision, SqliteReasoningStore};

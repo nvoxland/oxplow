@@ -31,10 +31,10 @@
 //! the cube silently diverges from the facts.
 
 use std::collections::{BTreeSet, HashMap};
-use std::path::Path;
 use std::sync::Mutex;
 
 use oxplow_db::{MetricCapture, SqliteSnapshotStore, StampedSnapshot};
+use oxplow_domain::vcs::RevisionGraph;
 use oxplow_domain::Timestamp;
 
 use crate::metric_engine::Visibility;
@@ -142,41 +142,34 @@ pub fn resolve(
     vis
 }
 
-/// [`AncestryOracle`] over the project's real repository, with answer caches —
-/// ancestry between two fixed shas and a commit's time never change, so both
-/// are cached for the resolver's lifetime.
-pub struct GitAncestryOracle {
-    repo: Option<git2::Repository>,
+/// [`AncestryOracle`] over the VCS's revision graph, with answer caches —
+/// ancestry between two fixed revisions and a revision's time never
+/// change, so both are cached for the resolver's lifetime. A graph that
+/// can't be read answers `None` for everything — blind visibility, never
+/// an error surfaced to a metrics read.
+pub struct GraphOracle {
+    graph: Box<dyn RevisionGraph>,
     ancestors: HashMap<(String, String), Option<bool>>,
     times: HashMap<String, Option<Timestamp>>,
 }
 
-impl GitAncestryOracle {
-    /// A failed open degrades to an oracle that answers `None` for everything
-    /// — i.e. blind visibility, never an error surfaced to a metrics read.
-    pub fn open(repo_dir: &Path) -> Self {
+impl GraphOracle {
+    pub fn new(graph: Box<dyn RevisionGraph>) -> Self {
         Self {
-            repo: git2::Repository::open(repo_dir).ok(),
+            graph,
             ancestors: HashMap::new(),
             times: HashMap::new(),
         }
     }
 }
 
-impl AncestryOracle for GitAncestryOracle {
+impl AncestryOracle for GraphOracle {
     fn is_ancestor_or_equal(&mut self, ancestor: &str, descendant: &str) -> Option<bool> {
-        if ancestor == descendant {
-            return Some(true);
-        }
         let key = (ancestor.to_string(), descendant.to_string());
         if let Some(cached) = self.ancestors.get(&key) {
             return *cached;
         }
-        let answer = self.repo.as_ref().and_then(|repo| {
-            let anc = git2::Oid::from_str(ancestor).ok()?;
-            let desc = git2::Oid::from_str(descendant).ok()?;
-            repo.graph_descendant_of(desc, anc).ok()
-        });
+        let answer = self.graph.is_ancestor_or_equal(ancestor, descendant);
         self.ancestors.insert(key, answer);
         answer
     }
@@ -185,11 +178,7 @@ impl AncestryOracle for GitAncestryOracle {
         if let Some(cached) = self.times.get(sha) {
             return *cached;
         }
-        let answer = self.repo.as_ref().and_then(|repo| {
-            let oid = git2::Oid::from_str(sha).ok()?;
-            let commit = repo.find_commit(oid).ok()?;
-            Some(Timestamp::from_unix_ms(commit.time().seconds() * 1000))
-        });
+        let answer = self.graph.time_of(sha);
         self.times.insert(sha.to_string(), answer);
         answer
     }
@@ -207,8 +196,8 @@ pub struct VisibilityResolver {
 }
 
 impl VisibilityResolver {
-    pub fn new(snapshots: SqliteSnapshotStore, repo_dir: &Path) -> Self {
-        Self::with_oracle(snapshots, Box::new(GitAncestryOracle::open(repo_dir)))
+    pub fn new(snapshots: SqliteSnapshotStore, graph: Box<dyn RevisionGraph>) -> Self {
+        Self::with_oracle(snapshots, Box::new(GraphOracle::new(graph)))
     }
 
     /// A resolver with an injected oracle — for tests that need a fake DAG.
@@ -493,8 +482,9 @@ mod tests {
     }
 
     #[test]
-    fn the_git_oracle_answers_ancestry_and_time_from_a_real_repo() {
-        // The adapter is the only piece the fake DAG can't cover: Oid parsing,
+    fn the_git_graph_answers_ancestry_and_time_from_a_real_repo() {
+        // The git provider's graph is the only piece the fake DAG can't
+        // cover: Oid parsing,
         // the `graph_descendant_of` ARGUMENT ORDER (its parameters are
         // (descendant, ancestor) — swapped, every answer inverts and main
         // inherits its feature branches), and commit-time lookup. Shape:
@@ -537,7 +527,8 @@ mod tests {
             )
             .unwrap();
 
-        let mut oracle = GitAncestryOracle::open(dir.path());
+        use oxplow_domain::vcs::Vcs as _;
+        let mut oracle = GraphOracle::new(crate::vcs::GitProvider.revision_graph(dir.path()));
         let (a, b, fa, m) = (a.to_string(), b.to_string(), fa.to_string(), m.to_string());
         assert_eq!(oracle.is_ancestor_or_equal(&a, &b), Some(true));
         assert_eq!(
@@ -561,7 +552,7 @@ mod tests {
         assert_eq!(oracle.commit_time("deadbeef"), None);
         // And a directory that isn't a repo degrades, never errors.
         let not_repo = tempfile::tempdir().unwrap();
-        let mut blind = GitAncestryOracle::open(not_repo.path());
+        let mut blind = GraphOracle::new(crate::vcs::GitProvider.revision_graph(not_repo.path()));
         assert_eq!(blind.is_ancestor_or_equal(&a, &b), None);
     }
 

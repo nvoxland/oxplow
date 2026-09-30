@@ -111,11 +111,14 @@ pub struct WorkspaceContext {
 pub async fn get_workspace_context(svc: &Services) -> Result<WorkspaceContext, IpcError> {
     let project = svc.layout.project_dir.clone();
     let project_str = project.to_string_lossy().into_owned();
-    let is_git_repo = tokio::task::spawn_blocking(move || oxplow_git::is_git_repo(&project))
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))?;
+    let is_git_repo = svc.vcs.detect(&project).await.is_some();
     let default_branch = if is_git_repo {
-        svc.git.detect_default_branch().await
+        svc.vcs
+            .branches(&project)
+            .await
+            .ok()
+            .and_then(|all| all.into_iter().find(|b| b.is_default && b.remote.is_none()))
+            .map(|b| b.name)
     } else {
         None
     };
