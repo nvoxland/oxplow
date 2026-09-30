@@ -130,6 +130,26 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   `workspace.symbol` and `textDocument.callHierarchy` are declared in
   `client_capabilities()`; keep the declared set + the pump's auto-answers
   in lockstep.
+- **Symbols (P5.C6)**: the `symbols.collect` pump consumer
+  (`crates/oxplow-app/src/symbol_collector.rs`, after `search.index`) turns
+  each `snapshot.taken` into `symbol` rows (`v_symbol`): for each changed
+  file a configured server covers, `document_symbols` restates the file
+  (a deleted one drops out), refs `symbol:<path>/<name>@snap:<id>`. It is
+  bounded by config `symbolsMaxFilesPerSnapshot` (default 50; 0 turns it
+  off) — the rest are recorded as over budget, never an error — and
+  **never starts a server** (`LspSessionManager::is_running`): a collector
+  doesn't run programs on a person's machine, so a file whose server
+  isn't running is recorded as such. Each snapshot's coverage is a
+  `symbol_capture` row (`v_symbol_capture`). Symbols are read from the
+  file as it is when the event is handled, pinned to the snapshot that
+  triggered it.
+- **Conformance**: `code_intel_conformance::suite(provider, probe)` —
+  definition and references come back as 1-based locations, a hover says
+  something, document symbols name known kinds and nest through real
+  containers, the call hierarchy answers, a rename proposes edits carrying
+  the name, a reported diagnostic reads back and a lost (crashed) provider
+  takes its reports with it. The language servers pass it over the fake
+  python server, the crash being a real `die`.
 - **RPC**: `lsp_request` / `lsp_notify` stay for Monaco's LSP bridge (a real
   LSP client); nothing else in the UI reads the servers yet.
 

@@ -578,6 +578,38 @@
     - { name: "kind", type: "", doc: "`repeated_edits` or `failed_commands`." }
     - { name: "subject", type: "TEXT", doc: "The file path, or `Bash`." }
     - { name: "count", type: "", doc: "How many edits / failures." }
+- name: symbol
+  version: 1
+  description: "The symbols (functions, classes, methods, …) the running language servers report for each stream's files — the current tree, restated per changed file at each snapshot (P5.C6). Only files whose language has a running server are covered; `v_symbol_capture` says what each snapshot's collection covered."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`symbol:<path>/<name>@snap:<id>`; a nested symbol's name is its container path (`Widget::spin`)." }
+    - { name: "snapshot_id", type: "INTEGER", doc: "The snapshot the file's symbols were read at." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream (v_stream.id)." }
+    - { name: "path", type: "TEXT", doc: "Workspace-relative file." }
+    - { name: "name", type: "TEXT", doc: "The symbol's own name." }
+    - { name: "kind", type: "TEXT", doc: "`function`, `class`, `method`, `module`, … (the LSP symbol kinds)." }
+    - { name: "container", type: "TEXT", doc: "The enclosing symbol path (`Widget`); NULL at top level." }
+    - { name: "language", type: "TEXT", doc: "The language server that reported it (`rust`, `python`, …)." }
+    - { name: "line", type: "INTEGER", doc: "1-based." }
+    - { name: "col", type: "INTEGER", doc: "1-based." }
+    - { name: "end_line", type: "INTEGER", doc: "1-based." }
+    - { name: "end_col", type: "INTEGER", doc: "1-based." }
+  tests:
+    - { not_null: ref }
+    - { not_null: name }
+- name: symbol_capture
+  version: 1
+  description: "One row per snapshot the symbol collector handled (P5.C6): how many changed files it asked the language servers about, how many went over the `symbolsMaxFilesPerSnapshot` bound, and how many had no running server."
+  columns:
+    - { name: "snapshot_id", type: "INTEGER", doc: "The snapshot (v_snapshot.id)." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream (v_stream.id)." }
+    - { name: "files_collected", type: "INTEGER", doc: "Changed files whose symbols were read." }
+    - { name: "files_over_budget", type: "INTEGER", doc: "Changed files skipped for the bound." }
+    - { name: "files_without_server", type: "INTEGER", doc: "Changed files whose language had no running server (the collector never starts one)." }
+    - { name: "captured_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: snapshot_id }
+    - { unique: snapshot_id }
 - name: tag
   version: 1
   description: "Tags, refreshed with the branches on boot and whenever refs move."

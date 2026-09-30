@@ -244,6 +244,7 @@ mod tests {
             generated: oxplow_config::GeneratedConfig::default(),
             snapshot_max_file_bytes: 0,
             snapshot_turn_budget_ms: 2000,
+            symbols_max_files_per_snapshot: oxplow_config::DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT,
             inject_session_context: true,
             icon_tint: None,
             collection: Default::default(),

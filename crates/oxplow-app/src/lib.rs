@@ -29,6 +29,7 @@ pub mod churn;
 pub mod co_change;
 pub mod code_analysis;
 pub mod code_intel;
+pub mod code_intel_conformance;
 pub mod code_quality_runner;
 pub mod collection;
 pub mod commands;
@@ -95,6 +96,7 @@ pub mod source_runner;
 pub mod sql_gateway;
 #[cfg(test)]
 mod stream_service_tests;
+pub mod symbol_collector;
 pub mod task_service;
 pub mod task_writes;
 pub mod terminal_sessions;
@@ -507,6 +509,8 @@ pub struct Services {
     /// Git history and branches (`v_commit`, `v_branch`, …).
     pub git_store: Arc<oxplow_db::SqliteGitStore>,
     pub diagnostic_store: Arc<oxplow_db::SqliteDiagnosticStore>,
+    /// The symbol index (`v_symbol`), written by the symbol collector.
+    pub symbol_store: oxplow_db::SqliteSymbolStore,
     /// Oxplow's own model calls by role (`v_ai_call` records each one).
     pub ai: Arc<ai_service::AiService>,
     /// Stored change analysis (`v_change*`) and its producer state.
@@ -728,6 +732,7 @@ impl Services {
         let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
         let git_store = Arc::new(oxplow_db::SqliteGitStore::new(db.clone()));
         let diagnostic_store = Arc::new(oxplow_db::SqliteDiagnosticStore::new(db.clone()));
+        let symbol_store = oxplow_db::SqliteSymbolStore::new(db.clone());
         let effort_evidence_store = Arc::new(oxplow_db::SqliteEffortEvidenceStore::new(db.clone()));
         let change_store = Arc::new(oxplow_db::SqliteChangeStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
@@ -1128,6 +1133,7 @@ impl Services {
             tool_call_store,
             git_store,
             diagnostic_store,
+            symbol_store,
             ai,
             secrets: ai_env.secrets,
             effort_evidence_store,

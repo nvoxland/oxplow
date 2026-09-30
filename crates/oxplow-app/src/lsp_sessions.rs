@@ -317,6 +317,15 @@ impl LspSessionManager {
         self.installed.find(language)
     }
 
+    /// Whether `(stream_id, language)` has a server running — what a
+    /// collector checks, since it never starts one.
+    pub async fn is_running(&self, stream_id: &str, language: &str) -> bool {
+        self.sessions.lock().await.contains_key(&SessionKey {
+            stream_id: stream_id.to_string(),
+            language: language.to_string(),
+        })
+    }
+
     /// Get or spawn the LspProxy for `(stream_id, language)`.
     pub async fn ensure(
         &self,
@@ -877,6 +886,7 @@ mod tests {
             generated: oxplow_config::GeneratedConfig::default(),
             snapshot_max_file_bytes: 0,
             snapshot_turn_budget_ms: 2000,
+            symbols_max_files_per_snapshot: oxplow_config::DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT,
             inject_session_context: true,
             icon_tint: None,
             collection: Default::default(),

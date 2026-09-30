@@ -905,6 +905,17 @@ command rebuilds the `WorkspaceFilter` and calls
 filter on every live per-stream `SnapshotCaptureService` (each holds
 it behind an `RwLock`) and on the copy used to build future ones.
 
+### `symbol` + `symbol_capture` — `SqliteSymbolStore` (`crates/oxplow-db/src/symbol_store.rs`, migration `V117__symbol.sql`)
+
+The symbol index (P5.C6): each stream's files' symbols as the running
+language servers report them, restated per changed file by the symbol
+collector at each snapshot (`ref` `symbol:<path>/<name>@snap:<id>`,
+`snapshot_id` the snapshot it was read at, `name`, `kind`, `container`,
+`language`, 1-based `line`/`col`/`end_line`/`end_col`), and one
+`symbol_capture` row per snapshot handled (`files_collected`,
+`files_over_budget`, `files_without_server`). Read as `v_symbol` /
+`v_symbol_capture`; see [lsp.md](./lsp.md).
+
 ### `wiki_page` — `WikiPageStore` (`crates/oxplow-db/src/wiki_page_store.rs`)
 
 The per-project wiki's pages. **Bodies live on disk** at

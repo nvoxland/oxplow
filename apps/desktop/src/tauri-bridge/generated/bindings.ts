@@ -3024,6 +3024,12 @@ export type OxplowConfig = {
 	 */
 	snapshotTurnBudgetMs: number,
 	/**
+	 *  How many of a snapshot's changed files the symbol collector asks
+	 *  the running language servers about; the rest are recorded as
+	 *  skipped. Default 50.
+	 */
+	symbolsMaxFilesPerSnapshot: number,
+	/**
 	 *  When true, the UserPromptSubmit hook injects a session-context
 	 *  block into every agent prompt.
 	 */

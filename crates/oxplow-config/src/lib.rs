@@ -94,6 +94,9 @@ const DEFAULT_SNAPSHOT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 pub const DEFAULT_SNAPSHOT_TURN_BUDGET_MS: u64 = 2000;
 /// The smallest budget accepted: the capture's own predrain wait is 300 ms.
 const MIN_SNAPSHOT_TURN_BUDGET_MS: u64 = 100;
+/// How many changed files one snapshot's symbol collection asks the
+/// language servers about (P5.C6).
+pub const DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT: u32 = 50;
 const DEFAULT_INJECT_SESSION_CONTEXT: bool = true;
 
 /// An agent oxplow talks to over the Agent Client Protocol (tsk335): a
@@ -767,6 +770,11 @@ pub struct OxplowConfig {
     /// recorded as over budget. Default 2000.
     #[serde(rename = "snapshotTurnBudgetMs")]
     pub snapshot_turn_budget_ms: u64,
+    /// How many of a snapshot's changed files the symbol collector asks
+    /// the running language servers about; the rest are recorded as
+    /// skipped. Default 50.
+    #[serde(rename = "symbolsMaxFilesPerSnapshot")]
+    pub symbols_max_files_per_snapshot: u32,
     /// When true, the UserPromptSubmit hook injects a session-context
     /// block into every agent prompt.
     #[serde(rename = "injectSessionContext")]
@@ -989,6 +997,9 @@ struct RawConfig {
     /// How long (ms) the Stop hook waits for the turn-end snapshot before moving on; the take keeps going and is recorded as over budget. Default 2000, minimum 100.
     #[serde(rename = "snapshotTurnBudgetMs", default)]
     snapshot_turn_budget_ms: Option<f64>,
+    /// How many of a snapshot's changed files the symbol collector asks the running language servers about (`v_symbol`); over the bound is recorded as skipped. Default 50; 0 turns collection off.
+    #[serde(rename = "symbolsMaxFilesPerSnapshot", default)]
+    symbols_max_files_per_snapshot: Option<f64>,
     /// Inject the session-context block into every agent prompt.
     #[serde(rename = "injectSessionContext", default)]
     inject_session_context: Option<bool>,
@@ -1263,6 +1274,12 @@ pub fn render_project_config(config: &OxplowConfig, fallback_name: &str) -> serd
         doc.insert(
             "snapshotTurnBudgetMs".into(),
             config.snapshot_turn_budget_ms.into(),
+        );
+    }
+    if config.symbols_max_files_per_snapshot != DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT {
+        doc.insert(
+            "symbolsMaxFilesPerSnapshot".into(),
+            config.symbols_max_files_per_snapshot.into(),
         );
     }
     if config.inject_session_context != DEFAULT_INJECT_SESSION_CONTEXT {
@@ -1585,6 +1602,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         generated: GeneratedConfig::default(),
         snapshot_max_file_bytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
         snapshot_turn_budget_ms: DEFAULT_SNAPSHOT_TURN_BUDGET_MS,
+        symbols_max_files_per_snapshot: DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT,
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
         icon_tint: None,
         collection: CollectionConfig::default(),
@@ -1728,6 +1746,16 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         None => DEFAULT_SNAPSHOT_TURN_BUDGET_MS,
     };
 
+    let symbols_max_files_per_snapshot = match raw.symbols_max_files_per_snapshot {
+        Some(n) if !n.is_finite() || n < 0.0 => {
+            return Err(ConfigError::Invalid(
+                "symbolsMaxFilesPerSnapshot must be a number >= 0".into(),
+            ));
+        }
+        Some(n) => n.floor() as u32,
+        None => DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT,
+    };
+
     let inject_session_context = raw
         .inject_session_context
         .unwrap_or(DEFAULT_INJECT_SESSION_CONTEXT);
@@ -1816,6 +1844,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         generated,
         snapshot_max_file_bytes,
         snapshot_turn_budget_ms,
+        symbols_max_files_per_snapshot,
         inject_session_context,
         icon_tint,
         collection,

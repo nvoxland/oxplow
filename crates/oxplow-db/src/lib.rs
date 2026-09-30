@@ -34,6 +34,7 @@ pub mod semantic_layer;
 pub mod snapshot_tree;
 pub mod sql_tokens;
 mod stream_store;
+pub mod symbol_store;
 pub mod task_satellite;
 pub mod task_store;
 mod thread_store;
@@ -91,6 +92,7 @@ pub use semantic_layer::{
 };
 pub use snapshot_tree::{ContentHasher, SnapshotTree, TreeEntry};
 pub use stream_store::SqliteStreamStore;
+pub use symbol_store::{FileSymbols, SqliteSymbolStore, SymbolCapture, SymbolRow};
 pub use task_satellite::{SqliteTaskLinkStore, SqliteTaskNoteStore};
 pub use task_store::{EffortTransition, SqliteTaskStore};
 pub use thread_store::SqliteThreadStore;
