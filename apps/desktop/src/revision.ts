@@ -29,6 +29,14 @@ export function snapshotIdOf(rev: Revision): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/** The id a VCS revision names in its VCS (a commit sha); null for the
+ *  working tree, a snapshot, or no revision. */
+export function vcsRevOf(rev: Revision | null | undefined): string | null {
+  if (!rev || rev === WORKING || snapshotIdOf(rev) !== null) return null;
+  const i = rev.indexOf(":");
+  return i > 0 ? rev.slice(i + 1) : null;
+}
+
 /** `raw` as a revision, or null when it isn't one. */
 export function parseRevision(raw: unknown): Revision | null {
   if (typeof raw !== "string") return null;

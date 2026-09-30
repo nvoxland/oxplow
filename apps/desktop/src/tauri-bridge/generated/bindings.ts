@@ -3828,22 +3828,19 @@ export type Snapshot = {
 	created_at: Timestamp,
 	file_count: number,
 	/**
-	 *  40-char git sha corresponding to this snapshot's worktree
-	 *  state. Populated only when the worktree was clean at capture
-	 *  time (no tracked-file changes, no non-ignored untracked
-	 *  files); `None` when the tree was dirty or the directory isn't
-	 *  a git repo at all. Not unique — multiple snapshots can share
-	 *  the same commit when local history captures files git doesn't
-	 *  track.
+	 *  The VCS revision this snapshot's tree equals (`git:<sha>`).
+	 *  Populated only when the workspace was clean at the head at
+	 *  capture time; `None` when it was dirty or isn't under version
+	 *  control. Not unique — several snapshots can share one revision
+	 *  when local history captures files the VCS doesn't track.
 	 */
-	git_commit: string | null,
+	revision: string | null,
 	/**
-	 *  Short name of the git branch HEAD was on when this snapshot was
-	 *  captured (e.g. `main`). `None` for pre-V42 rows, a detached
-	 *  HEAD, or a non-git directory. Lets callers distinguish snapshots
-	 *  taken on different branches within the same stream's worktree.
+	 *  The branch the workspace was on when this snapshot was captured
+	 *  (e.g. `main`). `None` for pre-V42 rows, a detached head, or a
+	 *  directory not under version control.
 	 */
-	git_branch: string | null,
+	branch: string | null,
 	/**
 	 *  Whole-tree identity (V96): the xxh3-128 of the sorted manifest of
 	 *  the reconstructed tree ([`crate::snapshot_tree::manifest_hash`]).

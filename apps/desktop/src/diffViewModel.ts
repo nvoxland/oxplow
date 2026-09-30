@@ -127,11 +127,11 @@ export function resolveSnapshotEndpoints(
  *  `start`), falling back to the stream's current branch. Null when none
  *  is known — the caller then leaves the list unfiltered. */
 export function pickerBranch(
-  endSnap: { gitBranch: string | null } | undefined,
-  startSnap: { gitBranch: string | null } | undefined,
+  endSnap: { branch: string | null } | undefined,
+  startSnap: { branch: string | null } | undefined,
   streamBranch: string | null,
 ): string | null {
-  return endSnap?.gitBranch ?? startSnap?.gitBranch ?? streamBranch ?? null;
+  return endSnap?.branch ?? startSnap?.branch ?? streamBranch ?? null;
 }
 
 /** Drop snapshots *known* to be on a different branch than `branch`, so
@@ -140,12 +140,12 @@ export function pickerBranch(
  *  pre-V42 rows, detached HEAD) is kept: it isn't provably different, and
  *  excluding it would empty the picker on existing snapshots. A null
  *  reference `branch` (unknown) disables filtering entirely. */
-export function snapshotsOnBranch<T extends { gitBranch?: string | null }>(
+export function snapshotsOnBranch<T extends { branch?: string | null }>(
   snapshots: T[],
   branch: string | null,
 ): T[] {
   if (branch == null) return snapshots;
-  return snapshots.filter((s) => s.gitBranch == null || s.gitBranch === branch);
+  return snapshots.filter((s) => s.branch == null || s.branch === branch);
 }
 
 /** Options for one end of the diff range's snapshot picker, newest

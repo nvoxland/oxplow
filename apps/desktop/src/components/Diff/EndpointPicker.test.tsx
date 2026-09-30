@@ -6,8 +6,8 @@ import { EndpointPicker, type EndpointSnapshotOption } from "./EndpointPicker.js
 afterEach(cleanup);
 
 const OPTIONS: EndpointSnapshotOption[] = [
-  { snapshotId: 7, createdAt: "2026-06-29T05:24:24Z", gitCommit: "d1e4dcb0000" },
-  { snapshotId: 5, createdAt: "2026-06-29T01:52:50Z", gitCommit: null },
+  { snapshotId: 7, createdAt: "2026-06-29T05:24:24Z", commit: "d1e4dcb0000" },
+  { snapshotId: 5, createdAt: "2026-06-29T01:52:50Z", commit: null },
 ];
 
 test("trigger shows the short (time-only) label; the menu is closed initially", () => {

@@ -30,6 +30,8 @@ use crate::snapshot_capture::SnapshotCaptureService;
 pub struct SnapshotCaptureRegistryConfig {
     pub snapshot_store: Arc<SqliteSnapshotStore>,
     pub blobs: BlobStore,
+    /// The VCS whose object store backs clean files.
+    pub vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     pub max_file_bytes: u64,
     pub workspace_filter: WorkspaceFilter,
     pub events: EventBus,
@@ -92,6 +94,7 @@ impl SnapshotCaptureRegistry {
             self.config.snapshot_store.clone(),
             self.config.blobs.clone(),
             worktree,
+            self.config.vcs.clone(),
             stream.id,
             self.config.max_file_bytes,
             self.workspace_filter
@@ -216,6 +219,7 @@ mod tests {
     fn config_for(project: &std::path::Path) -> SnapshotCaptureRegistryConfig {
         let db = Database::in_memory();
         SnapshotCaptureRegistryConfig {
+            vcs: std::sync::Arc::new(crate::vcs::GitProvider),
             snapshot_store: Arc::new(SqliteSnapshotStore::new(db)),
             blobs: BlobStore::new(project.join(".oxplow/snapshots")),
             max_file_bytes: 1_000_000,

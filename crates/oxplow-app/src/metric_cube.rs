@@ -1516,11 +1516,11 @@ mod tests {
             .await
             .unwrap();
         snapshots
-            .set_snapshot_git_commit(snap, "FA".into())
+            .set_snapshot_revision(snap, oxplow_domain::vcs::Revision::git("FA"))
             .await
             .unwrap();
         snapshots
-            .set_snapshot_git_branch(snap, "feat-a".into())
+            .set_snapshot_branch(snap, "feat-a".into())
             .await
             .unwrap();
 

@@ -34,7 +34,6 @@ use oxplow_db::{NewFact, NewMetricCapture, SqliteFactStore};
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{DomainError, EffortId, TaskId, ThreadId};
 
-use crate::blob_store::BlobStore;
 use crate::events::{EventBus, OxplowEvent};
 use crate::file_ref_version;
 use crate::metric_engine::threshold_state;
@@ -352,7 +351,8 @@ pub struct CollectionService {
     tasks: Arc<oxplow_db::SqliteTaskStore>,
     threads: Arc<SqliteThreadStore>,
     snapshots: Arc<SqliteSnapshotStore>,
-    blobs: BlobStore,
+    content: crate::snapshot_content::SnapshotContent,
+    vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     config: Arc<RwLock<OxplowConfig>>,
     project_dir: PathBuf,
     /// This machine's program approvals (`exec_consent`).
@@ -394,7 +394,8 @@ impl CollectionService {
         tasks: Arc<oxplow_db::SqliteTaskStore>,
         threads: Arc<SqliteThreadStore>,
         snapshots: Arc<SqliteSnapshotStore>,
-        blobs: BlobStore,
+        content: crate::snapshot_content::SnapshotContent,
+        vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
         config: Arc<RwLock<OxplowConfig>>,
         project_dir: PathBuf,
         events: EventBus,
@@ -411,7 +412,8 @@ impl CollectionService {
             tasks,
             threads,
             snapshots,
-            blobs,
+            content,
+            vcs,
             config,
             project_dir,
             approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
@@ -705,6 +707,7 @@ impl CollectionService {
                 // tree is dirty and the commit is only the CLOSEST one.
                 let version = crate::file_ref_version::resolve(
                     &self.snapshots,
+                    &*self.vcs,
                     &self.project_dir,
                     snapshot_id.unwrap_or(0),
                 )
@@ -1313,7 +1316,9 @@ impl CollectionService {
             None => None,
         };
         let version = match pin {
-            Some(p) => file_ref_version::resolve(&self.snapshots, &self.project_dir, p).await?,
+            Some(p) => {
+                file_ref_version::resolve(&self.snapshots, &*self.vcs, &self.project_dir, p).await?
+            }
             None => file_ref_version::ResolvedFileVersion {
                 local_snapshot_id: 0,
                 closest_git_version: None,
@@ -2389,7 +2394,9 @@ impl CollectionService {
         };
         let (local_snapshot_id, closest_git_version, git_version_exact) = match pin {
             Some(p) => {
-                let v = file_ref_version::resolve(&self.snapshots, &self.project_dir, p).await?;
+                let v =
+                    file_ref_version::resolve(&self.snapshots, &*self.vcs, &self.project_dir, p)
+                        .await?;
                 (
                     Some(v.local_snapshot_id),
                     v.closest_git_version,
@@ -3174,9 +3181,7 @@ impl CollectionService {
         let old = start_tree
             .get(path)
             .and_then(|entry| entry.content_ref())
-            .and_then(|r| {
-                crate::snapshot_content::read_content_ref(&r, &self.project_dir, &self.blobs).ok()
-            })
+            .and_then(|r| self.content.read_ref(&r).ok())
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
             .unwrap_or_default();
         let Ok(new_bytes) = std::fs::read(self.project_dir.join(path)) else {
@@ -3560,6 +3565,7 @@ fn analysis_source(collector: &Collector) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blob_store::BlobStore;
 
     #[test]
     fn threshold_state_respects_direction() {
@@ -4096,7 +4102,11 @@ mod tests {
                 Arc::new(SqliteTaskStore::new(db.clone())),
                 Arc::new(SqliteThreadStore::new(db.clone())),
                 snapshots,
-                blobs,
+                crate::snapshot_content::SnapshotContent::new(
+                    blobs,
+                    oxplow_domain::vcs::Vcs::object_store(&crate::vcs::GitProvider, &project_dir),
+                ),
+                Arc::new(crate::vcs::GitProvider),
                 Arc::new(RwLock::new(cfg)),
                 project_dir,
                 EventBus::new(),

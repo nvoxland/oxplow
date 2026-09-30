@@ -17,8 +17,6 @@ use oxplow_db::{SqlitePageRefStore, SqliteSnapshotStore};
 use oxplow_domain::DomainError;
 use serde::Serialize;
 
-use crate::blob_store::BlobStore;
-
 /// Cap on the returned diff. A wiki ref that drifted enormously isn't
 /// worth dumping in full into the agent's context — it should re-read
 /// the file at that point.
@@ -60,7 +58,7 @@ impl WikiRefDrift {
 pub async fn compute_wiki_ref_drift(
     page_refs: &SqlitePageRefStore,
     snapshots: &SqliteSnapshotStore,
-    blobs: &BlobStore,
+    content: &crate::snapshot_content::SnapshotContent,
     project_dir: &Path,
     slug: &str,
     path: &str,
@@ -91,7 +89,8 @@ pub async fn compute_wiki_ref_drift(
             return drifted_or_unchanged(slug, path, pin, String::new(), project_dir);
         }
     };
-    let pinned = crate::snapshot_content::read_content_ref(&pinned, project_dir, blobs)
+    let pinned = content
+        .read_ref(&pinned)
         .map_err(|e| DomainError::Storage(format!("snapshot read {path}@{pin}: {e}")))?;
     let pinned = match String::from_utf8(pinned) {
         Ok(s) => s,
@@ -158,6 +157,15 @@ pub fn unified_diff(old: &str, new: &str, path: &str, max_bytes: usize) -> (Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blob_store::BlobStore;
+
+    fn content(blobs: &BlobStore, project: &Path) -> crate::snapshot_content::SnapshotContent {
+        use oxplow_domain::vcs::Vcs as _;
+        crate::snapshot_content::SnapshotContent::new(
+            blobs.clone(),
+            crate::vcs::GitProvider.object_store(project),
+        )
+    }
 
     #[test]
     fn unified_diff_reports_changed_lines() {
@@ -239,10 +247,16 @@ mod tests {
         // Drifted: disk differs from the pinned blob.
         std::fs::create_dir_all(project.join("src")).unwrap();
         std::fs::write(project.join("src/x.rs"), "alpha\nBETA\ngamma\n").unwrap();
-        let drift =
-            compute_wiki_ref_drift(&page_refs, &snapshots, &blobs, project, "intro", "src/x.rs")
-                .await
-                .unwrap();
+        let drift = compute_wiki_ref_drift(
+            &page_refs,
+            &snapshots,
+            &content(&blobs, project),
+            project,
+            "intro",
+            "src/x.rs",
+        )
+        .await
+        .unwrap();
         assert_eq!(drift.status, "drifted");
         assert_eq!(drift.pinned_snapshot_id, Some(snap));
         let d = drift.unified_diff.unwrap();
@@ -250,10 +264,16 @@ mod tests {
 
         // Unchanged: disk matches the pinned blob.
         std::fs::write(project.join("src/x.rs"), pinned).unwrap();
-        let same =
-            compute_wiki_ref_drift(&page_refs, &snapshots, &blobs, project, "intro", "src/x.rs")
-                .await
-                .unwrap();
+        let same = compute_wiki_ref_drift(
+            &page_refs,
+            &snapshots,
+            &content(&blobs, project),
+            project,
+            "intro",
+            "src/x.rs",
+        )
+        .await
+        .unwrap();
         assert_eq!(same.status, "unchanged");
         assert!(same.unified_diff.is_none());
 
@@ -261,7 +281,7 @@ mod tests {
         let nr = compute_wiki_ref_drift(
             &page_refs,
             &snapshots,
-            &blobs,
+            &content(&blobs, project),
             project,
             "intro",
             "src/other.rs",
@@ -293,7 +313,7 @@ mod tests {
         let drift = compute_wiki_ref_drift(
             &page_refs,
             &snapshots,
-            &blobs,
+            &content(&blobs, tmp.path()),
             tmp.path(),
             "intro",
             "src/x.rs",

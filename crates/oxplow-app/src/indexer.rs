@@ -389,14 +389,9 @@ impl Indexer {
             if f.storage.is_oversize() || f.size_bytes > MAX_INDEX_FILE_BYTES {
                 continue;
             }
-            // Route through the read seam so git-backed rows resolve via
-            // the git odb (their `blob_hash` is an OID, not a blob-store key).
-            let Ok(bytes) = crate::snapshot_content::read_snapshot_content(
-                f.storage,
-                hash,
-                &self.services.layout.project_dir,
-                &self.services.blobs,
-            ) else {
+            // Route through the read seam so VCS-backed rows resolve via
+            // the object store (their `blob_hash` is an object id).
+            let Ok(bytes) = self.services.snapshot_content.read(f.storage, hash) else {
                 continue;
             };
             // Skip binary: a NUL byte is the cheap, reliable heuristic.

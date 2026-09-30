@@ -33,7 +33,7 @@ its snapshots don't bleed into another stream's history.
 
 When the worktree is clean at capture time (no tracked-file
 changes, no untracked-non-ignored files), the snapshot is
-pinned to the current `git_commit` SHA. HEAD moves re-stamp
+pinned to the current commit. HEAD moves re-stamp
 the latest snapshot so the pin stays current.
 
 That pin is what makes the "By git commit" view in the

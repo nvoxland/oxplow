@@ -29,6 +29,7 @@ use std::time::UNIX_EPOCH;
 
 use oxplow_db::{FileSnapshot, SnapshotStorage, SqliteSnapshotStore, TakeRecord};
 use oxplow_domain::snapshot::SnapshotTrigger;
+use oxplow_domain::vcs::{ObjectStore, Revision, Vcs};
 use oxplow_domain::{EffortId, ThreadId};
 
 /// What a snapshot take is for: why it runs, what it belongs to, and how
@@ -106,19 +107,18 @@ fn sweep_thread_pool() -> Option<rayon::ThreadPool> {
 }
 
 /// Whether `bytes` (whose xxh3 is `xxh3`) are the content `prior`'s row
-/// already records. By content hash when the prior has one; a git-backed
-/// prior not hashed yet is compared by git blob OID — the same bytes hash
+/// already records. By content hash when the prior has one; a VCS-backed
+/// prior not hashed yet is compared by object id — the same bytes hash
 /// to its address — so touching a clean file isn't a change (tsk439).
 fn same_content(
     prior: Option<(&SnapshotStorage, Option<&str>, Option<&str>)>,
     xxh3: &str,
     bytes: &[u8],
+    objects: &dyn ObjectStore,
 ) -> bool {
     match prior {
         Some((_, Some(content), _)) => content == xxh3,
-        Some((SnapshotStorage::Git, None, Some(oid))) => {
-            oxplow_git::git_blob_oid(bytes).as_deref() == Some(oid)
-        }
+        Some((SnapshotStorage::Git, None, Some(oid))) => objects.id_of(bytes).0 == oid,
         _ => false,
     }
 }
@@ -179,6 +179,9 @@ struct Inner {
     store: Arc<SqliteSnapshotStore>,
     blobs: BlobStore,
     project_dir: PathBuf,
+    /// The VCS: its clean baseline backs committed files by their head
+    /// objects, and its head names the revision a take captured.
+    vcs: Arc<dyn Vcs>,
     stream_id: StreamId,
     /// Files larger than this skip blob hashing and are flagged
     /// `oversize`. Pulled from `OxplowConfig::snapshot_max_file_bytes`.
@@ -271,6 +274,7 @@ impl SnapshotCaptureService {
         store: Arc<SqliteSnapshotStore>,
         blobs: BlobStore,
         project_dir: PathBuf,
+        vcs: Arc<dyn Vcs>,
         stream_id: StreamId,
         max_file_bytes: u64,
         workspace_filter: WorkspaceFilter,
@@ -280,6 +284,7 @@ impl SnapshotCaptureService {
                 store,
                 blobs,
                 project_dir,
+                vcs,
                 stream_id,
                 max_file_bytes,
                 workspace_filter: RwLock::new(workspace_filter),
@@ -414,6 +419,44 @@ impl SnapshotCaptureService {
 
     pub fn stream_id(&self) -> &StreamId {
         &self.inner.stream_id
+    }
+
+    /// The workspace's branch, and its head revision when the workspace is
+    /// clean at it (so a snapshot's tree equals that revision).
+    async fn clean_head(&self) -> (Option<String>, Option<Revision>) {
+        let (vcs, ws) = (&self.inner.vcs, &self.inner.project_dir);
+        let Ok(head) = vcs.head(ws).await else {
+            return (None, None);
+        };
+        let clean = vcs.status(ws).await.is_ok_and(|s| s.entries.is_empty());
+        let revision = head.revision.filter(|_| clean).map(|rev| Revision::Vcs {
+            kind: vcs.rev_kind().into(),
+            rev,
+        });
+        (head.branch, revision)
+    }
+
+    /// The version triple for a file ref pinned to `snapshot_id` in this
+    /// stream ([`crate::file_ref_version::resolve`]).
+    pub async fn resolve_file_version(
+        &self,
+        snapshot_id: i64,
+    ) -> Result<crate::file_ref_version::ResolvedFileVersion, oxplow_domain::DomainError> {
+        crate::file_ref_version::resolve(
+            &self.inner.store,
+            &*self.inner.vcs,
+            &self.inner.project_dir,
+            snapshot_id,
+        )
+        .await
+    }
+
+    /// Reads this stream's captured bytes from whichever store holds them.
+    pub fn content(&self) -> crate::snapshot_content::SnapshotContent {
+        crate::snapshot_content::SnapshotContent::new(
+            self.inner.blobs.clone(),
+            self.inner.vcs.object_store(&self.inner.project_dir),
+        )
     }
 
     pub fn blobs(&self) -> &BlobStore {
@@ -598,18 +641,8 @@ impl SnapshotCaptureService {
         let Some(current) = after_drain else {
             return Ok(None);
         };
-        // Bypass GitService's caches (see `record`).
-        let project_dir = self.inner.project_dir.clone();
-        let head = tokio::task::spawn_blocking(move || {
-            oxplow_git::list_git_statuses(&project_dir)
-                .is_empty()
-                .then(|| oxplow_git::head_commit_sha(&project_dir))
-                .flatten()
-        })
-        .await
-        .ok()
-        .flatten();
-        let Some(head_sha) = head else {
+        let head = self.clean_head().await.1;
+        let Some(head) = head else {
             // Dirty (the next take records the commit) or not a repo.
             return Ok(after_drain);
         };
@@ -619,7 +652,7 @@ impl SnapshotCaptureService {
             .record_head_moved(
                 self.inner.stream_id,
                 current,
-                head_sha,
+                head,
                 "system:snapshot_capture".into(),
             )
             .await?
@@ -1023,6 +1056,8 @@ impl SnapshotCaptureService {
         let project_dir = self.inner.project_dir.clone();
         let max_bytes = self.inner.max_file_bytes;
         let blobs = self.inner.blobs.clone();
+        let vcs = self.inner.vcs.clone();
+        let objects = vcs.object_store(&project_dir);
         let filter = self
             .inner
             .workspace_filter
@@ -1054,9 +1089,9 @@ impl SnapshotCaptureService {
             // Built once (in-memory tree walk + one index read); empty
             // when not a git repo.
             let baseline_started = Instant::now();
-            let git_baseline = oxplow_git::GitCleanBaseline::build(&project_dir);
+            let clean_baseline = vcs.clean_baseline(&project_dir);
             info!(
-                clean_candidates = git_baseline.candidate_count(),
+                clean_candidates = clean_baseline.candidates(),
                 baseline_ms = baseline_started.elapsed().as_millis() as u64,
                 "snapshot startup sweep: git baseline ready",
             );
@@ -1215,9 +1250,9 @@ impl SnapshotCaptureService {
                                 .strip_prefix(&project_dir)
                                 .unwrap_or(&path)
                                 .to_string_lossy();
-                            git_baseline
-                                .clean_head_oid(&rel, size as u64, mt)
-                                .map(str::to_string)
+                            clean_baseline
+                                .clean_object(&rel, size as u64, mt)
+                                .map(|id| id.0)
                         });
                         if let Some(oid) = clean_oid {
                             // Prior row already at this OID → unchanged.
@@ -1261,7 +1296,7 @@ impl SnapshotCaptureService {
                         let prior = prior_storage
                             .as_ref()
                             .map(|st| (st, prior_content.as_deref(), prior_hash.as_deref()));
-                        if same_content(prior, &hash, &bytes) {
+                        if same_content(prior, &hash, &bytes, &*objects) {
                             return None;
                         }
                         // Persist the blob now — we already have the
@@ -1435,6 +1470,7 @@ impl SnapshotCaptureService {
         let stream_id = self.inner.stream_id;
         let max_bytes = self.inner.max_file_bytes;
         let blobs = self.inner.blobs.clone();
+        let objects = self.inner.vcs.object_store(&project_dir);
         let settle = self.inner.settle_duration;
         let classify_now = Instant::now();
 
@@ -1558,6 +1594,7 @@ impl SnapshotCaptureService {
                                                 }),
                                                 &h,
                                                 &bytes,
+                                                &*objects,
                                             ) =>
                                             {
                                                 return None;
@@ -1669,22 +1706,12 @@ impl SnapshotCaptureService {
         started: Instant,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
         // A take with no rows records no new snapshot, so it needs no
-        // branch or commit — skip the git probes (a `git status` on a big
-        // repo is most of an empty take's cost).
-        let (git_branch, git_commit) = if rows.is_empty() {
+        // branch or revision — skip the VCS probes (a status on a big repo
+        // is most of an empty take's cost).
+        let (branch, revision) = if rows.is_empty() {
             (None, None)
         } else {
-            let project_dir = self.inner.project_dir.clone();
-            tokio::task::spawn_blocking(move || {
-                let branch = oxplow_git::detect_current_branch(&project_dir);
-                let clean = oxplow_git::list_git_statuses(&project_dir).is_empty();
-                let commit = clean
-                    .then(|| oxplow_git::head_commit_sha(&project_dir))
-                    .flatten();
-                (branch, commit)
-            })
-            .await
-            .unwrap_or((None, None))
+            self.clean_head().await
         };
         let take = TakeRecord {
             stream_id: self.inner.stream_id,
@@ -1693,8 +1720,8 @@ impl SnapshotCaptureService {
             thread_id: req.thread_id,
             turn_id: req.turn_id,
             effort_id: req.effort_id,
-            git_branch,
-            git_commit,
+            branch,
+            revision,
             elapsed_ms: started.elapsed().as_millis() as u64,
             budget_ms: req.budget.map(|b| b.as_millis() as u64),
             source: "system:snapshot_capture".into(),
@@ -1799,6 +1826,7 @@ mod tests {
             store.clone(),
             blobs,
             project.to_path_buf(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
             TEST_STREAM,
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
@@ -1866,22 +1894,18 @@ mod tests {
         assert_eq!(tracked.len(), 1);
         assert_eq!(tracked[0].storage, SnapshotStorage::Git);
         let oid = tracked[0].blob_hash.clone().unwrap();
-        let expect = oxplow_git::clean_head_blob_oids(project.path())
-            .remove("tracked.txt")
-            .unwrap();
-        assert_eq!(oid, expect, "blob_hash must be the git blob OID");
+        let content = svc.content();
+        assert_eq!(
+            oid,
+            content.objects().id_of(b"hello world\n").0,
+            "blob_hash must be the object id"
+        );
         assert!(
             !svc.inner.blobs.has(&oid),
             "git-backed file must not write a blob",
         );
-        // And it reads back through the seam from the git odb.
-        let bytes = crate::snapshot_content::read_snapshot_content(
-            SnapshotStorage::Git,
-            &oid,
-            project.path(),
-            &svc.inner.blobs,
-        )
-        .unwrap();
+        // And it reads back through the seam from the object store.
+        let bytes = content.read(SnapshotStorage::Git, &oid).unwrap();
         assert_eq!(bytes, b"hello world\n");
 
         // Untracked file → oxplow-backed with a real blob on disk.
@@ -1990,6 +2014,7 @@ mod tests {
             store,
             BlobStore::new(project.path().join(".oxplow/snapshots")),
             project.path().to_path_buf(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
             StreamId::new(999),
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
@@ -2390,8 +2415,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            store.get_snapshot_git_commit(clean_id).await.unwrap(),
-            Some(head_sha.clone())
+            store.get_snapshot_revision(clean_id).await.unwrap(),
+            Some(Revision::git(head_sha.clone()))
         );
 
         // Mutate the tracked file → worktree now dirty. The next
@@ -2404,7 +2429,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(store
-            .get_snapshot_git_commit(dirty_id)
+            .get_snapshot_revision(dirty_id)
             .await
             .unwrap()
             .is_none());
@@ -2432,8 +2457,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            store.get_snapshot_git_commit(with_ignored).await.unwrap(),
-            Some(head_oid2.to_string())
+            store.get_snapshot_revision(with_ignored).await.unwrap(),
+            Some(Revision::git(head_oid2.to_string()))
         );
     }
 
@@ -2469,8 +2494,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            store.get_snapshot_git_commit(first_id).await.unwrap(),
-            Some(head1_oid.to_string())
+            store.get_snapshot_revision(first_id).await.unwrap(),
+            Some(Revision::git(head1_oid.to_string()))
         );
 
         // User commits a new revision externally — worktree stays
@@ -2489,16 +2514,16 @@ mod tests {
             "no file changes → must re-use the existing row, not create a new one"
         );
         assert_eq!(
-            store.get_snapshot_git_commit(second_id).await.unwrap(),
-            Some(head2_oid.to_string())
+            store.get_snapshot_revision(second_id).await.unwrap(),
+            Some(Revision::git(head2_oid.to_string()))
         );
 
         // Calling again at the same HEAD is a no-op.
         let third_id = svc.request_snapshot_for_git_refs().await.unwrap().unwrap();
         assert_eq!(third_id, second_id);
         assert_eq!(
-            store.get_snapshot_git_commit(third_id).await.unwrap(),
-            Some(head2_oid.to_string())
+            store.get_snapshot_revision(third_id).await.unwrap(),
+            Some(Revision::git(head2_oid.to_string()))
         );
 
         // The op log tells the story, newest first: the second git-refs
@@ -2743,6 +2768,7 @@ mod tests {
             store.clone(),
             blobs,
             project.path().to_path_buf(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
             TEST_STREAM,
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
@@ -2788,6 +2814,7 @@ mod tests {
             store.clone(),
             blobs,
             project.path().to_path_buf(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
             TEST_STREAM,
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
@@ -2816,6 +2843,7 @@ mod tests {
             store,
             blobs,
             project.to_path_buf(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
             TEST_STREAM,
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
@@ -3159,6 +3187,7 @@ mod tests {
                 store.clone(),
                 blobs,
                 project.path().to_path_buf(),
+                std::sync::Arc::new(crate::vcs::GitProvider),
                 TEST_STREAM,
                 1_000_000,
                 oxplow_fs_watch::WorkspaceFilter::default(),
@@ -3201,6 +3230,7 @@ mod tests {
             store.clone(),
             blobs,
             project.path().to_path_buf(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
             TEST_STREAM,
             512, // 512 byte cap → 1KB is oversize
             oxplow_fs_watch::WorkspaceFilter::default(),

@@ -523,14 +523,14 @@
     - { not_null: id }
     - { unique: id }
 - name: snapshot
-  version: 1
+  version: 2
   description: "Snapshots: point-in-time captures of a stream's worktree, used to bracket efforts and diffs."
   columns:
     - { name: "id", type: "INTEGER", doc: "Snapshot id." }
     - { name: "stream_id", type: "INTEGER", doc: "Stream captured." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "git_commit", type: "TEXT", doc: "HEAD commit when captured, if known." }
-    - { name: "git_branch", type: "TEXT", doc: "Branch when captured, if known." }
+    - { name: "revision", type: "TEXT", doc: "The VCS revision the captured tree equals (`git:<sha>`): set when the workspace was clean at the head; NULL otherwise." }
+    - { name: "branch", type: "TEXT", doc: "Branch when captured, if known." }
     - { name: "tree_hash", type: "TEXT", doc: "Whole-tree identity: two snapshots with the same tree_hash hold the same files. NULL before V96." }
   tests:
     - { not_null: id }

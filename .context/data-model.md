@@ -617,13 +617,13 @@ draft of this doc described a single `snapshot_entry` table with a
 
 - **`snapshot`** (V13/V16/V42) — the grouping row, one per
   `request_snapshot()` call that had dirty files. Columns: `id,
-  stream_id, created_at, git_commit, git_branch`. `git_commit` is the
-  40-char sha the worktree was clean against (else NULL); it's
-  re-stamped in place when HEAD moves but the tree didn't change.
-  `git_branch` (V42) is the short branch name HEAD was on at capture
-  (set unconditionally, dirty or clean, via
-  `detect_current_branch`; NULL for pre-V42 rows / detached HEAD /
-  non-git dir) — it lets callers tell snapshots captured on different
+  stream_id, created_at, revision, branch` (renamed from `git_commit`
+  / `git_branch` in V112). `revision` is the VCS revision the workspace
+  was clean against (`git:<sha>`, a `Revision`; else NULL); it's
+  re-stamped in place when the head moves but the tree didn't change.
+  `branch` (V42) is the branch the workspace was on at capture (set
+  unconditionally, dirty or clean, via `Vcs::head`; NULL for pre-V42
+  rows / detached head / not under version control) — it lets callers tell snapshots captured on different
   branches of the *same* stream's worktree apart (the diff page's
   snapshot picker filters by it).
 - **`file_snapshot`** — the per-path rows: `id, stream_id, path,
@@ -645,7 +645,8 @@ class that has bytes. They coincide for `oxplow` rows (capture fills
 OID — a different hash space — so its `content_hash` is filled
 **lazily**: `SqliteSnapshotStore::resolve_for_compare` hashes exactly the
 git entries that sit opposite a different identity in a comparison (via
-the `ContentHasher` the app wires over the git odb in `Services::new`)
+the `ContentHasher` the app wires over the VCS object store —
+`SnapshotContent::object_content_hash` — in `Services::new`)
 and persists the result by OID. A clean baseline is never re-read.
 Everything that compares content goes through typed trees
 (`tree_at` → `SnapshotTree` of `TreeEntry { storage, address,
@@ -728,11 +729,12 @@ deleted. The sweep's reverse-deletion pass tombstones oversize files too
 **take** (`SnapshotCaptureService::request_snapshot(TakeRequest)`) drains
 the dirty set and hands the rows to `SqliteSnapshotStore::record_take`,
 which writes — in **one transaction** — the new `snapshot` row (with
-`git_branch`, `git_commit` when the tree is clean, and `tree_hash`), its
+`branch`, `revision` when the tree is clean, and `tree_hash`), its
 `file_snapshot` rows, one `snapshot_op` row and a `snapshot.taken@1`
 event (anchors: stream, thread, turn, effort, snapshot). It is the only
 production write path; `create_snapshot` / `capture` / `capture_batch` /
-`set_snapshot_git_*` remain as fixture seeders for tests.
+`set_snapshot_revision` / `set_snapshot_branch` remain as fixture
+seeders for tests.
 
 - `snapshot_op(seq, stream_id, snapshot_id, parent_snapshot_id, trigger,
   thread_id, turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget,
@@ -761,7 +763,7 @@ production write path; `create_snapshot` / `capture` / `capture_batch` /
   re-stamps the snapshot the caller saw the clean tree at — refusing if a
   take has moved the stream on since (tsk440), and the git-refs path
   holds the take lock from its drain through the stamp — with the new
-  `git_commit` (and flips every
+  `revision` (and flips every
   exact-pin file ref on it) with a `head_moved` op and `vcs.head.moved@1`,
   in one transaction. The git-refs listener runs a `git_refs` take first
   (draining anything dirty), then this.
@@ -800,14 +802,16 @@ oversize?)` 2-bit encoding (the dropped `oversize` boolean):
   (shared across streams for dedup). xxh3-128 (not SHA-256/blake3) was
   chosen because it's a local non-adversarial cache and ~30–50× faster
   on Apple silicon (`crates/oxplow-app/src/blob_store.rs`).
-- `git` — `blob_hash` is a **git blob OID**; the bytes are *not* copied
-  into the blob store — they're recovered on demand from the git object
-  db via libgit2 `find_blob`. This is the **git-sourced baseline**: the
-  startup sweep records clean tracked files (working-tree-identical to
-  HEAD) by their OID instead of reading + hashing + blobbing them, so a
-  clean checkout of a large repo boots without re-blobbing the tree.
-  Detection + read live in `oxplow_git::{clean_head_blob_oids,
-  read_blob}`; the capture path is the sweep's phase 2.
+- `git` — `blob_hash` is an **object id in the VCS's object store**
+  (a git blob OID); the bytes are *not* copied into the blob store —
+  they're recovered on demand through `Vcs::object_store`. This is the
+  **VCS-sourced baseline**: the startup sweep records clean tracked
+  files (working-tree-identical to the head, per `Vcs::clean_baseline`)
+  by their object id instead of reading + hashing + blobbing them, so a
+  clean checkout of a large repo boots without re-blobbing the tree. The
+  class keeps its persisted name `git` (P5.B3): renaming it would rebuild
+  `file_snapshot`, the largest table, for a word — it names the VCS's
+  object store, whichever VCS that is.
 - `oversize` — `blob_hash` NULL; the file exceeded
   `snapshotMaxFileBytes`, so only `size_bytes` + `mtime_ms` are tracked.
 - `deleted` — `blob_hash` NULL; a **tombstone** row marking the path
@@ -816,8 +820,9 @@ oversize?)` 2-bit encoding (the dropped `oversize` boolean):
 
 **The read seam.** Every consumer that wants a captured file's bytes
 (workspace file view, snapshot restore, search indexer, MCP/diff
-readers) goes through `oxplow_app::snapshot_content::read_snapshot_content`,
-which switches on `storage` so none of them can forget the git
+readers) goes through `oxplow_app::snapshot_content::SnapshotContent`
+(`Services.snapshot_content`: the blob store plus the VCS object store),
+which switches on `storage` so none of them can forget the VCS
 fallback. `SnapshotStore::content_ref_for_path` returns a
 `SnapshotContentRef { storage, hash }` for the same routing.
 
@@ -973,10 +978,11 @@ directory carry a snapshot pin so callers can tell how out-of-date
 each reference is. `local_snapshot_id` always points at the
 `snapshot.id` the edge was captured against; `closest_git_version`
 is the closest known git commit at capture time
-(`snapshot.git_commit` when the worktree was clean, else HEAD);
+(the id of `snapshot.revision` when the worktree was clean, else the
+head, via `Vcs::head`);
 `git_version_exact = 1` when the local snapshot is byte-equal to
-that commit. Non-file edges leave all three columns NULL / 0. When
-`set_snapshot_git_commit` lands a commit on a snapshot later
+that commit. Non-file edges leave all three columns NULL / 0. When a
+revision lands on a snapshot later
 (e.g. the clean-restamp path in `SnapshotCaptureService`), the
 write cascades: both `effort_file` and `page_ref` rows
 pointing at that snapshot get their `closest_git_version` set and

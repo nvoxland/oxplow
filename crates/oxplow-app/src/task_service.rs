@@ -1158,15 +1158,13 @@ impl TaskService {
             .unwrap_or(0);
         let svc = self.service_for_thread(&effort.thread_id).await;
         match svc {
-            Some(svc) if snapshot_id != 0 => {
-                crate::file_ref_version::resolve(svc.store(), svc.project_dir(), snapshot_id)
-                    .await
-                    .unwrap_or(crate::file_ref_version::ResolvedFileVersion {
-                        local_snapshot_id: snapshot_id,
-                        closest_git_version: None,
-                        git_version_exact: false,
-                    })
-            }
+            Some(svc) if snapshot_id != 0 => svc.resolve_file_version(snapshot_id).await.unwrap_or(
+                crate::file_ref_version::ResolvedFileVersion {
+                    local_snapshot_id: snapshot_id,
+                    closest_git_version: None,
+                    git_version_exact: false,
+                },
+            ),
             _ => crate::file_ref_version::ResolvedFileVersion {
                 local_snapshot_id: snapshot_id,
                 closest_git_version: None,
@@ -1673,6 +1671,7 @@ mod tests {
         let event_bus = crate::events::EventBus::new();
         let snapshot_captures = crate::snapshot_capture_registry::SnapshotCaptureRegistry::new(
             crate::snapshot_capture_registry::SnapshotCaptureRegistryConfig {
+                vcs: std::sync::Arc::new(crate::vcs::GitProvider),
                 snapshot_store: snapshot_store.clone(),
                 blobs: blobs.clone(),
                 max_file_bytes: 1_000_000,
@@ -1693,6 +1692,7 @@ mod tests {
                 snapshot_store,
                 blobs,
                 project.path().to_path_buf(),
+                std::sync::Arc::new(crate::vcs::GitProvider),
                 s.id,
                 1_000_000,
                 oxplow_fs_watch::WorkspaceFilter::default(),
@@ -3419,6 +3419,7 @@ mod tests {
 
         let snapshot_captures = crate::snapshot_capture_registry::SnapshotCaptureRegistry::new(
             crate::snapshot_capture_registry::SnapshotCaptureRegistryConfig {
+                vcs: std::sync::Arc::new(crate::vcs::GitProvider),
                 snapshot_store: snapshot_store.clone(),
                 blobs: blobs.clone(),
                 max_file_bytes: 1_000_000,
@@ -3438,6 +3439,7 @@ mod tests {
                     snapshot_store.clone(),
                     blobs.clone(),
                     std::path::PathBuf::from(&s.worktree_path),
+                    std::sync::Arc::new(crate::vcs::GitProvider),
                     s.id,
                     1_000_000,
                     oxplow_fs_watch::WorkspaceFilter::default(),

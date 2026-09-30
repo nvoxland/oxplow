@@ -2,16 +2,19 @@
 //! on its [`SnapshotStorage`] class.
 //!
 //! Snapshot rows store content in one of two places — oxplow's blob
-//! store (`storage = oxplow`, `blob_hash` = xxh3-128) or the git object
-//! db (`storage = git`, `blob_hash` = git blob OID). Every consumer that
-//! wants the bytes (workspace file view, snapshot restore, search
-//! indexer, MCP/diff readers) goes through [`read_snapshot_content`] so
-//! none of them can forget the git fallback. `oversize` / `deleted` rows
-//! have no readable bytes and return [`SnapshotReadError::NoContent`].
+//! store (`storage = oxplow`, `blob_hash` = xxh3-128) or the VCS's object
+//! store (`storage = git`, `blob_hash` = an object id; the persisted class
+//! name predates the VCS capability, `.context/vcs.md`). Every consumer
+//! that wants the bytes (workspace file view, snapshot restore, search
+//! indexer, metrics, drift, diff readers) goes through
+//! [`SnapshotContent`] so none of them can forget the VCS fallback.
+//! `oversize` / `deleted` rows have no readable bytes and return
+//! [`SnapshotReadError::NoContent`].
 
-use std::path::Path;
+use std::sync::Arc;
 
 use oxplow_db::{SnapshotContentRef, SnapshotStorage};
+use oxplow_domain::vcs::{ObjectId, ObjectStore};
 
 use crate::blob_store::BlobStore;
 
@@ -25,54 +28,87 @@ pub enum SnapshotReadError {
     /// An oxplow-blob-store row whose blob is missing/unreadable.
     #[error("blob store read failed: {0}")]
     Blob(String),
-    /// A git-backed row whose OID no longer resolves in the object db —
-    /// e.g. history was rewritten and the blob was GC'd. The bytes are
-    /// genuinely gone (we deliberately never copied them).
-    #[error("git object {0} unavailable (orphaned by a history rewrite?)")]
-    GitUnavailable(String),
+    /// A VCS-backed row whose object no longer resolves — e.g. history
+    /// was rewritten and the object collected. The bytes are genuinely
+    /// gone (we deliberately never copied them).
+    #[error("object {0} unavailable (orphaned by a history rewrite?)")]
+    ObjectUnavailable(String),
 }
 
-/// Read the bytes for `(storage, blob_hash)`, fetching from the blob
-/// store or the git odb under `project_dir`. Blocking (does file / git
-/// I/O) — call from `spawn_blocking` on the async path.
-pub fn read_snapshot_content(
-    storage: SnapshotStorage,
-    blob_hash: &str,
-    project_dir: &Path,
-    blobs: &BlobStore,
-) -> Result<Vec<u8>, SnapshotReadError> {
-    match storage {
-        SnapshotStorage::Oxplow => blobs
-            .read(blob_hash)
-            .map_err(|e| SnapshotReadError::Blob(e.to_string())),
-        SnapshotStorage::Git => oxplow_git::read_blob(project_dir, blob_hash)
-            .ok_or_else(|| SnapshotReadError::GitUnavailable(blob_hash.to_string())),
-        SnapshotStorage::Oversize | SnapshotStorage::Deleted => Err(SnapshotReadError::NoContent),
+/// Reads captured bytes from either store. Every workspace of the
+/// repository shares one object store, so one reader serves every
+/// stream. Cheap to clone. Blocking — call from `spawn_blocking` on the
+/// async path.
+#[derive(Clone)]
+pub struct SnapshotContent {
+    blobs: BlobStore,
+    objects: Arc<dyn ObjectStore>,
+}
+
+impl SnapshotContent {
+    pub fn new(blobs: BlobStore, objects: Arc<dyn ObjectStore>) -> Self {
+        Self { blobs, objects }
     }
-}
 
-/// Convenience over [`read_snapshot_content`] for a
-/// [`SnapshotContentRef`] (as returned by
-/// `SnapshotStore::content_ref_for_path`).
-pub fn read_content_ref(
-    content_ref: &SnapshotContentRef,
-    project_dir: &Path,
-    blobs: &BlobStore,
-) -> Result<Vec<u8>, SnapshotReadError> {
-    read_snapshot_content(content_ref.storage, &content_ref.hash, project_dir, blobs)
+    /// The bytes for `(storage, blob_hash)`.
+    pub fn read(
+        &self,
+        storage: SnapshotStorage,
+        blob_hash: &str,
+    ) -> Result<Vec<u8>, SnapshotReadError> {
+        match storage {
+            SnapshotStorage::Oxplow => self
+                .blobs
+                .read(blob_hash)
+                .map_err(|e| SnapshotReadError::Blob(e.to_string())),
+            SnapshotStorage::Git => self
+                .objects
+                .read(&ObjectId(blob_hash.to_string()))
+                .ok_or_else(|| SnapshotReadError::ObjectUnavailable(blob_hash.to_string())),
+            SnapshotStorage::Oversize | SnapshotStorage::Deleted => {
+                Err(SnapshotReadError::NoContent)
+            }
+        }
+    }
+
+    /// [`Self::read`] for a [`SnapshotContentRef`] (as returned by
+    /// `SnapshotStore::content_ref_for_path`).
+    pub fn read_ref(&self, content_ref: &SnapshotContentRef) -> Result<Vec<u8>, SnapshotReadError> {
+        self.read(content_ref.storage, &content_ref.hash)
+    }
+
+    /// The content hash (xxh3, the blob store's key) of a VCS object — how
+    /// VCS-backed rows join the one content-identity space
+    /// (`SqliteSnapshotStore::with_content_hasher`).
+    pub fn object_content_hash(&self, id: &str) -> Option<String> {
+        self.objects
+            .read(&ObjectId(id.to_string()))
+            .map(|bytes| BlobStore::hash(&bytes))
+    }
+
+    pub fn objects(&self) -> &Arc<dyn ObjectStore> {
+        &self.objects
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_domain::vcs::Vcs as _;
     use tempfile::tempdir;
+
+    fn reader(dir: &std::path::Path) -> SnapshotContent {
+        SnapshotContent::new(
+            BlobStore::new(dir.join(".oxplow/objects")),
+            crate::vcs::GitProvider.object_store(dir),
+        )
+    }
 
     #[test]
     fn oversize_and_deleted_have_no_content() {
         let dir = tempdir().unwrap();
-        let blobs = BlobStore::new(dir.path().join("objects"));
         for storage in [SnapshotStorage::Oversize, SnapshotStorage::Deleted] {
-            let err = read_snapshot_content(storage, "whatever", dir.path(), &blobs).unwrap_err();
+            let err = reader(dir.path()).read(storage, "whatever").unwrap_err();
             assert!(matches!(err, SnapshotReadError::NoContent));
         }
     }
@@ -80,44 +116,34 @@ mod tests {
     #[test]
     fn oxplow_reads_from_blob_store() {
         let dir = tempdir().unwrap();
-        let blobs = BlobStore::new(dir.path().join("objects"));
-        let hash = blobs.write(b"hello bytes").unwrap();
-        let got =
-            read_snapshot_content(SnapshotStorage::Oxplow, &hash, dir.path(), &blobs).unwrap();
+        let content = reader(dir.path());
+        let hash = content.blobs.write(b"hello bytes").unwrap();
+        let got = content.read(SnapshotStorage::Oxplow, &hash).unwrap();
         assert_eq!(got, b"hello bytes");
     }
 
     #[test]
-    fn git_reads_committed_blob() {
+    fn a_vcs_row_reads_its_committed_object() {
         let dir = tempdir().unwrap();
-        let repo = git2::Repository::init(dir.path()).unwrap();
-        let mut cfg = repo.config().unwrap();
-        cfg.set_str("user.name", "t").unwrap();
-        cfg.set_str("user.email", "t@e.com").unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
         std::fs::write(dir.path().join("f.txt"), "git body").unwrap();
-        let mut idx = repo.index().unwrap();
-        idx.add_path(Path::new("f.txt")).unwrap();
-        idx.write().unwrap();
-        let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
-        let sig = repo.signature().unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "c", &tree, &[])
-            .unwrap();
-
-        let oid = oxplow_git::clean_head_blob_oids(dir.path())
-            .remove("f.txt")
-            .unwrap();
-        let blobs = BlobStore::new(dir.path().join(".oxplow/objects"));
-        let got = read_snapshot_content(SnapshotStorage::Git, &oid, dir.path(), &blobs).unwrap();
+        crate::test_fixtures::commit_all(dir.path(), "c");
+        let content = reader(dir.path());
+        let oid = content.objects().id_of(b"git body").0;
+        let got = content.read(SnapshotStorage::Git, &oid).unwrap();
         assert_eq!(got, b"git body");
+        assert_eq!(
+            content.object_content_hash(&oid),
+            Some(BlobStore::hash(b"git body"))
+        );
 
-        // A bogus OID surfaces GitUnavailable, not a panic.
-        let err = read_snapshot_content(
-            SnapshotStorage::Git,
-            "0123456789abcdef0123456789abcdef01234567",
-            dir.path(),
-            &blobs,
-        )
-        .unwrap_err();
-        assert!(matches!(err, SnapshotReadError::GitUnavailable(_)));
+        // A bogus id surfaces ObjectUnavailable, not a panic.
+        let err = content
+            .read(
+                SnapshotStorage::Git,
+                "0123456789abcdef0123456789abcdef01234567",
+            )
+            .unwrap_err();
+        assert!(matches!(err, SnapshotReadError::ObjectUnavailable(_)));
     }
 }

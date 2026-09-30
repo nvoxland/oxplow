@@ -33,6 +33,7 @@ mod tests {
             f.svc.snapshot_store.clone(),
             f.svc.blobs.clone(),
             f.svc.layout.project_dir.clone(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
             stream,
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
@@ -77,10 +78,7 @@ mod tests {
             .content_ref_for_path(snapshot, path)
             .await
             .unwrap()?;
-        Some(
-            crate::snapshot_content::read_content_ref(&content, svc.project_dir(), svc.blobs())
-                .unwrap(),
-        )
+        Some(svc.content().read_ref(&content).unwrap())
     }
 
     #[tokio::test]

@@ -482,6 +482,7 @@ mod tests {
         // Per-stream capture service over the real worktree, with a zero
         // predrain so captures resolve synchronously in the test.
         let reg = SnapshotCaptureRegistry::new(SnapshotCaptureRegistryConfig {
+            vcs: std::sync::Arc::new(crate::vcs::GitProvider),
             snapshot_store: snapshot_store.clone(),
             blobs: BlobStore::new(project.path().join(".oxplow/snapshots")),
             max_file_bytes: 1_000_000,
@@ -494,6 +495,7 @@ mod tests {
                 snapshot_store.clone(),
                 BlobStore::new(project.path().join(".oxplow/snapshots")),
                 project.path().to_path_buf(),
+                std::sync::Arc::new(crate::vcs::GitProvider),
                 s.id,
                 1_000_000,
                 WorkspaceFilter::default(),

@@ -13,7 +13,7 @@ use oxplow_db::{FileSnapshot, SnapshotStorage};
 use oxplow_domain::stores::StreamStore as _;
 use oxplow_domain::StreamId;
 
-use crate::snapshot_content::{read_snapshot_content, SnapshotReadError};
+use crate::snapshot_content::SnapshotReadError;
 use crate::Services;
 
 #[derive(Debug, thiserror::Error)]
@@ -106,15 +106,14 @@ async fn read_row(svc: &Services, row: &FileSnapshot) -> Result<Vec<u8>, Snapsho
     read_bytes(svc, row.storage, hash).await
 }
 
-/// Blob-store or git-odb bytes, off the async runtime (it's file / git I/O).
+/// Blob-store or VCS-object bytes, off the async runtime (it's file I/O).
 async fn read_bytes(
     svc: &Services,
     storage: SnapshotStorage,
     hash: String,
 ) -> Result<Vec<u8>, SnapshotFileError> {
-    let project = svc.layout.project_dir.clone();
-    let blobs = svc.blobs.clone();
-    tokio::task::spawn_blocking(move || read_snapshot_content(storage, &hash, &project, &blobs))
+    let content = svc.snapshot_content.clone();
+    tokio::task::spawn_blocking(move || content.read(storage, &hash))
         .await
         .map_err(|e| SnapshotFileError::Other(e.to_string()))?
         .map_err(|e| match e {
@@ -164,6 +163,7 @@ mod tests {
             f.svc.snapshot_store.clone(),
             f.svc.blobs.clone(),
             worktree.path().to_path_buf(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
             stream,
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),

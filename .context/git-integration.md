@@ -182,7 +182,7 @@ loading spinner) by:
   modes.)
 - `SnapshotCapture::spawn_git_refs_listener` — requests a snapshot for
   the stream, so every commit lands a snapshot row stamped with the new
-  HEAD (`snapshot.git_commit`/`git_branch`) even when the worktree
+  HEAD (`snapshot.revision`/`branch`) even when the worktree
   didn't change. Beyond Local History, those rows are the **anchor
   points for metric ancestry** (tsk97/tsk102): a dirty test run's code
   is placed by the *next* same-branch commit-stamped snapshot — the
@@ -577,9 +577,9 @@ they came from the in-app commit affordance or an external
 desktop boot in `apps/desktop/src-tauri/src/main.rs`) subscribes to
 `OxplowEvent::GitRefsChanged` for its stream. On each event it drains
 any pending dirty paths via `request_snapshot(SnapshotSourceKind::GitRefs)`,
-then — if the worktree is clean and HEAD's sha differs from the latest
-snapshot's `git_commit` — **re-stamps the latest snapshot's
-`git_commit` to point at the new HEAD**. No new row is inserted: the
+then — if the worktree is clean and HEAD differs from the latest
+snapshot's `revision` — **re-stamps the latest snapshot's
+`revision` to point at the new HEAD** (`git:<sha>`). No new row is inserted: the
 worktree didn't change, so the existing snapshot is already the right
 representation of disk; it just now also corresponds to a new commit
 (common after `git commit`, `git commit --amend`, or a fast-forward
@@ -588,13 +588,11 @@ pull that moves HEAD without altering the working tree).
 After the re-stamp the service emits a 0-file
 `FileSnapshotsBatchCreated` event so renderer subscribers (Local
 History dashboard, change analysis) refetch and pick up the new
-`git_commit`.
+`revision`.
 
-The cleanliness check uses `oxplow_git::list_git_statuses` directly
-(via `spawn_blocking`) rather than going back through GitService.
-That's a holdover from when GitService cached statuses and the cache
-could race the event; now that the facade is uncached, both paths
-return the same data — direct is just one less hop.
+The cleanliness check and the head read go through the VCS capability
+(`Vcs::status` / `Vcs::head`, `SnapshotCaptureService::clean_head`,
+`.context/vcs.md`).
 
 ## Related
 

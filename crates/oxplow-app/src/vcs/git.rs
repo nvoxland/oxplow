@@ -5,18 +5,48 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use oxplow_domain::vcs::{
-    BlameLine, Branch, CommitRequest, ConflictChoice, Divergence, FileStatus, Head, InProgressOp,
-    LogQuery, MergeReadiness, ObjectId, OpOutcome, RemoteBranch, RevisionDetail, RevisionFile,
-    RevisionInfo, StatusEntry, Vcs, VcsError, VcsFeatures, VcsWorkspace, WorkspaceStatus,
+    BlameLine, Branch, CleanBaseline, CommitRequest, ConflictChoice, Divergence, FileStatus, Head,
+    InProgressOp, LogQuery, MergeReadiness, ObjectId, ObjectStore, OpOutcome, RemoteBranch,
+    RevisionDetail, RevisionFile, RevisionInfo, StatusEntry, Vcs, VcsError, VcsFeatures,
+    VcsWorkspace, WorkspaceStatus,
 };
 use oxplow_domain::FileChange;
 
 /// Git, as the VCS provider.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GitProvider;
+
+/// The object database of the repository at `.0` (any of its worktrees).
+struct GitObjects(PathBuf);
+
+impl ObjectStore for GitObjects {
+    fn read(&self, id: &ObjectId) -> Option<Vec<u8>> {
+        oxplow_git::read_blob(&self.0, &id.0)
+    }
+
+    fn id_of(&self, bytes: &[u8]) -> ObjectId {
+        ObjectId(oxplow_git::git_blob_oid(bytes).unwrap_or_default())
+    }
+}
+
+/// HEAD's blobs, vouched for by the git index's cached stat.
+struct GitBaseline(oxplow_git::GitCleanBaseline);
+
+impl CleanBaseline for GitBaseline {
+    fn clean_object(&self, path: &str, size: u64, mtime: (i64, u32)) -> Option<ObjectId> {
+        self.0
+            .clean_head_oid(path, size, mtime)
+            .map(|oid| ObjectId(oid.to_string()))
+    }
+
+    fn candidates(&self) -> usize {
+        self.0.candidate_count()
+    }
+}
 
 /// Run `f` on the blocking pool; a panicked task is a failure, not a
 /// crash of the caller.
@@ -239,17 +269,12 @@ impl Vcs for GitProvider {
         .await
     }
 
-    async fn read_object(&self, ws: &Path, id: &ObjectId) -> Result<Option<Vec<u8>>, VcsError> {
-        let (ws, id) = (ws.to_path_buf(), id.0.clone());
-        blocking(move || {
-            repo_check(&ws)?;
-            Ok(oxplow_git::read_blob(&ws, &id))
-        })
-        .await
+    fn object_store(&self, ws: &Path) -> Arc<dyn ObjectStore> {
+        Arc::new(GitObjects(ws.to_path_buf()))
     }
 
-    fn object_id_of(&self, bytes: &[u8]) -> ObjectId {
-        ObjectId(oxplow_git::git_blob_oid(bytes).unwrap_or_default())
+    fn clean_baseline(&self, ws: &Path) -> Box<dyn CleanBaseline> {
+        Box::new(GitBaseline(oxplow_git::GitCleanBaseline::build(ws)))
     }
 
     async fn diff(&self, ws: &Path, a: &str, b: &str) -> Result<Vec<FileChange>, VcsError> {

@@ -255,6 +255,27 @@ impl From<VcsError> for crate::DomainError {
     }
 }
 
+/// A VCS's content-addressed object store.
+pub trait ObjectStore: Send + Sync {
+    /// An object's bytes; `None` when the store doesn't have it (never
+    /// written, or collected after a history rewrite).
+    fn read(&self, id: &ObjectId) -> Option<Vec<u8>>;
+    /// The id `bytes` would have in the store (not written).
+    fn id_of(&self, bytes: &[u8]) -> ObjectId;
+}
+
+/// Which files are, per the VCS's own cached stat, byte-for-byte their
+/// head object ([`Vcs::clean_baseline`]).
+pub trait CleanBaseline: Send + Sync {
+    /// The head object `path` still is, given its current size and
+    /// mtime `(secs, nanos)`; `None` when that can't be vouched for (not
+    /// in the head, edited, or touched too close to the VCS's last stat
+    /// to tell).
+    fn clean_object(&self, path: &str, size: u64, mtime: (i64, u32)) -> Option<ObjectId>;
+    /// How many files it can vouch for at most.
+    fn candidates(&self) -> usize;
+}
+
 /// The VCS capability. See the module docs.
 #[async_trait]
 pub trait Vcs: Send + Sync {
@@ -290,10 +311,14 @@ pub trait Vcs: Send + Sync {
     // --- trees ---
     /// Every file at `rev`: path → object id.
     async fn files_at(&self, ws: &Path, rev: &str) -> Result<BTreeMap<String, ObjectId>, VcsError>;
-    /// An object's bytes; `None` when the store doesn't have it.
-    async fn read_object(&self, ws: &Path, id: &ObjectId) -> Result<Option<Vec<u8>>, VcsError>;
-    /// The id `bytes` would have in the store (not written).
-    fn object_id_of(&self, bytes: &[u8]) -> ObjectId;
+    /// The object store behind `ws` (every workspace of one repository
+    /// shares it). Synchronous: snapshot capture and content hashing read
+    /// it from blocking threads.
+    fn object_store(&self, ws: &Path) -> std::sync::Arc<dyn ObjectStore>;
+    /// What the VCS already knows is unchanged since the head, by file
+    /// stat — so a capture can back those files by their head objects
+    /// without reading them. Blocking; build it once per sweep.
+    fn clean_baseline(&self, ws: &Path) -> Box<dyn CleanBaseline>;
     /// What changed from `a` to `b`, sorted by path.
     async fn diff(&self, ws: &Path, a: &str, b: &str) -> Result<Vec<FileChange>, VcsError>;
 
@@ -363,6 +388,15 @@ impl Revision {
         Revision::Vcs {
             kind: "git".into(),
             rev: rev.into(),
+        }
+    }
+
+    /// The id a VCS revision names in its VCS (a commit sha); `None`
+    /// for the working tree and snapshots.
+    pub fn vcs_rev(&self) -> Option<&str> {
+        match self {
+            Revision::Vcs { rev, .. } => Some(rev),
+            _ => None,
         }
     }
 

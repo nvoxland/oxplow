@@ -139,9 +139,7 @@ async fn resolve_current(svc: &Services) -> Option<file_ref_version::ResolvedFil
         .await
         .ok()
         .flatten()?;
-    file_ref_version::resolve(svc.store(), svc.project_dir(), snapshot_id)
-        .await
-        .ok()
+    svc.resolve_file_version(snapshot_id).await.ok()
 }
 
 #[cfg(test)]

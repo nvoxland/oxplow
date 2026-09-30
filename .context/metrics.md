@@ -405,7 +405,7 @@ welded to collection.
   > ancestry resolver must anchor a dirty run to the commit that **absorbed** it
   > (the next snapshot carrying a commit), never the one it branched from.
   > That IS recoverable: every test capture carries a `snapshot_id`, snapshots
-  > carry `git_commit`/`git_branch`, and the git-refs listener re-stamps a
+  > carry `revision`/`branch`, and the git-refs listener re-stamps a
   > stream's latest snapshot on commit — the "permanently ancestry-blind
   > captures" this box used to claim were verified to be zero.
 - **`fact`** — the durable atomic measurement (folds `metric_sample` +

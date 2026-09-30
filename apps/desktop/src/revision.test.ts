@@ -9,6 +9,7 @@ import {
   snapshotIdOf,
   snapshotRevision,
   targetRevision,
+  vcsRevOf,
 } from "./revision.js";
 
 // P5.B2 (tsk521): a revision is the wire string Rust's `Revision` reads —
@@ -50,4 +51,11 @@ test("a change-analysis target names its revision", () => {
   expect(targetRevision("working")).toBe(WORKING);
   expect(targetRevision("abc1234")).toBe("git:abc1234");
   expect(targetRevision("endpoints:x")).toBe(WORKING);
+});
+
+test("vcsRevOf is a VCS revision's own id", () => {
+  expect(vcsRevOf("git:abc123")).toBe("abc123");
+  expect(vcsRevOf(WORKING)).toBe(null);
+  expect(vcsRevOf("snap:4")).toBe(null);
+  expect(vcsRevOf(null)).toBe(null);
 });

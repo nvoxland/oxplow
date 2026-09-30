@@ -3299,7 +3299,7 @@ impl OxplowMcp {
         let drift = oxplow_app::wiki_drift::compute_wiki_ref_drift(
             &self.services.page_ref_store,
             &self.services.snapshot_store,
-            &self.services.blobs,
+            &self.services.snapshot_content,
             &self.services.layout.project_dir,
             &p.slug,
             &p.path,
@@ -4582,7 +4582,6 @@ impl OxplowMcp {
         &self,
         params: Parameters<RecordWikiPageUpdateParams>,
     ) -> Result<CallToolResult, McpError> {
-        use oxplow_app::file_ref_version;
         use oxplow_db::page_ref_projections::{KIND_FILE, KIND_WIKI, RT_WIKI_FILE};
         let p = params.0;
         let slug = p.slug;
@@ -4599,11 +4598,7 @@ impl OxplowMcp {
             };
             let stream_id = *svc.stream_id();
             match svc.store().latest_snapshot_id_for_stream(stream_id).await {
-                Ok(Some(snapshot_id)) => {
-                    file_ref_version::resolve(svc.store(), svc.project_dir(), snapshot_id)
-                        .await
-                        .ok()
-                }
+                Ok(Some(snapshot_id)) => svc.resolve_file_version(snapshot_id).await.ok(),
                 _ => None,
             }
         };

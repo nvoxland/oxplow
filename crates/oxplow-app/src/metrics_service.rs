@@ -35,10 +35,9 @@ use oxplow_domain::{DomainError, EffortId, StreamId, ThreadId};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::blob_store::BlobStore;
 use crate::events::{EventBus, OxplowEvent};
 use crate::producer_metrics::builtin_producer_metrics;
-use crate::snapshot_content::read_snapshot_content;
+use crate::snapshot_content::SnapshotContent;
 use oxplow_domain::snapshot::SnapshotTrigger;
 
 const DEFAULT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
@@ -91,7 +90,8 @@ pub struct MetricsService {
     snapshot_store: Arc<SqliteSnapshotStore>,
     thread_store: Arc<SqliteThreadStore>,
     effort_store: Arc<SqliteEffortStore>,
-    blobs: BlobStore,
+    content: SnapshotContent,
+    vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     config: Arc<RwLock<OxplowConfig>>,
     project_dir: PathBuf,
     /// This machine's program approvals (`exec_consent`).
@@ -202,7 +202,8 @@ impl MetricsService {
         snapshot_store: Arc<SqliteSnapshotStore>,
         thread_store: Arc<SqliteThreadStore>,
         effort_store: Arc<SqliteEffortStore>,
-        blobs: BlobStore,
+        content: SnapshotContent,
+        vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
         config: Arc<RwLock<OxplowConfig>>,
         project_dir: PathBuf,
         events: EventBus,
@@ -211,7 +212,8 @@ impl MetricsService {
             snapshot_store,
             thread_store,
             effort_store,
-            blobs,
+            content,
+            vcs,
             config,
             project_dir,
             approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
@@ -1659,8 +1661,7 @@ impl MetricsService {
         &self,
         files: Vec<oxplow_db::FileSnapshot>,
     ) -> HashMap<String, String> {
-        let project_dir = self.project_dir.clone();
-        let blobs = self.blobs.clone();
+        let content = self.content.clone();
         let max_bytes = self.max_file_bytes();
         tokio::task::spawn_blocking(move || {
             let mut map = HashMap::new();
@@ -1677,7 +1678,7 @@ impl MetricsService {
                 let Some(hash) = f.blob_hash.as_deref() else {
                     continue;
                 };
-                match read_snapshot_content(f.storage, hash, &project_dir, &blobs) {
+                match content.read(f.storage, hash) {
                     // Skip binary blobs (NUL byte) — gauges read text.
                     Ok(bytes) if !bytes.contains(&0) => {
                         map.insert(f.path, String::from_utf8_lossy(&bytes).into_owned());
@@ -1700,9 +1701,14 @@ impl MetricsService {
         snapshot_id: i64,
     ) -> GaugeRunContext {
         let version = if snapshot_id > 0 {
-            crate::file_ref_version::resolve(&self.snapshot_store, &self.project_dir, snapshot_id)
-                .await
-                .ok()
+            crate::file_ref_version::resolve(
+                &self.snapshot_store,
+                &*self.vcs,
+                &self.project_dir,
+                snapshot_id,
+            )
+            .await
+            .ok()
         } else {
             None
         };

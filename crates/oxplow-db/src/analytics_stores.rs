@@ -4,6 +4,7 @@
 //! getting its own file.
 
 use async_trait::async_trait;
+use oxplow_domain::vcs::Revision;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -883,19 +884,17 @@ pub struct Snapshot {
     pub stream_id: StreamId,
     pub created_at: Timestamp,
     pub file_count: i64,
-    /// 40-char git sha corresponding to this snapshot's worktree
-    /// state. Populated only when the worktree was clean at capture
-    /// time (no tracked-file changes, no non-ignored untracked
-    /// files); `None` when the tree was dirty or the directory isn't
-    /// a git repo at all. Not unique — multiple snapshots can share
-    /// the same commit when local history captures files git doesn't
-    /// track.
-    pub git_commit: Option<String>,
-    /// Short name of the git branch HEAD was on when this snapshot was
-    /// captured (e.g. `main`). `None` for pre-V42 rows, a detached
-    /// HEAD, or a non-git directory. Lets callers distinguish snapshots
-    /// taken on different branches within the same stream's worktree.
-    pub git_branch: Option<String>,
+    /// The VCS revision this snapshot's tree equals (`git:<sha>`).
+    /// Populated only when the workspace was clean at the head at
+    /// capture time; `None` when it was dirty or isn't under version
+    /// control. Not unique — several snapshots can share one revision
+    /// when local history captures files the VCS doesn't track.
+    #[specta(type = Option<String>)]
+    pub revision: Option<Revision>,
+    /// The branch the workspace was on when this snapshot was captured
+    /// (e.g. `main`). `None` for pre-V42 rows, a detached head, or a
+    /// directory not under version control.
+    pub branch: Option<String>,
     /// Whole-tree identity (V96): the xxh3-128 of the sorted manifest of
     /// the reconstructed tree ([`crate::snapshot_tree::manifest_hash`]).
     /// Two snapshots with equal `tree_hash` hold the same files. `None`
@@ -968,6 +967,8 @@ pub struct StampedSnapshot {
     pub id: i64,
     pub stream_id: i64,
     pub branch: Option<String>,
+    /// The revision's id in its VCS (a commit sha) — the value part of
+    /// `snapshot.revision`.
     pub commit: String,
     pub created_at: Timestamp,
 }
@@ -1110,25 +1111,38 @@ pub(crate) fn current_snapshot_tx(
     .optional()
 }
 
-/// Point a snapshot at `sha` and flip every file ref pinned to it to an
-/// exact git version.
-fn stamp_git_commit_tx(
+/// A stored revision column (`NULL` → `None`).
+fn revision_col(row: &rusqlite::Row<'_>, i: usize) -> rusqlite::Result<Option<Revision>> {
+    row.get::<_, Option<String>>(i)?
+        .map(|s| {
+            s.parse().map_err(|e: String| {
+                rusqlite::Error::FromSqlConversionFailure(i, rusqlite::types::Type::Text, e.into())
+            })
+        })
+        .transpose()
+}
+
+/// Point a snapshot at VCS revision `revision` and flip every file ref
+/// pinned to it to that exact version.
+fn stamp_revision_tx(
     conn: &rusqlite::Connection,
     snapshot_id: i64,
-    sha: &str,
+    revision: &Revision,
 ) -> rusqlite::Result<()> {
     conn.execute(
-        "UPDATE snapshot SET git_commit = ?1 WHERE id = ?2",
-        params![sha, snapshot_id],
+        "UPDATE snapshot SET revision = ?1 WHERE id = ?2",
+        params![revision.to_string(), snapshot_id],
     )?;
-    for table in ["effort_file", "page_ref"] {
-        conn.execute(
-            &format!(
-                "UPDATE {table} SET closest_git_version = ?1, git_version_exact = 1
-                  WHERE local_snapshot_id = ?2"
-            ),
-            params![sha, snapshot_id],
-        )?;
+    if let Revision::Vcs { rev, .. } = revision {
+        for table in ["effort_file", "page_ref"] {
+            conn.execute(
+                &format!(
+                    "UPDATE {table} SET closest_git_version = ?1, git_version_exact = 1
+                      WHERE local_snapshot_id = ?2"
+                ),
+                params![rev, snapshot_id],
+            )?;
+        }
     }
     Ok(())
 }
@@ -1183,13 +1197,13 @@ fn record_take_tx(
         }
     } else {
         tx.execute(
-            "INSERT INTO snapshot (stream_id, created_at, git_branch, git_commit)
+            "INSERT INTO snapshot (stream_id, created_at, branch, revision)
              VALUES (?1, ?2, ?3, ?4)",
             params![
                 take.stream_id.value(),
                 ts_to_string(Timestamp::now()),
-                take.git_branch,
-                take.git_commit,
+                take.branch,
+                take.revision.as_ref().map(Revision::to_string),
             ],
         )
         .map_err(map_sql_err)?;
@@ -1295,7 +1309,7 @@ fn record_head_moved_tx(
     schemas: &EventSchemaRegistry,
     stream_id: StreamId,
     expected: i64,
-    sha: &str,
+    revision: &Revision,
     source: &str,
 ) -> Result<Option<TakeOutcome>, DomainError> {
     use crate::database::map_sql_err;
@@ -1305,15 +1319,15 @@ fn record_head_moved_tx(
     }
     let from: Option<String> = tx
         .query_row(
-            "SELECT git_commit FROM snapshot WHERE id = ?1",
+            "SELECT revision FROM snapshot WHERE id = ?1",
             params![sid],
             |r| r.get(0),
         )
         .map_err(map_sql_err)?;
-    if from.as_deref() == Some(sha) {
+    if from.as_deref() == Some(revision.to_string().as_str()) {
         return Ok(None);
     }
-    stamp_git_commit_tx(tx, sid, sha).map_err(map_sql_err)?;
+    stamp_revision_tx(tx, sid, revision).map_err(map_sql_err)?;
     let op_seq = insert_op_tx(
         tx,
         stream_id,
@@ -1332,8 +1346,10 @@ fn record_head_moved_tx(
         &VcsHeadMovedV1 {
             stream: stream.clone(),
             snapshot: snapshot_ref(sid),
-            from: from.map(|f| commit_ref(&f)),
-            to: commit_ref(sha),
+            from: from
+                .and_then(|f| f.parse::<Revision>().ok())
+                .and_then(|f| f.vcs_rev().map(commit_ref)),
+            to: commit_ref(revision.vcs_rev().unwrap_or_default()),
         },
     )
     .with_anchors(Anchors {
@@ -1341,7 +1357,11 @@ fn record_head_moved_tx(
         snapshot_id: Some(sid),
         ..Anchors::default()
     })
-    .with_subject([stream, snapshot_ref(sid), commit_ref(sha)]);
+    .with_subject([
+        stream,
+        snapshot_ref(sid),
+        commit_ref(revision.vcs_rev().unwrap_or_default()),
+    ]);
     append_tx(tx, schemas, &env)?;
     Ok(Some(TakeOutcome {
         op_seq,
@@ -1392,10 +1412,10 @@ pub struct TakeRecord {
     /// `agent_turn.id`, when the take belongs to a turn.
     pub turn_id: Option<i64>,
     pub effort_id: Option<EffortId>,
-    /// The branch HEAD was on (recorded clean or dirty).
-    pub git_branch: Option<String>,
-    /// HEAD's sha when the worktree was clean at the take.
-    pub git_commit: Option<String>,
+    /// The branch the workspace was on (recorded clean or dirty).
+    pub branch: Option<String>,
+    /// The head revision when the workspace was clean at the take.
+    pub revision: Option<Revision>,
     pub elapsed_ms: u64,
     pub budget_ms: Option<u64>,
     /// The envelope `source` of `snapshot.taken` (`system:snapshot_capture`).
@@ -1481,13 +1501,13 @@ impl SqliteSnapshotStore {
         &self,
         stream_id: StreamId,
         snapshot_id: i64,
-        sha: String,
+        revision: Revision,
         source: String,
     ) -> Result<Option<TakeOutcome>, DomainError> {
         let schemas = self.event_schemas.clone();
         self.db
             .transaction(move |tx| {
-                record_head_moved_tx(tx, &schemas, stream_id, snapshot_id, &sha, &source)
+                record_head_moved_tx(tx, &schemas, stream_id, snapshot_id, &revision, &source)
             })
             .await
     }
@@ -1573,17 +1593,17 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// Read the `git_commit` column for a snapshot, if recorded.
-    pub async fn get_snapshot_git_commit(
+    /// The VCS revision a snapshot's tree equals, if recorded.
+    pub async fn get_snapshot_revision(
         &self,
         snapshot_id: i64,
-    ) -> Result<Option<String>, DomainError> {
+    ) -> Result<Option<Revision>, DomainError> {
         self.db
             .call(move |conn| {
                 conn.query_row(
-                    "SELECT git_commit FROM snapshot WHERE id = ?1",
+                    "SELECT revision FROM snapshot WHERE id = ?1",
                     params![snapshot_id],
-                    |row| row.get::<_, Option<String>>(0),
+                    |row| revision_col(row, 0),
                 )
                 .optional()
                 .map(|opt| opt.flatten())
@@ -1591,24 +1611,38 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// **Fixture seeding** (tests): pin a snapshot to a git commit sha
-    /// (with the exact-pin cascade). Production stamps a new snapshot in
-    /// [`Self::record_take`] and a HEAD move in [`Self::record_head_moved`].
-    pub async fn set_snapshot_git_commit(
+    /// The snapshots whose trees equal `revision`, oldest first.
+    pub async fn snapshots_at(&self, revision: &Revision) -> Result<Vec<i64>, DomainError> {
+        let revision = revision.to_string();
+        self.db
+            .call(move |conn| {
+                let mut st = conn.prepare(
+                    "SELECT id FROM snapshot WHERE revision = ?1 ORDER BY created_at, id",
+                )?;
+                let rows = st.query_map(params![revision], |r| r.get(0))?;
+                rows.collect()
+            })
+            .await
+    }
+
+    /// **Fixture seeding** (tests): pin a snapshot to a revision (with
+    /// the exact-pin cascade). Production stamps a new snapshot in
+    /// [`Self::record_take`] and a head move in [`Self::record_head_moved`].
+    pub async fn set_snapshot_revision(
         &self,
         snapshot_id: i64,
-        sha: String,
+        revision: Revision,
     ) -> Result<(), DomainError> {
         self.db
             .transaction(move |tx| {
-                stamp_git_commit_tx(tx, snapshot_id, &sha).map_err(crate::database::map_sql_err)
+                stamp_revision_tx(tx, snapshot_id, &revision).map_err(crate::database::map_sql_err)
             })
             .await
     }
 
     /// **Fixture seeding** (tests): set a snapshot's branch. Production
     /// records it in [`Self::record_take`].
-    pub async fn set_snapshot_git_branch(
+    pub async fn set_snapshot_branch(
         &self,
         snapshot_id: i64,
         branch: String,
@@ -1616,7 +1650,7 @@ impl SqliteSnapshotStore {
         self.db
             .call(move |conn| {
                 conn.execute(
-                    "UPDATE snapshot SET git_branch = ?1 WHERE id = ?2",
+                    "UPDATE snapshot SET branch = ?1 WHERE id = ?2",
                     params![branch, snapshot_id],
                 )?;
                 Ok(())
@@ -1667,7 +1701,7 @@ impl SqliteSnapshotStore {
                     "SELECT s.id, s.stream_id, s.created_at,
                             (SELECT COUNT(*) FROM file_snapshot f
                              WHERE f.snapshot_id = s.id) AS file_count,
-                            s.git_commit, s.git_branch, s.tree_hash,
+                            s.revision, s.branch, s.tree_hash,
                             op.parent_snapshot_id, op.trigger, COALESCE(op.over_budget, 0)
                      FROM snapshot s
                      LEFT JOIN snapshot_op op ON op.seq = (
@@ -1680,8 +1714,8 @@ impl SqliteSnapshotStore {
                     let stream_id: i64 = row.get(1)?;
                     let created_at: String = row.get(2)?;
                     let file_count: i64 = row.get(3)?;
-                    let git_commit: Option<String> = row.get(4)?;
-                    let git_branch: Option<String> = row.get(5)?;
+                    let revision = revision_col(row, 4)?;
+                    let branch: Option<String> = row.get(5)?;
                     let tree_hash: Option<String> = row.get(6)?;
                     let parent_snapshot_id: Option<i64> = row.get(7)?;
                     let trigger: Option<String> = row.get(8)?;
@@ -1698,8 +1732,8 @@ impl SqliteSnapshotStore {
                         stream_id: StreamId::new(stream_id),
                         created_at: string_to_ts(&created_at).map_err(map_err)?,
                         file_count,
-                        git_commit,
-                        git_branch,
+                        revision,
+                        branch,
                         tree_hash,
                         parent_snapshot_id,
                         trigger: trigger.as_deref().and_then(SnapshotTrigger::from_db_str),
@@ -1722,9 +1756,9 @@ impl SqliteSnapshotStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, git_branch, git_commit, created_at
+                    "SELECT id, stream_id, branch, substr(revision, instr(revision, ':') + 1), created_at
                        FROM snapshot
-                      WHERE git_commit IS NOT NULL
+                      WHERE revision IS NOT NULL
                       ORDER BY created_at ASC, id ASC",
                 )?;
                 let rows = stmt.query_map([], |row| {
@@ -2817,8 +2851,8 @@ mod tests {
             thread_id: None,
             turn_id: None,
             effort_id: None,
-            git_branch: Some("main".into()),
-            git_commit: None,
+            branch: Some("main".into()),
+            revision: None,
             elapsed_ms: 5,
             budget_ms: None,
             source: "test".into(),
@@ -2858,7 +2892,7 @@ mod tests {
             vec![("a.txt", "a1"), ("b.txt", "b1")],
             SnapshotTrigger::Startup,
         );
-        first.git_commit = Some("c0ffee".into());
+        first.revision = Some(Revision::git("c0ffee"));
         let one = store.record_take(first).await.unwrap().unwrap();
         assert!(!one.unchanged);
         assert_eq!((one.parent_snapshot_id, one.file_count), (None, 2));
@@ -2867,8 +2901,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].git_branch.as_deref(), Some("main"));
-        assert_eq!(listed[0].git_commit.as_deref(), Some("c0ffee"));
+        assert_eq!(listed[0].branch.as_deref(), Some("main"));
+        assert_eq!(listed[0].revision, Some(Revision::git("c0ffee")));
         assert_eq!(
             listed[0].tree_hash.as_deref(),
             Some(
@@ -3052,14 +3086,14 @@ mod tests {
         let store = SqliteSnapshotStore::new(db.clone());
         assert_eq!(
             store
-                .record_head_moved(StreamId::new(1), 1, "aaaaaaa".into(), "test".into())
+                .record_head_moved(StreamId::new(1), 1, Revision::git("aaaaaaa"), "test".into())
                 .await
                 .unwrap(),
             None,
             "no snapshot yet"
         );
         let mut first = take(1, vec![("a.txt", "a1")], SnapshotTrigger::Startup);
-        first.git_commit = Some("aaaaaaa".into());
+        first.revision = Some(Revision::git("aaaaaaa"));
         let base = store.record_take(first).await.unwrap().unwrap();
         db.conn()
             .unwrap()
@@ -3076,7 +3110,7 @@ mod tests {
                 .record_head_moved(
                     StreamId::new(1),
                     base.snapshot_id,
-                    "aaaaaaa".into(),
+                    Revision::git("aaaaaaa"),
                     "test".into()
                 )
                 .await
@@ -3087,7 +3121,7 @@ mod tests {
             .record_head_moved(
                 StreamId::new(1),
                 base.snapshot_id,
-                "bbbbbbb".into(),
+                Revision::git("bbbbbbb"),
                 "test".into(),
             )
             .await
@@ -3095,12 +3129,8 @@ mod tests {
             .unwrap();
         assert_eq!(moved.snapshot_id, base.snapshot_id);
         assert_eq!(
-            store
-                .get_snapshot_git_commit(base.snapshot_id)
-                .await
-                .unwrap()
-                .as_deref(),
-            Some("bbbbbbb")
+            store.get_snapshot_revision(base.snapshot_id).await.unwrap(),
+            Some(Revision::git("bbbbbbb"))
         );
         let exact: (String, i64) = db
             .conn()
@@ -3111,7 +3141,7 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!(exact, ("bbbbbbb".into(), 1));
+        assert_eq!(exact, ("bbbbbbb".to_string(), 1));
         let ops = store.list_ops(StreamId::new(1), 5).await.unwrap();
         assert_eq!(ops[0].trigger, SnapshotTrigger::HeadMoved);
         // A take landed after the caller saw the clean tree: the stamp is
@@ -3126,7 +3156,7 @@ mod tests {
                 .record_head_moved(
                     StreamId::new(1),
                     base.snapshot_id,
-                    "ccccccc".into(),
+                    Revision::git("ccccccc"),
                     "test".into()
                 )
                 .await
@@ -3135,7 +3165,7 @@ mod tests {
         );
         assert_eq!(
             store
-                .get_snapshot_git_commit(later.snapshot_id)
+                .get_snapshot_revision(later.snapshot_id)
                 .await
                 .unwrap(),
             None
@@ -3213,7 +3243,7 @@ mod tests {
         .unwrap();
 
         snap_store
-            .set_snapshot_git_commit(snap_id, "bbbb".into())
+            .set_snapshot_revision(snap_id, Revision::git("bbbb"))
             .await
             .unwrap();
 
@@ -3266,11 +3296,11 @@ mod tests {
         let on_feature = store.create_snapshot(stream).await.unwrap();
         let unstamped = store.create_snapshot(stream).await.unwrap();
         store
-            .set_snapshot_git_branch(on_main, "main".into())
+            .set_snapshot_branch(on_main, "main".into())
             .await
             .unwrap();
         store
-            .set_snapshot_git_branch(on_feature, "feature-x".into())
+            .set_snapshot_branch(on_feature, "feature-x".into())
             .await
             .unwrap();
 
@@ -3278,7 +3308,7 @@ mod tests {
         let branch_of = |id: i64| {
             rows.iter()
                 .find(|s| s.id == id)
-                .and_then(|s| s.git_branch.clone())
+                .and_then(|s| s.branch.clone())
         };
         assert_eq!(branch_of(on_main).as_deref(), Some("main"));
         assert_eq!(branch_of(on_feature).as_deref(), Some("feature-x"));

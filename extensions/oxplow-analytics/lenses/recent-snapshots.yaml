@@ -1,6 +1,6 @@
 title: Recent Snapshots
 query: |
-  SELECT id, created_at, coalesce(git_branch, '—') AS branch, substr(coalesce(git_commit, ''), 1, 7) AS commit_sha,
+  SELECT id, created_at, coalesce(branch, '—') AS branch, substr(revision, instr(revision, ':') + 1, 7) AS commit_sha,
          'local-history' AS history
   FROM v_snapshot
   ORDER BY id DESC

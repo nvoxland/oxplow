@@ -21,6 +21,7 @@ import type { TabRef } from "../tabs/tabState.js";
 import type { NavSiblingEntry, NavSiblings } from "../tabs/PageNavigationContext.js";
 import { gitCommitRef, indexRef, snapshotRef } from "../tabs/pageRefs.js";
 import { workItemLabel } from "../workItemRef.js";
+import { vcsRevOf } from "../revision.js";
 
 const RECENT_LIMIT = 20;
 /** Cap on the number of commit groups rendered in the dashboard's
@@ -219,7 +220,7 @@ export function LocalHistoryDashboardPage({
         isInitial: earliestId !== null && snapshot.id === earliestId,
       }));
       const commitShas = Array.from(
-        new Set(snapshots.map((s) => s.gitCommit).filter((sha): sha is string => Boolean(sha))),
+        new Set(snapshots.map((s) => vcsRevOf(s.revision)).filter((sha): sha is string => Boolean(sha))),
       );
       const refLabels = await resolveCommitRefLabels(commitShas).catch(() => ({}));
       setData({ rows, refLabels });
@@ -472,10 +473,16 @@ function ToggleButton({
   );
 }
 
+/** The branch/tag labels of the commit a snapshot equals, if any. */
+function refLabelsFor<L>(refLabels: Record<string, L[]>, snapshot: Snapshot): L[] {
+  const commit = vcsRevOf(snapshot.revision);
+  return commit ? (refLabels[commit] ?? []) : [];
+}
+
 function snapshotSiblingEntries(rows: SnapshotRow[]): NavSiblingEntry[] {
   return rows.map((row) => {
     const hasOtherBadges =
-      !!row.snapshot.gitCommit || row.wikiSlugs.length > 0;
+      !!vcsRevOf(row.snapshot.revision) || row.wikiSlugs.length > 0;
     const label = formatSnapshotSubject(
       row.completedEfforts,
       row.inFlightEfforts,
@@ -486,7 +493,7 @@ function snapshotSiblingEntries(rows: SnapshotRow[]): NavSiblingEntry[] {
     // a short-sha or wiki-slug label so the prev/next tooltip still
     // says something meaningful.
     const fallback =
-      row.snapshot.gitCommit?.slice(0, 7) ??
+      vcsRevOf(row.snapshot.revision)?.slice(0, 7) ??
       (row.wikiSlugs.length > 0 ? `wiki:${row.wikiSlugs[0]}` : "snapshot");
     return {
       ref: snapshotRef(row.snapshot.id),
@@ -526,7 +533,7 @@ function RecentSnapshotsCard({
               key={row.snapshot.id}
               row={row}
               onSelect={(id) => onSelect(id, { entries, index: idx, title: "Recent snapshots" })}
-              labels={row.snapshot.gitCommit ? refLabels[row.snapshot.gitCommit] ?? [] : []}
+              labels={refLabelsFor(refLabels, row.snapshot)}
             />
           ))}
         </div>
@@ -563,14 +570,15 @@ function SnapshotRowItem({
   hideVersionChip?: boolean;
 }) {
   const { snapshot, summary, completedEfforts, inFlightEfforts, wikiSlugs, isInitial } = row;
-  // A git_commit on the snapshot always renders at least a short-sha
+  // A commit on the snapshot always renders at least a short-sha
   // chip (or branch/tag chips when ref labels resolve), and wiki
   // badges similarly carry meaning on their own — both suppress the
   // "External change" fallback because the chips speak for themselves.
   // The suppression still applies even when the chip itself is
   // hidden via hideVersionChip — the group header above carries the
   // version context.
-  const hasOtherBadges = !!snapshot.gitCommit || wikiSlugs.length > 0;
+  const commit = vcsRevOf(snapshot.revision);
+  const hasOtherBadges = !!commit || wikiSlugs.length > 0;
   const subjectish = formatSnapshotSubject(
     completedEfforts,
     inFlightEfforts,
@@ -592,8 +600,8 @@ function SnapshotRowItem({
         ? labels.map((l) => (
             <RefBadge key={`${l.kind}-${l.name}`} label={l.name} tone={l.kind} />
           ))
-        : snapshot.gitCommit
-        ? <RefBadge label={snapshot.gitCommit.slice(0, 7)} tone="sha" />
+        : commit
+        ? <RefBadge label={commit.slice(0, 7)} tone="sha" />
         : null}
       {wikiSlugs.map((slug) => (
         <RefBadge key={`wiki-${slug}`} label={slug} tone="wiki" />
@@ -744,7 +752,7 @@ function ByBranchGroup({
             key={row.snapshot.id}
             row={row}
             onSelect={(id) => onSelect(id, { entries, index: idx, title })}
-            labels={row.snapshot.gitCommit ? refLabels[row.snapshot.gitCommit] ?? [] : []}
+            labels={refLabelsFor(refLabels, row.snapshot)}
             hideVersionChip
           />
         ))}
@@ -771,7 +779,7 @@ function groupByBranch(
   // top so "what's happened since the last commit" reads first.
   const byCommit = new Map<string, SnapshotRow[]>();
   for (const row of rows) {
-    const key = row.snapshot.gitCommit ?? UNCOMMITTED_GROUP_KEY;
+    const key = vcsRevOf(row.snapshot.revision) ?? UNCOMMITTED_GROUP_KEY;
     const existing = byCommit.get(key) ?? [];
     existing.push(row);
     byCommit.set(key, existing);

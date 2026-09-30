@@ -6,6 +6,8 @@
 //!
 //! 1. **Round-trip** — what a commit captured reads back from the store,
 //!    whatever the working tree holds now.
+//!    The clean baseline vouches for an untouched committed file by its
+//!    stat, never for an edited one.
 //! 2. **Diffs** — two revisions diff to what changed between them,
 //!    deletions included, sorted by path.
 //! 3. **Status** — added, modified, deleted and untracked paths show;
@@ -45,10 +47,11 @@ pub async fn a_commit_reads_back_what_it_captured(p: &dyn Vcs, ws: &Path) {
     write(ws, "a.txt", "two\n");
     let files = p.files_at(ws, &first).await.unwrap();
     let id = files.get("a.txt").expect("a.txt is in the commit");
-    let bytes = p.read_object(ws, id).await.unwrap().expect("the object");
-    assert_eq!(bytes, b"one\n");
-    assert_eq!(*id, p.object_id_of(b"one\n"), "ids are content addresses");
-    assert_ne!(p.object_id_of(b"two\n"), *id);
+    let objects = p.object_store(ws);
+    assert_eq!(objects.read(id).expect("the object"), b"one\n");
+    assert_eq!(*id, objects.id_of(b"one\n"), "ids are content addresses");
+    assert_ne!(objects.id_of(b"two\n"), *id);
+    assert_eq!(objects.read(&objects.id_of(b"never stored")), None);
 }
 
 /// 2. Two revisions diff to what changed, deletions included.
@@ -74,6 +77,38 @@ pub async fn two_revisions_diff_to_what_changed(p: &dyn Vcs, ws: &Path) {
         ]
     );
     assert!(p.diff(ws, &second, &second).await.unwrap().is_empty());
+}
+
+/// 1b. The clean baseline vouches for a committed, untouched file by its
+///     stat — and for nothing edited since.
+pub async fn the_clean_baseline_vouches_only_for_untouched_files(p: &dyn Vcs, ws: &Path) {
+    write(ws, "clean.txt", "c\n");
+    write(ws, "edited.txt", "e1\n");
+    commit(p, ws, "base").await;
+    // Stat granularity: an edit in the same instant as the index write
+    // must still read as changed, so step past it.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    write(ws, "edited.txt", "e2 longer\n");
+    let stat = |path: &str| {
+        let md = std::fs::metadata(ws.join(path)).unwrap();
+        let t = md
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap();
+        (md.len(), (t.as_secs() as i64, t.subsec_nanos()))
+    };
+    let baseline = p.clean_baseline(ws);
+    let head = p.head(ws).await.unwrap().revision.unwrap();
+    let files = p.files_at(ws, &head).await.unwrap();
+    let (size, mtime) = stat("clean.txt");
+    assert_eq!(
+        baseline.clean_object("clean.txt", size, mtime),
+        files.get("clean.txt").cloned()
+    );
+    let (size, mtime) = stat("edited.txt");
+    assert_eq!(baseline.clean_object("edited.txt", size, mtime), None);
+    assert_eq!(baseline.clean_object("nope.txt", 1, (0, 0)), None);
 }
 
 /// 3. Status shows each kind of change, and a commit clears it.
@@ -170,6 +205,12 @@ mod tests {
     async fn git_a_commit_reads_back_what_it_captured() {
         let ws = workspace();
         a_commit_reads_back_what_it_captured(&GitProvider, ws.path()).await;
+    }
+
+    #[tokio::test]
+    async fn git_the_clean_baseline_vouches_only_for_untouched_files() {
+        let ws = workspace();
+        the_clean_baseline_vouches_only_for_untouched_files(&GitProvider, ws.path()).await;
     }
 
     #[tokio::test]

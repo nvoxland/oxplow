@@ -14,7 +14,6 @@ use oxplow_fs_watch::FsWatcher;
 use tracing::{info, warn};
 
 use crate::events::{EventBus, OxplowEvent};
-use crate::file_ref_version;
 use crate::snapshot_capture::SnapshotCaptureService;
 use crate::wiki_pages;
 
@@ -92,13 +91,9 @@ impl WikiPagesWatcher {
                                     .latest_snapshot_id_for_stream(*svc.stream_id())
                                     .await
                                 {
-                                    Ok(Some(snapshot_id)) => file_ref_version::resolve(
-                                        svc.store(),
-                                        svc.project_dir(),
-                                        snapshot_id,
-                                    )
-                                    .await
-                                    .ok(),
+                                    Ok(Some(snapshot_id)) => {
+                                        svc.resolve_file_version(snapshot_id).await.ok()
+                                    }
                                     _ => None,
                                 }
                             }

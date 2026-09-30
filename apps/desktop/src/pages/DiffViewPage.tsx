@@ -23,7 +23,7 @@ import {
   type DiffSubject,
   snapshotsOnBranch,
 } from "../diffViewModel.js";
-import { WORKING, snapshotIdOf, snapshotRevision, type Revision } from "../revision.js";
+import { WORKING, snapshotIdOf, snapshotRevision, vcsRevOf, type Revision } from "../revision.js";
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
@@ -498,7 +498,7 @@ function ResolvedEndpointDiff({
     const toOption = (s: Snapshot): EndpointSnapshotOption => ({
       snapshotId: s.id,
       createdAt: s.createdAt,
-      gitCommit: s.gitCommit,
+      commit: vcsRevOf(s.revision),
     });
     return {
       startOptions: rangeEndpointOptions(onBranch, "start", endSnapId, startSnapId, 20).map(
@@ -756,7 +756,7 @@ function endpointDisplay(
   const snap = snapshotsById.get(snapshotId);
   return {
     timeText: snap ? formatFullDateTime(snap.createdAt) : `snapshot ${snapshotId}`,
-    commitSha: snap?.gitCommit ?? null,
+    commitSha: vcsRevOf(snap?.revision),
     iso: snap?.createdAt ?? null,
   };
 }

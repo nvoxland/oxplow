@@ -3,13 +3,13 @@ import { useEffect, useRef, useState } from "react";
 
 import { formatFullDateTime } from "../format.js";
 
-/** One selectable snapshot in an endpoint dropdown. `gitCommit` (when set)
- *  is shown as a short sha beside the capture time. */
+/** One selectable snapshot in an endpoint dropdown. `commit` (when set)
+ *  is shown as a short id beside the capture time. */
 export interface EndpointSnapshotOption {
   snapshotId: number;
   /** Capture time (ISO) — rendered as a full date+time in the menu. */
   createdAt: string;
-  gitCommit: string | null;
+  commit: string | null;
 }
 
 /**
@@ -126,9 +126,9 @@ export function EndpointPicker({
                 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {formatFullDateTime(o.createdAt)}
                 </span>
-                {o.gitCommit ? (
+                {o.commit ? (
                   <span style={{ fontFamily: "var(--mono, monospace)", fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-                    {o.gitCommit.slice(0, 7)}
+                    {o.commit.slice(0, 7)}
                   </span>
                 ) : null}
                 {current ? <span style={{ fontSize: 10, color: "var(--accent, #4aa3ff)" }}>●</span> : null}

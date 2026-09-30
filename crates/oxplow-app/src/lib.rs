@@ -526,6 +526,8 @@ pub struct Services {
     pub tmux: Arc<dyn oxplow_tmux::TmuxRunner>,
     pub agent_panes: agent_pane::AgentPaneService,
     pub blobs: blob_store::BlobStore,
+    /// Reads a captured file's bytes from whichever store holds them.
+    pub snapshot_content: snapshot_content::SnapshotContent,
     pub lsp_sessions: lsp_sessions::LspSessionManager,
     /// Write guard, filing and the Stop directive, shared by every agent
     /// transport (the hook route, ACP).
@@ -670,13 +672,16 @@ impl Services {
         // (`.context/data-model.md` "snapshot + file_snapshot"). Every
         // worktree shares the repo's object db, so the primary dir serves
         // any stream's OIDs.
+        let vcs: Arc<dyn oxplow_domain::vcs::Vcs> = Arc::new(vcs::GitProvider);
+        let blobs = blob_store::BlobStore::new(layout.state_dir.join("snapshots"));
+        let snapshot_content = snapshot_content::SnapshotContent::new(
+            blobs.clone(),
+            vcs.object_store(&layout.project_dir),
+        );
         let snapshot_store = Arc::new({
-            let dir = layout.project_dir.clone();
+            let content = snapshot_content.clone();
             SqliteSnapshotStore::with_event_schemas(db.clone(), event_schemas.clone())
-                .with_content_hasher(Arc::new(move |oid: &str| {
-                    oxplow_git::read_blob(&dir, oid)
-                        .map(|bytes| blob_store::BlobStore::hash(&bytes))
-                }))
+                .with_content_hasher(Arc::new(move |oid: &str| content.object_content_hash(oid)))
         });
         let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
         let thread_runtime = Arc::new(thread_runtime::ThreadRuntimeRegistry::new());
@@ -782,8 +787,6 @@ impl Services {
             tmux.clone(),
             output_activity.clone(),
         );
-        let blobs = blob_store::BlobStore::new(layout.state_dir.join("snapshots"));
-        let vcs: Arc<dyn oxplow_domain::vcs::Vcs> = Arc::new(vcs::GitProvider);
         let worktrees = Arc::new(worktrees::WorktreeRouter::new(
             layout.project_dir.clone(),
             stream_store.clone(),
@@ -837,6 +840,7 @@ impl Services {
         let primary_stream = futures::executor::block_on(streams.ensure_primary())?;
         let snapshot_captures = snapshot_capture_registry::SnapshotCaptureRegistry::new(
             snapshot_capture_registry::SnapshotCaptureRegistryConfig {
+                vcs: vcs.clone(),
                 snapshot_store: snapshot_store.clone(),
                 blobs: blobs.clone(),
                 max_file_bytes: max_bytes,
@@ -893,7 +897,8 @@ impl Services {
             snapshot_store.clone(),
             thread_store.clone(),
             effort_store.clone(),
-            blobs.clone(),
+            snapshot_content.clone(),
+            vcs.clone(),
             config_arc.clone(),
             layout.project_dir.clone(),
             event_bus.clone(),
@@ -981,7 +986,8 @@ impl Services {
             task_store.clone(),
             thread_store.clone(),
             snapshot_store.clone(),
-            blobs.clone(),
+            snapshot_content.clone(),
+            vcs.clone(),
             config_arc.clone(),
             layout.project_dir.clone(),
             event_bus.clone(),
@@ -1093,6 +1099,7 @@ impl Services {
             tmux,
             agent_panes,
             blobs,
+            snapshot_content,
             lsp_sessions: lsp,
             agent_policy,
             agent_context: Arc::new(agent_context::AgentContext::default()),

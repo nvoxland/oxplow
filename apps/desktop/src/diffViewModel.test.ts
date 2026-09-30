@@ -53,12 +53,12 @@ describe("rangeEndpointOptions", () => {
 describe("pickerBranch", () => {
   test("prefers the end snapshot's branch", () => {
     expect(
-      pickerBranch({ gitBranch: "feature" }, { gitBranch: "main" }, "other"),
+      pickerBranch({ branch: "feature" }, { branch: "main" }, "other"),
     ).toBe("feature");
   });
   test("falls back to the start snapshot, then the stream branch", () => {
-    expect(pickerBranch(undefined, { gitBranch: "main" }, "other")).toBe("main");
-    expect(pickerBranch({ gitBranch: null }, { gitBranch: null }, "other")).toBe("other");
+    expect(pickerBranch(undefined, { branch: "main" }, "other")).toBe("main");
+    expect(pickerBranch({ branch: null }, { branch: null }, "other")).toBe("other");
   });
   test("null when nothing is known", () => {
     expect(pickerBranch(undefined, undefined, null)).toBeNull();
@@ -67,9 +67,9 @@ describe("pickerBranch", () => {
 
 describe("snapshotsOnBranch", () => {
   const rows = [
-    { id: 1, gitBranch: "main" },
-    { id: 2, gitBranch: "feature" },
-    { id: 3, gitBranch: null },
+    { id: 1, branch: "main" },
+    { id: 2, branch: "feature" },
+    { id: 3, branch: null },
   ];
   test("excludes known other-branch snapshots but keeps unknown (null) ones", () => {
     // null branch is unknown, not provably-different, so it's kept — this

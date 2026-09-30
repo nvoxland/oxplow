@@ -14,8 +14,13 @@ provider stays testable against a tempdir.
 - **Revisions:** `head`, `resolve` (a branch, a short id, `HEAD` → the
   full id), `log`, `revision` (message and changed files),
   `revisions_between`, `file_history`.
-- **Trees:** `files_at(rev)` (path → `ObjectId`), `read_object`,
-  `object_id_of(bytes)` (the id without writing it), `diff(a, b)`.
+- **Trees:** `files_at(rev)` (path → `ObjectId`), `diff(a, b)`,
+  `object_store(ws)` — a synchronous `ObjectStore` (`read(id)`,
+  `id_of(bytes)`: the id without writing it) — and
+  `clean_baseline(ws)`, a synchronous `CleanBaseline` that vouches, by
+  file stat, for files still byte-for-byte their head object (git: the
+  index's cached stat). Both are sync because snapshot capture and
+  content hashing use them from blocking threads.
 - **Status, branches, blame:** `status` (sorted entries plus the
   in-progress op; conflicted paths show as `Conflicted`), `branches`,
   `divergence(base, head)`, `blame(path, rev)`.
@@ -89,9 +94,8 @@ refused, naming the workspace's.
 any revision of a workspace: `files_at`, `read_at`, `corpus` (text files,
 for the code-quality scans) and `diff(from?, to)` with line counts.
 Snapshots read their blobs from the blob store and VCS-backed rows
-through `Vcs::read_object`; the working tree reuses the head's object id
-for a file `status` calls clean and hashes the rest
-(`Vcs::object_id_of`). Every side honours the workspace filter
+through the object store; the working tree reuses the head's object id
+for a file `status` calls clean and hashes the rest (`ObjectStore::id_of`). Every side honours the workspace filter
 (`generated:` plus `.gitignore`) — the working-tree corpus no longer has
 its own skip list. Two VCS revisions diff through `Vcs::diff`; two
 snapshots settle un-hashed rows first (`resolve_for_compare`); a mixed
@@ -105,6 +109,26 @@ snapshot head is scanned too. (The wiki's `@<rev>` link syntax is still
 its own `WikiVersion`; it joins `Revision` when knowledge becomes a
 capability, P5.C3.)
 
+## Snapshots and revisions
+
+A snapshot taken on a clean workspace *is* its head revision:
+`snapshot.revision` (V112, was `git_commit`) holds it as a `Revision`
+string (`git:<sha>`), and `snapshot.branch` (was `git_branch`) the
+branch. `SnapshotCaptureService::clean_head` asks `Vcs::head` +
+`Vcs::status`; the git-refs listener re-stamps the latest snapshot's
+revision when the head moves onto an unchanged tree (`vcs.head.moved`).
+`Trees::revision_of(snapshot)` and `Trees::snapshots_at(ws, rev)` map the
+two ways (`git:HEAD` and short ids resolve first).
+
+Capture reads git only through the capability: the sweep's clean files
+come from `Vcs::clean_baseline` and are stored by object id (storage
+class `git`, the VCS object store); `same_content` compares an un-hashed
+VCS row by `ObjectStore::id_of`. Reading a captured file's bytes is
+`SnapshotContent` (`Services.snapshot_content`: the blob store plus the
+VCS object store — every workspace shares one), which also hashes VCS
+objects into the content-identity space for `resolve_for_compare`.
+`file_ref_version::resolve` reads the head through `Vcs::head`.
+
 ## Conformance
 
 `oxplow_app::vcs_conformance` (test-only) holds the contract as
@@ -112,7 +136,8 @@ capability, P5.C3.)
 provider runs the same list:
 
 1. a commit reads back what it captured, whatever the working tree
-   holds now;
+   holds now, through the object store; the clean baseline vouches for
+   an untouched committed file by its stat and never for an edited one;
 2. two revisions diff to what changed, deletions included;
 3. status reports added/modified/deleted/untracked and is clean after a
    commit;
@@ -120,13 +145,22 @@ provider runs the same list:
    log walks newest first;
 6. blame attributes each line to its revision, at any revision.
 
-Still to come: 4 (branches follow checkout
-and diverge), 7 (a snapshot at a clean head maps to its revision, B3)
-and 8 (isolated workspaces share history).
+7 (a snapshot taken on a clean workspace maps to its head revision
+and back, and diffs empty against it) needs the snapshot store, so it
+runs in `trees.rs`. Still to come: 4 (branches follow checkout and
+diverge) and 8 (isolated workspaces share history).
 
-## Still git-shaped (P5 B3–B7)
+**`only_the_git_provider_calls_oxplow_git`** (`vcs/mod.rs`) scans the
+crates' production code: `oxplow_git::` appears only in `vcs/git.rs`
+and in the `NOT_YET_ON_VCS` list, which fails when a file on it stops
+calling `oxplow_git` (take it off) and ends empty at B7. The snapshot
+files left it in B3.
+
+## Still git-shaped (P5 B4–B7)
 
 `GitService` keeps its stream-taking methods until each RPC moves:
 reads to the neutral `vcs_*` RPCs (B4), history and branches to SQL
-(B5), and mutations to `vcs.*` commands (B6). After that, a crate-scan
-test pins `oxplow_git::` to `vcs/git.rs` (B7).
+(B5), and mutations to `vcs.*` commands (B6); the rest of
+`NOT_YET_ON_VCS` moves in B7. Commit-id columns outside snapshots
+(`closest_git_version`, `git_version_exact`, `v_commit`) keep their
+names until then.

@@ -1976,10 +1976,12 @@ export interface Snapshot {
   streamId: string;
   createdAt: string;
   fileCount: number;
-  gitCommit: string | null;
-  /** Short name of the branch HEAD was on at capture; null for pre-V42
-   *  rows, a detached HEAD, or a non-git directory. */
-  gitBranch: string | null;
+  /** The VCS revision the snapshot's tree equals (`git:<sha>`) — set when
+   *  it was taken on a clean workspace at its head. */
+  revision: Revision | null;
+  /** The branch the workspace was on at capture; null for pre-V42 rows, a
+   *  detached head, or a directory not under version control. */
+  branch: string | null;
   /** What the take that created it recorded (P2.11): the snapshot it grew
    *  from, why it was taken, and whether it ran over its time budget. */
   parentSnapshotId: number | null;
@@ -2038,8 +2040,8 @@ export async function listSnapshots(streamId: string, limit?: number): Promise<S
     stream_id: string;
     created_at: string;
     file_count: number;
-    git_commit: string | null;
-    git_branch: string | null;
+    revision: Revision | null;
+    branch: string | null;
     parent_snapshot_id: number | null;
     trigger: SnapshotTrigger | null;
     over_budget: boolean;
@@ -2049,8 +2051,8 @@ export async function listSnapshots(streamId: string, limit?: number): Promise<S
     streamId: r.stream_id,
     createdAt: r.created_at,
     fileCount: r.file_count,
-    gitCommit: r.git_commit,
-    gitBranch: r.git_branch,
+    revision: r.revision,
+    branch: r.branch,
     parentSnapshotId: r.parent_snapshot_id,
     trigger: r.trigger,
     overBudget: r.over_budget,

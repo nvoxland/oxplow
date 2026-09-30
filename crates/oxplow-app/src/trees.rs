@@ -12,7 +12,7 @@
 //! trees and the working tree compare by the VCS's object ids. A diff of
 //! two sides in the same space compares ids without reading a byte; a
 //! mixed diff normalizes the snapshot side into VCS ids
-//! (`Vcs::object_id_of` over its bytes).
+//! (`ObjectStore::id_of` over its bytes).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
@@ -129,6 +129,28 @@ impl Trees {
             )));
         }
         Ok(rev)
+    }
+
+    /// The VCS revision `snapshot`'s tree equals — set when it was taken
+    /// on a clean workspace at its head, or when the head later moved onto
+    /// an unchanged tree.
+    pub async fn revision_of(&self, snapshot: i64) -> Result<Option<Revision>, DomainError> {
+        self.snapshots.get_snapshot_revision(snapshot).await
+    }
+
+    /// The snapshots whose trees equal VCS revision `rev` (resolved in
+    /// `ws` first, so `git:HEAD` and a short id work), oldest first.
+    pub async fn snapshots_at(&self, ws: &Path, rev: &Revision) -> Result<Vec<i64>, DomainError> {
+        let Revision::Vcs { kind, rev } = rev else {
+            return Err(invalid(format!("`{rev}` isn't a VCS revision")));
+        };
+        let full = self.vcs.resolve(ws, self.vcs_rev(kind, rev)?).await?;
+        self.snapshots
+            .snapshots_at(&Revision::Vcs {
+                kind: kind.clone(),
+                rev: full,
+            })
+            .await
     }
 
     /// Every file in `rev`, sorted.
@@ -308,7 +330,7 @@ impl Trees {
             .into_iter()
             .filter(|(p, _)| !changed.contains(p))
             .collect();
-        let (root, vcs) = (ws.to_path_buf(), self.vcs.clone());
+        let (root, objects) = (ws.to_path_buf(), self.vcs.object_store(ws));
         blocking(move || {
             let mut out = Cells::new();
             for entry in walkdir::WalkDir::new(&root)
@@ -329,7 +351,7 @@ impl Trees {
                 let id = match clean.get(&rel) {
                     Some(id) => id.0.clone(),
                     None => match std::fs::read(entry.path()) {
-                        Ok(bytes) => vcs.object_id_of(&bytes).0,
+                        Ok(bytes) => objects.id_of(&bytes).0,
                         Err(_) => continue,
                     },
                 };
@@ -353,7 +375,7 @@ impl Trees {
             match &cell.source {
                 Source::Blob(_) => {
                     if let Some(bytes) = self.read(ws, &cell.source).await? {
-                        cell.id = self.vcs.object_id_of(&bytes).0;
+                        cell.id = self.vcs.object_store(ws).id_of(&bytes).0;
                     }
                 }
                 Source::Object(id) => cell.id = id.0.clone(),
@@ -369,7 +391,10 @@ impl Trees {
                 let (blobs, addr) = (self.blobs.clone(), addr.clone());
                 blocking(move || blobs.read(&addr).ok()).await
             }
-            Source::Object(id) => Ok(self.vcs.read_object(ws, id).await?),
+            Source::Object(id) => {
+                let (objects, id) = (self.vcs.object_store(ws), id.clone());
+                blocking(move || objects.read(&id)).await
+            }
             Source::File(path) => {
                 let path = path.clone();
                 blocking(move || std::fs::read(path).ok()).await
@@ -492,6 +517,71 @@ mod tests {
             vec![("a.rs".to_string(), "fn a() {}\n".to_string())]
         );
         assert!(trees.read_at(&ws, &rev, "../x").await.is_err());
+    }
+
+    /// Conformance 7 (P5.B3, tsk522): a snapshot taken on a clean
+    /// workspace maps to its head revision and back, and diffs empty
+    /// against it; one taken with an edit maps to none.
+    #[tokio::test]
+    async fn a_clean_snapshot_maps_to_its_revision_and_diffs_empty() {
+        use crate::snapshot_capture::{SnapshotCaptureService, TakeRequest};
+        use oxplow_domain::snapshot::SnapshotTrigger;
+        let f = services_with_effort().await;
+        let (trees, ws) = (&f.svc.trees, f.svc.layout.project_dir.clone());
+        std::fs::write(ws.join("a.txt"), "one\n").unwrap();
+        let head = commit_all(&ws, "c1");
+        let capture = SnapshotCaptureService::new(
+            f.svc.snapshot_store.clone(),
+            f.svc.blobs.clone(),
+            ws.clone(),
+            f.svc.vcs.clone(),
+            f.svc.stream_store.list().await.unwrap()[0].id,
+            1_000_000,
+            // The filter production captures with — what `Trees` reads by.
+            WorkspaceFilter::for_project(&ws, Vec::<String>::new(), Vec::<String>::new()),
+        )
+        .with_settle_duration(std::time::Duration::ZERO)
+        .with_predrain_delay(std::time::Duration::ZERO);
+        let take = |capture: SnapshotCaptureService| async move {
+            capture.enqueue_startup_diff().await.unwrap();
+            capture
+                .request_snapshot(TakeRequest {
+                    trigger: SnapshotTrigger::Manual,
+                    thread_id: None,
+                    turn_id: None,
+                    effort_id: None,
+                    budget: None,
+                })
+                .await
+                .unwrap()
+                .expect("a snapshot")
+        };
+        let status = f.svc.vcs.status(&ws).await.unwrap();
+        assert!(
+            status.entries.is_empty(),
+            "the fixture commits clean: {status:?}"
+        );
+        let clean = take(capture.clone()).await;
+        let rev = Revision::git(head);
+        assert_eq!(trees.revision_of(clean).await.unwrap(), Some(rev.clone()));
+        assert_eq!(trees.snapshots_at(&ws, &rev).await.unwrap(), vec![clean]);
+        assert_eq!(
+            trees
+                .snapshots_at(&ws, &Revision::git("HEAD"))
+                .await
+                .unwrap(),
+            vec![clean]
+        );
+        let d = trees
+            .diff(&ws, Some(&Revision::Snapshot(clean)), &rev)
+            .await
+            .unwrap();
+        assert!(d.is_empty(), "{d:?}");
+
+        std::fs::write(ws.join("a.txt"), "two\n").unwrap();
+        let dirty = take(capture).await;
+        assert_ne!(dirty, clean);
+        assert_eq!(trees.revision_of(dirty).await.unwrap(), None);
     }
 
     /// Another VCS's revision is refused, naming this workspace's.
