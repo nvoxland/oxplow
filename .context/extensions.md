@@ -62,7 +62,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   and `.oxplow/project.yaml`, so a hit costs ~60 µs instead of the ~3 ms
   parse and an edit still shows up on the very next call (see
   [performance.md](./performance.md)). `find_lens`, `run_lens`,
-  `validate_extension`, `describe_schema` and the advisory/metric/source
+  `validate_extension`, `list_data_entities` and the advisory/metric/source
   readers all take the catalog; `load_extensions` itself is the cache's
   loader and the write paths' direct read.
 - **Params.** Values are bound as `:name` (`SemanticLayer::query_sql_named`).
@@ -188,7 +188,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       repo's config never runs a program without consent").
 - **Core explorer (stays in core, deliberately simple).**
   - **Explore Data** (`explore-data` page, `ExploreDataPage.tsx`):
-    - Lists every entity from `describe_schema`, with column docs.
+    - Lists every model from `v_model`, with its columns from
+      `v_model_column` (SQL, like everything else; live as extensions
+      compile).
     - Picking one runs `SELECT * … LIMIT 50`; the SQL box then accepts
       any read-only query (Cmd/Ctrl+Enter runs it).
     - "Show as" switches the viz.
@@ -705,7 +707,7 @@ tool list stable no matter how many extensions are installed.
 **Teaching the agent**
 
 An `oxplow-extension` skill (shipped in `crates/oxplow-plugin/assets`)
-teaches the format, the `v_*` contract and the loop "describe_schema →
+teaches the format, the `v_*` contract and the loop "read `v_model` →
 query_sql → write files → validate_extension → run_lens". "Improve with Agent" on a lens pastes
 `[oxplow lens <ext>/<slug>]` plus its params into the agent's context.
 

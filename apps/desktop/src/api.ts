@@ -43,8 +43,7 @@ import type {
   RoleBinding,
   SourceListing,
   SourceRunReport,
-  SchemaEntity,
-  EntityRowCount,
+  DataEntity,
   AcpAgentListing,
   AcpEvent,
   AcpSnapshot,
@@ -75,7 +74,7 @@ export type {
   ToolDiff,
   TranscriptItem,
 };
-export type { EntityRowCount, Extension, ExtensionReview, Lens, LensRun, LensViz, NewLens, SchemaEntity, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
+export type { DataEntity, Extension, ExtensionReview, Lens, LensRun, LensViz, NewLens, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors are usually IpcError objects with
@@ -662,11 +661,6 @@ export async function updateExtension(
   return unwrap(await commands.updateExtension(name, reviewedSha, streamId));
 }
 
-/// The semantic layer's queryable entities with column docs.
-export async function describeSchema(): Promise<SchemaEntity[]> {
-  return unwrap(await commands.describeSchema());
-}
-
 /// Programs the project's config would run, and whether each is approved.
 export async function listProjectPrograms(): Promise<ProjectProgram[]> {
   return unwrap(await commands.listProjectPrograms());
@@ -742,9 +736,10 @@ export function subscribeAcpEvents(listener: (event: AcpEvent) => void): () => v
   };
 }
 
-/// Rows in every entity right now (Settings → Data).
-export async function semanticRowCounts(): Promise<EntityRowCount[]> {
-  return unwrap(await commands.semanticRowCounts());
+/// Settings → Data: every published model with its row count, and the
+/// entities extensions declare that haven't synced.
+export async function listDataEntities(): Promise<DataEntity[]> {
+  return unwrap(await commands.listDataEntities());
 }
 
 export async function listThreads(streamId: string): Promise<Thread[]> {

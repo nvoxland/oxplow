@@ -1,30 +1,80 @@
-//! The full semantic-layer catalog: every model (`v_model` and
-//! `v_model_column`, P4.2) plus every entity extensions declare through
-//! sources. One place, so the IPC and MCP `describe_schema` can't
-//! disagree. See `.context/semantic-layer.md`.
+//! Settings → Data: what the semantic layer holds, who provides it, and how
+//! much. The catalog itself is the model registry (`v_model`,
+//! `v_model_column`, P4.2/P4.9) — read through SQL like everything else;
+//! this adds what SQL can't say: an entity an extension declares that
+//! hasn't synced yet, and row counts. See `.context/semantic-layer.md`.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
-use oxplow_db::{SchemaColumn, SchemaEntity, SchemaRelation, SqlCell};
-
-use crate::extension_sources::ColumnType;
+use oxplow_db::SqlCell;
 use oxplow_domain::DomainError;
 
-/// The models first (the registry, with each one's contract), then
-/// extension entities (owner = extension name), read from
-/// `root/oxplow/extensions/`.
-pub async fn describe_schema(
+/// One row of Settings → Data.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DataEntity {
+    /// The view to query (`v_task`, `v_my_gh_pr`).
+    pub name: String,
+    /// `core`, or the extension that provides it.
+    pub owner: String,
+    /// `sql` (a model file), `entity` (an extension's synced data), or
+    /// `declared` (an entity whose source hasn't synced: no view yet).
+    pub kind: String,
+    pub description: String,
+    /// Rows in it now; `None` for a declared entity.
+    pub rows: Option<i64>,
+}
+
+/// Every published model with its row count, then every entity the
+/// enabled extensions under `root` declare but haven't synced.
+pub async fn data_entities(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
-) -> Result<Vec<SchemaEntity>, DomainError> {
-    let mut all = models(layer).await?;
-    let existing = layer.view_names().await?;
-    for ext in catalog.get(root).iter() {
+) -> Result<Vec<DataEntity>, DomainError> {
+    let text = |c: &SqlCell| match c {
+        SqlCell::Text(t) => t.clone(),
+        _ => String::new(),
+    };
+    let models = layer
+        .query_sql(
+            "SELECT view, owner, kind, description FROM v_model
+              ORDER BY owner <> 'core', owner, view",
+            vec![],
+            Some(oxplow_db::semantic_layer::MAX_ROW_LIMIT),
+        )
+        .await?;
+    let mut out = Vec::with_capacity(models.rows.len());
+    for row in &models.rows {
+        let name = text(&row[0]);
+        // Names come from the registry (compiled or validated views), never
+        // from user input.
+        let count = layer
+            .query_sql(&format!("SELECT count(*) FROM \"{name}\""), vec![], Some(1))
+            .await?;
+        out.push(DataEntity {
+            rows: match count.rows.first().and_then(|r| r.first()) {
+                Some(SqlCell::Int(n)) => Some(*n),
+                _ => None,
+            },
+            name,
+            owner: text(&row[1]),
+            kind: text(&row[2]),
+            description: text(&row[3]),
+        });
+    }
+    let published: BTreeSet<String> = out.iter().map(|e| e.name.clone()).collect();
+    for ext in catalog.get(root).iter().filter(|e| e.enabled) {
         for source in &ext.sources {
             for e in &source.entities {
-                all.push(SchemaEntity {
+                if published.contains(&e.view) {
+                    continue;
+                }
+                out.push(DataEntity {
                     name: e.view.clone(),
+                    owner: ext.name.clone(),
+                    kind: "declared".into(),
                     description: if e.doc.is_empty() {
                         format!(
                             "`{}` records from the `{}` source of extension `{}`.",
@@ -33,112 +83,10 @@ pub async fn describe_schema(
                     } else {
                         e.doc.clone()
                     },
-                    owner: ext.name.clone(),
-                    columns: e
-                        .columns
-                        .iter()
-                        .map(|c| SchemaColumn {
-                            name: c.name.clone(),
-                            sql_type: sql_type(c.col_type).to_string(),
-                            doc: c.doc.clone(),
-                        })
-                        .collect(),
-                    relations: e
-                        .relations
-                        .iter()
-                        .map(|r| SchemaRelation {
-                            to: r.to.clone(),
-                            on: r.on.clone(),
-                        })
-                        .collect(),
-                    available: existing.contains(&e.view),
+                    rows: None,
                 });
             }
         }
-    }
-    Ok(all)
-}
-
-/// Every compiled model with its columns, as the registry records them.
-async fn models(layer: &crate::sql_gateway::SqlGateway) -> Result<Vec<SchemaEntity>, DomainError> {
-    let out = layer
-        .query_sql(
-            "SELECT m.view, m.description, m.owner, c.name, c.sql_type, c.doc
-               FROM v_model m LEFT JOIN v_model_column c ON c.view = m.view
-              ORDER BY m.owner <> 'core', m.view, c.position",
-            vec![],
-            Some(oxplow_db::semantic_layer::MAX_ROW_LIMIT),
-        )
-        .await?;
-    let text = |c: &SqlCell| match c {
-        SqlCell::Text(t) => t.clone(),
-        _ => String::new(),
-    };
-    let mut all: Vec<SchemaEntity> = Vec::new();
-    for row in &out.rows {
-        let view = text(&row[0]);
-        if all.last().is_none_or(|e| e.name != view) {
-            all.push(SchemaEntity {
-                name: view,
-                description: text(&row[1]),
-                owner: text(&row[2]),
-                columns: Vec::new(),
-                relations: Vec::new(),
-                available: true,
-            });
-        }
-        if !matches!(row[3], SqlCell::Null(())) {
-            if let Some(e) = all.last_mut() {
-                e.columns.push(SchemaColumn {
-                    name: text(&row[3]),
-                    sql_type: text(&row[4]),
-                    doc: text(&row[5]),
-                });
-            }
-        }
-    }
-    Ok(all)
-}
-
-fn sql_type(t: ColumnType) -> &'static str {
-    match t {
-        ColumnType::Int | ColumnType::Bool => "INTEGER",
-        ColumnType::Real => "REAL",
-        ColumnType::Text | ColumnType::Time => "TEXT",
-    }
-}
-
-/// Rows in one entity right now.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct EntityRowCount {
-    pub name: String,
-    /// `None` for a declared entity that hasn't synced (no view yet).
-    pub rows: Option<i64>,
-}
-
-/// Row counts for every entity in [`describe_schema`] (Settings → Data).
-pub async fn row_counts(
-    layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-) -> Result<Vec<EntityRowCount>, DomainError> {
-    let mut out = Vec::new();
-    for e in describe_schema(layer, catalog, root).await? {
-        let rows = if e.available {
-            // Names come from the catalog (core views and validated
-            // `v_<ext>_<entity>` names), never from user input.
-            let r = layer
-                .query_sql(&format!("SELECT count(*) FROM {}", e.name), vec![], Some(1))
-                .await?;
-            match r.rows.first().and_then(|row| row.first()) {
-                Some(SqlCell::Int(n)) => Some(*n),
-                _ => None,
-            }
-        } else {
-            None
-        };
-        out.push(EntityRowCount { name: e.name, rows });
     }
     Ok(out)
 }
@@ -146,30 +94,41 @@ pub async fn row_counts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_db::{Database, EntityTable, SqliteExtSourceStore, StoredType};
+    use oxplow_db::{Database, EntityColumn, EntityTable, SqliteExtSourceStore, StoredType};
 
+    /// tsk517: Settings → Data lists every published model with its count
+    /// — a synced entity once, from the registry, with its doc — and a
+    /// declared entity that hasn't synced as `declared`.
     #[tokio::test]
-    async fn row_counts_cover_every_entity_and_skip_unsynced_ones() {
+    async fn data_entities_cover_models_and_unsynced_entities() {
         let root = tempfile::tempdir().unwrap();
         let ext = root.path().join("oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "name: my-gh\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+            "name: my-gh\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, doc: A pull request., key: number, columns: { number: int } }\n",
         )
         .unwrap();
         let db = Database::in_memory();
         let layer = crate::sql_gateway::SqlGateway::new(db.clone());
-        let counts = row_counts(
-            &layer,
-            &crate::extension_catalog::ExtensionCatalog::new(),
-            root.path(),
-        )
-        .await
-        .unwrap();
-        let get = |n: &str| counts.iter().find(|c| c.name == n).map(|c| c.rows);
-        assert_eq!(get("v_task"), Some(Some(0)));
-        assert_eq!(get("v_my_gh_pr"), Some(None), "not synced: no count");
+        let catalog = crate::extension_catalog::ExtensionCatalog::new();
+        let all = data_entities(&layer, &catalog, root.path()).await.unwrap();
+        let get = |all: &[DataEntity], n: &str| {
+            all.iter()
+                .filter(|e| e.name == n)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let task = get(&all, "v_task");
+        assert_eq!(
+            (task[0].owner.as_str(), task[0].kind.as_str(), task[0].rows),
+            ("core", "sql", Some(0))
+        );
+        let pr = get(&all, "v_my_gh_pr");
+        assert_eq!(pr.len(), 1);
+        assert_eq!((pr[0].kind.as_str(), pr[0].rows), ("declared", None));
+        assert_eq!(pr[0].description, "A pull request.");
+
         SqliteExtSourceStore::new(db)
             .replace_rows(vec![(
                 EntityTable {
@@ -177,88 +136,28 @@ mod tests {
                     entity: "pr".into(),
                     view: "v_my_gh_pr".into(),
                     key: "number".into(),
-                    columns: vec![("number".into(), StoredType::Integer)],
+                    description: "A pull request.".into(),
+                    columns: vec![EntityColumn {
+                        name: "number".into(),
+                        stored: StoredType::Integer,
+                        doc: "PR number.".into(),
+                    }],
                 },
                 vec![vec![SqlCell::Int(1)], vec![SqlCell::Int(2)]],
             )])
             .await
             .unwrap();
-        let counts = row_counts(
-            &layer,
-            &crate::extension_catalog::ExtensionCatalog::new(),
-            root.path(),
-        )
-        .await
-        .unwrap();
+        let all = data_entities(&layer, &catalog, root.path()).await.unwrap();
+        let pr = get(&all, "v_my_gh_pr");
+        assert_eq!(pr.len(), 1, "listed once, from the registry");
         assert_eq!(
-            counts.iter().find(|c| c.name == "v_my_gh_pr").unwrap().rows,
-            Some(2)
-        );
-    }
-
-    #[tokio::test]
-    async fn includes_declared_extension_entities_and_tracks_availability() {
-        let root = tempfile::tempdir().unwrap();
-        let ext = root.path().join("oxplow/extensions/my-gh");
-        std::fs::create_dir_all(&ext).unwrap();
-        std::fs::write(
-            ext.join("extension.yaml"),
-            "name: my-gh\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - name: pr\n        doc: A pull request.\n        key: number\n        columns: { number: int, title: { type: text, doc: PR title } }\n        relations: [ { to: v_task, on: \"v_my_gh_pr.title LIKE '%' || v_task.id || '%'\" } ]\n",
-        )
-        .unwrap();
-        let db = Database::in_memory();
-        let layer = crate::sql_gateway::SqlGateway::new(db.clone());
-
-        let all = describe_schema(
-            &layer,
-            &crate::extension_catalog::ExtensionCatalog::new(),
-            root.path(),
-        )
-        .await
-        .unwrap();
-        assert!(all
-            .iter()
-            .any(|e| e.name == "v_task" && e.owner == "core" && e.available));
-        let pr = all
-            .iter()
-            .find(|e| e.name == "v_my_gh_pr")
-            .expect("extension entity listed");
-        assert_eq!(pr.owner, "my-gh");
-        assert_eq!(pr.description, "A pull request.");
-        assert!(!pr.available, "not synced yet");
-        assert_eq!(pr.columns[1].name, "title");
-        assert_eq!(pr.columns[1].doc, "PR title");
-        assert_eq!(pr.columns[0].sql_type, "INTEGER");
-        assert_eq!(pr.relations[0].to, "v_task");
-
-        SqliteExtSourceStore::new(db)
-            .replace_rows(vec![(
-                EntityTable {
-                    extension: "my-gh".into(),
-                    entity: "pr".into(),
-                    view: "v_my_gh_pr".into(),
-                    key: "number".into(),
-                    columns: vec![
-                        ("number".into(), StoredType::Integer),
-                        ("title".into(), StoredType::Text),
-                    ],
-                },
-                vec![],
-            )])
-            .await
-            .unwrap();
-        let all = describe_schema(
-            &layer,
-            &crate::extension_catalog::ExtensionCatalog::new(),
-            root.path(),
-        )
-        .await
-        .unwrap();
-        assert!(
-            all.iter()
-                .find(|e| e.name == "v_my_gh_pr")
-                .unwrap()
-                .available
+            (
+                pr[0].owner.as_str(),
+                pr[0].kind.as_str(),
+                pr[0].rows,
+                pr[0].description.as_str()
+            ),
+            ("my-gh", "entity", Some(2), "A pull request.")
         );
     }
 }

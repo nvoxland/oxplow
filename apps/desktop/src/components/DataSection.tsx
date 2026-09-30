@@ -12,11 +12,10 @@ import { useCallback, useEffect, useState } from "react";
 
 import {
   approveProjectProgram,
-  describeSchema,
+  listDataEntities,
   listProjectPrograms,
   listSources,
   runSource,
-  semanticRowCounts,
   subscribeOxplowEvents,
   type SourceListing,
 } from "../api.js";
@@ -37,13 +36,12 @@ export function DataSection() {
 
   const refresh = useCallback(async () => {
     try {
-      const [schema, counts, listings, progs] = await Promise.all([
-        describeSchema(),
-        semanticRowCounts(),
+      const [entities, listings, progs] = await Promise.all([
+        listDataEntities(),
         listSources(),
         listProjectPrograms(),
       ]);
-      setRows(entityRows(schema, counts));
+      setRows(entityRows(entities));
       setSources(listings);
       setPrograms(progs);
     } catch (e) {

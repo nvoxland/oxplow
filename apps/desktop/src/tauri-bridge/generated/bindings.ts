@@ -318,12 +318,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	describeSchema: () => typedError<SchemaEntity[], IpcError>(__TAURI_INVOKE("describe_schema")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	semanticRowCounts: () => typedError<EntityRowCount[], IpcError>(__TAURI_INVOKE("semantic_row_counts")),
+	listDataEntities: () => typedError<DataEntity[], IpcError>(__TAURI_INVOKE("list_data_entities")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2021,6 +2016,22 @@ export type DashboardWithItems = {
 	items: DashboardItem[],
 };
 
+// One row of Settings → Data.
+export type DataEntity = {
+	// The view to query (`v_task`, `v_my_gh_pr`).
+	name: string,
+	// `core`, or the extension that provides it.
+	owner: string,
+	/**
+	 *  `sql` (a model file), `entity` (an extension's synced data), or
+	 *  `declared` (an entity whose source hasn't synced: no view yet).
+	 */
+	kind: string,
+	description: string,
+	// Rows in it now; `None` for a declared entity.
+	rows: number | null,
+};
+
 // A parked event: the consumer that failed on it, why, and how often.
 export type DeadLetter = {
 	id: number,
@@ -2174,13 +2185,6 @@ export type EffortFile = {
 export type EffortFileChange = "created" | "updated" | "deleted";
 
 export type EffortId = string;
-
-// Rows in one entity right now.
-export type EntityRowCount = {
-	name: string,
-	// `None` for a declared entity that hasn't synced (no view yet).
-	rows: number | null,
-};
 
 // One event as written to the log.
 export type Envelope = {
@@ -3745,39 +3749,6 @@ export type RoleStatus = {
 	binding: RoleBinding | null,
 	// The binding comes from the project, not the global `ai.yaml`.
 	overridden: boolean,
-};
-
-// One documented column of a semantic-layer entity.
-export type SchemaColumn = {
-	name: string,
-	// Declared SQLite type, as `PRAGMA table_info` reports it.
-	sqlType: string,
-	doc: string,
-};
-
-// One queryable entity (a `v_*` view) and its column docs.
-export type SchemaEntity = {
-	// SQL name to query, e.g. `v_task`.
-	name: string,
-	description: string,
-	// Who provides it: `core`, or an extension name.
-	owner: string,
-	columns: SchemaColumn[],
-	// Documented joins to other entities (how the data connects).
-	relations: SchemaRelation[],
-	/**
-	 *  False for a declared extension entity whose source hasn't synced
-	 *  yet (its view doesn't exist, so querying it would fail).
-	 */
-	available: boolean,
-};
-
-// A documented join from one entity to another view.
-export type SchemaRelation = {
-	// View it joins to, e.g. `v_task`.
-	to: string,
-	// SQL join condition.
-	on: string,
 };
 
 /**

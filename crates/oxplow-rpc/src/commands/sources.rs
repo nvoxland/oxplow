@@ -186,18 +186,18 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(q["rows"], json!([["Five"]]));
-        let schema = crate::dispatch("describe_schema", json!({}), &svc)
-            .await
-            .unwrap();
-        let pr = schema
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|e| e["name"] == "v_my_gh_pr")
-            .unwrap()
-            .clone();
-        assert_eq!(pr["owner"], "my-gh");
-        assert_eq!(pr["available"], true);
+        // The synced entity is a model its extension owns, its columns
+        // documented like any other.
+        let model = crate::dispatch(
+            "query_sql",
+            json!({ "sql": "SELECT m.owner, m.kind, count(c.name) FROM v_model m JOIN v_model_column c USING (view) WHERE m.view = 'v_my_gh_pr' GROUP BY m.view" }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(model["rows"][0][0], "my-gh");
+        assert_eq!(model["rows"][0][1], "entity");
+        assert!(model["rows"][0][2].as_i64().unwrap() > 0);
     }
 
     #[tokio::test]

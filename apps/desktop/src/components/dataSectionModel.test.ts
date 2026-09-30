@@ -1,38 +1,35 @@
 import { expect, test } from "bun:test";
 
-import type { SchemaEntity } from "../tauri-bridge/generated/bindings.js";
+import type { DataEntity } from "../tauri-bridge/generated/bindings.js";
 import { entityRows, entitySummary, programRow } from "./dataSectionModel.js";
 
-const entity = (name: string, owner: string, available = true): SchemaEntity => ({
+const entity = (name: string, owner: string, kind: string, rows: number | null): DataEntity => ({
   name,
   owner,
-  available,
+  kind,
+  rows,
   description: `${name} rows`,
-  columns: [],
-  relations: [],
 });
 
 test("entityRows puts core first, formats counts and flags unsynced entities", () => {
-  const rows = entityRows(
-    [entity("v_github_pr", "github", false), entity("v_task", "core"), entity("v_commit", "core"), entity("v_linear_issue", "linear")],
-    [
-      { name: "v_task", rows: 12345 },
-      { name: "v_commit", rows: 0 },
-      { name: "v_linear_issue", rows: 7 },
-      { name: "v_github_pr", rows: null },
-    ],
-  );
+  const rows = entityRows([
+    entity("v_github_pr", "github", "declared", null),
+    entity("v_task", "core", "sql", 12345),
+    entity("v_commit", "core", "sql", 0),
+    entity("v_linear_issue", "linear", "entity", 7),
+  ]);
   expect(rows.map((r) => r.name)).toEqual(["v_commit", "v_task", "v_github_pr", "v_linear_issue"]);
   expect(rows[1]!.rows).toBe(new Intl.NumberFormat().format(12345));
   expect(rows[0]!.rows).toBe("0");
   expect(rows[2]!.rows).toBe("Not synced yet");
   expect(rows[2]!.available).toBe(false);
+  expect(rows[3]!.rows).toBe("7");
   expect(entitySummary(rows)).toBe("4 entities · 2 from extensions");
   expect(entitySummary(rows.slice(0, 1))).toBe("1 entity");
 });
 
-test("an entity missing from the counts reads as a dash, not zero", () => {
-  expect(entityRows([entity("v_task", "core")], [])[0]!.rows).toBe("—");
+test("a model whose count didn't come back reads as a dash, not zero", () => {
+  expect(entityRows([entity("v_task", "core", "sql", null)])[0]!.rows).toBe("—");
 });
 
 test("programRow says what runs and whether it will", () => {

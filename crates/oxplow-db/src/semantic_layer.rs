@@ -1,8 +1,7 @@
-//! The semantic layer's read surface: `query_sql` over the stable `v_*`
-//! SQL views and `describe_schema` over their documented columns.
-//!
-//! The `v_*` views (migration `V73__semantic_layer_views.sql`) are the
-//! versioned contract; physical tables stay internal. See
+//! The semantic layer's read surface: `query_sql` over the published
+//! models (the `v_*` views `models.rs` compiles; `v_model` and
+//! `v_model_column` are their catalog). The models are the versioned
+//! contract; physical tables stay internal. See
 //! `.context/semantic-layer.md`.
 
 use std::time::Duration;
@@ -183,43 +182,6 @@ impl From<serde_json::Value> for SqlCell {
             other => SqlCell::Text(other.to_string()),
         }
     }
-}
-
-/// One documented column of a semantic-layer entity.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct SchemaColumn {
-    pub name: String,
-    /// Declared SQLite type, as `PRAGMA table_info` reports it.
-    pub sql_type: String,
-    pub doc: String,
-}
-
-/// One queryable entity (a `v_*` view) and its column docs.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct SchemaEntity {
-    /// SQL name to query, e.g. `v_task`.
-    pub name: String,
-    pub description: String,
-    /// Who provides it: `core`, or an extension name.
-    pub owner: String,
-    pub columns: Vec<SchemaColumn>,
-    /// Documented joins to other entities (how the data connects).
-    pub relations: Vec<SchemaRelation>,
-    /// False for a declared extension entity whose source hasn't synced
-    /// yet (its view doesn't exist, so querying it would fail).
-    pub available: bool,
-}
-
-/// A documented join from one entity to another view.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct SchemaRelation {
-    /// View it joins to, e.g. `v_task`.
-    pub to: String,
-    /// SQL join condition.
-    pub on: String,
 }
 
 /// Read access to the semantic layer.

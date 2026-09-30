@@ -916,9 +916,9 @@ pub struct ValidateExtensionParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct QuerySqlParams {
-    /// One read-only `SELECT` or `WITH` statement over the semantic layer's
-    /// `v_*` views (call `describe_schema` first to see them). Use `?1`,
-    /// `?2`, … for parameters.
+    /// One read-only `SELECT` or `WITH` statement over the published
+    /// models (`v_model` lists them, `v_model_column` documents their
+    /// columns). Use `?1`, `?2`, … for parameters.
     pub sql: String,
     /// Positional parameter values for `?1`, `?2`, ….
     pub params: Option<Vec<serde_json::Value>>,
@@ -1896,25 +1896,6 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Describe the semantic layer: every queryable entity (the read-only \
-                       `v_*` SQL views over oxplow's data: streams, threads, tasks, efforts, \
-                       comments, wiki pages, snapshots, measures, captures, facts, plus anything \
-                       extensions add) with a description, its owner (`core` or an extension), \
-                       and a doc + SQL type for every column. Call this before `query_sql`."
-    )]
-    async fn describe_schema(&self) -> Result<CallToolResult, McpError> {
-        let root = self.services.git.resolve_repo_dir(None).await;
-        let schema = oxplow_app::semantic_catalog::describe_schema(
-            &self.services.sql,
-            &self.services.extension_catalog,
-            &root,
-        )
-        .await
-        .map_err(internal)?;
-        json_result(&schema)
-    }
-
-    #[tool(
         description = "Run ONE read-only SQL statement (`SELECT`/`WITH`) over the published \
                        models — the `v_*` views lenses and the UI read (`v_model` lists them; \
                        physical tables are refused). Joins across views are fine. Metrics read \
@@ -1923,8 +1904,8 @@ impl OxplowMcp {
                        v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … \
                        bind from `params`. Returns `{columns, rows, truncated, reads}`; rows are \
                        positional arrays. Writes, PRAGMA, ATTACH and multiple statements are \
-                       rejected; queries time out after 5s. See `describe_schema` for column \
-                       meanings."
+                       rejected; queries time out after 5s. `v_model_column` documents every \
+                       column."
     )]
     async fn query_sql(
         &self,
@@ -4855,7 +4836,6 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "get_lens",
     "run_lens",
     "validate_extension",
-    "describe_schema",
     "query_sql",
     "app_version",
     "list_streams",
@@ -6044,15 +6024,6 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.message.contains("approval"), "{err:?}");
-
-        let schema: Vec<serde_json::Value> =
-            serde_json::from_str(&text_payload(server.describe_schema().await.unwrap())).unwrap();
-        let pr = schema
-            .iter()
-            .find(|e| e["name"] == "v_my_gh_pr")
-            .expect("extension entity");
-        assert_eq!(pr["owner"], "my-gh");
-        assert_eq!(pr["available"], false);
     }
 
     #[tokio::test]
@@ -6191,18 +6162,23 @@ mod tests {
             "{err:?}"
         );
 
-        let schema: Vec<serde_json::Value> =
-            serde_json::from_str(&text_payload(server.describe_schema().await.unwrap())).unwrap();
-        let v_task = schema
-            .iter()
-            .find(|e| e["name"] == "v_task")
-            .expect("v_task documented");
-        assert_eq!(v_task["owner"], "core");
-        assert!(v_task["columns"]
+        // The catalog is SQL too: every model's columns are documented.
+        let cols: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .query_sql(Parameters(QuerySqlParams {
+                    sql: "SELECT name FROM v_model_column WHERE view = 'v_task'".into(),
+                    params: None,
+                    limit: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert!(cols["rows"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|c| c["name"] == "status"));
+            .any(|r| r[0] == "status"));
     }
 
     #[tokio::test]

@@ -3,7 +3,8 @@
 /// `v_metric_spec` and `v_metric_catalog` rather than bespoke metric IPC.
 /// This module is the pure half — the queries and the row shapes; `api.ts`
 /// runs them.
-import type { SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
+import { cellNumber, cellText, rowObjects } from "./sqlRows.js";
+import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /** One capture of a metric: its value and where it was recorded. */
 export type SeriesPoint = {
@@ -87,13 +88,8 @@ export const METRIC_CATALOG_SQL =
   "SELECT key, title, kind, language, scope, enabled, target, trigger, toggleable, category " +
   "FROM v_metric_catalog ORDER BY key";
 
-/** A result's rows as objects keyed by column name. */
-export function rowObjects(result: SqlQueryResult): Record<string, SqlCell>[] {
-  return result.rows.map((row) => Object.fromEntries(result.columns.map((c, i) => [c, row[i]])));
-}
-
-const text = (v: SqlCell | undefined): string | null => (v === null || v === undefined ? null : String(v));
-const num = (v: SqlCell | undefined): number | null => (typeof v === "number" ? v : null);
+const text = cellText;
+const num = cellNumber;
 
 export function seriesPoints(result: SqlQueryResult): SeriesPoint[] {
   return rowObjects(result).map((r) => ({

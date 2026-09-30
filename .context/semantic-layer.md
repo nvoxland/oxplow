@@ -7,7 +7,7 @@ and agents query.
 
 > **Status: partly built (epic tsk275).**
 > - **Current:** the `v_*` read contract for core data, plus `query_sql` and
->   `describe_schema` over IPC and MCP (tsk282), and the **fact substrate**
+>   the catalog as models (`v_model*`), and the **fact substrate**
 >   (`measure`, `dimension`, `metric_spec`, `metric_capture`, `fact`, cube),
 >   documented in [metrics.md](./metrics.md).
 > - **Current (tsk289):** extension `exec` sources that bring external
@@ -26,7 +26,7 @@ and agents query.
 > - **Current (tsk324):** the exec-source `network` allowlist, enforced
 >   on macOS.
 > - **Current (tsk325):** Settings → Data: every entity with provider and
->   row count (IPC `semantic_row_counts`, UI-only), and the source rows.
+>   row count (IPC `list_data_entities`, UI-only), and the source rows.
 >
 > When a piece ships, move it from "target" to "current" here, in the same
 > commit.
@@ -366,8 +366,9 @@ and `v_model_test` are the catalog of all of them:
 Still target: the rest of the shipped-sources table above (tsk327).
 
 **Column docs live with the model, not here.** `models.yaml` documents
-every column, and `describe_schema` (IPC and MCP) serves the registry
-(`v_model` + `v_model_column`, plus extension entities). The compile at
+every column, and the registry is the catalog: `v_model` +
+`v_model_column`, read through `query_sql` (extension entities too —
+their contract is their declared columns; tsk517). The compile at
 open fails if a view's columns and its declared ones disagree, in name,
 type or order. So changing a view means:
 
@@ -435,9 +436,9 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
 - Values are `SqlCell`: an untagged `null | boolean | number | string`,
   so the TS binding is a plain scalar union. Blobs come back as
   `"<blob N bytes>"`.
-- `describe_schema` returns each entity's name, description, owner
-  (`core` or an extension) and columns, with docs and SQL types taken from
-  the live schema.
+- The catalog is SQL: `v_model` (name, owner, kind, description) and
+  `v_model_column` (each column's SQL type and doc). The MCP
+  `describe_schema` tool and its IPC twin are gone (tsk517).
 - Lenses never call models or run sources on render; they read what sources
   already produced.
 - Everything an extension adds (entities, relations, dimensions, metrics)
@@ -521,12 +522,12 @@ entities from data already in the semantic layer:
 | Parse/validate declarations | `crates/oxplow-app/src/extension_sources.rs` |
 | Consent, exec, coercion, `run_source`, scheduler | `crates/oxplow-app/src/source_runner.rs` |
 | Entity tables + views, run state (V75 `ext_source_state`) | `crates/oxplow-db/src/ext_source_store.rs` |
-| Combined catalog for `describe_schema` | `crates/oxplow-app/src/semantic_catalog.rs` |
+| Settings → Data read model (`data_entities`) | `crates/oxplow-app/src/semantic_catalog.rs` |
 | IPC `list_sources` / `run_source(approve?)` | `crates/oxplow-rpc/src/commands/sources.rs` |
 | MCP `list_sources` / `run_source` (never approves) | `crates/oxplow-mcp/src/lib.rs` |
 | UI: Settings → Data (entities + counts, source rows, Run) | `apps/desktop/src/components/DataSection.tsx` |
 | UI: credentials per extension | `apps/desktop/src/components/ExtensionsSection.tsx` |
-| Row counts (`semantic_row_counts`) | `crates/oxplow-app/src/semantic_catalog.rs::row_counts` |
+| IPC `list_data_entities` (models + counts, unsynced entities) | `crates/oxplow-rpc/src/commands/semantic.rs` |
 
 **Decisions (epic tsk289, 2026-09-27).**
 
@@ -621,9 +622,11 @@ entities from data already in the semantic layer:
 - **Scheduling.** A background loop (`spawn_scheduler`, started from boot)
   runs approved `every` sources once they're due (`due_sources`, which is
   pure and tested). Unapproved sources never run unattended.
-- **Schema.** `describe_schema` lists declared entities even before they
-  sync. It sets `available: false` until the view exists, and includes
-  column docs, relations and the owner (the extension name).
+- **Schema.** A synced entity is a model its extension owns: its
+  description is its doc plus the joins it documents (`relations`), and
+  its contract is its declared columns with their docs, refreshed when the
+  declaration changes (`register_entity`). Settings → Data also lists a
+  declared entity that hasn't synced (`kind: declared`, no count).
 
 ## Change analysis
 

@@ -677,7 +677,7 @@ pub async fn preview_source(
                 total: rows.len(),
                 rows: rows.into_iter().take(PREVIEW_ROWS).collect(),
                 deleted,
-                columns: table.columns.iter().map(|(n, _)| n.clone()).collect(),
+                columns: table.columns.iter().map(|c| c.name.clone()).collect(),
                 entity: table.entity,
                 view: table.view,
             }
@@ -913,16 +913,38 @@ fn plan_writes(
                 entity: entity.name.clone(),
                 view: entity.view.clone(),
                 key: entity.key.clone(),
+                description: entity_description(extension, entity),
                 columns: entity
                     .columns
                     .iter()
-                    .map(|c| (c.name.clone(), stored(c.col_type)))
+                    .map(|c| oxplow_db::EntityColumn {
+                        name: c.name.clone(),
+                        stored: stored(c.col_type),
+                        doc: c.doc.clone(),
+                    })
                     .collect(),
             },
             write,
         ));
     }
     Ok(writes)
+}
+
+/// An entity's catalog description: its doc (or where it comes from),
+/// then the joins it documents.
+fn entity_description(extension: &str, entity: &SourceEntity) -> String {
+    let mut out = if entity.doc.trim().is_empty() {
+        format!(
+            "`{}` records synced by the `{extension}` extension.",
+            entity.name
+        )
+    } else {
+        entity.doc.trim().to_string()
+    };
+    for r in &entity.relations {
+        out.push_str(&format!(" Joins `{}` on `{}`.", r.to, r.on));
+    }
+    out
 }
 
 /// Coerce tombstone keys to the entity key column's type.

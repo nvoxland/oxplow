@@ -2,7 +2,7 @@
 //! semantic layer (`v_*` views). See `.context/semantic-layer.md`.
 
 use oxplow_app::Services;
-use oxplow_db::{SchemaEntity, SqlCell, SqlQueryResult};
+use oxplow_db::{SqlCell, SqlQueryResult};
 
 use crate::error::IpcError;
 
@@ -28,32 +28,27 @@ pub async fn query_sql(
         .await?)
 }
 
-/// Every queryable entity with its column docs.
-pub async fn describe_schema(svc: &Services) -> Result<Vec<SchemaEntity>, IpcError> {
+/// Settings → Data: every published model with its row count, and the
+/// entities extensions declare that haven't synced. UI-only: an agent
+/// reads `v_model` and counts with `query_sql`.
+pub async fn list_data_entities(
+    svc: &Services,
+) -> Result<Vec<oxplow_app::semantic_catalog::DataEntity>, IpcError> {
     // Extension-declared entities come from the primary worktree (their
     // data is project-global).
     let root = svc.git.resolve_repo_dir(None).await;
     Ok(
-        oxplow_app::semantic_catalog::describe_schema(&svc.sql, &svc.extension_catalog, &root)
+        oxplow_app::semantic_catalog::data_entities(&svc.sql, &svc.extension_catalog, &root)
             .await?,
     )
-}
-
-/// Rows in every entity right now, for Settings → Data. UI-only: an agent
-/// counts with `query_sql`.
-pub async fn semantic_row_counts(
-    svc: &Services,
-) -> Result<Vec<oxplow_app::semantic_catalog::EntityRowCount>, IpcError> {
-    let root = svc.git.resolve_repo_dir(None).await;
-    Ok(oxplow_app::semantic_catalog::row_counts(&svc.sql, &svc.extension_catalog, &root).await?)
 }
 
 #[cfg(test)]
 mod tests {
     #[tokio::test]
-    async fn semantic_row_counts_dispatches() {
+    async fn list_data_entities_dispatches() {
         let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch("semantic_row_counts", serde_json::json!({}), &svc)
+        let out = crate::dispatch("list_data_entities", serde_json::json!({}), &svc)
             .await
             .unwrap();
         let task = out
@@ -112,21 +107,5 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(out["reads"]["tables"], json!(["task"]));
-    }
-
-    #[tokio::test]
-    async fn describe_schema_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch("describe_schema", json!({}), &svc)
-            .await
-            .unwrap();
-        let names: Vec<&str> = out
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|e| e["name"].as_str().unwrap())
-            .collect();
-        assert!(names.contains(&"v_task"));
-        assert!(out[0]["columns"][0]["doc"].is_string());
     }
 }

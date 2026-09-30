@@ -72,7 +72,7 @@ pub use effort_store::{
 };
 pub use event_log_store::{anchors_for_thread_tx, DeadLetter, EventCtx, SqliteEventLogStore};
 pub use ext_source_store::{
-    EntityTable, EntityWrite, SourceState, SqliteExtSourceStore, StoredType,
+    EntityColumn, EntityTable, EntityWrite, SourceState, SqliteExtSourceStore, StoredType,
 };
 pub use fact_store::{
     BatchApply, BatchRows, CubeReadRow, Dimension, EffortMetricDelta, FactRow, FactSliceKey,
@@ -85,8 +85,7 @@ pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use reasoning_store::{NewClaim, NewDecision, SqliteReasoningStore};
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use semantic_layer::{
-    ModelFreshness, Reads, SchemaColumn, SchemaEntity, SchemaRelation, SemanticLayer, SqlCell,
-    SqlParams, SqlQuery, SqlQueryResult, TempTable,
+    ModelFreshness, Reads, SemanticLayer, SqlCell, SqlParams, SqlQuery, SqlQueryResult, TempTable,
 };
 pub use snapshot_tree::{ContentHasher, SnapshotTree, TreeEntry};
 pub use stream_store::SqliteStreamStore;

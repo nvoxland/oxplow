@@ -1,16 +1,9 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import type { Stream } from "../tauri-bridge/index.js";
-import {
-  describeSchema,
-  querySql,
-  saveLens,
-  type LensRun,
-  type LensViz,
-  type SchemaEntity,
-} from "../api.js";
+import { querySql, saveLens, type LensRun, type LensViz } from "../api.js";
 import { LensResultView } from "../lens/LensResultView.js";
 import { PinToDashboard } from "../components/Dashboard/PinToDashboard.js";
 import { adHocLens, NEW_LENS_PROMPT, slugify } from "../lens/lensModel.js";
@@ -18,6 +11,8 @@ import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { useRequestGuard } from "../request-guard.js";
+import type { Reads } from "../tauri-bridge/generated/bindings.js";
+import { MODEL_COLUMNS_SQL, MODELS_SQL, modelColumns, models, type ModelColumn, type ModelRow } from "./exploreData.js";
 
 export interface ExploreDataPageProps {
   stream: Stream | null;
@@ -28,26 +23,49 @@ const SAMPLE_LIMIT = 50;
 const VIZ_OPTIONS: LensViz[] = ["table", "list", "number", "markdown"];
 
 /**
- * Explore Data: the semantic layer's catalog (every `v_*` entity with its
- * column docs), an editable SQL box over it, and "Save as Lens" to keep a
- * query as a page. The core, deliberately simple starting point for
- * people who want to see what data exists before asking an agent for a
- * lens. See `.context/semantic-layer.md` and `.context/extensions.md`.
+ * Explore Data: the semantic layer's catalog (every model in `v_model`,
+ * with its documented columns from `v_model_column`), an editable SQL box
+ * over it, and "Save as Lens" to keep a query as a page. The core,
+ * deliberately simple starting point for people who want to see what data
+ * exists before asking an agent for a lens. See
+ * `.context/semantic-layer.md` and `.context/extensions.md`.
  */
 export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
-  const [entities, setEntities] = useState<SchemaEntity[]>([]);
+  const [catalog, setCatalog] = useState<ModelRow[]>([]);
+  const [catalogReads, setCatalogReads] = useState<Reads>(NO_READS);
   const [selected, setSelected] = useState<string | null>(null);
+  const [columns, setColumns] = useState<ModelColumn[]>([]);
   const [sql, setSql] = useState("");
   const [viz, setViz] = useState<LensViz>("table");
   const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const guard = useRequestGuard();
 
-  useEffect(() => {
-    describeSchema()
-      .then(setEntities)
+  // The catalog is SQL too, and live: an extension's models appear when
+  // they compile.
+  const loadCatalog = useCallback(() => {
+    querySql(MODELS_SQL, [], null)
+      .then((result) => {
+        setCatalog(models(result));
+        setCatalogReads(result.reads);
+      })
       .catch((e) => setError(String(e)));
   }, []);
+  useEffect(loadCatalog, [loadCatalog]);
+  useRerunOnChange(catalogReads, loadCatalog);
+
+  useEffect(() => {
+    if (!selected) return;
+    let cancelled = false;
+    querySql(MODEL_COLUMNS_SQL, [selected], null)
+      .then((result) => {
+        if (!cancelled) setColumns(modelColumns(result));
+      })
+      .catch((e) => setError(String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   async function execute(query: string, as: LensViz = viz) {
     // A slower earlier query mustn't land over this one.
@@ -76,20 +94,20 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
     void execute(q, "table");
   }
 
-  const entity = entities.find((e) => e.name === selected) ?? null;
+  const model = catalog.find((m) => m.view === selected) ?? null;
 
-  const catalog = (
+  const catalogList = (
     <ul data-testid="explore-entities" style={{ listStyle: "none", margin: 0, padding: 0 }}>
-      {entities.map((e) => (
-        <li key={e.name}>
+      {catalog.map((m) => (
+        <li key={m.view}>
           <button
             type="button"
-            data-testid={`explore-entity-${e.name}`}
-            title={e.description}
-            onClick={() => pick(e.name)}
-            style={{ ...entityButtonStyle, fontWeight: e.name === selected ? 600 : 400 }}
+            data-testid={`explore-entity-${m.view}`}
+            title={m.owner === "core" ? m.description : `${m.description} (${m.owner})`}
+            onClick={() => pick(m.view)}
+            style={{ ...entityButtonStyle, fontWeight: m.view === selected ? 600 : 400 }}
           >
-            {e.name}
+            {m.view}
           </button>
         </li>
       ))}
@@ -97,7 +115,7 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
   );
 
   return (
-    <Page testId="page-explore-data" title="Explore Data" layout="details" rightRail={catalog} rightRailTitle="Data">
+    <Page testId="page-explore-data" title="Explore Data" layout="details" rightRail={catalogList} rightRailTitle="Data">
       <p style={{ color: "var(--text-secondary)", marginTop: 0 }}>
         Everything oxplow knows, as read-only SQL views. Pick one on the right, tweak the query, and save it as a
         lens to keep it as a page — or{" "}
@@ -105,14 +123,14 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
           ask your agent to build one…
         </button>
       </p>
-      {entity ? (
+      {model ? (
         <details data-testid="explore-columns" style={{ marginBottom: 12 }}>
           <summary style={{ cursor: "pointer" }}>
-            <strong>{entity.name}</strong> — {entity.description}
+            <strong>{model.view}</strong> — {model.description}
           </summary>
           <table style={docsTableStyle}>
             <tbody>
-              {entity.columns.map((c) => (
+              {columns.map((c) => (
                 <tr key={c.name}>
                   <td style={docsCellStyle}>
                     <code>{c.name}</code>

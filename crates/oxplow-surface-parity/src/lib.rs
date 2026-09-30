@@ -153,9 +153,9 @@ pub const MANIFEST: &[Capability] = &[
     ui("discard_dead_letter"),
     both("search"),
     both("query_sql"),
-    both("describe_schema"),
-    // Settings → Data's counts; an agent counts with query_sql.
-    ui("semantic_row_counts"),
+    // Settings → Data (models with counts, unsynced entities); an agent
+    // reads v_model and counts with query_sql.
+    ui("list_data_entities"),
     both("list_extensions"),
     both("get_lens"),
     both("run_lens"),

@@ -34,7 +34,7 @@ impl StoredType {
     }
 }
 
-/// The table/view shape for one entity.
+/// The table/view shape for one entity, and what documents it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityTable {
     pub extension: String,
@@ -42,7 +42,18 @@ pub struct EntityTable {
     /// `v_<extension>_<entity>`.
     pub view: String,
     pub key: String,
-    pub columns: Vec<(String, StoredType)>,
+    /// What the entity is, for the catalog (`v_model.description`).
+    pub description: String,
+    pub columns: Vec<EntityColumn>,
+}
+
+/// One column of an entity: stored as `stored`, documented by `doc` (its
+/// contract in `v_model_column`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EntityColumn {
+    pub name: String,
+    pub stored: StoredType,
+    pub doc: String,
 }
 
 /// How one entity's rows land in a run.
@@ -260,10 +271,10 @@ fn validate_table(t: &EntityTable) -> Result<(), DomainError> {
     if t.view != format!("v_{}_{}", t.extension.replace('-', "_"), t.entity) {
         return bad(format!("view `{}` doesn't match its entity", t.view));
     }
-    if t.columns.is_empty() || t.columns.iter().any(|(c, _)| !is_ident(c)) {
+    if t.columns.is_empty() || t.columns.iter().any(|c| !is_ident(&c.name)) {
         return bad(format!("entity `{}` has an invalid column name", t.entity));
     }
-    if !t.columns.iter().any(|(c, _)| c == &t.key) {
+    if !t.columns.iter().any(|c| c.name == t.key) {
         return bad(format!(
             "entity `{}`: key `{}` isn't a column",
             t.entity, t.key
@@ -273,29 +284,56 @@ fn validate_table(t: &EntityTable) -> Result<(), DomainError> {
 }
 
 /// Record an entity view as its extension's model: owner, how it's made
-/// (`entity`), and the table it reads.
+/// (`entity`), its description, the table it reads, and its columns with
+/// their docs as its contract. It follows the extension's declaration, so
+/// a changed one replaces it; an unchanged one writes nothing.
 fn register_entity(
     tx: &rusqlite::Transaction<'_>,
     t: &EntityTable,
     table: &str,
     select: &str,
 ) -> Result<(), DomainError> {
+    let contract = serde_json::to_string(
+        &t.columns
+            .iter()
+            .map(|c| serde_json::json!({ "name": c.name, "type": c.stored.sql(), "doc": c.doc }))
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|e| DomainError::Invalid(e.to_string()))?;
+    let current: Option<(String, String, Option<String>)> = tx
+        .query_row(
+            "SELECT m.description, m.sql, c.columns_json FROM model m
+             LEFT JOIN model_contract c ON c.view = m.view AND c.version = m.version
+             WHERE m.view = ?1",
+            [&t.view],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    if current.as_ref()
+        == Some(&(
+            t.description.clone(),
+            select.to_string(),
+            Some(contract.clone()),
+        ))
+    {
+        return Ok(());
+    }
     let now = ts_to_string(oxplow_domain::Timestamp::now());
     tx.execute(
         "INSERT INTO model (view, name, owner, version, description, sql, compiled_at, kind)
          VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, 'entity')
-         ON CONFLICT (view) DO UPDATE SET sql = excluded.sql, compiled_at = excluded.compiled_at",
-        params![
-            t.view,
-            t.entity,
-            t.extension,
-            format!(
-                "Entity synced by the `{}` extension's sources.",
-                t.extension
-            ),
-            select,
-            now
-        ],
+         ON CONFLICT (view) DO UPDATE SET description = excluded.description,
+             sql = excluded.sql, compiled_at = excluded.compiled_at",
+        params![t.view, t.entity, t.extension, t.description, select, now],
+    )
+    .map_err(map_sql_err)?;
+    tx.execute(
+        "INSERT INTO model_contract (view, version, columns_json, recorded_at)
+         VALUES (?1, 1, ?2, ?3)
+         ON CONFLICT (view, version) DO UPDATE SET columns_json = excluded.columns_json,
+             recorded_at = excluded.recorded_at",
+        params![t.view, contract, now],
     )
     .map_err(map_sql_err)?;
     tx.execute(
@@ -369,23 +407,29 @@ fn write_entity(
     let wanted: Vec<(String, String, i64)> = t
         .columns
         .iter()
-        .map(|(c, ty)| (c.clone(), ty.sql().to_string(), i64::from(c == &t.key)))
+        .map(|c| {
+            (
+                c.name.clone(),
+                c.stored.sql().to_string(),
+                i64::from(c.name == t.key),
+            )
+        })
         .collect();
+    let names = t
+        .columns
+        .iter()
+        .map(|c| quote(&c.name))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let select = format!("SELECT {names} FROM {}", quote(&table));
     let registered = owner.is_some() && view_exists;
     if current != wanted || !registered {
         let cols = t
             .columns
             .iter()
-            .map(|(c, ty)| format!("{} {}", quote(c), ty.sql()))
+            .map(|c| format!("{} {}", quote(&c.name), c.stored.sql()))
             .collect::<Vec<_>>()
             .join(", ");
-        let names = t
-            .columns
-            .iter()
-            .map(|(c, _)| quote(c))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let select = format!("SELECT {names} FROM {}", quote(&table));
         tx.execute_batch(&format!("DROP VIEW IF EXISTS {}", quote(&t.view)))
             .map_err(map_sql_err)?;
         if current != wanted {
@@ -400,8 +444,8 @@ fn write_entity(
         }
         tx.execute_batch(&format!("CREATE VIEW {} AS {select}", quote(&t.view)))
             .map_err(map_sql_err)?;
-        register_entity(tx, t, &table, &select)?;
     }
+    register_entity(tx, t, &table, &select)?;
     match deleted {
         // Replace: the run's rows are the whole entity.
         None => tx
@@ -458,7 +502,15 @@ mod tests {
             entity: "pr".into(),
             view: "v_my_gh_pr".into(),
             key: "number".into(),
-            columns: cols.iter().map(|(n, t)| (n.to_string(), *t)).collect(),
+            description: "A pull request.".into(),
+            columns: cols
+                .iter()
+                .map(|(n, t)| EntityColumn {
+                    name: n.to_string(),
+                    stored: *t,
+                    doc: format!("{n} doc"),
+                })
+                .collect(),
         }
     }
 
@@ -514,7 +566,12 @@ mod tests {
             entity: "gh_pr".into(),
             view: "v_my_gh_pr".into(),
             key: "number".into(),
-            columns: vec![("number".into(), StoredType::Integer)],
+            description: String::new(),
+            columns: vec![EntityColumn {
+                name: "number".into(),
+                stored: StoredType::Integer,
+                doc: String::new(),
+            }],
         };
         let err = store
             .replace_rows(vec![(other, rows(json!([[1]])))])
@@ -527,13 +584,52 @@ mod tests {
             entity: "file".into(),
             view: "v_effort_file".into(),
             key: "path".into(),
-            columns: vec![("path".into(), StoredType::Text)],
+            description: String::new(),
+            columns: vec![EntityColumn {
+                name: "path".into(),
+                stored: StoredType::Text,
+                doc: String::new(),
+            }],
         };
         let err = store
             .replace_rows(vec![(core, rows(json!([["a"]])))])
             .await
             .unwrap_err();
         assert!(err.to_string().contains("belongs to `core`"), "{err}");
+        // Its contract is the declared columns, docs included: the catalog
+        // (`v_model_column`) documents it like any model.
+        let columns: Vec<(String, String, String)> = db
+            .read(|tx| {
+                let mut st = tx
+                    .prepare(
+                        "SELECT c.name, c.sql_type, c.doc FROM v_model_column c
+                         WHERE c.view = 'v_my_gh_pr' ORDER BY c.position",
+                    )
+                    .map_err(map_sql_err)?;
+                let rows = st
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .map_err(map_sql_err)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(map_sql_err)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            columns,
+            vec![
+                (
+                    "number".to_string(),
+                    "INTEGER".to_string(),
+                    "number doc".to_string()
+                ),
+                (
+                    "title".to_string(),
+                    "TEXT".to_string(),
+                    "title doc".to_string()
+                ),
+            ]
+        );
         // The open that recompiles models keeps it.
         db.call_mut(|conn| {
             crate::models::drop_all(conn)?;
@@ -706,7 +802,7 @@ mod tests {
     async fn rejects_unsafe_identifiers() {
         let store = SqliteExtSourceStore::new(Database::in_memory());
         let mut t = pr_table(&[("number", StoredType::Integer)]);
-        t.columns[0].0 = "x); DROP TABLE task; --".into();
+        t.columns[0].name = "x); DROP TABLE task; --".into();
         assert!(matches!(
             store.replace_rows(vec![(t, vec![])]).await,
             Err(DomainError::Invalid(_))
@@ -787,7 +883,12 @@ mod tests {
             entity: "note".into(),
             view: "v_task_note".into(),
             key: "id".into(),
-            columns: vec![("id".into(), StoredType::Integer)],
+            description: String::new(),
+            columns: vec![EntityColumn {
+                name: "id".into(),
+                stored: StoredType::Integer,
+                doc: String::new(),
+            }],
         };
         let err = store.replace_rows(vec![(t, vec![])]).await.unwrap_err();
         assert!(

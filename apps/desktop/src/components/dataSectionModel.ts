@@ -1,7 +1,7 @@
 /// Pure view model for Settings → Data (DataSection.tsx): what data the
 /// semantic layer holds, who provides it, and how much. See
 /// `.context/semantic-layer.md`.
-import type { EntityRowCount, ProjectProgram, SchemaEntity } from "../tauri-bridge/generated/bindings.js";
+import type { DataEntity, ProjectProgram } from "../tauri-bridge/generated/bindings.js";
 
 export interface EntityRowModel {
   name: string;
@@ -13,19 +13,18 @@ export interface EntityRowModel {
 }
 
 /// One row per entity: core first, then by provider and name. An entity
-/// whose source hasn't synced shows "Not synced yet" instead of a count.
-export function entityRows(schema: SchemaEntity[], counts: EntityRowCount[]): EntityRowModel[] {
-  const byName = new Map(counts.map((c) => [c.name, c.rows]));
+/// whose source hasn't synced (`declared`) shows "Not synced yet".
+export function entityRows(entities: DataEntity[]): EntityRowModel[] {
   const fmt = new Intl.NumberFormat();
-  return schema
+  return entities
     .map((e) => {
-      const n = byName.get(e.name);
+      const available = e.kind !== "declared";
       return {
         name: e.name,
         owner: e.owner,
         description: e.description,
-        rows: !e.available ? "Not synced yet" : n == null ? "—" : fmt.format(n),
-        available: e.available,
+        rows: !available ? "Not synced yet" : e.rows == null ? "—" : fmt.format(e.rows),
+        available,
       };
     })
     .sort((a, b) => {
