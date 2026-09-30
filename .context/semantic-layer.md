@@ -507,10 +507,15 @@ entities from data already in the semantic layer:
   More than 10k rows fails the run rather than deriving from a partial
   set. The script gets `{"rows": [{col: value, …}]}` and returns the exec
   shape.
-- **Sandbox.** It runs in the collector sandbox (`run_sandboxed` +
-  `run_starlark` / `run_jaq`), with no files, network, env or secrets.
-  So there is **no approval**: `list_sources` reports it as approved, and
-  the scheduler runs it on its `schedule`.
+- **Sandbox.** It runs in the collector sandbox
+  (`run_sandboxed_excluding` + `run_starlark_with_ai` / `run_jaq`), with
+  no files, network, env or secrets. So there is **no approval**:
+  `list_sources` reports it as approved, and the scheduler runs it on its
+  `schedule`. Its one way out is oxplow's own: the `ai_*` builtins
+  (`ai_classify` / `ai_score` / `ai_summarize` / `ai_extract`), recorded
+  computations on the project's AI roles as caller `source:<ext>/<id>`,
+  whose wait is left out of the budget ([ai-providers.md](./ai-providers.md)
+  "`ai_*` functions for sources").
 - **Refused at parse:** `env` / `credentials` on a derived source, `input`
   on an exec source, and an `input` that names one of the source's own
   views (a source can't feed on itself). Reading other extensions' views

@@ -104,13 +104,68 @@ pub fn run_sandboxed<F>(budget: &SandboxBudget, f: F) -> Result<Value, CollectEr
 where
     F: FnOnce() -> Result<Value, CollectError> + Send + 'static,
 {
+    run_sandboxed_excluding(budget, &PauseClock::default(), f)
+}
+
+/// Time a script spends waiting on something outside it (a collector's
+/// `ai_*` calls): the calls it has finished, and the one in flight.
+#[derive(Debug, Default)]
+pub struct PauseClock {
+    state: std::sync::Mutex<(Duration, Option<std::time::Instant>)>,
+}
+
+impl PauseClock {
+    /// Run `f` with the clock paused.
+    pub fn paused<T>(&self, f: impl FnOnce() -> T) -> T {
+        self.lock().1 = Some(std::time::Instant::now());
+        let out = f();
+        let mut st = self.lock();
+        if let Some(since) = st.1.take() {
+            st.0 += since.elapsed();
+        }
+        out
+    }
+
+    /// Everything paused so far, the call in flight included.
+    pub fn total(&self) -> Duration {
+        let st = self.lock();
+        st.0 + st.1.map(|s| s.elapsed()).unwrap_or_default()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, (Duration, Option<std::time::Instant>)> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// [`run_sandboxed`], leaving out of the budget the time `clock` was
+/// paused (see [`PauseClock`]).
+pub fn run_sandboxed_excluding<F>(
+    budget: &SandboxBudget,
+    clock: &PauseClock,
+    f: F,
+) -> Result<Value, CollectError>
+where
+    F: FnOnce() -> Result<Value, CollectError> + Send + 'static,
+{
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send(f());
     });
-    match rx.recv_timeout(budget.timeout) {
-        Ok(result) => result,
-        Err(_) => Err(CollectError::Timeout),
+    let started = std::time::Instant::now();
+    loop {
+        let deadline = started + budget.timeout + clock.total();
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return Err(CollectError::Timeout);
+        }
+        // Wake at least every 50ms to see more paused time.
+        match rx.recv_timeout((deadline - now).min(Duration::from_millis(50))) {
+            Ok(result) => return result,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(CollectError::Runtime("the script's worker died".into()))
+            }
+        }
     }
 }
 
@@ -409,7 +464,24 @@ fn helper_anyhow(e: crate::HelperError) -> anyhow::Error {
 /// (`parse_xml`/`parse_json`/`lcov_records`/`lines`/`regex_find`/`xpath`) are
 /// available to the script.
 pub fn run_starlark(script: &str, input: &Value) -> Result<Value, CollectError> {
-    run_starlark_inner(script, input, None)
+    run_starlark_inner(script, input, Host::None)
+}
+
+/// [`run_starlark`] for a collector: the `ai_*` builtins answer through
+/// `host`.
+pub fn run_starlark_with_ai(
+    script: &str,
+    input: &Value,
+    host: &crate::ai::AiHost,
+) -> Result<Value, CollectError> {
+    run_starlark_inner(script, input, Host::Ai(host))
+}
+
+/// What a run's `Evaluator::extra` holds.
+enum Host<'a> {
+    None,
+    Gauge(&'a GaugeHost),
+    Ai(&'a crate::ai::AiHost),
 }
 
 /// Like [`run_starlark`] but with a [`GaugeHost`] in scope, so the script's
@@ -420,14 +492,10 @@ pub fn run_starlark_with_host(
     input: &Value,
     host: &GaugeHost,
 ) -> Result<Value, CollectError> {
-    run_starlark_inner(script, input, Some(host))
+    run_starlark_inner(script, input, Host::Gauge(host))
 }
 
-fn run_starlark_inner(
-    script: &str,
-    input: &Value,
-    host: Option<&GaugeHost>,
-) -> Result<Value, CollectError> {
+fn run_starlark_inner(script: &str, input: &Value, host: Host<'_>) -> Result<Value, CollectError> {
     use starlark::environment::{GlobalsBuilder, LibraryExtension, Module};
     use starlark::eval::Evaluator;
     use starlark::syntax::{AstModule, Dialect};
@@ -445,12 +513,15 @@ fn run_starlark_inner(
         .map_err(|e| CollectError::Runtime(format!("starlark parse: {e}")))?;
     let globals = GlobalsBuilder::extended_by(&[LibraryExtension::Json])
         .with(collect_helpers)
+        .with(crate::ai::ai_builtins)
         .build();
 
     Module::with_temp_heap(|module| {
         let mut eval = Evaluator::new(&module);
-        if let Some(host) = host {
-            eval.extra = Some(host);
+        match host {
+            Host::None => {}
+            Host::Gauge(h) => eval.extra = Some(h),
+            Host::Ai(h) => eval.extra = Some(h),
         }
         let result = eval
             .eval_module(ast, &globals)

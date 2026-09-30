@@ -87,6 +87,8 @@ pub struct Sources<'a> {
     pub layer: crate::sql_gateway::SqlGateway,
     /// The loaded-extensions cache (`Services.extension_catalog`).
     pub catalog: &'a crate::extension_catalog::ExtensionCatalog,
+    /// What a derived source's `ai_*` builtins ask (recorded computations).
+    pub ai: std::sync::Arc<crate::ai_compute::AiCompute>,
 }
 
 impl<'a> Sources<'a> {
@@ -99,6 +101,7 @@ impl<'a> Sources<'a> {
             secrets: svc.secrets.as_ref(),
             layer: svc.sql.clone(),
             catalog: &svc.extension_catalog,
+            ai: svc.ai_compute.clone(),
         }
     }
 }
@@ -480,6 +483,7 @@ pub async fn derive_source(
     layer: &crate::sql_gateway::SqlGateway,
     script: String,
     spec: &SourceSpec,
+    oracle: std::sync::Arc<dyn oxplow_collect_plugin::AiOracle>,
 ) -> Result<SourceOutput, String> {
     let rows = match &spec.input {
         None => Vec::new(),
@@ -515,10 +519,15 @@ pub async fn derive_source(
     let input = serde_json::json!({ "rows": rows });
     let runtime = spec.runtime;
     let value = tokio::task::spawn_blocking(move || {
-        use oxplow_collect_plugin::runtime::{run_jaq, run_sandboxed, run_starlark, SandboxBudget};
-        run_sandboxed(&SandboxBudget::default(), move || match runtime {
+        use oxplow_collect_plugin::runtime::{
+            run_jaq, run_sandboxed_excluding, run_starlark_with_ai, SandboxBudget,
+        };
+        // The time its `ai_*` calls wait on a model isn't the script's.
+        let host = std::sync::Arc::new(oxplow_collect_plugin::AiHost::new(oracle));
+        let clock = host.clock();
+        run_sandboxed_excluding(&SandboxBudget::default(), &clock, move || match runtime {
             SourceRuntime::Jaq => run_jaq(&script, &input),
-            _ => run_starlark(&script, &input),
+            _ => run_starlark_with_ai(&script, &input, &host),
         })
     })
     .await
@@ -719,7 +728,13 @@ async fn produce(
     let ext_dir = root.join(&ext.path);
     if spec.runtime.is_derived() {
         let output = match crate::extensions::read_extension_file(root, &ext.name, &spec.entry) {
-            Some(script) => derive_source(&ctx.layer, script, &spec).await,
+            Some(script) => {
+                let oracle = crate::ai_compute::CollectorOracle::new(
+                    ctx.ai.clone(),
+                    format!("source:{}/{}", ext.name, spec.id),
+                );
+                derive_source(&ctx.layer, script, &spec, std::sync::Arc::new(oracle)).await
+            }
             None => Err(format!(
                 "source `{source_id}`: entry `{}` doesn't exist in the extension",
                 spec.entry
@@ -977,6 +992,21 @@ fn coerce_keys(
 
 #[cfg(test)]
 mod tests {
+    /// An `AiCompute` with no roles assigned (these sources don't call
+    /// models).
+    fn no_ai() -> std::sync::Arc<crate::ai_compute::AiCompute> {
+        let db = oxplow_db::Database::in_memory();
+        std::sync::Arc::new(crate::ai_compute::AiCompute::new(
+            std::sync::Arc::new(crate::ai_service::AiService::new(
+                oxplow_ai::client::Client::default(),
+                std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+                std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
+                None,
+            )),
+            oxplow_db::SqliteAiResultStore::new(db),
+        ))
+    }
+
     use super::*;
     use crate::extension_sources::{parse_sources, SourceSchedule};
     use serde_json::json;
@@ -1182,6 +1212,7 @@ mod tests {
             secrets: &secrets,
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            ai: no_ai(),
         };
 
         let err = run_source(&ctx, "my-gh", "gh", None).await.unwrap_err();
@@ -1347,6 +1378,7 @@ mod tests {
             secrets: &secrets,
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            ai: no_ai(),
         };
 
         let list = list_sources(&ctx).await.unwrap();
@@ -1374,6 +1406,7 @@ mod tests {
             secrets: &secrets,
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            ai: no_ai(),
         };
         let other = list_sources(&elsewhere).await.unwrap();
         assert!(
@@ -1476,6 +1509,7 @@ mod tests {
             secrets: &secrets,
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            ai: no_ai(),
         };
         // No approval asked for, and the listing says it can run.
         assert!(list_sources(&ctx).await.unwrap().iter().all(|l| l.approved));
@@ -1493,6 +1527,87 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
             json!([["Fix login", "FIX LOGIN,TIDY DOCS,SHIP IT"]])
+        );
+    }
+
+    /// P5.E2's red: a derived source's `ai_classify` is a recorded
+    /// computation — six calls on one text, one model call, recorded as
+    /// the source.
+    #[tokio::test]
+    async fn a_derived_sources_ai_classify_on_one_text_is_one_call() {
+        use crate::ai_service::{ProviderConfig, ProviderKind, Role, RoleBinding};
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join(".oxplow");
+        extension(
+            root.path(),
+            "work",
+            "name: work\nsources:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT id, title FROM v_task\"\n    entities:\n      - { name: kind, key: id, columns: { id: int, kind: text } }\n",
+            &[(
+                "kind.star",
+                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        rows.append({\"id\": r[\"id\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
+            )],
+        );
+        let db = task_db().await;
+        let reply = json!({ "answers": { "label": { "type": "choice", "choice": "bug", "probabilities": { "bug": 0.9, "feature": 0.1 } } } });
+        let (base, _) = oxplow_ai::testing::mock(
+            "/chat/completions",
+            200,
+            json!({ "choices": [{ "message": { "content": reply.to_string() } }], "usage": { "prompt_tokens": 4, "completion_tokens": 2 } }),
+        )
+        .await;
+        let ai = std::sync::Arc::new(crate::ai_service::AiService::new(
+            oxplow_ai::client::Client::default(),
+            std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+            std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
+            Some(state.join("global-config")),
+        ));
+        ai.save_provider(
+            ProviderConfig {
+                id: "m".into(),
+                kind: ProviderKind::OpenaiCompatible,
+                base_url: Some(base),
+            },
+            None,
+        )
+        .unwrap();
+        ai.set_role(
+            Role::Decide,
+            Some(RoleBinding {
+                provider: "m".into(),
+                model: "x".into(),
+            }),
+        )
+        .unwrap();
+        let store = SqliteExtSourceStore::new(db.clone());
+        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let ctx = Sources {
+            root: root.path(),
+            project: "test-project".into(),
+            approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
+            store: &store,
+            secrets: &secrets,
+            layer: crate::sql_gateway::SqlGateway::new(db.clone()),
+            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            ai: std::sync::Arc::new(crate::ai_compute::AiCompute::new(
+                ai,
+                oxplow_db::SqliteAiResultStore::new(db.clone()),
+            )),
+        };
+        let report = run_source(&ctx, "work", "star", None).await.unwrap();
+        assert_eq!(report.row_counts["kind"], 3);
+        let out = crate::sql_gateway::SqlGateway::new(db)
+            .query_sql(
+                "SELECT (SELECT group_concat(DISTINCT kind) FROM v_work_kind), \
+                        (SELECT count(*) FROM v_ai_call), (SELECT caller FROM v_ai_call), \
+                        (SELECT op || ' ' || role FROM v_ai_result)",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            json!([["bug", 1, "source:work/star", "classify decide"]])
         );
     }
 
@@ -1529,6 +1644,7 @@ mod tests {
             secrets: &secrets,
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            ai: no_ai(),
         };
         let preview = preview_source(&ctx, "work", "star").await.unwrap();
         assert_eq!(preview.entities.len(), 1);
@@ -1581,6 +1697,7 @@ mod tests {
             secrets: &secrets,
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            ai: no_ai(),
         };
         script(
             &ext,
@@ -1677,6 +1794,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             secrets: &secrets,
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            ai: no_ai(),
         };
         assert!(list_sources(&ctx).await.unwrap()[0].network_enforced);
         run_source(&ctx, "net", "s", Some(&version_of(&ctx, "net", "s").await))
@@ -1772,6 +1890,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             secrets: &secrets,
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            ai: no_ai(),
         };
         let seen = list_sources(&ctx).await.unwrap()[0]
             .version

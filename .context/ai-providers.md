@@ -8,9 +8,9 @@ providers you configure, the roles that decide which model does what, the
 > client, call records (`oxplow-ai`, `oxplow-app/src/ai_service.rs`,
 > `v_ai_call`), Settings → AI, and the `list_ai_roles` / `ai_decide` /
 > `ai_summarize` MCP tools, inferred decisions, project role overrides,
-> and recorded computations (`AiCompute`, `v_ai_result`, P5.E1). **Not
-> yet:** the `ai_*` functions for sources (P5.E2), and a models.dev
-> catalog.
+> recorded computations (`AiCompute`, `v_ai_result`, P5.E1) and the
+> `ai_*` Starlark builtins for collectors (P5.E2). **Not
+> yet:** a models.dev catalog.
 > Sections below say which parts are target design.
 
 ## Why
@@ -164,12 +164,24 @@ computes afresh. `AiService::complete_as` / `decide_as` take a
 carries the hash, and return its row id; plain `complete` / `decide`
 record `input_hash` NULL.
 
-## `ai_*` functions for sources (target, P5.E2)
+## `ai_*` functions for sources (current, P5.E2)
 
-Collectors call `ai_classify`, `ai_summarize`, `ai_score` and
-`ai_extract` (Starlark builtins over `AiCompute`, caller
-`source:<ext>/<id>`); lenses never call a model when they render — they
-read recorded results.
+A **collector** (a starlark derived source) calls `ai_classify(text,
+labels)`, `ai_score(text, levels)`, `ai_summarize(text, focus = None)`
+and `ai_extract(text, schema, instructions = "")` — Starlark builtins
+(`crates/oxplow-collect-plugin/src/ai.rs`) answered by the run's
+`AiHost` in `Evaluator::extra` (the `GaugeHost` pattern). The host holds
+a synchronous `dyn AiOracle`; the app's is `ai_compute::CollectorOracle`,
+which blocks the script's worker thread on the runtime and asks
+`AiCompute` as caller `source:<ext>/<id>` — so every answer is a
+recorded computation (the same question on the same text is one call,
+ever). The time a script waits on the oracle is left out of its sandbox
+budget (`PauseClock`, the in-flight call included;
+`run_sandboxed_excluding`). A gauge or a report parser runs without an
+`AiHost`, and the builtins refuse: "`ai_classify` is available in
+collectors only". Lenses never call a model when they render; they read
+what collectors recorded. The extension skill's example classifies each
+turn's prompt (`turn_kind`).
 
 ## MCP (current)
 

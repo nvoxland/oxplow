@@ -29,9 +29,11 @@ use std::sync::Arc;
 use oxplow_coverage::{AnalysisReport, CoverageReport, TestReport};
 use serde::{Deserialize, Serialize};
 
+pub mod ai;
 pub mod builtin_metrics;
 pub mod helpers;
 pub mod runtime;
+pub use ai::{AiHost, AiOracle};
 pub use builtin_metrics::{builtin_metrics, BuiltinMetric};
 pub use helpers::HelperError;
 pub use runtime::{GaugeHost, SandboxBudget};

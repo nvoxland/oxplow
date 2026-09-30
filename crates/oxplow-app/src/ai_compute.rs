@@ -359,6 +359,59 @@ impl AiCompute {
     }
 }
 
+/// [`AiCompute`] as a collector's `ai_*` oracle (`oxplow_collect_plugin`),
+/// recording as `caller` (`source:<ext>/<id>`). The script runs on a
+/// worker thread outside the runtime; each call blocks it on the runtime
+/// the oracle was made on.
+pub struct CollectorOracle {
+    compute: Arc<AiCompute>,
+    caller: String,
+    runtime: tokio::runtime::Handle,
+}
+
+impl CollectorOracle {
+    /// Made inside the runtime its calls run on.
+    pub fn new(compute: Arc<AiCompute>, caller: String) -> Self {
+        Self {
+            compute,
+            caller,
+            runtime: tokio::runtime::Handle::current(),
+        }
+    }
+
+    fn run<T: Serialize>(
+        &self,
+        f: impl std::future::Future<Output = Result<Recorded<T>, AiComputeError>>,
+    ) -> Result<Value, String> {
+        self.runtime
+            .block_on(f)
+            .map(|r| serde_json::to_value(r.value).expect("result serializes"))
+            .map_err(|e| e.to_string())
+    }
+}
+
+impl oxplow_collect_plugin::AiOracle for CollectorOracle {
+    fn classify(&self, text: &str, labels: &[String]) -> Result<Value, String> {
+        self.run(self.compute.classify(&self.caller, text, labels))
+    }
+
+    fn score(&self, text: &str, levels: &[String]) -> Result<Value, String> {
+        self.run(self.compute.score(&self.caller, text, levels))
+    }
+
+    fn summarize(&self, text: &str, focus: Option<&str>) -> Result<String, String> {
+        self.run(self.compute.summarize(&self.caller, text, focus))
+            .map(|v| v.as_str().unwrap_or_default().to_string())
+    }
+
+    fn extract(&self, instructions: &str, text: &str, schema: &Value) -> Result<Value, String> {
+        self.run(
+            self.compute
+                .extract(&self.caller, instructions, text, schema),
+        )
+    }
+}
+
 fn site<'a>(caller: &'a str, hash: &'a str) -> CallSite<'a> {
     CallSite {
         caller,

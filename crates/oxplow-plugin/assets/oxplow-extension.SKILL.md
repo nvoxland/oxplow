@@ -329,6 +329,36 @@ to a read-only SQL query:
   so it needs no approval and you can `run_source` it yourself.
 - **Input limits.** `input` can't read the source's own views, and more
   than 10,000 input rows fails the run.
+- **Asking a model.** A starlark source can call `ai_classify(text,
+  labels)` → `{label, probabilities}`, `ai_score(text, levels)` →
+  `{level, score, probabilities}` (levels lowest first),
+  `ai_summarize(text, focus = None)` → text, and `ai_extract(text,
+  schema, instructions = "")` → JSON matching `schema`. Each is recorded
+  (`v_ai_result`): the same question on the same text is one model call,
+  ever, so a re-sync costs nothing for rows that didn't change. They run
+  on the project's AI roles (`decide`, `summarize`, `main`); with no model
+  assigned the run fails saying which role. Gauges and report parsers
+  can't call them. For example, what kind of work each turn was:
+
+  ```yaml
+  collectors:
+    - id: turn_kind
+      runtime: starlark
+      entry: turn_kind.star
+      input: "SELECT id, prompt FROM v_agent_turn WHERE prompt <> ''"
+      entities:
+        - { name: turn_kind, key: id, columns: { id: int, kind: text } }
+  ```
+
+  ```python
+  KINDS = ["feature", "bug fix", "refactor", "question", "chore"]
+
+  def transform(input):
+      return {"entities": {"turn_kind": [
+          {"id": r["id"], "kind": ai_classify(r["prompt"], KINDS)["label"]}
+          for r in input["rows"]
+      ]}}
+  ```
 
 **Incremental sync.** For a big or slow upstream, set `sync: upsert`:
 
