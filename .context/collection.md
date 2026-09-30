@@ -629,4 +629,4 @@ Don't run it via `bunx type-coverage@latest` — bunx auto-installs the newest
 `typescript` as the peer and it crashes on TS 7 (`ts.SyntaxKind` undefined).
 `trigger: on-snapshot` re-reads the report each
 snapshot — there is no auto-firing `on-report` dispatcher, so `on-snapshot`
-(or `manual` via `run_metric`) is how a report gauge runs.
+(or `manual` via the `metric.run` command) is how a report gauge runs.

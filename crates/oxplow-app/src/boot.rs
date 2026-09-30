@@ -463,7 +463,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     {
         let state = state.clone();
         tokio::spawn(async move {
-            match state.rebuild_metric_baseline(false).await {
+            match state.metrics.rebuild_baseline(false).await {
                 Ok(r) if r.ran => tracing::info!(
                     gauges = r.gauges_run,
                     failed = ?r.failed,

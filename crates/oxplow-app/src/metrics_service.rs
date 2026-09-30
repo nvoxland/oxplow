@@ -62,7 +62,7 @@ const GAUGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 const TREE_SWEEP_FILE_THRESHOLD: usize = 100;
 
 /// What a gauge sweep did — how many gauges actually ran (after the idempotency
-/// skip) and which failed. Returned so [`crate::Services::rebuild_metric_baseline`]
+/// skip) and which failed. Returned so [`MetricsService::rebuild_baseline`]
 /// can report the outcome to an MCP caller or a test instead of it vanishing into a
 /// background-task label (tsk50).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -105,6 +105,9 @@ pub struct MetricsService {
     /// into the catalog (epic tsk12, E). `None` in test fixtures that don't
     /// exercise catalog seeding; wired at boot via [`Self::with_fact_store`].
     fact_store: Option<Arc<SqliteFactStore>>,
+    /// Wired at boot via [`Self::with_snapshot_captures`]; `None` in tests
+    /// that never rebuild a baseline.
+    snapshot_captures: Option<crate::snapshot_capture_registry::SnapshotCaptureRegistry>,
     /// Background-task store, so a whole-tree gauge sweep is VISIBLE while it runs
     /// (tsk48). `None` in tests. Wired at boot via [`Self::with_background_tasks`].
     background_tasks: Option<crate::background_task::BackgroundTaskStore>,
@@ -217,6 +220,7 @@ impl MetricsService {
             fact_store: None,
             background_tasks: None,
             global_catalog: Arc::new(std::sync::Mutex::new(None)),
+            snapshot_captures: None,
             extensions_cache: Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             entity_captures: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
@@ -250,6 +254,16 @@ impl MetricsService {
 
     pub fn with_fact_store(mut self, fact_store: Arc<SqliteFactStore>) -> Self {
         self.fact_store = Some(fact_store);
+        self
+    }
+
+    /// The streams' snapshot captures, which a baseline rebuild drains
+    /// ([`Self::rebuild_baseline`]).
+    pub fn with_snapshot_captures(
+        mut self,
+        captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
+    ) -> Self {
+        self.snapshot_captures = Some(captures);
         self
     }
 
@@ -292,7 +306,7 @@ impl MetricsService {
     }
 
     /// Drop the cached global catalog so the next read reloads it. Called on
-    /// every in-app config mutation (beside each `ConfigChanged` emit).
+    /// every `ConfigChanged`.
     fn invalidate_global_catalog(&self) {
         *self
             .global_catalog
@@ -1073,138 +1087,109 @@ impl MetricsService {
         stale
     }
 
-    /// Scaffold a custom **measure** (a new fact TYPE) — epic tsk12, E. Appends a
-    /// `measures:` entry to `.oxplow/project.yaml` (project scope, default) or
-    /// writes a shareable `<global>/measures/<slug>.yaml` (global scope), then
-    /// reseeds the catalog. Returns the created measure key. A global measure is
-    /// active in every project automatically (`seed_catalog` loads global +
-    /// project), so — unlike a metric — no project `use:` opt-in is written.
+    /// Bring every `per-path` metric up to date over the WHOLE tree (tsk50).
     ///
-    /// The measure's fields ride in a [`MeasureEntry`] — including
-    /// `captureScope` (`complete` (default) | `per-path`), which a
-    /// snapshot-triggered tree gauge's measure must set to `per-path` so its metric
-    /// reads the whole repo rather than just the last commit's files (tsk41).
-    pub async fn scaffold_measure(
-        &self,
-        entry: MeasureEntry,
-        scope: Option<String>,
-    ) -> Result<String, String> {
-        let key_owned = entry.key.as_deref().unwrap_or_default().trim().to_string();
-        let key: &str = &key_owned;
-        if key.is_empty() || !key.contains('.') {
-            return Err("key must be namespaced, e.g. acme.api_latency".to_string());
-        }
-        if key.starts_with("oxplow.") {
-            return Err("`oxplow.` is reserved for built-in measures".to_string());
-        }
-        let blank = |v: Option<String>| v.filter(|s| !s.is_empty());
-        let entry = MeasureEntry {
-            key: Some(key.to_string()),
-            title: blank(entry.title),
-            unit: blank(entry.unit),
-            subject_kind: blank(entry.subject_kind),
-            temporal_semantics: blank(entry.temporal_semantics),
-            capture_scope: blank(entry.capture_scope),
-            component_role: None,
-            description: blank(entry.description),
+    /// A baseline no longer fabricates a full-tree snapshot (tsk71 — that
+    /// snapshot polluted effort file-attribution). Instead it drains any
+    /// pending edits into an ORDINARY snapshot (authored work, correctly
+    /// attributed), anchors on the latest snapshot, and runs the un-baselined
+    /// gauges `scan_kind = 'full'` over the RECONSTRUCTED tree as-of it — the
+    /// per-path fold reads a full capture's scanned set via `tree_at`
+    /// semantics, so provenance stays on a real snapshot and no snapshot is
+    /// invented.
+    ///
+    /// This is deliberately callable, not buried in boot: it's the one entry point
+    /// boot, the `metric.rebuild` command, and the end-to-end test all share, so
+    /// the boot baseline path is finally exercisable without a process restart —
+    /// four metrics bugs in a row (tsk47/48/49) were caught only by restarting.
+    ///
+    /// `force` treats every gauge as needing a baseline (the command's escape hatch).
+    /// The kind-scoped idempotency guard in the sweep means a repeat over the
+    /// same unchanged snapshot won't re-scan.
+    pub async fn rebuild_baseline(&self, force: bool) -> Result<BaselineReport, String> {
+        let Some(captures) = &self.snapshot_captures else {
+            return Err("no snapshot captures wired".into());
         };
-        if matches!(scope.as_deref(), Some("global")) {
-            let gdir = self
-                .effective_global_dir()
-                .ok_or_else(|| "no global config dir available on this platform".to_string())?;
-            if load_global_measure_entries(&gdir)
-                .iter()
-                .any(|e| e.key.as_deref() == Some(key))
-            {
-                return Err(format!("global measure `{key}` already exists"));
-            }
-            let slug = slugify(key);
-            oxplow_config::write_global_measures_file(
-                &gdir.join("measures").join(format!("{slug}.yaml")),
-                &[entry],
-            )
-            .map_err(|e| e.to_string())?;
-        } else {
-            let mut cfg = self
-                .config
-                .write()
-                .map_err(|_| "config lock poisoned".to_string())?;
-            if cfg.measures.iter().any(|e| e.key.as_deref() == Some(key)) {
-                return Err(format!(
-                    "measure `{key}` already exists in .oxplow/project.yaml"
-                ));
-            }
-            cfg.measures.push(entry);
-            oxplow_config::write_project_config(&self.project_dir, &cfg)
-                .map_err(|e| e.to_string())?;
-        }
-        self.invalidate_global_catalog();
-        self.events.emit(OxplowEvent::ConfigChanged);
-        self.seed_catalog().await;
-        Ok(key.to_string())
-    }
+        let Some(fact_store) = &self.fact_store else {
+            return Err("no fact store wired".into());
+        };
+        let stream_val = captures
+            .primary()
+            .map(|c| c.stream_id().value())
+            .unwrap_or(1);
 
-    /// Scaffold a custom **dimension** (a new conformed slice axis) — epic tsk12,
-    /// E. Analogous to [`Self::scaffold_measure`]: appends a `dimensions:` entry
-    /// (project) or writes `<global>/dimensions/<slug>.yaml` (global), reseeds,
-    /// and returns the created key.
-    pub async fn scaffold_dimension(
-        &self,
-        key: &str,
-        label: Option<String>,
-        value_type: Option<String>,
-        scope: Option<String>,
-    ) -> Result<String, String> {
-        let key = key.trim();
-        if key.is_empty() || !key.contains('.') {
-            return Err("key must be namespaced, e.g. acme.license".to_string());
+        if !force {
+            let pending = self.gauges_needing_baseline(stream_val).await;
+            if pending.is_empty() {
+                // Nothing to baseline — but still sweep out captures an
+                // EARLIER baseline made dead weight (tsk75): the post-sweep
+                // prune only fires when a full phase runs, so history from
+                // before the prune existed is collected here, once per boot.
+                // Idempotent and cheap when there's nothing to drop.
+                match fact_store.prune_dominated_tree_captures(stream_val).await {
+                    Ok(n) if n > 0 => {
+                        tracing::info!(
+                            pruned = n,
+                            "metrics: dropped baseline-dominated tree captures at boot"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(error = %e, "metrics: boot prune failed");
+                    }
+                }
+                return Ok(BaselineReport {
+                    ran: false,
+                    ..Default::default()
+                });
+            }
         }
-        if key.starts_with("oxplow.") {
-            return Err("`oxplow.` is reserved for built-in dimensions".to_string());
-        }
-        let entry = DimensionEntry {
-            key: Some(key.to_string()),
-            label: label.filter(|l| !l.is_empty()),
-            value_type: value_type.filter(|v| !v.is_empty()),
-            subject_kind: None,
-            vocabulary: vec![],
-            promote: false,
-            ..DimensionEntry::default()
+
+        let Some(capture) = captures.primary() else {
+            return Err("no primary snapshot capture registered".into());
         };
-        if matches!(scope.as_deref(), Some("global")) {
-            let gdir = self
-                .effective_global_dir()
-                .ok_or_else(|| "no global config dir available on this platform".to_string())?;
-            if load_global_dimension_entries(&gdir)
-                .iter()
-                .any(|e| e.key.as_deref() == Some(key))
-            {
-                return Err(format!("global dimension `{key}` already exists"));
-            }
-            let slug = slugify(key);
-            oxplow_config::write_global_dimensions_file(
-                &gdir.join("dimensions").join(format!("{slug}.yaml")),
-                &[entry],
-            )
+        // Make sure the tree we anchor on is current: wait for the startup
+        // sweep, run the ordinary stat-diff (which marks only files whose
+        // content actually changed since their last capture — NOT the old
+        // pretend-everything-is-dirty full-tree enqueue), and drain the dirty
+        // set into a normal snapshot. Those rows are real authored edits the
+        // fs-watch would capture anyway — attribution is correct-by-
+        // construction. `None` = nothing changed; fall back to the latest
+        // existing snapshot.
+        capture.await_initial_ready().await;
+        capture
+            .enqueue_startup_diff()
+            .await
             .map_err(|e| e.to_string())?;
-        } else {
-            let mut cfg = self
-                .config
-                .write()
-                .map_err(|_| "config lock poisoned".to_string())?;
-            if cfg.dimensions.iter().any(|e| e.key.as_deref() == Some(key)) {
-                return Err(format!(
-                    "dimension `{key}` already exists in .oxplow/project.yaml"
-                ));
-            }
-            cfg.dimensions.push(entry);
-            oxplow_config::write_project_config(&self.project_dir, &cfg)
-                .map_err(|e| e.to_string())?;
-        }
-        self.invalidate_global_catalog();
-        self.events.emit(OxplowEvent::ConfigChanged);
-        self.seed_catalog().await;
-        Ok(key.to_string())
+        let drained = capture
+            .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Manual)
+            .await
+            .map_err(|e| e.to_string())?;
+        let snapshot_id = match drained {
+            Some(id) => Some(id),
+            None => self
+                .snapshot_store
+                .latest_snapshot_id_for_stream(oxplow_domain::StreamId::new(stream_val))
+                .await
+                .map_err(|e| e.to_string())?,
+        };
+        let Some(snapshot_id) = snapshot_id else {
+            // Fresh project with no snapshot at all — nothing to baseline on.
+            return Ok(BaselineReport {
+                ran: false,
+                ..Default::default()
+            });
+        };
+
+        let sweep = self
+            .run_snapshot_gauges_with(oxplow_domain::StreamId::new(stream_val), snapshot_id, force)
+            .await;
+        Ok(BaselineReport {
+            ran: true,
+            snapshot_id: Some(snapshot_id),
+            gauges_run: sweep.ran,
+            failed: sweep.failed,
+        })
     }
 
     /// Event loop: seed once, then reseed on `ConfigChanged` and run
@@ -1228,6 +1213,7 @@ impl MetricsService {
             }
             match event {
                 Ok(OxplowEvent::ConfigChanged) => {
+                    self.invalidate_global_catalog();
                     self.seed_catalog().await;
                     self.capture_entity_states(true).await;
                 }
@@ -1343,7 +1329,7 @@ impl MetricsService {
     }
 
     /// Run every enabled `on-snapshot` gauge against the just-captured snapshot.
-    /// `pub(crate)` so [`crate::Services::rebuild_metric_baseline`] can drive it
+    /// `pub(crate)` so [`MetricsService::rebuild_baseline`] can drive it
     /// directly (and thus test the boot path end to end, tsk50).
     ///
     /// Two-phase (tsk71): gauges already baselined run a `delta` scan over the
@@ -1363,7 +1349,7 @@ impl MetricsService {
     }
 
     /// [`Self::run_snapshot_gauges`] with a `force_full` override: treat EVERY
-    /// on-snapshot gauge as needing a baseline (the `rebuild_metrics(force)`
+    /// on-snapshot gauge as needing a baseline (the `metric.rebuild { force }`
     /// escape hatch). The per-snapshot idempotency guard still applies, so a
     /// repeated force over the same unchanged snapshot doesn't re-scan.
     pub(crate) async fn run_snapshot_gauges_with(
@@ -1456,7 +1442,7 @@ impl MetricsService {
         // snapshot at its current fingerprint (tsk50). Otherwise a re-delivered
         // snapshot event — or the direct baseline run PLUS the event loop reacting to
         // the same snapshot — would tree-sitter-parse the whole tree twice (minutes of
-        // CPU). The manual `run_metric` path doesn't come through here, so an explicit
+        // CPU). The manual `metric.run` path doesn't come through here, so an explicit
         // "run now" still runs.
         let mut to_run: Vec<&ResolvedGauge> = Vec::new();
         for g in gauges {
@@ -1606,7 +1592,7 @@ impl MetricsService {
 
     /// Manually run one configured gauge by key, against the stream's latest
     /// snapshot. Returns the number of samples recorded, or an error string.
-    /// (The MCP `run_metric` tool, tsk226, calls this.)
+    /// (The `metric.run` command calls this.)
     pub async fn run_metric_by_key(
         &self,
         key: &str,
@@ -2641,6 +2627,19 @@ fn gauge_source(gauge: &ResolvedGauge, collector: &Collector) -> String {
     }
 }
 
+/// What [`MetricsService::rebuild_baseline`] did — observable so a command caller or a
+/// test can assert on it instead of reading tracing logs (tsk50).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, specta::Type)]
+pub struct BaselineReport {
+    /// False when no gauge needed a baseline (a warm, up-to-date repo).
+    pub ran: bool,
+    pub snapshot_id: Option<i64>,
+    pub gauges_run: usize,
+    /// Gauges that failed during the sweep (empty on success). Non-empty means those
+    /// metrics will read stale/empty — a visible failure, not a silent one.
+    pub failed: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -2992,10 +2991,10 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn rebuild_metric_baseline_reads_the_whole_repo_end_to_end() {
+    async fn rebuild_baseline_reads_the_whole_repo_end_to_end() {
         // THE test that would have caught all four metrics bugs (tsk47/48/49) without a
         // restart: real files on disk → full-tree snapshot → every gauge → fold →
-        // repo-wide headline, driven through the same `rebuild_metric_baseline` boot
+        // repo-wide headline, driven through the same `rebuild_baseline` boot
         // uses. It runs TWO gauges sharing `oxplow.ast_hit` — the exact shape tsk49
         // hid in — so a single-gauge unit test could not have found it.
         let (svc, dir) = fixture().await;
@@ -3023,7 +3022,7 @@ def transform(input):
         write("web/app.ts", "console.log(1);\nconsole.error(2);\n");
         write("web/other.ts", "export const x = 1;\n");
 
-        let report = svc.rebuild_metric_baseline(true).await.unwrap();
+        let report = svc.metrics.rebuild_baseline(true).await.unwrap();
         assert!(report.ran, "a forced rebuild must run");
         assert!(
             report.failed.is_empty(),
@@ -3065,7 +3064,7 @@ def transform(input):
         // A NON-forced rebuild on the now-warm repo is a no-op: every gauge has
         // scanned the whole tree at its current fingerprint, so nothing needs redoing.
         // This is the guard against the every-boot baseline loop.
-        let warm = svc.rebuild_metric_baseline(false).await.unwrap();
+        let warm = svc.metrics.rebuild_baseline(false).await.unwrap();
         assert!(!warm.ran, "a warm, up-to-date repo must not re-baseline");
         assert_eq!(
             svc.metric_engine
@@ -3090,7 +3089,7 @@ def transform(input):
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(dir.path().join("src/a.rs"), "fn a() { unsafe { x(); } }\n").unwrap();
 
-        let first = svc.rebuild_metric_baseline(true).await.unwrap();
+        let first = svc.metrics.rebuild_baseline(true).await.unwrap();
         assert!(first.ran);
         assert!(first.failed.is_empty(), "{:?}", first.failed);
         let latest_after_first = svc
@@ -3101,7 +3100,7 @@ def transform(input):
 
         // Second forced rebuild: nothing on disk changed → no new snapshot,
         // and the kind-scoped idempotency guard skips the re-scan.
-        let second = svc.rebuild_metric_baseline(true).await.unwrap();
+        let second = svc.metrics.rebuild_baseline(true).await.unwrap();
         assert!(second.ran);
         let latest_after_second = svc
             .snapshot_store
@@ -4476,93 +4475,6 @@ def transform(input):
             .expect("cold seeded");
         assert!(hot.promoted, "promote: true must reach the dimension row");
         assert!(!cold.promoted, "unset promote defaults to false");
-    }
-
-    #[tokio::test]
-    async fn scaffold_measure_writes_config_and_seeds_catalog() {
-        let (svc, dir) = fixture().await;
-        let key = svc
-            .metrics
-            .scaffold_measure(
-                MeasureEntry {
-                    key: Some("acme.api_latency".into()),
-                    title: Some("API latency".into()),
-                    unit: Some("ms".into()),
-                    subject_kind: Some("endpoint".into()),
-                    temporal_semantics: Some("non-additive".into()),
-                    ..Default::default()
-                },
-                None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(key, "acme.api_latency");
-        // Persisted to project.yaml AND seeded into the catalog (scaffold reseeds).
-        let raw = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
-        assert!(raw.contains("acme.api_latency"), "got:\n{raw}");
-        let m = svc
-            .fact_store
-            .get_measure("acme.api_latency")
-            .await
-            .unwrap()
-            .expect("seeded");
-        assert_eq!(m.unit.as_deref(), Some("ms"));
-        assert_eq!(m.temporal_semantics, "non-additive");
-        // Reserved namespace + duplicate both rejected.
-        assert!(svc
-            .metrics
-            .scaffold_measure(
-                MeasureEntry {
-                    key: Some("oxplow.x".into()),
-                    ..Default::default()
-                },
-                None
-            )
-            .await
-            .is_err());
-        assert!(svc
-            .metrics
-            .scaffold_measure(
-                MeasureEntry {
-                    key: Some("acme.api_latency".into()),
-                    ..Default::default()
-                },
-                None
-            )
-            .await
-            .is_err());
-    }
-
-    #[tokio::test]
-    async fn scaffold_dimension_writes_config_and_seeds_catalog() {
-        let (svc, dir) = fixture().await;
-        let key = svc
-            .metrics
-            .scaffold_dimension(
-                "acme.license",
-                Some("License".into()),
-                Some("categorical".into()),
-                None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(key, "acme.license");
-        let raw = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
-        assert!(raw.contains("acme.license"), "got:\n{raw}");
-        let dims = svc.fact_store.list_dimensions().await.unwrap();
-        assert!(dims
-            .iter()
-            .any(|d| d.key == "acme.license" && d.scope == "project"));
-        assert!(svc
-            .metrics
-            .scaffold_dimension("oxplow.x", None, None, None)
-            .await
-            .is_err());
-        assert!(svc
-            .metrics
-            .scaffold_dimension("acme.license", None, None, None)
-            .await
-            .is_err());
     }
 
     #[tokio::test]

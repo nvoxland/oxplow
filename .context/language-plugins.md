@@ -91,8 +91,8 @@ These are the substrate the Metrics package/dimension roll-up builds on:
 `SqliteMetricStore::dimension_rollup_for_metric` sums a per-file metric's
 latest values by **package** (directory) or any per-file `dims_json` key
 (e.g. **language**) — the `metric_subject` package grain made concrete. It
-backs the `metric_breakdown` MCP tool (tsk327/330 — `dimension` defaults to
-`package`, optional `stream`). The Metric Detail breakdown card and its IPC
+backed the retired `metric_breakdown` MCP tool (tsk327/330); a slice by
+dimension is now `metric_grid(…, dim)` in SQL (P4.8). The Metric Detail breakdown card and its IPC
 were removed in tsk309; a per-package/-language view is lens or agent work.
 
 ## Adding a language (the checklist)

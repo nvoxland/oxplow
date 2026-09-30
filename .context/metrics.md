@@ -85,7 +85,7 @@ welded to collection.
 >   tree while anchored to an ordinary delta snapshot, so no full-tree snapshot
 >   is ever fabricated.
 > - **`asserted`** — exactly the paths it emitted facts for (agent
->   `record_metric`, synthetic writes). Its snapshot is **provenance only**,
+>   `metric.record`, synthetic writes). Its snapshot is **provenance only**,
 >   never a scanned set; the insert coerces any snapshot-less capture to
 >   `asserted` (delta/full require an anchor).
 >
@@ -137,7 +137,7 @@ welded to collection.
 > the on-demand entry point — it waits for the startup sweep, drains genuinely
 > pending edits into a NORMAL snapshot (real authored work, correctly attributed;
 > none dirty ⇒ **no snapshot is created**, it anchors to the latest existing one),
-> then runs the sweep. **Boot, the `rebuild_metrics` MCP tool, and the end-to-end
+> then runs the sweep. **Boot, the `metric.rebuild` command, and the end-to-end
 > tests all call it** (tsk50) — see
 > `rebuild_does_not_fabricate_a_snapshot_on_a_clean_tree`. **Not** needed on a
 > branch switch — checkout rewrites the differing files, the watcher marks them
@@ -214,7 +214,7 @@ welded to collection.
 > wrong ranking, what is already optimized, and what measurement has ruled out.
 >
 > **Bounded reads — Phase 1 (tsk202/tsk204).** The read shape is now windowable.
-> `list_metric_samples` / `metric_series` take `from_ms`/`to_ms` (IPC + MCP), and
+> the series reads take a time window (today `metric_grid` over a range), and
 > a `TimeWindow` threads through `series[_for_spec]_in_stream` → `cube_series`.
 > **The cube windows safely for EVERY scope** — each cube row already carries its
 > capture's fully-folded state, so dropping out-of-window captures never changes
@@ -300,7 +300,7 @@ welded to collection.
 >
 > `per-path` today: `oxplow.ast_hit`, `oxplow.complexity`, `oxplow.fn_length`,
 > `oxplow.parameter_count`, `oxplow.todo` (+ any project measure a snapshot gauge
-> emits per-file facts on — `scaffold_metric` sets it automatically). Validated in
+> emits per-file facts on — `metric.scaffold` sets it automatically). Validated in
 > config + `CaptureScope::parse`, deliberately **NOT** a DB CHECK: the
 > `temporal_semantics` CHECK is exactly why adding a value *there* would need a
 > `measure` table rebuild, which fires `fact.measure_id ON DELETE CASCADE` and wipes
@@ -921,7 +921,7 @@ its current program content and args. Global-scope gauges are the user's own
 and aren't gated.
 
 - **Background runs** (snapshots, triggers) log "gauge: not run" and skip.
-- **Explicit runs** (`run_metric_by_key`, MCP `run_metric`) return the
+- **Explicit runs** (`run_metric_by_key`, the `metric.run` command) return the
   reason, via the `gauge_collector` / `run_gauge_collector` split.
 - **Approving.** Settings → Data → Programs (IPC `list_project_programs` /
   `approve_project_program`, UI-only). See architecture.md → "A repo's
@@ -1119,66 +1119,36 @@ per fired nudge is cheap and makes the `agent.nudges.fired` operational metric a
 first-class spec like every other. The nudge rows in `agent_nudge` stay the
 authoritative store; the fact is the analytics grain.
 
-### Read surface (MCP)
+### Read and write surface (P4.8)
 
-`crates/oxplow-mcp/src/lib.rs`, agent-only in the surface-parity MANIFEST. The
-measure-level primitives:
-- `list_measures` / `list_dimensions` — the two catalogs (optional scope/
-  subject_kind filter).
-- `list_facts(measure_key, limit)` — raw atomic facts, most-recent, with the
-  capture spine.
-- `metric_series(measure_key, aggregation, group_by?, min_value?, severity?,
-  dim_eq?, bucket?, stream?)` — the metrics-as-definitions read: one aggregated
-  point per capture, optionally sliced by a dimension; `stream` scopes to one
-  worktree's scans (like `metric_breakdown`). `list_metric_samples` takes the
-  same `group_by` / `dim_eq` / `bucket` for a spec (see "Spine dimensions and
-  time buckets" below).
-- `metric_rollup(measure_key, dimension?)` — the by-dimension breakdown.
+**Reads are SQL.** Agents and the desktop read metrics through `query_sql`
+— `metric_grid(bucket[, dim])` with `MEASURE('<key>')` for series (the
+engine computes each one; see `.context/semantic-layer.md` "Metrics in
+SQL"), and the views `v_metric_spec`, `v_metric_catalog`, `v_measure`,
+`v_dimension`, `v_capture` and `v_fact` for definitions and raw facts. The
+metric-specific MCP reads (`list_metric_definitions`, `list_metric_samples`,
+`get_metric_summary`, `metric_breakdown`, `list_metric_findings`,
+`list_measures`, `list_dimensions`, `list_facts`, `metric_series`,
+`metric_rollup`) are deleted, and the parity manifest holds no metric read
+(`no_surface_carries_a_metric_read`).
 
-**The five metric-KEY reads are flipped onto the engine (T-C2, tsk35)** — they
-resolve a `metric_spec` by key (seeded catalog) and compute over its
-`source_measure` facts, no longer reading the legacy V38 `metric_sample`/
-`metric_finding`/`metric_definition` store:
-- `list_metric_definitions` → `fact_store.list_specs()` (the spec catalog; each
-  row carries `source_measure` + `aggregation`, not a baked sample stream).
-- `list_metric_samples(metric_key, limit, stream?)` → `series_for_spec`
-  (newest-first, capped) — the metric-key ergonomic wrapper over
-  `metric_series`; `stream` scopes to one worktree.
-- `metric_breakdown(metric_key, dimension?)` → `rollup_for_spec` (default dim
-  `oxplow.package`; an optional `stream` arg scopes to one worktree's scans
-  (restored in tsk46) — facts aren't
-  stream-partitioned at this grain).
-- `get_metric_summary(metric_key, stream?)` → one `series_for_spec_in_stream`
-  computation collapsed via `headline_from_series` (per the measure's temporal
-  semantics) + the latest series point's captured_at/branch; `stream` scopes
-  the headline to one worktree's timeline.
-- `list_metric_findings(metric_key, capture_id?)` → `findings_for_spec` — the
-  read-time offenders view (args changed from `run_id`).
+**Writes are `metric.*` commands** (`crates/oxplow-app/src/commands/metric.rs`,
+reached through `run_command`, audited like every command):
+- `metric.enable { keys, enabled }` — `Tx`, through `config.set`'s core.
+- `metric.record { key, value, subject?, dims?, stream? }` — `Tx`: an
+  asserted fact (below) written in the bus transaction with its audit
+  (`fact_store::record_facts_tx`); after commit it clears the fact memo
+  and emits `MetricSamplesChanged` for the measure.
+- `metric.run { key, stream? }` — `BestEffort` over
+  `MetricsService::run_metric_by_key` (the `manual` trigger).
+- `metric.rebuild { force }` — `BestEffort` over
+  `MetricsService::rebuild_baseline`, the whole-tree baseline boot runs.
+- `metric.scaffold { key, title?, language?, glob? }` — a `Read`: the
+  starter gauge and the config entries, which the agent adds with
+  `config.set` (`gauges` is person-only, so that step asks the person).
 
-**The IPC/Tauri counterparts are flipped too (T-C3a, tsk39)** — the four
-`oxplow-rpc` cores (and the adapters generated from them) now return spec/fact types
-(`MetricSpec`/`SeriesPoint`/`RollupRow`/`FactFinding`), `bindings.ts` is
-regenerated, and every metric frontend consumer moved with them (see the "Reads"
-table below). Two measure-level IPC reads (`metric_series`/`metric_rollup`) were
-added and their parity rows flipped `agent`→`both`. `SeriesPoint` gained
-`git_version` + `source` (one-per-capture, like `branch`/`provenance`) so the
-recordings table stays intact. Two frontend logic moves: the Explorer's group-by
-is now a server `series_for_spec` `group_by` (each point carries `group`); the
-`event`-kind subject breakdown is a server `rollup_for_spec("subject")`. The
-`test`/`coverage` drill-ins fold into the uniform per-file/per-case `FactFinding`
-table — the bespoke suite-tree / line-heat needed the verbatim legacy
-`*-detail` payloads (pass/fail status, uncovered line-sets), which are **not in
-facts** (the same scope-guard the coverage attribution took in T-D); the
-underlying facts still chart + roll up.
-
-**The baked writes are gone (T-C3b, tsk40)** — `record_baked_run` is deleted;
-`run_one_gauge` is facts-only (returns the fact count; `record_gauge_facts`
-emits `MetricSamplesChanged`). The 4 `plugins/metrics/code/*.star` scripts are
-unbaked (emit only `{facts:[…]}`, no `tree:.`/`file:` samples). Any `samples`/
-`findings` a script still returns (the per-language idiom scripts, not yet
-unbaked) are computed-but-ignored. The legacy V38 `metric_sample`/`metric_finding`/
-`metric_definition`/`metric_run` tables + `metric_store.rs` retire LAST in T-E
-(tsk20).
+A stream defaults to the caller's, else the primary; an agent may only
+name its own.
 
 ### Catalog authoring surface (`measures:` / `dimensions:` config — workstream E)
 
@@ -1213,9 +1183,9 @@ dimensions:                        # custom conformed slice axes
 - **Read-path caching (tsk17):** `resolved_specs`/`resolved_gauges` run on
   **every** snapshot event, so the four global YAML dirs are loaded once into a
   `MetricsService.global_catalog` (`Arc<Mutex<Option<GlobalCatalog>>>`) and
-  served from cache (`with_global_catalog`); the cache is cleared on every in-app
-  `ConfigChanged` (an external edit to a global file needs any in-app config op
-  to refresh). Project config stays read fresh from the in-memory `RwLock`.
+  served from cache (`with_global_catalog`); the service's run loop clears it
+  on every `ConfigChanged` before reseeding (an external edit to a global file
+  needs a config change to refresh). Project config stays read fresh from the in-memory `RwLock`.
   `with_global_dir` forks a fresh cache (dir changed). Two more per-read memos:
   `effort_metric_deltas` loads each measure's history **once** across the
   File-family specs sharing it (a per-call `fact_cache`), and `dim_value` parses
@@ -1231,10 +1201,9 @@ dimensions:                        # custom conformed slice axes
   target/warnAt/failAt overrides (from the `use:` entry). The
   second pass must not skip built-in scope, or those thresholds never reach
   the persisted `metric_spec` the engine reads.
-- **Scaffolds:** `MetricsService::scaffold_measure` / `scaffold_dimension` —
-  one-call "create a custom measure/dimension" (append config entry or write a
-  shareable `<global>/…/<slug>.yaml`, reseed, return the key). The IPC/UI "New
-  measure/dimension" buttons that surface these land with the UI task.
+- **Adding one** is `config.set` on `measures` / `dimensions` (a global one
+  is a file under the global dir). The old `scaffold_measure` /
+  `scaffold_dimension` writers had no caller and were deleted (P4.8).
 - **`promote`** now persists onto the row: `seed_catalog` threads the resolved
   dimension's `promote` into `NewDimension.promoted`, so `dimension.promoted`
   reflects the config (it was previously parsed but dropped at seed). Still
@@ -1443,33 +1412,19 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
 > shape, kept for context; the current IPC wiring + types are in the **IPC**
 > bullet.
 
-- **MCP** (`crates/oxplow-mcp/src/lib.rs`): reads `list_metric_definitions`
-  (optional language/scope filter), `list_metric_samples` (by key, newest-first),
-  `list_metric_findings` (by run id — findings-kind drill-in),
-  `get_metric_summary` (latest value + delta-vs-target), and `metric_breakdown`
-  (tsk327/330 — rolls a per-file metric up by a **dimension** via
-  `SqliteMetricStore::dimension_rollup_for_metric`: the latest
-  `subject_kind='file'` sample per file, summed by `dimension` key, largest
-  first — the dormant `metric_subject` package grain made concrete; "which
-  package / language holds the most complexity/TODOs"). `dimension` is
-  `"package"` (default — parent dir) or any per-file `dims_json` key (e.g.
-  `language`, tsk319); `stream` is optional (omit ⇒ all streams), matching the
-  UI. Authoring/trigger:
-  `run_metric` (run a configured gauge now — the `manual` trigger → `MetricsService::run_metric_by_key`;
-  returns `facts_recorded`) and `record_metric` (an **asserted FACT** on the
-  metric's source measure, under a `provenance: asserted` / `source:
-  agent-reported` / `scan_kind: asserted` capture **anchored to the stream's
-  latest snapshot for provenance** (tsk71/tsk72 — the snapshot says which tree
-  state the value described; the `asserted` scan kind keeps it from being read
-  as a scanned set) — flipped off the legacy sample write in tsk41 so the
-  fact-based reads actually see it; a formula spec is rejected, and so is a
-  `count` spec — one asserted fact would read as 1 whatever its value. The fact
-  is stamped to match the spec's own filter (severity / dim_eq → the `rule`
-  column for `oxplow.rule`, dims_json otherwise) and carries ratio components
-  for a `ratio` spec (den=100 for `%` so the percent round-trips), so the
-  metric's own reads actually include the asserted number). These four are
-  **agent-only** (classified in the surface-parity manifest); the renderer
-  drives compute via config + the runner, not ad-hoc IPC.
+- **Agents** read through `query_sql` and change metrics through the
+  `metric.*` commands (see "Read and write surface (P4.8)"). An asserted
+  fact (`metric.record`) lands on the metric's source measure under a
+  `provenance: asserted` / `source: agent-reported` / `scan_kind: asserted`
+  capture **anchored to the stream's latest snapshot for provenance**
+  (tsk71/tsk72 — the snapshot says which tree state the value described;
+  the `asserted` scan kind keeps it from being read as a scanned set). A
+  formula spec is refused, and so is a `count` spec — one asserted fact
+  would read as 1 whatever its value. The fact is stamped to match the
+  spec's own filter (severity / dim_eq → the `rule` column for
+  `oxplow.rule`, dims_json otherwise) and carries ratio components for a
+  `ratio` spec (den=100 for `%` so the percent round-trips), so the metric's
+  own reads include the asserted number.
 - **The desktop reads metrics through SQL** (P4.7, tsk492 — the metric IPC
   reads are gone). `src/metricsSql.ts` builds the queries and row shapes;
   `api.ts` runs them through `query_sql` and returns the rows with the
@@ -1479,9 +1434,9 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   `v_metric_spec` (v2 adds `entity_json`), `listMetricCatalog` reads
   `v_metric_catalog`. The one metric IPC left is `enable_metrics`, below. The dimension roll-up, per-capture
   findings, measure series/rollup and effort-delta IPC commands were removed
-  with the UI that used them (tsk309); agents keep `metric_breakdown`,
-  `list_metric_findings`, `metric_series` and `metric_rollup` over MCP, and
-  per-effort deltas are `v_effort_metric_delta`. The agent
+  with the UI that used them (tsk309); agents slice with `metric_grid(…, dim)`
+  and read offenders from `v_fact`, and per-effort deltas are
+  `v_effort_metric_delta`. The agent
   gets the same numbers as prompt text via oxplow-analytics' `metric-deltas`
   advisory (over the stored `v_effort_metric_delta`).
 - **Event**: `OxplowEvent::MetricSamplesChanged { stream_id }` (coarse — the
@@ -1497,7 +1452,7 @@ configure surface was split off as a fourth "Metric Settings" page in
 tsk282/tsk80, then **folded back in by tsk117** — per-metric configuration now
 lives on the Metric Detail page; see "The configure surface" below.) Explorer
 and Recorded observe; Detail both observes and **writes** (its Configure block).
-Authoring a *new* metric is **agent work** (the `scaffold_metric` MCP tool +
+Authoring a *new* metric is **agent work** (the `metric.scaffold` command +
 the `/oxplow:new-metric` skill, tsk122) — no page writes one; Recorded Metrics
 just carries a Help blurb pointing there.
 
@@ -1515,7 +1470,7 @@ just carries a Help blurb pointing there.
 > computes a built-in gauge's `enabled` as *"a non-disabled `use:` resolves it"*.
 >
 > So `metric_spec` ⊋ "the enabled set", and **only the catalog knows about
-> `use:`**. Reading `list_metric_definitions` alone and calling the result
+> `use:`**. Reading `v_metric_spec` alone and calling the result
 > "enabled metrics" is wrong: in this Rust/TS repo the bundled `oxplow.csharp.*`
 > and `oxplow.clojure.*` idiom specs are seeded, never run, and have no facts —
 > so Recorded Metrics listed them as permanent `—` rows while the (since-folded)
@@ -1547,7 +1502,7 @@ just carries a Help blurb pointing there.
   `useRouteDispatch(metricRef(key))`, passing the **sibling chain**
   (`metricSiblings`) so the detail page gets up/down nav (tsk119). A Help
   blurb (`recorded-new-metric-help`) points at the agent for new metrics
-  (`scaffold_metric` + `/oxplow:new-metric`). Re-runs when a model or measure
+  (`metric.scaffold` + `/oxplow:new-metric`). Re-runs when a model or measure
   its reads read changed (`useRerunOnChange`, single-flight). **Simplified (tsk309):** the Line value
   stat picker, the Off target mode and the saved-view presets are gone.
 
@@ -1583,8 +1538,8 @@ just carries a Help blurb pointing there.
 > (`builtin_ast_specs_carry_the_language_their_gauge_declares` pins it). Before
 > tsk81 the specs set no `language` at all (`NewMetricSpec::base` defaults it to
 > `None`). That's no longer what sections the *page* — but `MetricSpec.language`
-> is still real read surface: `list_metric_definitions` takes a **language
-> filter** over it (IPC + MCP), which silently matches nothing when the column is
+> is still real read surface: `v_metric_spec.language` is how a query
+> filters by language, which silently matches nothing when the column is
 > null. Keep it populated.
 >
 > Note the key segment is **not** the slug: `oxplow.ts.*` is language
@@ -1603,8 +1558,8 @@ just carries a Help blurb pointing there.
   the breakdown card and group filter, the per-kind drill-ins (findings
   table, test tree, coverage lines, top subjects), the Metric Recording page,
   the target-override input and the "In this effort" callout are gone.
-  Targets live in config; breakdowns and findings are for agents (MCP
-  `metric_breakdown`, `metric_rollup`, `list_metric_findings`) and lenses.
+  Targets live in config; breakdowns and findings are for agents
+  (`metric_grid(…, dim)`, `v_fact` through `query_sql`) and lenses.
   Old `metric-recording:<capture>:<key>` tab ids reopen the metric.
 
 > **Definition descriptions (tsk309).** Every metric carries a one-line
@@ -1633,8 +1588,8 @@ folded it into the surfaces where you already look at a metric:
   on `configChanged` as well as `metricSamplesChanged`.
 - **"+ New metric" scaffolding is agent-driven (tsk122).** The inline
   `NewMetricBar.tsx` form was **removed** — authoring a metric always needs the
-  gauge script edited anyway, which is agent work. The `scaffold_metric` backend
-  is now an **MCP tool** (see below), and Recorded Metrics' details rail carries
+  gauge script edited anyway, which is agent work. The scaffold backend
+  is now the `metric.scaffold` command (see below), and Recorded Metrics' details rail carries
   a Help blurb (`recorded-new-metric-help`) telling the user to ask their agent
   (the `/oxplow:new-metric` skill).
 - **Retired with the page:** the per-section **tri-state bulk enable/disable**
@@ -1686,15 +1641,15 @@ The mechanics behind those controls (unchanged by tsk117):
   in `.oxplow/project.yaml`. **Trigger is inherent to the definition** —
   `resolve_one` reads it from the definition (like `compute`) and a `use:`
   entry can't override it (tsk290).
-- **`scaffold_metric` (MCP tool, tsk122; a template since tsk391)** returns the
+- **`metric.scaffold` (a command since P4.8; a template since tsk391)** returns the
   **trio** (measure + gauge + metric) and a starter fact-emitting Starlark stub,
   and **writes nothing**: `MetricsService::metric_scaffold` → `MetricScaffold {
   scriptPath: oxplow/gauges/<slug>.star, script, projectYaml }`, the entries a
   `measures:` entry (`<key>.count`, per-path), a `gauges:` entry (`<key>`) and a
   `metrics:` spec (`<key>`, `sum` over the measure), rendered by
-  `oxplow_config::entries_yaml`. The agent writes the script and merges the
-  snippet with its own Edit/Write tools, so the write guard, filing and its own
-  worktree apply; `ConfigChanged` reseeds. It used to write the files itself
+  `oxplow_config::entries_yaml`. The agent writes the script with its own
+  tools and adds the entries through `config.set` (`gauges` is person-only,
+  so the person confirms); `ConfigChanged` reseeds. It used to write the files itself
   (and had a `global` scope writing the global config dir), which let a
   read-only thread change the repo and always wrote to the primary worktree.
   Global metrics are authored by hand in the global config dir; the runner
@@ -1713,10 +1668,9 @@ Catalog reads/writes: `v_metric_catalog` (the `metric_catalog` table, V106,
 which `seed_catalog` rewrites from `MetricsService::catalog()` on every
 reseed) and the `metric.enable` command — consumed by the Metric Detail
 Configure block and the Metrics rows.
-**`scaffold_metric` is no longer here** (tsk122): its UI button was retired, so
-it moved off the `ui` surface to an **agent-only MCP tool** (`agent(...)` in
-surface-parity; the handler in `oxplow-mcp` calls `MetricsService::metric_scaffold`
-directly), and the Tauri/RPC `scaffold_metric` command was deleted.
+**Scaffolding is not here** (tsk122): its UI button was retired, and it is
+now the `metric.scaffold` command (P4.8), which calls
+`MetricsService::metric_scaffold`.
 Token and page analytics are oxplow-analytics lenses (`usage`) over
 `v_token_usage` / `v_page_visit`; `page_visit`/`usage_event` are deliberately
 **not** projected into the metric substrate — see the producers note above.
@@ -1837,11 +1791,11 @@ The in-oxplow agent authors these on request via the **`oxplow-metrics`** skill
 + the **`/oxplow:new-metric`** command (assets in `crates/oxplow-plugin/`,
 materialized for Claude/Codex/opencode) — "make a metric that counts TODOs" →
 the measure+gauge+metric trio + script + verification, no oxplow-team involvement.
-The skill's fast path is the **`scaffold_metric` MCP tool** (tsk122) →
+The skill's fast path is the **`metric.scaffold` command** (P4.8) →
 `MetricsService::metric_scaffold`, which returns that trio (measure `<key>.count`,
 gauge `<key>`, metric `<key>`) + a starter fact-emitting gauge script as a
-template the agent writes and adapts with its own tools (tsk391); or the agent
-hand-authors the four blocks.
+template the agent writes and adapts (tsk391), adding the entries through
+`config.set`; or the agent hand-authors the four blocks the same way.
 
 ## Targets & feedback (advise-only, P5/tsk220)
 

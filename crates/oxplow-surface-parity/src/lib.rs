@@ -126,42 +126,16 @@ pub const MANIFEST: &[Capability] = &[
     // `metric-deltas` advisory (over `v_effort_metric_delta`).
     // Effort bands on the Metrics Explorer time axis (tsk233) — UI-only overlay.
     ui("list_efforts_in_window"),
-    // Metric reads (tsk213): the UI reads through SQL (`metric_grid()`, P4.7);
-    // the MCP tools go in P4.8.
-    agent("list_metric_definitions"),
-    agent("list_metric_samples"),
-    // Per-run finding detail (tsk213/tsk232) — both: the agent drills in via MCP,
-    // the renderer's per-kind Metric detail view reads it over IPC.
-    agent("list_metric_findings"),
+    // Metrics read through SQL (`v_metric_spec`, `v_fact`, `metric_grid()`)
+    // on both surfaces, and change through the `metric.*` commands
+    // (`run_command`); nothing metric-specific is left on MCP (P4.8).
     // The catalog toggle (tsk219): the person's typed call into the
     // `metric.enable` command; an agent runs the command itself.
     ui("enable_metrics"),
-    // Metric authoring tools (tsk213, P3) — agent-only: the renderer drives
-    // compute via config + the runner, not ad-hoc IPC. `scaffold_metric` joined
-    // them (tsk122) when its "+ New metric" UI button was retired in favor of
-    // agent-driven authoring (the `/oxplow:new-metric` skill).
-    agent("run_metric"),
-    agent("rebuild_metrics"),
-    agent("record_metric"),
-    agent("scaffold_metric"),
-    // Architectural zones (tsk251) — agent-only by the same logic: the agent
-    // reads the table here and writes it with `config.set` (tsk411); the renderer only READS it (it
-    // rides on `get_config`), so there is no IPC counterpart to pair with.
+    // Architectural zones (tsk251) — agent-only: the agent reads the table
+    // here and writes it with `config.set` (tsk411); the renderer only reads
+    // it (it rides on `get_config`), so there is no IPC counterpart.
     agent("list_zones"),
-    agent("get_metric_summary"),
-    agent("metric_breakdown"),
-    // Durable fact substrate reads (epic tsk12) — agent-only for now (the
-    // additive MCP read surface lands before the IPC/UI catalog pages; flip
-    // these to `both`/`both_named` when the Metrics + Dimensions catalog pages
-    // read them over IPC).
-    agent("list_measures"),
-    agent("list_dimensions"),
-    agent("list_facts"),
-    // Engine-backed measure-level reads over facts (metrics-as-definitions) —
-    // on both surfaces (T-C3): the agent reads them over MCP, the renderer's
-    // Explorer/Detail pages compute over IPC.
-    agent("metric_series"),
-    agent("metric_rollup"),
     both("list_wiki_pages"),
     both("add_followup"),
     both("list_followups"),
@@ -540,5 +514,29 @@ mod tests {
             "manifest shape errors:\n{}",
             errs.join("\n")
         );
+    }
+
+    /// P4.8 (tsk493): metrics are read through SQL and changed through
+    /// `metric.*` commands, so no surface carries a metric-specific read.
+    #[test]
+    fn no_surface_carries_a_metric_read() {
+        let reads = [
+            "metric_series",
+            "metric_rollup",
+            "metric_breakdown",
+            "list_metric_samples",
+            "list_metric_definitions",
+            "list_metric_findings",
+            "list_metric_catalog",
+            "get_metric_summary",
+            "list_measures",
+            "list_dimensions",
+            "list_facts",
+        ];
+        for c in MANIFEST {
+            for name in [Some(c.capability), c.ipc, c.mcp].into_iter().flatten() {
+                assert!(!reads.contains(&name), "`{name}` is a metric read");
+            }
+        }
     }
 }

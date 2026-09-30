@@ -1,6 +1,6 @@
 ---
 name: oxplow-extension
-description: Build oxplow lenses and extensions on request: custom pages over oxplow's data (tasks, efforts, threads, comments, wiki, snapshots, metrics facts) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a lens/page/view/list/report of X", "a place where I can see X", "track X across threads/efforts", "what's waiting on me", or asks to change an existing lens. Teaches the semantic layer (`describe_schema`, `query_sql` over `v_*` views), the `oxplow/extensions/<name>/` file format, and the validate → run_lens loop.
+description: Build oxplow lenses and extensions on request: custom pages over oxplow's data (tasks, efforts, threads, comments, wiki, snapshots, metrics facts) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a lens/page/view/list/report of X", "a place where I can see X", "track X across threads/efforts", "what's waiting on me", or asks to change an existing lens. Teaches the semantic layer (`v_model`, `query_sql` over `v_*` views), the `oxplow/extensions/<name>/` file format, and the validate → run_lens loop.
 ---
 
 # Building oxplow lenses
@@ -17,14 +17,16 @@ an intent, one example and fixture, and a starter lens; then edit.
 
 ## 1. Find the data
 
-- `describe_schema` lists every queryable view (`v_stream`, `v_thread`,
-  `v_task`, `v_effort`, `v_comment`, `v_wiki_page`, `v_snapshot`,
-  `v_measure`, `v_capture`, `v_fact`, and anything extensions add), with a
-  doc for every column. **Read it first**; don't guess column names.
+- `v_model` lists every queryable view (`v_stream`, `v_thread`, `v_task`,
+  `v_effort`, `v_comment`, `v_wiki_page`, `v_snapshot`, `v_measure`,
+  `v_capture`, `v_fact`, …) with its doc, and `v_model_column` documents
+  every column: `SELECT view, name, sql_type, doc FROM v_model_column WHERE
+  view = 'v_task'`. **Read them first**; don't guess column names.
 - `query_sql` runs one read-only `SELECT`/`WITH`. Iterate on the query
   here until the rows are what the user wants, before writing any files.
-- Only query `v_*` views. The physical tables behind them aren't a stable
-  contract.
+- Only `v_*` views can be read; a physical table is refused, naming the
+  view to read instead. Metrics are read with `metric_grid()` and
+  `MEASURE('<key>')` (see the `oxplow-metrics` skill).
 
 ## 2. Write the files
 
@@ -255,8 +257,7 @@ Rules:
   nothing. `run_source` always runs the primary's copy (source data is
   shared by the whole project), so in a worktree stream it won't see your
   changes. An exec source still needs a person's approval for the preview.
-- `describe_schema` lists declared entities with `available: false`
-  until the source first syncs.
+- A declared entity's view exists once its source first syncs.
 
 **Deriving data you already have (starlark / jaq sources).** When the
 entity can be computed from views that already exist (reshaping tasks,

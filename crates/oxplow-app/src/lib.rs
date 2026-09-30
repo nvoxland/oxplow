@@ -855,7 +855,8 @@ impl Services {
         .with_fact_store(fact_store.clone())
         .with_background_tasks(background_tasks.clone())
         .with_approvals(approvals.clone())
-        .with_extension_catalog(extension_catalog.clone());
+        .with_extension_catalog(extension_catalog.clone())
+        .with_snapshot_captures(snapshot_captures.clone());
         let tasks = tasks
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
@@ -917,7 +918,13 @@ impl Services {
         };
         for command in commands::config_commands::commands(config_target.clone())
             .into_iter()
-            .chain(commands::metric::commands(config_target, metrics.clone()))
+            .chain(commands::metric::commands(commands::metric::MetricTarget {
+                config: config_target,
+                metrics: metrics.clone(),
+                facts: fact_store.clone(),
+                events: event_bus.clone(),
+                primary_stream: primary_stream.id,
+            }))
         {
             commands.register(command).expect("core commands register");
         }
@@ -1094,124 +1101,6 @@ impl Services {
         self.events.emit(OxplowEvent::ConfigChanged);
         Ok(())
     }
-
-    /// Bring every `per-path` metric up to date over the WHOLE tree (tsk50).
-    ///
-    /// A baseline no longer fabricates a full-tree snapshot (tsk71 — that
-    /// snapshot polluted effort file-attribution). Instead it drains any
-    /// pending edits into an ORDINARY snapshot (authored work, correctly
-    /// attributed), anchors on the latest snapshot, and runs the un-baselined
-    /// gauges `scan_kind = 'full'` over the RECONSTRUCTED tree as-of it — the
-    /// per-path fold reads a full capture's scanned set via `tree_at`
-    /// semantics, so provenance stays on a real snapshot and no snapshot is
-    /// invented.
-    ///
-    /// This is deliberately callable, not buried in boot: it's the one entry point
-    /// boot, the `rebuild_metrics` MCP tool, and the end-to-end test all share, so
-    /// the boot baseline path is finally exercisable without a process restart —
-    /// four metrics bugs in a row (tsk47/48/49) were caught only by restarting.
-    ///
-    /// `force` treats every gauge as needing a baseline (the MCP escape hatch).
-    /// The kind-scoped idempotency guard in the sweep means a repeat over the
-    /// same unchanged snapshot won't re-scan.
-    pub async fn rebuild_metric_baseline(&self, force: bool) -> Result<BaselineReport, String> {
-        let stream_val = self
-            .snapshot_captures
-            .primary()
-            .map(|c| c.stream_id().value())
-            .unwrap_or(1);
-
-        if !force {
-            let pending = self.metrics.gauges_needing_baseline(stream_val).await;
-            if pending.is_empty() {
-                // Nothing to baseline — but still sweep out captures an
-                // EARLIER baseline made dead weight (tsk75): the post-sweep
-                // prune only fires when a full phase runs, so history from
-                // before the prune existed is collected here, once per boot.
-                // Idempotent and cheap when there's nothing to drop.
-                match self
-                    .fact_store
-                    .prune_dominated_tree_captures(stream_val)
-                    .await
-                {
-                    Ok(n) if n > 0 => {
-                        tracing::info!(
-                            pruned = n,
-                            "metrics: dropped baseline-dominated tree captures at boot"
-                        );
-                    }
-                    Ok(_) => {}
-                    Err(e) => {
-                        tracing::warn!(error = %e, "metrics: boot prune failed");
-                    }
-                }
-                return Ok(BaselineReport {
-                    ran: false,
-                    ..Default::default()
-                });
-            }
-        }
-
-        let Some(capture) = self.snapshot_captures.primary() else {
-            return Err("no primary snapshot capture registered".into());
-        };
-        // Make sure the tree we anchor on is current: wait for the startup
-        // sweep, run the ordinary stat-diff (which marks only files whose
-        // content actually changed since their last capture — NOT the old
-        // pretend-everything-is-dirty full-tree enqueue), and drain the dirty
-        // set into a normal snapshot. Those rows are real authored edits the
-        // fs-watch would capture anyway — attribution is correct-by-
-        // construction. `None` = nothing changed; fall back to the latest
-        // existing snapshot.
-        capture.await_initial_ready().await;
-        capture
-            .enqueue_startup_diff()
-            .await
-            .map_err(|e| e.to_string())?;
-        let drained = capture
-            .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Manual)
-            .await
-            .map_err(|e| e.to_string())?;
-        let snapshot_id = match drained {
-            Some(id) => Some(id),
-            None => self
-                .snapshot_store
-                .latest_snapshot_id_for_stream(oxplow_domain::StreamId::new(stream_val))
-                .await
-                .map_err(|e| e.to_string())?,
-        };
-        let Some(snapshot_id) = snapshot_id else {
-            // Fresh project with no snapshot at all — nothing to baseline on.
-            return Ok(BaselineReport {
-                ran: false,
-                ..Default::default()
-            });
-        };
-
-        let sweep = self
-            .metrics
-            .run_snapshot_gauges_with(oxplow_domain::StreamId::new(stream_val), snapshot_id, force)
-            .await;
-        Ok(BaselineReport {
-            ran: true,
-            snapshot_id: Some(snapshot_id),
-            gauges_run: sweep.ran,
-            failed: sweep.failed,
-        })
-    }
-}
-
-/// What [`Services::rebuild_metric_baseline`] did — observable so an MCP caller or a
-/// test can assert on it instead of reading tracing logs (tsk50).
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, specta::Type)]
-pub struct BaselineReport {
-    /// False when no gauge needed a baseline (a warm, up-to-date repo).
-    pub ran: bool,
-    pub snapshot_id: Option<i64>,
-    pub gauges_run: usize,
-    /// Gauges that failed during the sweep (empty on success). Non-empty means those
-    /// metrics will read stale/empty — a visible failure, not a silent one.
-    pub failed: Vec<String>,
 }
 
 /// Forward every BackgroundTaskStore broadcast event onto the typed

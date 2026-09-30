@@ -3725,7 +3725,7 @@ lsp:
         let mut cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(cfg.gauges.len(), 1, "fixture loads its one gauge");
 
-        // What `scaffold_metric` does: append a second gauge, then write.
+        // What a `metric.scaffold` user does: append a second gauge, then write.
         let mut added = cfg.gauges[0].clone();
         added.key = Some("repo.scan_two".into());
         added.title = Some("Two".into());

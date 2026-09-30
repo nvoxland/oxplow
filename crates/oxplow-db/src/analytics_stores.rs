@@ -1689,17 +1689,7 @@ impl SqliteSnapshotStore {
         stream_id: StreamId,
     ) -> Result<Option<i64>, DomainError> {
         self.db
-            .call(move |conn| {
-                let row: Option<i64> = conn
-                    .query_row(
-                        "SELECT id FROM snapshot WHERE stream_id = ?1
-                         ORDER BY created_at DESC, id DESC LIMIT 1",
-                        params![stream_id.value()],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                Ok(row)
-            })
+            .call(move |conn| latest_snapshot_id_for_stream_tx(conn, stream_id))
             .await
     }
 
@@ -2313,6 +2303,21 @@ impl SqliteSnapshotStore {
             })
             .await
     }
+}
+
+/// Most recent `snapshot.id` for the stream, read on the caller's
+/// connection; `None` when the stream has no snapshot yet.
+pub fn latest_snapshot_id_for_stream_tx(
+    conn: &rusqlite::Connection,
+    stream_id: StreamId,
+) -> rusqlite::Result<Option<i64>> {
+    conn.query_row(
+        "SELECT id FROM snapshot WHERE stream_id = ?1
+         ORDER BY created_at DESC, id DESC LIMIT 1",
+        params![stream_id.value()],
+        |row| row.get(0),
+    )
+    .optional()
 }
 
 #[cfg(test)]

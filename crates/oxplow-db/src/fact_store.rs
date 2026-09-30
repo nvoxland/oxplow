@@ -482,6 +482,57 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
     })
 }
 
+/// The measure `key`, read on the caller's connection.
+pub fn get_measure_tx(conn: &rusqlite::Connection, key: &str) -> rusqlite::Result<Option<Measure>> {
+    let sql = format!("SELECT {MEASURE_COLS} FROM measure WHERE key = ?1");
+    conn.prepare_cached(&sql)?
+        .query_row(params![key], row_to_measure)
+        .optional()
+}
+
+/// The metric spec `key`, read on the caller's connection.
+pub fn get_spec_tx(conn: &rusqlite::Connection, key: &str) -> rusqlite::Result<Option<MetricSpec>> {
+    let sql = format!("SELECT {SPEC_COLS} FROM metric_spec WHERE key = ?1");
+    conn.query_row(&sql, params![key], row_to_spec).optional()
+}
+
+/// Insert a capture and its facts inside the caller's transaction; when
+/// `log` is given, append the event it builds from the capture id. A
+/// capture already recorded under its idempotency key writes nothing and
+/// returns the existing id (the partial unique index is the true guard;
+/// this read is the fast path on the serialized write connection). The
+/// caller commits, then calls [`SqliteFactStore::facts_committed`].
+pub fn record_facts_tx(
+    conn: &rusqlite::Connection,
+    capture: NewMetricCapture,
+    facts: Vec<NewFact>,
+    log: Option<&CaptureEvent>,
+) -> Result<i64, DomainError> {
+    if let Some(key) = capture.idempotency_key.as_deref() {
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM metric_capture WHERE idempotency_key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        if let Some(id) = existing {
+            return Ok(id);
+        }
+    }
+    let capture_id = insert_capture(conn, capture).map_err(map_sql_err)?;
+    for mut f in facts {
+        f.capture_id = Some(capture_id);
+        insert_fact(conn, f).map_err(map_sql_err)?;
+    }
+    if let Some(log) = log {
+        let env = (log.build)(capture_id);
+        crate::event_log_store::append_unique_tx(conn, &log.schemas, &env)?;
+    }
+    Ok(capture_id)
+}
+
 fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite::Result<i64> {
     let captured = c
         .captured_at
@@ -1004,14 +1055,7 @@ impl SqliteFactStore {
 
     pub async fn get_measure(&self, key: &str) -> Result<Option<Measure>, DomainError> {
         let key = key.to_string();
-        self.db
-            .call(move |conn| {
-                let sql = format!("SELECT {MEASURE_COLS} FROM measure WHERE key = ?1");
-                conn.prepare_cached(&sql)?
-                    .query_row(params![key], row_to_measure)
-                    .optional()
-            })
-            .await
+        self.db.call(move |conn| get_measure_tx(conn, &key)).await
     }
 
     pub async fn list_measures(&self) -> Result<Vec<Measure>, DomainError> {
@@ -1153,12 +1197,7 @@ impl SqliteFactStore {
 
     pub async fn get_spec(&self, key: &str) -> Result<Option<MetricSpec>, DomainError> {
         let key = key.to_string();
-        self.db
-            .call(move |conn| {
-                let sql = format!("SELECT {SPEC_COLS} FROM metric_spec WHERE key = ?1");
-                conn.query_row(&sql, params![key], row_to_spec).optional()
-            })
-            .await
+        self.db.call(move |conn| get_spec_tx(conn, &key)).await
     }
 
     pub async fn list_specs(&self) -> Result<Vec<MetricSpec>, DomainError> {
@@ -1237,34 +1276,7 @@ impl SqliteFactStore {
             .db
             .call_mut(move |conn| {
                 let tx = conn.transaction().map_err(map_sql_err)?;
-                // Idempotent ingestion (tsk14): if this capture carries a
-                // content identity that's already been recorded, skip the whole
-                // write (no duplicate capture, no double-counted facts) and
-                // return the existing id. The partial unique index is the true
-                // guard; this SELECT is the fast, race-free path on the single
-                // serialized write connection.
-                if let Some(key) = capture.idempotency_key.as_deref() {
-                    let existing: Option<i64> = tx
-                        .query_row(
-                            "SELECT id FROM metric_capture WHERE idempotency_key = ?1",
-                            params![key],
-                            |r| r.get(0),
-                        )
-                        .optional()
-                        .map_err(map_sql_err)?;
-                    if let Some(id) = existing {
-                        return Ok(id);
-                    }
-                }
-                let capture_id = insert_capture(&tx, capture).map_err(map_sql_err)?;
-                for mut f in facts {
-                    f.capture_id = Some(capture_id);
-                    insert_fact(&tx, f).map_err(map_sql_err)?;
-                }
-                if let Some(log) = &log {
-                    let env = (log.build)(capture_id);
-                    crate::event_log_store::append_unique_tx(&tx, &log.schemas, &env)?;
-                }
+                let capture_id = record_facts_tx(&tx, capture, facts, log.as_ref())?;
                 tx.commit().map_err(map_sql_err)?;
                 Ok(capture_id)
             })
@@ -1277,6 +1289,12 @@ impl SqliteFactStore {
             self.db.memo().invalidate_facts();
         }
         result
+    }
+
+    /// Forget the memoized fact reads — after a caller's own transaction
+    /// recorded facts through [`record_facts_tx`] and committed.
+    pub fn facts_committed(&self) {
+        self.db.memo().invalidate_facts();
     }
 
     pub async fn get_capture(&self, capture_id: i64) -> Result<Option<MetricCapture>, DomainError> {
@@ -1970,7 +1988,7 @@ impl SqliteFactStore {
     }
 
     /// The PATH-LESS, SUBJECT-LESS facts of a measure — agent-asserted repo
-    /// scalars (`record_metric` with no subject). The per-path read supplements
+    /// scalars (`metric.record` with no subject). The per-path read supplements
     /// its tree fold with these (they have no path, so nothing supersedes them
     /// per-path); it used to load the measure's entire history to find the
     /// usually-zero of them (tsk75).
@@ -2340,7 +2358,7 @@ impl SqliteFactStore {
                                     OR (c3.captured_at = c.captured_at AND c3.id > c.id))
                           )
                        UNION
-                       -- An ASSERTED capture (agent `record_metric`, synthetic writes)
+                       -- An ASSERTED capture (agent `metric.record`, synthetic writes)
                        -- restates exactly the paths it emitted facts for; its snapshot,
                        -- when present, is provenance only — never a scanned set.
                        SELECT c.id, c.stream_id, c.producer, c.captured_at,
@@ -2446,7 +2464,7 @@ impl SqliteFactStore {
     /// evicted those paths), but not for a path the sweep never restated, so we
     /// invalidate rather than reason about which prunes are safe. The cube is
     /// disposable; the next build re-folds. A prune that drops NOTHING leaves it
-    /// alone — `rebuild_metric_baseline` prunes on every boot, and wiping a healthy
+    /// alone — `rebuild_baseline` prunes on every boot, and wiping a healthy
     /// cube each start would turn tsk96's fix off for nothing.
     pub async fn prune_dominated_tree_captures(&self, stream_id: i64) -> Result<u64, DomainError> {
         self.db
@@ -3285,7 +3303,7 @@ mod tests {
 
     #[tokio::test]
     async fn asserted_capture_with_snapshot_restates_only_its_emitted_paths() {
-        // tsk72 direction: `record_metric` captures now carry a snapshot for
+        // tsk72 direction: `metric.record` captures now carry a snapshot for
         // PROVENANCE — but their scanned set stays "exactly what I emitted".
         // If the snapshot were treated as a delta scanned set, this assertion
         // over snapshot 1 (which lists b.rs) would wipe b.rs's gauge fact.
@@ -3571,7 +3589,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_prune_that_drops_nothing_leaves_the_cube_alone() {
-        // The other half, and NOT hypothetical: `rebuild_metric_baseline` prunes on
+        // The other half, and NOT hypothetical: `rebuild_baseline` prunes on
         // EVERY boot (the "nothing to baseline" path). Invalidating unconditionally
         // would wipe a healthy cube each start and force a full re-fold — turning
         // tsk96's fix back off at boot, for nothing. Only a prune that actually

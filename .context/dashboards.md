@@ -75,7 +75,7 @@ correctly; frontend field access is snake_case.
 
 Reads + create/populate are agent-authorable so the agent can build a dashboard
 on request ("make me a dashboard of the coverage metrics"), matching the
-`scaffold_metric` direction. In `oxplow-mcp/src/lib.rs`:
+agent-authoring direction. In `oxplow-mcp/src/lib.rs`:
 
 - `list_dashboards`, `get_dashboard` — reads.
 - `create_dashboard {title}` → returns the new dashboard.
@@ -137,7 +137,7 @@ cumulative, avg → moving average, else the value). **Simplified (tsk309):**
 the `sparkline` / `bar` visualizations, per-tile chart mode and scale, the
 off-target highlight, the dimension filter, saved views and Save Copy are
 gone; `parseTileOptions` reads tiles saved with those options as plain line
-tiles. Breakdowns are for agents (MCP `metric_breakdown` / `metric_rollup`)
+tiles. Breakdowns are for agents (`metric_grid(…, dim)` through `query_sql`)
 and lenses.
 
 A `text`-kind item is a **heading band** (`TextTile`) labelling the run of tiles

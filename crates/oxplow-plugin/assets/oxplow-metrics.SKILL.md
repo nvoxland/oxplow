@@ -1,6 +1,6 @@
 ---
 name: oxplow-metrics
-description: Author oxplow metrics on request — durable, BI-reportable numbers tracked over time (LOC, unsafe blocks, bundle size, TODO count, complexity, …). Loads when the user asks to "make/add/track a metric", "count X over time", "chart X", "set a target on X", or "measure X in the codebase". Teaches the four config blocks in .oxplow/project.yaml (measures / gauges / metrics / dimensions), the gauge script surface (files/ast_query/code_metrics), and how to verify.
+description: Author and read oxplow metrics — durable, BI-reportable numbers tracked over time (LOC, unsafe blocks, bundle size, TODO count, complexity, …). Loads when the user asks to "make/add/track a metric", "count X over time", "chart X", "set a target on X", or "measure X in the codebase". Teaches the four config blocks in .oxplow/project.yaml (measures / gauges / metrics / dimensions), the gauge script surface (files/ast_query/code_metrics), the metric.* commands, and reading metrics in SQL with metric_grid().
 ---
 
 # Authoring oxplow metrics
@@ -28,12 +28,19 @@ A metric no longer *computes* anything — it names a `sourceMeasure` + an
 
 ## Step 1 — is there already a built-in? (`use:`)
 
-**Always prefer `use:`** when a bundled metric covers the ask — list them with the
-`list_metric_definitions` MCP tool (scope `built-in`). Bundled Rust/TS/Clojure/C#
+**Always prefer `use:`** when a bundled metric covers the ask — list them with
+`query_sql`:
+
+```sql
+SELECT key, title, language, enabled FROM v_metric_catalog WHERE scope = 'built-in'
+```
+ Bundled Rust/TS/Clojure/C#
 metrics exist for unsafe blocks, unwrap/expect, panic macros, TODO markers,
 function count, high-complexity / long functions, `any` usage, non-null
 assertions, console calls, ts-ignore, defn count, empty catch, blocking async, …
-If one fits, a one-line `use:` is the whole job:
+If one fits, turn it on with the `metric.enable` command (through `run_command`):
+`{ "keys": ["oxplow.rust.unsafe_blocks"], "enabled": true }`. That writes the
+`use:` line for you:
 
 ```yaml
 metrics:
@@ -45,10 +52,13 @@ metrics:
 
 ## Step 2 — a new metric: declare the trio (measure + gauge + metric)
 
-The fastest path is the `scaffold_metric` MCP tool. It writes nothing: it
-returns a starter gauge script (`scriptPath`, `script`) and the three entries
-(`projectYaml`); write the script and merge the entries into
-`.oxplow/project.yaml` with your own file tools. The trio looks like this:
+The fastest path is the `metric.scaffold` command (`run_command`). It writes
+nothing: it returns a starter gauge script (`scriptPath`, `script`) and the
+three entries (`projectYaml`). Write the script with your file tools, then add
+each entry with `config.set` (`run_command`): read the list with `config.get
+{ "key": "measures" }`, append, and set it back — the same for `gauges` and
+`metrics`. A gauge runs a program, so `gauges` is a person-only key: your
+`config.set` on it asks the person to confirm. The trio looks like this:
 
 ```yaml
 measures:
@@ -109,7 +119,7 @@ time. A count-over-threshold is `aggregation: count` + a `filter: { minValue: N 
 | field | meaning |
 |---|---|
 | `key` | namespaced producer id (required) |
-| `trigger` | when it runs: `on-snapshot` (after a snapshot — the default for tree scans), `on-effort-complete`, `manual` (only via `run_metric`). (`on-report` / `continuous` reserved.) |
+| `trigger` | when it runs: `on-snapshot` (after a snapshot — the default for tree scans), `on-effort-complete`, `manual` (only via `metric.run`). (`on-report` / `continuous` reserved.) |
 | `emits` | the measure keys it may emit facts on (declare-to-collect — a fact outside this list is dropped) |
 | `compute` | `{ runtime, input?, entryFile, args?, report? }` — how it produces facts |
 
@@ -169,7 +179,7 @@ The `metrics:` spec `aggregation: sum` re-adds the per-file facts into the headl
 `compute: { runtime: exec, entryFile: oxplow/gauges/bundle-size.sh }`. Lower trust
 (it does I/O) — tagged `plugin-exec:<key>`. Use only when no in-process tier can
 compute it: **it won't run until the user approves it** in Settings → Data →
-Programs (you can't approve it; `run_metric` tells you when it's waiting), and
+Programs (you can't approve it; `metric.run` tells you when it's waiting), and
 any change to the program or its args needs approving again.
 
 The bundled gauge scripts in
@@ -189,26 +199,48 @@ Precedence is **project > global > built-in** by key.
 
 ## Step 5 — verify
 
-1. **Run the gauge now:** `run_metric { key: "repo.todo" }` (MCP) — runs the gauge
-   against the latest snapshot and records its facts; returns the count.
-2. **Read the metric back:** `list_metric_samples { metric_key: "repo.todo_count" }`
-   or `get_metric_summary { metric_key: "repo.todo_count" }`.
+1. **Run the gauge now:** the `metric.run` command, `{ "key": "repo.todo" }` —
+   runs the gauge against the latest snapshot and records its facts; returns
+   the count. `metric.rebuild` (`{ "force": true }` to redo everything) runs
+   every gauge's whole-tree baseline.
+2. **Read the metric back** with `query_sql` and the metric function:
+
+   ```sql
+   SELECT bucket, MEASURE('repo.todo_count') FROM metric_grid('day')
+   ```
+
 3. The metric appears on the **Metrics** page automatically — no UI code.
 
-Slicing a read: `list_metric_samples` (and `metric_series` for a raw measure)
-take `group_by` (any dim the facts carry, or `oxplow.stream` / `oxplow.thread`
-/ `oxplow.effort` / `oxplow.task` / `oxplow.git_version`), `dim_eq: {key,
-value}`, and `bucket: day|week|month`. For example, "tokens per task per week"
-is `{ metric_key, group_by: "oxplow.task", bucket: "week" }`.
+**Reading metrics.** Metrics are read in SQL. `metric_grid(bucket[, dim])`
+is a grid of time buckets (`day`, `week`, `month`, or `capture` for one row
+per recording, with a `capture_id` that joins `v_capture`); each
+`MEASURE('<key>')` is a metric's series on it, computed with the metric's
+own aggregation and time semantics. The optional `dim` slices it: any
+dimension the facts carry, or `oxplow.stream` / `oxplow.thread` /
+`oxplow.effort` / `oxplow.task` / `oxplow.git_version`. "Tokens per task per
+week" is:
+
+```sql
+SELECT bucket, "oxplow.task", MEASURE('oxplow.tokens.total')
+FROM metric_grid('week', 'oxplow.task')
+```
+
+The catalog and raw data are views: `v_metric_spec` (definitions and
+thresholds), `v_metric_catalog` (what's available and on), `v_measure`,
+`v_dimension`, `v_capture` and `v_fact` (the atomic facts — the located
+offenders behind a metric are its measure's facts:
+`SELECT path, line, rule, severity, value, detail FROM v_fact WHERE
+measure_key = 'oxplow.ast_hit' AND capture_id = …`).
 
 For a CI-imported or agent-asserted number oxplow can't compute itself, use
-`record_metric { key, value, subject?, dims? }` (stored `asserted`, lower-trust).
+the `metric.record` command, `{ key, value, subject?, dims? }` (stored
+`asserted`, lower-trust).
 
 ## Metrics over data (entity metrics)
 
 When the number is about records oxplow already has (tasks, commits, test
 runs, an extension's synced entities), skip the gauge. Aggregate the view
-directly (see `describe_schema` for the views):
+directly (the views and their columns are in `v_model` / `v_model_column`):
 
 ```yaml
 metrics:
@@ -233,9 +265,9 @@ dimensions:
 - **Fragments.** They are SQL over the view, aliased `e`. Only a
   dimension's `expr` sees its `join`. A fragment that doesn't compile keeps
   the metric out of the catalog; check the log.
-- **Slicing.** Group by the entity dimensions over the same view
-  (`list_metric_samples { metric_key, group_by: "repo.priority" }`), or
-  break down with `metric_breakdown`.
+- **Slicing.** Group by an entity dimension over the same view:
+  `SELECT bucket, "repo.priority", MEASURE('repo.tasks_done') FROM
+  metric_grid('week', 'repo.priority')`.
 
 ## Gotchas
 
@@ -252,4 +284,4 @@ dimensions:
 - A `use:` entry may only re-target thresholds; the measure/aggregation/filter are
   inherent to the definition.
 - If a fact doesn't appear, the run is best-effort (errors are logged, not
-  surfaced) — check the daemon log, or re-run `run_metric` and read the return.
+  surfaced) — check the daemon log, or re-run `metric.run` and read the return.

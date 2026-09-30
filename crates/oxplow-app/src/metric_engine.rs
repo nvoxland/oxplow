@@ -912,7 +912,7 @@ impl Visibility {
 type Tree<'a> = HashMap<(String, String), Vec<&'a FactRow>>;
 
 /// The state key for a fact with no path/subject — an agent-asserted repo scalar
-/// (`record_metric` with no subject). Not a real path, so it can never collide with
+/// (`metric.record` with no subject). Not a real path, so it can never collide with
 /// one (paths are never empty and never contain a NUL).
 pub(crate) const SCALAR_SUBJECT: &str = "\u{0}repo-scalar";
 
@@ -1021,7 +1021,7 @@ pub(crate) fn tree_state_series(
             tree.remove(&(c.producer.clone(), path.clone()));
         }
         // A capture may also carry PATH-LESS facts — an agent-asserted repo scalar
-        // (`record_metric` with no subject). Those aren't tree facts: no path means the
+        // (`metric.record` with no subject). Those aren't tree facts: no path means the
         // per-path fold can't place or supersede them, so they keep the plain
         // "latest assertion per producer wins" rule. Emitting one restates it —
         // judged on the capture's UNFILTERED facts, like every other eviction.
@@ -1881,7 +1881,7 @@ impl MetricEngine {
             CaptureScope::PerPath => {
                 let mut folded = self.facts.latest_tree_facts(measure.id, stream).await?;
                 // The SQL fold joins on `path`, so PATH-LESS facts — an agent-asserted repo
-                // scalar (`record_metric` with no subject) — are not in it. They aren't tree
+                // scalar (`metric.record` with no subject) — are not in it. They aren't tree
                 // facts: with no path there is nothing to supersede them per-path, so they
                 // keep the plain per-producer currency rule (latest assertion wins). Without
                 // this an asserted number would silently vanish from every read. SQL-side

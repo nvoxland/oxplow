@@ -636,16 +636,15 @@ tool list stable no matter how many extensions are installed.
 
 **Understanding the semantic layer**
 
-- `describe_schema`: every entity (core `v_*` and extension
-  `v_<ext>_<entity>`) with column docs, declared relations (joins), and the
-  owning source/extension.
-- `list_dimensions`, `list_metric_definitions`, `list_measures`:
-  including extension-declared ones, each with its scope.
-- `query_sql`: read-only SQL across everything above.
-- A metric's numbers: `get_metric_summary` (headline value vs target),
-  `metric_breakdown` (a metric by one dimension), and per measure
-  `metric_series` (time series, `group_by` / `dim_eq`) and
-  `metric_rollup`.
+- `query_sql`: read-only SQL over the published models. `v_model` /
+  `v_model_column` / `v_model_lineage` describe every view (core `v_*` and
+  extension `v_<ext>_<entity>`) with its column docs and inputs;
+  `v_dimension`, `v_metric_spec` and `v_measure` list the dimensions,
+  metrics and measures, extension-declared ones included, each with its
+  scope.
+- A metric's numbers are SQL too: `SELECT bucket, MEASURE('<key>') FROM
+  metric_grid('day'[, '<dim>'])` — sliced by a dimension, in any bucket.
+  Changing metrics is the `metric.*` commands (`run_command`).
 
 **Working with lenses**
 
@@ -681,7 +680,8 @@ tool list stable no matter how many extensions are installed.
   files outside the filing guard (and the write guard, and the caller's
   worktree). The skill carries the templates instead, and humans have
   Save as Lens in Explore Data. The same rule holds for metrics:
-  `scaffold_metric` returns a template the agent writes itself (tsk391).
+  the `metric.scaffold` command returns a template the agent writes itself
+  (tsk391).
 - `validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
 - `list_extensions`, `list_sources`, `run_source(extension, source_id)`

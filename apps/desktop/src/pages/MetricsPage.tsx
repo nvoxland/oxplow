@@ -118,7 +118,7 @@ const sel = { fontSize: 12, width: "100%" } as const;
  * (`metricRef`), which is also where a metric is enabled/disabled and its
  * target set (tsk117). Authoring a NEW custom metric is agent work now (the
  * "+ New metric" scaffold form was retired in tsk122 for agent-driven authoring
- * via the `/oxplow:new-metric` skill + the `scaffold_metric` MCP tool); the rail
+ * via the `/oxplow:new-metric` skill + the `metric.scaffold` command); the rail
  * carries a Help blurb pointing there.
  * Live on `metricSamplesChanged` (debounced) and `configChanged`.
  *

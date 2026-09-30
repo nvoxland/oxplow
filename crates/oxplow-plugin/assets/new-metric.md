@@ -16,25 +16,21 @@ LOC). Ask only if genuinely ambiguous.
 
 ## 2. Prefer a built-in
 
-Call `list_metric_definitions { scope: "built-in" }` (MCP). If a bundled metric
-already measures it (unsafe blocks, unwrap/expect, TODO markers, function count,
-high-complexity functions, `any` usage, …), just enable it — one line:
-
-```yaml
-metrics:
-  - use: oxplow.rust.unsafe_blocks
-    target: 0
-```
+List the bundled metrics with `query_sql`:
+`SELECT key, title, language, enabled FROM v_metric_catalog WHERE scope = 'built-in'`.
+If one already measures it (unsafe blocks, unwrap/expect, TODO markers, function
+count, high-complexity functions, `any` usage, …), just turn it on with the
+`metric.enable` command (`run_command`):
+`{ "keys": ["oxplow.rust.unsafe_blocks"], "enabled": true }`.
 
 ## 3. Otherwise define the trio (measure + gauge + metric)
 
-Fastest path — the **`scaffold_metric` MCP tool**. It writes nothing: it
-returns a starter gauge script and the measure + gauge + metric trio as a
-`.oxplow/project.yaml` snippet, and **you write them** with your normal file
-tools, under your task like any other edit.
+Fastest path — the **`metric.scaffold` command** (`run_command`). It writes
+nothing: it returns a starter gauge script and the measure + gauge + metric
+trio as a `.oxplow/project.yaml` snippet.
 
 ```
-scaffold_metric { key: "repo.todo_count", title: "TODO comments", language: "rust" }
+metric.scaffold { key: "repo.todo_count", title: "TODO comments", language: "rust" }
 → { "scriptPath": "oxplow/gauges/repo_todo_count.star", "script": "…", "projectYaml": "measures: …" }
 ```
 
@@ -42,14 +38,15 @@ scaffold_metric { key: "repo.todo_count", title: "TODO comments", language: "rus
    actually asked for (the starter just counts TODO/FIXME per file; it can
    call `files(glob)` / `ast_query(text, language, sexpr)` /
    `code_metrics(text, language)`).
-2. Merge `projectYaml` into `.oxplow/project.yaml`: append each entry to
-   the `measures:` / `gauges:` / `metrics:` list already there, or add the
-   list. The catalog reseeds when the file changes.
+2. Add each entry with `config.set` (`run_command`): `config.get` the
+   `measures` / `gauges` / `metrics` list, append the new entry, and set the
+   list back. `gauges` is person-only (a gauge runs a program), so that
+   `config.set` asks the person to confirm. The catalog reseeds on the change.
 
 Then jump to **Verify**.
 
-By hand instead, add the trio (namespaced — `oxplow.*` is reserved) + a gauge
-script under `oxplow/gauges/`:
+The trio (namespaced — `oxplow.*` is reserved) and its gauge script under
+`oxplow/gauges/` look like this:
 
 ```yaml
 measures:
@@ -94,9 +91,10 @@ templates.
 
 ## 4. Verify
 
-1. `run_metric { key: "repo.todo" }` (MCP) — runs the gauge now, returns the fact
-   count.
-2. `get_metric_summary { metric_key: "repo.todo_count" }` — confirm the value.
+1. `metric.run { key: "repo.todo" }` (`run_command`) — runs the gauge now,
+   returns the fact count.
+2. `query_sql`: `SELECT bucket, MEASURE('repo.todo_count') FROM metric_grid('day')`
+   — confirm the value.
 3. It now appears on the Metrics page automatically.
 
 Leave the `.oxplow/project.yaml` + script diffs for the user to review (committed files).

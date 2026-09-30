@@ -63,8 +63,9 @@ colors its value green, amber, or red against it. Targets live in
 local to you; ask your agent to set one.
 
 Breakdowns (a metric by package, language, or model) aren't on the
-detail page. Ask your agent: it has `metric_breakdown` over MCP, and it
-can build a [lens](lenses.md) if you want to keep the view. It can also
+detail page. Ask your agent: it can read any metric in SQL, sliced any
+way the data allows, and build a [lens](lenses.md) if you want to keep
+the view. It can also
 slice a metric's history by worktree, thread, effort, task, or commit,
 and roll it up by day, week, or month, e.g. "tokens per task per week".
 
@@ -109,10 +110,11 @@ you want counted:
 > Track how many `unwrap()` calls are in the Rust crates, and set a
 > target of zero.
 
-The agent has a `scaffold_metric` MCP tool that hands it a template
-for the measure/gauge/metric trio plus the gauge script. It writes
-them like any other edit (under a task, in its own worktree), then
-runs the metric to confirm it produces a number. The `/oxplow:new-metric` skill walks
+The agent asks oxplow for a template of the measure/gauge/metric trio
+plus the gauge script. It writes the script like any other edit (under
+a task, in its own worktree) and adds the config entries. A gauge runs
+a program, so oxplow asks you to confirm that part. Then the agent runs
+the metric to confirm it produces a number. The `/oxplow:new-metric` skill walks
 the same path with more structure.
 
 This is deliberate: a metric is a small program, and describing what
