@@ -1,7 +1,7 @@
 //! Drift detail for a wiki page's file ref (#112).
 //!
-//! [`list_stale_wiki_pages`] / `get_wiki_page_metadata.stale_refs`
-//! tell the agent *which* refs drifted; this answers *what* drifted —
+//! `v_knowledge_ref` (its `stale` rows) tells the agent *which* refs
+//! drifted; this answers *what* drifted —
 //! the unified diff between the snapshot the ref was pinned to and the
 //! file's current on-disk content, so the agent reads only the changed
 //! hunks instead of re-opening the whole file.

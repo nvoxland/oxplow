@@ -80,11 +80,17 @@ rail's "Finished" list) from `knowledge.page.written`'s thread anchor.
   `provider`, `slug`, `title`, `excerpt`, `body_size`, `outbound_refs`
   (JSON array of every ref it links to), `stale_ref_count`, `updated_at`.
 - **`v_knowledge_ref`** — each page's file refs: `page`, `path`,
-  `pinned_snapshot_id`, `latest_snapshot_id`, `stale`.
+  `pinned_snapshot_id`, `pinned_vcs_rev`, `pinned_vcs_rev_exact`,
+  `latest_snapshot_id`, `stale`.
 
-A ref is **stale** when its file has a snapshot newer than the one it was
-pinned to, or was captured but never pinned — the rule the Freshness page
-(`list_wiki_freshness`) and `KnowledgeProvider::freshness` use too.
+A ref is **stale** when its file has a **primary-stream** snapshot newer
+than the one it was pinned to, or was captured there but never pinned.
+The primary is the stream a pin comes from (`pin_tx`), so another
+stream's newer snapshot of the file neither makes a page stale nor keeps
+a verified one stale (tsk563). `v_knowledge_ref` is the **one
+definition**: `v_knowledge_page.stale_ref_count` counts its rows,
+`KnowledgeProvider::freshness` reads it, and the Freshness page's
+`list_wiki_freshness` RPC is that reader.
 `wiki_ref_drift` (MCP) shows one stale ref's diff. Bodies are searched
 with the site `search` tool: the `search.index` pump consumer indexes a
 page from `knowledge.page.written` / `deleted` (written by command or by

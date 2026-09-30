@@ -30,6 +30,10 @@ pub struct RefFreshness {
     pub target: String,
     /// The snapshot the ref was pinned to, if any.
     pub pinned_snapshot: Option<i64>,
+    /// The VCS revision nearest the pin (`None` without one), and whether
+    /// the pinned snapshot is exactly that revision.
+    pub pinned_revision: Option<String>,
+    pub pinned_revision_exact: bool,
     /// The target's latest snapshot, if it has one.
     pub latest_snapshot: Option<i64>,
     /// The target changed since it was pinned (or was never pinned but

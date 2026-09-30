@@ -810,20 +810,22 @@
     - { name: "excerpt", type: "TEXT", doc: "Start of the body." }
     - { name: "body_size", type: "INTEGER", doc: "Size of the full body, bytes." }
     - { name: "outbound_refs", type: "TEXT", doc: "JSON array of every ref the page links to (`file:src/lib.rs`, `wiki:other`, `work_item:oxplow:tsk42`)." }
-    - { name: "stale_ref_count", type: "INT", doc: "File refs whose file has a newer snapshot than the one the ref was pinned to (or that were never pinned but have been snapshotted): what may no longer hold." }
+    - { name: "stale_ref_count", type: "INT", doc: "Its `stale` rows in v_knowledge_ref: file refs whose file has a newer primary-stream snapshot than the one the ref was pinned to (or that were never pinned but have been snapshotted): what may no longer hold." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
   tests:
     - { not_null: ref }
     - { unique: ref }
     - { accepted_values: { column: provider, values: [oxplow] } }
 - name: knowledge_ref
-  version: 1
-  description: "Each knowledge page's file refs and how current they are (P5.C4): the snapshot a ref was pinned to against the file's latest. `stale` rows are what `v_knowledge_page.stale_ref_count` counts; `wiki_ref_drift` shows one's diff."
+  version: 2
+  description: "Each knowledge page's file refs and how current they are (P5.C4): the snapshot a ref was pinned to against the file's latest — both the primary stream's, the one definition of staleness every reader uses. `stale` rows are what `v_knowledge_page.stale_ref_count` counts; `wiki_ref_drift` shows one's diff."
   columns:
     - { name: "page", type: "TEXT", doc: "The page (`wiki:<slug>`, v_knowledge_page.ref)." }
     - { name: "path", type: "TEXT", doc: "The file it relies on (workspace-relative)." }
     - { name: "pinned_snapshot_id", type: "INTEGER", doc: "The snapshot the ref was pinned to (written or verified against); NULL if never pinned." }
-    - { name: "latest_snapshot_id", type: "INT", doc: "The file's latest snapshot; NULL if it was never captured." }
+    - { name: "pinned_vcs_rev", type: "TEXT", doc: "The VCS revision nearest the pin (v_commit.sha for git); NULL without one." }
+    - { name: "pinned_vcs_rev_exact", type: "INT", doc: "1 when the pinned snapshot is exactly `pinned_vcs_rev` (a clean worktree), else 0." }
+    - { name: "latest_snapshot_id", type: "INT", doc: "The file's latest primary-stream snapshot (the stream a pin comes from); NULL if it was never captured there." }
     - { name: "stale", type: "INT", doc: "1 when the file changed after the pin (or was captured but never pinned)." }
   tests:
     - { not_null: page }

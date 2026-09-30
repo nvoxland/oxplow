@@ -6,9 +6,9 @@ import { summarizeWikiFreshness } from "./wikiFreshness.js";
 function row(path: string, stale: boolean): WikiRefFreshness {
   return {
     path,
-    local_snapshot_id: 1,
-    closest_vcs_rev: null,
-    vcs_rev_exact: false,
+    pinned_snapshot_id: 1,
+    pinned_vcs_rev: null,
+    pinned_vcs_rev_exact: false,
     latest_snapshot_id: stale ? 2 : 1,
     stale,
   };

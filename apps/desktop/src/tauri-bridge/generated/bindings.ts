@@ -4342,31 +4342,24 @@ export type WikiPage = {
 export type WikiRefFreshness = {
 	path: string,
 	/**
-	 *  The snapshot the ref was captured against. 0 when the
-	 *  wiki sync had no snapshot service available.
+	 *  The snapshot the ref was pinned to (written or verified against);
+	 *  `None` if never pinned.
 	 */
-	local_snapshot_id: number,
+	pinned_snapshot_id: number | null,
 	/**
-	 *  Closest known git commit at capture time; populated only
-	 *  when the worktree had a HEAD.
+	 *  The VCS revision nearest the pin, and whether the pinned snapshot
+	 *  is exactly it.
 	 */
-	closest_vcs_rev: string | null,
+	pinned_vcs_rev: string | null,
+	pinned_vcs_rev_exact: boolean,
 	/**
-	 *  `true` when the local snapshot is byte-equal to the recorded
-	 *  commit (capture was on a clean worktree, or
-	 *  `set_snapshot_git_commit` later attached HEAD to the snapshot).
-	 */
-	vcs_rev_exact: boolean,
-	/**
-	 *  The latest `snapshot.id` whose `file_snapshot.path` matches
-	 *  this target. `None` when the file hasn't been captured (e.g.
-	 *  it's outside the workspace or has never been touched since
-	 *  the snapshot service booted).
+	 *  The file's latest primary-stream snapshot; `None` if never
+	 *  captured there.
 	 */
 	latest_snapshot_id: number | null,
 	/**
-	 *  `true` when `latest_snapshot_id > local_snapshot_id`. The
-	 *  renderer paints a "stale" chip on these rows.
+	 *  The file changed after the pin (or was captured but never
+	 *  pinned). The renderer paints a "stale" chip on these rows.
 	 */
 	stale: boolean,
 };

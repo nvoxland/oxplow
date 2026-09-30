@@ -426,30 +426,28 @@ impl KnowledgeProvider for OxplowKnowledge {
             .map(|_| ())
     }
 
+    /// `v_knowledge_ref`: the one definition of staleness.
     async fn freshness(&self, page: &str) -> Result<Vec<RefFreshness>, KnowledgeError> {
-        let slug = slug_of_ref(page)?.to_string();
+        let page = page_ref(slug_of_ref(page)?);
         self.db
             .read(move |conn| {
                 let mut stmt = conn
                     .prepare(
-                        "SELECT pr.target_id, pr.local_snapshot_id,
-                                (SELECT MAX(fs.snapshot_id) FROM file_snapshot fs
-                                  WHERE fs.path = pr.target_id)
-                         FROM page_ref pr
-                         WHERE pr.source_kind = ?1 AND pr.source_id = ?2 AND pr.target_kind = ?3
-                         ORDER BY pr.target_id",
+                        "SELECT path, pinned_snapshot_id, latest_snapshot_id, stale,
+                                pinned_vcs_rev, pinned_vcs_rev_exact
+                         FROM v_knowledge_ref WHERE page = ?1 ORDER BY path",
                     )
                     .map_err(sql)?;
                 let rows = stmt
-                    .query_map(params![KIND_WIKI, slug, KIND_FILE], |r| {
+                    .query_map(params![page], |r| {
                         let target: String = r.get(0)?;
-                        let pinned: Option<i64> = r.get(1)?;
-                        let latest: Option<i64> = r.get(2)?;
                         Ok(RefFreshness {
                             target: format!("{KIND_FILE}:{target}"),
-                            pinned_snapshot: pinned,
-                            latest_snapshot: latest,
-                            stale: latest.is_some_and(|l| pinned.is_none_or(|p| l > p)),
+                            pinned_snapshot: r.get(1)?,
+                            pinned_revision: r.get(4)?,
+                            pinned_revision_exact: r.get::<_, i64>(5)? != 0,
+                            latest_snapshot: r.get(2)?,
+                            stale: r.get::<_, i64>(3)? != 0,
                         })
                     })
                     .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
@@ -1141,6 +1139,48 @@ mod tests {
             })
             .await
             .unwrap()
+    }
+
+    /// Staleness is the primary stream's, like the pin (tsk563): another
+    /// stream's newer snapshot of the file neither makes a page stale nor
+    /// keeps a verified one stale, and every reader agrees.
+    #[tokio::test]
+    async fn another_streams_snapshot_doesnt_make_a_page_stale() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
+        std::fs::write(dir(&fx).join("src/lib.rs"), "v1").unwrap();
+        snapshot_with(&fx, "src/lib.rs").await;
+        run(
+            &fx,
+            WRITE_PAGE,
+            json!({ "slug": "lib", "body": "# Lib\n\nsee [[src/lib.rs]]\n" }),
+        )
+        .await
+        .unwrap();
+        fx.svc
+            .db
+            .transaction(|c| {
+                c.execute_batch(
+                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
+                                          worktree_path, created_at, updated_at)
+                       VALUES (99, 'worktree', 'w', 'w', 'r', 'r', '/w',
+                               '2026-09-30T00:00:00.000000Z', '2026-09-30T00:00:00.000000Z');
+                     INSERT INTO snapshot (id, stream_id, created_at)
+                       VALUES (9999, 99, '2026-09-30T00:00:00.000000Z');
+                     INSERT INTO file_snapshot (stream_id, path, blob_hash, size_bytes,
+                                                captured_at, storage, snapshot_id)
+                       VALUES (99, 'src/lib.rs', 'h2', 1, '2026-09-30T00:00:00.000000Z',
+                               'oxplow', 9999);",
+                )
+                .map_err(sql)
+            })
+            .await
+            .unwrap();
+        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 0);
+        let fresh = fx.svc.knowledge.freshness("wiki:lib").await.unwrap();
+        assert_eq!(fresh.len(), 1);
+        assert!(!fresh[0].stale, "{fresh:?}");
+        assert_ne!(fresh[0].latest_snapshot, Some(9999));
     }
 
     /// P5.C4: `v_knowledge_page.stale_ref_count` rises when a pinned

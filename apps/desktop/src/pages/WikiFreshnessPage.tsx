@@ -161,10 +161,10 @@ export function WikiFreshnessPage({ slug, onOpenPage }: WikiFreshnessPageProps) 
                     </button>
                   </td>
                   <td style={{ ...cellStyle, color: "var(--text-secondary)" }}>
-                    s-{row.local_snapshot_id}
-                    {row.closest_vcs_rev ? (
+                    {row.pinned_snapshot_id === null ? "—" : `s-${row.pinned_snapshot_id}`}
+                    {row.pinned_vcs_rev ? (
                       <span style={{ marginLeft: 6, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                        {row.vcs_rev_exact ? "=" : "~"} {row.closest_vcs_rev.slice(0, 8)}
+                        {row.pinned_vcs_rev_exact ? "=" : "~"} {row.pinned_vcs_rev.slice(0, 8)}
                       </span>
                     ) : null}
                   </td>
