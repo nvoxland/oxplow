@@ -518,9 +518,11 @@ Bash (which the hook can't classify reliably).
 
 ## Commit indexer
 
-`crates/oxplow-app/src/commit_indexer.rs` walks the most-recent
-`DEFAULT_INDEX_DEPTH` (500) commits reachable from **every stream's**
-head — through the VCS capability (`Vcs::log`, `Vcs::revision`;
+`crates/oxplow-app/src/commit_indexer.rs` walks the commits reachable
+from **every stream's** head as deep as `IndexDepth::DEFAULT` says — a
+window of 500, doubled while the oldest it read was new (a pull longer
+than the window is indexed whole, no gap), up to 5000, which is also the
+horizon: a first boot indexes the newest 5000 (tsk568) — through the VCS capability (`Vcs::log`, `Vcs::revision`;
 [vcs.md](./vcs.md)) — stores them (`v_commit`, `v_commit_file`),
 restates branches and tags (`v_branch`, `v_tag`), and projects each
 commit into the unified `page_ref` graph (see
@@ -543,8 +545,8 @@ aggregates the last 180 days of `git_commit_file`
 together and when each was last touched, and flags a change's files
 whose usual co-changers are missing or that were long dormant. The
 history is cached until the index changes (its size or newest commit).
-It used to walk up to 5000 commits of the primary's HEAD; the index
-spans every stream's head, 500 commits deep.
+The index spans every stream's head, up to 5000 commits deep from a
+first boot (the depth the old primary-only walk had).
 
 The boot path runs the initial scan in a detached task. The same
 function is re-run on every `OxplowEvent::VcsRefsChanged` (debounced

@@ -13,8 +13,8 @@
 //! before re-diffing — the diff + edge build is the only expensive
 //! step, the existence probe is one indexed SELECT.
 //!
-//! The boot path scans the most-recent N commits reachable from every
-//! stream's head (so a worktree stream's own commits are in `v_commit`);
+//! The boot path scans the commits reachable from every stream's head
+//! down to the ones already stored ([`IndexDepth`]) (so a worktree stream's own commits are in `v_commit`);
 //! the [`OxplowEvent::VcsRefsChanged`] subscriber re-runs the same scan
 //! on every ref movement (debounced upstream by `GitRefsWatcher`). The
 //! same pass restates `v_branch` and `v_tag`. Everything reads through
@@ -30,11 +30,26 @@ use oxplow_db::{PageRefEdge, SqlitePageRefStore};
 use oxplow_domain::refs::extract;
 use oxplow_domain::vcs::{Branch, LogQuery, RevisionDetail, Vcs};
 
-/// Default depth for the boot-time + ref-change scans. 500 commits
-/// covers most active branches without a full-history walk; older
-/// commits still appear in backlinks if they're referenced from a
-/// newer source.
-pub const DEFAULT_INDEX_DEPTH: usize = 500;
+/// How far a pass walks from a head. It reads `window` revisions, and
+/// while the oldest it read was new (new history is longer than the
+/// window — a big pull), doubles it and reads on, up to `max`. So new
+/// history up to `max` deep is indexed whole, with no gap below a
+/// window. `max` is also the horizon: a first boot on a long history
+/// indexes the newest `max`, and older history stays out (as does the
+/// rest of a single ref move of more than `max` new revisions).
+#[derive(Debug, Clone, Copy)]
+pub struct IndexDepth {
+    pub window: usize,
+    pub max: usize,
+}
+
+impl IndexDepth {
+    /// The boot and ref-change scans: 500 at a time, 5000 at most.
+    pub const DEFAULT: IndexDepth = IndexDepth {
+        window: 500,
+        max: 5000,
+    };
+}
 
 /// Pure: build the edge set for one commit. Exposed so tests can
 /// exercise the projection independently of a real repo.
@@ -109,51 +124,77 @@ pub fn commit_edges(detail: &RevisionDetail) -> Vec<PageRefEdge> {
     out
 }
 
-/// Walk the most-recent `limit` revisions reachable from workspace
-/// `ws`'s head, store each one (`v_commit`, `v_commit_file`) and project
-/// it into `page_ref`. Skips revisions already stored, so subsequent
-/// calls only index new ones. Returns the number newly indexed.
+/// Walk the revisions reachable from workspace `ws`'s head, newest
+/// first and as deep as `depth` says, store each new one (`v_commit`,
+/// `v_commit_file`) and project it into `page_ref`. Returns the number
+/// newly indexed.
 pub async fn index_recent(
     vcs: &dyn Vcs,
     ws: &Path,
     page_refs: &SqlitePageRefStore,
     git: &oxplow_db::SqliteGitStore,
-    limit: usize,
+    depth: IndexDepth,
 ) -> usize {
-    let log = vcs
-        .log(
-            ws,
-            LogQuery {
-                limit: Some(limit as u32),
-                all: false,
-            },
-        )
-        .await
-        .unwrap_or_default();
-
-    let mut indexed = 0usize;
-    for info in log {
-        // Cheap probe: a stored commit is fully indexed. replace_source
-        // is idempotent, but the diff walk is O(filecount) and we'd
-        // rather not pay it on every boot for old commits.
-        if git.has_commit(&info.id).await.unwrap_or(false) {
-            continue;
+    let mut this_pass: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut limit = depth.window.min(depth.max);
+    loop {
+        let log = vcs
+            .log(
+                ws,
+                LogQuery {
+                    limit: Some(limit as u32),
+                    all: false,
+                },
+            )
+            .await
+            .unwrap_or_default();
+        let exhausted = log.len() < limit;
+        let oldest = log.last().map(|i| i.id.clone());
+        for info in log {
+            if this_pass.contains(&info.id) {
+                continue;
+            }
+            // Cheap probe: a stored commit is fully indexed. replace_source
+            // is idempotent, but the diff walk is O(filecount) and we'd
+            // rather not pay it on every boot for old commits.
+            if git.has_commit(&info.id).await.unwrap_or(false) {
+                continue;
+            }
+            if index_one(vcs, ws, page_refs, git, &info.id).await {
+                this_pass.insert(info.id);
+            }
         }
-        let Ok(Some(detail)) = vcs.revision(ws, &info.id).await else {
-            continue;
-        };
-        let edges = commit_edges(&detail);
-        if let Err(e) = page_refs.replace_source(KIND_COMMIT, &info.id, edges).await {
-            tracing::warn!(?e, sha = %info.id, "commit indexer write failed");
-            continue;
+        // The walk goes on below the window only while its oldest
+        // revision was new: new history is longer than the window.
+        let oldest_was_new = oldest.is_some_and(|o| this_pass.contains(&o));
+        if !oldest_was_new || exhausted || limit >= depth.max {
+            return this_pass.len();
         }
-        if let Err(e) = git.upsert_commit(commit_row(&detail)).await {
-            tracing::warn!(?e, sha = %info.id, "commit indexer: storing the commit failed");
-            continue;
-        }
-        indexed += 1;
+        limit = (limit * 2).min(depth.max);
     }
-    indexed
+}
+
+/// Store and project one revision; whether it was.
+async fn index_one(
+    vcs: &dyn Vcs,
+    ws: &Path,
+    page_refs: &SqlitePageRefStore,
+    git: &oxplow_db::SqliteGitStore,
+    sha: &str,
+) -> bool {
+    let Ok(Some(detail)) = vcs.revision(ws, sha).await else {
+        return false;
+    };
+    let edges = commit_edges(&detail);
+    if let Err(e) = page_refs.replace_source(KIND_COMMIT, sha, edges).await {
+        tracing::warn!(?e, %sha, "commit indexer write failed");
+        return false;
+    }
+    if let Err(e) = git.upsert_commit(commit_row(&detail)).await {
+        tracing::warn!(?e, %sha, "commit indexer: storing the commit failed");
+        return false;
+    }
+    true
 }
 
 /// Index new revisions from every stream's head and restate the branch
@@ -179,7 +220,7 @@ pub async fn refresh(svc: &crate::Services) -> usize {
             ws,
             &svc.page_ref_store,
             &svc.git_store,
-            DEFAULT_INDEX_DEPTH,
+            IndexDepth::DEFAULT,
         )
         .await;
     }
@@ -457,7 +498,17 @@ mod tests {
         let db = oxplow_db::Database::in_memory();
         let page_refs = SqlitePageRefStore::new(db.clone());
         let git = oxplow_db::SqliteGitStore::new(db.clone());
-        let n = index_recent(&crate::vcs::GitProvider, dir.path(), &page_refs, &git, 50).await;
+        let n = index_recent(
+            &crate::vcs::GitProvider,
+            dir.path(),
+            &page_refs,
+            &git,
+            IndexDepth {
+                window: 50,
+                max: 50,
+            },
+        )
+        .await;
         assert_eq!(n, 1, "should index the one commit");
 
         // The commit, its file and its task mention read through v_*.
@@ -495,8 +546,76 @@ mod tests {
         assert!(file_inbound.iter().any(|e| e.source_kind == "commit"));
 
         // Re-index — nothing new.
-        let n2 = index_recent(&crate::vcs::GitProvider, dir.path(), &page_refs, &git, 50).await;
+        let n2 = index_recent(
+            &crate::vcs::GitProvider,
+            dir.path(),
+            &page_refs,
+            &git,
+            IndexDepth {
+                window: 50,
+                max: 50,
+            },
+        )
+        .await;
         assert_eq!(n2, 0, "second pass must skip already-indexed commits");
+    }
+
+    /// tsk568: more new commits than a window are indexed whole — the
+    /// walk goes on below the window while its oldest is new — and a
+    /// pass stops at its cap.
+    #[tokio::test]
+    async fn a_pull_larger_than_the_window_leaves_no_gap() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let commit_n = |from: usize, to: usize| {
+            for i in from..to {
+                std::fs::write(dir.path().join("n.txt"), i.to_string()).unwrap();
+                crate::test_fixtures::commit_all(dir.path(), "c");
+            }
+        };
+        commit_n(0, 7);
+        let db = oxplow_db::Database::in_memory();
+        let page_refs = SqlitePageRefStore::new(db.clone());
+        let git = oxplow_db::SqliteGitStore::new(db.clone());
+        let pass = |max: usize| {
+            let (page_refs, git) = (page_refs.clone(), git.clone());
+            let ws = dir.path().to_path_buf();
+            async move {
+                index_recent(
+                    &crate::vcs::GitProvider,
+                    &ws,
+                    &page_refs,
+                    &git,
+                    IndexDepth { window: 3, max },
+                )
+                .await
+            }
+        };
+        let stored = || {
+            let db = db.clone();
+            async move {
+                db.read(|c| {
+                    c.query_row("SELECT count(*) FROM git_commit", [], |r| {
+                        r.get::<_, i64>(0)
+                    })
+                    .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+                })
+                .await
+                .unwrap()
+            }
+        };
+        // A first pass walks past its window to the whole history.
+        let total = 1 + 7; // init_git_repo's commit and ours
+        assert_eq!(pass(100).await, total);
+        assert_eq!(stored().await, total as i64);
+        // A pull of 5 on top of a window of 3: all 5.
+        commit_n(7, 12);
+        assert_eq!(pass(100).await, 5);
+        assert_eq!(stored().await, total as i64 + 5);
+        assert_eq!(pass(100).await, 0);
+        // The cap bounds a pass: 4 more new ones, a cap of 2.
+        commit_n(12, 16);
+        assert_eq!(pass(2).await, 2);
     }
 
     #[test]
