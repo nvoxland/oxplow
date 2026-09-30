@@ -6,6 +6,17 @@ export { onRemoteReconnect, triggerRemoteResync };
 import { EVENT_CHANNELS } from "./tauri-bridge/channels.js";
 import type { OxplowEvent } from "./api-types.js";
 import { latestWins } from "./latestWins.js";
+import {
+  METRIC_CATALOG_SQL,
+  METRIC_SPECS_SQL,
+  catalogEntries,
+  metricSeriesSql,
+  metricSpecs as metricSpecRows,
+  seriesPoints as seriesPointRows,
+  type MetricCatalogEntry,
+  type MetricSpec,
+  type SeriesPoint,
+} from "./metricsSql.js";
 import { normalizeSnapshotId } from "./effort-snapshot.js";
 import { taskIdOfWorkItemRef, workItemRef } from "./workItemRef.js";
 import { ipcErrorMessage } from "./ipc-error.js";
@@ -1861,7 +1872,7 @@ export async function listTaskEfforts(itemId: string): Promise<EffortDetail[]> {
   });
 }
 
-export type { MetricSpec, SeriesPoint, MetricCatalogEntry } from "./tauri-bridge/index.js";
+export type { MetricSpec, SeriesPoint, MetricCatalogEntry } from "./metricsSql.js";
 
 import type { Dashboard, DashboardWithItems } from "./tauri-bridge/index.js";
 export type { Dashboard, DashboardItem, DashboardWithItems } from "./tauri-bridge/index.js";
@@ -1917,59 +1928,35 @@ export function subscribeDashboardEvents(fn: () => void): () => void {
   });
 }
 
-/** The metric catalog — every known metric SPEC (built-in / global / project).
- *  A metric is an aggregation defined OVER a measure (epic tsk12), not a second
- *  store of rows. Optional `language` / `scope` filter. */
-export async function listMetricDefinitions(
-  language?: string,
-  scope?: string,
-): Promise<import("./tauri-bridge/index.js").MetricSpec[]> {
-  return unwrap(
-    await commands.listMetricDefinitions(language ?? null, scope ?? null),
-  ) as unknown as import("./tauri-bridge/index.js").MetricSpec[];
+/** Every metric definition — `v_metric_spec` (P4.7: metrics read through SQL). */
+export async function listMetricDefinitions(): Promise<MetricSpec[]> {
+  return metricSpecRows(await querySql(METRIC_SPECS_SQL, [], 10_000));
 }
 
-/** Time series for one metric (by spec `key`), newest-first — one point per
- *  capture aggregated over the metric's source-measure facts (epic tsk12).
- *  `groupBy` slices by a conformed dimension (`subject` / `branch` /
- *  `oxplow.model` / …), yielding one series-point per (capture × group). */
+/** One metric's captures, newest first — `metric_grid('capture')` joined to
+ *  `v_capture` (P4.7). `groupBy` slices by a dimension (one row per
+ *  capture × group); `range` (epoch ms, inclusive) bounds the rows returned. */
 export async function listMetricSamples(
   metricKey: string,
   limit?: number,
   groupBy?: string | null,
-  // Inclusive epoch-ms window (tsk202) — bounds the read to the visible range
-  // so the backend stops computing the whole history just to show a window.
   range?: { from: number; to: number } | null,
-): Promise<import("./tauri-bridge/index.js").SeriesPoint[]> {
-  return unwrap(
-    await commands.listMetricSamples(
-      metricKey,
-      limit ?? null,
-      groupBy ?? null,
-      range?.from ?? null,
-      range?.to ?? null,
-    ),
-  ) as unknown as import("./tauri-bridge/index.js").SeriesPoint[];
+): Promise<SeriesPoint[]> {
+  const params = range ? [new Date(range.from).toISOString(), new Date(range.to).toISOString()] : [];
+  return seriesPointRows(
+    await querySql(metricSeriesSql(metricKey, groupBy, !!range), params, limit ?? 200),
+  );
 }
 
-
-
-/** The available metric catalog (built-in ∪ global ∪ project) + each entry's
- *  enabled-in-this-project flag. Drives the Catalog page (tsk219). */
-export async function listMetricCatalog(): Promise<
-  import("./tauri-bridge/index.js").MetricCatalogEntry[]
-> {
-  return unwrap(
-    await commands.listMetricCatalog(),
-  ) as unknown as import("./tauri-bridge/index.js").MetricCatalogEntry[];
+/** Every metric this project can use, with whether it's on — `v_metric_catalog`. */
+export async function listMetricCatalog(): Promise<MetricCatalogEntry[]> {
+  return catalogEntries(await querySql(METRIC_CATALOG_SQL, [], 10_000));
 }
 
-/** Enable (add a `use:`) or disable (remove) a metric in `.oxplow/project.yaml`. */
-export async function setMetricEnabled(key: string, enabled: boolean): Promise<void> {
-  unwrap(await commands.setMetricEnabled(key, enabled));
+/** Turn metrics on or off in this project (the `metric.enable` command). */
+export async function enableMetrics(keys: string[], enabled: boolean): Promise<void> {
+  unwrap(await commands.enableMetrics(keys, enabled));
 }
-
-
 
 /** Efforts whose span overlaps `[windowStart, windowEnd]` (RFC-3339) — the
  *  Metrics Explorer's effort-band overlay (tsk233). */

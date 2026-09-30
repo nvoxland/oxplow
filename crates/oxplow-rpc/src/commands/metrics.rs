@@ -1,80 +1,72 @@
-//! Unified metric substrate read commands (epic tsk213).
-//!
-//! The successor to effort observations + code-quality scans: a durable,
-//! time-anchored typed metric model. These are the read-side cores the Tauri
-//! and remote transports share.
+//! Metric commands for the desktop (P4.7). Metric *reads* are SQL — the
+//! grid (`metric_grid()`), `v_metric_spec` and `v_metric_catalog` through
+//! `query_sql`; what's left here is the person's switch, which runs the
+//! `metric.enable` bus command like every other write.
 
-use oxplow_app::metric_engine::{SeriesPoint, TimeWindow};
-use oxplow_app::metrics_service::MetricCatalogEntry;
 use oxplow_app::Services;
-use oxplow_db::MetricSpec;
+use oxplow_domain::Actor;
 
 use crate::error::IpcError;
 
-/// The metric catalog — every known metric SPEC (built-in / global / project).
-/// A metric is an aggregation defined OVER a measure (epic tsk12), not a second
-/// store of rows. Optional `language` / `scope` filter.
-pub async fn list_metric_definitions(
+/// Turn metrics on or off in this project — the Catalog toggle and its
+/// per-section "enable all" — as the person, through `metric.enable`.
+pub async fn enable_metrics(
     svc: &Services,
-    language: Option<String>,
-    scope: Option<String>,
-) -> Result<Vec<MetricSpec>, IpcError> {
-    let mut specs = svc.fact_store.list_specs().await?;
-    if let Some(lang) = language.as_deref() {
-        specs.retain(|s| s.language.as_deref() == Some(lang));
-    }
-    if let Some(scope) = scope.as_deref() {
-        specs.retain(|s| s.scope == scope);
-    }
-    Ok(specs)
-}
-
-/// Time series for one metric (by spec `key`) — one point per capture,
-/// aggregated over the metric's source-measure facts (epic tsk12): value
-/// (+numerator/denominator), captured_at, branch, provenance. Newest-first,
-/// capped at `limit` (default 200). `group_by` slices by a conformed dimension
-/// (`subject` / `branch` / `oxplow.model` / …), one series-point per
-/// (capture × group). Unknown key → empty (UI-friendly, not an error).
-pub async fn list_metric_samples(
-    svc: &Services,
-    metric_key: String,
-    limit: Option<i64>,
-    group_by: Option<String>,
-    from_ms: Option<i64>,
-    to_ms: Option<i64>,
-) -> Result<Vec<SeriesPoint>, IpcError> {
-    let Some(spec) = svc.fact_store.get_spec(&metric_key).await? else {
-        return Ok(vec![]);
-    };
-    // Bound the read to the caller's visible range (tsk202) so it no longer
-    // computes the whole history just to show a window.
-    let window = TimeWindow::from_ms(from_ms, to_ms);
-    let mut rows = svc
-        .metric_engine
-        .series_for_spec_in_stream(&spec, group_by.as_deref(), None, window)
-        .await?;
-    // The engine returns oldest→newest; this read is newest-first, capped.
-    rows.reverse();
-    let limit = limit.unwrap_or(200).max(0) as usize;
-    rows.truncate(limit);
-    Ok(rows)
-}
-
-/// The available catalog (built-in ∪ global ∪ project) with each entry's
-/// enabled-in-this-project flag — drives the Catalog page (tsk219).
-pub async fn list_metric_catalog(svc: &Services) -> Result<Vec<MetricCatalogEntry>, IpcError> {
-    Ok(svc.metrics.catalog().await)
-}
-
-/// Enable (add a `use:`) or disable (remove) a metric in `.oxplow/project.yaml`, then
-/// reseed. The Catalog toggle.
-pub async fn set_metric_enabled(
-    svc: &Services,
-    key: String,
+    keys: Vec<String>,
     enabled: bool,
 ) -> Result<(), IpcError> {
-    svc.metrics
-        .set_metric_enabled(&key, enabled)
+    svc.commands
+        .run(
+            &Actor::Human,
+            oxplow_app::commands::metric::ENABLE,
+            serde_json::json!({ "keys": keys, "enabled": enabled }),
+            false,
+        )
         .await
-        .map_err(IpcError::internal)
+        .map_err(|e| IpcError::invalid(e.to_string()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    /// P4.7 (tsk492): the catalog toggle goes through the command — the
+    /// catalog reads it back through SQL.
+    #[tokio::test]
+    async fn enabling_a_metric_shows_in_the_catalog() {
+        let (svc, _dir) = crate::test_support::services();
+        svc.metrics.seed_catalog().await;
+        let enabled = |svc: &crate::RpcContext| {
+            let svc = svc.clone();
+            async move {
+                crate::dispatch(
+                    "query_sql",
+                    json!({ "sql": "SELECT enabled FROM v_metric_catalog WHERE key = 'oxplow.rust.unsafe_blocks'" }),
+                    &svc,
+                )
+                .await
+                .unwrap()["rows"][0][0]
+                    .clone()
+            }
+        };
+        assert_eq!(enabled(&svc).await, json!(0));
+        crate::dispatch(
+            "enable_metrics",
+            json!({ "keys": ["oxplow.rust.unsafe_blocks"], "enabled": true }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        svc.metrics.seed_catalog().await;
+        assert_eq!(enabled(&svc).await, json!(1));
+        let err = crate::dispatch(
+            "enable_metrics",
+            json!({ "keys": ["nope"], "enabled": true }),
+            &svc,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.message.contains("no metric `nope`"), "{}", err.message);
+    }
 }

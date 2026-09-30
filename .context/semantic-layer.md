@@ -198,6 +198,10 @@ FROM metric_grid('day', 'zone')
   empty grid.
 - The series are scoped to `SqlQuery.stream` — a lens passes its
   `:stream_id`.
+- `metric_grid('capture'[, dim])` keeps **one row per capture**: `bucket`
+  is the capture's time and a `capture_id` column joins `v_capture` for its
+  branch, provenance and git version — what the metric pages read for
+  their recordings (P4.7).
 - Errors name the `MEASURE`: an unknown key, a dimension the metric can't
   be grouped by, a formula metric (refused, not empty), and a gateway with
   no engine.

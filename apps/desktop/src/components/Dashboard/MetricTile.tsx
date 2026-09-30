@@ -169,7 +169,8 @@ export function MetricTile({
     let cancelled = false;
     const refresh = () => {
       const win = tileIsAll ? null : widestPresetWindow(Date.now());
-      void listMetricSamples(metricKey, SAMPLE_LIMIT, null, win).then((rows) => {
+      // A metric with nothing to grid (no spec, or a formula) shows no data.
+      void listMetricSamples(metricKey, SAMPLE_LIMIT, null, win).catch(() => []).then((rows) => {
         if (cancelled) return;
         setSamples(rows);
         setLoading(false);

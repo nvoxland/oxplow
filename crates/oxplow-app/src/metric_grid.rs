@@ -6,6 +6,10 @@
 //! FROM metric_grid('day', 'zone')
 //! ```
 //!
+//! The bucket `'capture'` keeps one row per capture instead: `bucket` is
+//! the capture's time and `capture_id` joins `v_capture` for its branch,
+//! provenance and git version.
+//!
 //! The engine stays the one authority on what a metric means (its
 //! aggregation, temporal fold, filters, scale, the cube): each
 //! `MEASURE('<key>')` is that metric's series, read through
@@ -34,7 +38,8 @@ fn invalid(msg: impl Into<String>) -> DomainError {
 /// A query's `metric_grid(…)` and `MEASURE(…)` calls, parsed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GridPlan {
-    pub bucket: TimeBucket,
+    /// `None`: one row per capture (`'capture'`).
+    pub bucket: Option<TimeBucket>,
     /// The dimension each row is grouped by, when given.
     pub dim: Option<String>,
     /// The metric keys, in first-use order, distinct.
@@ -66,14 +71,17 @@ pub fn plan(sql: &str) -> Result<Option<GridPlan>, DomainError> {
         [b] => (literal(b, "bucket")?, None),
         [b, d] => (literal(b, "bucket")?, Some(literal(d, "dimension")?)),
         _ => return Err(invalid(
-            "metric_grid() takes a bucket ('day', 'week' or 'month') and optionally a dimension",
+            "metric_grid() takes a bucket ('day', 'week', 'month' or 'capture') and optionally a dimension",
         )),
     };
-    let bucket = TimeBucket::parse(&bucket).ok_or_else(|| {
-        invalid(format!(
-            "metric_grid('{bucket}'): the bucket is 'day', 'week' or 'month'"
-        ))
-    })?;
+    let bucket = match bucket.as_str() {
+        "capture" => None,
+        b => Some(TimeBucket::parse(b).ok_or_else(|| {
+            invalid(format!(
+                "metric_grid('{bucket}'): the bucket is 'day', 'week', 'month' or 'capture'"
+            ))
+        })?),
+    };
     let mut keys: Vec<String> = Vec::new();
     let mut measures = Vec::new();
     for call in measure_calls {
@@ -135,8 +143,9 @@ impl GridPlan {
         stream: Option<i64>,
         with_rows: bool,
     ) -> Result<Materialized, DomainError> {
-        // (bucket, group) → one value per key, in key order.
-        let mut grid: BTreeMap<(String, Option<String>), Vec<Option<f64>>> = BTreeMap::new();
+        // (bucket, capture, group) → one value per key, in key order.
+        type Key = (String, Option<i64>, Option<String>);
+        let mut grid: BTreeMap<Key, Vec<Option<f64>>> = BTreeMap::new();
         let mut measures = Vec::new();
         for (i, key) in self.keys.iter().enumerate() {
             let named = |e: DomainError| match e {
@@ -161,7 +170,7 @@ impl GridPlan {
             let read = SeriesRead {
                 group_by: self.dim.clone(),
                 stream,
-                bucket: Some(self.bucket),
+                bucket: self.bucket,
                 ..SeriesRead::default()
             };
             let points = if with_rows {
@@ -187,22 +196,35 @@ impl GridPlan {
                     .map_err(named)?
             };
             for p in points {
-                let bucket = p.captured_at.to_text().chars().take(10).collect::<String>();
+                let key = match self.bucket {
+                    Some(_) => (
+                        p.captured_at.to_text().chars().take(10).collect(),
+                        None,
+                        p.group.clone(),
+                    ),
+                    None => (p.captured_at.to_text(), Some(p.capture_id), p.group.clone()),
+                };
                 let row = grid
-                    .entry((bucket, p.group.clone()))
+                    .entry(key)
                     .or_insert_with(|| vec![None; self.keys.len()]);
                 row[i] = Some(p.value);
             }
         }
         let mut columns = vec!["bucket".to_string()];
+        if self.bucket.is_none() {
+            columns.push("capture_id".to_string());
+        }
         if let Some(d) = &self.dim {
             columns.push(d.clone());
         }
         columns.extend(self.keys.iter().map(|k| Self::column(k)));
         let rows = grid
             .into_iter()
-            .map(|((bucket, group), values)| {
+            .map(|((bucket, capture, group), values)| {
                 let mut row = vec![SqlCell::Text(bucket)];
+                if self.bucket.is_none() {
+                    row.push(capture.map_or(SqlCell::Null(()), SqlCell::Int));
+                }
                 if self.dim.is_some() {
                     row.push(group.map_or(SqlCell::Null(()), SqlCell::Text));
                 }
@@ -253,7 +275,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert_eq!(p.bucket, TimeBucket::Week);
+        assert_eq!(p.bucket, Some(TimeBucket::Week));
         assert_eq!(p.dim.as_deref(), Some("zone"));
         assert_eq!(p.keys, vec!["a.b".to_string(), "c".to_string()]);
         assert_eq!(plan("SELECT 1 FROM v_task").unwrap(), None);
@@ -261,7 +283,7 @@ mod tests {
             ("SELECT MEASURE('a') FROM v_task", "doesn't have"),
             (
                 "SELECT MEASURE('a') FROM metric_grid('hour')",
-                "'day', 'week' or 'month'",
+                "'day', 'week', 'month' or 'capture'",
             ),
             (
                 "SELECT MEASURE(x) FROM metric_grid('day')",
@@ -428,6 +450,39 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(reads.measures, vec!["acme.size".to_string()]);
+    }
+
+    /// One row per capture, joinable to `v_capture` — what the metric pages
+    /// read for their recordings.
+    #[tokio::test]
+    async fn a_capture_grid_has_a_row_per_capture() {
+        let (gateway, engine, facts) = fixture().await;
+        let spec = facts.get_spec("acme.size_sum").await.unwrap().unwrap();
+        let series = engine
+            .series_for_spec_read(&spec, &SeriesRead::default())
+            .await
+            .unwrap();
+        let out = gateway
+            .query_sql(
+                "SELECT g.capture_id, MEASURE('acme.size_sum') AS v, c.provenance
+                   FROM metric_grid('capture') g JOIN v_capture c ON c.id = g.capture_id
+                  ORDER BY g.bucket",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        let got: Vec<(i64, f64)> = out
+            .rows
+            .iter()
+            .map(|r| match (&r[0], &r[1]) {
+                (SqlCell::Int(id), SqlCell::Real(v)) => (*id, *v),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        let want: Vec<(i64, f64)> = series.iter().map(|p| (p.capture_id, p.value)).collect();
+        assert_eq!(got, want);
+        assert!(out.reads.models.contains(&"v_capture".to_string()));
     }
 
     #[tokio::test]

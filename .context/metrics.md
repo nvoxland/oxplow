@@ -1464,13 +1464,13 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   metric's own reads actually include the asserted number). These four are
   **agent-only** (classified in the surface-parity manifest); the renderer
   drives compute via config + the runner, not ad-hoc IPC.
-- **IPC** (`crates/oxplow-rpc/src/commands/metrics.rs` cores +
-  the `oxplow-rpc` command table (which generates the Tauri adapters), registered
-  in `collect_commands!` + the remote `rpc_dispatch!`) — **flipped onto specs +
-  facts (T-C3a, tsk39)**, mirroring the MCP wiring: `list_metric_definitions` →
-  `list_specs` (`MetricSpec`), `list_metric_samples(metric_key, limit, group_by?)`
-  → `series_for_spec` (`SeriesPoint`, newest-first; `group_by` slices server-side),
-  and the catalog / enable reads below. The dimension roll-up, per-capture
+- **The desktop reads metrics through SQL** (P4.7, tsk492 — the metric IPC
+  reads are gone). `src/metricsSql.ts` builds the queries and row shapes;
+  `api.ts` runs them through `query_sql`: `listMetricSamples` is
+  `metric_grid('capture'[, dim])` joined to `v_capture` (one row per capture,
+  newest first, bounded to a range in SQL), `listMetricDefinitions` reads
+  `v_metric_spec` (v2 adds `entity_json`), `listMetricCatalog` reads
+  `v_metric_catalog`. The one metric IPC left is `enable_metrics`, below. The dimension roll-up, per-capture
   findings, measure series/rollup and effort-delta IPC commands were removed
   with the UI that used them (tsk309); agents keep `metric_breakdown`,
   `list_metric_findings`, `metric_series` and `metric_rollup` over MCP, and
@@ -1656,7 +1656,11 @@ The mechanics behind those controls (unchanged by tsk117):
   (`config_state`): a built-in gauge is on only when a non-disabled `use:`
   resolves it; producers/plugins are default-ON unless an `enabled: false`
   marker disables them.
-- **Enable/disable** via `set_metric_enabled` — its config shape is
+- **Enable/disable** via the `metric.enable { keys, enabled }` command
+  (`commands/metric.rs`; the desktop's `enable_metrics` IPC runs it as the
+  person) — it computes the new `metrics:` list and hands it to
+  `config.set`'s core, so it is audited, logged as `config.changed` and
+  undoable. Its config shape is
   default-aware (`apply_metric_enabled` + `is_default_on`): a default-OFF
   metric (built-in code gauge / global def) toggles by the presence of a bare
   `use:` entry, while a default-ON metric (producer/plugin) or a config `key:`
@@ -1698,10 +1702,10 @@ effort review (`DiffViewPage`'s `effort-review` slot) shows the oxplow-analytics
 (tests, coverage, analysis, tokens and nudges have their own lenses and are
 left out). A row links to the metric's detail page.
 
-Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` (RPC cores
-in `commands/metrics.rs`, `ui`-scoped in surface-parity), backed by
-`MetricsService::{catalog, set_metric_enabled}` and the `MetricCatalogEntry`
-type — consumed by the Metric Detail Configure block and the Metrics rows.
+Catalog reads/writes: `v_metric_catalog` (the `metric_catalog` table, V106,
+which `seed_catalog` rewrites from `MetricsService::catalog()` on every
+reseed) and the `metric.enable` command — consumed by the Metric Detail
+Configure block and the Metrics rows.
 **`scaffold_metric` is no longer here** (tsk122): its UI button was retired, so
 it moved off the `ui` surface to an **agent-only MCP tool** (`agent(...)` in
 surface-parity; the handler in `oxplow-mcp` calls `MetricsService::metric_scaffold`

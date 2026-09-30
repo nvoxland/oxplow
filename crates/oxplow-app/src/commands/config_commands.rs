@@ -136,7 +136,7 @@ fn report(target: &ConfigTarget, cfg: &OxplowConfig, key: ConfigKey) -> KeyRepor
 
 /// Set (`Some`) or unset (`None`) `key`: validate and describe the change;
 /// the file write and config swap run after commit ([`apply_committed`]).
-fn change(
+pub(crate) fn change(
     target: &ConfigTarget,
     actor: &Actor,
     key: &str,

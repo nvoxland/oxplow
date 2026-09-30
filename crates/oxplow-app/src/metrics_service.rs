@@ -31,7 +31,7 @@ use oxplow_db::{
     SqliteFactStore, SqliteSnapshotStore, SqliteThreadStore,
 };
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{EffortId, StreamId, ThreadId};
+use oxplow_domain::{DomainError, EffortId, StreamId, ThreadId};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -628,7 +628,36 @@ impl MetricsService {
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "seed: project measure reconciliation failed"),
         }
+        if let Err(e) = self.publish_catalog(facts).await {
+            tracing::warn!(error = %e, "seed: publishing the metric catalog failed");
+        }
         (m, d)
+    }
+
+    /// Write the resolved catalog to `metric_catalog` (`v_metric_catalog`,
+    /// P4.7) — the whole of it, replacing what was there.
+    async fn publish_catalog(&self, facts: &SqliteFactStore) -> Result<(), DomainError> {
+        let entries = self.catalog().await;
+        facts
+            .database()
+            .transaction(move |tx| {
+                tx.execute("DELETE FROM metric_catalog", [])
+                    .map_err(oxplow_db::map_sql_err)?;
+                for e in &entries {
+                    tx.execute(
+                        "INSERT INTO metric_catalog
+                           (key, title, kind, language, scope, enabled, target, trigger, toggleable, category)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                        rusqlite::params![
+                            e.key, e.title, e.kind, e.language, e.scope, e.enabled, e.target,
+                            e.trigger, e.toggleable, e.category
+                        ],
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                }
+                Ok(())
+            })
+            .await
     }
 
     /// The **available** catalog (built-in ∪ global ∪ project) with each entry's
@@ -794,7 +823,12 @@ impl MetricsService {
     /// stay consistent (tsk31). Default-OFF metrics toggle by `use:` presence;
     /// default-ON metrics and config `key:` definitions toggle by the `enabled`
     /// marker (never deleting a `key:` definition on disable).
-    fn apply_metric_enabled(&self, metrics: &mut Vec<MetricEntry>, key: &str, enabled: bool) {
+    pub(crate) fn apply_metric_enabled(
+        &self,
+        metrics: &mut Vec<MetricEntry>,
+        key: &str,
+        enabled: bool,
+    ) {
         let pos = metrics
             .iter()
             .position(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key));
@@ -850,47 +884,6 @@ impl MetricsService {
                 None => {}
             }
         }
-    }
-
-    /// Enable or disable a metric in this project's `.oxplow/project.yaml`, then
-    /// reseed (the Catalog toggle, tsk219/tsk31). Persists the config + emits
-    /// `ConfigChanged`; `seed_catalog` reconciles the `metric_spec` table so a
-    /// disabled metric is pruned (hidden + collection stops).
-    pub async fn set_metric_enabled(&self, key: &str, enabled: bool) -> Result<(), String> {
-        {
-            let mut cfg = self
-                .config
-                .write()
-                .map_err(|_| "config lock poisoned".to_string())?;
-            self.apply_metric_enabled(&mut cfg.metrics, key, enabled);
-            oxplow_config::write_project_config(&self.project_dir, &cfg)
-                .map_err(|e| e.to_string())?;
-        }
-        self.invalidate_global_catalog();
-        self.events.emit(OxplowEvent::ConfigChanged);
-        self.seed_catalog().await;
-        Ok(())
-    }
-
-    /// Enable or disable **many** metrics in one config write + one reseed — the
-    /// per-section "Enable all / Disable all" action (tsk32). Applies each key to
-    /// the same in-memory `metrics:` list under a single lock, then persists once.
-    pub async fn set_metrics_enabled(&self, keys: &[String], enabled: bool) -> Result<(), String> {
-        {
-            let mut cfg = self
-                .config
-                .write()
-                .map_err(|_| "config lock poisoned".to_string())?;
-            for key in keys {
-                self.apply_metric_enabled(&mut cfg.metrics, key, enabled);
-            }
-            oxplow_config::write_project_config(&self.project_dir, &cfg)
-                .map_err(|e| e.to_string())?;
-        }
-        self.invalidate_global_catalog();
-        self.events.emit(OxplowEvent::ConfigChanged);
-        self.seed_catalog().await;
-        Ok(())
     }
 
     /// A new gauge-backed metric, as a template (epic tsk12, E; tsk391): a
@@ -2651,6 +2644,23 @@ fn gauge_source(gauge: &ResolvedGauge, collector: &Collector) -> String {
 #[cfg(test)]
 mod tests {
 
+    /// Switch metrics through the real path — the `metric.enable` command —
+    /// then reseed, as the service's event loop does on `ConfigChanged`.
+    async fn enable(svc: &crate::Services, keys: &[String], enabled: bool) {
+        // The catalog the command checks keys against (boot seeds it).
+        svc.metrics.seed_catalog().await;
+        svc.commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::commands::metric::ENABLE,
+                serde_json::json!({ "keys": keys, "enabled": enabled }),
+                false,
+            )
+            .await
+            .unwrap();
+        svc.metrics.seed_catalog().await;
+    }
+
     /// P4.1 (tsk486): every built-in entity metric and dimension reads only
     /// published views — nothing its SQL names is a physical table.
     #[tokio::test]
@@ -2990,16 +3000,15 @@ def transform(input):
         // hid in — so a single-gauge unit test could not have found it.
         let (svc, dir) = fixture().await;
         svc.metrics.seed_catalog().await;
-        svc.metrics
-            .set_metrics_enabled(
-                &[
-                    "oxplow.rust.unsafe_blocks".into(),
-                    "oxplow.ts.console_calls".into(),
-                ],
-                true,
-            )
-            .await
-            .unwrap();
+        enable(
+            &svc,
+            &[
+                "oxplow.rust.unsafe_blocks".into(),
+                "oxplow.ts.console_calls".into(),
+            ],
+            true,
+        )
+        .await;
 
         let write = |rel: &str, body: &str| {
             let p = dir.path().join(rel);
@@ -3077,10 +3086,7 @@ def transform(input):
         // unchanged tree must not create any snapshot at all.
         let (svc, dir) = fixture().await;
         svc.metrics.seed_catalog().await;
-        svc.metrics
-            .set_metrics_enabled(&["oxplow.rust.unsafe_blocks".into()], true)
-            .await
-            .unwrap();
+        enable(&svc, &["oxplow.rust.unsafe_blocks".into()], true).await;
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(dir.path().join("src/a.rs"), "fn a() { unsafe { x(); } }\n").unwrap();
 
@@ -3120,16 +3126,15 @@ def transform(input):
         svc.metrics.seed_catalog().await;
         // A gauge is only in `resolved_gauges` when its metric is enabled — enable the
         // two built-ins this test drives.
-        svc.metrics
-            .set_metrics_enabled(
-                &[
-                    "oxplow.rust.unsafe_blocks".into(),
-                    "oxplow.ts.console_calls".into(),
-                ],
-                true,
-            )
-            .await
-            .unwrap();
+        enable(
+            &svc,
+            &[
+                "oxplow.rust.unsafe_blocks".into(),
+                "oxplow.ts.console_calls".into(),
+            ],
+            true,
+        )
+        .await;
         let ctx = |snapshot_id: i64| GaugeRunContext {
             stream_val: 1,
             thread_id: None,
@@ -4811,10 +4816,7 @@ def transform(input):
         assert_eq!(entry.category.as_deref(), Some("static-quality"));
 
         // Enable end-to-end: writes a `use:` into .oxplow/project.yaml + seeds the def.
-        svc.metrics
-            .set_metric_enabled("oxplow.rust.unsafe_blocks", true)
-            .await
-            .unwrap();
+        enable(&svc, &["oxplow.rust.unsafe_blocks".into()], true).await;
         assert!(
             svc.metrics
                 .catalog()
@@ -4839,10 +4841,7 @@ def transform(input):
         );
 
         // Disable removes it from config.
-        svc.metrics
-            .set_metric_enabled("oxplow.rust.unsafe_blocks", false)
-            .await
-            .unwrap();
+        enable(&svc, &["oxplow.rust.unsafe_blocks".into()], false).await;
         assert!(
             !svc.metrics
                 .catalog()
@@ -4942,10 +4941,7 @@ def transform(input):
 
         // Disable the producer: catalog reads it off, config carries a marker, and
         // the spec is pruned so all spec-driven reads go empty.
-        svc.metrics
-            .set_metric_enabled("agent.tokens.total", false)
-            .await
-            .unwrap();
+        enable(&svc, &["agent.tokens.total".into()], false).await;
         let entry = svc
             .metrics
             .catalog()
@@ -4970,10 +4966,7 @@ def transform(input):
         );
 
         // Re-enable removes the marker and re-seeds the spec from its definition.
-        svc.metrics
-            .set_metric_enabled("agent.tokens.total", true)
-            .await
-            .unwrap();
+        enable(&svc, &["agent.tokens.total".into()], true).await;
         assert!(
             svc.metrics
                 .catalog()
@@ -5008,7 +5001,7 @@ def transform(input):
             "agent.tokens.input".to_string(),
             "agent.tokens.output".to_string(),
         ];
-        svc.metrics.set_metrics_enabled(&keys, false).await.unwrap();
+        enable(&svc, &keys, false).await;
 
         let cat = svc.metrics.catalog().await;
         for k in &keys {
@@ -5047,7 +5040,7 @@ def transform(input):
             "agent.tokens.input",
             "agent.tokens.output",
         ] {
-            svc.metrics.set_metric_enabled(k, false).await.unwrap();
+            enable(&svc, &[k.to_string()], false).await;
         }
         assert!(
             !svc.fact_store

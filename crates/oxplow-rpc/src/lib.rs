@@ -254,11 +254,9 @@ macro_rules! oxplow_command_table {
                 list_efforts_at_snapshots => $crate::commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<i64> } -> Vec<::oxplow_db::EffortAtSnapshot>,
                 list_efforts_overlapping_range => $crate::commands::effort::list_efforts_overlapping_range { range_start: i64, range_end: i64 } -> Vec<::oxplow_db::Effort>,
                 list_changed_paths_for_effort => $crate::commands::effort::list_changed_paths_for_effort { effort_id: ::oxplow_domain::EffortId } -> ::oxplow_db::EffortChangedPaths,
-                // metrics (unified substrate, tsk213)
-                list_metric_definitions => $crate::commands::metrics::list_metric_definitions { language: Option<String>, scope: Option<String> } -> Vec<::oxplow_db::MetricSpec>,
-                list_metric_samples => $crate::commands::metrics::list_metric_samples { metric_key: String, limit: Option<i64>, group_by: Option<String>, from_ms: Option<i64>, to_ms: Option<i64> } -> Vec<::oxplow_app::metric_engine::SeriesPoint>,
-                list_metric_catalog => $crate::commands::metrics::list_metric_catalog {} -> Vec<::oxplow_app::metrics_service::MetricCatalogEntry>,
-                set_metric_enabled => $crate::commands::metrics::set_metric_enabled { key: String, enabled: bool } -> (),
+                // metrics: reads are SQL (`metric_grid()`, `v_metric_catalog`); this
+                // switches them, through the `metric.enable` command (P4.7)
+                enable_metrics => $crate::commands::metrics::enable_metrics { keys: Vec<String>, enabled: bool } -> (),
                 // followup
                 list_followups => $crate::commands::followup::list_followups { thread_id: ::oxplow_domain::ThreadId } -> Vec<::oxplow_app::Followup>,
                 add_followup => $crate::commands::followup::add_followup { thread_id: ::oxplow_domain::ThreadId, body: String } -> ::oxplow_app::Followup,

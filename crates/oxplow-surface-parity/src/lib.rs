@@ -126,16 +126,16 @@ pub const MANIFEST: &[Capability] = &[
     // `metric-deltas` advisory (over `v_effort_metric_delta`).
     // Effort bands on the Metrics Explorer time axis (tsk233) — UI-only overlay.
     ui("list_efforts_in_window"),
-    // Unified metric substrate reads (tsk213) — exposed on both surfaces.
-    both("list_metric_definitions"),
-    both("list_metric_samples"),
+    // Metric reads (tsk213): the UI reads through SQL (`metric_grid()`, P4.7);
+    // the MCP tools go in P4.8.
+    agent("list_metric_definitions"),
+    agent("list_metric_samples"),
     // Per-run finding detail (tsk213/tsk232) — both: the agent drills in via MCP,
     // the renderer's per-kind Metric detail view reads it over IPC.
     agent("list_metric_findings"),
-    // Catalog browse + enable-toggle (tsk219) — UI-driven (the agent authors via
-    // the `metrics:` config / run_metric, not the catalog toggle).
-    ui("list_metric_catalog"),
-    ui("set_metric_enabled"),
+    // The catalog toggle (tsk219): the person's typed call into the
+    // `metric.enable` command; an agent runs the command itself.
+    ui("enable_metrics"),
     // Metric authoring tools (tsk213, P3) — agent-only: the renderer drives
     // compute via config + the runner, not ad-hoc IPC. `scaffold_metric` joined
     // them (tsk122) when its "+ New metric" UI button was retired in favor of

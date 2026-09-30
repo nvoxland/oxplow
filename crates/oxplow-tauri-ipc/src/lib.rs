@@ -276,10 +276,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_efforts_overlapping_range,
             commands::generated::list_changed_paths_for_effort,
             commands::generated::list_efforts_in_window,
-            commands::generated::list_metric_definitions,
-            commands::generated::list_metric_samples,
-            commands::generated::list_metric_catalog,
-            commands::generated::set_metric_enabled,
+            commands::generated::enable_metrics,
             // log
             commands::generated::get_git_log,
             commands::generated::get_commit_detail,

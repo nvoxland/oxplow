@@ -996,22 +996,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listMetricDefinitions: (language: string | null, scope: string | null) => typedError<MetricSpec[], IpcError>(__TAURI_INVOKE("list_metric_definitions", { language, scope })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listMetricSamples: (metricKey: string, limit: number | null, groupBy: string | null, fromMs: number | null, toMs: number | null) => typedError<SeriesPoint[], IpcError>(__TAURI_INVOKE("list_metric_samples", { metricKey, limit, groupBy, fromMs, toMs })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listMetricCatalog: () => typedError<MetricCatalogEntry[], IpcError>(__TAURI_INVOKE("list_metric_catalog")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setMetricEnabled: (key: string, enabled: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_enabled", { key, enabled })),
+	enableMetrics: (keys: string[], enabled: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("enable_metrics", { keys, enabled })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2997,42 +2982,6 @@ export type MergeReadiness =
 "conflict";
 
 /**
- *  One row in the **available** metric catalog (built-in ∪ global ∪ project) for
- *  the Catalog UI (tsk219, P4): what the metric is + whether the project has it
- *  enabled. Distinct from `MetricDefinition` (the seeded substrate row) — a
- *  built-in appears here even before it's enabled/seeded.
- */
-export type MetricCatalogEntry = {
-	key: string,
-	title: string,
-	kind: string,
-	language: string | null,
-	// `built-in` | `global` | `project`.
-	scope: string,
-	/**
-	 *  Active in this project's `.oxplow/project.yaml` `metrics:` block. Always `true`
-	 *  for non-toggleable (always-on) producer/plugin metrics.
-	 */
-	enabled: boolean,
-	target: number | null,
-	trigger: string,
-	/**
-	 *  Whether this metric can be enabled/disabled + overridden from config.
-	 *  `true` for the bundled code gauges (`use:`-able) and project/global
-	 *  `metrics:` entries; `false` for always-on producers (tokens, tests,
-	 *  coverage, analysis, lifecycle, nudges) and plugin-seeded definitions —
-	 *  those are free side-bands, not opt-in compute. The real axis is
-	 *  always-on vs toggleable; "built-in vs hardcoded" was an artifact (tsk284).
-	 */
-	toggleable: boolean,
-	/**
-	 *  `operational` | `testing` | `static-quality` | `custom` — drives the
-	 *  Catalog page's grouping.
-	 */
-	category: string | null,
-};
-
-/**
  *  One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a
  *  measure (epic tsk12, E). A metric no longer *computes* anything: it names a
  *  `sourceMeasure` + an `aggregation` (+ optional `filter`), or a `formula` over
@@ -3115,45 +3064,6 @@ export type MetricEntry = {
 	time?: string | null,
 	// Entity metric: the value expression aggregated (not needed for `count`).
 	value?: string | null,
-};
-
-export type MetricSpec = {
-	id: number,
-	key: string,
-	title: string,
-	unit: string | null,
-	// The measure whose facts this metric aggregates; `None` for a formula metric.
-	source_measure: string | null,
-	/**
-	 *  `count` | `count_distinct` | `sum` | `avg` | `min` | `max` | `last` | `p95`
-	 *  | `ratio` — how source facts combine WITHIN a capture.
-	 */
-	aggregation: string,
-	// Conjunctive fact predicate (min_value / severity / dim equality), JSON.
-	filter_json: string | null,
-	// Derived-metric formula referencing other metric keys; `None` for a base.
-	formula: string | null,
-	// Conformed dims this metric may be sliced by (JSON array of dim keys).
-	sliceable_dims_json: string | null,
-	// `higher-better` | `lower-better` | `neutral`.
-	direction: string,
-	target: number | null,
-	warn_at: number | null,
-	fail_at: number | null,
-	description: string | null,
-	category: string | null,
-	language: string | null,
-	// `built-in` | `global` | `project`.
-	scope: string,
-	// Read-time presentation: `gauge` | `findings` | `test` | `coverage` | `event`.
-	display_kind: string,
-	/**
-	 *  Set for an entity metric: `{view, where?, time?, value?, aggregation}`
-	 *  (V88). Its `aggregation` column is then `sum` (one value per capture).
-	 */
-	entity_json: string | null,
-	created_at: Timestamp,
-	updated_at: Timestamp,
 };
 
 // When one model last changed.
@@ -3812,30 +3722,6 @@ export type SearchHit = {
 export type SelectThreadRequest = {
 	streamId: StreamId,
 	threadId: ThreadId | null,
-};
-
-/**
- *  One point in a metric's time series: a single capture's aggregated value.
- *  A capture has one branch + one provenance, so a point carries them directly
- *  (the read surface renders them without a second lookup, tsk26).
- */
-export type SeriesPoint = {
-	capture_id: number,
-	captured_at: Timestamp,
-	value: number,
-	// Carried for ratio metrics so downstream roll-ups re-aggregate correctly.
-	numerator: number | null,
-	denominator: number | null,
-	// The group-by dimension value, when the series is sliced by a dimension.
-	group: string | null,
-	// The capture's branch (`None` for operational facts with no worktree).
-	branch: string | null,
-	// The capture's trust label (`observed` | `asserted` | …).
-	provenance: string | null,
-	// The capture's closest git version (short sha), for the recordings table.
-	git_version: string | null,
-	// The capture's collector source (e.g. `nextest`, `agent-reported`).
-	source: string | null,
 };
 
 export type SetStreamPromptRequest = {

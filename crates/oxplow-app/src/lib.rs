@@ -909,12 +909,14 @@ impl Services {
         ] {
             commands.register(command).expect("core commands register");
         }
-        for command in
-            commands::config_commands::commands(commands::config_commands::ConfigTarget {
-                config: config_arc.clone(),
-                project_dir: layout.project_dir.clone(),
-                events: event_bus.clone(),
-            })
+        let config_target = commands::config_commands::ConfigTarget {
+            config: config_arc.clone(),
+            project_dir: layout.project_dir.clone(),
+            events: event_bus.clone(),
+        };
+        for command in commands::config_commands::commands(config_target.clone())
+            .into_iter()
+            .chain(commands::metric::commands(config_target, metrics.clone()))
         {
             commands.register(command).expect("core commands register");
         }

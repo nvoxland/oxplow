@@ -17,6 +17,7 @@
 
 pub mod config_commands;
 pub mod effort;
+pub mod metric;
 pub mod work_item;
 
 use std::collections::BTreeMap;

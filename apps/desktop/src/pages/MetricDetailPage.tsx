@@ -12,7 +12,7 @@ import {
   listMetricDefinitions,
   listMetricSamples,
   removeDashboardItem,
-  setMetricEnabled,
+  enableMetrics,
   subscribeDashboardEvents,
   subscribeMetricRefresh,
 } from "../api.js";
@@ -118,9 +118,12 @@ export function MetricDetailPage({
       });
       // Bound the read to the widest preset (tsk202); the chart's range dropdown
       // still switches instantly client-side within it (filterByRange below).
-      void listMetricSamples(metricKey, SAMPLE_LIMIT, null, widestPresetWindow(Date.now())).then((rows) => {
-        if (!cancelled) setSamples(rows);
-      });
+      // A metric with nothing to grid (no spec, or a formula) shows no data.
+      void listMetricSamples(metricKey, SAMPLE_LIMIT, null, widestPresetWindow(Date.now()))
+        .catch(() => [])
+        .then((rows) => {
+          if (!cancelled) setSamples(rows);
+        });
     };
     refresh();
     // Debounce the OTLP-burst metricSamplesChanged and skip events for measures
@@ -153,7 +156,7 @@ export function MetricDetailPage({
     if (!entry) return;
     setConfigBusy(true);
     try {
-      await setMetricEnabled(entry.key, !entry.enabled);
+      await enableMetrics([entry.key], !entry.enabled);
     } catch (e) {
       recordOpError({
         label: `${entry.enabled ? "Disable" : "Enable"} ${entry.key}`,
