@@ -658,8 +658,9 @@ pub struct McpDimEq {
     pub value: String,
 }
 
-/// Optional stream selector shared by the stream-scoped git read tools.
-/// Omit `stream_id` to target the current/primary worktree.
+/// Optional stream selector shared by the stream-scoped VCS read tools.
+/// Omit `stream_id` to read the caller's own stream (the primary only for
+/// a caller with no thread identity).
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct GitStreamParams {
     pub stream_id: Option<String>,
@@ -667,6 +668,7 @@ pub struct GitStreamParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct GitLogParams {
+    /// The stream whose history to read; the caller's when absent.
     pub stream_id: Option<String>,
     /// Max commits to return.
     pub limit: Option<u32>,
@@ -676,15 +678,8 @@ pub struct GitLogParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GitPathParams {
-    pub stream_id: Option<String>,
-    /// Repo-relative file path.
-    pub path: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiffParams {
-    /// The stream whose workspace to diff; the primary when absent.
+    /// The stream whose workspace to diff; the caller's when absent.
     pub stream_id: Option<String>,
     /// The older side: `working`, `snap:<id>` or `git:<rev>`; absent =
     /// the empty tree (everything added).
@@ -699,7 +694,7 @@ pub struct DiffParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BlameParams {
-    /// The stream whose workspace to blame in; the primary when absent.
+    /// The stream whose workspace to blame in; the caller's when absent.
     pub stream_id: Option<String>,
     /// Workspace-relative file path.
     pub path: String,
@@ -710,7 +705,7 @@ pub struct BlameParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ReadAtParams {
-    /// The stream whose workspace to read; the primary when absent.
+    /// The stream whose workspace to read; the caller's when absent.
     pub stream_id: Option<String>,
     /// Workspace-relative file path.
     pub path: String,
@@ -1970,14 +1965,14 @@ impl OxplowMcp {
     )]
     async fn git_status(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<GitStreamParams>,
     ) -> Result<CallToolResult, McpError> {
         check_optional_stream("git_status", params.0.stream_id.as_deref())?;
-        let ws = self
-            .services
-            .worktrees
-            .resolve(params.0.stream_id.as_deref())
+        let sid = self
+            .stream_or_callers(&caller_of(&extensions), params.0.stream_id)
             .await;
+        let ws = self.services.worktrees.resolve(sid.as_deref()).await;
         let scopes = self
             .services
             .git
@@ -1991,13 +1986,19 @@ impl OxplowMcp {
         description = "The stream's history from its head, newest first (`all` spans every \
                           branch; `limit` caps the count)."
     )]
-    async fn vcs_log(&self, params: Parameters<GitLogParams>) -> Result<CallToolResult, McpError> {
+    async fn vcs_log(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<GitLogParams>,
+    ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         check_optional_stream("vcs_log", p.stream_id.as_deref())?;
-        let log =
-            oxplow_app::vcs::reads::log(&self.services, p.stream_id.as_deref(), p.limit, p.all)
-                .await
-                .map_err(domain_err)?;
+        let sid = self
+            .stream_or_callers(&caller_of(&extensions), p.stream_id)
+            .await;
+        let log = oxplow_app::vcs::reads::log(&self.services, sid.as_deref(), p.limit, p.all)
+            .await
+            .map_err(domain_err)?;
         json_result(&log)
     }
 
@@ -2006,18 +2007,21 @@ impl OxplowMcp {
                           line, at `revision` (default `working`; an uncommitted line names no \
                           revision)."
     )]
-    async fn vcs_blame(&self, params: Parameters<BlameParams>) -> Result<CallToolResult, McpError> {
+    async fn vcs_blame(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<BlameParams>,
+    ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         check_optional_stream("vcs_blame", p.stream_id.as_deref())?;
+        let sid = self
+            .stream_or_callers(&caller_of(&extensions), p.stream_id)
+            .await;
         let revision = parse_revision(p.revision.as_deref().unwrap_or("working"))?;
-        let lines = oxplow_app::vcs::reads::blame(
-            &self.services,
-            p.stream_id.as_deref(),
-            &p.path,
-            &revision,
-        )
-        .await
-        .map_err(domain_err)?;
+        let lines =
+            oxplow_app::vcs::reads::blame(&self.services, sid.as_deref(), &p.path, &revision)
+                .await
+                .map_err(domain_err)?;
         json_result(&lines)
     }
 
@@ -2028,35 +2032,12 @@ impl OxplowMcp {
                           with where it forked from `from` — a branch's own changes against \
                           `git:main`."
     )]
-    async fn diff(&self, params: Parameters<DiffParams>) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("diff", p.stream_id.as_deref())?;
-        let to = parse_revision(&p.to)?;
-        let mut from = p.from.as_deref().map(parse_revision).transpose()?;
-        let sid = p.stream_id.as_deref();
-        if p.since_fork {
-            let Some(base) = &from else {
-                return Err(McpError::invalid_params("since_fork needs `from`", None));
-            };
-            let head = oxplow_domain::vcs::Revision::from_rev_slot(Some("git:HEAD"))
-                .map_err(|e| McpError::invalid_params(e, None))?;
-            let fork_of = if to == oxplow_domain::vcs::Revision::Working {
-                &head
-            } else {
-                &to
-            };
-            from = oxplow_app::vcs::reads::merge_base(&self.services, sid, base, fork_of)
-                .await
-                .map_err(domain_err)?;
-        }
-        let ws = self.services.worktrees.resolve(sid).await;
-        let entries = self
-            .services
-            .trees
-            .diff(&ws, from.as_ref(), &to)
-            .await
-            .map_err(domain_err)?;
-        json_result(&entries)
+    async fn diff(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<DiffParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.diff_as(&caller_of(&extensions), params.0).await
     }
 
     #[tool(
@@ -2064,28 +2045,12 @@ impl OxplowMcp {
                           `snap:<id>` (a local-history snapshot) or `git:<rev>` (a sha, branch, \
                           tag or HEAD). Returns null when the path isn't in that version."
     )]
-    async fn read_at(&self, params: Parameters<ReadAtParams>) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("read_at", p.stream_id.as_deref())?;
-        let revision: oxplow_domain::vcs::Revision = p
-            .revision
-            .parse()
-            .map_err(|e: String| McpError::invalid_params(e, None))?;
-        let ws = self
-            .services
-            .worktrees
-            .resolve(p.stream_id.as_deref())
-            .await;
-        let bytes = self
-            .services
-            .trees
-            .read_at(&ws, &revision, &p.path)
-            .await
-            .map_err(|e| match e {
-                oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
-                other => internal(other),
-            })?;
-        json_result(&bytes.map(|b| String::from_utf8_lossy(&b).into_owned()))
+    async fn read_at(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<ReadAtParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.read_at_as(&caller_of(&extensions), params.0).await
     }
 
     #[tool(
@@ -5185,6 +5150,93 @@ impl<T: serde::Serialize> WithLinkWarnings<T> {
 }
 
 impl OxplowMcp {
+    /// The stream a stream-scoped read acts on when the call names none:
+    /// the caller's (its header, else its thread's stream); the primary
+    /// only for an anonymous caller.
+    /// `given`, else the caller's stream ([`Self::caller_stream`]).
+    async fn stream_or_callers(&self, caller: &McpCaller, given: Option<String>) -> Option<String> {
+        match given {
+            Some(s) => Some(s),
+            None => self.caller_stream(caller).await,
+        }
+    }
+
+    async fn caller_stream(&self, caller: &McpCaller) -> Option<String> {
+        use oxplow_domain::stores::ThreadStore as _;
+        if let Some(s) = caller.stream_id {
+            return Some(s.to_string());
+        }
+        let thread = caller.thread_id?;
+        let t = self.services.thread_store.get(&thread).await.ok()??;
+        Some(t.stream_id.to_string())
+    }
+
+    /// `diff` as `caller`: a stream the call doesn't name is the caller's.
+    pub async fn diff_as(
+        &self,
+        caller: &McpCaller,
+        mut p: DiffParams,
+    ) -> Result<CallToolResult, McpError> {
+        check_optional_stream("diff", p.stream_id.as_deref())?;
+        p.stream_id = self.stream_or_callers(caller, p.stream_id.take()).await;
+        let to = parse_revision(&p.to)?;
+        let mut from = p.from.as_deref().map(parse_revision).transpose()?;
+        let sid = p.stream_id.as_deref();
+        if p.since_fork {
+            let Some(base) = &from else {
+                return Err(McpError::invalid_params("since_fork needs `from`", None));
+            };
+            let head = oxplow_domain::vcs::Revision::from_rev_slot(Some("git:HEAD"))
+                .map_err(|e| McpError::invalid_params(e, None))?;
+            let fork_of = if to == oxplow_domain::vcs::Revision::Working {
+                &head
+            } else {
+                &to
+            };
+            from = oxplow_app::vcs::reads::merge_base(&self.services, sid, base, fork_of)
+                .await
+                .map_err(domain_err)?;
+        }
+        let ws = self.services.worktrees.resolve(sid).await;
+        let entries = self
+            .services
+            .trees
+            .diff(&ws, from.as_ref(), &to)
+            .await
+            .map_err(domain_err)?;
+        json_result(&entries)
+    }
+
+    /// `read_at` as `caller`: a stream the call doesn't name is the
+    /// caller's.
+    pub async fn read_at_as(
+        &self,
+        caller: &McpCaller,
+        mut p: ReadAtParams,
+    ) -> Result<CallToolResult, McpError> {
+        check_optional_stream("read_at", p.stream_id.as_deref())?;
+        p.stream_id = self.stream_or_callers(caller, p.stream_id.take()).await;
+        let revision: oxplow_domain::vcs::Revision = p
+            .revision
+            .parse()
+            .map_err(|e: String| McpError::invalid_params(e, None))?;
+        let ws = self
+            .services
+            .worktrees
+            .resolve(p.stream_id.as_deref())
+            .await;
+        let bytes = self
+            .services
+            .trees
+            .read_at(&ws, &revision, &p.path)
+            .await
+            .map_err(|e| match e {
+                oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
+                other => internal(other),
+            })?;
+        json_result(&bytes.map(|b| String::from_utf8_lossy(&b).into_owned()))
+    }
+
     /// `run_command` for a known caller. Refuses an anonymous connection:
     /// a write with no actor behind it is not audited to anyone.
     pub async fn run_command_as(
@@ -6826,6 +6878,47 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.message.contains("another stream"), "{}", err.message);
+    }
+
+    /// tsk555: `read_at` / `diff` without a `stream_id` read the calling
+    /// thread's stream, not the primary's.
+    #[tokio::test]
+    async fn read_at_and_diff_default_to_the_callers_stream() {
+        use oxplow_domain::stores::StreamStore as _;
+        let (proj, services, server) = boot();
+        let primary = services.stream_store.list().await.unwrap().pop().unwrap();
+        std::fs::write(proj.path().join("who.txt"), "primary").unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::fs::write(elsewhere.path().join("who.txt"), "mine").unwrap();
+        let mut other = primary.clone();
+        other.id = oxplow_domain::StreamId::placeholder();
+        other.title = "other".into();
+        other.branch = "other".into();
+        other.kind = oxplow_domain::StreamKind::Worktree;
+        other.worktree_path = elsewhere.path().to_string_lossy().into_owned();
+        let other_id = services.stream_store.upsert(&other).await.unwrap();
+        let thread = services
+            .threads
+            .create(&other_id, "t", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
+        let caller = McpCaller {
+            thread_id: Some(thread.id),
+            stream_id: None,
+        };
+        let out = server
+            .read_at_as(
+                &caller,
+                ReadAtParams {
+                    stream_id: None,
+                    revision: "working".into(),
+                    path: "who.txt".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let text = out.content[0].as_text().unwrap().text.clone();
+        assert!(text.contains("mine"), "{text}");
     }
 
     #[tokio::test]
