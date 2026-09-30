@@ -98,31 +98,28 @@ metrics.md.
 
 ## Shipped sources (core)
 
-| Source | Entities | Facts |
+What core publishes, by where it comes from. Each row names its models
+(`v_<name>`); `v_model` lists them all.
+
+| Source | Models | Facts |
 |---|---|---|
-| work | stream, thread, task, effort, decision, claim | cycle time, steering, lifecycle |
-| knowledge | wiki_page, comment, correction | freshness |
-| git | commit, branch, file_change, cochange, blame_line | churn |
-| snapshots | snapshot, change_file, test_change | — |
-| lsp | diagnostic, symbol, reference | diagnostic counts by severity |
-| tests & coverage | test_run, test_case | coverage, pass/fail |
-| code metrics | function, file | complexity, length, params |
-| agent | session, turn, tool_call, agent event (`v_event` `agent.*`), context_read | tokens, struggle |
-| ai | ai_call | tokens, latency |
-| usage | page_visit | — |
+| work | `stream`, `thread`, `task`, `task_note`, `task_link`, `effort`, `effort_file`, `decision`, `claim`, `context_read`, `struggle` | cycle time, steering, lifecycle |
+| knowledge | `wiki_page`, `comment` | freshness |
+| git | `commit`, `commit_file`, `commit_task`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_co_change`, `change_duplicate`, `change_test_file`) | churn |
+| snapshots | `snapshot`, `snapshot_op` | — |
+| lsp | `diagnostic` | diagnostic counts by severity |
+| tests & coverage | `test_run`, `test_case` | coverage, pass/fail |
+| code metrics | `function`, `file_metric` over `tree_fact` (the current tree of every per-path measure — the engine's fold) | complexity, length, params, TODOs, doc coverage |
+| agent | `agent_turn`, `tool_call`, `token_usage`, `agent_nudge`, and agent events (hooks, sessions) as `v_event` `agent.*` | tokens, struggle |
+| ai | `ai_call` | tokens, latency |
+| usage | `page_visit` | — |
+| metrics | `measure`, `dimension`, `metric_spec`, `metric_catalog`, `capture`, `fact`, `effort_metric_delta`; series through `metric_grid()`, offenders through `metric_findings()` | — |
+| the log and the registry | `event`, `event_content`, `event_checkpoint`, `event_dead_letter`; `model`, `model_column`, `model_lineage`, `model_test` | — |
 
-New primitives that don't exist yet:
-
-- `decision`: the forks an agent resolved during an effort (fork, choice,
-  alternatives, confidence, why). Written via a `record_decision` MCP tool.
-- `claim`: statements like "tests pass", joined to observations so each one
-  reads as verified or unverified. Written via `record_claim`. Both attach to the given task's open effort, or else the
-  thread's; a given task must be in the calling thread's stream (tsk353).
-- `context_read`: which `.context/*.md` docs the agent read before touching
-  a subsystem.
-- `struggle`: retries, repeated reads of the same file, reverted edits.
-
-These exist because what a human reviewing agent work needs most is
+Live-only for now — read over LSP or git when asked, not stored, so no
+model: blame lines, and LSP symbols and references. A collector that
+stores them would add their models. Decisions, claims, context reads and
+struggle signals are what a person reviewing agent work needs most —
 **exceptions and decisions**, not trends and totals.
 
 ## Models (P4.2)
@@ -403,7 +400,14 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
     naming the models whose `source()` it is (from `model_input`), and
     never with SQLite's "no such table" (which `explain_unsynced` reads as
     an unsynced source). `count(*)` over a view is allowed (SQLite reports
-    its base table at top level after the view's own reads). Anything but
+    its base table at top level after the view's own reads). **A read's
+    accessor is the view *or CTE* it happened in** — SQLite names a CTE,
+    not the view around it — so the session takes the statement's own
+    CTE names (`sql_tokens::cte_names`): a read in one of them is the
+    statement's and is checked; a read in any other view or CTE is a
+    view's (a model built on CTEs, like `tree_fact`, reads fine). A
+    statement CTE sharing a name with a view's CTE refuses more, never
+    less. Lineage and `reads` use the same rule (P4.11). Anything but
     a read, select, function or recursion is refused, save the
     `query_only` pragma the session itself runs. `SqlQuery::raw` switches
     to recording only: the person's explorer, through IPC `query_sql

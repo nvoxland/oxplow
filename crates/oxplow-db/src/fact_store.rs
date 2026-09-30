@@ -3096,6 +3096,113 @@ mod tests {
         store.record_facts(capture, rows).await.unwrap()
     }
 
+    /// P4.11 (tsk496): the `v_tree_fact` model is the engine's fold — for
+    /// measure `m` (made per-path, which the model reads) on stream 1, the
+    /// same facts `latest_tree_facts` returns.
+    async fn model_agrees(store: &SqliteFactStore, m: i64) {
+        let mut engine: Vec<i64> = store
+            .latest_tree_facts(m, Some(1))
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|f| f.id)
+            .collect();
+        engine.sort();
+        let model: Vec<i64> = store
+            .db
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE measure SET capture_scope = 'per-path' WHERE id = ?1",
+                    [m],
+                )?;
+                let mut st = conn.prepare(
+                    "SELECT t.id FROM v_tree_fact t JOIN measure m ON m.key = t.measure_key
+                     WHERE m.id = ?1 AND t.stream_id = 1 ORDER BY t.id",
+                )?;
+                let ids = st
+                    .query_map([m], |r| r.get(0))?
+                    .collect::<rusqlite::Result<Vec<i64>>>()?;
+                Ok(ids)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            model, engine,
+            "v_tree_fact disagrees with the engine's fold"
+        );
+    }
+
+    /// P4.11 (tsk496): `v_function` is each function's latest complexity —
+    /// a rescan of its file replaces it, a function removed from the file
+    /// goes, and a file not rescanned keeps its functions.
+    #[tokio::test]
+    async fn v_function_is_the_latest_complexity_per_function() {
+        let store = fixture().await;
+        let m = store
+            .db
+            .call(|conn| {
+                conn.query_row(
+                    "SELECT id FROM measure WHERE key = 'oxplow.complexity'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+            })
+            .await
+            .unwrap();
+        let capture = |snap: i64, at_: &str, fns: &[(&str, &str, f64)]| {
+            let mut c = NewMetricCapture::done(1, "complexity", "metric:complexity");
+            c.snapshot_id = Some(snap);
+            c.captured_at = Some(at(at_));
+            let facts: Vec<NewFact> = fns
+                .iter()
+                .map(|(path, name, v)| NewFact {
+                    subject_kind: Some("symbol".into()),
+                    subject_ref: Some(format!("symbol:{path}::{name}")),
+                    path: Some((*path).to_string()),
+                    line: Some(3),
+                    dims_json: Some(r#"{"oxplow.language":"rust"}"#.into()),
+                    ..NewFact::new(m, *v)
+                })
+                .collect();
+            (c, facts)
+        };
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        let (c, f) = capture(
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            &[
+                ("a.rs", "one", 4.0),
+                ("a.rs", "two", 7.0),
+                ("b.rs", "three", 2.0),
+            ],
+        );
+        store.record_facts(c, f).await.unwrap();
+        snapshot_with(&store, 2, &[("a.rs", "oxplow")]).await;
+        let (c, f) = capture(2, "2026-06-30T11:00:00.000000Z", &[("a.rs", "one", 9.0)]);
+        store.record_facts(c, f).await.unwrap();
+        let rows: Vec<(String, String, f64, Option<String>)> = store
+            .db
+            .call(|conn| {
+                let mut st = conn.prepare(
+                    "SELECT name, path, complexity, language FROM v_function
+                     WHERE stream_id = 1 ORDER BY name",
+                )?;
+                let rows = st
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("one".into(), "a.rs".into(), 9.0, Some("rust".into())),
+                ("three".into(), "b.rs".into(), 2.0, Some("rust".into())),
+            ]
+        );
+    }
+
     fn total(facts: &[FactRow]) -> f64 {
         facts.iter().map(|f| f.value).sum()
     }
@@ -3131,6 +3238,7 @@ mod tests {
         assert_eq!(total(&facts), 2.0, "a.rs superseded to 0; b.rs unchanged");
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].path.as_deref(), Some("b.rs"));
+        model_agrees(&store, m).await;
     }
 
     #[tokio::test]
@@ -3156,6 +3264,7 @@ mod tests {
         let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
         assert_eq!(total(&facts), 2.0, "the deleted file's 3 is gone");
         assert_eq!(facts[0].path.as_deref(), Some("b.rs"));
+        model_agrees(&store, m).await;
     }
 
     #[tokio::test]
@@ -3192,6 +3301,7 @@ mod tests {
             total(&store.latest_tree_facts(m, Some(1)).await.unwrap()),
             12.0
         );
+        model_agrees(&store, m).await;
     }
 
     /// A `scan_kind = 'full'` capture by `producer` anchored to `snap_id` —
@@ -3262,6 +3372,7 @@ mod tests {
         );
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].path.as_deref(), Some("a.rs"));
+        model_agrees(&store, m).await;
     }
 
     #[tokio::test]
@@ -3299,6 +3410,7 @@ mod tests {
         assert_eq!(total(&facts), 1.0, "a rescanned to 1; deleted b gone");
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].path.as_deref(), Some("a.rs"));
+        model_agrees(&store, m).await;
     }
 
     #[tokio::test]
@@ -3335,6 +3447,7 @@ mod tests {
 
         let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
         assert_eq!(total(&facts), 9.0, "a.rs updated to 7, b.rs's 2 untouched");
+        model_agrees(&store, m).await;
     }
 
     #[tokio::test]

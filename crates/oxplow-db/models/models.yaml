@@ -789,3 +789,59 @@
   tests:
     - { not_null: key }
     - { unique: key }
+- name: tree_fact
+  version: 1
+  description: "The code tree's current facts: for every `per-path` measure (code gauges' per-file and per-function facts), per stream, only the facts from the latest capture that scanned each path — a fixed or removed item drops out, a deleted file's facts go. The same fold the metric engine reads. Its columns are `v_fact`'s."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Fact id." }
+    - { name: "capture_id", type: "INTEGER", doc: "Producing capture (v_capture.id)." }
+    - { name: "measure_key", type: "TEXT", doc: "Measure this is a value of (v_measure.key)." }
+    - { name: "value", type: "REAL", doc: "The measured value." }
+    - { name: "numerator", type: "REAL", doc: "Ratio numerator, for ratio measures." }
+    - { name: "denominator", type: "REAL", doc: "Ratio denominator, for ratio measures." }
+    - { name: "subject_kind", type: "TEXT", doc: "What the fact is about: `file` or `symbol`." }
+    - { name: "subject_ref", type: "TEXT", doc: "Logical id of the subject (`symbol:<path>::<name>`, `file:<path>`)." }
+    - { name: "path", type: "TEXT", doc: "File path." }
+    - { name: "line", type: "INTEGER", doc: "Line number, when it has one." }
+    - { name: "severity", type: "TEXT", doc: "Finding severity, for lint-like facts." }
+    - { name: "rule", type: "TEXT", doc: "Rule id, for lint-like facts." }
+    - { name: "detail", type: "TEXT", doc: "Free-text detail." }
+    - { name: "dims_json", type: "TEXT", doc: "Extra dimensions as a JSON object." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream (worktree) whose tree it describes." }
+    - { name: "thread_id", type: "INTEGER", doc: "From the capture." }
+    - { name: "effort_id", type: "INTEGER", doc: "From the capture." }
+    - { name: "captured_at", type: "TEXT", doc: "When the capture that holds it ran." }
+    - { name: "branch", type: "TEXT", doc: "From the capture." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: function
+  version: 1
+  description: "Functions in the current code tree, one row per function and stream: its latest cyclomatic complexity, length and parameter count from the code gauges (over `v_tree_fact`)."
+  columns:
+    - { name: "stream_id", type: "INTEGER", doc: "The stream (worktree) whose tree it's in." }
+    - { name: "symbol", type: "TEXT", doc: "`symbol:<path>::<name>`." }
+    - { name: "path", type: "TEXT", doc: "The file it's in." }
+    - { name: "name", doc: "The function's name." }
+    - { name: "line", doc: "Its first line." }
+    - { name: "language", doc: "Its language (`rust`, `typescript`, …)." }
+    - { name: "complexity", doc: "Cyclomatic complexity; NULL when not measured." }
+    - { name: "length", doc: "Length in lines; NULL when not measured." }
+    - { name: "parameters", doc: "Parameter count; NULL when not measured." }
+    - { name: "captured_at", doc: "When its latest capture ran." }
+  tests:
+    - { not_null: symbol }
+    - { sql: "SELECT 1 FROM v_function GROUP BY stream_id, symbol HAVING count(*) > 1" }
+- name: file_metric
+  version: 1
+  description: "Per-file code facts in the current tree, one row per file, measure and stream (TODO markers, doc coverage, and any per-path measure a gauge reports per file; over `v_tree_fact`)."
+  columns:
+    - { name: "stream_id", type: "INTEGER", doc: "The stream (worktree) whose tree it's in." }
+    - { name: "path", type: "TEXT", doc: "The file." }
+    - { name: "measure_key", type: "TEXT", doc: "The measure (v_measure.key)." }
+    - { name: "value", type: "REAL", doc: "Its value for the file." }
+    - { name: "numerator", type: "REAL", doc: "Ratio numerator, for ratio measures." }
+    - { name: "denominator", type: "REAL", doc: "Ratio denominator, for ratio measures." }
+    - { name: "captured_at", type: "TEXT", doc: "When its latest capture ran." }
+  tests:
+    - { not_null: path }
