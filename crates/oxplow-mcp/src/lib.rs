@@ -2008,20 +2008,16 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Git commit log for the worktree. `all` spans every branch; \
-                          `limit` caps the count."
+        description = "The stream's history from its head, newest first (`all` spans every \
+                          branch; `limit` caps the count)."
     )]
-    async fn git_log(&self, params: Parameters<GitLogParams>) -> Result<CallToolResult, McpError> {
-        check_optional_stream("git_log", params.0.stream_id.as_deref())?;
-        let opts = oxplow_git::GitLogOptions {
-            limit: params.0.limit.map(|n| n as usize),
-            all: params.0.all,
-        };
-        let log = self
-            .services
-            .git
-            .git_log(params.0.stream_id.as_deref(), opts)
-            .await;
+    async fn vcs_log(&self, params: Parameters<GitLogParams>) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("vcs_log", p.stream_id.as_deref())?;
+        let log =
+            oxplow_app::vcs::reads::log(&self.services, p.stream_id.as_deref(), p.limit, p.all)
+                .await
+                .map_err(domain_err)?;
         json_result(&log)
     }
 
@@ -2112,9 +2108,14 @@ impl OxplowMcp {
         json_result(&bytes.map(|b| String::from_utf8_lossy(&b).into_owned()))
     }
 
-    #[tool(description = "List the project's git branches (local + remote).")]
-    async fn list_branches(&self) -> Result<CallToolResult, McpError> {
-        let branches = self.services.git.list_branches_project().await;
+    #[tool(
+        description = "The project's branches — local and remote-tracking — with their \
+                          heads; `is_default` marks the default branch."
+    )]
+    async fn vcs_branches(&self) -> Result<CallToolResult, McpError> {
+        let branches = oxplow_app::vcs::reads::branches(&self.services, None)
+            .await
+            .map_err(domain_err)?;
         json_result(&branches)
     }
 
@@ -4900,11 +4901,11 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "get_dashboard",
     "search",
     "git_status",
-    "git_log",
+    "vcs_log",
     "vcs_blame",
     "diff",
     "read_at",
-    "list_branches",
+    "vcs_branches",
     "list_snapshots_for_stream",
     "list_snapshot_ops",
     "list_files_for_snapshot",

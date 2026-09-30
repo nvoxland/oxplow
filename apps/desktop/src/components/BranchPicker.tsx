@@ -1,6 +1,7 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { deleteGitBranch, gitMergeInto, gitRebaseOnto, listGitRefs, renameGitBranch, type BranchRef, type GroupedGitRefs } from "../api.js";
+import { deleteGitBranch, gitMergeInto, gitRebaseOnto, renameGitBranch, type BranchRef, type GroupedGitRefs } from "../api.js";
+import { readRefGroups } from "../vcsHistory.js";
 import { awaitGitOp, gitOpErrorMessage } from "../git-op.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { InlineConfirm } from "./InlineConfirm.js";
@@ -142,7 +143,7 @@ export function BranchPicker({
 
   async function refresh() {
     try {
-      const next = await listGitRefs();
+      const next = await readRefGroups();
       setGrouped(next);
     } catch (e) {
       setError(String(e));
@@ -239,7 +240,7 @@ export function BranchPicker({
     if (grouped) return;
     try {
       setLoading(true);
-      const next = await listGitRefs();
+      const next = await readRefGroups();
       setGrouped(next);
     } catch (e) {
       setError(String(e));

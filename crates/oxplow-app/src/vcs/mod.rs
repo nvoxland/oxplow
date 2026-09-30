@@ -15,16 +15,12 @@ mod tests {
         "oxplow-session/src/lib.rs",
         "oxplow-app/src/task_service.rs",
         "oxplow-app/src/workspace_watch.rs",
-        "oxplow-app/src/commit_indexer.rs",
         "oxplow-app/src/change_analysis.rs",
         "oxplow-app/src/metrics_service.rs",
         "oxplow-app/src/collection.rs",
         "oxplow-app/src/git_service.rs",
-        "oxplow-mcp/src/lib.rs",
         "oxplow-rpc/src/lib.rs",
-        "oxplow-rpc/src/commands/branch.rs",
         "oxplow-rpc/src/commands/config.rs",
-        "oxplow-rpc/src/commands/log.rs",
         "oxplow-rpc/src/commands/git.rs",
     ];
 

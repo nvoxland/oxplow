@@ -113,20 +113,6 @@ export interface ChangeScopes {
 /// carries `commits`, so this stays in api-types until the Rust
 /// surface grows the overlay or every consumer composes it
 /// renderer-side.
-export interface GitLogRef {
-  ref: string;
-  short: string;
-  kind: "tag" | "branch" | "head";
-}
-
-export interface GitLogResult {
-  commits: import("./tauri-bridge/index.js").GitLogCommit[];
-  refs?: GitLogRef[];
-  currentBranch?: string | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
-}
-
 export interface GroupedGitRefs {
   local: BranchRef[];
   remote: BranchRef[];

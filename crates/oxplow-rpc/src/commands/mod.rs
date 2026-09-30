@@ -33,7 +33,6 @@ pub mod extensions;
 pub mod followup;
 pub mod git;
 pub mod hooks;
-pub mod log;
 pub mod lsp;
 pub mod metrics;
 pub mod notes;

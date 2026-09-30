@@ -149,6 +149,13 @@ pub struct Branch {
     pub is_default: bool,
 }
 
+/// A tag: a name fixed to one revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct Tag {
+    pub name: String,
+    pub revision: String,
+}
+
 /// Whether `head` would merge into `base` cleanly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -327,6 +334,8 @@ pub trait Vcs: Send + Sync {
     // --- status, branches, blame ---
     async fn status(&self, ws: &Path) -> Result<WorkspaceStatus, VcsError>;
     async fn branches(&self, ws: &Path) -> Result<Vec<Branch>, VcsError>;
+    /// Every tag, sorted by name.
+    async fn tags(&self, ws: &Path) -> Result<Vec<Tag>, VcsError>;
     async fn divergence(&self, ws: &Path, base: &str, head: &str) -> Result<Divergence, VcsError>;
     /// Who last changed each line of `path` at `rev`, or in the working
     /// tree when `rev` is `None`.

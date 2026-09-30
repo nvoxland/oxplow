@@ -1,8 +1,12 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { GitLogCommit, GitLogResult, Stream } from "../../api.js";
-import { getGitLog, subscribeGitRefsEvents } from "../../api.js";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Stream } from "../../api.js";
+import { vcsHead } from "../../api.js";
+import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import { logUi } from "../../logger.js";
+import { vcsRevOf } from "../../revision.js";
+import type { RevisionInfo } from "../../tauri-bridge/generated/bindings.js";
+import { readHistory, type History } from "../../vcsHistory.js";
 import { CommitGraphTable, indexRefsBySha } from "./CommitGraphTable.js";
 
 interface Props {
@@ -17,8 +21,13 @@ interface Props {
   revealSha?: { sha: string; token: number } | null;
 }
 
+/**
+ * The stream's history: `v_commit` walked from the stream's head (through
+ * the models — `.context/vcs.md`), re-read whenever a model it read
+ * changes (the commit indexer runs on every ref move).
+ */
 export function HistoryPanel({ stream, onSelectCommit, revealSha }: Props) {
-  const [log, setLog] = useState<GitLogResult | null>(null);
+  const [log, setLog] = useState<(History & { currentBranch: string | null }) | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -26,43 +35,35 @@ export function HistoryPanel({ stream, onSelectCommit, revealSha }: Props) {
   const [branch, setBranch] = useState("");
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const limit = 500;
+  const streamId = stream?.id ?? null;
+
+  const load = useCallback(
+    async (silent: boolean) => {
+      if (!streamId) {
+        setLog(null);
+        return;
+      }
+      if (!silent) setLoading(true);
+      setError(null);
+      try {
+        const head = await vcsHead(streamId);
+        const history = await readHistory(vcsRevOf(head.revision), limit);
+        setLog({ ...history, currentBranch: head.branch });
+      } catch (err) {
+        logUi("warn", "history read failed", { error: String(err) });
+        setError(String(err));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [streamId],
+  );
 
   useEffect(() => {
-    if (!stream) {
-      setLog(null);
-      return;
-    }
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const load = (opts?: { silent?: boolean }) => {
-      if (!opts?.silent) setLoading(true);
-      setError(null);
-      void getGitLog(stream.id, { limit })
-        .then((result) => {
-          if (cancelled) return;
-          setLog(result);
-          setLoading(false);
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          logUi("warn", "git log failed", { error: String(err) });
-          setError(String(err));
-          setLoading(false);
-        });
-    };
-    load();
-    const unsubscribe = subscribeGitRefsEvents(stream.id, () => {
-      if (timer) clearTimeout(timer);
-      // Refresh silently on external git events so the list doesn't flash a
-      // loading spinner every time the agent commits.
-      timer = setTimeout(() => load({ silent: true }), 150);
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe();
-      if (timer) clearTimeout(timer);
-    };
-  }, [stream?.id]);
+    void load(false);
+  }, [load]);
+  // Silent: the list doesn't flash a spinner every time the agent commits.
+  useRerunOnChange(log?.reads ?? NO_READS, () => void load(true));
 
   useEffect(() => {
     if (!revealSha) return;
@@ -82,9 +83,9 @@ export function HistoryPanel({ stream, onSelectCommit, revealSha }: Props) {
   const reachableShas = useMemo(() => reachableFromBranch(log, branch), [log, branch]);
 
   const visibleCommits = useMemo(() => {
-    if (!log) return [] as GitLogCommit[];
+    if (!log) return [] as RevisionInfo[];
     if (!reachableShas) return log.commits;
-    return log.commits.filter((c) => reachableShas.has(c.sha));
+    return log.commits.filter((c) => reachableShas.has(c.id));
   }, [log, reachableShas]);
 
   const queryLower = query.trim().toLowerCase();
@@ -93,12 +94,12 @@ export function HistoryPanel({ stream, onSelectCommit, revealSha }: Props) {
     const out = new Set<string>();
     for (const commit of visibleCommits) {
       if (author && commit.author !== author) continue;
-      if (!queryLower) { out.add(commit.sha); continue; }
-      const hit = commit.sha.toLowerCase().includes(queryLower)
+      if (!queryLower) { out.add(commit.id); continue; }
+      const hit = commit.id.toLowerCase().includes(queryLower)
         || commit.subject.toLowerCase().includes(queryLower)
         || commit.author.toLowerCase().includes(queryLower)
         || commit.email.toLowerCase().includes(queryLower);
-      if (hit) out.add(commit.sha);
+      if (hit) out.add(commit.id);
     }
     return out;
   }, [visibleCommits, queryLower, author]);
@@ -152,21 +153,14 @@ export function HistoryPanel({ stream, onSelectCommit, revealSha }: Props) {
   );
 }
 
-function reachableFromBranch(log: GitLogResult | null, branch: string): Set<string> | null {
+function reachableFromBranch(log: History | null, branch: string): Set<string> | null {
   if (!log || !branch) return null;
   const head = log.branchHeads.find((b) => b.name === branch);
   if (!head) return new Set();
   const parentsBySha = new Map<string, string[]>();
-  for (const commit of log.commits) {
-    parentsBySha.set(
-      commit.sha,
-      commit.parents.map((p) =>
-        typeof p === "string" ? p : (p as { sha: string }).sha,
-      ),
-    );
-  }
+  for (const commit of log.commits) parentsBySha.set(commit.id, commit.parents);
   const reachable = new Set<string>();
-  const stack = [head.commit.sha];
+  const stack = [head.sha];
   while (stack.length > 0) {
     const sha = stack.pop()!;
     if (reachable.has(sha)) continue;

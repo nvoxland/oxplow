@@ -43,6 +43,14 @@ pub struct GitBranchRow {
     pub head_sha: Option<String>,
     /// The stream whose worktree has it checked out, if any.
     pub stream_id: Option<i64>,
+    /// The repository's default branch.
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GitTagRow {
+    pub name: String,
+    pub sha: String,
 }
 
 #[derive(Clone)]
@@ -114,12 +122,42 @@ impl SqliteGitStore {
         let at = ts_to_string(Timestamp::now());
         self.db
             .transaction(move |tx| {
-                tx.execute("DELETE FROM git_branch", []).map_err(map_sql_err)?;
+                tx.execute("DELETE FROM git_branch", [])
+                    .map_err(map_sql_err)?;
                 for b in &rows {
                     tx.execute(
-                        "INSERT OR REPLACE INTO git_branch (name, kind, remote, head_sha, stream_id, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                        rusqlite::params![b.name, b.kind, b.remote, b.head_sha, b.stream_id, at],
+                        "INSERT OR REPLACE INTO git_branch
+                           (name, kind, remote, head_sha, stream_id, updated_at, is_default)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        rusqlite::params![
+                            b.name,
+                            b.kind,
+                            b.remote,
+                            b.head_sha,
+                            b.stream_id,
+                            at,
+                            b.is_default
+                        ],
+                    )
+                    .map_err(map_sql_err)?;
+                }
+                Ok(())
+            })
+            .await
+    }
+}
+
+impl SqliteGitStore {
+    /// Replace the tag list.
+    pub async fn replace_tags(&self, rows: Vec<GitTagRow>) -> Result<(), DomainError> {
+        let at = ts_to_string(Timestamp::now());
+        self.db
+            .transaction(move |tx| {
+                tx.execute("DELETE FROM git_tag", []).map_err(map_sql_err)?;
+                for t in &rows {
+                    tx.execute(
+                        "INSERT OR REPLACE INTO git_tag (name, sha, updated_at) VALUES (?1, ?2, ?3)",
+                        rusqlite::params![t.name, t.sha, at],
                     )
                     .map_err(map_sql_err)?;
                 }
@@ -185,6 +223,7 @@ mod tests {
                     remote: None,
                     head_sha: Some("abc".into()),
                     stream_id: Some(1),
+                    is_default: true,
                 },
                 GitBranchRow {
                     name: "main".into(),
@@ -192,6 +231,7 @@ mod tests {
                     remote: Some("origin".into()),
                     head_sha: Some("abc".into()),
                     stream_id: None,
+                    is_default: false,
                 },
             ])
             .await

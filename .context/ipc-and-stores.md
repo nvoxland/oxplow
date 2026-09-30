@@ -179,15 +179,14 @@ both together when adding a channel.
 
 ## Git dashboard / cross-worktree IPC
 
-The Git Dashboard page added five renderer-callable methods to
-`DesktopApi`. Each delegates to a helper in `crates/oxplow-git/src/lib.rs` after
-resolving the stream's `worktree_path` (the same pattern as
-`getGitLog`):
+The Git Dashboard reads its lists through the models and its live
+comparisons through the neutral RPCs ([vcs.md](./vcs.md)):
 
-- `getAheadBehind(streamId, base, head?)` — `{ ahead, behind }` for
-  the branch header / worktree rows.
-- `getCommitsAheadOf(streamId, base, head, limit?)` —
-  `GitLogCommit[]` for pairwise commit-diff displays.
+- `vcsDivergence(streamId, base, head)` — `{ ahead, behind,
+  overlapping_files, readiness }` for the branch header, the worktree
+  rows and the merge-readiness card.
+- `vcsRevisionsBetween(streamId, base, head, limit?)` —
+  `RevisionInfo[]` for pairwise commit-diff displays.
 - `listRecentRemoteBranches(streamId, limit?)` —
   `RemoteBranchEntry[]` sorted by committer date.
 - `gitPushCurrentTo(streamId, remote, branch)` — refspec push of

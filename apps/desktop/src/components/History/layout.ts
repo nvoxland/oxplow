@@ -1,4 +1,4 @@
-import type { GitLogCommit } from "../../api.js";
+import type { RevisionInfo } from "../../tauri-bridge/generated/bindings.js";
 
 /**
  * One row of the rendered git-log graph. The graph is drawn row-by-row with
@@ -17,7 +17,7 @@ import type { GitLogCommit } from "../../api.js";
  *     (i.e., some child placed it). New branch heads are false.
  */
 export interface GraphRow {
-  commit: GitLogCommit;
+  commit: RevisionInfo;
   column: number;
   incoming: Array<string | null>;
   outgoing: Array<string | null>;
@@ -37,14 +37,14 @@ export interface GraphLayout {
  * lanes" (sha each column is waiting for), and when we hit a commit, reassign
  * its lane to its first parent. Extra parents spawn new lanes.
  */
-export function layoutCommits(commits: GitLogCommit[]): GraphLayout {
-  const shaSet = new Set(commits.map((c) => c.sha));
+export function layoutCommits(commits: RevisionInfo[]): GraphLayout {
+  const shaSet = new Set(commits.map((c) => c.id));
   let lanes: Array<string | null> = [];
   const rows: GraphRow[] = [];
   let maxCols = 0;
 
   for (const commit of commits) {
-    let column = lanes.indexOf(commit.sha);
+    let column = lanes.indexOf(commit.id);
     const fromAbove = column !== -1;
     if (!fromAbove) {
       column = lanes.indexOf(null);
@@ -52,23 +52,16 @@ export function layoutCommits(commits: GitLogCommit[]): GraphLayout {
         column = lanes.length;
         lanes.push(null);
       }
-      lanes[column] = commit.sha;
+      lanes[column] = commit.id;
     }
     const incoming = lanes.slice();
 
     // Clear this commit from the lane state before placing parents.
-    for (let k = 0; k < lanes.length; k++) if (lanes[k] === commit.sha) lanes[k] = null;
+    for (let k = 0; k < lanes.length; k++) if (lanes[k] === commit.id) lanes[k] = null;
 
     const parentEdges: GraphRow["parentEdges"] = [];
     for (let pi = 0; pi < commit.parents.length; pi++) {
-      // commit.parents is `string[]` in api.ts; legacy code used to
-      // expect an object form with `.sha`. Normalize at this seam so
-      // the rest of the layout stays unchanged.
-      const parentRaw = commit.parents[pi]!;
-      const parentSha =
-        typeof parentRaw === "string"
-          ? parentRaw
-          : (parentRaw as { sha: string }).sha;
+      const parentSha = commit.parents[pi]!;
       const missing = !shaSet.has(parentSha);
       let pcol = lanes.indexOf(parentSha);
       if (pcol === -1) {

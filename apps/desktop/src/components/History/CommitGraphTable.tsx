@@ -1,6 +1,7 @@
 import type { MutableRefObject } from "react";
 import { useMemo } from "react";
-import type { GitLogCommit, GitLogResult } from "../../api.js";
+import type { RevisionInfo } from "../../tauri-bridge/generated/bindings.js";
+import type { History } from "../../vcsHistory.js";
 import { layoutCommits, type GraphRow } from "./layout.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { gitCommitRef } from "../../tabs/pageRefs.js";
@@ -32,7 +33,7 @@ export interface CommitStats {
 }
 
 export interface CommitGraphTableProps {
-  commits: GitLogCommit[];
+  commits: RevisionInfo[];
   branchHeadsBySha: Map<string, string[]>;
   tagsBySha: Map<string, string[]>;
   currentBranch: string | null;
@@ -75,8 +76,8 @@ export function CommitGraphTable({
   // step through the same list the user clicked from.
   const siblingEntries: NavSiblingEntry[] = useMemo(
     () => layout.rows.map((row) => ({
-      ref: gitCommitRef(row.commit.sha),
-      label: `${row.commit.sha.slice(0, 7)} ${row.commit.subject ?? ""}`.trim(),
+      ref: gitCommitRef(row.commit.id),
+      label: `${row.commit.id.slice(0, 7)} ${row.commit.subject ?? ""}`.trim(),
     })),
     [layout.rows],
   );
@@ -88,7 +89,7 @@ export function CommitGraphTable({
   return (
     <div data-testid="commit-graph-table">
       {layout.rows.map((row, idx) => {
-        const sha = row.commit.sha;
+        const sha = row.commit.id;
         const matched = !matches || matches.has(sha);
         return (
           <div
@@ -172,28 +173,21 @@ function CommitRowDispatcher({
 }
 
 /**
- * Group log refs (branch heads / tags) by sha so the table can
- * overlay them next to each row. Same shape used by both surfaces.
+ * Group branch heads and tags by sha so the table can overlay them next
+ * to each row. Same shape used by both surfaces.
  */
-export function indexRefsBySha(log: GitLogResult | null): {
+export function indexRefsBySha(history: Pick<History, "branchHeads" | "tags"> | null): {
   branchHeadsBySha: Map<string, string[]>;
   tagsBySha: Map<string, string[]>;
 } {
   const branchHeadsBySha = new Map<string, string[]>();
   const tagsBySha = new Map<string, string[]>();
-  if (!log) return { branchHeadsBySha, tagsBySha };
-  // The Rust backend's `GitLogResult` only emits `commits` today —
-  // `branchHeads` / `tags` aren't populated. Tolerate their absence
-  // (no overlay markers in that case) instead of crashing the table.
-  for (const head of log.branchHeads ?? []) {
-    const list = branchHeadsBySha.get(head.commit.sha) ?? [];
-    list.push(head.name);
-    branchHeadsBySha.set(head.commit.sha, list);
+  if (!history) return { branchHeadsBySha, tagsBySha };
+  for (const head of history.branchHeads) {
+    branchHeadsBySha.set(head.sha, [...(branchHeadsBySha.get(head.sha) ?? []), head.name]);
   }
-  for (const tag of log.tags ?? []) {
-    const list = tagsBySha.get(tag.commit.sha) ?? [];
-    list.push(tag.name);
-    tagsBySha.set(tag.commit.sha, list);
+  for (const tag of history.tags) {
+    tagsBySha.set(tag.sha, [...(tagsBySha.get(tag.sha) ?? []), tag.name]);
   }
   return { branchHeadsBySha, tagsBySha };
 }
@@ -260,15 +254,15 @@ function CommitRow({
   }
 
   const nodeColor = BRANCH_COLORS[row.column % BRANCH_COLORS.length]!;
-  const date = formatTimestamp(row.commit.timestamp_secs);
+  const date = formatTimestamp(row.commit.time);
 
   return (
     <div
       onClick={onClick}
       data-testid="commit-graph-row"
-      data-sha={row.commit.sha}
+      data-sha={row.commit.id}
       data-ref-kind="commit"
-      data-ref-id={row.commit.sha}
+      data-ref-id={row.commit.id}
       style={{
         display: "flex",
         alignItems: "center",
@@ -340,7 +334,7 @@ function CommitRow({
         ) : null}
         <span
           style={{ color: "var(--muted)", flexShrink: 0, fontSize: 11, minWidth: 132, textAlign: "right" }}
-          title={`${row.commit.timestamp_secs}\n${row.commit.sha}`}
+          title={`${row.commit.time}\n${row.commit.id}`}
         >
           {date}
         </span>

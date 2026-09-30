@@ -54,7 +54,7 @@
     - { not_null: id }
     - { unique: id }
 - name: branch
-  version: 1
+  version: 2
   description: "Local and remote-tracking branches, refreshed on boot and whenever refs move."
   columns:
     - { name: "name", type: "TEXT", doc: "Branch name (without the remote)." }
@@ -63,6 +63,7 @@
     - { name: "head_sha", type: "TEXT", doc: "The commit it points at." }
     - { name: "stream_id", type: "INTEGER", doc: "The stream whose worktree has it checked out (v_stream.id), if any." }
     - { name: "updated_at", type: "TEXT", doc: "When oxplow last read it (RFC 3339)." }
+    - { name: "is_default", type: "INTEGER", doc: "1 for the repository's default branch (`main`), else 0." }
 - name: capture
   version: 1
   description: "Captures: one scan or run that produced facts, with its when/where/who context."
@@ -245,8 +246,8 @@
     - { name: "body", type: "TEXT", doc: "Text of the first message." }
     - { name: "message_count", type: "", doc: "Number of messages in the thread." }
 - name: commit
-  version: 1
-  description: "Git commits the indexer has read (the last 500 reachable from the primary worktree's HEAD, kept as it moves)."
+  version: 2
+  description: "Commits the indexer has read: the last 500 reachable from every stream's head, kept as heads move. A stream's history is a recursive read over `parents` from its branch's `v_branch.head_sha`."
   columns:
     - { name: "sha", type: "TEXT", doc: "Full commit sha." }
     - { name: "author", type: "TEXT", doc: "Author name." }
@@ -256,6 +257,7 @@
     - { name: "body", type: "TEXT", doc: "The rest of the message." }
     - { name: "first_parent", type: "", doc: "First parent's sha; NULL for a root commit." }
     - { name: "parent_count", type: "", doc: "Number of parents (2+ for a merge)." }
+    - { name: "parents", type: "TEXT", doc: "Every parent's sha, as a JSON array (first parent first)." }
 - name: commit_file
   version: 1
   description: "Files each commit changed, against its first parent."
@@ -576,6 +578,13 @@
     - { name: "kind", type: "", doc: "`repeated_edits` or `failed_commands`." }
     - { name: "subject", type: "TEXT", doc: "The file path, or `Bash`." }
     - { name: "count", type: "", doc: "How many edits / failures." }
+- name: tag
+  version: 1
+  description: "Tags, refreshed with the branches on boot and whenever refs move."
+  columns:
+    - { name: "name", type: "TEXT", doc: "Tag name." }
+    - { name: "sha", type: "TEXT", doc: "The commit it points at (v_commit.sha); annotated tags peeled." }
+    - { name: "updated_at", type: "TEXT", doc: "When oxplow last read it (RFC 3339)." }
 - name: task
   version: 1
   description: "Tasks (work items), excluding deleted ones. `thread_id` NULL means the project-wide backlog."

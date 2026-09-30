@@ -296,11 +296,7 @@ export type { OxplowEvent } from "./api-types.js";
 // are migrated.
 export type {
   GitOpResult,
-  GitWorktreeEntry,
   RemoteBranchEntry,
-  GitLogCommit,
-  StreamDivergenceReport,
-  StreamDivergenceRow,
   MergeReadiness,
 } from "./tauri-bridge/index.js";
 // The remaining legacy types still come from api-types because
@@ -313,8 +309,6 @@ export type {
 // the runtime hands the renderer is the bindings shape but the
 // renderer's TypeScript believes it's the legacy shape.
 export type {
-  GitLogRef,
-  GitLogResult,
   ChangeScopes,
   TextSearchHit,
   RefOption,
@@ -445,10 +439,13 @@ export interface WorkspaceRenameResult {
 import type { Revision } from "./revision.js";
 import type {
   BlameLine,
+  Divergence,
   FileStatus,
   HeadInfo,
   InProgressOp,
   RevisionDetail,
+  RevisionInfo,
+  VcsWorkspace,
   StatusEntry,
   WorkspaceEntry,
   WorkspaceIndexedFile,
@@ -456,9 +453,12 @@ import type {
 } from "./tauri-bridge/generated/bindings.js";
 export type {
   BlameLine,
+  Divergence,
   FileStatus,
   HeadInfo,
   InProgressOp,
+  RevisionInfo,
+  VcsWorkspace,
   RevisionDetail,
   StatusEntry,
   WorkspaceEntry,
@@ -495,6 +495,40 @@ export async function vcsRevision(
   revision: Revision,
 ): Promise<RevisionDetail | null> {
   return unwrap(await commands.vcsRevision(streamId || null, revision));
+}
+
+/** How far `head` and `base` have diverged, and whether `head` would
+ *  merge cleanly (live; a stream's history reads `v_commit`). */
+export async function vcsDivergence(
+  streamId: string,
+  base: Revision,
+  head: Revision,
+): Promise<Divergence> {
+  return unwrap(await commands.vcsDivergence(streamId || null, base, head));
+}
+
+/** Revisions on `head` that `base` lacks, newest first. */
+export async function vcsRevisionsBetween(
+  streamId: string,
+  base: Revision,
+  head: Revision,
+  limit = 200,
+): Promise<RevisionInfo[]> {
+  return unwrap(await commands.vcsRevisionsBetween(streamId || null, base, head, limit));
+}
+
+/** Revisions that changed `path`, newest first. */
+export async function vcsFileHistory(
+  streamId: string,
+  path: string,
+  limit = 50,
+): Promise<RevisionInfo[]> {
+  return unwrap(await commands.vcsFileHistory(streamId || null, path, limit));
+}
+
+/** Working copies of the repository no stream uses yet. */
+export async function vcsListAdoptableWorkspaces(): Promise<VcsWorkspace[]> {
+  return unwrap(await commands.vcsListAdoptableWorkspaces());
 }
 
 /** Where the histories of `a` and `b` fork. */
@@ -882,51 +916,13 @@ export async function setSnapshotMaxFileBytes(bytes: number): Promise<import("./
   return unwrap(await commands.setSnapshotMaxFileBytes(bytes)) as unknown as import("./api-types.js").OxplowConfig;
 }
 
-export async function listBranches(): Promise<BranchRef[]> {
-  return unwrap(await commands.listLocalBranches()) as unknown as BranchRef[];
-}
-
-export async function getDefaultBranch(): Promise<string | null> {
-  return unwrap(await commands.getDefaultBranch());
-}
-
 export type CommitRefLabel = import("./tauri-bridge/generated/bindings.js").CommitRefLabel;
 
 export async function resolveCommitRefLabels(
   shas: string[],
 ): Promise<Record<string, CommitRefLabel[]>> {
   if (shas.length === 0) return {};
-  return unwrap(await commands.resolveCommitRefLabels(shas));
-}
-
-export async function listGitRefs(): Promise<import("./api-types.js").GroupedGitRefs> {
-  const raw = unwrap(await commands.listAllRefs());
-  const localBranches = raw.locals.map((r) => ({
-    kind: "local" as const,
-    name: r.label,
-    ref: r.ref,
-  }));
-  const byRemote = new Map<
-    string,
-    Array<{ kind: "remote"; name: string; ref: string; remote: string }>
-  >();
-  for (const r of raw.remotes) {
-    const slash = r.label.indexOf("/");
-    const remote = slash >= 0 ? r.label.slice(0, slash) : "origin";
-    const name = slash >= 0 ? r.label.slice(slash + 1) : r.label;
-    if (!byRemote.has(remote)) byRemote.set(remote, []);
-    byRemote.get(remote)!.push({ kind: "remote", name, ref: r.ref, remote });
-  }
-  return {
-    local: localBranches,
-    remote: Array.from(byRemote.values()).flat(),
-    remotes: Array.from(byRemote.entries()).map(([remote, branches]) => ({
-      remote,
-      branches,
-    })),
-    tags: raw.tags.map((t) => ({ name: t.label, ref: t.ref })),
-    recent: localBranches.slice(0, 5).map((b) => b.name),
-  } as unknown as import("./api-types.js").GroupedGitRefs;
+  return unwrap(await commands.gitResolveCommitRefLabels(shas));
 }
 
 export async function renameGitBranch(
@@ -1105,12 +1101,6 @@ export async function createStream(input:
         }),
       );
   }
-}
-
-export async function listAdoptableWorktrees(): Promise<
-  import("./tauri-bridge/index.js").GitWorktreeEntry[]
-> {
-  return unwrap(await commands.listAdoptableWorktrees());
 }
 
 export async function checkoutStreamBranch(streamId: string, branch: string): Promise<Stream> {
@@ -1316,20 +1306,10 @@ export async function moveBacklogItemToThread(
   return { backlog, to };
 }
 
-export async function getGitLog(
-  streamId: string,
-  options?: { limit?: number; all?: boolean },
-): Promise<import("./api-types.js").GitLogResult> {
-  const raw = unwrap(
-    await commands.getGitLog(streamId, options?.limit ?? null, options?.all ?? false),
-  );
-  return raw as unknown as import("./api-types.js").GitLogResult;
-}
-
 export async function getChangeScopes(
   streamId: string,
 ): Promise<import("./api-types.js").ChangeScopes> {
-  const raw = unwrap(await commands.getChangeScopes(streamId));
+  const raw = unwrap(await commands.gitChangeScopes(streamId));
   return {
     staged: raw.staged as unknown as import("./api-types.js").BranchChangeEntry[],
     unstaged: raw.unstaged as unknown as import("./api-types.js").BranchChangeEntry[],
@@ -1410,37 +1390,11 @@ export async function gitCommitAll(
   return unwrap(await commands.gitCommitAll(streamId, message));
 }
 
-export async function getAheadBehind(
-  streamId: string,
-  base: string,
-  head?: string,
-): Promise<{ ahead: number; behind: number }> {
-  const ab = unwrap(await commands.getAheadBehind(streamId, base, head ?? "HEAD"));
-  return { ahead: ab.ahead, behind: ab.behind };
-}
-
-export async function listStreamDivergences(
-  base?: string,
-): Promise<import("./tauri-bridge/index.js").StreamDivergenceReport> {
-  return unwrap(await commands.listStreamDivergences(base ?? null));
-}
-
-export async function getCommitsAheadOf(
-  streamId: string,
-  base: string,
-  head: string,
-  limit?: number,
-): Promise<import("./tauri-bridge/index.js").GitLogCommit[]> {
-  return unwrap(
-    await commands.getCommitsAheadOf(streamId, base, head, limit ?? 200),
-  );
-}
-
 export async function listRecentRemoteBranches(
   _streamId: string,
   limit?: number,
 ): Promise<import("./tauri-bridge/index.js").RemoteBranchEntry[]> {
-  return unwrap(await commands.listRecentRemoteBranches(limit ?? null));
+  return unwrap(await commands.gitListRecentRemoteBranches(limit ?? null));
 }
 
 export async function gitPushCurrentTo(
@@ -1467,14 +1421,6 @@ export async function gitPullRemoteIntoCurrent(
     `git pull ${remote} ${branch}`,
     async () => unwrap(await commands.gitPullRemoteIntoCurrent(streamId, remote, branch)),
   );
-}
-
-export async function listFileCommits(
-  streamId: string,
-  path: string,
-  limit?: number,
-): Promise<import("./tauri-bridge/index.js").GitLogCommit[]> {
-  return unwrap(await commands.listFileCommits(streamId, path, limit ?? null));
 }
 
 export type WikiPageSummary = import("./api-types.js").WikiPageSummary;
@@ -1811,12 +1757,6 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
       if (task && (task.status === "done" || task.status === "failed")) void finish();
     });
   });
-}
-
-export async function listAllRefs(_streamId: string): Promise<import("./api-types.js").RefOption[]> {
-  return listGitRefs() as unknown as Promise<
-    import("./api-types.js").RefOption[]
-  >;
 }
 
 export async function listTaskEfforts(itemId: string): Promise<EffortDetail[]> {

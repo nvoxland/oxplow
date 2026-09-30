@@ -439,18 +439,10 @@ All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:
   shows progress. The sync wrappers stay around for code paths that
   haven't been promoted yet (e.g. `gitCommitAll`'s internal calls,
   unit tests).
-- `getGitLog` accepts an `all` option (defaults `true`). Pass
-  `{ all: false }` to drop `--all` so the log only walks commits
-  reachable from `HEAD`'s branch — used by the Git Dashboard's
-  "Recent commits" card so the graph stays scoped to the current
-  branch.
-- `getAheadBehind(projectDir, base, head?)` — wraps
-  `git rev-list --left-right --count base...head` and returns
-  `{ ahead, behind }` relative to `base`. `head` defaults to `HEAD`.
-  Powers the Git Dashboard branch header and worktree rows.
-- `getCommitsAheadOf(projectDir, base, head, limit=50)` — wraps
-  `git log base..head` with the same parser used by `getGitLog`, for
-  pairwise commit-diff displays.
+- History and branch lists read the models (`v_commit`, `v_branch`,
+  `v_tag`; P5.B5, [vcs.md](./vcs.md)); ahead/behind, divergence,
+  commits-ahead and a file's history stay live on `vcs_divergence`,
+  `vcs_revisions_between` and `vcs_file_history`.
 - `compute_divergence(repo_path, base, head)` (`src/divergence.rs`) —
   cross-stream merge-readiness. Returns `Divergence { ahead, behind,
   overlapping_files, readiness }`. `ahead`/`behind` come from
@@ -461,10 +453,9 @@ All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:
   `AlreadyIntegrated` (head has no commits beyond base), `Clean` (ahead,
   no overlap), or `Conflict` (ahead, overlap). Any lookup failure
   (unresolvable branch, etc.) degrades to `AlreadyIntegrated` zeros so a
-  bad row never breaks the dashboard. Exposed via
-  `GitService::divergence` → the `list_stream_divergences` command (one
-  row per stream vs the detected default branch), consumed by the Git
-  Dashboard's "Merge readiness" card.
+  bad row never breaks the dashboard. Exposed as `Vcs::divergence` →
+  `vcs_divergence`; the Git Dashboard's "Merge readiness" card composes
+  one row per stream against the default branch (`v_branch.is_default`).
 - `tree_at_commit(repo, rev)` / `diff_commits(repo, a, b)`
   (`src/tree.rs`) — a libgit2 tree walk that yields `path -> blob oid`
   and runs it through the **shared** `oxplow_domain::diff_trees`
@@ -552,8 +543,11 @@ Bash (which the hook can't classify reliably).
 ## Commit indexer
 
 `crates/oxplow-app/src/commit_indexer.rs` walks the most-recent
-`DEFAULT_INDEX_DEPTH` (500) commits reachable from HEAD and projects
-each one into the unified `page_ref` graph (see
+`DEFAULT_INDEX_DEPTH` (500) commits reachable from **every stream's**
+head — through the VCS capability (`Vcs::log`, `Vcs::revision`;
+[vcs.md](./vcs.md)) — stores them (`v_commit`, `v_commit_file`),
+restates branches and tags (`v_branch`, `v_tag`), and projects each
+commit into the unified `page_ref` graph (see
 [data-model.md](./data-model.md)):
 
 - Diff against parent#0 → one `(commit:<sha>) -- touched_file -->

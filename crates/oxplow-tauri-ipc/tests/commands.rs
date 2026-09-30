@@ -353,30 +353,15 @@ async fn primary_and_thread(app: &TestApp) -> (Stream, Thread) {
 // ---- branch commands ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_branches_returns_default_branch() {
+async fn vcs_branches_include_the_default_branch() {
     let app = TestApp::build();
-    let branches = commands::generated::list_branches(app.state())
+    let branches = commands::generated::vcs_branches(app.state(), None)
         .await
         .unwrap();
     assert!(
-        !branches.is_empty(),
-        "a repo with one commit has at least its default branch"
+        branches.iter().any(|b| b.is_default),
+        "a repo with one commit has its default branch: {branches:?}"
     );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_local_branches_returns_default_branch() {
-    let app = TestApp::build();
-    let branches = commands::generated::list_local_branches(app.state())
-        .await
-        .unwrap();
-    assert!(!branches.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn get_default_branch_does_not_panic() {
-    let app = TestApp::build();
-    let _ = commands::generated::get_default_branch(app.state()).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -393,10 +378,10 @@ async fn git_reads_over_primary_worktree() {
     let s = app.state();
     let _ = commands::generated::vcs_status(s.clone(), None).await;
     let _ = commands::generated::vcs_head(s.clone(), None).await;
-    let _ =
-        commands::generated::get_ahead_behind(s.clone(), None, "HEAD".into(), "HEAD".into()).await;
-    let _ = commands::generated::list_all_refs(s.clone()).await;
-    let _ = commands::generated::get_change_scopes(s.clone(), None).await;
+    let head = || oxplow_domain::vcs::Revision::git("HEAD");
+    let _ = commands::generated::vcs_divergence(s.clone(), None, head(), head()).await;
+    let _ = commands::generated::git_change_scopes(s.clone(), None).await;
+    let _ = commands::generated::vcs_log(s.clone(), None, Some(10), false).await;
     let _ = commands::generated::read_at(
         s.clone(),
         None,
@@ -404,8 +389,7 @@ async fn git_reads_over_primary_worktree() {
         oxplow_domain::vcs::Revision::git("HEAD"),
     )
     .await;
-    let _ =
-        commands::generated::list_file_commits(s.clone(), None, "nope.txt".into(), Some(10)).await;
+    let _ = commands::generated::vcs_file_history(s.clone(), None, "nope.txt".into(), 10).await;
     let _ = commands::generated::vcs_blame(
         s.clone(),
         None,
@@ -420,7 +404,7 @@ async fn git_list_commands_return_empty_for_fresh_repo() {
     let app = TestApp::build();
     let s = app.state();
     assert!(
-        commands::generated::list_recent_remote_branches(s.clone(), Some(10))
+        commands::generated::git_list_recent_remote_branches(s.clone(), Some(10))
             .await
             .unwrap()
             .is_empty()
@@ -432,12 +416,12 @@ async fn git_list_commands_return_empty_for_fresh_repo() {
             .is_empty()
     );
     assert!(
-        commands::generated::resolve_commit_ref_labels(s.clone(), vec![])
+        commands::generated::git_resolve_commit_ref_labels(s.clone(), vec![])
             .await
             .unwrap()
             .is_empty()
     );
-    let _ = commands::generated::list_adoptable_worktrees(s.clone())
+    let _ = commands::generated::vcs_list_adoptable_workspaces(s.clone())
         .await
         .unwrap();
 }

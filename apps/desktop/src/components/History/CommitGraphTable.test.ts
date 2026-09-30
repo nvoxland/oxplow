@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { GitLogResult } from "../../api.js";
 import { formatTimestamp, indexRefsBySha } from "./CommitGraphTable.js";
-
-function emptyLog(): GitLogResult {
-  return { commits: [], branchHeads: [], tags: [], currentBranch: null };
-}
 
 describe("formatTimestamp", () => {
   test("renders an ISO date as YYYY-MM-DD HH:MM in local time", () => {
@@ -35,16 +30,15 @@ describe("indexRefsBySha", () => {
   });
 
   test("groups branch heads and tags by their commit sha", () => {
-    const log: GitLogResult = {
-      ...emptyLog(),
+    const log = {
       branchHeads: [
-        { name: "main", commit: { sha: "aaa" } },
-        { name: "feature", commit: { sha: "bbb" } },
-        { name: "release", commit: { sha: "aaa" } },
+        { name: "main", sha: "aaa" },
+        { name: "feature", sha: "bbb" },
+        { name: "release", sha: "aaa" },
       ],
       tags: [
-        { name: "v1.0", commit: { sha: "aaa" } },
-        { name: "rc1", commit: { sha: "ccc" } },
+        { name: "v1.0", sha: "aaa" },
+        { name: "rc1", sha: "ccc" },
       ],
     };
     const { branchHeadsBySha, tagsBySha } = indexRefsBySha(log);

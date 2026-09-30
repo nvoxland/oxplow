@@ -4,22 +4,9 @@
 use std::collections::HashMap;
 
 use oxplow_app::Services;
-use oxplow_domain::stores::StreamStore;
-use oxplow_git::{
-    AheadBehind, ChangeScopes, CommitRefLabel, GitOpResult, GitWorktreeEntry, GroupedGitRefs,
-    RemoteBranchEntry, TextSearchHit,
-};
+use oxplow_git::{ChangeScopes, CommitRefLabel, GitOpResult, RemoteBranchEntry, TextSearchHit};
 
 use crate::error::IpcError;
-
-pub async fn get_ahead_behind(
-    svc: &Services,
-    stream_id: Option<String>,
-    base: String,
-    head: String,
-) -> Result<AheadBehind, IpcError> {
-    Ok(svc.git.ahead_behind(stream_id.as_deref(), base, head).await)
-}
 
 pub async fn append_to_gitignore(
     svc: &Services,
@@ -158,22 +145,18 @@ pub async fn git_add_path(
         .map_err(|e| IpcError::internal(e.to_string()))
 }
 
-pub async fn list_all_refs(svc: &Services) -> Result<GroupedGitRefs, IpcError> {
-    Ok(svc.git.list_all_refs().await)
-}
-
 /// Map commit SHAs to a single user-facing branch/tag label. Used by
 /// the Local History dashboard to chip each snapshot with its
 /// pinned commit's branch/tag name; SHAs that match no ref are absent
 /// from the result (caller renders a short-sha fallback).
-pub async fn resolve_commit_ref_labels(
+pub async fn git_resolve_commit_ref_labels(
     svc: &Services,
     shas: Vec<String>,
 ) -> Result<HashMap<String, Vec<CommitRefLabel>>, IpcError> {
     Ok(svc.git.resolve_commit_ref_labels(shas).await)
 }
 
-pub async fn list_recent_remote_branches(
+pub async fn git_list_recent_remote_branches(
     svc: &Services,
     limit: Option<usize>,
 ) -> Result<Vec<RemoteBranchEntry>, IpcError> {
@@ -183,34 +166,11 @@ pub async fn list_recent_remote_branches(
         .await)
 }
 
-pub async fn list_file_commits(
-    svc: &Services,
-    stream_id: Option<String>,
-    path: String,
-    limit: Option<usize>,
-) -> Result<Vec<oxplow_git::GitLogCommit>, IpcError> {
-    Ok(svc
-        .git
-        .list_file_commits(stream_id.as_deref(), path, limit.unwrap_or(50))
-        .await)
-}
-
-pub async fn get_change_scopes(
+pub async fn git_change_scopes(
     svc: &Services,
     stream_id: Option<String>,
 ) -> Result<ChangeScopes, IpcError> {
     Ok(svc.git.change_scopes(stream_id.as_deref()).await)
-}
-
-pub async fn list_adoptable_worktrees(svc: &Services) -> Result<Vec<GitWorktreeEntry>, IpcError> {
-    let store = oxplow_db::SqliteStreamStore::new(svc.db.clone());
-    let registered: Vec<String> = store
-        .list()
-        .await?
-        .into_iter()
-        .map(|s| s.worktree_path)
-        .collect();
-    Ok(svc.git.list_adoptable_worktrees(registered).await)
 }
 
 pub async fn search_workspace_text(
@@ -225,86 +185,8 @@ pub async fn search_workspace_text(
         .await)
 }
 
-/// One stream's divergence row for the Git Dashboard "Streams" panel.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
-pub struct StreamDivergenceRow {
-    pub stream_id: String,
-    pub title: String,
-    pub branch: String,
-    pub is_primary: bool,
-    pub ahead: u32,
-    pub behind: u32,
-    pub overlapping_files: Vec<String>,
-    pub readiness: oxplow_git::MergeReadiness,
-}
-
-/// Cross-stream divergence report: each stream/worktree's ahead/behind
-/// and merge-readiness vs the integration branch `base`.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
-pub struct StreamDivergenceReport {
-    pub base: String,
-    pub rows: Vec<StreamDivergenceRow>,
-}
-
-/// Compute divergence + merge-readiness for every stream against the
-/// integration branch. `base` defaults to the detected default branch
-/// (`main`/`master`), then `"main"` if detection fails.
-pub async fn list_stream_divergences(
-    svc: &Services,
-    base: Option<String>,
-) -> Result<StreamDivergenceReport, IpcError> {
-    let base = match base {
-        Some(b) if !b.trim().is_empty() => b,
-        _ => svc
-            .git
-            .detect_default_branch()
-            .await
-            .unwrap_or_else(|| "main".to_string()),
-    };
-
-    let streams = svc.streams.list_streams().await?;
-    let mut rows = Vec::with_capacity(streams.len());
-    for s in streams {
-        let d = svc
-            .git
-            .divergence(None, base.clone(), s.branch.clone())
-            .await;
-        rows.push(StreamDivergenceRow {
-            stream_id: s.id.to_string(),
-            title: s.title,
-            branch: s.branch,
-            is_primary: matches!(s.kind, oxplow_domain::StreamKind::Primary),
-            ahead: d.ahead,
-            behind: d.behind,
-            overlapping_files: d.overlapping_files,
-            readiness: d.readiness,
-        });
-    }
-    Ok(StreamDivergenceReport { base, rows })
-}
-
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
-    async fn list_stream_divergences_dispatches_and_returns_report() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch(
-            "list_stream_divergences",
-            serde_json::json!({ "base": null }),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert!(
-            out.get("base").is_some(),
-            "expected a base field, got {out}"
-        );
-        assert!(
-            out.get("rows").unwrap().is_array(),
-            "rows should be an array"
-        );
-    }
-
     #[tokio::test]
     async fn git_cherry_pick_dispatches_and_returns_op_result() {
         let (svc, _dir) = crate::test_support::services();

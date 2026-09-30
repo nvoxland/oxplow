@@ -24,10 +24,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use oxplow_domain::StreamId;
-use oxplow_git::{
-    AheadBehind, BranchRef, ChangeScopes, CommitRefLabel, Divergence, GitLogCommit, GitLogOptions,
-    GitLogResult, GitOpResult, GitWorktreeEntry, GroupedGitRefs, RemoteBranchEntry, TextSearchHit,
-};
+use oxplow_git::{ChangeScopes, CommitRefLabel, GitOpResult, RemoteBranchEntry, TextSearchHit};
 use tracing::warn;
 
 use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
@@ -81,99 +78,11 @@ impl GitService {
     // Reads — every one is a live shell-out via spawn_blocking.
     // ---------------------------------------------------------------
 
-    pub async fn branches_for(&self, stream_id: Option<&str>) -> Vec<BranchRef> {
-        let path = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::list_branches(path))
-            .await
-            .unwrap_or_default()
-    }
-
-    /// `list_branches` against the project root — used by the shared
-    /// branch picker that doesn't sit inside a specific stream.
-    pub async fn list_branches_project(&self) -> Vec<BranchRef> {
-        let path = self.project_dir();
-        tokio::task::spawn_blocking(move || oxplow_git::list_branches(path))
-            .await
-            .unwrap_or_default()
-    }
-
-    pub async fn ahead_behind(
-        &self,
-        stream_id: Option<&str>,
-        base: String,
-        head: String,
-    ) -> AheadBehind {
-        let path = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::get_ahead_behind(&path, &base, &head))
-            .await
-            .expect("ahead_behind join")
-    }
-
-    /// Divergence + merge-readiness of `head` vs `base`, resolved
-    /// against `stream_id`'s repo (defaults to the project root, where
-    /// every worktree branch is visible since they share `.git`).
-    pub async fn divergence(
-        &self,
-        stream_id: Option<&str>,
-        base: String,
-        head: String,
-    ) -> Divergence {
-        let path = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::compute_divergence(&path, &base, &head))
-            .await
-            .expect("divergence join")
-    }
-
-    /// Resolved 40-char sha for HEAD in `stream_id`'s worktree.
-    /// Returns `None` when the directory isn't a git repo or HEAD
-    /// is unborn.
-    pub async fn head_commit_sha(&self, stream_id: Option<&str>) -> Option<String> {
-        let path = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::head_commit_sha(&path))
-            .await
-            .ok()
-            .flatten()
-    }
-
     pub async fn change_scopes(&self, stream_id: Option<&str>) -> ChangeScopes {
         let path = self.router.resolve(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::get_change_scopes(&path))
             .await
             .expect("change_scopes join")
-    }
-
-    pub async fn git_log(&self, stream_id: Option<&str>, opts: GitLogOptions) -> GitLogResult {
-        let path = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::get_git_log(&path, opts))
-            .await
-            .expect("git_log join")
-    }
-
-    pub async fn commits_ahead_of(
-        &self,
-        stream_id: Option<&str>,
-        base: String,
-        head: String,
-        limit: usize,
-    ) -> Vec<GitLogCommit> {
-        let path = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || {
-            oxplow_git::get_commits_ahead_of(&path, &base, &head, limit)
-        })
-        .await
-        .unwrap_or_default()
-    }
-
-    pub async fn list_file_commits(
-        &self,
-        stream_id: Option<&str>,
-        path: String,
-        limit: usize,
-    ) -> Vec<GitLogCommit> {
-        let dir = self.router.resolve(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::list_file_commits(&dir, &path, limit))
-            .await
-            .unwrap_or_default()
     }
 
     pub async fn search_workspace_text(
@@ -186,13 +95,6 @@ impl GitService {
         tokio::task::spawn_blocking(move || oxplow_git::search_workspace_text(&dir, &query, limit))
             .await
             .unwrap_or_default()
-    }
-
-    pub async fn list_all_refs(&self) -> GroupedGitRefs {
-        let path = self.project_dir();
-        tokio::task::spawn_blocking(move || oxplow_git::list_all_refs(&path))
-            .await
-            .expect("list_all_refs join")
     }
 
     /// Map commit SHAs to every branch + tag pointing at them.
@@ -213,22 +115,6 @@ impl GitService {
         tokio::task::spawn_blocking(move || oxplow_git::list_recent_remote_branches(&path, limit))
             .await
             .unwrap_or_default()
-    }
-
-    pub async fn list_existing_worktrees(&self) -> Vec<GitWorktreeEntry> {
-        let path = self.project_dir();
-        tokio::task::spawn_blocking(move || oxplow_git::list_existing_worktrees(&path))
-            .await
-            .unwrap_or_default()
-    }
-
-    pub async fn list_adoptable_worktrees(&self, registered: Vec<String>) -> Vec<GitWorktreeEntry> {
-        let path = self.project_dir();
-        tokio::task::spawn_blocking(move || {
-            oxplow_git::list_adoptable_worktrees(&path, &registered)
-        })
-        .await
-        .unwrap_or_default()
     }
 
     pub async fn detect_default_branch(&self) -> Option<String> {

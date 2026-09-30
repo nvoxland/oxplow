@@ -46,7 +46,7 @@ mock.module("../../tauri-bridge/generated/bindings.js", () => ({
     listWorkspaceFiles: async () => ok(FILES),
     vcsStatus: async () => ok(STATUS),
     listWorkspaceEntries: async () => ok([]),
-    getChangeScopes: async () =>
+    gitChangeScopes: async () =>
       ok({
         current_branch: "main",
         branch_base: null,
@@ -55,7 +55,6 @@ mock.module("../../tauri-bridge/generated/bindings.js", () => ({
         staged: [],
         unstaged: [],
       }),
-    listAllRefs: async () => ok({ branches: [], remotes: [], tags: [] }),
   },
 }));
 

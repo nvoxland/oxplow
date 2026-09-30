@@ -3,7 +3,10 @@
 //! `WorktreeRouter`) and names versions as `Revision`s, so no caller
 //! sees a provider's own ids or kinds.
 
-use oxplow_domain::vcs::{BlameLine, Revision, RevisionDetail, WorkspaceStatus};
+use oxplow_domain::vcs::{
+    BlameLine, Branch, Divergence, LogQuery, Revision, RevisionDetail, RevisionInfo, VcsWorkspace,
+    WorkspaceStatus,
+};
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -110,6 +113,95 @@ pub async fn merge_base(
         .merge_base(&ws, &a, &b)
         .await?
         .map(|r| vcs_revision(svc, r)))
+}
+
+/// The provider's ids for two revisions that must both be VCS revisions.
+async fn provider_pair(
+    svc: &Services,
+    a: &Revision,
+    b: &Revision,
+) -> Result<(String, String), DomainError> {
+    match (provider_rev(svc, a).await?, provider_rev(svc, b).await?) {
+        (Some(a), Some(b)) => Ok((a, b)),
+        _ => Err(DomainError::Invalid(
+            "this compares two revisions, not the working tree".into(),
+        )),
+    }
+}
+
+/// The stream's history from its head, newest first — or every branch's
+/// with `all`. (The UI reads history from `v_commit`; this is the live
+/// walk for agents.)
+pub async fn log(
+    svc: &Services,
+    stream_id: Option<&str>,
+    limit: Option<u32>,
+    all: bool,
+) -> Result<Vec<RevisionInfo>, DomainError> {
+    let ws = svc.worktrees.resolve(stream_id).await;
+    Ok(svc.vcs.log(&ws, LogQuery { limit, all }).await?)
+}
+
+pub async fn branches(svc: &Services, stream_id: Option<&str>) -> Result<Vec<Branch>, DomainError> {
+    let ws = svc.worktrees.resolve(stream_id).await;
+    Ok(svc.vcs.branches(&ws).await?)
+}
+
+/// How far `head` and `base` have diverged, and whether `head` would
+/// merge cleanly.
+pub async fn divergence(
+    svc: &Services,
+    stream_id: Option<&str>,
+    base: &Revision,
+    head: &Revision,
+) -> Result<Divergence, DomainError> {
+    let ws = svc.worktrees.resolve(stream_id).await;
+    let (base, head) = provider_pair(svc, base, head).await?;
+    Ok(svc.vcs.divergence(&ws, &base, &head).await?)
+}
+
+/// Revisions on `head` that `base` lacks, newest first.
+pub async fn revisions_between(
+    svc: &Services,
+    stream_id: Option<&str>,
+    base: &Revision,
+    head: &Revision,
+    limit: u32,
+) -> Result<Vec<RevisionInfo>, DomainError> {
+    let ws = svc.worktrees.resolve(stream_id).await;
+    let (base, head) = provider_pair(svc, base, head).await?;
+    Ok(svc.vcs.revisions_between(&ws, &base, &head, limit).await?)
+}
+
+pub async fn file_history(
+    svc: &Services,
+    stream_id: Option<&str>,
+    path: &str,
+    limit: u32,
+) -> Result<Vec<RevisionInfo>, DomainError> {
+    let ws = svc.worktrees.resolve(stream_id).await;
+    Ok(svc.vcs.file_history(&ws, path, limit).await?)
+}
+
+/// Working copies of the repository no stream uses yet — what "adopt a
+/// worktree" offers.
+pub async fn adoptable_workspaces(svc: &Services) -> Result<Vec<VcsWorkspace>, DomainError> {
+    use oxplow_domain::stores::StreamStore as _;
+    let canon = |p: &str| std::fs::canonicalize(p).unwrap_or_else(|_| p.into());
+    let registered: Vec<std::path::PathBuf> = svc
+        .stream_store
+        .list()
+        .await?
+        .iter()
+        .map(|s| canon(&s.worktree_path))
+        .collect();
+    Ok(svc
+        .vcs
+        .list_workspaces(svc.worktrees.project_dir())
+        .await?
+        .into_iter()
+        .filter(|w| !w.is_main && !registered.contains(&canon(&w.path)))
+        .collect())
 }
 
 #[cfg(test)]

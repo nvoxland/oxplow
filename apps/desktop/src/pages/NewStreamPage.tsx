@@ -2,13 +2,12 @@ import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   createStream,
-  getDefaultBranch,
-  listAdoptableWorktrees,
-  listBranches,
+  vcsListAdoptableWorkspaces,
   type BranchRef,
-  type GitWorktreeEntry,
   type Stream,
+  type VcsWorkspace,
 } from "../api.js";
+import { branchRefOf, readBranches } from "../vcsHistory.js";
 import { logUi } from "../logger.js";
 import { BranchPicker, type PickedRef } from "../components/BranchPicker.js";
 import { Page } from "../tabs/Page.js";
@@ -102,7 +101,7 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
   const [startPointRef, setStartPointRef] = useState("");
   const [startPointLabel, setStartPointLabel] = useState("");
   const [worktreePath, setWorktreePath] = useState("");
-  const [worktrees, setWorktrees] = useState<GitWorktreeEntry[]>([]);
+  const [worktrees, setWorktrees] = useState<VcsWorkspace[]>([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -112,9 +111,12 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
     if (!gitEnabled) return;
     let cancelled = false;
     setLoadingBranches(true);
-    void Promise.all([listBranches(), listAdoptableWorktrees(), getDefaultBranch()])
-      .then(([nextBranches, nextWorktrees, defaultBranch]) => {
+    void Promise.all([readBranches(), vcsListAdoptableWorkspaces()])
+      .then(([{ branches: rows }, nextWorktrees]) => {
         if (cancelled) return;
+        const locals = rows.filter((b) => b.remote === null);
+        const nextBranches = locals.map(branchRefOf);
+        const defaultBranch = locals.find((b) => b.isDefault)?.name ?? null;
         setWorktrees(nextWorktrees);
         const first = nextBranches[0];
         if (first) {

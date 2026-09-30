@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use oxplow_domain::vcs::{
     BlameLine, Branch, CleanBaseline, CommitRequest, ConflictChoice, Divergence, FileStatus, Head,
     InProgressOp, LogQuery, MergeReadiness, ObjectId, ObjectStore, OpOutcome, RemoteBranch,
-    RevisionDetail, RevisionFile, RevisionInfo, StatusEntry, Vcs, VcsError, VcsFeatures,
+    RevisionDetail, RevisionFile, RevisionInfo, StatusEntry, Tag, Vcs, VcsError, VcsFeatures,
     VcsWorkspace, WorkspaceStatus,
 };
 use oxplow_domain::FileChange;
@@ -340,6 +340,18 @@ impl Vcs for GitProvider {
                     remote: b.remote,
                     head: b.head,
                 })
+                .collect())
+        })
+        .await
+    }
+
+    async fn tags(&self, ws: &Path) -> Result<Vec<Tag>, VcsError> {
+        let ws = ws.to_path_buf();
+        blocking(move || {
+            repo_check(&ws)?;
+            Ok(oxplow_git::list_tags(&ws)
+                .into_iter()
+                .map(|(name, revision)| Tag { name, revision })
                 .collect())
         })
         .await

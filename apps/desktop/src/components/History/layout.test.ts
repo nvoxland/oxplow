@@ -1,14 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { layoutCommits } from "./layout.js";
-import type { GitLogCommit } from "../../api.js";
+import type { RevisionInfo } from "../../tauri-bridge/generated/bindings.js";
 
-function commit(sha: string, parents: string[] = []): GitLogCommit {
-  return {
-    sha,
-    parents: parents.map((p) => ({ sha: p })),
-    commit: { author: { name: "", email: "", date: "" }, message: "" },
-    refs: [],
-  };
+function commit(sha: string, parents: string[] = []): RevisionInfo {
+  return { id: sha, short_id: sha.slice(0, 7), author: "", email: "", time: 0, subject: "", parents };
 }
 
 describe("layoutCommits", () => {

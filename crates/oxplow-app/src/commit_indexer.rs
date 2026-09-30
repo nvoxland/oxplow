@@ -13,13 +13,12 @@
 //! before re-diffing — the diff + edge build is the only expensive
 //! step, the existence probe is one indexed SELECT.
 //!
-//! The boot path scans the most-recent N commits; the
-//! [`OxplowEvent::GitRefsChanged`] subscriber re-runs the same scan
-//! on every ref movement (debounced upstream by `GitRefsWatcher`).
-//!
-//! Lives in `oxplow-app` rather than `oxplow-git` so we can pull in
-//! the `oxplow-db` page-ref types without leaking a DB dep into the
-//! pure git crate.
+//! The boot path scans the most-recent N commits reachable from every
+//! stream's head (so a worktree stream's own commits are in `v_commit`);
+//! the [`OxplowEvent::GitRefsChanged`] subscriber re-runs the same scan
+//! on every ref movement (debounced upstream by `GitRefsWatcher`). The
+//! same pass restates `v_branch` and `v_tag`. Everything reads through
+//! the VCS capability (`.context/vcs.md`).
 
 use std::path::Path;
 
@@ -29,7 +28,7 @@ use oxplow_db::page_ref_projections::{
 };
 use oxplow_db::{PageRefEdge, SqlitePageRefStore};
 use oxplow_domain::refs::extract;
-use oxplow_git::log::{get_commit_detail, get_git_log, CommitDetail, GitLogOptions};
+use oxplow_domain::vcs::{Branch, LogQuery, RevisionDetail, Vcs};
 
 /// Default depth for the boot-time + ref-change scans. 500 commits
 /// covers most active branches without a full-history walk; older
@@ -39,8 +38,8 @@ pub const DEFAULT_INDEX_DEPTH: usize = 500;
 
 /// Pure: build the edge set for one commit. Exposed so tests can
 /// exercise the projection independently of a real repo.
-pub fn commit_edges(detail: &CommitDetail) -> Vec<PageRefEdge> {
-    let sha = detail.sha.as_str();
+pub fn commit_edges(detail: &RevisionDetail) -> Vec<PageRefEdge> {
+    let sha = detail.info.id.as_str();
     let mut out = Vec::new();
     // touched-file edges from the diff.
     for f in &detail.files {
@@ -60,7 +59,7 @@ pub fn commit_edges(detail: &CommitDetail) -> Vec<PageRefEdge> {
     // apply to wiki bodies and task descriptions also apply to
     // commit messages.
     let mut combined = String::new();
-    combined.push_str(&detail.subject);
+    combined.push_str(&detail.info.subject);
     if !detail.body.is_empty() {
         combined.push('\n');
         combined.push_str(&detail.body);
@@ -110,64 +109,46 @@ pub fn commit_edges(detail: &CommitDetail) -> Vec<PageRefEdge> {
     out
 }
 
-/// Walk the most-recent `limit` commits reachable from HEAD, store each
-/// one (`v_commit`, `v_commit_file`) and project it into `page_ref`.
-/// Skips commits already stored, so subsequent calls only index new
-/// commits (and commits indexed into `page_ref` before commits were
-/// stored get backfilled once). Returns the number of commits newly
-/// indexed.
+/// Walk the most-recent `limit` revisions reachable from workspace
+/// `ws`'s head, store each one (`v_commit`, `v_commit_file`) and project
+/// it into `page_ref`. Skips revisions already stored, so subsequent
+/// calls only index new ones. Returns the number newly indexed.
 pub async fn index_recent(
-    repo_path: &Path,
+    vcs: &dyn Vcs,
+    ws: &Path,
     page_refs: &SqlitePageRefStore,
     git: &oxplow_db::SqliteGitStore,
     limit: usize,
 ) -> usize {
-    let log = {
-        let repo_path = repo_path.to_path_buf();
-        tokio::task::spawn_blocking(move || {
-            get_git_log(
-                &repo_path,
-                GitLogOptions {
-                    limit: Some(limit),
-                    all: false,
-                },
-            )
-        })
+    let log = vcs
+        .log(
+            ws,
+            LogQuery {
+                limit: Some(limit as u32),
+                all: false,
+            },
+        )
         .await
-        .unwrap_or_else(|_| oxplow_git::log::GitLogResult {
-            commits: vec![],
-            branch_heads: vec![],
-            tags: vec![],
-        })
-    };
+        .unwrap_or_default();
 
     let mut indexed = 0usize;
-    for commit in log.commits {
+    for info in log {
         // Cheap probe: a stored commit is fully indexed. replace_source
         // is idempotent, but the diff walk is O(filecount) and we'd
         // rather not pay it on every boot for old commits.
-        if git.has_commit(&commit.sha).await.unwrap_or(false) {
+        if git.has_commit(&info.id).await.unwrap_or(false) {
             continue;
         }
-        let repo_path = repo_path.to_path_buf();
-        let sha = commit.sha.clone();
-        let detail = tokio::task::spawn_blocking(move || get_commit_detail(&repo_path, &sha))
-            .await
-            .ok()
-            .flatten();
-        let Some(detail) = detail else {
+        let Ok(Some(detail)) = vcs.revision(ws, &info.id).await else {
             continue;
         };
         let edges = commit_edges(&detail);
-        if let Err(e) = page_refs
-            .replace_source(KIND_COMMIT, &commit.sha, edges)
-            .await
-        {
-            tracing::warn!(?e, sha = %commit.sha, "commit indexer write failed");
+        if let Err(e) = page_refs.replace_source(KIND_COMMIT, &info.id, edges).await {
+            tracing::warn!(?e, sha = %info.id, "commit indexer write failed");
             continue;
         }
         if let Err(e) = git.upsert_commit(commit_row(&detail)).await {
-            tracing::warn!(?e, sha = %commit.sha, "commit indexer: storing the commit failed");
+            tracing::warn!(?e, sha = %info.id, "commit indexer: storing the commit failed");
             continue;
         }
         indexed += 1;
@@ -175,47 +156,58 @@ pub async fn index_recent(
     indexed
 }
 
-/// Index new commits and restate the branch list, for the primary
-/// worktree. Returns the number of commits newly indexed.
+/// Index new revisions from every stream's head and restate the branch
+/// and tag lists. Returns the number of revisions newly indexed.
 pub async fn refresh(svc: &crate::Services) -> usize {
     use oxplow_domain::stores::StreamStore as _;
-    let repo_path = svc.layout.project_dir.clone();
-    let n = index_recent(
-        &repo_path,
-        &svc.page_ref_store,
-        &svc.git_store,
-        DEFAULT_INDEX_DEPTH,
-    )
-    .await;
-    let streams: Vec<(i64, String)> = svc
-        .stream_store
-        .list()
-        .await
-        .unwrap_or_default()
+    let streams = svc.stream_store.list().await.unwrap_or_default();
+    let mut workspaces: Vec<std::path::PathBuf> = Vec::new();
+    for s in &streams {
+        let ws = svc.worktrees.resolve(Some(&s.id.to_string())).await;
+        if !workspaces.contains(&ws) {
+            workspaces.push(ws);
+        }
+    }
+    let primary = svc.worktrees.project_dir().to_path_buf();
+    if !workspaces.contains(&primary) {
+        workspaces.insert(0, primary.clone());
+    }
+    let mut n = 0;
+    for ws in &workspaces {
+        n += index_recent(
+            &*svc.vcs,
+            ws,
+            &svc.page_ref_store,
+            &svc.git_store,
+            DEFAULT_INDEX_DEPTH,
+        )
+        .await;
+    }
+    let checkouts: Vec<(i64, String)> = streams
         .into_iter()
         .map(|s| (s.id.value(), s.branch))
         .collect();
-    refresh_branches(&repo_path, &streams, &svc.git_store).await;
+    refresh_refs(&*svc.vcs, &primary, &checkouts, &svc.git_store).await;
     n
 }
 
-/// The stored form of a commit.
-fn commit_row(d: &CommitDetail) -> oxplow_db::GitCommitRow {
+/// The stored form of a revision.
+fn commit_row(d: &RevisionDetail) -> oxplow_db::GitCommitRow {
     oxplow_db::GitCommitRow {
-        sha: d.sha.clone(),
-        author: d.author.clone(),
-        email: d.email.clone(),
-        committed_secs: d.timestamp_secs,
-        subject: d.subject.clone(),
+        sha: d.info.id.clone(),
+        author: d.info.author.clone(),
+        email: d.info.email.clone(),
+        committed_secs: d.info.time,
+        subject: d.info.subject.clone(),
         body: d.body.clone(),
-        parents: d.parents.clone(),
+        parents: d.info.parents.clone(),
         files: d
             .files
             .iter()
             .filter(|f| !f.path.is_empty())
             .map(|f| oxplow_db::GitCommitFileRow {
                 path: f.path.clone(),
-                status: f.status.clone(),
+                status: f.status.as_str().to_string(),
                 additions: f.additions as i64,
                 deletions: f.deletions as i64,
             })
@@ -223,34 +215,40 @@ fn commit_row(d: &CommitDetail) -> oxplow_db::GitCommitRow {
     }
 }
 
-/// Restate `v_branch`: every local and remote-tracking branch with its
-/// head, and which stream (`(stream_id, branch)` pairs) has a local one
-/// checked out.
-pub async fn refresh_branches(
-    repo_path: &Path,
+/// Restate `v_branch` — every local and remote-tracking branch with its
+/// head, which stream (`(stream_id, branch)` pairs) has a local one
+/// checked out, and the default — and `v_tag`.
+pub async fn refresh_refs(
+    vcs: &dyn Vcs,
+    ws: &Path,
     streams: &[(i64, String)],
     git: &oxplow_db::SqliteGitStore,
 ) {
-    let path = repo_path.to_path_buf();
-    let branches = tokio::task::spawn_blocking(move || oxplow_git::list_branches(&path))
-        .await
-        .unwrap_or_default();
-    let rows = branch_rows(&branches, streams);
-    if let Err(e) = git.replace_branches(rows).await {
+    let branches = vcs.branches(ws).await.unwrap_or_default();
+    if let Err(e) = git.replace_branches(branch_rows(&branches, streams)).await {
         tracing::warn!(?e, "branch refresh failed");
+    }
+    let tags = vcs
+        .tags(ws)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| oxplow_db::GitTagRow {
+            name: t.name,
+            sha: t.revision,
+        })
+        .collect();
+    if let Err(e) = git.replace_tags(tags).await {
+        tracing::warn!(?e, "tag refresh failed");
     }
 }
 
 /// Pure: branch refs + stream checkouts → stored rows.
-fn branch_rows(
-    branches: &[oxplow_git::BranchRef],
-    streams: &[(i64, String)],
-) -> Vec<oxplow_db::GitBranchRow> {
-    use oxplow_git::BranchRefKind;
+fn branch_rows(branches: &[Branch], streams: &[(i64, String)]) -> Vec<oxplow_db::GitBranchRow> {
     branches
         .iter()
         .map(|b| {
-            let local = b.kind == BranchRefKind::Local;
+            let local = b.remote.is_none();
             oxplow_db::GitBranchRow {
                 name: b.name.clone(),
                 kind: if local { "local" } else { "remote" }.into(),
@@ -264,6 +262,7 @@ fn branch_rows(
                 } else {
                     None
                 },
+                is_default: b.is_default,
             }
         })
         .collect()
@@ -272,25 +271,27 @@ fn branch_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_git::log::{CommitDetail, CommitDetailFile};
+    use oxplow_domain::vcs::{FileStatus, RevisionFile, RevisionInfo};
 
-    fn commit(sha: &str, subject: &str, body: &str, paths: &[&str]) -> CommitDetail {
-        CommitDetail {
-            sha: sha.into(),
-            short_sha: sha[..7.min(sha.len())].into(),
-            author: "a".into(),
-            email: "a@b".into(),
-            timestamp_secs: 0,
-            subject: subject.into(),
+    fn commit(sha: &str, subject: &str, body: &str, paths: &[&str]) -> RevisionDetail {
+        RevisionDetail {
+            info: RevisionInfo {
+                id: sha.into(),
+                short_id: sha[..7.min(sha.len())].into(),
+                author: "a".into(),
+                email: "a@b".into(),
+                time: 0,
+                subject: subject.into(),
+                parents: vec![],
+            },
             body: body.into(),
-            parents: vec![],
             files: paths
                 .iter()
-                .map(|p| CommitDetailFile {
+                .map(|p| RevisionFile {
                     path: (*p).into(),
                     additions: 0,
                     deletions: 0,
-                    status: "modified".into(),
+                    status: FileStatus::Modified,
                 })
                 .collect(),
         }
@@ -346,6 +347,82 @@ mod tests {
         );
     }
 
+    /// P5.B5 (tsk524): the indexer walks every stream's head, so a commit
+    /// made only on a worktree stream's branch reaches `v_commit` (with its
+    /// parents), `v_branch` marks the default branch, and tags are in
+    /// `v_tag`. A stream's history is a recursive read from its head.
+    #[tokio::test]
+    async fn every_stream_head_is_indexed_and_history_reads_from_its_head() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.txt"), "a\n").unwrap();
+        let base = crate::test_fixtures::commit_all(&root, "base");
+        let main = svc.vcs.head(&root).await.unwrap().branch.unwrap();
+        let git = |dir: &std::path::Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{out:?}");
+        };
+        git(&root, &["tag", "v1"]);
+        let side = svc
+            .streams
+            .create_worktree("b5-side", "Side", "b5-side", main.clone())
+            .await
+            .unwrap();
+        let side_dir = std::path::PathBuf::from(&side.worktree_path);
+        let _cleanup = scopeguard(side_dir.clone());
+        std::fs::write(side_dir.join("side.txt"), "s\n").unwrap();
+        git(&side_dir, &["add", "-A"]);
+        git(
+            &side_dir,
+            &["commit", "-q", "-m", "only on the side branch"],
+        );
+
+        refresh(svc).await;
+        let q = |sql: &'static str| async move {
+            serde_json::to_value(svc.sql.query_sql(sql, vec![], None).await.unwrap().rows).unwrap()
+        };
+        assert_eq!(
+            q("SELECT subject, parents FROM v_commit WHERE subject = 'only on the side branch'")
+                .await,
+            serde_json::json!([["only on the side branch", format!("[\"{base}\"]")]])
+        );
+        assert_eq!(
+            q("SELECT name, is_default FROM v_branch WHERE kind = 'local' ORDER BY name").await,
+            serde_json::json!([["b5-side", 0], [main, 1]])
+        );
+        assert_eq!(
+            q("SELECT name, sha FROM v_tag").await,
+            serde_json::json!([["v1", base.clone()]])
+        );
+        // The side stream's history, from its branch head.
+        assert_eq!(
+            q("WITH RECURSIVE reach(sha) AS (
+                   SELECT head_sha FROM v_branch WHERE name = 'b5-side' AND kind = 'local'
+                   UNION
+                   SELECT p.value FROM reach JOIN v_commit c ON c.sha = reach.sha, json_each(c.parents) p
+                 )
+                 SELECT c.subject FROM v_commit c JOIN reach USING (sha) ORDER BY c.subject")
+            .await,
+            serde_json::json!([["base"], ["init"], ["only on the side branch"]])
+        );
+    }
+
+    /// Removes a sibling worktree directory when the test ends.
+    fn scopeguard(dir: std::path::PathBuf) -> impl Drop {
+        struct G(std::path::PathBuf);
+        impl Drop for G {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        G(dir)
+    }
+
     #[tokio::test]
     async fn index_recent_against_real_repo() {
         let dir = tempfile::tempdir().unwrap();
@@ -380,7 +457,7 @@ mod tests {
         let db = oxplow_db::Database::in_memory();
         let page_refs = SqlitePageRefStore::new(db.clone());
         let git = oxplow_db::SqliteGitStore::new(db.clone());
-        let n = index_recent(dir.path(), &page_refs, &git, 50).await;
+        let n = index_recent(&crate::vcs::GitProvider, dir.path(), &page_refs, &git, 50).await;
         assert_eq!(n, 1, "should index the one commit");
 
         // The commit, its file and its task mention read through v_*.
@@ -418,25 +495,23 @@ mod tests {
         assert!(file_inbound.iter().any(|e| e.source_kind == "commit"));
 
         // Re-index — nothing new.
-        let n2 = index_recent(dir.path(), &page_refs, &git, 50).await;
+        let n2 = index_recent(&crate::vcs::GitProvider, dir.path(), &page_refs, &git, 50).await;
         assert_eq!(n2, 0, "second pass must skip already-indexed commits");
     }
 
     #[test]
     fn local_branches_map_to_the_stream_that_checks_them_out() {
-        use oxplow_git::{BranchRef, BranchRefKind};
-        let b = |kind, name: &str, remote: Option<&str>| BranchRef {
-            kind,
+        let b = |name: &str, remote: Option<&str>| Branch {
             name: name.into(),
-            ref_: String::new(),
             remote: remote.map(str::to_string),
             head: Some("abc".into()),
+            is_default: name == "main" && remote.is_none(),
         };
         let rows = branch_rows(
             &[
-                b(BranchRefKind::Local, "main", None),
-                b(BranchRefKind::Local, "feature", None),
-                b(BranchRefKind::Remote, "main", Some("origin")),
+                b("main", None),
+                b("feature", None),
+                b("main", Some("origin")),
             ],
             &[(1, "main".into()), (2, "feature".into())],
         );

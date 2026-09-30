@@ -97,6 +97,21 @@ pub fn get_git_log(repo_path: &Path, options: GitLogOptions) -> GitLogResult {
     }
 }
 
+/// Every tag with the commit it points at (annotated tags peeled),
+/// sorted by name. Empty when not a repo.
+pub fn list_tags(repo_path: &Path) -> Vec<(String, String)> {
+    let Ok(repo) = git2::Repository::open(repo_path) else {
+        return vec![];
+    };
+    let mut tags: Vec<(String, String)> = collect_log_refs(&repo)
+        .1
+        .into_iter()
+        .map(|t| (t.name, t.commit.sha))
+        .collect();
+    tags.sort();
+    tags
+}
+
 /// Walk every local branch + tag and emit `GitLogRef` entries pointing
 /// at the commit each ref resolves to. The renderer indexes these by
 /// sha so refs whose target sha isn't in `commits[]` simply don't

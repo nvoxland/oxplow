@@ -12,7 +12,10 @@ const realBindings = await import("../tauri-bridge/generated/bindings.js");
 
 const ok = <T,>(data: T) => ({ status: "ok" as const, data });
 
-const GIT_SHAPED = /^(git[A-Z]|get(BranchChanges|CommitDetail|RepoConflictState|WorkspaceStatusSummary|GitLog|CommitsAheadOf|AheadBehind)|localBlame|readFile)/;
+const GIT_SHAPED = /^(git(?!ChangeScopes|ResolveCommitRefLabels|ListRecentRemoteBranches)[A-Z]|get(BranchChanges|CommitDetail|RepoConflictState|WorkspaceStatusSummary|GitLog|CommitsAheadOf|AheadBehind|DefaultBranch)|list(Branches|LocalBranches|FileCommits|AllRefs|StreamDivergences|AdoptableWorktrees)|localBlame|readFile)/;
+const sqlCalls: string[] = [];
+const HEAD = "a".repeat(40);
+const reads = { models: ["v_commit"], tables: [], measures: [] };
 const gitCalls: string[] = [];
 const diffCalls: unknown[][] = [];
 
@@ -35,6 +38,27 @@ const neutral: Record<string, (...args: unknown[]) => Promise<unknown>> = {
       body: "",
       files: [{ path: "b.ts", status: "added", additions: 3, deletions: 0 }],
     }),
+  vcsHead: async () => ok({ revision: `git:${HEAD}`, branch: "main" }),
+  querySql: async (...args) => {
+    const sql = String(args[0]);
+    sqlCalls.push(sql);
+    if (sql.includes("WITH RECURSIVE")) {
+      return ok({
+        columns: [],
+        rows: [
+          [HEAD, "Ann", "ann@example.com", "2026-09-30T00:00:00Z", "Second commit", `["${"b".repeat(40)}"]`],
+          ["b".repeat(40), "Ann", "ann@example.com", "2026-09-29T00:00:00Z", "First commit", "[]"],
+        ],
+        truncated: false,
+        reads,
+        freshness: [],
+      });
+    }
+    if (sql.includes("v_branch")) {
+      return ok({ columns: [], rows: [["main", HEAD]], truncated: false, reads, freshness: [] });
+    }
+    return ok({ columns: [], rows: [], truncated: false, reads, freshness: [] });
+  },
   listSnapshotsForStream: async () => ok([]),
   listEffortsOverlappingRange: async () => ok([]),
 };
@@ -64,6 +88,7 @@ mock.module("../tauri-bridge/generated/bindings.js", () => ({
 
 const { DiffViewPage } = await import("./DiffViewPage.js");
 const { GitCommitPage } = await import("./GitCommitPage.js");
+const { HistoryPanel } = await import("../components/History/HistoryPanel.js");
 
 afterEach(cleanup);
 
@@ -97,5 +122,14 @@ test("the commit page reads its commit through vcsRevision, not git commands", a
   );
   await findByText("Fix the widget");
   await findByText(/b\.ts/);
+  expect(gitCalls).toEqual([]);
+});
+
+test("history reads v_commit from the stream's head, not git log", async () => {
+  gitCalls.length = 0;
+  const { findByText } = render(<HistoryPanel stream={STREAM} />);
+  await findByText("Second commit");
+  await findByText("First commit");
+  expect(sqlCalls.some((sql) => sql.includes("WITH RECURSIVE"))).toBe(true);
   expect(gitCalls).toEqual([]);
 });

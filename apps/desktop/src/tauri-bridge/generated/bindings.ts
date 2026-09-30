@@ -692,37 +692,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listBranches: () => typedError<BranchRef[], IpcError>(__TAURI_INVOKE("list_branches")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	getDefaultBranch: () => typedError<string | null, IpcError>(__TAURI_INVOKE("get_default_branch")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	renameBranch: (from: string, to: string) => typedError<null, IpcError>(__TAURI_INVOKE("rename_branch", { from, to })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
 	deleteBranch: (branch: string, force: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("delete_branch", { branch, force })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listLocalBranches: () => typedError<BranchRef[], IpcError>(__TAURI_INVOKE("list_local_branches")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	getAheadBehind: (streamId: string | null, base: string, head: string) => typedError<AheadBehind, IpcError>(__TAURI_INVOKE("get_ahead_behind", { streamId, base, head })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listStreamDivergences: (base: string | null) => typedError<StreamDivergenceReport, IpcError>(__TAURI_INVOKE("list_stream_divergences", { base })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -792,22 +767,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listAllRefs: () => typedError<GroupedGitRefs, IpcError>(__TAURI_INVOKE("list_all_refs")),
+	gitResolveCommitRefLabels: (shas: string[]) => typedError<{ [key in string]: CommitRefLabel[] }, IpcError>(__TAURI_INVOKE("git_resolve_commit_ref_labels", { shas })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	resolveCommitRefLabels: (shas: string[]) => typedError<{ [key in string]: CommitRefLabel[] }, IpcError>(__TAURI_INVOKE("resolve_commit_ref_labels", { shas })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listRecentRemoteBranches: (limit: number | null) => typedError<RemoteBranchEntry[], IpcError>(__TAURI_INVOKE("list_recent_remote_branches", { limit })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listFileCommits: (streamId: string | null, path: string, limit: number | null) => typedError<GitLogCommit[], IpcError>(__TAURI_INVOKE("list_file_commits", { streamId, path, limit })),
+	gitListRecentRemoteBranches: (limit: number | null) => typedError<RemoteBranchEntry[], IpcError>(__TAURI_INVOKE("git_list_recent_remote_branches", { limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -822,12 +787,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listAdoptableWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_adoptable_worktrees")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	getChangeScopes: (streamId: string | null) => typedError<ChangeScopes, IpcError>(__TAURI_INVOKE("get_change_scopes", { streamId })),
+	gitChangeScopes: (streamId: string | null) => typedError<ChangeScopes, IpcError>(__TAURI_INVOKE("git_change_scopes", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -986,16 +946,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getGitLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { streamId, limit, all })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	getCommitsAheadOf: (streamId: string | null, base: string, head: string, limit: number) => typedError<GitLogCommit[], IpcError>(__TAURI_INVOKE("get_commits_ahead_of", { streamId, base, head, limit })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listWorkspaceEntries: (streamId: string | null, relativePath: string) => typedError<WorkspaceEntry[], IpcError>(__TAURI_INVOKE("list_workspace_entries", { streamId, relativePath })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1041,6 +991,36 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	vcsMergeBase: (streamId: string | null, a: string, b: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("vcs_merge_base", { streamId, a, b })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	vcsLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<RevisionInfo[], IpcError>(__TAURI_INVOKE("vcs_log", { streamId, limit, all })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	vcsBranches: (streamId: string | null) => typedError<Branch[], IpcError>(__TAURI_INVOKE("vcs_branches", { streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	vcsDivergence: (streamId: string | null, base: string, head: string) => typedError<Divergence, IpcError>(__TAURI_INVOKE("vcs_divergence", { streamId, base, head })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	vcsRevisionsBetween: (streamId: string | null, base: string, head: string, limit: number) => typedError<RevisionInfo[], IpcError>(__TAURI_INVOKE("vcs_revisions_between", { streamId, base, head, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	vcsFileHistory: (streamId: string | null, path: string, limit: number) => typedError<RevisionInfo[], IpcError>(__TAURI_INVOKE("vcs_file_history", { streamId, path, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	vcsListAdoptableWorkspaces: () => typedError<VcsWorkspace[], IpcError>(__TAURI_INVOKE("vcs_list_adoptable_workspaces")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1489,11 +1469,6 @@ export type AgentTurn = {
 
 export type AgentTurnId = string;
 
-export type AheadBehind = {
-	ahead: number,
-	behind: number,
-};
-
 // One `ai.roles` entry.
 export type AiRoleOverride = {
 	provider: string,
@@ -1614,6 +1589,17 @@ export type BlameLine = {
 	summary: string,
 };
 
+// A branch.
+export type Branch = {
+	name: string,
+	// The remote it tracks a copy of; `None` for a local branch.
+	remote: string | null,
+	// The revision it points at, when it resolves.
+	head: string | null,
+	// The repository's default branch (`main`).
+	is_default: boolean,
+};
+
 export type BranchChangeEntry = {
 	path: string,
 	original_path: string | null,
@@ -1621,19 +1607,6 @@ export type BranchChangeEntry = {
 	additions: number,
 	deletions: number,
 };
-
-export type BranchRef = {
-	kind: BranchRefKind,
-	name: string,
-	// Full ref name (e.g. `refs/heads/main`).
-	ref_: string,
-	// Remote name for `kind = Remote`; `None` for locals.
-	remote: string | null,
-	// The commit the branch points at (full sha), when it resolves.
-	head: string | null,
-};
-
-export type BranchRefKind = "local" | "remote";
 
 export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked";
 
@@ -2119,6 +2092,15 @@ export type DimensionEntry = {
 	join?: string | null,
 };
 
+// How far `head` and `base` have diverged.
+export type Divergence = {
+	ahead: number,
+	behind: number,
+	// Files changed on both sides since they split, sorted.
+	overlapping_files: string[],
+	readiness: MergeReadiness,
+};
+
 export type Effort = {
 	id: EffortId,
 	// The work item worked on, as a canonical `work_item` ref.
@@ -2501,43 +2483,6 @@ export type GeneratedConfig = {
 	include?: string[],
 };
 
-export type GitLogCommit = {
-	sha: string,
-	short_sha: string,
-	author: string,
-	email: string,
-	timestamp_secs: number,
-	subject: string,
-	parents: string[],
-};
-
-/**
- *  One branch head or tag tied to a commit. Surfaced on `GitLogResult`
- *  so `CommitGraphTable` (and its dashboard re-use in the
- *  recent-commits card) can render branch/tag badges next to each row.
- */
-export type GitLogRef = {
-	name: string,
-	commit: GitLogRefCommit,
-};
-
-/**
- *  Minimal commit pointer carried by ref overlays. The renderer only
- *  reads `.sha` to bucket refs into the per-row badge map, so the
- *  extra fields on `GitLogCommit` would be dead weight.
- */
-export type GitLogRefCommit = {
-	sha: string,
-};
-
-export type GitLogResult = {
-	commits: GitLogCommit[],
-	// Local branch heads keyed by the commit they point at.
-	branchHeads: GitLogRef[],
-	// Tags (lightweight + annotated, dereferenced to their commit).
-	tags: GitLogRef[],
-};
-
 /**
  *  Result of a git sync operation.
  * 
@@ -2556,22 +2501,6 @@ export type GitOpResult = {
 	 *  "N conflicts auto-resolved".
 	 */
 	auto_resolved?: number,
-};
-
-export type GitWorktreeEntry = {
-	path: string,
-	branch: string | null,
-	head_sha: string | null,
-	is_main: boolean,
-	is_detached: boolean,
-	is_locked: boolean,
-	is_prunable: boolean,
-};
-
-export type GroupedGitRefs = {
-	locals: RefOption[],
-	remotes: RefOption[],
-	tags: RefOption[],
 };
 
 // Where a stream's workspace is.
@@ -2998,19 +2927,13 @@ export type MenuItemSnapshot = {
 	submenu?: MenuItemSnapshot[] | null,
 };
 
-// Whether merging `head` into `base` looks safe.
+// Whether `head` would merge into `base` cleanly.
 export type MergeReadiness = 
-// `head` has no commits beyond `base` — nothing to merge.
-"already-integrated" | 
-/**
- *  `head` is ahead and no file was touched on both sides since the
- *  merge-base — a merge should apply cleanly.
- */
+// `head` has nothing `base` lacks.
+"already_integrated" | 
+// `head` is ahead and no file changed on both sides.
 "clean" | 
-/**
- *  `head` is ahead and at least one file was touched on both sides —
- *  a merge will likely conflict (see `overlapping_files`).
- */
+// `head` is ahead and some file changed on both sides.
 "conflict";
 
 /**
@@ -3648,14 +3571,6 @@ export type RecentProjectView = {
 	exists: boolean,
 };
 
-export type RefKind = "local" | "remote" | "tag" | "head";
-
-export type RefOption = {
-	label: string,
-	ref: string,
-	kind: RefKind,
-};
-
 export type Relationship = {
 	column: string,
 	// The model the column points into.
@@ -4125,27 +4040,6 @@ export type Stream = {
 	archived_at: Timestamp | null,
 };
 
-/**
- *  Cross-stream divergence report: each stream/worktree's ahead/behind
- *  and merge-readiness vs the integration branch `base`.
- */
-export type StreamDivergenceReport = {
-	base: string,
-	rows: StreamDivergenceRow[],
-};
-
-// One stream's divergence row for the Git Dashboard "Streams" panel.
-export type StreamDivergenceRow = {
-	stream_id: string,
-	title: string,
-	branch: string,
-	is_primary: boolean,
-	ahead: number,
-	behind: number,
-	overlapping_files: string[],
-	readiness: MergeReadiness,
-};
-
 export type StreamId = string;
 
 // Whether a stream is the project's primary stream or a worktree.
@@ -4392,6 +4286,15 @@ export type UsageRollup = {
 	key: string,
 	last_at: Timestamp,
 	count: number,
+};
+
+// One working copy of the repository (feature `isolated_workspaces`).
+export type VcsWorkspace = {
+	path: string,
+	branch: string | null,
+	head: string | null,
+	// The repository's primary working copy.
+	is_main: boolean,
 };
 
 export type VisitedPage = {

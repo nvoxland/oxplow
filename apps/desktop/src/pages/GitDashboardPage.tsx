@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { GitLogCommit, GitLogResult, GitOpResult, RemoteBranchEntry, Stream, StreamDivergenceReport, StreamDivergenceRow, StatusCounts } from "../api.js";
+import type { GitOpResult, MergeReadiness, RemoteBranchEntry, RevisionInfo, Stream, StatusCounts } from "../api.js";
 import {
-  getAheadBehind,
-  listStreamDivergences,
   countStatus,
+  vcsDivergence,
+  vcsHead,
   vcsRevision,
+  vcsRevisionsBetween,
   vcsStatus,
-  getCommitsAheadOf,
-  getGitLog,
   gitFetch,
   gitMergeInto,
   gitRebaseOnto,
@@ -23,7 +22,9 @@ import {
   subscribeWorkspaceEvents,
 } from "../api.js";
 import { AgentStatusDot } from "../components/AgentStatusDot.js";
-import { gitRevision } from "../revision.js";
+import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
+import { gitRevision, vcsRevOf } from "../revision.js";
+import { readBranches, readHistory, type History } from "../vcsHistory.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, indexRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
@@ -50,10 +51,58 @@ interface DashboardData {
     behindUpstream: number;
   };
   uncommitted: StatusCounts | null;
-  recentLog: GitLogResult;
+  recentLog: History & { currentBranch: string | null };
   streams: StreamRow[];
   remoteBranches: RemoteBranchEntry[];
   divergence: StreamDivergenceReport;
+}
+
+/** One stream's divergence from the integration branch. */
+interface StreamDivergenceRow {
+  streamId: string;
+  title: string;
+  branch: string;
+  ahead: number;
+  behind: number;
+  overlappingFiles: string[];
+  readiness: MergeReadiness;
+}
+
+/** Every stream's divergence from the integration branch `base` (the
+ *  repository's default branch, from `v_branch`). */
+interface StreamDivergenceReport {
+  base: string;
+  rows: StreamDivergenceRow[];
+}
+
+/** Compare every stream's branch with the default branch. */
+async function readStreamDivergences(
+  streamId: string,
+  streams: Stream[],
+): Promise<StreamDivergenceReport> {
+  const { branches } = await readBranches();
+  const base = branches.find((b) => b.remote === null && b.isDefault)?.name ?? "main";
+  const rows = await Promise.all(
+    streams
+      .filter((s) => s.branch)
+      .map(async (s): Promise<StreamDivergenceRow | null> => {
+        try {
+          const d = await vcsDivergence(streamId, gitRevision(base), gitRevision(s.branch));
+          return {
+            streamId: s.id,
+            title: s.title,
+            branch: s.branch,
+            ahead: d.ahead,
+            behind: d.behind,
+            overlappingFiles: d.overlapping_files,
+            readiness: d.readiness,
+          };
+        } catch {
+          return null;
+        }
+      }),
+  );
+  return { base, rows: rows.filter((r): r is StreamDivergenceRow => r !== null) };
 }
 
 interface StreamRow {
@@ -112,14 +161,16 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     }
     try {
       setError(null);
-      const [statusSummary, log, remoteBranches, streams, divergence] = await Promise.all([
+      const head = await vcsHead(streamId);
+      const [statusSummary, history, remoteBranches, streams] = await Promise.all([
         vcsStatus(streamId).then(countStatus),
-        getGitLog(streamId, { limit: RECENT_LIMIT, all: false }),
+        readHistory(vcsRevOf(head.revision), RECENT_LIMIT),
         listRecentRemoteBranches(streamId, 20),
         listStreams(),
-        listStreamDivergences(),
       ]);
-      const branch = stream?.branch ?? log.currentBranch ?? null;
+      const divergence = await readStreamDivergences(streamId, streams);
+      const log = { ...history, currentBranch: head.branch };
+      const branch = stream?.branch ?? head.branch ?? null;
       const headCommit = log.commits[0] ?? null;
       // Find an upstream ref via the remote branches list (best-effort).
       // remoteBranches[].short_name is "<remote>/<branch>" (e.g.
@@ -132,8 +183,8 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         : null;
       let aheadUpstream = 0;
       let behindUpstream = 0;
-      if (upstreamRef) {
-        const counts = await getAheadBehind(streamId, upstreamRef);
+      if (upstreamRef && head.revision) {
+        const counts = await vcsDivergence(streamId, gitRevision(upstreamRef), head.revision);
         aheadUpstream = counts.ahead;
         behindUpstream = counts.behind;
       }
@@ -150,16 +201,16 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
           if (!otherBranch || !branch || otherBranch === branch) {
             return { stream: other, branch: otherBranch, ahead: 0, behind: 0, uncommitted };
           }
-          const counts = await getAheadBehind(streamId, branch, otherBranch);
+          const counts = await vcsDivergence(streamId, gitRevision(branch), gitRevision(otherBranch));
           return { stream: other, branch: otherBranch, ahead: counts.ahead, behind: counts.behind, uncommitted };
         }),
       );
       setData({
         branchHeader: {
           branch,
-          headSha: headCommit?.sha ?? null,
+          headSha: headCommit?.id ?? null,
           headSubject: headCommit?.subject ?? null,
-          headDate: headCommit?.timestamp_secs ?? null,
+          headDate: headCommit?.time ?? null,
           upstream: upstreamRef,
           aheadUpstream,
           behindUpstream,
@@ -181,6 +232,8 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     setLoading(true);
     void refresh();
   }, [refresh]);
+  // The commit indexer lands new commits in `v_commit` after a ref moves.
+  useRerunOnChange(data?.recentLog.reads ?? NO_READS, () => void refresh());
 
   // Debounce watcher-driven refreshes: a single `git rebase`/`git merge`
   // can fire .git/refs and workspace events dozens of times in quick
@@ -557,12 +610,12 @@ function UncommittedMiniCard({
   );
 }
 
-function useCommitStats(streamId: string, commits: GitLogCommit[]): Map<string, CommitStats> {
+function useCommitStats(streamId: string, commits: RevisionInfo[]): Map<string, CommitStats> {
   const [stats, setStats] = useState<Map<string, CommitStats>>(new Map());
-  const shaKey = commits.map((c) => c.sha).join(",");
+  const shaKey = commits.map((c) => c.id).join(",");
   useEffect(() => {
     let cancelled = false;
-    const shas = commits.map((c) => c.sha);
+    const shas = commits.map((c) => c.id);
     void Promise.all(
       shas.map(async (sha) => {
         const detail = await vcsRevision(streamId, gitRevision(sha));
@@ -602,7 +655,7 @@ function RecentCommitsCard({
   onViewFullHistory,
 }: {
   streamId: string;
-  log: GitLogResult;
+  log: History & { currentBranch: string | null };
   onSelectCommit(sha: string): void;
   onViewFullHistory(): void;
 }) {
@@ -790,7 +843,7 @@ const READINESS_STYLE: Record<
 > = {
   clean: { label: "Clean to merge", color: "#3fb950", bg: "rgba(63,185,80,0.12)" },
   conflict: { label: "Will conflict", color: "#d29922", bg: "rgba(210,153,34,0.12)" },
-  "already-integrated": { label: "Integrated", color: "var(--text-muted)", bg: "transparent" },
+  already_integrated: { label: "Integrated", color: "var(--text-muted)", bg: "transparent" },
 };
 
 function ReadinessBadge({ readiness }: { readiness: StreamDivergenceRow["readiness"] }) {
@@ -849,7 +902,7 @@ function MergeReadinessCard({
             const canMerge = onBase && row.readiness === "clean";
             return (
               <div
-                key={row.stream_id}
+                key={row.streamId}
                 data-testid="git-dashboard-divergence-row"
                 style={{
                   display: "flex",
@@ -884,15 +937,15 @@ function MergeReadinessCard({
                 </div>
                 {row.readiness === "conflict" ? (
                   <div style={subtle} data-testid="git-dashboard-divergence-overlap">
-                    Overlapping {row.overlapping_files.length === 1 ? "file" : "files"}:{" "}
-                    {row.overlapping_files.slice(0, 8).map((f, i) => (
+                    Overlapping {row.overlappingFiles.length === 1 ? "file" : "files"}:{" "}
+                    {row.overlappingFiles.slice(0, 8).map((f, i) => (
                       <span key={f}>
                         {i > 0 ? ", " : ""}
                         <code>{f}</code>
                       </span>
                     ))}
-                    {row.overlapping_files.length > 8
-                      ? ` +${row.overlapping_files.length - 8} more`
+                    {row.overlappingFiles.length > 8
+                      ? ` +${row.overlappingFiles.length - 8} more`
                       : ""}
                   </div>
                 ) : null}
@@ -1080,7 +1133,7 @@ function PairwiseDiffPane({
   onSelectCommit(sha: string): void;
 }) {
   const target = currentBranch && currentBranch !== siblingBranch ? currentBranch : "";
-  const [commits, setCommits] = useState<GitLogCommit[]>([]);
+  const [commits, setCommits] = useState<RevisionInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const stats = useCommitStats(streamId, commits);
 
@@ -1091,7 +1144,7 @@ function PairwiseDiffPane({
     }
     let cancelled = false;
     setLoading(true);
-    void getCommitsAheadOf(streamId, target, siblingBranch, 20)
+    void vcsRevisionsBetween(streamId, gitRevision(target), gitRevision(siblingBranch), 20)
       .then((result) => {
         if (!cancelled) setCommits(result);
       })
@@ -1161,7 +1214,7 @@ function RemoteBranchesCard({
     let cancelled = false;
     void Promise.all(
       rows.map(async (row) => {
-        const res = await getAheadBehind(streamId, row.short_name);
+        const res = await vcsDivergence(streamId, gitRevision(row.short_name), gitRevision("HEAD"));
         return [row.short_name, res] as const;
       }),
     ).then((entries) => {

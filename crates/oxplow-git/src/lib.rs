@@ -39,8 +39,8 @@ pub use conflict::{
 };
 pub use divergence::{compute_divergence, Divergence, MergeReadiness};
 pub use log::{
-    get_commit_detail, get_git_log, CommitDetail, CommitDetailFile, GitLogCommit, GitLogOptions,
-    GitLogResult,
+    get_commit_detail, get_git_log, list_tags, CommitDetail, CommitDetailFile, GitLogCommit,
+    GitLogOptions, GitLogResult,
 };
 pub use refs::{
     list_all_refs, list_file_commits, list_recent_remote_branches, resolve_commit_ref_labels,

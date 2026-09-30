@@ -130,6 +130,28 @@ from `vcsMergeBase`, the rail's counts and conflicts come from
 `DiffViewPage.smoke.test.tsx` renders the diff view and the commit page
 over a command Proxy that records any git-shaped call.
 
+## History and branches on the models (P5.B5)
+
+The commit indexer walks every stream's head (`Vcs::log`, `revision`)
+into `v_commit` (with `parents`, v2) and `v_commit_file`, and restates
+`v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches` / `tags`.
+The desktop reads history from the models (`apps/desktop/src/vcsHistory.ts`):
+a stream's history is a recursive CTE over `json_each(parents)` from its
+head (`vcsHead`), re-run on `modelsChanged` (`useRerunOnChange`); the
+branch picker, compare list and new-stream form read `v_branch` /
+`v_tag`. What is computed stays live: `vcs_divergence`,
+`vcs_revisions_between`, `vcs_file_history` (the index keeps 500
+commits per head; a file's full history can be older),
+`vcs_list_adoptable_workspaces`, and for agents `vcs_log` /
+`vcs_branches` (MCP too). Git-native reads keep `git_` names:
+`git_change_scopes`, `git_resolve_commit_ref_labels`,
+`git_list_recent_remote_branches`. Deleted: `get_git_log`,
+`get_commits_ahead_of`, `list_file_commits`, `list_branches`,
+`list_local_branches`, `get_default_branch`, `get_ahead_behind`,
+`list_stream_divergences`, `list_adoptable_worktrees`, `list_all_refs`
+(the "Compare with…" list it fed had been casting a grouped object to a
+flat list; it now reads `readRefOptions`).
+
 ## Snapshots and revisions
 
 A snapshot taken on a clean workspace *is* its head revision:
@@ -180,11 +202,10 @@ and in the `NOT_YET_ON_VCS` list, which fails when a file on it stops
 calling `oxplow_git` (take it off) and ends empty at B7. The snapshot
 files left it in B3.
 
-## Still git-shaped (P5 B5–B7)
+## Still git-shaped (P5 B6–B7)
 
-`GitService` keeps its stream-taking methods until each RPC moves:
-history and branches to SQL (B5) and mutations to `vcs.*` commands (B6);
-the rest of
+`GitService` keeps its mutations until they move to `vcs.*` commands
+(B6); the rest of
 `NOT_YET_ON_VCS` moves in B7. Commit-id columns outside snapshots
 (`closest_git_version`, `git_version_exact`, `v_commit`) keep their
 names until then.

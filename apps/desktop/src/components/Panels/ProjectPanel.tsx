@@ -10,8 +10,7 @@ import {
   gitPull,
   gitPush,
   gitRestorePath,
-  listAllRefs,
-  listFileCommits,
+  vcsFileHistory,
   listWorkspaceEntries,
   listWorkspaceFiles,
   readWorkspaceFile,
@@ -19,7 +18,7 @@ import {
   subscribeGitRefsEvents,
   subscribeWorkspaceEvents,
   type ChangeScopes,
-  type GitLogCommit,
+  type RevisionInfo,
   type GitOpResult,
   type RefOption,
   type Stream,
@@ -30,6 +29,7 @@ import {
 } from "../../api.js";
 import type { DiffRequest } from "../Diff/diff-request.js";
 import { WORKING, gitRevision } from "../../revision.js";
+import { readRefOptions } from "../../vcsHistory.js";
 import type { MenuItem } from "../../menu.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
@@ -370,7 +370,7 @@ export function ProjectPanel({
   } | null>(null);
   const [fileHistoryState, setFileHistoryState] = useState<{
     path: string;
-    commits: GitLogCommit[] | null;
+    commits: RevisionInfo[] | null;
     loading: boolean;
   } | null>(null);
   const [compareState, setCompareState] = useState<{
@@ -570,7 +570,7 @@ export function ProjectPanel({
           if (!stream) return;
           setFileHistoryState({ path: contextMenu.path, commits: null, loading: true });
           setContextMenu(null);
-          const commits = await listFileCommits(stream.id, contextMenu.path, 100);
+          const commits = await vcsFileHistory(stream.id, contextMenu.path, 100);
           setFileHistoryState({ path: contextMenu.path, commits, loading: false });
           return;
         }
@@ -578,7 +578,7 @@ export function ProjectPanel({
           if (!stream) return;
           setCompareState({ path: contextMenu.path, refs: null, loading: true });
           setContextMenu(null);
-          const refs = await listAllRefs(stream.id);
+          const refs = await readRefOptions();
           setCompareState({ path: contextMenu.path, refs, loading: false });
           return;
         }
@@ -1022,7 +1022,7 @@ function FileHistoryModal({
   onClose,
   onOpenDiff,
 }: {
-  state: { path: string; commits: GitLogCommit[] | null; loading: boolean };
+  state: { path: string; commits: RevisionInfo[] | null; loading: boolean };
   onClose(): void;
   onOpenDiff(sha: string, parent: string | null): void;
 }) {
@@ -1035,20 +1035,13 @@ function FileHistoryModal({
       ) : (
         state.commits.map((commit) => (
           <button type="button"
-            key={commit.sha}
-            onDoubleClick={() => {
-              const parent = commit.parents[0];
-              const parentSha =
-                typeof parent === "string"
-                  ? parent
-                  : (parent as { sha?: string } | undefined)?.sha ?? null;
-              onOpenDiff(commit.sha, parentSha);
-            }}
+            key={commit.id}
+            onDoubleClick={() => onOpenDiff(commit.id, commit.parents[0] ?? null)}
             title="Double-click to open diff"
             style={modalRowStyle}
           >
             <span style={{ fontFamily: "var(--mono, monospace)", color: "var(--muted)", fontSize: 11, minWidth: 56 }}>
-              {commit.sha.slice(0, 7)}
+              {commit.short_id}
             </span>
             <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
               {commit.subject}
