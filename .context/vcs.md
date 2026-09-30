@@ -159,7 +159,11 @@ into `v_commit` (with `parents`, v2) and `v_commit_file`, and restates
 `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches` / `tags`.
 The desktop reads history from the models (`apps/desktop/src/vcsHistory.ts`):
 a stream's history is a recursive CTE over `json_each(parents)` from its
-head (`vcsHead`), re-run on `modelsChanged` (`useRerunOnChange`); the
+head (`vcsHead`), re-run on `modelsChanged` (`useRerunOnChange`), and
+put in `topoOrder` — every child before its parents, else newest first:
+commit times are whole seconds and clocks skew, so a time order can list
+a rebase's parent before its child and break the graph's lanes (tsk565;
+the dashboard finds the head commit by sha, not as the first row); the
 branch picker, compare list and new-stream form read `v_branch` /
 `v_tag`. What is computed stays live: `vcs_divergence`,
 `vcs_revisions_between`, `vcs_file_history` (the index keeps 500

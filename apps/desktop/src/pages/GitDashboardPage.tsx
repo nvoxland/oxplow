@@ -161,16 +161,17 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     try {
       setError(null);
       const head = await vcsHead(streamId);
+      const headSha = vcsRevOf(head.revision);
       const [statusSummary, history, remoteBranches, streams] = await Promise.all([
         vcsStatus(streamId).then(countStatus),
-        readHistory(vcsRevOf(head.revision), RECENT_LIMIT),
+        readHistory(headSha, RECENT_LIMIT),
         listRecentRemoteBranches(streamId, 20),
         listStreams(),
       ]);
       const divergence = await readStreamDivergences(streamId, streams);
       const log = { ...history, currentBranch: head.branch };
       const branch = stream?.branch ?? head.branch ?? null;
-      const headCommit = log.commits[0] ?? null;
+      const headCommit = log.commits.find((c) => c.id === headSha) ?? null;
       // Find an upstream ref via the remote branches list (best-effort).
       // remoteBranches[].short_name is "<remote>/<branch>" (e.g.
       // "origin/main"). Match the trailing branch name.
