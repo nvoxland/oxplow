@@ -597,6 +597,31 @@ fn links_resolve(
     ))
 }
 
+/// `body` with `line` added at the end of its `## Related` section (before
+/// whatever section follows), or a new `## Related` at the end.
+fn with_related(body: &str, line: &str) -> String {
+    let mut lines: Vec<&str> = body.lines().collect();
+    let Some(heading) = lines.iter().position(|l| l.trim_end() == "## Related") else {
+        return format!("{}\n\n## Related\n\n{line}\n", body.trim_end());
+    };
+    let end = lines[heading + 1..]
+        .iter()
+        .position(|l| l.starts_with("# ") || l.starts_with("## "))
+        .map_or(lines.len(), |i| heading + 1 + i);
+    match (heading + 1..end)
+        .rev()
+        .find(|&i| !lines[i].trim().is_empty())
+    {
+        Some(last) => lines.insert(last + 1, line),
+        None => lines
+            .splice(heading + 1..heading + 1, ["", line])
+            .for_each(drop),
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
 /// Write `body` to the page's file (unless it already holds it), inside
 /// the run: the file is the page, so a write that fails fails the run and
 /// the transaction records nothing. A temp file renamed into place means
@@ -753,10 +778,7 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
         if current.lines().any(|l| l.trim() == line) {
             return Err(invalid("/target", format!("`{slug}` already links to it")));
         }
-        let body = match current.find("\n## Related") {
-            Some(_) => format!("{}\n{line}\n", current.trim_end()),
-            None => format!("{}\n\n## Related\n\n{line}\n", current.trim_end()),
-        };
+        let body = strip_body_version_literals(&with_related(&current, &line));
         links_resolve(&t, ctx.conn, slug, &body)?;
         let written = write_page_tx(
             ctx.conn,
@@ -977,6 +999,67 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(events_of(&fx, "knowledge.page.written").await.is_empty());
+    }
+
+    /// tsk572: one slug rule — a wiki file whose name isn't a slug is not
+    /// a page: syncing it records nothing, and a row it left is removed.
+    #[tokio::test]
+    async fn a_file_whose_name_isnt_a_slug_is_not_a_page() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let wiki = dir(&fx).join(".oxplow/wiki");
+        std::fs::create_dir_all(&wiki).unwrap();
+        std::fs::write(wiki.join("Bad_Name.md"), "# Bad\n").unwrap();
+        crate::wiki_pages::scan_and_sync_all(
+            &fx.svc.db,
+            &fx.svc.event_schemas,
+            &dir(&fx),
+            &fx.svc.wiki_page_store,
+        )
+        .await
+        .unwrap();
+        assert!(fx
+            .svc
+            .wiki_page_store
+            .get("Bad_Name")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(events_of(&fx, "knowledge.page.written").await.is_empty());
+    }
+
+    /// tsk572: `knowledge.link` adds under `## Related` — even when a
+    /// section follows it — and the body it writes has no `@version`.
+    #[tokio::test]
+    async fn link_adds_under_related_and_strips_versions() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
+        std::fs::write(dir(&fx).join("src/lib.rs"), "x").unwrap();
+        for slug in ["b", "c"] {
+            run(&fx, WRITE_PAGE, json!({ "slug": slug, "body": "# P\n" }))
+                .await
+                .unwrap();
+        }
+        run(
+            &fx,
+            WRITE_PAGE,
+            json!({ "slug": "a", "body": "# A\n\n## Related\n\n- [[b]]\n\n## Notes\n\nmore\n" }),
+        )
+        .await
+        .unwrap();
+        // A hand edit leaves a version literal behind.
+        let path = page_path(&dir(&fx), "a");
+        let edited = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("more", "see [[src/lib.rs@abc1234]]");
+        std::fs::write(&path, edited).unwrap();
+
+        run(&fx, LINK, json!({ "page": "a", "target": "c" }))
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# A\n\n## Related\n\n- [[b]]\n- [[c]]\n\n## Notes\n\nsee [[src/lib.rs]]\n"
+        );
     }
 
     /// A dangling link is refused, naming it, and nothing is written.

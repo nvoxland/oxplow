@@ -10,7 +10,9 @@ brings external ones). Reads are SQL; writes go through a provider.
 `v_work_item` (table `work_item`, V115) holds every provider's items by
 ref, `work_item:<provider>:<id>`: `title`, `body`, a canonical `state`
 (`todo`, `in_progress`, `blocked`, `done`, `canceled`), the provider's own
-`native_state` and `native` JSON, and `parent_ref`. `v_task` stays
+`native_state` and `native` JSON, and `parent_ref` (NULL when the
+parent is deleted: a deleted item isn't a live one, so the model's
+parent relationship holds; tsk572). `v_task` stays
 oxplow's native view. How the rows are written, the state mapping and the
 cascade trigger are in [data-model.md](./data-model.md) "`work_item`".
 
@@ -53,7 +55,8 @@ Canonical `todo` is oxplow's `ready`; native states are oxplow's statuses
 
 The `work_item.*` commands ([commands.md](./commands.md)) are the oxplow
 provider's: they take canonical refs (`ref`, `parent_ref`, `target`) and
-refuse another provider's. Dispatching them across providers by ref is
+refuse another provider's; `work_item.comment` and `work_item.link`
+refuse a deleted task (tsk572). Dispatching them across providers by ref is
 decided with a real second provider (P7). `effort.open` asks the ref's
 provider's features: refused when it declares `in_progress_opens_effort`,
 open to an unregistered provider's item.

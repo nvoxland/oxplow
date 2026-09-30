@@ -984,6 +984,35 @@ mod tests {
         }
     }
 
+    /// tsk572: a soft-deleted parent isn't a live work item, so its
+    /// children in `v_work_item` have no parent — the relationship holds.
+    #[tokio::test]
+    async fn a_deleted_parent_leaves_its_children_without_one() {
+        let (store, tid) = fixture().await;
+        let epic = store.insert(&item(Some(tid))).await.unwrap();
+        let mut child = item(None);
+        child.parent_id = Some(epic);
+        let child = store.insert(&child).await.unwrap();
+        store.soft_delete(epic).await.unwrap();
+        let child_ref = work_item_ref(child);
+        let (parent, dangling): (Option<String>, i64) = store
+            .db
+            .call(move |c| {
+                c.query_row(
+                    "SELECT (SELECT parent_ref FROM v_work_item WHERE ref = ?1),
+                            (SELECT count(*) FROM v_work_item w WHERE w.parent_ref IS NOT NULL
+                               AND NOT EXISTS (SELECT 1 FROM v_work_item p
+                                               WHERE p.ref = w.parent_ref))",
+                    [child_ref],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(parent, None);
+        assert_eq!(dangling, 0);
+    }
+
     /// The oxplow provider's `work_item` rows (P5.C1) are written with the
     /// task rows: every live task has one, and a deleted one's is marked
     /// deleted, or gone with a cascade.

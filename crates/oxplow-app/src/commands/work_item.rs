@@ -54,6 +54,37 @@ pub fn oxplow_task(
     })
 }
 
+/// `task` is a live task: a deleted one takes no comments or links.
+fn live_task_tx(
+    conn: &rusqlite::Connection,
+    task: TaskId,
+    item_ref: &str,
+    field: &str,
+) -> Result<(), CommandError> {
+    use rusqlite::OptionalExtension;
+    let live: Option<bool> = conn
+        .query_row(
+            "SELECT deleted_at IS NULL FROM task WHERE id = ?1",
+            [task.value()],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| CommandError::Failed {
+            message: e.to_string(),
+        })?;
+    match live {
+        Some(true) => Ok(()),
+        Some(false) => Err(CommandError::Invalid {
+            field: Some(field.into()),
+            message: format!("`{item_ref}` was deleted"),
+        }),
+        None => Err(CommandError::Invalid {
+            field: Some(field.into()),
+            message: format!("no work item `{item_ref}`"),
+        }),
+    }
+}
+
 fn parse<T: serde::de::DeserializeOwned>(input: serde_json::Value) -> Result<T, CommandError> {
     serde_json::from_value(input).map_err(|e| CommandError::Invalid {
         field: None,
@@ -378,6 +409,8 @@ pub fn link_command(registry: WorkItemsRegistry) -> Command {
         let input: WorkItemLinkInput = parse(input)?;
         let from = oxplow_task(&registry, &input.item_ref, "/ref")?;
         let to = oxplow_task(&registry, &input.target, "/target")?;
+        live_task_tx(ctx.conn, from, &input.item_ref, "/ref")?;
+        live_task_tx(ctx.conn, to, &input.target, "/target")?;
         let thread = match input.thread.as_deref() {
             Some(raw) => raw.parse::<ThreadId>().map_err(|e| CommandError::Invalid {
                 field: Some("/thread".into()),
@@ -448,6 +481,7 @@ pub fn comment_command(registry: WorkItemsRegistry) -> Command {
     let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WorkItemCommentInput = parse(input)?;
         let task = oxplow_task(&registry, &input.item_ref, "/ref")?;
+        live_task_tx(ctx.conn, task, &input.item_ref, "/ref")?;
         if input.body.trim().is_empty() {
             return Err(CommandError::Invalid {
                 field: Some("/body".into()),
@@ -551,6 +585,43 @@ mod tests {
             err.to_string().contains("work_item:<provider>:<id>"),
             "{err}"
         );
+    }
+
+    /// tsk572: a deleted task takes no comments or links.
+    #[tokio::test]
+    async fn a_deleted_task_takes_no_comments_or_links() {
+        use oxplow_domain::stores::TaskStore as _;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let other = fx
+            .svc
+            .commands
+            .run(&Actor::Human, CREATE, json!({ "title": "other" }), false)
+            .await
+            .unwrap()
+            .result["ref"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        fx.svc.task_store.soft_delete(fx.task).await.unwrap();
+        let gone = work_item_ref(fx.task);
+        for (name, input) in [
+            (COMMENT, json!({ "ref": gone, "body": "hello" })),
+            (
+                LINK,
+                json!({ "ref": other, "target": gone, "link_type": "blocks", "thread": fx.thread.to_string() }),
+            ),
+        ] {
+            let err = fx
+                .svc
+                .commands
+                .run(&Actor::Human, name, input, false)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&err, CommandError::Invalid { message, .. } if message.contains("deleted")),
+                "{name}: {err:?}"
+            );
+        }
     }
 
     /// `work_item.link` and `work_item.comment` write the link and the

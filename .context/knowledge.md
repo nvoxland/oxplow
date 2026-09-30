@@ -47,7 +47,9 @@ body's `# ` heading.
 Beside it: `knowledge.delete_page { slug }` (Destructive; row, edges and
 file — the file removed inside the run, a failure failing it;
 `knowledge.page.deleted@1`), `knowledge.link { page, target }`
-(adds `- [[target]]` under the page's `## Related`, validated), and
+(adds `- [[target]]` at the end of the page's `## Related` section —
+before any section after it — or a new one at the end, validated and
+with `@version` literals stripped like any write; tsk572), and
 `knowledge.resync { slug }` (restate from the file; the repair when a row
 and its file disagree). All are `Record`: a read-only thread captures
 what it explored too. `knowledge.write_page` replaced MCP
@@ -68,7 +70,10 @@ is on disk is recorded). The watcher (`wiki_pages_watch`) runs it per
 changed file and `scan_and_sync_all` at boot. A body whose hash matches
 the row's is a no-op, so a page the command just wrote doesn't sync (or
 log) twice; a missing file deletes the page; an unreadable one is an
-error, never a delete. `updated_at` follows the file's mtime on this
+error, never a delete. **One slug rule** (`knowledge::valid_slug`,
+kebab-case): a file whose name isn't a slug is not a page — syncing it
+records nothing, and removes a row it left (tsk572) — so every row is
+one the commands can write and delete. `updated_at` follows the file's mtime on this
 path, so a boot scan doesn't reset recency.
 
 ## Attribution

@@ -158,13 +158,18 @@ fn file_mtime(path: &Path) -> Option<Timestamp> {
 /// hash matches the row's, as after a command's own write) is a no-op;
 /// a missing file deletes the page. `updated_at` is the file's mtime, so
 /// a boot scan doesn't reset every page's recency. Whether anything
-/// changed.
+/// changed. A file whose name isn't a slug (`knowledge::valid_slug`, the
+/// commands' rule) is not a page: nothing is recorded for it, and a row
+/// it left behind is removed.
 pub fn sync_page_tx(
     conn: &rusqlite::Connection,
     ev: &oxplow_db::EventCtx<'_>,
     project_dir: &Path,
     slug: &str,
 ) -> Result<bool, DomainError> {
+    if !crate::knowledge::valid_slug(slug) {
+        return crate::knowledge::delete_page_tx(conn, ev, oxplow_domain::Anchors::default(), slug);
+    }
     let file_path = crate::knowledge::page_path(project_dir, slug);
     let raw = match fs::read_to_string(&file_path) {
         Ok(raw) => raw,
