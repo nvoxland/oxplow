@@ -87,11 +87,13 @@ pub struct Task {
 
 impl Task {
     /// Move to `to` at `now`: `completed_at` is set on entering `done` and
-    /// cleared on leaving it; `updated_at` moves.
+    /// cleared on moving anywhere but `done` or `archived` — archiving is
+    /// tidying, so an archived task still says whether (and when) it was
+    /// completed; `updated_at` moves.
     pub fn set_status(&mut self, to: TaskStatus, now: Timestamp) {
         if to == TaskStatus::Done && self.status != TaskStatus::Done {
             self.completed_at = Some(now);
-        } else if self.status == TaskStatus::Done && to != TaskStatus::Done {
+        } else if to != TaskStatus::Done && to != TaskStatus::Archived {
             self.completed_at = None;
         }
         self.status = to;
@@ -161,6 +163,39 @@ pub struct TaskImpact {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archiving_a_done_task_keeps_when_it_was_completed() {
+        let at = |ms| Timestamp::from_unix_ms(ms);
+        let mut task = Task {
+            id: TaskId::new(1),
+            thread_id: None,
+            parent_id: None,
+            title: "t".into(),
+            description: String::new(),
+            status: TaskStatus::Ready,
+            priority: TaskPriority::Medium,
+            sort_index: 0,
+            created_by: TaskActorKind::User,
+            created_at: at(1),
+            updated_at: at(1),
+            completed_at: None,
+            deleted_at: None,
+            note_count: 0,
+            author: None,
+        };
+        task.set_status(TaskStatus::Done, at(2));
+        task.set_status(TaskStatus::Archived, at(3));
+        assert_eq!(
+            task.completed_at,
+            Some(at(2)),
+            "archiving is tidying, not undoing"
+        );
+        task.set_status(TaskStatus::Ready, at(4));
+        assert_eq!(task.completed_at, None, "reopened: no longer completed");
+        task.set_status(TaskStatus::Archived, at(5));
+        assert_eq!(task.completed_at, None);
+    }
 
     #[test]
     fn enum_round_trips_as_snake_case() {

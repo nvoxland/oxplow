@@ -333,6 +333,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_stream` | streams (worktrees) |
 | `v_thread` | threads within a stream |
 | `v_task` | tasks, excluding deleted; carries the thread's `stream_id` |
+| `v_work_item` | work items from every provider (`ref`, `provider`, canonical `state`, `native_state`, `native` JSON, `parent_ref`), excluding deleted; oxplow's tasks are `work_item:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
 | `v_effort` | bracketed spans of work on a work item (`work_item` ref; `task_id` derived for oxplow tasks, V100) |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_wiki_page` | wiki pages (excerpt; full body is on disk) |

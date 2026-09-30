@@ -316,6 +316,7 @@ fn write_status_tx(conn: &rusqlite::Connection, item: &Task) -> Result<(), Domai
     if rows == 0 {
         return Err(DomainError::NotFound);
     }
+    project_work_item_tx(conn, item.id).map_err(crate::database::map_sql_err)?;
     Ok(())
 }
 
@@ -464,6 +465,45 @@ pub fn set_status_tx(
     })
 }
 
+/// Restate task `id`'s `work_item` row (P5.C1, the oxplow provider's):
+/// every task write calls it in its own transaction, so the two never
+/// disagree. Canonical state: `ready` → `todo`; `archived` → `done` when
+/// it was completed, else `canceled`; the rest map by name. The native
+/// status stays in `native_state`, the oxplow-only fields in `native`. A
+/// hard delete (a cascade from the thread or stream) is the `task`
+/// table's trigger's (V115).
+pub(crate) fn project_work_item_tx(
+    conn: &rusqlite::Connection,
+    id: TaskId,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO work_item (ref, provider, title, body, state, native_state, native,
+                                parent_ref, created_at, updated_at, deleted_at)
+         SELECT 'work_item:oxplow:tsk' || t.id, 'oxplow', t.title, t.description,
+                CASE t.status
+                    WHEN 'ready' THEN 'todo'
+                    WHEN 'archived' THEN
+                        CASE WHEN t.completed_at IS NULL THEN 'canceled' ELSE 'done' END
+                    ELSE t.status
+                END,
+                t.status,
+                json_object('priority', t.priority, 'thread_id', t.thread_id,
+                            'sort_index', t.sort_index, 'author', t.author,
+                            'completed_at', t.completed_at),
+                CASE WHEN t.parent_id IS NULL THEN NULL
+                     ELSE 'work_item:oxplow:tsk' || t.parent_id END,
+                t.created_at, t.updated_at, t.deleted_at
+         FROM task t WHERE t.id = ?1
+         ON CONFLICT(ref) DO UPDATE SET
+            title = excluded.title, body = excluded.body, state = excluded.state,
+            native_state = excluded.native_state, native = excluded.native,
+            parent_ref = excluded.parent_ref, updated_at = excluded.updated_at,
+            deleted_at = excluded.deleted_at",
+        params![id.value()],
+    )?;
+    Ok(())
+}
+
 /// Sync core for the task-row INSERT; returns the new id.
 pub(crate) fn insert_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqlite::Result<TaskId> {
     conn.execute(
@@ -488,7 +528,9 @@ pub(crate) fn insert_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqli
             item.author.map(author_to_str),
         ],
     )?;
-    Ok(TaskId::new(conn.last_insert_rowid()))
+    let id = TaskId::new(conn.last_insert_rowid());
+    project_work_item_tx(conn, id)?;
+    Ok(id)
 }
 
 /// One live task by id — `None` for a missing or soft-deleted row — for
@@ -508,7 +550,7 @@ pub fn get_task_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<Option<Tas
 /// revert a status change. Returns affected-row count; callers map 0 to
 /// `NotFound`.
 pub(crate) fn update_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqlite::Result<usize> {
-    conn.execute(
+    let rows = conn.execute(
         "UPDATE task SET
             thread_id = ?2,
             parent_id = ?3,
@@ -532,7 +574,9 @@ pub(crate) fn update_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqli
             item.deleted_at.map(ts_to_string),
             item.author.map(author_to_str),
         ],
-    )
+    )?;
+    project_work_item_tx(conn, item.id)?;
+    Ok(rows)
 }
 
 fn status_to_str(s: TaskStatus) -> &'static str {
@@ -822,6 +866,7 @@ impl TaskStore for SqliteTaskStore {
                     )
                     .optional()
                     .map_err(crate::database::map_sql_err)?;
+                project_work_item_tx(tx, id).map_err(crate::database::map_sql_err)?;
                 if let Some(open) =
                     crate::effort_store::find_open_for_work_item_tx(tx, &work_item_ref(id))
                         .map_err(crate::database::map_sql_err)?
@@ -937,6 +982,102 @@ mod tests {
             note_count: 0,
             author: Some(TaskAuthor::User),
         }
+    }
+
+    /// The oxplow provider's `work_item` rows (P5.C1) are written with the
+    /// task rows: every live task has one, and a deleted one's is marked
+    /// deleted, or gone with a cascade.
+    #[tokio::test]
+    async fn every_task_has_its_work_item_row() {
+        let (store, tid) = fixture().await;
+        let epic = store.insert(&item(Some(tid))).await.unwrap();
+        let mut child = item(None);
+        child.title = "child".into();
+        child.parent_id = Some(epic);
+        let child = store.insert(&child).await.unwrap();
+        store
+            .set_status(epic, TaskStatus::InProgress)
+            .await
+            .unwrap();
+        let mut edited = store.get(child).await.unwrap().unwrap();
+        edited.title = "renamed".into();
+        edited.description = "the body".into();
+        store.update(&edited).await.unwrap();
+        let gone = store.insert(&item(Some(tid))).await.unwrap();
+        store.soft_delete(gone).await.unwrap();
+        let shipped = store.insert(&item(Some(tid))).await.unwrap();
+        store.set_status(shipped, TaskStatus::Done).await.unwrap();
+        store
+            .set_status(shipped, TaskStatus::Archived)
+            .await
+            .unwrap();
+        let dropped = store.insert(&item(Some(tid))).await.unwrap();
+        store
+            .set_status(dropped, TaskStatus::Archived)
+            .await
+            .unwrap();
+
+        let rows = store
+            .db
+            .call(|c| {
+                let mut stmt = c.prepare(
+                    "SELECT ref, provider, title, body, state, native_state, parent_ref,
+                            deleted_at IS NOT NULL
+                     FROM work_item ORDER BY ref",
+                )?;
+                let rows = stmt
+                    .query_map([], |r| {
+                        Ok(format!(
+                            "{}|{}|{}|{}|{}|{}|{}|{}",
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, String>(2)?,
+                            r.get::<_, String>(3)?,
+                            r.get::<_, String>(4)?,
+                            r.get::<_, String>(5)?,
+                            r.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                            r.get::<_, bool>(7)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        let r = |id: TaskId| work_item_ref(id);
+        let mut expected = vec![
+            format!("{}|oxplow|ship it||in_progress|in_progress||false", r(epic)),
+            format!(
+                "{}|oxplow|renamed|the body|todo|ready|{}|false",
+                r(child),
+                r(epic)
+            ),
+            format!("{}|oxplow|ship it||todo|ready||true", r(gone)),
+            format!("{}|oxplow|ship it||done|archived||false", r(shipped)),
+            format!("{}|oxplow|ship it||canceled|archived||false", r(dropped)),
+        ];
+        expected.sort();
+        assert_eq!(rows, expected);
+
+        // A cascade (the stream or thread deleted outright) takes the
+        // work item with the task.
+        store
+            .db
+            .call(|c| c.execute("DELETE FROM threads", []))
+            .await
+            .unwrap();
+        let left: (i64, i64) = store
+            .db
+            .call(|c| {
+                c.query_row(
+                    "SELECT (SELECT count(*) FROM task), (SELECT count(*) FROM work_item)",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(left, (0, 0), "the backlog child went with its parent");
     }
 
     /// Moving an in_progress task takes its claim with it: the effort on

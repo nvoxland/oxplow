@@ -395,6 +395,32 @@ nothing populated either automatically — they were vestigial. The
 Backlog page never actually grouped or filtered by them despite the
 old doc claim.
 
+`completed_at` is set on entering `done` and kept when a done task is
+archived (archiving is tidying, not undoing); moving anywhere else clears
+it (`Task::set_status`).
+
+### `work_item` — every provider's work items (migration `V115__work_item.sql`, P5.C1)
+
+One row per work item, keyed by its ref (`work_item:<provider>:<id>`):
+`provider`, `title`, `body`, canonical `state` (`todo`, `in_progress`,
+`blocked`, `done`, `canceled`), the provider's own `native_state`, its
+other fields as `native` JSON, `parent_ref`, timestamps and
+`deleted_at`. Published as `v_work_item` (live rows); `v_task` stays
+oxplow's native model.
+
+The oxplow provider's rows (`work_item:oxplow:tsk<n>`) are restated from
+the `task` row by `task_store::project_work_item_tx`, which every task
+write calls in its own transaction (insert, field update, status,
+soft delete) — the two never disagree. Mapping: `ready` → `todo`;
+`archived` → `done` when `completed_at` is set, else `canceled`; the rest
+by name. `native` carries priority, thread, sort index, author and
+`completed_at`. A task deleted by a cascade (its thread or stream
+deleted outright) never passes through the store, so a trigger
+(`work_item_follows_task_delete`) deletes its row. `v_work_item`'s own
+`sql` test checks every live `v_task` has its row and every oxplow row
+its task. An external provider's rows arrive by projection from its
+events (P5.C2).
+
 ### `work_note` — thread-scoped notes only (`crates/oxplow-db/src/work_satellite.rs`)
 
 Structured per-thread notes. Each row has `id`, nullable

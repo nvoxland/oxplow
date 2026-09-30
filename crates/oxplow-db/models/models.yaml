@@ -601,7 +601,7 @@
     - { name: "sort_index", type: "INTEGER", doc: "Order within its list." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "completed_at", type: "TEXT", doc: "Set when the task reached `done`." }
+    - { name: "completed_at", type: "TEXT", doc: "When the task reached `done`; kept if it is then archived, cleared if reopened." }
 - name: task_link
   version: 1
   description: "Typed links between tasks (one blocks another, duplicates it, …)."
@@ -724,6 +724,26 @@
     - { name: "body_size_bytes", type: "INTEGER", doc: "Size of the full body." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+- name: work_item
+  version: 1
+  description: "Work items from every provider (P5.C1), excluding deleted ones: oxplow's tasks (`work_item:oxplow:tsk<n>`, written with the task) and, later, a provider's issues. `state` is the canonical state every provider maps to; `v_task` stays oxplow's native view."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`work_item:<provider>:<id>` (`work_item:oxplow:tsk42`)." }
+    - { name: "provider", type: "TEXT", doc: "The provider it comes from (`oxplow`)." }
+    - { name: "title", type: "TEXT", doc: "Title." }
+    - { name: "body", type: "TEXT", doc: "Markdown body." }
+    - { name: "state", type: "TEXT", doc: "Canonical state: `todo`, `in_progress`, `blocked`, `done` or `canceled`. oxplow: `ready` is `todo`; `archived` is `done` when it was completed, else `canceled`." }
+    - { name: "native_state", type: "TEXT", doc: "The provider's own state (oxplow: the task status, `archived` included)." }
+    - { name: "native", type: "TEXT", doc: "Provider-specific fields as JSON (oxplow: priority, thread_id, sort_index, author, completed_at)." }
+    - { name: "parent_ref", type: "TEXT", doc: "The parent work item's ref (an epic); NULL at top level." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+    - { accepted_values: { column: state, values: [todo, in_progress, blocked, done, canceled] } }
+    - { relationships: { column: parent_ref, to: work_item, field: ref } }
+    - { sql: "SELECT t.id FROM v_task t WHERE NOT EXISTS (SELECT 1 FROM v_work_item w WHERE w.ref = 'work_item:oxplow:tsk' || t.id) UNION ALL SELECT w.ref FROM v_work_item w WHERE w.provider = 'oxplow' AND NOT EXISTS (SELECT 1 FROM v_task t WHERE 'work_item:oxplow:tsk' || t.id = w.ref)" }
 - name: model
   version: 2
   description: "Models: every published view, as compiled at this open — core ones and each extension's. Read a model's columns in `v_model_column`, what it reads in `v_model_lineage` and its declared tests' results in `v_model_test`."
