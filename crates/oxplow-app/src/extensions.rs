@@ -591,6 +591,10 @@ pub struct Extension {
     /// Dimensions it contributes (fact or entity), never promoted: an
     /// extension toggling would rebuild the metric cube each time.
     pub dimensions: Vec<oxplow_config::DimensionEntry>,
+    /// Its SQL models (`models:` plus `models/<name>.sql`), published as
+    /// `v_<extension>_<name>` (`extension_models`). Empty when any
+    /// declaration is broken (see `errors`).
+    pub models: Vec<oxplow_db::models::ModelSource>,
 }
 
 /// Provenance of an installed extension, kept in its `source.yaml`.
@@ -831,6 +835,7 @@ fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
         advisories: Vec::new(),
         measures: Vec::new(),
         dimensions: Vec::new(),
+        models: Vec::new(),
         metrics: Vec::new(),
         gauges: Vec::new(),
     }
@@ -1002,6 +1007,29 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 }
             }
             Err(e) => ext.errors.push(err_at("gauges", e)),
+        }
+        match parse_block::<oxplow_db::models::ModelDecl>(m.models.clone()) {
+            Ok(decls) => {
+                let dir = format!("{rel}/models");
+                let joined = oxplow_db::models::join_sources(
+                    decls.unwrap_or_default(),
+                    &dir,
+                    &file,
+                    |sql_file| files.read(&format!("models/{sql_file}")),
+                    || {
+                        files
+                            .list("models")
+                            .into_iter()
+                            .filter_map(|f| f.strip_suffix(".sql").map(str::to_string))
+                            .collect()
+                    },
+                );
+                match joined {
+                    Ok(models) => ext.models = models,
+                    Err(e) => ext.errors.push(err_at("models", e.to_string())),
+                }
+            }
+            Err(e) => ext.errors.push(err_at("models", format!("models: {e}"))),
         }
         // Cross-references inside the catalog: a metric's source measure
         // and a gauge's emitted measures are normally ones this extension
@@ -1236,6 +1264,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.dimensions.clear();
         ext.metrics.clear();
         ext.gauges.clear();
+        ext.models.clear();
     }
     ext
 }
@@ -3271,6 +3300,87 @@ empty: No tasks.
                 ext.errors
             );
         }
+    }
+
+    /// P4.9 (tsk494): `models:` entries with their `models/<name>.sql`
+    /// load as the extension's models; a declaration without its file, a
+    /// file without its declaration, and a malformed entry are errors.
+    #[test]
+    fn extensions_declare_models_with_their_sql() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = [
+            "name: x",
+            "models:",
+            "  - name: late",
+            "    version: 1",
+            "    description: Blocked tasks.",
+            "    columns:",
+            "      - { name: id, type: INTEGER, doc: Task id. }",
+            "  - { name: gone, version: 1, description: No file., columns: [] }",
+            "",
+        ]
+        .join("\n");
+        write(dir.path(), "oxplow/extensions/x/extension.yaml", &manifest);
+        write(
+            dir.path(),
+            "oxplow/extensions/x/models/late.sql",
+            "SELECT id FROM ref('task') WHERE status = 'blocked'",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/x/models/stray.sql",
+            "SELECT 1",
+        );
+        let ext = project_extensions(dir.path()).remove(0);
+        assert_eq!(
+            ext.models
+                .iter()
+                .map(|m| m.decl.name.as_str())
+                .collect::<Vec<_>>(),
+            Vec::<&str>::new(),
+            "a broken declaration set loads no models"
+        );
+        let errors = ext.errors.join("\n");
+        assert!(
+            errors.contains("oxplow/extensions/x/models/gone.sql is missing"),
+            "{errors}"
+        );
+
+        write(
+            dir.path(),
+            "oxplow/extensions/x/extension.yaml",
+            &manifest.replace(
+                "  - { name: gone, version: 1, description: No file., columns: [] }\n",
+                "",
+            ),
+        );
+        std::fs::remove_file(dir.path().join("oxplow/extensions/x/models/stray.sql")).unwrap();
+        let ext = project_extensions(dir.path()).remove(0);
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(ext.models.len(), 1);
+        assert_eq!(ext.models[0].file, "oxplow/extensions/x/models/late.sql");
+        assert!(ext.models[0].sql.contains("ref('task')"));
+
+        write(
+            dir.path(),
+            "oxplow/extensions/x/models/stray.sql",
+            "SELECT 1",
+        );
+        let ext = project_extensions(dir.path()).remove(0);
+        assert!(
+            ext.errors.join("\n").contains("stray.sql has no entry"),
+            "{:?}",
+            ext.errors
+        );
+
+        let (_d, ext) = load_x(&[], "models:\n  - { name: late, colour: red }\n");
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("models") && e.contains("colour")),
+            "{:?}",
+            ext.errors
+        );
     }
 
     #[test]

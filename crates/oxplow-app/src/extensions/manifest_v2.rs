@@ -95,7 +95,8 @@ pub struct ManifestV2 {
     pub intent: Option<Intent>,
 
     // ---- stable kinds ----
-    /// Published entity models (§9.1). Parsed as data in P1.
+    /// SQL models (§9.1): `ModelDecl`s, each with `models/<name>.sql`,
+    /// published as `v_<extension>_<name>` (P4.9).
     #[serde(default)]
     pub models: Option<Value>,
     /// The metric catalog contributions, in `.oxplow/project.yaml`'s

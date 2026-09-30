@@ -1320,6 +1320,11 @@ export const commands = {
 };
 
 /* Types */
+export type AcceptedValues = {
+	column: string,
+	values: string[],
+};
+
 /**
  *  An agent oxplow talks to over the Agent Client Protocol (tsk335): a
  *  program that speaks ACP on its stdio. Presets cover the common ones
@@ -1771,6 +1776,17 @@ export type CollectionConfig = {
 	 *  report format without any change to oxplow itself.
 	 */
 	plugins?: PluginConfig[],
+};
+
+// One promised column.
+export type ColumnDecl = {
+	name: string,
+	/**
+	 *  The declared type SQLite reports for the view's column
+	 *  (`PRAGMA table_info`); empty for a computed column.
+	 */
+	type?: string,
+	doc: string,
 };
 
 // Declared type of an entity column.
@@ -2273,6 +2289,12 @@ export type Extension = {
 	 *  extension toggling would rebuild the metric cube each time.
 	 */
 	dimensions: DimensionEntry[],
+	/**
+	 *  Its SQL models (`models:` plus `models/<name>.sql`), published as
+	 *  `v_<extension>_<name>` (`extension_models`). Empty when any
+	 *  declaration is broken (see `errors`).
+	 */
+	models: ModelSource[],
 };
 
 /**
@@ -3071,11 +3093,29 @@ export type MetricEntry = {
 	value?: string | null,
 };
 
+// One model as its owner declares it (an entry of `models.yaml`).
+export type ModelDecl = {
+	name: string,
+	version: number,
+	description: string,
+	// The contract: the view's columns, in order.
+	columns: ColumnDecl[],
+	tests?: TestDecl[],
+};
+
 // When one model last changed.
 export type ModelFreshness = {
 	model: string,
 	// RFC 3339.
 	changedAt: string,
+};
+
+// A model's declaration and its SQL file.
+export type ModelSource = {
+	decl: ModelDecl,
+	// Where the SQL came from, for error locations (`models/task.sql`).
+	file: string,
+	sql: string,
 };
 
 export type MoveTaskRequest = {
@@ -3598,6 +3638,13 @@ export type RefOption = {
 	label: string,
 	ref: string,
 	kind: RefKind,
+};
+
+export type Relationship = {
+	column: string,
+	// The model the column points into.
+	to: string,
+	field: string,
 };
 
 export type RemoteBranchEntry = {
@@ -4143,6 +4190,20 @@ export type TaskNote = {
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 
 export type TaskStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
+
+/**
+ *  One declared test, written as a one-key map: `{ not_null: id }`,
+ *  `{ unique: id }`, `{ accepted_values: { column, values } }`,
+ *  `{ relationships: { column, to, field } }` or `{ sql: "SELECT …" }` (a
+ *  query returning the failing rows).
+ */
+export type TestDecl = {
+	not_null?: string | null,
+	unique?: string | null,
+	accepted_values?: AcceptedValues | null,
+	relationships?: Relationship | null,
+	sql?: string | null,
+};
 
 export type TextSearchHit = {
 	path: string,

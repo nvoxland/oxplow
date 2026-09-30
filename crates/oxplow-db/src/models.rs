@@ -37,7 +37,7 @@ mod core_files {
 pub const CORE: &str = "core";
 
 /// One model as its owner declares it (an entry of `models.yaml`).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(deny_unknown_fields)]
 pub struct ModelDecl {
     pub name: String,
@@ -50,7 +50,7 @@ pub struct ModelDecl {
 }
 
 /// One promised column.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(deny_unknown_fields)]
 pub struct ColumnDecl {
     pub name: String,
@@ -65,7 +65,7 @@ pub struct ColumnDecl {
 /// `{ unique: id }`, `{ accepted_values: { column, values } }`,
 /// `{ relationships: { column, to, field } }` or `{ sql: "SELECT …" }` (a
 /// query returning the failing rows).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(deny_unknown_fields)]
 pub struct TestDecl {
     #[serde(default)]
@@ -80,14 +80,14 @@ pub struct TestDecl {
     pub sql: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(deny_unknown_fields)]
 pub struct AcceptedValues {
     pub column: String,
     pub values: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(deny_unknown_fields)]
 pub struct Relationship {
     pub column: String,
@@ -97,7 +97,7 @@ pub struct Relationship {
 }
 
 /// A model's declaration and its SQL file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct ModelSource {
     pub decl: ModelDecl,
     /// Where the SQL came from, for error locations (`models/task.sql`).
@@ -140,19 +140,32 @@ pub fn sources_from(
 ) -> Result<Vec<ModelSource>, DomainError> {
     let decls: Vec<ModelDecl> =
         serde_yaml::from_str(yaml).map_err(|e| invalid(format!("{dir}/models.yaml: {e}")))?;
+    join_sources(decls, dir, &format!("{dir}/models.yaml"), file, sql_files)
+}
+
+/// Join declarations (from `declared_in`) with their `<name>.sql` files in
+/// `dir`: every declared model needs its file and every file its
+/// declaration.
+pub fn join_sources(
+    decls: Vec<ModelDecl>,
+    dir: &str,
+    declared_in: &str,
+    file: impl Fn(&str) -> Option<String>,
+    sql_files: impl Fn() -> Vec<String>,
+) -> Result<Vec<ModelSource>, DomainError> {
     let mut seen = BTreeSet::new();
     let mut out = Vec::with_capacity(decls.len());
     for decl in decls {
         if !seen.insert(decl.name.clone()) {
             return Err(invalid(format!(
-                "{dir}/models.yaml: model `{}` is declared twice",
+                "{declared_in}: model `{}` is declared twice",
                 decl.name
             )));
         }
         let path = format!("{}.sql", decl.name);
         let sql = file(&path).ok_or_else(|| {
             invalid(format!(
-                "{dir}/models.yaml declares `{}` but {dir}/{path} is missing",
+                "{declared_in} declares `{}` but {dir}/{path} is missing",
                 decl.name
             ))
         })?;
@@ -165,7 +178,7 @@ pub fn sources_from(
     for stem in sql_files() {
         if !seen.contains(&stem) {
             return Err(invalid(format!(
-                "{dir}/{stem}.sql has no entry in {dir}/models.yaml"
+                "{dir}/{stem}.sql has no entry in {declared_in}"
             )));
         }
     }
