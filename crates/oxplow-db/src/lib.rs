@@ -10,6 +10,7 @@ pub mod ai_call_store;
 pub mod analytics_stores;
 pub mod attribution_store;
 pub mod change_store;
+pub mod changes;
 pub mod command_audit_store;
 pub mod comment_store;
 pub mod dashboard_store;
@@ -84,8 +85,8 @@ pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use reasoning_store::{NewClaim, NewDecision, SqliteReasoningStore};
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use semantic_layer::{
-    Reads, SchemaColumn, SchemaEntity, SchemaRelation, SemanticLayer, SqlCell, SqlParams, SqlQuery,
-    SqlQueryResult, TempTable,
+    ModelFreshness, Reads, SchemaColumn, SchemaEntity, SchemaRelation, SemanticLayer, SqlCell,
+    SqlParams, SqlQuery, SqlQueryResult, TempTable,
 };
 pub use snapshot_tree::{ContentHasher, SnapshotTree, TreeEntry};
 pub use stream_store::SqliteStreamStore;

@@ -204,6 +204,32 @@ FROM metric_grid('day', 'zone')
 - `grid_rows_equal_the_engine_series` holds the grid to the engine's
   series for every metric, by bucket and by dimension.
 
+## Subscriptions (P4.6)
+
+What a query read is what it subscribes to.
+
+- **Tables:** every pooled connection gets a preupdate, a commit and a
+  rollback hook at init (`crates/oxplow-db/src/changes.rs`). The preupdate
+  hook — not the plain update hook — also fires for WITHOUT ROWID tables,
+  and while it is set SQLite skips the truncate shortcut, so a bare
+  `DELETE FROM t` reports. A table joins the committed set only when its
+  transaction commits (a rollback forgets it); temp tables never do. After
+  each `Database::call` / `call_mut` / `transaction` / `read` the committed
+  set is published — after the commit, so a subscriber that reads on
+  hearing it sees the change: `Database::subscribe_changes()`.
+- **Models:** `crates/oxplow-app/src/models_changed.rs` follows
+  `model_input` from those tables to every model that reads them, directly
+  or through other models (reloading the lineage when `model_input`
+  itself changes, and treating a lagged channel as "everything changed"),
+  stamps each one's in-memory watermark (`ModelWatermarks`, derivable, so
+  not persisted) and emits `OxplowEvent::ModelsChanged { models }`.
+- **Results:** `SqlQueryResult.freshness` is the watermark of each model
+  the query read that changed since the app started.
+- A `metric_grid()` query's `reads.measures` pairs with
+  `MetricSamplesChanged { measures }`: facts land on every OTLP burst, and
+  the measure scope keeps a metric tile quiet unless its own measures
+  moved (tsk198).
+
 ## The `v_*` contract (current)
 
 Every shipped entity is exposed as a stable **read-only SQL view**. They

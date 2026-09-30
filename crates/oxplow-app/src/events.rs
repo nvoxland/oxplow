@@ -183,6 +183,10 @@ pub enum OxplowEvent {
     /// so a consumer can skip an event that can't affect it (tsk198); an EMPTY
     /// list is fail-open — "unknown, refresh anyway" — which is what the
     /// low-frequency emit sites still send. See `.context/metrics.md`.
+    /// Published models (views) changed: a commit touched a table one of
+    /// them reads, directly or through other models (P4.6). A lens re-runs
+    /// when a model it read is listed.
+    ModelsChanged { models: Vec<String> },
     MetricSamplesChanged {
         stream_id: StreamId,
         #[serde(default)]

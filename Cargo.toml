@@ -96,7 +96,7 @@ schemars = { version = "1", features = ["derive"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
 
 # DB
-rusqlite = { version = "0.39", features = ["bundled", "time", "uuid", "serde_json", "hooks"] }
+rusqlite = { version = "0.39", features = ["bundled", "time", "uuid", "serde_json", "hooks", "preupdate_hook"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.34"
 refinery = { version = "0.9", features = ["rusqlite"] }

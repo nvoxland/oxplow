@@ -3156,6 +3156,13 @@ export type MetricSpec = {
 	updated_at: Timestamp,
 };
 
+// When one model last changed.
+export type ModelFreshness = {
+	model: string,
+	// RFC 3339.
+	changedAt: string,
+};
+
 export type MoveTaskRequest = {
 	id: TaskId,
 	// Destination thread, or `None` to move onto the backlog.
@@ -3418,8 +3425,11 @@ detail: string | null } |
  *  so a consumer can skip an event that can't affect it (tsk198); an EMPTY
  *  list is fail-open — "unknown, refresh anyway" — which is what the
  *  low-frequency emit sites still send. See `.context/metrics.md`.
+ *  Published models (views) changed: a commit touched a table one of
+ *  them reads, directly or through other models (P4.6). A lens re-runs
+ *  when a model it read is listed.
  */
-{ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] } | 
+{ kind: "modelsChanged"; models: string[] } | { kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] } | 
 /**
  *  A persisted agent nudge landed (report-less-run / coverage-target).
  *  The renderer refetches the effort's (or thread's) nudge list. See
@@ -4123,6 +4133,11 @@ export type SqlQueryResult = {
 	truncated: boolean,
 	// What the query read — what a caller subscribes to (P4.6).
 	reads: Reads,
+	/**
+	 *  When each model it read last changed since the app started (the
+	 *  SQL gateway fills it, P4.6); a model unchanged since then is absent.
+	 */
+	freshness: ModelFreshness[],
 };
 
 // An envelope as read back from the log, with its position.

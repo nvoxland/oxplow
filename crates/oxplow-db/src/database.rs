@@ -86,6 +86,8 @@ pub struct Database {
     /// Bounds how many DB tasks are dispatched to the blocking pool at once,
     /// sized to the connection pool (tsk131).
     gate: Arc<Semaphore>,
+    /// Which tables commits touched, published after each call (P4.6).
+    changes: Arc<crate::changes::Changes>,
 }
 
 /// Per-connection setup, run by the pool for every connection it opens.
@@ -135,11 +137,14 @@ impl Database {
                 want.map_or("none".into(), |v| v.to_string()),
             )));
         }
+        let changes = Arc::new(crate::changes::Changes::default());
+        let hooks = changes.clone();
         let manager = SqliteConnectionManager::file(path.as_ref())
             .with_flags(flags)
-            .with_init(|c| {
+            .with_init(move |c| {
                 c.pragma_update(None, "foreign_keys", "ON")?;
-                c.busy_timeout(std::time::Duration::from_secs(5))
+                c.busy_timeout(std::time::Duration::from_secs(5))?;
+                hooks.install(c)
             });
         let pool = Pool::builder()
             .max_size(2)
@@ -150,6 +155,7 @@ impl Database {
             pool: Arc::new(pool),
             memo: Arc::new(QueryMemo::default()),
             gate: Arc::new(Semaphore::new(permits)),
+            changes,
         })
     }
 
@@ -167,8 +173,12 @@ impl Database {
             .map_err(DbInitError::Sqlite)?;
         drop(setup);
 
-        let manager =
-            SqliteConnectionManager::file(path.as_ref()).with_init(|c| init_connection(c));
+        let changes = Arc::new(crate::changes::Changes::default());
+        let hooks = changes.clone();
+        let manager = SqliteConnectionManager::file(path.as_ref()).with_init(move |c| {
+            init_connection(c)?;
+            hooks.install(c)
+        });
         let pool = Pool::builder()
             .max_size(8)
             .build(manager)
@@ -183,6 +193,7 @@ impl Database {
             pool: Arc::new(pool),
             memo: Arc::new(QueryMemo::default()),
             gate: Arc::new(Semaphore::new(permits)),
+            changes,
         })
     }
 
@@ -191,9 +202,11 @@ impl Database {
     /// Public so other crates' tests can build a Services graph
     /// without needing a tempfile.
     pub fn in_memory() -> Self {
-        let manager = SqliteConnectionManager::memory().with_init(|c| {
+        let changes = Arc::new(crate::changes::Changes::default());
+        let hooks = changes.clone();
+        let manager = SqliteConnectionManager::memory().with_init(move |c| {
             c.pragma_update(None, "foreign_keys", "ON")?;
-            Ok(())
+            hooks.install(c)
         });
         let pool = Pool::builder()
             .max_size(1)
@@ -206,6 +219,7 @@ impl Database {
             pool: Arc::new(pool),
             memo: Arc::new(QueryMemo::default()),
             gate: Arc::new(Semaphore::new(permits)),
+            changes,
         }
     }
 
@@ -288,12 +302,14 @@ impl Database {
     {
         let permit = self.db_permit().await?;
         let db = self.clone();
-        tokio::task::spawn_blocking(move || {
+        let out = tokio::task::spawn_blocking(move || {
             let _permit = permit; // held for the duration of the DB work
             db.with_conn(f)
         })
         .await
-        .map_err(|e| oxplow_domain::DomainError::Storage(format!("db task panicked: {e}")))?
+        .map_err(|e| oxplow_domain::DomainError::Storage(format!("db task panicked: {e}")))?;
+        self.changes.flush();
+        out
     }
 
     /// Like [`Self::call`] but hands the closure a `&mut Connection`, for
@@ -308,7 +324,7 @@ impl Database {
     {
         let permit = self.db_permit().await?;
         let db = self.clone();
-        tokio::task::spawn_blocking(move || {
+        let out = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let mut conn = db
                 .conn()
@@ -316,7 +332,19 @@ impl Database {
             f(&mut conn)
         })
         .await
-        .map_err(|e| oxplow_domain::DomainError::Storage(format!("db task panicked: {e}")))?
+        .map_err(|e| oxplow_domain::DomainError::Storage(format!("db task panicked: {e}")))?;
+        self.changes.flush();
+        out
+    }
+
+    /// Hear which tables commits touched: each message is the tables one or
+    /// more calls committed writes to, sent after they committed (P4.6).
+    /// A lagging receiver misses messages; treat a lag as "anything may
+    /// have changed".
+    pub fn subscribe_changes(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<crate::changes::TablesChanged> {
+        self.changes.subscribe()
     }
 }
 
@@ -370,7 +398,7 @@ impl Database {
         ];
         let permit = self.db_permit().await?;
         let db = self.clone();
-        tokio::task::spawn_blocking(move || {
+        let out = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let mut attempt: u32 = 0;
             loop {
@@ -400,7 +428,9 @@ impl Database {
             }
         })
         .await
-        .map_err(|e| oxplow_domain::DomainError::Storage(format!("db task panicked: {e}")))?
+        .map_err(|e| oxplow_domain::DomainError::Storage(format!("db task panicked: {e}")));
+        self.changes.flush();
+        out?
     }
 }
 

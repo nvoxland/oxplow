@@ -64,6 +64,7 @@ pub mod metric_engine;
 pub mod metric_grid;
 pub mod metric_visibility;
 pub mod metrics_service;
+pub mod models_changed;
 pub mod net_sandbox;
 pub mod otlp_tokens;
 pub mod output_activity;
@@ -414,6 +415,9 @@ pub struct Services {
     pub event_log_store: Arc<SqliteEventLogStore>,
     /// The one way a query reaches the semantic layer (P4.1).
     pub sql: sql_gateway::SqlGateway,
+    /// When each model last changed (P4.6); `models_changed::spawn` keeps
+    /// it and announces `ModelsChanged`.
+    pub model_watermarks: Arc<models_changed::ModelWatermarks>,
     /// Every event `type@v` the log accepts, with its schema. Core types
     /// at boot; plugin types join when their manifests load.
     pub event_schemas: Arc<EventSchemaRegistry>,
@@ -670,7 +674,10 @@ impl Services {
         ));
         let metric_engine = metric_engine::MetricEngine::new(SqliteFactStore::new(db.clone()))
             .with_visibility(metric_visibility.clone());
-        let sql = sql.with_engine(metric_engine.clone());
+        let model_watermarks = Arc::new(models_changed::ModelWatermarks::default());
+        let sql = sql
+            .with_engine(metric_engine.clone())
+            .with_watermarks(model_watermarks.clone());
         let attribution_store = Arc::new(oxplow_db::SqliteAttributionStore::new(db.clone()));
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let dashboard_store = Arc::new(oxplow_db::SqliteDashboardStore::new(db.clone()));
@@ -978,6 +985,7 @@ impl Services {
             task_link_store,
             event_log_store,
             sql,
+            model_watermarks,
             event_schemas,
             event_pump,
             extension_catalog,

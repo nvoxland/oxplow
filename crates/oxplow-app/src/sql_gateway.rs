@@ -16,6 +16,8 @@ pub struct SqlGateway {
     /// What `metric_grid()` reads metrics through; `None` for a gateway
     /// that serves the engine itself (its entity metrics).
     engine: Option<std::sync::Arc<crate::metric_engine::MetricEngine>>,
+    /// When each model last changed, for a result's `freshness` (P4.6).
+    watermarks: Option<std::sync::Arc<crate::models_changed::ModelWatermarks>>,
 }
 
 impl SqlGateway {
@@ -23,7 +25,24 @@ impl SqlGateway {
         Self {
             layer: SemanticLayer::new(db),
             engine: None,
+            watermarks: None,
         }
+    }
+
+    /// Say how fresh each read model is (P4.6).
+    pub fn with_watermarks(
+        mut self,
+        watermarks: std::sync::Arc<crate::models_changed::ModelWatermarks>,
+    ) -> Self {
+        self.watermarks = Some(watermarks);
+        self
+    }
+
+    fn fresh(&self, mut out: SqlQueryResult) -> SqlQueryResult {
+        if let Some(w) = &self.watermarks {
+            out.freshness = w.freshness(&out.reads.models);
+        }
+        out
     }
 
     /// Read metrics in SQL through `engine` (`metric_grid()`, P4.5).
@@ -37,7 +56,7 @@ impl SqlGateway {
     /// any connection is taken — and runs against them as a temp table.
     pub async fn run(&self, mut query: SqlQuery) -> Result<SqlQueryResult, DomainError> {
         let Some(plan) = crate::metric_grid::plan(&query.sql)? else {
-            return self.layer.run(query).await;
+            return Ok(self.fresh(self.layer.run(query).await?));
         };
         // Boxed: the engine reads entity metrics through a gateway, so
         // this future contains another `run`.
@@ -47,7 +66,7 @@ impl SqlGateway {
         query.temp.push(grid.table);
         let mut out = self.layer.run(query).await?;
         out.reads.measures = grid.measures;
-        Ok(out)
+        Ok(self.fresh(out))
     }
 
     fn engine(&self) -> Result<&crate::metric_engine::MetricEngine, DomainError> {

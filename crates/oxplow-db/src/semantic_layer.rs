@@ -29,6 +29,18 @@ pub struct SqlQueryResult {
     pub truncated: bool,
     /// What the query read — what a caller subscribes to (P4.6).
     pub reads: Reads,
+    /// When each model it read last changed since the app started (the
+    /// SQL gateway fills it, P4.6); a model unchanged since then is absent.
+    pub freshness: Vec<ModelFreshness>,
+}
+
+/// When one model last changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelFreshness {
+    pub model: String,
+    /// RFC 3339.
+    pub changed_at: String,
 }
 
 /// What a query read, as SQLite's authorizer reported it while preparing
@@ -762,6 +774,7 @@ fn run_read_only(
             rows: rows_out,
             truncated,
             reads,
+            freshness: Vec::new(),
         })
     })();
 

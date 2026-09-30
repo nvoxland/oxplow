@@ -340,6 +340,13 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     )
     .spawn();
 
+    // Asset subscriptions (P4.6): which models each commit changed.
+    crate::models_changed::spawn(
+        state.db.clone(),
+        state.model_watermarks.clone(),
+        event_bus.clone(),
+    );
+
     // Event retention (P3.11): expire old agent/test payloads and bodies
     // per `.context/target-architecture.md` §5.4 — a while after boot (the
     // first sweep after an upgrade may have a large backlog, and hooks
