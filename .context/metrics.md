@@ -356,8 +356,8 @@ welded to collection.
 - **`metric_capture`** (the renamed/generalized `metric_run`) — the **one context
   row**: it holds ALL the "when/where/who/trust" metadata so it isn't duplicated
   on every fact. `producer`, `trigger`, `status`/`error`, `scope`; when
-  `captured_at`/`ended_at`; where `snapshot_id`/`closest_git_version`/
-  `git_version_exact`/`branch`/`basis_ref`; who `stream_id` (NOT NULL, the CASCADE
+  `captured_at`/`ended_at`; where `snapshot_id`/`closest_vcs_rev`/
+  `vcs_rev_exact`/`branch`/`basis_ref`; who `stream_id` (NOT NULL, the CASCADE
   scope) / `thread_id` / **`effort_id`** (nullable, `ON DELETE SET NULL` — the
   *producing* effort, stamped only when unambiguous; ledger-backfilled otherwise);
   trust `provenance`/`source`. **Captures are durable by default** (they carry
@@ -390,12 +390,12 @@ welded to collection.
   > same daily `boot.rs` loop as the prune, but independently of it — the loop
   > used to be gated on `metricRetentionDays > 0`, which would have disabled
   > compaction for everyone.
-  > **Stamp `closest_git_version` on every capture you add (tsk95).** Use
+  > **Stamp `closest_vcs_rev` on every capture you add (tsk95).** Use
   > `file_ref_version::resolve(store, dir, snap)`: a snapshot with its own commit
-  > reads `git_version_exact = true`, otherwise it falls back to HEAD with
+  > reads `vcs_rev_exact = true`, otherwise it falls back to HEAD with
   > `exact = false`. **Dirty is the normal case** (the agent edits, then runs
-  > tests), which is exactly what the `closest_git_version` +
-  > `git_version_exact` pair is for — don't add a third field.
+  > tests), which is exactly what the `closest_vcs_rev` +
+  > `vcs_rev_exact` pair is for — don't add a third field.
   >
   > **But commit ancestry alone cannot place a dirty run (tsk97, verified).** A
   > dirty run on a feature branch stamps the *fork-point* commit — which is on
@@ -487,10 +487,10 @@ welded to collection.
 > same branch always sees; cross-branch, C is visible from R iff C's
 > **absorbing commit** (`effective_commit` — the first same-stream, same-branch
 > commit-stamped snapshot at-or-after C; an exact capture is its own anchor) is
-> an ancestor-or-equal of R's **base** (`closest_git_version` — tsk95's stamp
+> an ancestor-or-equal of R's **base** (`closest_vcs_rev` — tsk95's stamp
 > IS the base, which is why capture-level stamping stays). Three load-bearing
 > properties, each pinned by test:
-> - **Never anchor a dirty run to its fork point** — `closest_git_version` is
+> - **Never anchor a dirty run to its fork point** — `closest_vcs_rev` is
 >   an ancestor of everything, so ancestry over it cannot separate branches
 >   (tsk97's disproof). The anchor is the commit that ABSORBED the work.
 > - **As-of-R with the absorbing COMMIT's own timestamp**: work not yet
@@ -576,7 +576,7 @@ welded to collection.
 >
 > **The grain's floor is the CAPTURE.** Never aggregate coarser (per-day,
 > per-commit): a capture *is* one scan/run, so `snapshot_id`/`effort_id`/
-> `thread_id`/`branch`/`closest_git_version`/`stream_id` stay reachable through
+> `thread_id`/`branch`/`closest_vcs_rev`/`stream_id` stay reachable through
 > the JOIN and within-effort deltas keep working. Branch/thread/stream remain
 > **dimensions you can group by, never partitions that hide rows**.
 >
@@ -810,7 +810,7 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
 ### Spine dimensions and time buckets (tsk321)
 
 - **Spine dimensions.** `oxplow.stream`, `oxplow.thread`, `oxplow.effort`,
-  `oxplow.task` and `oxplow.git_version` read the fact's capture (arms in
+  `oxplow.task` and `oxplow.vcs_rev` read the fact's capture (arms in
   `dim_value_cached`; excluded in `dim_is_slice_key`, listed in `SPINE_DIMS`).
   `task_id` is on `FactRow`: `fact_row_mapper(conn)` loads `effort`'s
   effort→task map once per read and stamps each row. A per-row join would cost
@@ -1259,7 +1259,7 @@ store `crates/oxplow-db/src/metric_store.rs` (`SqliteMetricStore`):
   `language`, `scope` (built-in|global|project), `dimensions_json`,
   `target`/`warn_at`/`fail_at`. Upserted by `key`.
 - **`metric_dimension`** — conformed-dimension catalog (seeded: time, stream,
-  thread, effort, git_version, branch, subject, model, agent, language,
+  thread, effort, vcs_rev, branch, subject, model, agent, language,
   severity, status). Shared meaning across metrics → cross-metric drill-across.
 - **`metric_subject`** — subject hierarchy (file→module→package→repo) for
   roll-ups. Declared, not yet exercised.
@@ -1268,7 +1268,7 @@ store `crates/oxplow-db/src/metric_store.rs` (`SqliteMetricStore`):
   many metrics. Raw events have **no run** (`run_id` NULL).
 - **`metric_sample`** — the durable scalar fact (the BI grain). `value`
   (+ `numerator`/`denominator` for ratios so roll-ups RE-AGGREGATE correctly),
-  `captured_at` (the spine) + `closest_git_version` + `branch`, optional
+  `captured_at` (the spine) + `closest_vcs_rev` + `branch`, optional
   `subject_kind`/`subject_ref`/`path`/`line`, `dims_json`, `provenance`/`source`.
 - **`metric_finding`** — located detail for the `findings` kind (generalizes
   `code_quality_finding`): path/line, kind, severity, rule, message, value.
@@ -1276,7 +1276,7 @@ store `crates/oxplow-db/src/metric_store.rs` (`SqliteMetricStore`):
 ### Time-primary, effort-as-overlay (the key invariant)
 
 A sample carries **NO `effort_id` FK**. It's anchored by `captured_at` +
-`closest_git_version`. Efforts (and later commits/releases) are **time-range
+`closest_vcs_rev`. Efforts (and later commits/releases) are **time-range
 overlays** read from `effort` (`started_at`/`ended_at`) — so:
 - efforts can be garbage-collected without touching a single sample,
 - a sample can fall in zero or many efforts,

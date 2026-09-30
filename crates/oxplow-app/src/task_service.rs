@@ -968,8 +968,8 @@ impl TaskService {
             // default.
             None => crate::file_ref_version::ResolvedFileVersion {
                 local_snapshot_id: 0,
-                closest_git_version: None,
-                git_version_exact: false,
+                closest_vcs_rev: None,
+                vcs_rev_exact: false,
             },
         };
         let files: Vec<(String, oxplow_db::EffortFileChange)> = self
@@ -988,8 +988,8 @@ impl TaskService {
                 files,
                 version: oxplow_db::OwnedFileRefVersion {
                     local_snapshot_id: version.local_snapshot_id,
-                    closest_git_version: version.closest_git_version,
-                    git_version_exact: version.git_version_exact,
+                    closest_vcs_rev: version.closest_vcs_rev,
+                    vcs_rev_exact: version.vcs_rev_exact,
                 },
                 impacts: impacts.to_vec(),
                 summary,
@@ -1146,7 +1146,7 @@ impl TaskService {
     /// only happens for an effort opened without a snapshot pin and
     /// no snapshot service attached). The cascade in
     /// `set_snapshot_git_commit` will retroactively flip
-    /// `git_version_exact` to true if a commit lands on the chosen
+    /// `vcs_rev_exact` to true if a commit lands on the chosen
     /// snapshot later.
     pub async fn resolve_effort_file_version(
         &self,
@@ -1161,14 +1161,14 @@ impl TaskService {
             Some(svc) if snapshot_id != 0 => svc.resolve_file_version(snapshot_id).await.unwrap_or(
                 crate::file_ref_version::ResolvedFileVersion {
                     local_snapshot_id: snapshot_id,
-                    closest_git_version: None,
-                    git_version_exact: false,
+                    closest_vcs_rev: None,
+                    vcs_rev_exact: false,
                 },
             ),
             _ => crate::file_ref_version::ResolvedFileVersion {
                 local_snapshot_id: snapshot_id,
-                closest_git_version: None,
-                git_version_exact: false,
+                closest_vcs_rev: None,
+                vcs_rev_exact: false,
             },
         }
     }
@@ -3574,8 +3574,8 @@ mod tests {
         // Claiming the path moves it from `unclaimed` to `claimed`.
         let v = crate::file_ref_version::ResolvedFileVersion {
             local_snapshot_id: 0,
-            closest_git_version: None,
-            git_version_exact: false,
+            closest_vcs_rev: None,
+            vcs_rev_exact: false,
         };
         oxplow_db::EffortStore::record_file(
             &*effort_store,

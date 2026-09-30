@@ -51,7 +51,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
     const EFFORT_DIMS: &[&str] = &["branch", "effort"];
     const NUDGE_DIMS: &[&str] = &["subject", "branch", "thread"];
     const BRANCH_DIMS: &[&str] = &["branch"];
-    const TREE_DIMS: &[&str] = &["branch", "git_version"];
+    const TREE_DIMS: &[&str] = &["branch", "vcs_rev"];
     &[
         // otel-tokens (token_usage.rs::ingest_otlp_tokens, via the OTLP
         // receiver — tsk22). The `producer` field is descriptor metadata; the

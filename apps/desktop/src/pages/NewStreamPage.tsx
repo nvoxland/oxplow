@@ -78,7 +78,7 @@ function resolvePickedRef(target: PickedRef): { ref: string; label: string } {
 
 export interface NewStreamPageProps {
   /** Whether git operations are available in this workspace. */
-  gitEnabled: boolean;
+  vcsEnabled: boolean;
   /** Existing streams count, for the default "Stream N" placeholder. */
   defaultTitle?: string;
   onClose?(): void;
@@ -92,7 +92,7 @@ export interface NewStreamPageProps {
  * (existing branch / new branch / existing worktree) so muscle memory
  * carries over.
  */
-export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: NewStreamPageProps) {
+export function NewStreamPage({ vcsEnabled, defaultTitle, onClose, onCreated }: NewStreamPageProps) {
   const [mode, setMode] = useState<NewStreamMode>("existing");
   const [title, setTitle] = useState(defaultTitle ?? "");
   const [selectedRef, setSelectedRef] = useState("");
@@ -108,7 +108,7 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
   const titleRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    if (!gitEnabled) return;
+    if (!vcsEnabled) return;
     let cancelled = false;
     setLoadingBranches(true);
     void Promise.all([readBranches(), vcsListAdoptableWorkspaces()])
@@ -146,7 +146,7 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
     return () => {
       cancelled = true;
     };
-  }, [gitEnabled]);
+  }, [vcsEnabled]);
 
   useEffect(() => {
     titleRef.current?.focus();
@@ -199,7 +199,7 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
     }
   }
 
-  if (!gitEnabled) {
+  if (!vcsEnabled) {
     return (
       <Page testId="page-new-stream" title="New Stream">
         <div style={{ padding: "20px 24px", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>

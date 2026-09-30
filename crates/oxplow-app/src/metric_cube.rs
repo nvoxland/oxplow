@@ -756,7 +756,7 @@ pub async fn cube_series(
             group,
             branch: c.branch.clone(),
             provenance: Some(c.provenance.clone()),
-            git_version: c.closest_git_version.clone(),
+            vcs_rev: c.closest_vcs_rev.clone(),
             source: Some(c.source.clone()),
         };
         let groups = by_capture.get(&c.id);
@@ -1528,8 +1528,8 @@ mod tests {
         let on = |branch: &str, at: Timestamp, exact: bool| NewMetricCapture {
             captured_at: Some(at),
             branch: Some(branch.into()),
-            closest_git_version: Some("A".into()),
-            git_version_exact: exact,
+            closest_vcs_rev: Some("A".into()),
+            vcs_rev_exact: exact,
             ..NewMetricCapture::done(1, "tests", "builtin")
         };
         facts

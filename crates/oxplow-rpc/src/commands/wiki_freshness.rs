@@ -22,11 +22,11 @@ pub struct WikiRefFreshness {
     pub local_snapshot_id: i64,
     /// Closest known git commit at capture time; populated only
     /// when the worktree had a HEAD.
-    pub closest_git_version: Option<String>,
+    pub closest_vcs_rev: Option<String>,
     /// `true` when the local snapshot is byte-equal to the recorded
     /// commit (capture was on a clean worktree, or
     /// `set_snapshot_git_commit` later attached HEAD to the snapshot).
-    pub git_version_exact: bool,
+    pub vcs_rev_exact: bool,
     /// The latest `snapshot.id` whose `file_snapshot.path` matches
     /// this target. `None` when the file hasn't been captured (e.g.
     /// it's outside the workspace or has never been touched since
@@ -47,8 +47,8 @@ pub async fn list_wiki_freshness(
         .map(|(path, local, git, exact, latest)| WikiRefFreshness {
             path,
             local_snapshot_id: local.unwrap_or(0),
-            closest_git_version: git,
-            git_version_exact: exact,
+            closest_vcs_rev: git,
+            vcs_rev_exact: exact,
             latest_snapshot_id: latest,
             stale: matches!((latest, local), (Some(l), Some(loc)) if l > loc)
                 || matches!((latest, local), (Some(_), None)),

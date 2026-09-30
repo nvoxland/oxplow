@@ -171,8 +171,8 @@ mod tests {
                 metric_value: value,
                 payload_json: Some(payload.to_string()),
                 local_snapshot_id: None,
-                closest_git_version: None,
-                git_version_exact: false,
+                closest_vcs_rev: None,
+                vcs_rev_exact: false,
                 created_at: oxplow_domain::Timestamp::now(),
             }
         };
@@ -491,8 +491,8 @@ mod tests {
                     oxplow_db::EffortFileChange::Updated,
                     oxplow_db::FileRefVersion {
                         local_snapshot_id: 0,
-                        closest_git_version: None,
-                        git_version_exact: false,
+                        closest_vcs_rev: None,
+                        vcs_rev_exact: false,
                     },
                 )
                 .await
@@ -593,8 +593,8 @@ mod tests {
                 oxplow_db::EffortFileChange::Updated,
                 oxplow_db::FileRefVersion {
                     local_snapshot_id: 0,
-                    closest_git_version: None,
-                    git_version_exact: false,
+                    closest_vcs_rev: None,
+                    vcs_rev_exact: false,
                 },
             )
             .await

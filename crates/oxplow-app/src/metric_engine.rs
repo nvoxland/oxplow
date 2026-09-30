@@ -280,8 +280,8 @@ pub struct SeriesPoint {
     pub branch: Option<String>,
     /// The capture's trust label (`observed` | `asserted` | …).
     pub provenance: Option<String>,
-    /// The capture's closest git version (short sha), for the recordings table.
-    pub git_version: Option<String>,
+    /// The capture's closest VCS revision (a short sha), for the recordings table.
+    pub vcs_rev: Option<String>,
     /// The capture's collector source (e.g. `nextest`, `agent-reported`).
     pub source: Option<String>,
 }
@@ -435,7 +435,7 @@ pub(crate) fn dim_value_cached(
         "oxplow.thread" => f.thread_id.map(|v| v.to_string()),
         "oxplow.effort" => f.effort_id.map(|v| v.to_string()),
         "oxplow.task" => f.task_id.map(|v| v.to_string()),
-        "oxplow.git_version" => f.closest_git_version.clone(),
+        "oxplow.vcs_rev" => f.closest_vcs_rev.clone(),
         key => dims.get(f).and_then(|d| dim_from_map(d, key)),
     }
 }
@@ -449,7 +449,7 @@ pub(crate) const SPINE_DIMS: &[&str] = &[
     "oxplow.thread",
     "oxplow.effort",
     "oxplow.task",
-    "oxplow.git_version",
+    "oxplow.vcs_rev",
 ];
 
 pub(crate) fn is_spine_dim(dimension: &str) -> bool {
@@ -752,7 +752,7 @@ pub(crate) fn aggregate_series(
                 // One capture → one branch/provenance/version/source; take the bucket's.
                 branch: fs[0].branch.clone(),
                 provenance: Some(fs[0].provenance.clone()),
-                git_version: fs[0].closest_git_version.clone(),
+                vcs_rev: fs[0].closest_vcs_rev.clone(),
                 source: Some(fs[0].source.clone()),
             });
         }
@@ -779,7 +779,7 @@ pub(crate) fn aggregate_series(
 ///   dirty run's code lands in the next commit. `None` when never committed
 ///   (abandoned work) ⇒ C is its own branch's business only.
 /// - **`base_commit(R)`** — the closest ANCESTOR commit at-or-before R; R's code is
-///   `base_commit(R) + delta`. This is exactly what `closest_git_version` records
+///   `base_commit(R) + delta`. This is exactly what `closest_vcs_rev` records
 ///   (HEAD at record time, or the snapshot's own commit when exact — tsk95).
 ///
 /// # Resolution is as-of-R, and that makes it IMMUTABLE
@@ -795,7 +795,7 @@ pub(crate) fn aggregate_series(
 /// # Why not plain commit ancestry (tsk97's original rule — DISPROVEN)
 ///
 /// 100% of test captures are dirty, and a dirty run on a branch stamps
-/// `closest_git_version` to the **fork point**, which is on main. Ancestry on that
+/// `closest_vcs_rev` to the **fork point**, which is on main. Ancestry on that
 /// keeps the branch's results visible from main — the very bug being fixed. This
 /// rule anchors a dirty run to the commit that **absorbed** it, not the one it
 /// **branched from**, which separates them. It also gives the semantic this always
@@ -1047,7 +1047,7 @@ pub(crate) fn tree_state_series(
             group,
             branch: c.branch.clone(),
             provenance: Some(c.provenance.clone()),
-            git_version: c.closest_git_version.clone(),
+            vcs_rev: c.closest_vcs_rev.clone(),
             source: Some(c.source.clone()),
         };
 
@@ -1120,7 +1120,7 @@ pub(crate) fn splice_zero_points(
                 group: None,
                 branch: c.branch.clone(),
                 provenance: Some(c.provenance.clone()),
-                git_version: c.closest_git_version.clone(),
+                vcs_rev: c.closest_vcs_rev.clone(),
                 source: Some(c.source.clone()),
             });
         }
@@ -1925,7 +1925,7 @@ impl MetricEngine {
                     group: r.group,
                     branch: None,
                     provenance: Some("observed".into()),
-                    git_version: None,
+                    vcs_rev: None,
                     source: Some("entity".into()),
                 })
                 .collect(),
@@ -2165,8 +2165,8 @@ mod tests {
             dims_json: None,
             captured_at: ts(captured_at),
             branch: None,
-            closest_git_version: None,
-            git_version_exact: false,
+            closest_vcs_rev: None,
+            vcs_rev_exact: false,
             basis_ref: None,
             snapshot_id: None,
             stream_id: 1,
@@ -2512,7 +2512,7 @@ mod tests {
             thread_id: Some(4),
             effort_id: Some(9),
             task_id: Some(12),
-            closest_git_version: Some("abc123".into()),
+            closest_vcs_rev: Some("abc123".into()),
             severity: Some("error".into()),
             rule: Some("E1".into()),
             dims_json: Some(
@@ -2558,7 +2558,7 @@ mod tests {
             "oxplow.thread",
             "oxplow.effort",
             "oxplow.task",
-            "oxplow.git_version",
+            "oxplow.vcs_rev",
         ] {
             assert!(!dim_is_slice_key(key), "{key} reads outside the slice key");
             assert_ne!(
@@ -2575,7 +2575,7 @@ mod tests {
             thread_id: Some(4),
             effort_id: Some(9),
             task_id: Some(12),
-            closest_git_version: Some("abc123".into()),
+            closest_vcs_rev: Some("abc123".into()),
             ..fact(1, "2026-06-30T00:00:00Z", 1.0)
         };
         let got: Vec<_> = [
@@ -2583,7 +2583,7 @@ mod tests {
             "oxplow.thread",
             "oxplow.effort",
             "oxplow.task",
-            "oxplow.git_version",
+            "oxplow.vcs_rev",
         ]
         .iter()
         .map(|d| dim_value(&f, d))

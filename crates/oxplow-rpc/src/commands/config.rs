@@ -105,14 +105,14 @@ pub async fn set_generated(
 pub struct WorkspaceContext {
     pub project_dir: String,
     pub default_branch: Option<String>,
-    pub is_git_repo: bool,
+    pub vcs_enabled: bool,
 }
 
 pub async fn get_workspace_context(svc: &Services) -> Result<WorkspaceContext, IpcError> {
     let project = svc.layout.project_dir.clone();
     let project_str = project.to_string_lossy().into_owned();
-    let is_git_repo = svc.vcs.detect(&project).await.is_some();
-    let default_branch = if is_git_repo {
+    let vcs_enabled = svc.vcs.detect(&project).await.is_some();
+    let default_branch = if vcs_enabled {
         svc.vcs
             .branches(&project)
             .await
@@ -125,7 +125,7 @@ pub async fn get_workspace_context(svc: &Services) -> Result<WorkspaceContext, I
     Ok(WorkspaceContext {
         project_dir: project_str,
         default_branch,
-        is_git_repo,
+        vcs_enabled,
     })
 }
 

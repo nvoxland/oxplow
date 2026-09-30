@@ -1450,7 +1450,7 @@ export type BackgroundTask = {
 	result_json: string | null,
 };
 
-export type BackgroundTaskKind = "git" | "code-quality" | "lsp" | "notes-resync" | "snapshot" | 
+export type BackgroundTaskKind = "vcs" | "code-quality" | "lsp" | "notes-resync" | "snapshot" | 
 /**
  *  Recomputing code metrics over the whole tree (the metric baseline, tsk48).
  *  Slow and CPU-hungry — it must be visible, or "why is oxplow pegging a core?"
@@ -2071,13 +2071,13 @@ export type EffortFile = {
 	 *  docs. NULL when no git information is available (no commits
 	 *  yet, headless repo, etc.).
 	 */
-	closest_git_version: string | null,
+	closest_vcs_rev: string | null,
 	/**
 	 *  `true` when `local_snapshot_id`'s snapshot is byte-equal to
-	 *  `closest_git_version` (clean worktree at capture, or
+	 *  `closest_vcs_rev` (clean worktree at capture, or
 	 *  auto-resolved later by `set_snapshot_git_commit`).
 	 */
-	git_version_exact: boolean,
+	vcs_rev_exact: boolean,
 };
 
 export type EffortFileChange = "created" | "updated" | "deleted";
@@ -3350,7 +3350,7 @@ detail: string | null } |
  *  "is this a git workspace" flipped. Renderer hides/restores the
  *  git-aware UI on receipt.
  */
-{ kind: "workspaceContextChanged"; gitEnabled: boolean } | 
+{ kind: "workspaceContextChanged"; vcsEnabled: boolean } | 
 /**
  *  A worktree file changed on disk. Renderer-wide: file tree, quick
  *  open, project panel, git dashboard, uncommitted changes view all
@@ -3361,7 +3361,7 @@ detail: string | null } |
  *  A ref under `.git/refs/` changed. Drives history, branch list,
  *  and ahead/behind refreshes. Coarse per stream.
  */
-{ kind: "gitRefsChanged"; streamId: StreamId } | 
+{ kind: "vcsRefsChanged"; streamId: StreamId } | 
 /**
  *  A non-primary stream's backing worktree was deleted out from
  *  under us (externally `rm -rf`'d, `git worktree remove`'d, etc.).
@@ -4350,13 +4350,13 @@ export type WikiRefFreshness = {
 	 *  Closest known git commit at capture time; populated only
 	 *  when the worktree had a HEAD.
 	 */
-	closest_git_version: string | null,
+	closest_vcs_rev: string | null,
 	/**
 	 *  `true` when the local snapshot is byte-equal to the recorded
 	 *  commit (capture was on a clean worktree, or
 	 *  `set_snapshot_git_commit` later attached HEAD to the snapshot).
 	 */
-	git_version_exact: boolean,
+	vcs_rev_exact: boolean,
 	/**
 	 *  The latest `snapshot.id` whose `file_snapshot.path` matches
 	 *  this target. `None` when the file hasn't been captured (e.g.
@@ -4381,7 +4381,7 @@ export type WorkspaceChangeKind = "created" | "updated" | "deleted" | "renamed";
 export type WorkspaceContext = {
 	project_dir: string,
 	default_branch: string | null,
-	is_git_repo: boolean,
+	vcs_enabled: boolean,
 };
 
 export type WorkspaceEntry = {

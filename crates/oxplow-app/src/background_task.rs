@@ -24,7 +24,7 @@ const SNAPSHOT_MAX_ENTRIES: usize = 200;
 #[derive(Default)]
 pub enum BackgroundTaskKind {
     #[default]
-    Git,
+    Vcs,
     CodeQuality,
     Lsp,
     NotesResync,
@@ -262,7 +262,7 @@ mod tests {
     fn start_then_complete_keeps_task_until_grace_expires() {
         let store = BackgroundTaskStore::new();
         let task = store.start(StartInput {
-            kind: BackgroundTaskKind::Git,
+            kind: BackgroundTaskKind::Vcs,
             label: "git push".into(),
             ..Default::default()
         });

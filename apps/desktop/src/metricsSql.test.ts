@@ -8,7 +8,7 @@ describe("metrics read through SQL", () => {
     expect(metricSeriesSql("oxplow.coverage.abs_pct")).toBe(
       [
         `SELECT g.capture_id, g.bucket AS captured_at, MEASURE('oxplow.coverage.abs_pct') AS value, NULL AS "group",`,
-        "       c.branch, c.provenance, c.closest_git_version AS git_version, c.source",
+        "       c.branch, c.provenance, c.closest_vcs_rev AS vcs_rev, c.source",
         "FROM metric_grid('capture') g LEFT JOIN v_capture c ON c.id = g.capture_id",
         "WHERE MEASURE('oxplow.coverage.abs_pct') IS NOT NULL",
         "ORDER BY g.bucket DESC",
@@ -23,7 +23,7 @@ describe("metrics read through SQL", () => {
 
   test("rows become points and catalog entries", () => {
     const points = seriesPoints({
-      columns: ["capture_id", "captured_at", "value", "group", "branch", "provenance", "git_version", "source"],
+      columns: ["capture_id", "captured_at", "value", "group", "branch", "provenance", "vcs_rev", "source"],
       rows: [[7, "2026-03-02T10:00:00.000000Z", 3.5, null, "main", "observed", "abc123", "builtin"]],
       truncated: false,
       reads,
@@ -37,7 +37,7 @@ describe("metrics read through SQL", () => {
         group: null,
         branch: "main",
         provenance: "observed",
-        git_version: "abc123",
+        vcs_rev: "abc123",
         source: "builtin",
       },
     ]);

@@ -15,7 +15,7 @@ export type SeriesPoint = {
   group: string | null;
   branch: string | null;
   provenance: string | null;
-  git_version: string | null;
+  vcs_rev: string | null;
   source: string | null;
 };
 
@@ -72,7 +72,7 @@ export function metricSeriesSql(key: string, groupBy?: string | null, ranged = f
   const window = ranged ? " AND g.bucket >= ?1 AND g.bucket <= ?2" : "";
   return [
     `SELECT g.capture_id, g.bucket AS captured_at, ${measure} AS value, ${group} AS "group",`,
-    "       c.branch, c.provenance, c.closest_git_version AS git_version, c.source",
+    "       c.branch, c.provenance, c.closest_vcs_rev AS vcs_rev, c.source",
     `FROM ${grid} g LEFT JOIN v_capture c ON c.id = g.capture_id`,
     `WHERE ${measure} IS NOT NULL${window}`,
     "ORDER BY g.bucket DESC",
@@ -99,7 +99,7 @@ export function seriesPoints(result: SqlQueryResult): SeriesPoint[] {
     group: text(r.group),
     branch: text(r.branch),
     provenance: text(r.provenance),
-    git_version: text(r.git_version),
+    vcs_rev: text(r.vcs_rev),
     source: text(r.source),
   }));
 }

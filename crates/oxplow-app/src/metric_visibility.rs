@@ -5,7 +5,7 @@
 //! The rule itself lives on [`Visibility`] (`metric_engine.rs`) — read its type
 //! docs first. This module supplies its three inputs:
 //!
-//! - **`base_commit(R)`** is already ON the capture: `closest_git_version` is
+//! - **`base_commit(R)`** is already ON the capture: `closest_vcs_rev` is
 //!   HEAD at record time (or the snapshot's own commit when exact) — tsk95's
 //!   stamping IS the base, which is why that stamping stays.
 //! - **`effective_commit(C)`** comes from the commit-stamped snapshots: the
@@ -64,17 +64,17 @@ pub fn resolve(
     // the snapshot's own commit when exact. Exactness doesn't matter for the
     // base: either way it is the closest ancestor commit of the code read.
     for c in captures {
-        if let Some(sha) = &c.closest_git_version {
+        if let Some(sha) = &c.closest_vcs_rev {
             vis.base.insert(c.id, sha.clone());
         }
     }
 
     // effective_commit — the first commit CONTAINING the capture's code.
     for c in captures {
-        let eff = if c.git_version_exact {
+        let eff = if c.vcs_rev_exact {
             // Clean tree ⇒ the code is already in the stamped commit:
             // absorbed at birth, no snapshot search, no oracle call.
-            c.closest_git_version
+            c.closest_vcs_rev
                 .as_ref()
                 .map(|sha| (sha.clone(), c.captured_at))
         } else {
@@ -306,8 +306,8 @@ mod tests {
             provenance: "agent".into(),
             source: "builtin".into(),
             snapshot_id: None,
-            closest_git_version: base.map(Into::into),
-            git_version_exact: false,
+            closest_vcs_rev: base.map(Into::into),
+            vcs_rev_exact: false,
             branch: branch.map(Into::into),
             captured_at: ts(at_secs),
             ended_at: None,
@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn a_dirty_run_anchors_to_the_absorbing_commit_not_the_fork_point() {
-        // The disproof pin (tsk97): ancestry on `closest_git_version` (= the
+        // The disproof pin (tsk97): ancestry on `closest_vcs_rev` (= the
         // fork point A, which IS an ancestor of everything) cannot separate
         // branches. The anchor must be FA — the commit that absorbed the work.
         let on_feat_a = cap(1, Some("feat-a"), 20, Some("A"));
@@ -473,10 +473,10 @@ mod tests {
 
     #[test]
     fn an_exact_capture_is_its_own_anchor() {
-        // A clean-tree capture's code is already IN closest_git_version —
+        // A clean-tree capture's code is already IN closest_vcs_rev —
         // absorbed at birth, no snapshot search.
         let mut exact = cap(1, Some("main"), 40, Some("B"));
-        exact.git_version_exact = true;
+        exact.vcs_rev_exact = true;
         let vis = resolve(&[exact], &stamps(), &mut dag());
         assert_eq!(vis.effective.get(&1), Some(&("B".to_string(), ts(40))));
     }

@@ -492,8 +492,8 @@ mod tests {
             metric_value: Some(pct),
             payload_json: None,
             local_snapshot_id: None,
-            closest_git_version: None,
-            git_version_exact: false,
+            closest_vcs_rev: None,
+            vcs_rev_exact: false,
             created_at: oxplow_domain::Timestamp::now(),
         };
         f.svc

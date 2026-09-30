@@ -41,8 +41,8 @@ pub struct PageRefEdge {
     /// by the writer via [`PageRefEdge::with_version`]; the store
     /// persists it verbatim. See V20 for column semantics.
     pub local_snapshot_id: Option<i64>,
-    pub closest_git_version: Option<String>,
-    pub git_version_exact: bool,
+    pub closest_vcs_rev: Option<String>,
+    pub vcs_rev_exact: bool,
 }
 
 impl PageRefEdge {
@@ -61,8 +61,8 @@ impl PageRefEdge {
             ref_type: ref_type.into(),
             source_extra: None,
             local_snapshot_id: None,
-            closest_git_version: None,
-            git_version_exact: false,
+            closest_vcs_rev: None,
+            vcs_rev_exact: false,
         }
     }
 
@@ -77,12 +77,12 @@ impl PageRefEdge {
     pub fn with_version(
         mut self,
         local_snapshot_id: i64,
-        closest_git_version: Option<String>,
-        git_version_exact: bool,
+        closest_vcs_rev: Option<String>,
+        vcs_rev_exact: bool,
     ) -> Self {
         self.local_snapshot_id = Some(local_snapshot_id);
-        self.closest_git_version = closest_git_version;
-        self.git_version_exact = git_version_exact;
+        self.closest_vcs_rev = closest_vcs_rev;
+        self.vcs_rev_exact = vcs_rev_exact;
         self
     }
 }
@@ -128,8 +128,8 @@ impl SqlitePageRefStore {
     ///
     /// Semantics:
     /// - Edge in `existing ∩ new` → row kept with its OLD
-    ///   `local_snapshot_id` / `closest_git_version` /
-    ///   `git_version_exact`. `source_extra` is updated to the new
+    ///   `local_snapshot_id` / `closest_vcs_rev` /
+    ///   `vcs_rev_exact`. `source_extra` is updated to the new
     ///   value (line anchors, label overrides may legitimately
     ///   change without re-verifying the target).
     /// - Edge in `new \ existing` → INSERT with the new edge's
@@ -182,8 +182,8 @@ impl SqlitePageRefStore {
                 let mut stmt = conn.prepare(
                     "SELECT pr.target_id,
                             pr.local_snapshot_id,
-                            pr.closest_git_version,
-                            pr.git_version_exact,
+                            pr.closest_vcs_rev,
+                            pr.vcs_rev_exact,
                             (SELECT MAX(s.id)
                                FROM file_snapshot fs
                                JOIN snapshot s ON s.id = fs.snapshot_id
@@ -296,8 +296,8 @@ impl SqlitePageRefStore {
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT source_kind, source_id, target_kind, target_id, ref_type,
-                            source_extra, local_snapshot_id, closest_git_version,
-                            git_version_exact
+                            source_extra, local_snapshot_id, closest_vcs_rev,
+                            vcs_rev_exact
                      FROM page_ref
                      WHERE target_kind = ?1 AND target_id = ?2
                      ORDER BY source_kind, source_id, ref_type
@@ -324,8 +324,8 @@ impl SqlitePageRefStore {
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT source_kind, source_id, target_kind, target_id, ref_type,
-                            source_extra, local_snapshot_id, closest_git_version,
-                            git_version_exact
+                            source_extra, local_snapshot_id, closest_vcs_rev,
+                            vcs_rev_exact
                      FROM page_ref
                      WHERE source_kind = ?1 AND source_id = ?2
                      ORDER BY target_kind, target_id, ref_type
@@ -339,7 +339,7 @@ impl SqlitePageRefStore {
 }
 
 fn row_to_edge(row: &rusqlite::Row<'_>) -> rusqlite::Result<PageRefEdge> {
-    let git_version_exact: i64 = row.get(8)?;
+    let vcs_rev_exact: i64 = row.get(8)?;
     Ok(PageRefEdge {
         source_kind: row.get(0)?,
         source_id: row.get(1)?,
@@ -348,8 +348,8 @@ fn row_to_edge(row: &rusqlite::Row<'_>) -> rusqlite::Result<PageRefEdge> {
         ref_type: row.get(4)?,
         source_extra: row.get(5)?,
         local_snapshot_id: row.get(6)?,
-        closest_git_version: row.get(7)?,
-        git_version_exact: git_version_exact != 0,
+        closest_vcs_rev: row.get(7)?,
+        vcs_rev_exact: vcs_rev_exact != 0,
     })
 }
 
@@ -421,8 +421,8 @@ pub fn merge_source_tx(
         let mut stmt = conn
             .prepare(
                 "SELECT target_kind, target_id, ref_type,
-                    local_snapshot_id, closest_git_version,
-                    git_version_exact
+                    local_snapshot_id, closest_vcs_rev,
+                    vcs_rev_exact
              FROM page_ref
              WHERE source_kind = ?1 AND source_id = ?2",
             )
@@ -473,15 +473,15 @@ pub fn merge_source_tx(
             Some(prev) => prev.clone(),
             None => (
                 edge.local_snapshot_id,
-                edge.closest_git_version.clone(),
-                edge.git_version_exact,
+                edge.closest_vcs_rev.clone(),
+                edge.vcs_rev_exact,
             ),
         };
         conn.execute(
             "INSERT OR REPLACE INTO page_ref
            (source_kind, source_id, target_kind, target_id, ref_type,
-            source_extra, local_snapshot_id, closest_git_version,
-            git_version_exact)
+            source_extra, local_snapshot_id, closest_vcs_rev,
+            vcs_rev_exact)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 edge.source_kind,
@@ -520,8 +520,8 @@ pub fn upsert_edge_tx(conn: &rusqlite::Connection, edge: &PageRefEdge) -> Result
     conn.execute(
         "INSERT OR REPLACE INTO page_ref
            (source_kind, source_id, target_kind, target_id, ref_type,
-            source_extra, local_snapshot_id, closest_git_version,
-            git_version_exact)
+            source_extra, local_snapshot_id, closest_vcs_rev,
+            vcs_rev_exact)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             edge.source_kind,
@@ -531,8 +531,8 @@ pub fn upsert_edge_tx(conn: &rusqlite::Connection, edge: &PageRefEdge) -> Result
             edge.ref_type,
             edge.source_extra,
             edge.local_snapshot_id,
-            edge.closest_git_version,
-            if edge.git_version_exact { 1 } else { 0 },
+            edge.closest_vcs_rev,
+            if edge.vcs_rev_exact { 1 } else { 0 },
         ],
     )
     .map_err(crate::database::map_sql_err)?;
@@ -601,8 +601,8 @@ pub fn replace_source_for_ref_types_tx(
         conn.execute(
             "INSERT OR IGNORE INTO page_ref
                (source_kind, source_id, target_kind, target_id, ref_type,
-                source_extra, local_snapshot_id, closest_git_version,
-                git_version_exact)
+                source_extra, local_snapshot_id, closest_vcs_rev,
+                vcs_rev_exact)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 edge.source_kind,
@@ -612,8 +612,8 @@ pub fn replace_source_for_ref_types_tx(
                 edge.ref_type,
                 edge.source_extra,
                 edge.local_snapshot_id,
-                edge.closest_git_version,
-                if edge.git_version_exact { 1 } else { 0 },
+                edge.closest_vcs_rev,
+                if edge.vcs_rev_exact { 1 } else { 0 },
             ],
         )
         .map_err(crate::database::map_sql_err)?;
@@ -762,8 +762,8 @@ mod tests {
         let out2 = store.list_outbound("wiki", "intro", None).await.unwrap();
         assert_eq!(out2.len(), 1);
         assert_eq!(out2[0].local_snapshot_id, Some(200));
-        assert_eq!(out2[0].closest_git_version.as_deref(), Some("bbbb"));
-        assert!(!out2[0].git_version_exact);
+        assert_eq!(out2[0].closest_vcs_rev.as_deref(), Some("bbbb"));
+        assert!(!out2[0].vcs_rev_exact);
     }
 
     #[tokio::test]
@@ -787,8 +787,8 @@ mod tests {
         let out = store.list_outbound("wiki", "intro", None).await.unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].local_snapshot_id, Some(100));
-        assert_eq!(out[0].closest_git_version.as_deref(), Some("aaaa"));
-        assert!(out[0].git_version_exact);
+        assert_eq!(out[0].closest_vcs_rev.as_deref(), Some("aaaa"));
+        assert!(out[0].vcs_rev_exact);
     }
 
     #[tokio::test]

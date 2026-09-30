@@ -147,12 +147,12 @@ async fn announce(target: &VcsTarget, stream: StreamId, touched: Touched) {
         Touched::Workspace => {}
         Touched::Refs => target
             .events
-            .emit(OxplowEvent::GitRefsChanged { stream_id: stream }),
+            .emit(OxplowEvent::VcsRefsChanged { stream_id: stream }),
         Touched::AllRefs => {
             for (id, _) in target.worktrees.all().await.unwrap_or_default() {
                 target
                     .events
-                    .emit(OxplowEvent::GitRefsChanged { stream_id: id });
+                    .emit(OxplowEvent::VcsRefsChanged { stream_id: id });
             }
         }
     }

@@ -712,7 +712,7 @@ impl CollectionService {
                 // so stamp the commit the run tested — the fold needs it to be
                 // ancestry-aware (tsk97), and it is NOT backfillable after the
                 // fact. A snapshot carrying its own commit reads exact; otherwise
-                // this falls back to HEAD with `git_version_exact = false`, which
+                // this falls back to HEAD with `vcs_rev_exact = false`, which
                 // is the normal case: the agent edits, then runs tests, so the
                 // tree is dirty and the commit is only the CLOSEST one.
                 let version = crate::file_ref_version::resolve(
@@ -729,12 +729,8 @@ impl CollectionService {
                 capture.trigger = Some("on-report".into());
                 capture.branch = branch;
                 capture.snapshot_id = snapshot_id;
-                capture.closest_git_version =
-                    version.as_ref().and_then(|v| v.closest_git_version.clone());
-                capture.git_version_exact = version
-                    .as_ref()
-                    .map(|v| v.git_version_exact)
-                    .unwrap_or(false);
+                capture.closest_vcs_rev = version.as_ref().and_then(|v| v.closest_vcs_rev.clone());
+                capture.vcs_rev_exact = version.as_ref().map(|v| v.vcs_rev_exact).unwrap_or(false);
                 capture.effort_id = owning_val;
                 capture.detail_json = Self::capture_detail(
                     "test-detail",
@@ -1142,14 +1138,14 @@ impl CollectionService {
     /// there's no payload to identify by — such a capture always inserts fresh.
     fn ingest_idempotency_key(
         producer: &str,
-        git_version: Option<&str>,
+        vcs_rev: Option<&str>,
         snapshot_id: Option<i64>,
         detail_json: Option<&str>,
     ) -> Option<String> {
         let detail = detail_json?;
         let identity = format!(
             "{producer}|{}|{}|{detail}",
-            git_version.unwrap_or(""),
+            vcs_rev.unwrap_or(""),
             snapshot_id.map(|s| s.to_string()).unwrap_or_default(),
         );
         Some(crate::blob_store::BlobStore::hash(identity.as_bytes()))
@@ -1167,8 +1163,8 @@ impl CollectionService {
         analyzers: &[String],
         report: &oxplow_coverage::AnalysisReport,
         snapshot_id: Option<i64>,
-        git_version: Option<String>,
-        git_version_exact: bool,
+        vcs_rev: Option<String>,
+        vcs_rev_exact: bool,
         detail: Option<serde_json::Value>,
     ) -> Option<i64> {
         let stream_val = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())?;
@@ -1233,14 +1229,14 @@ impl CollectionService {
             capture.thread_id = Some(thread.value());
             capture.trigger = Some("on-report".into());
             capture.snapshot_id = snapshot_id;
-            capture.closest_git_version = git_version.clone();
-            capture.git_version_exact = git_version_exact;
+            capture.closest_vcs_rev = vcs_rev.clone();
+            capture.vcs_rev_exact = vcs_rev_exact;
             capture.branch = branch.clone();
             capture.effort_id = owning_val;
             capture.detail_json = capture_detail_json;
             capture.idempotency_key = Self::ingest_idempotency_key(
                 &analyzer,
-                git_version.as_deref(),
+                vcs_rev.as_deref(),
                 snapshot_id,
                 capture.detail_json.as_deref(),
             );
@@ -1331,8 +1327,8 @@ impl CollectionService {
             }
             None => file_ref_version::ResolvedFileVersion {
                 local_snapshot_id: 0,
-                closest_git_version: None,
-                git_version_exact: false,
+                closest_vcs_rev: None,
+                vcs_rev_exact: false,
             },
         };
         // The owning effort stamps the coverage capture AND receives the ledger
@@ -1408,15 +1404,15 @@ impl CollectionService {
                 capture.thread_id = Some(thread.value());
                 capture.trigger = Some("on-report".into());
                 capture.snapshot_id = snapshot_id;
-                capture.closest_git_version = version.closest_git_version.clone();
-                capture.git_version_exact = version.git_version_exact;
-                capture.basis_ref = version.closest_git_version.clone();
+                capture.closest_vcs_rev = version.closest_vcs_rev.clone();
+                capture.vcs_rev_exact = version.vcs_rev_exact;
+                capture.basis_ref = version.closest_vcs_rev.clone();
                 capture.branch = branch;
                 capture.effort_id = owning_val;
                 capture.detail_json = Self::capture_detail("coverage-detail", &payload);
                 capture.idempotency_key = Self::ingest_idempotency_key(
                     "coverage",
-                    version.closest_git_version.as_deref(),
+                    version.closest_vcs_rev.as_deref(),
                     snapshot_id,
                     capture.detail_json.as_deref(),
                 );
@@ -2388,15 +2384,15 @@ impl CollectionService {
                 None => None,
             },
         };
-        let (local_snapshot_id, closest_git_version, git_version_exact) = match pin {
+        let (local_snapshot_id, closest_vcs_rev, vcs_rev_exact) = match pin {
             Some(p) => {
                 let v =
                     file_ref_version::resolve(&self.snapshots, &*self.vcs, &self.project_dir, p)
                         .await?;
                 (
                     Some(v.local_snapshot_id),
-                    v.closest_git_version,
-                    v.git_version_exact,
+                    v.closest_vcs_rev,
+                    v.vcs_rev_exact,
                 )
             }
             None => (None, None, false),
@@ -2412,8 +2408,8 @@ impl CollectionService {
                 analyzers,
                 r,
                 local_snapshot_id,
-                closest_git_version.clone(),
-                git_version_exact,
+                closest_vcs_rev.clone(),
+                vcs_rev_exact,
                 Some(serde_json::Value::Object(payload.clone())),
             )
             .await
@@ -2425,8 +2421,8 @@ impl CollectionService {
             metric_value,
             payload,
             local_snapshot_id,
-            closest_git_version,
-            git_version_exact,
+            closest_vcs_rev,
+            vcs_rev_exact,
         );
         // Attribute the run via the unified ledger, then refresh the panel for the
         // effort it landed on (command-only runs have no run → refresh the single
@@ -2562,8 +2558,8 @@ impl CollectionService {
                 metric_value,
                 payload_json,
                 local_snapshot_id: c.snapshot_id,
-                closest_git_version: c.closest_git_version.clone(),
-                git_version_exact: c.git_version_exact,
+                closest_vcs_rev: c.closest_vcs_rev.clone(),
+                vcs_rev_exact: c.vcs_rev_exact,
                 created_at: c.captured_at,
             });
         }
@@ -3051,7 +3047,7 @@ impl CollectionService {
                         group: None,
                         branch: c.branch.clone(),
                         provenance: Some(c.provenance.clone()),
-                        git_version: c.closest_git_version.clone(),
+                        vcs_rev: c.closest_vcs_rev.clone(),
                         source: Some(c.source.clone()),
                     });
                 }
@@ -4856,11 +4852,11 @@ mod tests {
             assert_eq!(caps.len(), 1, "one run capture");
             assert!(
                 caps[0]
-                    .closest_git_version
+                    .closest_vcs_rev
                     .as_deref()
                     .is_some_and(|v| !v.is_empty()),
                 "the run capture must carry the commit it tested, got {:?}",
-                caps[0].closest_git_version
+                caps[0].closest_vcs_rev
             );
         }
 
@@ -5265,8 +5261,8 @@ mod tests {
                     oxplow_db::EffortFileChange::Updated,
                     oxplow_db::FileRefVersion {
                         local_snapshot_id: 0,
-                        closest_git_version: None,
-                        git_version_exact: false,
+                        closest_vcs_rev: None,
+                        vcs_rev_exact: false,
                     },
                 )
                 .await
@@ -5970,8 +5966,8 @@ mod tests {
                         oxplow_db::EffortFileChange::Updated,
                         oxplow_db::FileRefVersion {
                             local_snapshot_id: 0,
-                            closest_git_version: None,
-                            git_version_exact: false,
+                            closest_vcs_rev: None,
+                            vcs_rev_exact: false,
                         },
                     )
                     .await
@@ -6120,8 +6116,8 @@ mod tests {
                             oxplow_db::EffortFileChange::Updated,
                             oxplow_db::FileRefVersion {
                                 local_snapshot_id: 0,
-                                closest_git_version: None,
-                                git_version_exact: false,
+                                closest_vcs_rev: None,
+                                vcs_rev_exact: false,
                             },
                         )
                         .await

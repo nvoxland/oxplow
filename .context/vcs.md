@@ -38,7 +38,7 @@ provider stays testable against a tempdir.
   (`StreamService` in `oxplow-session` takes the `Vcs`).
 - **Watching and the graph:** `watch_refs(ws, on_change)` calls back
   when refs move until the returned guard drops (the workspace watch
-  registry turns it into `GitRefsChanged`); `revision_graph(ws)` is a
+  registry turns it into `VcsRefsChanged`); `revision_graph(ws)` is a
   synchronous `RevisionGraph` (ancestry, a revision's time) that metric
   visibility caches over.
 
@@ -84,7 +84,7 @@ that runs each call under `spawn_blocking`. `Services.vcs` holds it as
   undefined.
 - **`BranchReconciler`** (`Services.branch_reconciler`, spawned at
   boot): keeps `stream.branch` equal to the checked-out branch (from
-  `vcs.head`), once per stream at boot and on each `GitRefsChanged`. A
+  `vcs.head`), once per stream at boot and on each `VcsRefsChanged`. A
   detached head leaves the row alone.
 
 ## Revisions and `Trees`
@@ -270,7 +270,12 @@ was deleted with its tests.
 - `GitService` is gone: its git-native reads are `GitProvider` methods,
   and `Services.git` is the provider.
 
-Still git-named: the commit-id columns outside snapshots
-(`closest_git_version`, `git_version_exact`), the `GitRefsChanged`
-event, the workspace context's `is_git_repo`, and the project-root
-`.git` watcher (git-integration.md) — renamed in their own task.
+The last git-named surfaces went in their own change (tsk542): the
+version columns on `metric_capture`, `page_ref` and `effort_file` are
+`closest_vcs_rev` / `vcs_rev_exact` (V119 — the VCS's own revision id,
+`Revision::vcs_rev`; pinned dashboard tiles rewritten; `v_capture`,
+`v_effort_file`, `v_test_run` at v2), the metric dimension is
+`oxplow.vcs_rev`, the event is `VcsRefsChanged`, the workspace context
+says `vcs_enabled` (the desktop's `vcsEnabled`), the background task
+kind is `vcs`, and the project-root watcher asks `Vcs::detect` instead
+of looking for `.git`.

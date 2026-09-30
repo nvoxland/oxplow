@@ -341,7 +341,7 @@ fn point(at: Timestamp, value: f64, group: Option<String>) -> SeriesPoint {
         group,
         branch: None,
         provenance: Some("observed".into()),
-        git_version: None,
+        vcs_rev: None,
         source: Some("entity".into()),
     }
 }

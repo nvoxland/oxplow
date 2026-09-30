@@ -565,7 +565,7 @@ import type { InstalledLspPackage, LspServerListing } from "./tauri-bridge/gener
 export type { InstalledLspPackage, LspServerListing };
 
 export interface WorkspaceContext {
-  gitEnabled: boolean;
+  vcsEnabled: boolean;
 }
 
 export interface WorkspaceWatchEvent {
@@ -1000,34 +1000,34 @@ async function runAsBackgroundTask(
 }
 
 export async function vcsMerge(streamId: string, rev: string, confirmed: boolean): Promise<GitOpKickoff> {
-  return runAsBackgroundTask(`Merge ${rev}`, "git", `merge ${rev}`, () =>
+  return runAsBackgroundTask(`Merge ${rev}`, "vcs", `merge ${rev}`, () =>
     runVcs("vcs.merge", { stream: streamId, rev }, confirmed),
   );
 }
 
 export async function gitRebase(streamId: string, onto: string, confirmed: boolean): Promise<GitOpKickoff> {
-  return runAsBackgroundTask(`Rebase onto ${onto}`, "git", `rebase ${onto}`, () =>
+  return runAsBackgroundTask(`Rebase onto ${onto}`, "vcs", `rebase ${onto}`, () =>
     runVcs("git.rebase", { stream: streamId, rev: onto }, confirmed),
   );
 }
 
 export async function gitCherryPick(streamId: string, rev: string): Promise<GitOpKickoff> {
   const short = rev.slice(0, 7);
-  return runAsBackgroundTask(`Cherry-pick ${short}`, "git", `cherry-pick ${short}`, () =>
+  return runAsBackgroundTask(`Cherry-pick ${short}`, "vcs", `cherry-pick ${short}`, () =>
     runVcs("git.cherry_pick", { stream: streamId, rev }),
   );
 }
 
 export async function gitRevert(streamId: string, rev: string, confirmed: boolean): Promise<GitOpKickoff> {
   const short = rev.slice(0, 7);
-  return runAsBackgroundTask(`Revert ${short}`, "git", `revert ${short}`, () =>
+  return runAsBackgroundTask(`Revert ${short}`, "vcs", `revert ${short}`, () =>
     runVcs("git.revert", { stream: streamId, rev }, confirmed),
   );
 }
 
 export async function getWorkspaceContext(): Promise<WorkspaceContext> {
   const ctx = unwrap(await commands.getWorkspaceContext());
-  return { gitEnabled: ctx.is_git_repo };
+  return { vcsEnabled: ctx.vcs_enabled };
 }
 
 // ---- Launcher / multi-window ----
@@ -1368,20 +1368,20 @@ export interface RemoteBranchTarget {
 
 export async function vcsPush(streamId: string, to?: RemoteBranchTarget): Promise<GitOpKickoff> {
   const where = to ? ` ${to.remote} ${to.branch}` : "";
-  return runAsBackgroundTask(to ? `Push to ${to.remote}/${to.branch}` : "Push", "git", `push${where}`, () =>
+  return runAsBackgroundTask(to ? `Push to ${to.remote}/${to.branch}` : "Push", "vcs", `push${where}`, () =>
     runVcs("vcs.push", { stream: streamId, ...to }),
   );
 }
 
 export async function vcsPull(streamId: string, from?: RemoteBranchTarget): Promise<GitOpKickoff> {
   const where = from ? ` ${from.remote} ${from.branch}` : "";
-  return runAsBackgroundTask(from ? `Pull ${from.remote}/${from.branch}` : "Pull", "git", `pull${where}`, () =>
+  return runAsBackgroundTask(from ? `Pull ${from.remote}/${from.branch}` : "Pull", "vcs", `pull${where}`, () =>
     runVcs("vcs.pull", { stream: streamId, ...from }),
   );
 }
 
 export async function vcsFetch(streamId: string, remote?: string): Promise<GitOpKickoff> {
-  return runAsBackgroundTask("Fetch", "git", `fetch${remote ? ` ${remote}` : ""}`, () =>
+  return runAsBackgroundTask("Fetch", "vcs", `fetch${remote ? ` ${remote}` : ""}`, () =>
     runVcs("vcs.fetch", { stream: streamId, remote: remote ?? null }),
   );
 }
@@ -2382,7 +2382,7 @@ export function subscribeWorkspaceContext(
 ): () => void {
   return subscribeOxplowEvents((event) => {
     if (event.kind !== "workspaceContextChanged") return;
-    onEvent({ gitEnabled: Boolean(event.gitEnabled) });
+    onEvent({ vcsEnabled: Boolean(event.vcsEnabled) });
   });
 }
 
@@ -2408,7 +2408,7 @@ export function subscribeGitRefsEvents(
   onEvent: () => void,
 ): () => void {
   return subscribeOxplowEvents((event) => {
-    if (event.kind !== "gitRefsChanged") return;
+    if (event.kind !== "vcsRefsChanged") return;
     if (event.streamId !== streamId) return;
     onEvent();
   });

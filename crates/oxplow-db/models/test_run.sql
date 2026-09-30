@@ -15,7 +15,7 @@ SELECT c.id,
        c.provenance,
        c.source,
        c.branch,
-       c.closest_git_version,
+       c.closest_vcs_rev,
        c.captured_at
 FROM source('metric_capture') c
 WHERE c.producer IN ('tests', 'test-run')

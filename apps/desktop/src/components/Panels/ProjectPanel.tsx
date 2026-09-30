@@ -52,7 +52,7 @@ function cssEscapeAttr(value: string): string {
 
 interface Props {
   stream: Stream | null;
-  gitEnabled: boolean;
+  vcsEnabled: boolean;
   selectedFilePath: string | null;
   generated: string[];
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
@@ -67,7 +67,7 @@ interface Props {
 
 export function ProjectPanel({
   stream,
-  gitEnabled,
+  vcsEnabled,
   selectedFilePath,
   generated,
   onOpenFile,
@@ -213,13 +213,13 @@ export function ProjectPanel({
   );
 
   useEffect(() => {
-    if (!stream || !gitEnabled) { setScopes(null); return; }
+    if (!stream || !vcsEnabled) { setScopes(null); return; }
     let cancelled = false;
     void getChangeScopes(stream.id)
       .then((result) => { if (!cancelled) setScopes(result); })
       .catch(() => { if (!cancelled) setScopes(null); });
     return () => { cancelled = true; };
-  }, [stream?.id, gitEnabled]);
+  }, [stream?.id, vcsEnabled]);
 
   // If the user had a scope selected that became unavailable (e.g., switched
   // to the default branch), fall back to a sensible default.
@@ -251,7 +251,7 @@ export function ProjectPanel({
       setScopedDeletions(uncommittedDeletions);
       return;
     }
-    if (!gitEnabled) { setScopedPaths(null); setScopedDeletions(new Set()); return; }
+    if (!vcsEnabled) { setScopedPaths(null); setScopedDeletions(new Set()); return; }
     const ref = filterMode === "branch" ? scopes?.branchBase : scopes?.upstream;
     if (!ref) { setScopedPaths([]); setScopedDeletions(new Set()); return; }
     let cancelled = false;
@@ -268,7 +268,7 @@ export function ProjectPanel({
         setScopedDeletions(new Set());
       });
     return () => { cancelled = true; };
-  }, [stream?.id, gitEnabled, filterMode, scopes?.branchBase, scopes?.upstream, uncommittedPaths, uncommittedDeletions, indexedFiles]);
+  }, [stream?.id, vcsEnabled, filterMode, scopes?.branchBase, scopes?.upstream, uncommittedPaths, uncommittedDeletions, indexedFiles]);
 
   const changedPathSet = useMemo(() => {
     const paths = scopedPaths ?? [];
@@ -285,7 +285,7 @@ export function ProjectPanel({
     return set;
   }, [scopedPaths]);
   // "Turn" doesn't need a git repo, so `effectiveChangedOnly` must not gate on
-  // gitEnabled alone. Any non-"all" mode filters the tree.
+  // vcsEnabled alone. Any non-"all" mode filters the tree.
   const effectiveChangedOnly = filterMode !== "all";
 
   // When the user turns on "Changed only", auto-expand every ancestor directory
@@ -383,10 +383,10 @@ export function ProjectPanel({
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
 
   useEffect(() => {
-    if (commitRequest && commitRequest > 0 && gitEnabled && stream) {
+    if (commitRequest && commitRequest > 0 && vcsEnabled && stream) {
       setCommitDialogOpen(true);
     }
-  }, [commitRequest, gitEnabled, stream]);
+  }, [commitRequest, vcsEnabled, stream]);
 
   if (!stream) {
     return <div style={{ padding: 12, color: "var(--muted)", fontSize: "var(--text-xs)" }}>loading stream…</div>;
@@ -634,7 +634,7 @@ export function ProjectPanel({
         ? [
             { id: "files.open", label: "Open", enabled: true, run: () => handleContextAction("open") },
             { id: "files.add-to-agent", label: "Add to agent context", enabled: true, run: () => handleContextAction("add-to-agent") },
-            ...(gitEnabled && !!onOpenDiff
+            ...(vcsEnabled && !!onOpenDiff
               ? [
                   {
                     id: "files.diff-uncommitted",
@@ -665,7 +665,7 @@ export function ProjectPanel({
       ...(contextMenu.kind === "file"
         ? [{ id: "files.find-usages", label: "Find Usages", enabled: true, run: () => handleContextAction("find-usages") }]
         : []),
-      ...(gitEnabled ? [{
+      ...(vcsEnabled ? [{
         id: "files.git",
         label: "Git",
         enabled: true,
@@ -716,7 +716,7 @@ export function ProjectPanel({
           title="Collapse all"
           style={iconButtonStyle}
         >⤢</button>
-        {gitEnabled ? (
+        {vcsEnabled ? (
           <>
             {/* Count the changeset (what a commit will include), driven by the
                 same `statusSummary.total` the header's "N changed" shows so the
@@ -741,7 +741,7 @@ export function ProjectPanel({
         <FilterMenuButton
           filterMode={filterMode}
           setFilterMode={setFilterMode}
-          gitEnabled={gitEnabled}
+          vcsEnabled={vcsEnabled}
           scopes={scopes}
         />
       </div>
@@ -771,7 +771,7 @@ export function ProjectPanel({
         />
       ) : null}
       <div style={{ flex: 1, overflowX: "auto", overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8, minWidth: "100%", width: "max-content" }}>
-        {gitEnabled && statusSummary ? <GitSummary summary={statusSummary} /> : null}
+        {vcsEnabled && statusSummary ? <GitSummary summary={statusSummary} /> : null}
         {error ? <div style={{ color: "#ff6b6b" }}>{error}</div> : null}
         {rootEntries.length === 0 && !loadingDirs[""] ? (
           <div style={{ color: "var(--muted)" }}>No files loaded yet.</div>
@@ -1369,12 +1369,12 @@ function filterModeLabel(
 function FilterMenuButton({
   filterMode,
   setFilterMode,
-  gitEnabled,
+  vcsEnabled,
   scopes,
 }: {
   filterMode: FilterMode;
   setFilterMode: (mode: FilterMode) => void;
-  gitEnabled: boolean;
+  vcsEnabled: boolean;
   scopes: { branchBase?: string | null; upstream?: string | null; onDefaultBranch?: boolean } | null;
 }) {
   const [open, setOpen] = useState(false);
@@ -1394,13 +1394,13 @@ function FilterMenuButton({
   const options: Array<{ value: FilterMode; label: string; disabled?: boolean }> = [
     { value: "all", label: "All files" },
   ];
-  if (gitEnabled) options.push({ value: "uncommitted", label: "Uncommitted changes" });
-  if (gitEnabled) options.push({
+  if (vcsEnabled) options.push({ value: "uncommitted", label: "Uncommitted changes" });
+  if (vcsEnabled) options.push({
     value: "branch",
     label: `Branch changes${scopes?.branchBase && !scopes?.onDefaultBranch ? ` (vs ${scopes.branchBase})` : ""}`,
     disabled: !scopes?.branchBase || !!scopes?.onDefaultBranch,
   });
-  if (gitEnabled) options.push({
+  if (vcsEnabled) options.push({
     value: "unpushed",
     label: `Unpushed changes${scopes?.upstream ? ` (vs ${scopes.upstream})` : " (no upstream)"}`,
     disabled: !scopes?.upstream,

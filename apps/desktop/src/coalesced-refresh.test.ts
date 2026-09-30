@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-// tsk238/tsk240: the branch-changes summary refreshes off BOTH gitRefsChanged
+// tsk238/tsk240: the branch-changes summary refreshes off BOTH vcsRefsChanged
 // and workspaceChanged, and each refresh shells out to 4+ git subprocesses
 // (including a `status --untracked-files=all` worktree walk). The backend
 // watchers already debounce 250ms each, but nothing coalesced *across* the two
@@ -48,7 +48,7 @@ test("bursts separated by more than the window run separately", async () => {
 test("two streams firing together produce one run", async () => {
   const { state, run } = tracker();
   const r = coalescedRefresh(run, 20);
-  r.schedule(); // gitRefsChanged
+  r.schedule(); // vcsRefsChanged
   await sleep(5);
   r.schedule(); // workspaceChanged
   await sleep(60);

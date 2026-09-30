@@ -56,7 +56,7 @@ function renderNavigator(opts?: {
       onSelectThread={opts?.onSelectThread ?? NOOP_ASYNC}
       onCreateThread={NOOP_ASYNC}
       onPromoteThread={opts?.onPromoteThread}
-      gitEnabled
+      vcsEnabled
     />,
   );
 }

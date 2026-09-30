@@ -530,7 +530,7 @@ Re-opening a task (done → in_progress) produces a second effort. At most one o
 `effort_file` (v22) records per-effort write paths so parallel
 subagents in one thread get distinct file lists instead of the union via
 the snapshot pair-diff. Columns: `effort_id`, `path`, `change_kind`,
-`local_snapshot_id`, `closest_git_version`, `git_version_exact`,
+`local_snapshot_id`, `closest_vcs_rev`, `vcs_rev_exact`,
 primary key `(effort_id, path)`. Rows come from two claim-first
 sources: the PostToolUse hook auto-claims each structured edit
 (Edit/Write/MultiEdit/NotebookEdit) onto the thread's open effort in
@@ -958,8 +958,8 @@ points at me?") and outbound ("what do I point at?") are SQL
 queries against this table.
 
 Columns: `source_kind, source_id, target_kind, target_id, ref_type,
-source_extra, local_snapshot_id, closest_git_version,
-git_version_exact` (PK on the first five). Indexes on
+source_extra, local_snapshot_id, closest_vcs_rev,
+vcs_rev_exact` (PK on the first five). Indexes on
 `(target_kind, target_id)` for backlinks, `(source_kind,
 source_id)` for outbound, and `local_snapshot_id` for the
 cascade-on-commit-attach update. `kind` is denormalised next to
@@ -969,17 +969,17 @@ combined column.
 **File-ref versioning (V20).** Edges whose target is a file or
 directory carry a snapshot pin so callers can tell how out-of-date
 each reference is. `local_snapshot_id` always points at the
-`snapshot.id` the edge was captured against; `closest_git_version`
+`snapshot.id` the edge was captured against; `closest_vcs_rev`
 is the closest known git commit at capture time
 (the id of `snapshot.revision` when the worktree was clean, else the
 head, via `Vcs::head`);
-`git_version_exact = 1` when the local snapshot is byte-equal to
+`vcs_rev_exact = 1` when the local snapshot is byte-equal to
 that commit. Non-file edges leave all three columns NULL / 0. When a
 revision lands on a snapshot later
 (e.g. the clean-restamp path in `SnapshotCaptureService`), the
 write cascades: both `effort_file` and `page_ref` rows
-pointing at that snapshot get their `closest_git_version` set and
-`git_version_exact` flipped to 1. The capture-time resolver lives
+pointing at that snapshot get their `closest_vcs_rev` set and
+`vcs_rev_exact` flipped to 1. The capture-time resolver lives
 in `oxplow_app::file_ref_version`; callers don't pass any of these
 fields by hand — `task_service::record_effort` and the wiki
 sync watcher fill them automatically.
@@ -987,8 +987,8 @@ sync watcher fill them automatically.
 **Wiki sync preserves unchanged pins.** `sync_from_disk_with_refs_versioned`
 calls `SqlitePageRefStore::merge_source` (NOT `replace_source`).
 Each edge is matched against the existing row by the PK; existing
-edges keep their `local_snapshot_id` / `closest_git_version` /
-`git_version_exact`. Only newly-added edges get the current
+edges keep their `local_snapshot_id` / `closest_vcs_rev` /
+`vcs_rev_exact`. Only newly-added edges get the current
 snapshot pin. Edges removed from the body are deleted. So editing
 unrelated prose doesn't re-stamp every file ref's freshness — the
 pin only advances when the body actively re-adds the ref OR when

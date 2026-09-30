@@ -317,7 +317,7 @@ export function App() {
   const { fileSessions, setFileSessions, getFileSession, mutateFileSession } = useFileSessions();
   const restoredStreamsRef = useRef<Set<string>>(new Set());
   const centerActiveValidatedRef = useRef(false);
-  const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext>({ gitEnabled: false });
+  const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext>({ vcsEnabled: false });
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const [editorFindRequest, setEditorFindRequest] = useState(0);
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
@@ -376,7 +376,7 @@ export function App() {
         logUi("info", "loaded initial app state", {
           streamCount: allStreams.length,
           currentStreamId: current.id,
-          gitEnabled: context.gitEnabled,
+          vcsEnabled: context.vcsEnabled,
         });
       })
       .catch((e) => {
@@ -1319,9 +1319,9 @@ export function App() {
       hasSelectedFile: !!selectedFilePath,
       canSave: !!currentFile && !currentFile.isLoading && currentFileDirty,
       hasThread: !!selectedThread,
-      canCommit: !!stream && !!workspaceContext.gitEnabled,
+      canCommit: !!stream && !!workspaceContext.vcsEnabled,
     } as const),
-    [currentFile, currentFileDirty, selectedThread, selectedFilePath, stream, workspaceContext.gitEnabled],
+    [currentFile, currentFileDirty, selectedThread, selectedFilePath, stream, workspaceContext.vcsEnabled],
   );
   // Run a Git-menu mutation (pull/push) as a background task and surface
   // any failure the same way the Git Dashboard does: record an op-error
@@ -1401,16 +1401,16 @@ export function App() {
       handleOpenPageRef.current?.(indexRef("git-history"));
     },
     commitFiles() {
-      if (!stream || !workspaceContext.gitEnabled) return;
+      if (!stream || !workspaceContext.vcsEnabled) return;
       handleOpenPageRef.current?.(indexRef("files"));
       setCommitFilesRequest((n) => n + 1);
     },
     pullChanges() {
-      if (!stream || !workspaceContext.gitEnabled) return;
+      if (!stream || !workspaceContext.vcsEnabled) return;
       void runGitMenuOp("Pull", "pull", () => vcsPull(stream.id));
     },
     pushChanges() {
-      if (!stream || !workspaceContext.gitEnabled) return;
+      if (!stream || !workspaceContext.vcsEnabled) return;
       void runGitMenuOp("Push", "push", () => vcsPush(stream.id));
     },
     openProject() {
@@ -1422,7 +1422,7 @@ export function App() {
     newProject() {
       void pickAndCreateProject();
     },
-  }), [stream, selectedFilePath, workspaceContext.gitEnabled, runGitMenuOp]);
+  }), [stream, selectedFilePath, workspaceContext.vcsEnabled, runGitMenuOp]);
   const [recentProjects, setRecentProjects] = useState<RecentProjectView[]>([]);
   useEffect(() => {
     listRecentProjects()
@@ -2792,7 +2792,7 @@ export function App() {
           render: () => (
             <FilesPage
               stream={stream}
-              gitEnabled={workspaceContext.gitEnabled}
+              vcsEnabled={workspaceContext.vcsEnabled}
               selectedFilePath={selectedFilePath}
               generated={generated.exclude}
               onOpenFile={nav.navOpenFile}
@@ -3066,7 +3066,7 @@ export function App() {
           closable: true,
           render: () => (
             <NewStreamPage
-              gitEnabled={workspaceContext.gitEnabled}
+              vcsEnabled={workspaceContext.vcsEnabled}
               defaultTitle={`Stream ${streams.length + 1}`}
               onClose={() => closePageTab(ref.id)}
               onCreated={(created) => {
@@ -3276,7 +3276,7 @@ export function App() {
     pageTitles,
     setPageTitle,
     bookmarksStore,
-    workspaceContext.gitEnabled,
+    workspaceContext.vcsEnabled,
     selectedFilePath,
     generated,
     commitFilesRequest,
@@ -3351,7 +3351,7 @@ export function App() {
           onCloseThread={handleCloseThread}
           onOpenStreamSettings={(streamId) => handleOpenPage(streamSettingsRef(streamId))}
           onOpenThreadSettings={(threadId) => handleOpenPage(threadSettingsRef(threadId))}
-          gitEnabled={workspaceContext.gitEnabled}
+          vcsEnabled={workspaceContext.vcsEnabled}
         />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, background: "var(--surface-chrome)" }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
@@ -3467,7 +3467,7 @@ export function App() {
         })()}
         <StatusBar
           stream={stream}
-          gitEnabled={workspaceContext.gitEnabled}
+          vcsEnabled={workspaceContext.vcsEnabled}
           onOpenPage={handleOpenPage}
           onDismissOpError={(id) => {
             opErrorsStore.dismiss(id);

@@ -261,7 +261,7 @@ hook + MCP wiring):
   identity `claim_runs` refs use). A report-less, count-less run records its
   capture under the `test-run` producer so it never reads as "found 0 tests"
   (see [metrics.md](./metrics.md)). The run capture also stamps
-  **`closest_git_version`/`git_version_exact`** (tsk95) — the commit it tested,
+  **`closest_vcs_rev`/`vcs_rev_exact`** (tsk95) — the commit it tested,
   resolved via `file_ref_version::resolve` off the stream's latest snapshot,
   falling back to HEAD with `exact = false` when the tree is dirty (the normal
   case). This is the fold's only ancestry material and is **not backfillable**;

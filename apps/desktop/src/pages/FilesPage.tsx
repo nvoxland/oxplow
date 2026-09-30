@@ -5,7 +5,7 @@ import type { DiffRequest } from "../components/Diff/diff-request.js";
 
 export interface FilesPageProps {
   stream: Stream | null;
-  gitEnabled: boolean;
+  vcsEnabled: boolean;
   selectedFilePath: string | null;
   generated: string[];
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;

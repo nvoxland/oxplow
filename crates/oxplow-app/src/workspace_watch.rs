@@ -7,7 +7,7 @@
 //! the shared [`oxplow_fs_watch::WorkspaceFilter`]) and a refs watch
 //! through the VCS (`Vcs::watch_refs`). Translates the per-watcher
 //! broadcasts into `OxplowEvent::WorkspaceChanged` /
-//! `OxplowEvent::GitRefsChanged` so the renderer's existing
+//! `OxplowEvent::VcsRefsChanged` so the renderer's existing
 //! subscribers fire.
 //!
 //! Also watches the project root for `.git` appearing/disappearing
@@ -92,7 +92,7 @@ impl WorkspaceWatchRegistry {
                 watchers.push(w);
             }
         }
-        let project_watcher = spawn_project_context(project_dir, events);
+        let project_watcher = spawn_project_context(project_dir, vcs.clone(), events);
         Self {
             _watchers: watchers,
             _project_watcher: project_watcher,
@@ -225,7 +225,7 @@ fn spawn_for_stream(
 
     let refs = {
         let bus = events.clone();
-        let on_change = Box::new(move || bus.emit(OxplowEvent::GitRefsChanged { stream_id }));
+        let on_change = Box::new(move || bus.emit(OxplowEvent::VcsRefsChanged { stream_id }));
         match vcs.watch_refs(&worktree, on_change) {
             Ok(guard) => Some(guard),
             Err(e) => {
@@ -243,14 +243,18 @@ fn spawn_for_stream(
     })
 }
 
-/// Watch the project root for `.git` appearing or disappearing and
-/// emit `WorkspaceContextChanged` so the renderer flips the git-aware
-/// UI without polling. Initial state is reported on the first emit;
+/// Watch the project root for it coming under (or leaving) version
+/// control, and emit `WorkspaceContextChanged` so the renderer flips its
+/// VCS-aware UI without polling. The VCS says what counts
+/// (`Vcs::detect`), re-asked after each settled change at the root;
 /// callers also `getWorkspaceContext` for the first paint.
-fn spawn_project_context(project_dir: PathBuf, events: EventBus) -> Option<FsWatcher> {
-    // Non-recursive: we only care about whether `.git` appears or
-    // disappears at the project root. A recursive watch here would
-    // re-walk the entire .git tree on boot for nothing.
+fn spawn_project_context(
+    project_dir: PathBuf,
+    vcs: std::sync::Arc<dyn Vcs>,
+    events: EventBus,
+) -> Option<FsWatcher> {
+    // Non-recursive: a repository appears or goes at the root; a
+    // recursive watch would re-walk its metadata on boot for nothing.
     let watcher =
         match FsWatcher::watch_paths(vec![(project_dir.clone(), RecursiveMode::NonRecursive)]) {
             Ok(w) => w,
@@ -259,24 +263,18 @@ fn spawn_project_context(project_dir: PathBuf, events: EventBus) -> Option<FsWat
                 return None;
             }
         };
-    // Debounced: `git init`/`rm -rf .git` churns the root briefly; we
-    // only need to settle on the final `.git` presence state.
+    // Debounced: an init or a removal churns the root briefly; we only
+    // need the settled state.
     let mut rx = watcher.subscribe_debounced(Duration::from_millis(500));
-    let mut last_state = project_dir.join(".git").exists();
     tokio::spawn(async move {
+        let mut last_state = vcs.detect(&project_dir).await.is_some();
         loop {
             match rx.recv().await {
-                Ok(WatchEvent { path, .. }) => {
-                    // Only react to events on `.git` itself.
-                    let touched_git = path.file_name().map(|n| n == ".git").unwrap_or(false)
-                        || path.components().any(|c| c.as_os_str() == ".git");
-                    if !touched_git {
-                        continue;
-                    }
-                    let now = project_dir.join(".git").exists();
+                Ok(_) => {
+                    let now = vcs.detect(&project_dir).await.is_some();
                     if now != last_state {
                         last_state = now;
-                        events.emit(OxplowEvent::WorkspaceContextChanged { git_enabled: now });
+                        events.emit(OxplowEvent::WorkspaceContextChanged { vcs_enabled: now });
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,

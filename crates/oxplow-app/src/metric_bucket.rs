@@ -117,7 +117,7 @@ mod tests {
             group: group.map(str::to_string),
             branch: None,
             provenance: None,
-            git_version: None,
+            vcs_rev: None,
             source: None,
         }
     }

@@ -15,7 +15,7 @@
 //!
 //! The boot path scans the most-recent N commits reachable from every
 //! stream's head (so a worktree stream's own commits are in `v_commit`);
-//! the [`OxplowEvent::GitRefsChanged`] subscriber re-runs the same scan
+//! the [`OxplowEvent::VcsRefsChanged`] subscriber re-runs the same scan
 //! on every ref movement (debounced upstream by `GitRefsWatcher`). The
 //! same pass restates `v_branch` and `v_tag`. Everything reads through
 //! the VCS capability (`.context/vcs.md`).

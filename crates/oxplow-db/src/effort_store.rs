@@ -74,11 +74,11 @@ pub struct EffortFile {
     /// Closest known git commit at capture time. See V20 column
     /// docs. NULL when no git information is available (no commits
     /// yet, headless repo, etc.).
-    pub closest_git_version: Option<String>,
+    pub closest_vcs_rev: Option<String>,
     /// `true` when `local_snapshot_id`'s snapshot is byte-equal to
-    /// `closest_git_version` (clean worktree at capture, or
+    /// `closest_vcs_rev` (clean worktree at capture, or
     /// auto-resolved later by `set_snapshot_git_commit`).
-    pub git_version_exact: bool,
+    pub vcs_rev_exact: bool,
 }
 
 /// The snapshot-bracket changed paths for an effort, split by whether the
@@ -100,8 +100,8 @@ pub struct EffortChangedPaths {
 #[derive(Debug, Clone, Copy)]
 pub struct FileRefVersion<'a> {
     pub local_snapshot_id: i64,
-    pub closest_git_version: Option<&'a str>,
-    pub git_version_exact: bool,
+    pub closest_vcs_rev: Option<&'a str>,
+    pub vcs_rev_exact: bool,
 }
 
 /// Owned variant of [`FileRefVersion`] for callers that need to move
@@ -109,16 +109,16 @@ pub struct FileRefVersion<'a> {
 #[derive(Debug, Clone)]
 pub struct OwnedFileRefVersion {
     pub local_snapshot_id: i64,
-    pub closest_git_version: Option<String>,
-    pub git_version_exact: bool,
+    pub closest_vcs_rev: Option<String>,
+    pub vcs_rev_exact: bool,
 }
 
 impl OwnedFileRefVersion {
     pub fn as_ref(&self) -> FileRefVersion<'_> {
         FileRefVersion {
             local_snapshot_id: self.local_snapshot_id,
-            closest_git_version: self.closest_git_version.as_deref(),
-            git_version_exact: self.git_version_exact,
+            closest_vcs_rev: self.closest_vcs_rev.as_deref(),
+            vcs_rev_exact: self.vcs_rev_exact,
         }
     }
 }
@@ -286,15 +286,15 @@ fn record_file_tx(
     conn.execute(
         "INSERT OR REPLACE INTO effort_file
            (effort_id, path, change_kind,
-            local_snapshot_id, closest_git_version, git_version_exact)
+            local_snapshot_id, closest_vcs_rev, vcs_rev_exact)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             id.value(),
             path,
             change_to_str(change),
             version.local_snapshot_id,
-            version.closest_git_version,
-            if version.git_version_exact { 1 } else { 0 },
+            version.closest_vcs_rev,
+            if version.vcs_rev_exact { 1 } else { 0 },
         ],
     )?;
     // Claim-first invariant: a path is CLAIMED or UNATTRIBUTED, never both.
@@ -1092,7 +1092,7 @@ impl EffortStore for SqliteEffortStore {
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT effort_id, path, change_kind,
-                            local_snapshot_id, closest_git_version, git_version_exact
+                            local_snapshot_id, closest_vcs_rev, vcs_rev_exact
                      FROM effort_file
                      WHERE effort_id = ?1 ORDER BY path ASC",
                 )?;
@@ -1101,8 +1101,8 @@ impl EffortStore for SqliteEffortStore {
                     let path: String = r.get(1)?;
                     let kind: String = r.get(2)?;
                     let local_snapshot_id: i64 = r.get(3)?;
-                    let closest_git_version: Option<String> = r.get(4)?;
-                    let git_version_exact: i64 = r.get(5)?;
+                    let closest_vcs_rev: Option<String> = r.get(4)?;
+                    let vcs_rev_exact: i64 = r.get(5)?;
                     let map_err = |e: DomainError| {
                         rusqlite::Error::FromSqlConversionFailure(
                             0,
@@ -1115,8 +1115,8 @@ impl EffortStore for SqliteEffortStore {
                         path,
                         change: str_to_change(&kind).map_err(map_err)?,
                         local_snapshot_id,
-                        closest_git_version,
-                        git_version_exact: git_version_exact != 0,
+                        closest_vcs_rev,
+                        vcs_rev_exact: vcs_rev_exact != 0,
                     })
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -1173,8 +1173,8 @@ impl EffortStore for SqliteEffortStore {
         let id_clone = *id;
         let owned = OwnedFileRefVersion {
             local_snapshot_id: version.local_snapshot_id,
-            closest_git_version: version.closest_git_version.map(|s| s.to_string()),
-            git_version_exact: version.git_version_exact,
+            closest_vcs_rev: version.closest_vcs_rev.map(|s| s.to_string()),
+            vcs_rev_exact: version.vcs_rev_exact,
         };
         let path_clone = path.to_string();
         self.db
@@ -1525,7 +1525,7 @@ mod tests {
                     conn.execute(
                         "INSERT INTO effort_file
                            (effort_id, path, change_kind, local_snapshot_id,
-                            closest_git_version, git_version_exact)
+                            closest_vcs_rev, vcs_rev_exact)
                          VALUES (?1, ?2, 'updated', 1, NULL, 0)",
                         params![eid, path],
                     )?;
@@ -1771,8 +1771,8 @@ mod tests {
             files,
             version: OwnedFileRefVersion {
                 local_snapshot_id: 0,
-                closest_git_version: None,
-                git_version_exact: false,
+                closest_vcs_rev: None,
+                vcs_rev_exact: false,
             },
             impacts: Vec::new(),
             summary: summary.map(|s| s.to_string()),
@@ -1957,8 +1957,8 @@ mod tests {
                 files: vec![],
                 version: OwnedFileRefVersion {
                     local_snapshot_id: 0,
-                    closest_git_version: None,
-                    git_version_exact: false,
+                    closest_vcs_rev: None,
+                    vcs_rev_exact: false,
                 },
                 impacts: vec![],
                 summary: Some("s".into()),
@@ -2123,8 +2123,8 @@ mod tests {
         let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         let v = FileRefVersion {
             local_snapshot_id: 0,
-            closest_git_version: None,
-            git_version_exact: false,
+            closest_vcs_rev: None,
+            vcs_rev_exact: false,
         };
         store
             .record_file(&eff.id, "src/a.rs", EffortFileChange::Created, v)
@@ -2287,8 +2287,8 @@ mod tests {
         let second = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         let v = FileRefVersion {
             local_snapshot_id: 0,
-            closest_git_version: None,
-            git_version_exact: false,
+            closest_vcs_rev: None,
+            vcs_rev_exact: false,
         };
         store
             .record_file(&second.id, "src/bar.rs", EffortFileChange::Updated, v)
@@ -2345,8 +2345,8 @@ mod tests {
             .unwrap();
         let v = FileRefVersion {
             local_snapshot_id: 0,
-            closest_git_version: None,
-            git_version_exact: false,
+            closest_vcs_rev: None,
+            vcs_rev_exact: false,
         };
         store
             .record_file(&eff.id, "shared.rs", EffortFileChange::Updated, v)

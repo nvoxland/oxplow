@@ -30,7 +30,7 @@ pub struct EffortObservation {
     pub payload_json: Option<String>,
     /// Freshness pin — the snapshot this was captured against.
     pub local_snapshot_id: Option<i64>,
-    pub closest_git_version: Option<String>,
-    pub git_version_exact: bool,
+    pub closest_vcs_rev: Option<String>,
+    pub vcs_rev_exact: bool,
     pub created_at: Timestamp,
 }

@@ -585,7 +585,7 @@ impl SnapshotCaptureService {
         self.inner.quiet_shutdown.notify_one();
     }
 
-    /// Spawn a listener that turns `OxplowEvent::GitRefsChanged` into
+    /// Spawn a listener that turns `OxplowEvent::VcsRefsChanged` into
     /// a snapshot request for this stream. The event fires whenever
     /// HEAD or any ref moves (commit, branch switch, fetch, pull,
     /// rebase, …), so a fresh commit shows up in Local History as a
@@ -609,7 +609,7 @@ impl SnapshotCaptureService {
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
-                    Ok(OxplowEvent::GitRefsChanged { stream_id })
+                    Ok(OxplowEvent::VcsRefsChanged { stream_id })
                         if stream_id == this.inner.stream_id =>
                     {
                         if let Err(e) = this.request_snapshot_for_git_refs().await {
@@ -1703,7 +1703,7 @@ impl SnapshotCaptureService {
     ///
     /// The git status is read here, after the drain, so any in-flight edit
     /// that made it into `rows` is reflected in "clean". It bypasses
-    /// GitService's caches: we may be running on the same `GitRefsChanged`
+    /// GitService's caches: we may be running on the same `VcsRefsChanged`
     /// event GitService is invalidating on.
     async fn record(
         &self,

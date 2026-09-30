@@ -162,9 +162,9 @@ export function WikiFreshnessPage({ slug, onOpenPage }: WikiFreshnessPageProps) 
                   </td>
                   <td style={{ ...cellStyle, color: "var(--text-secondary)" }}>
                     s-{row.local_snapshot_id}
-                    {row.closest_git_version ? (
+                    {row.closest_vcs_rev ? (
                       <span style={{ marginLeft: 6, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                        {row.git_version_exact ? "=" : "~"} {row.closest_git_version.slice(0, 8)}
+                        {row.vcs_rev_exact ? "=" : "~"} {row.closest_vcs_rev.slice(0, 8)}
                       </span>
                     ) : null}
                   </td>

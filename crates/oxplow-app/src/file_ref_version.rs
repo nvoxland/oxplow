@@ -1,5 +1,5 @@
 //! Capture-time helper that resolves the `(local_snapshot_id,
-//! closest_git_version, git_version_exact)` triple stamped on every
+//! closest_vcs_rev, vcs_rev_exact)` triple stamped on every
 //! file reference. Called by the effort-file recorder and the wiki
 //! ref sync so the agent doesn't have to think about it.
 //!
@@ -9,13 +9,13 @@
 //!     etc.).
 //!   * If that snapshot row has a `revision` (clean workspace at
 //!     capture or re-stamped later), use its id with
-//!     `git_version_exact = true`.
+//!     `vcs_rev_exact = true`.
 //!   * Otherwise read the head via `Vcs::head` and stamp it with
-//!     `git_version_exact = false`. The snapshot store's revision stamp
+//!     `vcs_rev_exact = false`. The snapshot store's revision stamp
 //!     flips exact -> true if and when the snapshot itself gets a
 //!     revision attached.
 //!   * If neither is available (no commit yet, headless repo) the
-//!     `closest_git_version` stays `None`.
+//!     `closest_vcs_rev` stays `None`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -30,8 +30,8 @@ use oxplow_domain::DomainError;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedFileVersion {
     pub local_snapshot_id: i64,
-    pub closest_git_version: Option<String>,
-    pub git_version_exact: bool,
+    pub closest_vcs_rev: Option<String>,
+    pub vcs_rev_exact: bool,
 }
 
 impl ResolvedFileVersion {
@@ -39,8 +39,8 @@ impl ResolvedFileVersion {
     pub fn as_ref(&self) -> oxplow_db::FileRefVersion<'_> {
         oxplow_db::FileRefVersion {
             local_snapshot_id: self.local_snapshot_id,
-            closest_git_version: self.closest_git_version.as_deref(),
-            git_version_exact: self.git_version_exact,
+            closest_vcs_rev: self.closest_vcs_rev.as_deref(),
+            vcs_rev_exact: self.vcs_rev_exact,
         }
     }
 }
@@ -60,14 +60,14 @@ pub async fn resolve(
     {
         return Ok(ResolvedFileVersion {
             local_snapshot_id,
-            closest_git_version: Some(rev),
-            git_version_exact: true,
+            closest_vcs_rev: Some(rev),
+            vcs_rev_exact: true,
         });
     }
     let head = vcs.head(ws).await.ok().and_then(|h| h.revision);
     Ok(ResolvedFileVersion {
         local_snapshot_id,
-        closest_git_version: head,
-        git_version_exact: false,
+        closest_vcs_rev: head,
+        vcs_rev_exact: false,
     })
 }

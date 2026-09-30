@@ -3693,8 +3693,8 @@ impl OxplowMcp {
         } else {
             oxplow_app::file_ref_version::ResolvedFileVersion {
                 local_snapshot_id: 0,
-                closest_git_version: None,
-                git_version_exact: false,
+                closest_vcs_rev: None,
+                vcs_rev_exact: false,
             }
         };
         // Same tsk249 filter the close-time claim uses: a path the
@@ -6383,8 +6383,8 @@ mod tests {
             .unwrap();
         let v = oxplow_db::FileRefVersion {
             local_snapshot_id: 0,
-            closest_git_version: None,
-            git_version_exact: false,
+            closest_vcs_rev: None,
+            vcs_rev_exact: false,
         };
         services
             .effort_store

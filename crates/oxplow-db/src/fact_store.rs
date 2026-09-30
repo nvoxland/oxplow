@@ -358,8 +358,8 @@ pub struct MetricCapture {
     pub provenance: String,
     pub source: String,
     pub snapshot_id: Option<i64>,
-    pub closest_git_version: Option<String>,
-    pub git_version_exact: bool,
+    pub closest_vcs_rev: Option<String>,
+    pub vcs_rev_exact: bool,
     pub branch: Option<String>,
     pub captured_at: Timestamp,
     pub ended_at: Option<Timestamp>,
@@ -396,8 +396,8 @@ pub struct NewMetricCapture {
     pub provenance: String,
     pub source: String,
     pub snapshot_id: Option<i64>,
-    pub closest_git_version: Option<String>,
-    pub git_version_exact: bool,
+    pub closest_vcs_rev: Option<String>,
+    pub vcs_rev_exact: bool,
     pub branch: Option<String>,
     /// Defaults to now when `None`.
     pub captured_at: Option<Timestamp>,
@@ -434,8 +434,8 @@ impl NewMetricCapture {
             provenance: "observed".into(),
             source: source.into(),
             snapshot_id: None,
-            closest_git_version: None,
-            git_version_exact: false,
+            closest_vcs_rev: None,
+            vcs_rev_exact: false,
             branch: None,
             captured_at: None,
             ended_at: None,
@@ -448,7 +448,7 @@ impl NewMetricCapture {
 }
 
 const CAPTURE_COLS: &str = "id, stream_id, thread_id, effort_id, producer, status, error, scope, \
-     trigger, basis_ref, provenance, source, snapshot_id, closest_git_version, git_version_exact, \
+     trigger, basis_ref, provenance, source, snapshot_id, closest_vcs_rev, vcs_rev_exact, \
      branch, captured_at, ended_at, detail_json, producer_version, scan_kind";
 
 fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
@@ -468,8 +468,8 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
         provenance: row.get(10)?,
         source: row.get(11)?,
         snapshot_id: row.get(12)?,
-        closest_git_version: row.get(13)?,
-        git_version_exact: row.get::<_, i64>(14)? != 0,
+        closest_vcs_rev: row.get(13)?,
+        vcs_rev_exact: row.get::<_, i64>(14)? != 0,
         branch: row.get(15)?,
         captured_at: string_to_ts(&captured_at).map_err(ts_conv_err)?,
         ended_at: match ended_at {
@@ -551,7 +551,7 @@ fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite:
     conn.execute(
         "INSERT INTO metric_capture
            (stream_id, thread_id, effort_id, producer, status, error, scope, trigger, basis_ref,
-            provenance, source, snapshot_id, closest_git_version, git_version_exact, branch,
+            provenance, source, snapshot_id, closest_vcs_rev, vcs_rev_exact, branch,
             captured_at, ended_at, detail_json, idempotency_key, producer_version, scan_kind)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         params![
@@ -567,8 +567,8 @@ fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite:
             c.provenance,
             c.source,
             c.snapshot_id,
-            c.closest_git_version,
-            c.git_version_exact,
+            c.closest_vcs_rev,
+            c.vcs_rev_exact,
             c.branch,
             captured,
             ended,
@@ -688,7 +688,7 @@ pub struct CubeReadRow {
     pub branch: Option<String>,
     pub provenance: String,
     pub source: String,
-    pub closest_git_version: Option<String>,
+    pub closest_vcs_rev: Option<String>,
 }
 
 /// The joined read view of a fact: its own measurement columns PLUS the spine it
@@ -755,8 +755,8 @@ pub struct FactRow {
     // --- spine, inherited from the capture ---
     pub captured_at: Timestamp,
     pub branch: Option<String>,
-    pub closest_git_version: Option<String>,
-    pub git_version_exact: bool,
+    pub closest_vcs_rev: Option<String>,
+    pub vcs_rev_exact: bool,
     pub basis_ref: Option<String>,
     pub snapshot_id: Option<i64>,
     pub stream_id: i64,
@@ -786,8 +786,8 @@ pub struct FactSliceKey {
 
 const FACT_ROW_COLS: &str = "f.id, f.capture_id, f.measure_id, f.value, f.numerator, \
      f.denominator, f.subject_kind, f.subject_ref, f.path, f.line, f.severity, f.rule, \
-     f.detail, f.dims_json, c.captured_at, c.branch, c.closest_git_version, \
-     c.git_version_exact, c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, \
+     f.detail, f.dims_json, c.captured_at, c.branch, c.closest_vcs_rev, \
+     c.vcs_rev_exact, c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, \
      c.effort_id, c.provenance, c.source, c.producer";
 
 /// A [`FactRow`] mapper that decodes each capture's `captured_at` **once**
@@ -861,8 +861,8 @@ fn row_to_fact_row_with(
         dims_json: row.get(13)?,
         captured_at,
         branch: row.get(15)?,
-        closest_git_version: row.get(16)?,
-        git_version_exact: row.get::<_, i64>(17)? != 0,
+        closest_vcs_rev: row.get(16)?,
+        vcs_rev_exact: row.get::<_, i64>(17)? != 0,
         basis_ref: row.get(18)?,
         snapshot_id: row.get(19)?,
         stream_id: row.get(20)?,
@@ -1954,7 +1954,7 @@ impl SqliteFactStore {
                 let sql = "SELECT mc.producer, mc.dims_key, mc.fact_count, mc.value_sum,
                                   mc.value_min, mc.value_max, mc.numerator, mc.denominator,
                                   c.id, c.captured_at, c.stream_id, c.producer, c.branch,
-                                  c.provenance, c.source, c.closest_git_version
+                                  c.provenance, c.source, c.closest_vcs_rev
                              FROM metric_cube mc
                              JOIN metric_capture c ON c.id = mc.capture_id
                             WHERE mc.measure_id = ?1
@@ -1979,7 +1979,7 @@ impl SqliteFactStore {
                         branch: r.get(12)?,
                         provenance: r.get(13)?,
                         source: r.get(14)?,
-                        closest_git_version: r.get(15)?,
+                        closest_vcs_rev: r.get(15)?,
                     })
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -5141,7 +5141,7 @@ mod tests {
             .record_facts(
                 NewMetricCapture {
                     branch: Some("main".into()),
-                    closest_git_version: Some("abc1234".into()),
+                    closest_vcs_rev: Some("abc1234".into()),
                     ..NewMetricCapture::done(1, "metrics", "builtin")
                 },
                 facts,
@@ -5156,7 +5156,7 @@ mod tests {
         assert!(rows.iter().all(|f| f.branch.as_deref() == Some("main")));
         assert!(rows
             .iter()
-            .all(|f| f.closest_git_version.as_deref() == Some("abc1234")));
+            .all(|f| f.closest_vcs_rev.as_deref() == Some("abc1234")));
         // Oldest-first within the capture is by fact id (insertion order).
         assert_eq!(rows[0].subject_ref.as_deref(), Some("src/a.rs::foo"));
         assert_eq!(rows[0].value, 14.0);

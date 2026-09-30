@@ -180,12 +180,6 @@ export interface WorkspaceRenameResult {
   toPath: string;
 }
 
-export interface WorkspaceContext {
-  rootPath: string;
-  defaultBranch: string | null;
-  isGitRepo: boolean;
-}
-
 export interface WorkspaceWatchEvent {
   kind: "change" | "remove" | "create";
   path: string;

@@ -64,8 +64,8 @@ pub fn stamp_file_versions(edges: &mut [PageRefEdge], version: FileRefVersion<'_
             continue;
         }
         edge.local_snapshot_id = Some(version.local_snapshot_id);
-        edge.closest_git_version = version.closest_git_version.map(|s| s.to_string());
-        edge.git_version_exact = version.git_version_exact;
+        edge.closest_vcs_rev = version.closest_vcs_rev.map(|s| s.to_string());
+        edge.vcs_rev_exact = version.vcs_rev_exact;
     }
 }
 pub const RT_SUMMARY_DIR: &str = "summary_dir_ref";

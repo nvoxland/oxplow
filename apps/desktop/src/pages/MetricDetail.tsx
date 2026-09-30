@@ -146,7 +146,7 @@ function RecordingRow({ s, unit }: { s: SeriesPoint; unit?: string | null }) {
       <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: 600 }}>{fmt(s.value, unit)}</td>
       <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>{s.branch ?? "—"}</td>
       <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>
-        {s.git_version ? s.git_version.slice(0, 8) : "—"}
+        {s.vcs_rev ? s.vcs_rev.slice(0, 8) : "—"}
       </td>
       <td
         style={{ padding: "4px 8px", opacity: s.provenance === "observed" ? 0.6 : 1 }}

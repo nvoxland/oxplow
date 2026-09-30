@@ -590,7 +590,7 @@ pub fn spawn_invalidation(state: std::sync::Arc<crate::Services>) {
         loop {
             let stream = match rx.recv().await {
                 Ok(OxplowEvent::SnapshotTaken { stream_id: s, .. })
-                | Ok(OxplowEvent::GitRefsChanged { stream_id: s }) => s.value(),
+                | Ok(OxplowEvent::VcsRefsChanged { stream_id: s }) => s.value(),
                 Ok(_) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -1579,7 +1579,7 @@ mod tests {
         spawn_invalidation(f.svc.clone());
         tokio::task::yield_now().await;
         for _ in 0..3 {
-            f.svc.events.emit(crate::OxplowEvent::GitRefsChanged {
+            f.svc.events.emit(crate::OxplowEvent::VcsRefsChanged {
                 stream_id: oxplow_domain::StreamId::new(1),
             });
         }

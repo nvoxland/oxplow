@@ -4,7 +4,7 @@
 //! own; without this the branch chip and every other reader of
 //! `stream.branch` keep showing the branch the stream was created on.
 //!
-//! It runs once per stream at boot and again on each `GitRefsChanged`.
+//! It runs once per stream at boot and again on each `VcsRefsChanged`.
 //! A detached head leaves the row as it is.
 
 use std::path::Path;
@@ -55,7 +55,7 @@ impl BranchReconciler {
             }
             loop {
                 match rx.recv().await {
-                    Ok(OxplowEvent::GitRefsChanged { stream_id }) => {
+                    Ok(OxplowEvent::VcsRefsChanged { stream_id }) => {
                         let path = self.router.resolve(Some(&stream_id.to_string())).await;
                         self.reconcile(&stream_id, &path).await;
                     }

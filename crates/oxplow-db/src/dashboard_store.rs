@@ -377,6 +377,55 @@ mod tests {
         assert_eq!(cols, 0);
     }
 
+    /// tsk542: V119 names the version columns for what they hold
+    /// (`closest_vcs_rev`, `vcs_rev_exact`) and rewrites the tiles V108
+    /// pinned with the old names.
+    #[test]
+    fn v119_renames_the_vcs_rev_columns_and_the_pinned_tiles() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::migrate_to_for_tests(&mut conn, 107);
+        conn.execute_batch(
+            "INSERT INTO dashboard (id, title, sort_index, created_at, updated_at) VALUES (1, 'D', 0, 't', 't');
+             INSERT INTO dashboard_item (dashboard_id, sort_index, kind, metric_key, options_json, created_at, updated_at)
+               VALUES (1, 0, 'metric', 'm', '{}', 't', 't');",
+        )
+        .unwrap();
+        crate::database::migrate_to_for_tests(&mut conn, 118);
+        let sql = |conn: &rusqlite::Connection| -> String {
+            conn.query_row(
+                "SELECT json_extract(options_json, '$.sql') FROM dashboard_item",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert!(sql(&conn).contains("c.closest_git_version AS git_version"));
+        crate::database::migrate_and_compile(&mut conn).unwrap();
+        let after = sql(&conn);
+        assert!(after.contains("c.closest_vcs_rev AS vcs_rev"), "{after}");
+        assert!(!after.contains("git_version"), "{after}");
+        for table in ["metric_capture", "page_ref", "effort_file"] {
+            let names: Vec<String> = conn
+                .prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            assert!(
+                names.contains(&"closest_vcs_rev".into())
+                    && names.contains(&"vcs_rev_exact".into()),
+                "{table}: {names:?}"
+            );
+            assert!(
+                !names.iter().any(|n| n.contains("git")),
+                "{table}: {names:?}"
+            );
+        }
+        conn.prepare("SELECT closest_vcs_rev FROM v_capture")
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn create_list_get_round_trip() {
         let s = store();

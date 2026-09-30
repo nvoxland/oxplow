@@ -13,7 +13,7 @@ import type { BackgroundTask, GitOpKickoff, OpOutcome } from "./api.js";
 function task(over: Partial<BackgroundTask>): BackgroundTask {
   return {
     id: "t1",
-    kind: "git",
+    kind: "vcs",
     label: "merge",
     status: "done",
     progress: null,

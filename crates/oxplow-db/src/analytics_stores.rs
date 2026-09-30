@@ -1137,7 +1137,7 @@ fn stamp_revision_tx(
         for table in ["effort_file", "page_ref"] {
             conn.execute(
                 &format!(
-                    "UPDATE {table} SET closest_git_version = ?1, git_version_exact = 1
+                    "UPDATE {table} SET closest_vcs_rev = ?1, vcs_rev_exact = 1
                       WHERE local_snapshot_id = ?2"
                 ),
                 params![rev, snapshot_id],
@@ -3099,7 +3099,7 @@ mod tests {
             .unwrap()
             .execute(
                 "INSERT INTO page_ref (source_kind, source_id, target_kind, target_id, ref_type,
-                   local_snapshot_id, git_version_exact)
+                   local_snapshot_id, vcs_rev_exact)
                  VALUES ('wiki', 'w', 'file', 'a.txt', 'mention', ?1, 0)",
                 params![base.snapshot_id],
             )
@@ -3136,7 +3136,7 @@ mod tests {
             .conn()
             .unwrap()
             .query_row(
-                "SELECT closest_git_version, git_version_exact FROM page_ref",
+                "SELECT closest_vcs_rev, vcs_rev_exact FROM page_ref",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -3181,7 +3181,7 @@ mod tests {
         // When `set_snapshot_git_commit` lands on a snapshot, every
         // `effort_file` and `page_ref` row pointing at that
         // snapshot must pick up the sha and flip
-        // `git_version_exact` to 1. We bypass the domain stores
+        // `vcs_rev_exact` to 1. We bypass the domain stores
         // (FK setup noise) and seed the rows directly.
         let db = Database::in_memory();
         let snap_store = SqliteSnapshotStore::new(db.clone());
@@ -3223,14 +3223,14 @@ mod tests {
                 conn.execute(
                     "INSERT INTO effort_file
                        (effort_id, path, change_kind,
-                        local_snapshot_id, closest_git_version, git_version_exact)
+                        local_snapshot_id, closest_vcs_rev, vcs_rev_exact)
                      VALUES (?1, ?2, 'updated', ?3, ?4, 0)",
                     params![1, "src/a.rs", snap_id, "aaaa"],
                 )?;
                 conn.execute(
                     "INSERT INTO page_ref
                        (source_kind, source_id, target_kind, target_id, ref_type,
-                        source_extra, local_snapshot_id, closest_git_version, git_version_exact)
+                        source_extra, local_snapshot_id, closest_vcs_rev, vcs_rev_exact)
                      VALUES ('wiki', 'intro', 'file', 'src/a.rs', 'wiki_file_ref',
                              NULL, ?1, 'aaaa', 0)",
                     params![snap_id],
@@ -3256,13 +3256,13 @@ mod tests {
         ) = tokio::task::spawn_blocking(move || {
             db_for_check.with_conn(|conn| {
                 let mut row = conn.query_row(
-                    "SELECT closest_git_version, git_version_exact FROM effort_file
+                    "SELECT closest_vcs_rev, vcs_rev_exact FROM effort_file
                          WHERE effort_id = 1 AND path = 'src/a.rs'",
                     [],
                     |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
                 )?;
                 let er = conn.query_row(
-                    "SELECT closest_git_version, git_version_exact FROM page_ref
+                    "SELECT closest_vcs_rev, vcs_rev_exact FROM page_ref
                          WHERE source_kind = 'wiki' AND source_id = 'intro'
                            AND target_kind = 'file' AND target_id = 'src/a.rs'",
                     [],

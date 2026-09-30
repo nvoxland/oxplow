@@ -34,7 +34,7 @@ interface NavigatorProps {
   onCloseThread?(threadId: string): void | Promise<void>;
   onOpenStreamSettings?(streamId: string): void;
   onOpenThreadSettings?(threadId: string): void;
-  gitEnabled: boolean;
+  vcsEnabled: boolean;
 }
 
 type RenameTarget = { kind: "stream" | "thread"; id: string };
@@ -102,7 +102,7 @@ export function Navigator({
   onCloseThread,
   onOpenStreamSettings,
   onOpenThreadSettings,
-  gitEnabled,
+  vcsEnabled,
 }: NavigatorProps) {
   const [pendingNewThreadFor, setPendingNewThreadFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<RenameTarget | null>(null);
@@ -443,7 +443,7 @@ export function Navigator({
               );
             })}
             <AddStreamButton
-              gitEnabled={gitEnabled && !!onOpenNewStreamPage}
+              vcsEnabled={vcsEnabled && !!onOpenNewStreamPage}
               onClick={() => onOpenNewStreamPage?.()}
             />
           </div>
@@ -825,7 +825,7 @@ function IconCell({
   );
 }
 
-function AddStreamButton({ gitEnabled, onClick }: { gitEnabled: boolean; onClick(): void }) {
+function AddStreamButton({ vcsEnabled, onClick }: { vcsEnabled: boolean; onClick(): void }) {
   return (
     <div
       style={{
@@ -837,9 +837,9 @@ function AddStreamButton({ gitEnabled, onClick }: { gitEnabled: boolean; onClick
       <button
         type="button"
         data-testid="navigator-new-stream"
-        onClick={() => { if (gitEnabled) onClick(); }}
-        disabled={!gitEnabled}
-        title={gitEnabled ? "Create a new stream" : "Disabled: workspace root is not its own git repo"}
+        onClick={() => { if (vcsEnabled) onClick(); }}
+        disabled={!vcsEnabled}
+        title={vcsEnabled ? "Create a new stream" : "Disabled: workspace root is not its own git repo"}
         style={{
           width: "100%",
           textAlign: "center",
@@ -848,12 +848,12 @@ function AddStreamButton({ gitEnabled, onClick }: { gitEnabled: boolean; onClick
           border: "1px solid var(--border-strong)",
           borderRadius: 6,
           padding: "6px 10px",
-          cursor: gitEnabled ? "pointer" : "not-allowed",
+          cursor: vcsEnabled ? "pointer" : "not-allowed",
           fontFamily: "inherit",
           fontSize: "var(--text-xs)",
           fontWeight: "var(--weight-medium)",
           letterSpacing: 0.2,
-          opacity: gitEnabled ? 1 : 0.5,
+          opacity: vcsEnabled ? 1 : 0.5,
         }}
       >
         + Add stream

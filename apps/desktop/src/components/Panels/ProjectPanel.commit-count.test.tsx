@@ -69,7 +69,7 @@ test("commit button count matches the header changed-count, not the file count",
   const view = render(
     <ProjectPanel
       stream={STREAM}
-      gitEnabled
+      vcsEnabled
       selectedFilePath={null}
       generated={[]}
       onOpenFile={() => {}}

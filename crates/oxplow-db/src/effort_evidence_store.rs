@@ -162,8 +162,8 @@ mod tests {
                     metric_value: Some(72.5),
                     payload_json: Some("{}".into()),
                     local_snapshot_id: None,
-                    closest_git_version: None,
-                    git_version_exact: false,
+                    closest_vcs_rev: None,
+                    vcs_rev_exact: false,
                     created_at: oxplow_domain::Timestamp::now(),
                 }],
             )

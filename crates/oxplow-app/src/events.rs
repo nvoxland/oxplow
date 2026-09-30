@@ -248,7 +248,7 @@ pub enum OxplowEvent {
     /// `.git` directory appeared/disappeared at the project root —
     /// "is this a git workspace" flipped. Renderer hides/restores the
     /// git-aware UI on receipt.
-    WorkspaceContextChanged { git_enabled: bool },
+    WorkspaceContextChanged { vcs_enabled: bool },
     /// A worktree file changed on disk. Renderer-wide: file tree, quick
     /// open, project panel, git dashboard, uncommitted changes view all
     /// refresh in response.
@@ -259,7 +259,7 @@ pub enum OxplowEvent {
     },
     /// A ref under `.git/refs/` changed. Drives history, branch list,
     /// and ahead/behind refreshes. Coarse per stream.
-    GitRefsChanged { stream_id: StreamId },
+    VcsRefsChanged { stream_id: StreamId },
     /// A non-primary stream's backing worktree was deleted out from
     /// under us (externally `rm -rf`'d, `git worktree remove`'d, etc.).
     /// The runtime has already archived the stream by the time this

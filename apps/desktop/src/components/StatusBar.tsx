@@ -7,7 +7,7 @@ import type { TabRef } from "../tabs/tabState.js";
 
 interface Props {
   stream: Stream | null;
-  gitEnabled: boolean;
+  vcsEnabled: boolean;
   /** Async-op error surfacing — the indicator only renders when there are errors. */
   onOpenPage(ref: TabRef): void;
   onDismissOpError(id: string): void;
@@ -20,10 +20,10 @@ interface Props {
  * picker chip. Clicking the branch chip opens the picker; clicking the
  * task indicator opens its own popover with the live task list.
  */
-export function StatusBar({ stream, gitEnabled, onOpenPage, onDismissOpError, onClearOpErrors }: Props) {
-  const canInteract = !!stream && gitEnabled;
+export function StatusBar({ stream, vcsEnabled, onOpenPage, onDismissOpError, onClearOpErrors }: Props) {
+  const canInteract = !!stream && vcsEnabled;
   const label = stream ? stream.branch : "—";
-  const title = !gitEnabled
+  const title = !vcsEnabled
     ? "Git not enabled for this workspace"
     : stream
       ? `Branch: ${stream.branch} (click to switch)`

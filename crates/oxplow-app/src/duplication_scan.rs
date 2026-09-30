@@ -215,7 +215,7 @@ async fn write_facts(
         .collect();
     let capture = oxplow_db::NewMetricCapture {
         basis_ref: Some(revision.to_string()),
-        closest_git_version: match revision {
+        closest_vcs_rev: match revision {
             Revision::Vcs { rev, .. } => Some(rev.clone()),
             _ => None,
         },

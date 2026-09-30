@@ -198,8 +198,8 @@ pub fn write_page_tx(
             &mut edges,
             FileRefVersion {
                 local_snapshot_id: id,
-                closest_git_version: pin.revision.as_deref(),
-                git_version_exact: pin.revision.is_some(),
+                closest_vcs_rev: pin.revision.as_deref(),
+                vcs_rev_exact: pin.revision.is_some(),
             },
         );
     }
@@ -275,8 +275,8 @@ pub fn body_hash(body: &str) -> String {
 fn file_edges_tx(conn: &rusqlite::Connection, slug: &str) -> Result<Vec<PageRefEdge>, DomainError> {
     let mut stmt = conn
         .prepare(
-            "SELECT target_id, ref_type, source_extra, local_snapshot_id, closest_git_version,
-                    git_version_exact
+            "SELECT target_id, ref_type, source_extra, local_snapshot_id, closest_vcs_rev,
+                    vcs_rev_exact
              FROM page_ref WHERE source_kind = ?1 AND source_id = ?2 AND target_kind = ?3",
         )
         .map_err(sql)?;
@@ -291,8 +291,8 @@ fn file_edges_tx(conn: &rusqlite::Connection, slug: &str) -> Result<Vec<PageRefE
             );
             edge.source_extra = r.get(2)?;
             edge.local_snapshot_id = r.get(3)?;
-            edge.closest_git_version = r.get(4)?;
-            edge.git_version_exact = r.get::<_, i64>(5)? != 0;
+            edge.closest_vcs_rev = r.get(4)?;
+            edge.vcs_rev_exact = r.get::<_, i64>(5)? != 0;
             Ok(edge)
         })
         .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())

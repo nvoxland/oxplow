@@ -7,8 +7,8 @@ function row(path: string, stale: boolean): WikiRefFreshness {
   return {
     path,
     local_snapshot_id: 1,
-    closest_git_version: null,
-    git_version_exact: false,
+    closest_vcs_rev: null,
+    vcs_rev_exact: false,
     latest_snapshot_id: stale ? 2 : 1,
     stale,
   };

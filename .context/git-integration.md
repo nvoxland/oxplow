@@ -40,7 +40,7 @@ debounce says nothing about how long the resulting work takes — if it
 outruns the window, calls overlap.
 
 That bit the branch-changes summary in `App.tsx` (tsk238): it subscribes
-to both `gitRefsChanged` and `workspaceChanged`, and each refresh runs
+to both `vcsRefsChanged` and `workspaceChanged`, and each refresh runs
 `listBranchChanges` → 4+ git subprocesses including a
 `status --untracked-files=all` worktree walk. Agent edit storms drove a
 full rescan every 250ms, overlapping.
@@ -132,24 +132,20 @@ A recursive root watch would make both edges disappear, and that is what
 this used to be. It is not worth it — see the 345k-file flood above. The
 cost of the scoped set is that *staleness must be handled explicitly*.
 
-### 2. Git root watcher
+### 2. Project root watcher
 
-A non-recursive `FsWatcher` on `projectDir` itself, set up inline in
-`workspace_watch::spawn_project_context`. Listens only for direntry
-changes whose filename is `.git`. Non-recursive is sufficient: we only
-need to know whether `.git` appears or disappears at the project root,
-and a recursive watch here would re-walk the entire `.git` tree on
-boot for nothing.
-
-Fires when the user runs `git init` (or removes `.git`) in the project
-root. On change:
-
-- Re-reads `isGitRepo(projectDir)` and updates `gitEnabledCached`.
-- Publishes `workspace-context.changed` with the new `gitEnabled` flag
-  so UI surfaces (e.g. branch picker, stream creation form) enable or
-  disable themselves.
-- Re-binds the **git refs watcher** for every stream (starts watching if
-  `.git` just appeared, stops if it disappeared).
+A non-recursive `FsWatcher` on `projectDir` itself
+(`workspace_watch::spawn_project_context`). Non-recursive is enough: a
+repository appears or goes at the root, and a recursive watch would
+re-walk its metadata on boot for nothing. It doesn't know what a
+repository looks like: after each settled (500 ms) change at the root it
+asks the VCS (`Vcs::detect`) whether the project is under version
+control, and when the answer changes it emits
+`WorkspaceContextChanged { vcs_enabled }`, so UI surfaces (the branch
+picker, the stream creation form) enable or disable themselves. The
+first paint reads `get_workspace_context` (`vcs_enabled`). Stream refs
+watchers are bound at boot per stream; a repository created after boot
+is watched from the next start.
 
 This is the only watcher that lives at the project-root level rather
 than per-stream.
@@ -162,7 +158,7 @@ than per-stream.
 guard drops. The per-stream registry lives in
 `crates/oxplow-app/src/workspace_watch.rs` (`WorkspaceWatchRegistry`),
 which starts one refs watch and one `FsWatcher` per stream at boot and
-turns them into `gitRefsChanged` / `workspaceChanged` on the shared
+turns them into `vcsRefsChanged` / `workspaceChanged` on the shared
 `EventBus`. Git's watcher debounces ~250ms (a single `git commit` fires a
 dozen events touching `HEAD`, `refs/*`, `logs/*`, `index`, `ORIG_HEAD`, …).
 
@@ -175,7 +171,7 @@ the shared `.git` (where `refs/heads/*` actually update). Both dirs are
 watched; without the commondir watch, `git fetch` / ref updates from
 outside the worktree would be missed.
 
-Fires `gitRefsChanged` after each debounce. Consumed silently (no
+Fires `vcsRefsChanged` after each debounce. Consumed silently (no
 loading spinner) by:
 
 - `HistoryPanel` — reloads the commit log.
@@ -188,7 +184,7 @@ loading spinner) by:
   didn't change. Beyond Local History, those rows are the **anchor
   points for metric ancestry** (tsk97/tsk102): a dirty test run's code
   is placed by the *next* same-branch commit-stamped snapshot — the
-  commit that absorbed it, not the fork point its `closest_git_version`
+  commit that absorbed it, not the fork point its `closest_vcs_rev`
   names. The metric fold partitions per `(stream, branch)` and its
   cross-branch visibility rule (`metric_visibility.rs`) resolves from
   these anchors — see `.context/metrics.md`.
@@ -304,7 +300,7 @@ What left the old `GitService` facade (P5.B1–B7), and where it went:
 
 The previous design cached statuses / branches / log / ahead-behind /
 remote-branches and **subscribed to its own invalidation triggers**
-(`WorkspaceChanged` / `GitRefsChanged`). Subscribers on the same
+(`WorkspaceChanged` / `VcsRefsChanged`). Subscribers on the same
 broadcast channel have no ordering guarantees, so any other consumer
 of those events that read from that cache could land on the
 pre-event snapshot before the invalidation hop ran. That race silently
@@ -319,7 +315,7 @@ is cached.
 ### Mutations announce what they changed
 
 A `vcs.*` / `git.*` command emits `OxplowEvent::WorkspaceChanged` for
-its stream (always) plus `GitRefsChanged` when it may have moved HEAD
+its stream (always) plus `VcsRefsChanged` when it may have moved HEAD
 or a ref — for every stream when the refs are shared (fetch, push,
 branch rename or delete). `WorkspaceFiles`' writes emit
 `WorkspaceChanged` the same way. Subscribers refetch on receipt; no
@@ -478,7 +474,8 @@ worktree test in `crates/oxplow-git/src/lib.rs` (`#[cfg(test)] mod tests`) asser
 status, and file content on the sibling after merging *its* branch
 into the primary.
 
-`isGitRepo` requires the project root *itself* to be the git toplevel —
+The git provider's `detect` (over `oxplow_git::is_git_repo`) requires the
+project root *itself* to be the git toplevel —
 nested git repos and parent-dir lookups are explicitly refused (see
 `architecture.md`'s "Workspace isolation rule"). `isGitWorktree` rejects
 secondary worktrees so oxplow won't try to nest its own worktrees inside
@@ -487,7 +484,7 @@ another tool's checkout.
 ## UI commit affordance
 
 The Files panel (`ProjectPanel`) shows a **Commit (N)** button in its
-header toolbar whenever `gitEnabled && uncommittedPaths.length > 0`.
+header toolbar whenever `vcsEnabled && uncommittedPaths.length > 0`.
 Clicking it opens a small `CommitDialog` with a commit-message
 textarea; submitting runs the `vcs.commit` command (`vcsCommit`). This
 is the UI entry point for
@@ -550,7 +547,7 @@ It used to walk up to 5000 commits of the primary's HEAD; the index
 spans every stream's head, 500 commits deep.
 
 The boot path runs the initial scan in a detached task. The same
-function is re-run on every `OxplowEvent::GitRefsChanged` (debounced
+function is re-run on every `OxplowEvent::VcsRefsChanged` (debounced
 by the refs watch upstream), which catches new commits whether
 they came from the in-app commit affordance or an external
 `git commit` in the user's terminal.
@@ -559,7 +556,7 @@ they came from the in-app commit affordance or an external
 
 `SnapshotCaptureService::spawn_git_refs_listener` (wired from the
 desktop boot in `apps/desktop/src-tauri/src/main.rs`) subscribes to
-`OxplowEvent::GitRefsChanged` for its stream. On each event it drains
+`OxplowEvent::VcsRefsChanged` for its stream. On each event it drains
 any pending dirty paths via `request_snapshot(SnapshotSourceKind::GitRefs)`,
 then — if the worktree is clean and HEAD differs from the latest
 snapshot's `revision` — **re-stamps the latest snapshot's

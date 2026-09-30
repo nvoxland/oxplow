@@ -43,7 +43,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     }
 
     // Start the file-snapshot manager's watcher loop for every
-    // registered stream, plus per-stream GitRefsChanged listeners so a
+    // registered stream, plus per-stream VcsRefsChanged listeners so a
     // commit in any worktree re-stamps that stream's latest snapshot.
     state.snapshot_captures.spawn_all_watchers();
     for svc in state.snapshot_captures.list() {
@@ -265,7 +265,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         };
         let bts = state.background_tasks.clone();
         let task = bts.start(StartInput {
-            kind: BackgroundTaskKind::Git,
+            kind: BackgroundTaskKind::Vcs,
             label: "Starting workspace watchers".into(),
             ..Default::default()
         });
@@ -412,7 +412,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
             tracing::info!(indexed = n, "commit indexer initial scan done");
             loop {
                 match rx.recv().await {
-                    Ok(crate::events::OxplowEvent::GitRefsChanged { .. }) => {
+                    Ok(crate::events::OxplowEvent::VcsRefsChanged { .. }) => {
                         crate::commit_indexer::refresh(&state).await;
                     }
                     Ok(_) => continue,
