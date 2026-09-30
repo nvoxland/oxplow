@@ -2142,6 +2142,23 @@ export type ExtensionInstanceConfig = {
 };
 
 /**
+ *  A page an extension contributes (P6.G2, target §11.3): a lens shown
+ *  full-page at `page:ext.<extension>.<id>`, listed in the launcher under
+ *  its category.
+ */
+export type ExtensionPage = {
+	id: string,
+	extension: string,
+	// Its tab id: `page:ext.<extension>.<id>`.
+	pageRef: string,
+	title: string,
+	icon: string | null,
+	category: LauncherCategory,
+	// The lens it shows (`<extension>/<slug>`).
+	lens: string,
+};
+
+/**
  *  A left-nav panel an extension contributes (P6.G1, target §11.3): its
  *  `body` lens renders compact in the nav; its `badge` lens's alert gives
  *  the count shown on the panel and in the Alerts panel.
@@ -2292,6 +2309,8 @@ export type Extension_Deserialize = {
 	 *  `errors`).
 	 */
 	panels: ExtensionPanel[],
+	// Full pages it contributes (valid ones; invalid ones are in `errors`).
+	pages: ExtensionPage[],
 	/**
 	 *  Launcher entries for what isn't a lens: a page, a command, a
 	 *  prompt (P6.D1; valid ones — invalid ones are in `errors`).
@@ -2375,6 +2394,8 @@ export type Extension_Serialize = {
 	 *  `errors`).
 	 */
 	panels: ExtensionPanel[],
+	// Full pages it contributes (valid ones; invalid ones are in `errors`).
+	pages: ExtensionPage[],
 	/**
 	 *  Launcher entries for what isn't a lens: a page, a command, a
 	 *  prompt (P6.D1; valid ones — invalid ones are in `errors`).

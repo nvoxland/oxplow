@@ -134,6 +134,7 @@ import { ExploreDataPage } from "./pages/ExploreDataPage.js";
 import { CatalogPage } from "./pages/CatalogPage.js";
 import { BoardPage } from "./pages/BoardPage.js";
 import { ProblemsPage } from "./pages/ProblemsPage.js";
+import { ExtensionPageView } from "./pages/ExtensionPageView.js";
 import { SymbolsPage } from "./pages/SymbolsPage.js";
 import { resolveSymbol } from "./codeIntel.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
@@ -2850,6 +2851,15 @@ export function App() {
           label: "Explore Data",
           closable: true,
           render: () => <ExploreDataPage stream={stream} onOpenPage={nav.navOpen} />,
+        };
+      },
+      "ext-page": (ref, nav) => {
+        const { extension, page } = ref.payload as { extension: string; page: string };
+        return {
+          id: ref.id,
+          label: page,
+          closable: true,
+          render: () => <ExtensionPageView extension={extension} page={page} stream={stream} onOpenPage={nav.navOpen} />,
         };
       },
       lens: (ref, nav) => {

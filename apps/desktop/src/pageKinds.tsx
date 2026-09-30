@@ -103,6 +103,7 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return GitBranch;
 
     case "lens":
+    case "ext-page":
       return Glasses;
     case "explore-data":
       return Database;

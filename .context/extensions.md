@@ -119,6 +119,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     loader refuses one with both or neither condition. Every `LensRun`
     (IPC and MCP `run_lens`) carries `alert: {firing, count, value,
     message}`; the message is `label: count`, `N rows`, or `label: value`.
+  - **Pages** (P6.G2, target §11.3): `pages: [{ id, title, icon?,
+    category, lens }]` — a lens shown full-page at
+    `page:ext.<extension>.<id>` (`Extension.pages`, `ExtensionPage`;
+    checked at load in `parse_pages`: a kebab-case, unique id, a launcher
+    category, a lens that exists), listed in the launcher under its
+    category (`components/extensionLauncher.ts`).
   - **Panels** (P6.G1, target §11.3): `panels: [{ id, title, icon?,
     scope: project | stream | thread, body, badge? }]` put a lens in the
     left nav (`Extension.panels`, `ExtensionPanel`; checked at load in

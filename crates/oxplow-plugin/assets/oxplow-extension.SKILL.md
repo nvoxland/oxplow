@@ -155,6 +155,10 @@ empty: Nothing is waiting on you.
   - `thread` (the Work panel, compact) → `thread_id`;
   - `settings` → no params; Settings shows a section named after the
     extension with its mounted lenses (its status or setup views).
+- **Pages** give a lens a place of its own: `pages: [{ id, title, icon?,
+  category, lens }]` opens it full-page at `page:ext.<extension>.<id>` and
+  lists it in the launcher under `category` (Work, Code, Git, Activity,
+  Knowledge, Data, Lenses, System).
 - **Panels** put a lens in the left nav (`panels: [{ id, title, icon?,
   scope, body, badge? }]`): `body` renders compact; `badge` (a lens with
   an `alert`) gives the panel's count and lists in the Alerts panel while

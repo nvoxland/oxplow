@@ -58,6 +58,9 @@ fn the_core_kinds_are_registered_and_validate_ids() {
     assert!(reg.validate(&canon("command:config.set")).is_ok());
     assert!(reg.validate(&canon("command:dashboard.item.add")).is_ok());
     assert!(reg.validate(&canon("command:nodots")).is_err());
+    // An extension's page (P6.G2): `page:ext.<extension>.<page>`.
+    assert!(reg.validate(&canon("page:ext.acme.open-prs")).is_ok());
+    assert!(reg.validate(&canon("page:ext.acme.Open PRs")).is_err());
     assert!(reg.validate(&canon("work_item:oxplow:tsk42")).is_ok());
     assert!(
         reg.validate(&canon("work_item:tsk42")).is_err(),

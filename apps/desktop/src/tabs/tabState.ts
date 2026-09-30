@@ -70,7 +70,11 @@ export type RoutePageKind =
   | "problems"
   | "symbols";
 
-export type PageKind = EntityPageKind | RoutePageKind;
+/** An extension's page (`page:ext.<extension>.<page>`, P6.G2): a lens
+ *  shown full-page. Not a named route — its name is the extension's. */
+export type ExtensionPageKind = "ext-page";
+
+export type PageKind = EntityPageKind | RoutePageKind | ExtensionPageKind;
 
 /** Reference to a tab. `id` must be unique across page kinds within a thread. */
 export interface TabRef {

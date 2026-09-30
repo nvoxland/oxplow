@@ -4,7 +4,7 @@
 /// `.context/extensions.md` → "Launcher entries".
 import type { Extension, LauncherCategory, LauncherTarget } from "../tauri-bridge/generated/bindings.js";
 import { lensDirectoryEntries } from "../lens/lensModel.js";
-import { refFromTabId } from "../tabs/pageRefs.js";
+import { extPageRef, refFromTabId } from "../tabs/pageRefs.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
 
 /** A launcher entry that isn't a page: a command or a prompt. */
@@ -24,6 +24,10 @@ export function launcherDirectory(extensions: Extension[]): {
   const actions: LauncherAction[] = [];
   for (const ext of extensions) {
     if (!ext.enabled) continue;
+    for (const page of ext.pages) {
+      const ref = extPageRef(ext.name, page.id);
+      pages.push({ id: ref.id, label: page.title, ref, category: page.category, keywords: `${ext.name} ${page.id}` });
+    }
     for (const entry of ext.launcher) {
       const { target } = entry;
       if (target.kind === "ref") {

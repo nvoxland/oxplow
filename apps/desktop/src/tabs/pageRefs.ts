@@ -265,6 +265,21 @@ export function duplicateBlockRef(payload: DuplicateBlockPayload): TabRef {
   });
 }
 
+/** An extension's page: `page:ext.<extension>.<page>` (P6.G2). */
+export function extPageRef(extension: string, page: string): TabRef {
+  return { id: `page:ext.${extension}.${page}`, kind: "ext-page", payload: { extension, page } };
+}
+
+/** The extension and page of a `page:ext.<extension>.<page>` id (the page
+ *  id has no `.`, so it's what follows the last one), or null. */
+function extPageOf(head: string): { extension: string; page: string } | null {
+  if (!head.startsWith("ext.")) return null;
+  const rest = head.slice("ext.".length);
+  const dot = rest.lastIndexOf(".");
+  if (dot <= 0 || dot === rest.length - 1) return null;
+  return { extension: rest.slice(0, dot), page: rest.slice(dot + 1) };
+}
+
 /** A symbol (`symbol:<path>/<name>@snap:<id>`, `v_symbol.ref`): opening
  *  it opens its file at the symbol's line (P6.E3). */
 export function symbolRef(ref: string): TabRef {
@@ -597,7 +612,9 @@ export function refFromTabId(id: string): TabRef | null {
       return lensRefFromTail(id.slice("lens:".length));
     case "page": {
       const { head, params } = splitParams(id.slice("page:".length));
-      return isRoute(head) ? ROUTES[head](params) : null;
+      if (isRoute(head)) return ROUTES[head](params);
+      const ext = extPageOf(head);
+      return ext ? extPageRef(ext.extension, ext.page) : null;
     }
     default:
       return null;
@@ -609,7 +626,9 @@ export function refFromTabId(id: string): TabRef | null {
 export function pageKindOf(tabId: string): PageKind | null {
   const canonical = parseRef(tabId);
   if (!canonical) return null;
-  if (canonical.kind === "page") return routeNameOf(tabId);
+  if (canonical.kind === "page") {
+    return routeNameOf(tabId) ?? (extPageOf(splitParams(tabId.slice("page:".length)).head) ? "ext-page" : null);
+  }
   const entity: readonly string[] = [
     "file",
     "dir",

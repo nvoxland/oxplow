@@ -17,6 +17,8 @@ mock.module("../api.js", () => ({
       name: "x",
       enabled: true,
       lenses: [],
+      pages: [],
+      panels: [],
       launcher: [
         { label: "Ask why slow", category: "Code", target: { kind: "prompt", prompt: "Why is the build slow?" } },
         { label: "File a bug", category: "Work", target: { kind: "command", command: "work_item.create", input: { title: "Bug" } } },

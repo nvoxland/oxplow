@@ -715,6 +715,35 @@ pub struct ExtensionPanel {
     pub badge: Option<String>,
 }
 
+/// A page an extension contributes (P6.G2, target §11.3): a lens shown
+/// full-page at `page:ext.<extension>.<id>`, listed in the launcher under
+/// its category.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionPage {
+    pub id: String,
+    pub extension: String,
+    /// Its tab id: `page:ext.<extension>.<id>`.
+    pub page_ref: String,
+    pub title: String,
+    pub icon: Option<String>,
+    pub category: LauncherCategory,
+    /// The lens it shows (`<extension>/<slug>`).
+    pub lens: String,
+}
+
+/// A `pages:` entry as the manifest holds it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PageFile {
+    id: String,
+    title: String,
+    #[serde(default)]
+    icon: Option<String>,
+    category: LauncherCategory,
+    lens: String,
+}
+
 /// A `panels:` entry as the manifest holds it.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -833,6 +862,8 @@ pub struct Extension {
     /// Left-nav panels it contributes (valid ones; invalid ones are in
     /// `errors`).
     pub panels: Vec<ExtensionPanel>,
+    /// Full pages it contributes (valid ones; invalid ones are in `errors`).
+    pub pages: Vec<ExtensionPage>,
     /// Launcher entries for what isn't a lens: a page, a command, a
     /// prompt (P6.D1; valid ones — invalid ones are in `errors`).
     pub launcher: Vec<LauncherEntry>,
@@ -1027,6 +1058,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         gauges: Vec::new(),
         launcher: Vec::new(),
         panels: Vec::new(),
+        pages: Vec::new(),
     }
 }
 
@@ -1092,6 +1124,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ));
     }
     let panel_files = m.panels.clone();
+    let page_files = m.pages.clone();
     let slot_files = {
         if let Some(v) = &m.collectors {
             let (sources, errors) = crate::extension_sources::parse_sources(name, v);
@@ -1421,6 +1454,17 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             });
         }
     }
+    if let Some(v) = page_files {
+        let (pages, errors) = parse_pages(name, &ext.lenses, v);
+        ext.pages = pages;
+        ext.errors.extend(errors.into_iter().map(|(needle, e)| {
+            at(
+                &file,
+                line_under(&manifest, "pages", &needle).or(key_line(&manifest, "pages")),
+                e,
+            )
+        }));
+    }
     if let Some(v) = panel_files {
         let (panels, errors) = parse_panels(name, &ext.lenses, v);
         ext.panels = panels;
@@ -1433,6 +1477,58 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }));
     }
     ext
+}
+
+/// Check the manifest's `pages:`: a kebab-case, unique id, a launcher
+/// category, and a lens that exists. Errors carry text to find the line.
+fn parse_pages(
+    extension: &str,
+    lenses: &[Lens],
+    raw: serde_yaml::Value,
+) -> (Vec<ExtensionPage>, Vec<(String, String)>) {
+    let mut pages: Vec<ExtensionPage> = Vec::new();
+    let mut errors = Vec::new();
+    let Some(list) = raw.as_sequence() else {
+        return (
+            pages,
+            vec![(String::new(), "`pages` must be a list".into())],
+        );
+    };
+    for v in list {
+        let needle = v
+            .get("id")
+            .and_then(|i| i.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let p = match serde_yaml::from_value::<PageFile>(v.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                errors.push((needle, format!(
+                    "pages: {e} (a page is `{{ id, title, icon?, category, lens }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
+                )));
+                continue;
+            }
+        };
+        let err = |e: String| (p.id.clone(), format!("page `{}`: {e}", p.id));
+        if !is_advisory_id(&p.id) {
+            errors.push(err("a page id is lowercase letters, digits and `-`".into()));
+        } else if pages.iter().any(|q| q.id == p.id) {
+            errors.push(err("declared twice".into()));
+        } else if !lenses.iter().any(|l| l.slug == p.lens) {
+            errors.push(err(format!("its lens `{}` isn't in lenses/", p.lens)));
+        } else {
+            pages.push(ExtensionPage {
+                page_ref: format!("page:ext.{extension}.{}", p.id),
+                id: p.id,
+                extension: extension.to_string(),
+                title: p.title,
+                icon: p.icon,
+                category: p.category,
+                lens: format!("{extension}/{}", p.lens),
+            });
+        }
+    }
+    (pages, errors)
 }
 
 /// Check the manifest's `panels:` against the extension's lenses: a panel
@@ -1664,6 +1760,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.models.clear();
         ext.launcher.clear();
         ext.panels.clear();
+        ext.pages.clear();
     }
     ext
 }
@@ -4744,5 +4841,54 @@ empty: No tasks.
             "{:?}",
             v.warnings
         );
+    }
+
+    /// P6.G2: an extension's page is a lens under a launcher category, at
+    /// `page:ext.<extension>.<page>`.
+    #[test]
+    fn pages_are_lenses_with_a_route() {
+        let lenses = [("open", "title: Open\nquery: SELECT 1\n")];
+        let (_d, ext) = load_x(
+            &lenses,
+            "manifest: 2\nintent:\n  purpose: p\npages:\n  - { id: open-prs, title: Open PRs, icon: git-pull-request, category: Work, lens: open }\n",
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(
+            ext.pages,
+            vec![ExtensionPage {
+                id: "open-prs".into(),
+                extension: "x".into(),
+                page_ref: "page:ext.x.open-prs".into(),
+                title: "Open PRs".into(),
+                icon: Some("git-pull-request".into()),
+                category: LauncherCategory::Work,
+                lens: "x/open".into(),
+            }]
+        );
+        for (page, says) in [
+            (
+                "{ id: a, title: A, category: Work, lens: nope }",
+                "isn't in lenses/",
+            ),
+            (
+                "{ id: Bad Id, title: A, category: Work, lens: open }",
+                "page id",
+            ),
+            (
+                "{ id: a, title: A, category: Nowhere, lens: open }",
+                "category",
+            ),
+        ] {
+            let (_d, ext) = load_x(
+                &lenses,
+                &format!("manifest: 2\nintent:\n  purpose: p\npages:\n  - {page}\n"),
+            );
+            let errs = ext.errors.join("\n");
+            assert!(
+                errs.contains(says) && errs.contains("extension.yaml"),
+                "{page}: {errs}"
+            );
+            assert!(ext.pages.is_empty(), "{page}");
+        }
     }
 }
