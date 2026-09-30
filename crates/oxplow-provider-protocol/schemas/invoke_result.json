@@ -1,0 +1,75 @@
+{
+  "$defs": {
+    "CommandCall": {
+      "additionalProperties": false,
+      "description": "A command call (an inverse).",
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "input": true
+      },
+      "required": [
+        "command",
+        "input"
+      ],
+      "type": "object"
+    },
+    "EventDraft": {
+      "additionalProperties": false,
+      "description": "An event a command produced, for the host to log (its type is one\nthe provider declared).",
+      "properties": {
+        "payload": true,
+        "subject": {
+          "default": [],
+          "description": "Refs the event is about.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "type": {
+          "type": "string"
+        },
+        "v": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "v",
+        "payload"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "events": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EventDraft"
+      },
+      "type": "array"
+    },
+    "inverse": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CommandCall"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "result": true
+  },
+  "required": [
+    "result"
+  ],
+  "title": "InvokeResult",
+  "type": "object"
+}

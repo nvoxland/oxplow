@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`$/progress` (provider → host): how request `id` is going.",
+  "properties": {
+    "fraction": {
+      "description": "0 to 1.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "id": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "message": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "Progress",
+  "type": "object"
+}

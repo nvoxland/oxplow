@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "config": true,
+    "credentials": {
+      "description": "The names of the credentials the host holds for the instance (the\nvalues stay in the keychain; the provider's environment has them).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "config",
+    "credentials"
+  ],
+  "title": "CheckParams",
+  "type": "object"
+}

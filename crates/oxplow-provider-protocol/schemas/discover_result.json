@@ -1,0 +1,40 @@
+{
+  "$defs": {
+    "EntityDecl": {
+      "additionalProperties": false,
+      "description": "An entity a configured instance can read.",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "schema": {
+          "description": "JSON Schema of a row."
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "schema"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "entities": {
+      "items": {
+        "$ref": "#/$defs/EntityDecl"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "entities"
+  ],
+  "title": "DiscoverResult",
+  "type": "object"
+}

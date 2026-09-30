@@ -1,0 +1,127 @@
+use oxplow_provider_protocol::codec::notify;
+use oxplow_provider_protocol::errors::{ErrorObject, ProtocolError, INVALID_INPUT};
+use oxplow_provider_protocol::{Incoming, Message, Peer};
+use serde_json::json;
+
+/// Every message shape survives its NDJSON line, `$/cancel` included.
+#[test]
+fn messages_round_trip_through_their_lines() {
+    let messages = [
+        Message::Request {
+            id: 1,
+            method: "invoke".into(),
+            params: json!({ "handle": "h", "command": "create", "input": {} }),
+        },
+        Message::Response {
+            id: 1,
+            result: json!({ "result": null }),
+        },
+        Message::Error {
+            id: Some(2),
+            error: (&ProtocolError::InvalidInput {
+                field: "/title".into(),
+                message: "required".into(),
+            })
+                .into(),
+        },
+        Message::Notification {
+            method: notify::CANCEL.into(),
+            params: serde_json::to_value(notify::Cancel { id: 3 }).unwrap(),
+        },
+        Message::Notification {
+            method: notify::RECORD.into(),
+            params: json!({ "id": 4, "entity": "issue", "row": { "id": "W-1" } }),
+        },
+    ];
+    for m in messages {
+        let line = m.to_line();
+        assert!(
+            line.ends_with('\n') && !line[..line.len() - 1].contains('\n'),
+            "{line}"
+        );
+        assert_eq!(Message::from_line(&line).unwrap(), m);
+    }
+    assert!(
+        Message::from_line(r#"{"id":1,"result":{}}"#).is_err(),
+        "no jsonrpc"
+    );
+    assert!(
+        Message::from_line(r#"{"jsonrpc":"2.0","id":1}"#).is_err(),
+        "no body"
+    );
+    assert!(Message::from_line("not json").is_err());
+}
+
+/// Typed errors keep their meaning across the wire.
+#[test]
+fn errors_keep_their_meaning() {
+    let wire = ErrorObject::from(&ProtocolError::InvalidInput {
+        field: "/title".into(),
+        message: "required".into(),
+    });
+    assert_eq!(wire.code, INVALID_INPUT);
+    assert_eq!(
+        ProtocolError::from(wire),
+        ProtocolError::InvalidInput {
+            field: "/title".into(),
+            message: "required".into()
+        }
+    );
+    let limited = ProtocolError::from(ErrorObject::from(&ProtocolError::RateLimited {
+        message: "slow down".into(),
+        retry_after_ms: Some(500),
+    }));
+    assert_eq!(
+        limited,
+        ProtocolError::RateLimited {
+            message: "slow down".into(),
+            retry_after_ms: Some(500)
+        }
+    );
+    assert_eq!(
+        ProtocolError::from(ErrorObject::from(&ProtocolError::Cancelled)),
+        ProtocolError::Cancelled
+    );
+}
+
+/// Two peers over a pipe: a request gets its reply, and a cancelled one
+/// comes back `Cancelled` after the other side saw the `$/cancel`.
+#[tokio::test]
+async fn peers_answer_requests_and_cancellations() {
+    let (a_io, b_io) = tokio::io::duplex(4096);
+    let (a_read, a_write) = tokio::io::split(a_io);
+    let (b_read, b_write) = tokio::io::split(b_io);
+    let (host, _host_in) = Peer::spawn(a_read, a_write);
+    let (provider, mut provider_in) = Peer::spawn(b_read, b_write);
+
+    let answering = tokio::spawn(async move {
+        let mut slow = None;
+        while let Some(incoming) = provider_in.recv().await {
+            match incoming {
+                Incoming::Request { id, method, params } if method == "echo" => {
+                    provider.respond(id, Ok(params)).await.unwrap();
+                }
+                Incoming::Request { id, method, .. } if method == "slow" => slow = Some(id),
+                Incoming::Notification { method, params } if method == notify::CANCEL => {
+                    let cancel: notify::Cancel = serde_json::from_value(params).unwrap();
+                    assert_eq!(Some(cancel.id), slow);
+                    provider
+                        .respond(cancel.id, Err(ProtocolError::Cancelled))
+                        .await
+                        .unwrap();
+                    return;
+                }
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+    });
+
+    assert_eq!(
+        host.request("echo", json!({ "hello": 1 })).await.unwrap(),
+        json!({ "hello": 1 })
+    );
+    let call = host.start("slow", json!({})).await.unwrap();
+    host.cancel(call.id).await.unwrap();
+    assert_eq!(call.reply().await, Err(ProtocolError::Cancelled));
+    answering.await.unwrap();
+}

@@ -1,0 +1,52 @@
+{
+  "$defs": {
+    "Handle": {
+      "description": "An opaque token for a checked instance, carried by the other calls.",
+      "type": "string"
+    },
+    "Problem": {
+      "additionalProperties": false,
+      "description": "One thing wrong with a config: where, and what.",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "description": "A JSON pointer into the config (`/team`), or `\"\"` for the whole.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "handle": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Handle"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Present exactly when there are no problems."
+    },
+    "problems": {
+      "items": {
+        "$ref": "#/$defs/Problem"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "problems"
+  ],
+  "title": "CheckResult",
+  "type": "object"
+}

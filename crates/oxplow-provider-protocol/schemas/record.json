@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`$/record` (provider → host): one row a `read` produced, streamed\nbefore the read's result.",
+  "properties": {
+    "entity": {
+      "description": "The entity the row belongs to (a collector's declared entity).",
+      "type": "string"
+    },
+    "id": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "row": true
+  },
+  "required": [
+    "id",
+    "entity",
+    "row"
+  ],
+  "title": "Record",
+  "type": "object"
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A JSON-RPC error object.",
+  "properties": {
+    "code": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "data": true,
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "code",
+    "message"
+  ],
+  "title": "ErrorObject",
+  "type": "object"
+}

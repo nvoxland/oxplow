@@ -1,0 +1,162 @@
+{
+  "$defs": {
+    "CapabilityDecl": {
+      "additionalProperties": false,
+      "description": "A capability the provider implements (`work_items`), with the\ncapability's own feature flags.",
+      "properties": {
+        "capability": {
+          "type": "string"
+        },
+        "features": {
+          "default": null
+        }
+      },
+      "required": [
+        "capability"
+      ],
+      "type": "object"
+    },
+    "CollectorDecl": {
+      "additionalProperties": false,
+      "description": "A collector: a read that produces rows of an entity.",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "entity": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "entity",
+        "description"
+      ],
+      "type": "object"
+    },
+    "CommandDecl": {
+      "additionalProperties": false,
+      "description": "A command the provider runs, registered on the host's bus as\n`<provider>.<name>`.",
+      "properties": {
+        "confirm": {
+          "description": "`never`, `always` or `destructive`.",
+          "type": "string"
+        },
+        "effect": {
+          "description": "`write`, `read` or `record`.",
+          "type": "string"
+        },
+        "input_schema": {
+          "description": "JSON Schema of the input."
+        },
+        "name": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "undoable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "summary",
+        "input_schema",
+        "confirm",
+        "effect",
+        "undoable"
+      ],
+      "type": "object"
+    },
+    "EventTypeDecl": {
+      "additionalProperties": false,
+      "description": "An event type the provider's commands produce, with its payload's\nJSON Schema.",
+      "properties": {
+        "schema": true,
+        "type": {
+          "type": "string"
+        },
+        "v": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "v",
+        "schema"
+      ],
+      "type": "object"
+    },
+    "Party": {
+      "additionalProperties": false,
+      "description": "Who is speaking.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "capabilities": {
+      "items": {
+        "$ref": "#/$defs/CapabilityDecl"
+      },
+      "type": "array"
+    },
+    "collectors": {
+      "items": {
+        "$ref": "#/$defs/CollectorDecl"
+      },
+      "type": "array"
+    },
+    "commands": {
+      "items": {
+        "$ref": "#/$defs/CommandDecl"
+      },
+      "type": "array"
+    },
+    "config_schema": {
+      "description": "JSON Schema of an instance's config."
+    },
+    "event_types": {
+      "items": {
+        "$ref": "#/$defs/EventTypeDecl"
+      },
+      "type": "array"
+    },
+    "protocol_version": {
+      "type": "string"
+    },
+    "provider": {
+      "$ref": "#/$defs/Party"
+    }
+  },
+  "required": [
+    "protocol_version",
+    "provider",
+    "capabilities",
+    "commands",
+    "event_types",
+    "collectors",
+    "config_schema"
+  ],
+  "title": "InitializeResult",
+  "type": "object"
+}

@@ -29,6 +29,7 @@ members = [
     "crates/oxplow-sdk",
     "crates/oxplow-ai",
     "crates/oxplow-acp-fake",
+    "crates/oxplow-provider-protocol",
 ]
 
 [workspace.package]

@@ -1,0 +1,37 @@
+{
+  "$defs": {
+    "Party": {
+      "additionalProperties": false,
+      "description": "Who is speaking.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "host": {
+      "$ref": "#/$defs/Party"
+    },
+    "protocol_version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocol_version",
+    "host"
+  ],
+  "title": "InitializeParams",
+  "type": "object"
+}

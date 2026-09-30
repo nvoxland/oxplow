@@ -1,0 +1,28 @@
+{
+  "$defs": {
+    "Handle": {
+      "description": "An opaque token for a checked instance, carried by the other calls.",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "collector": {
+      "description": "A declared collector's name.",
+      "type": "string"
+    },
+    "handle": {
+      "$ref": "#/$defs/Handle"
+    },
+    "state": {
+      "description": "The last `$/state` checkpoint, to resume from."
+    }
+  },
+  "required": [
+    "handle",
+    "collector"
+  ],
+  "title": "ReadParams",
+  "type": "object"
+}

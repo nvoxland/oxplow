@@ -4733,6 +4733,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-provider-protocol"
+version = "0.7.0"
+dependencies = [
+ "jsonschema",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "oxplow-pty"
 version = "0.7.0"
 dependencies = [

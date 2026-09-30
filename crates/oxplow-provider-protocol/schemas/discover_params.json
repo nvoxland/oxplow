@@ -1,0 +1,20 @@
+{
+  "$defs": {
+    "Handle": {
+      "description": "An opaque token for a checked instance, carried by the other calls.",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "handle": {
+      "$ref": "#/$defs/Handle"
+    }
+  },
+  "required": [
+    "handle"
+  ],
+  "title": "DiscoverParams",
+  "type": "object"
+}

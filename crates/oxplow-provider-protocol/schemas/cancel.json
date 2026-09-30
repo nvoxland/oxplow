@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`$/cancel` (host → provider): stop working on request `id`; it\nanswers with a `Cancelled` error.",
+  "properties": {
+    "id": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "Cancel",
+  "type": "object"
+}
