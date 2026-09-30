@@ -27,6 +27,14 @@ and agents query.
 >   on macOS.
 > - **Current (tsk325):** Settings → Data: every entity with provider and
 >   row count (IPC `list_data_entities`, UI-only), and the source rows.
+> - **Current (P4, epic tsk484):** every published view is a **model**
+>   (core files and extensions' `models:`, compiled with lineage,
+>   contracts, versions and tests; the registry `v_model*` is the
+>   catalog); the read contract is **enforced** by the authorizer;
+>   metrics read in SQL through `metric_grid()` / `MEASURE()` and
+>   `metric_findings()`; results carry their `reads` and `freshness`, and
+>   views re-run when a model they read changed; the code models
+>   `v_function` / `v_file_metric` over `v_tree_fact`.
 >
 > When a piece ships, move it from "target" to "current" here, in the same
 > commit.

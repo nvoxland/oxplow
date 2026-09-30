@@ -1137,6 +1137,10 @@ metric-specific MCP reads (`list_metric_definitions`, `list_metric_samples`,
 `metric_rollup`) are deleted, and the parity manifest holds no metric read
 (`no_surface_carries_a_metric_read`).
 
+**The cube stays** (P4.4): at 7.1M facts a cold read took 68.3 s from
+facts and 1.6 s from the cube; the measurement is in
+[performance.md](./performance.md) "The cube decision".
+
 **Writes are `metric.*` commands** (`crates/oxplow-app/src/commands/metric.rs`,
 reached through `run_command`, audited like every command):
 - `metric.enable { keys, enabled }` — `Tx`, through `config.set`'s core.

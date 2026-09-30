@@ -33,6 +33,21 @@ reads it is fixed in the same change, and the compile at open says so if
 it isn't. The build script embeds `models/` the same way
 (`rerun-if-changed=models`).
 
+**The model registry** (V105, V109): `model` (one row per published view
+— owner `core` or an extension, `kind` `sql` or `entity`, version,
+compiled SQL), `model_input` (its `ref`/`source` inputs), `model_contract`
+(the columns each view promised at each version; outlives the view, so
+a changed contract at the same version is refused) and `model_test`
+(the last result of each declared test). Readable as `v_model*`.
+
+**Changed tables per commit** (P4.6, `crates/oxplow-db/src/changes.rs`):
+every pooled connection's init installs SQLite's preupdate, commit and
+rollback hooks; a commit's touched tables are published after each
+`Database::call` / `call_mut` / `transaction` / `read`
+(`Database::subscribe_changes`), and `models_changed` maps them to models
+through `model_input`. A write needs nothing to be seen — the hooks see
+every table, WITHOUT ROWID and a bare `DELETE` included.
+
 **DB dispatch is gated to the pool size (tsk131).** `Database::call`,
 `call_mut`, and `transaction` each take a `tokio::sync::Semaphore` permit —
 sized to the r2d2 pool (`max_size`) — *before* `spawn_blocking`, and hold it for

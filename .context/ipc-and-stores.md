@@ -18,6 +18,16 @@ transaction as the state change ([data-model.md](./data-model.md)
 wake-up for the UI and the pump. A new write path that bypasses the bus
 needs a reason recorded here.
 
+**Then: is it a read of data a model can publish?** Reads are SQL
+(P4): a new read of project data is a **model** (a `models/<name>.sql`
+file with its `models.yaml` entry — [semantic-layer.md](./semantic-layer.md)
+"Models") that the UI and agents query through `query_sql`, not a
+bespoke IPC/MCP read. The result says what it read (`reads`), and the
+view refreshes through `useRerunOnChange` when `ModelsChanged` names a
+model it read — no per-feature event to add. A bespoke read stays for
+what SQL can't answer (a git or LSP call, a file on disk, a row count
+per model); Settings → Data's `list_data_entities` is one.
+
 A new operation that the UI invokes and that mutates persistent state
 touches roughly seven files. They sit in this order:
 
