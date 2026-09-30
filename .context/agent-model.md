@@ -307,7 +307,17 @@ to `runtime.handleHookEnvelope`, which:
 2. Runs `HookIngestService::ingest` (`crates/oxplow-app/src/hook_ingest.rs`,
    P3.3): **one transaction per envelope** writes the state the hook changes
    and the `agent.*` events that record it, anchored to the thread's stream,
-   its open turn and its single open effort (`activity_anchors_tx`):
+   its open turn and its single open effort (`activity_anchors_tx`).
+   **Attribution is a best effort, by design (tsk511, decided with
+   Nathan 2026-09-30).** Several agents, the person and outside processes
+   can all change a worktree at once, so no rule ties every change to
+   the right work exactly. The anchor stays **thread-scoped** — the
+   thread's own open effort, tied to its active task — because that says
+   more than the stream would, even when it's sometimes wrong. A writer
+   thread editing under a sibling thread's effort (the guard allows it,
+   tsk133) records no effort on its events; that's an accepted edge
+   case, not a bug to close by tightening the guard or widening the
+   anchor:
    - every prompt → `agent.prompt.submitted` (`reprompt: true` inside an
      open turn), its text in `event_content` (`prompt: ContentRef`, read
      with `read_event_content` body `prompt`) — so a re-prompt's text is
