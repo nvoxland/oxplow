@@ -63,28 +63,140 @@ pub fn parse(yaml: &str) -> Result<Vec<Question>, String> {
     serde_yaml::from_str(yaml).map_err(|e| e.to_string())
 }
 
-/// The models (`v_*`) a query reads.
+/// The models (`v_*`) a query reads: the tables named after `FROM`,
+/// `JOIN` or a comma in a `FROM` list, lowercased — never a `v_*` word in
+/// a string, a comment or an alias.
 pub fn models_in(sql: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    let bytes = sql.as_bytes();
-    let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        let starts = bytes[i] == b'v' && bytes[i + 1] == b'_' && (i == 0 || !word(bytes[i - 1]));
-        if starts {
-            let end = (i..bytes.len())
-                .find(|&j| !word(bytes[j]))
-                .unwrap_or(bytes.len());
-            let name = sql[i..end].to_string();
-            if !out.contains(&name) {
-                out.push(name);
+    // The clause each open parenthesis interrupted, and the current one.
+    let mut clauses: Vec<String> = Vec::new();
+    let mut clause = String::new();
+    let mut prev = String::new();
+    for token in sql_tokens(sql) {
+        match token {
+            SqlToken::Word(w) => {
+                let upper = w.to_ascii_uppercase();
+                let table_position =
+                    prev == "FROM" || prev == "JOIN" || (prev == "," && clause == "FROM");
+                if table_position && w.to_ascii_lowercase().starts_with("v_") {
+                    let name = w.to_ascii_lowercase();
+                    if !out.contains(&name) {
+                        out.push(name);
+                    }
+                }
+                if matches!(
+                    upper.as_str(),
+                    "SELECT"
+                        | "FROM"
+                        | "WHERE"
+                        | "GROUP"
+                        | "ORDER"
+                        | "HAVING"
+                        | "LIMIT"
+                        | "ON"
+                        | "USING"
+                        | "UNION"
+                        | "EXCEPT"
+                        | "INTERSECT"
+                        | "WINDOW"
+                ) {
+                    clause = upper.clone();
+                }
+                prev = if upper == "JOIN" || upper == "FROM" {
+                    upper
+                } else {
+                    w
+                };
             }
-            i = end;
+            SqlToken::Punct(c) => {
+                match c {
+                    '(' => clauses.push(std::mem::take(&mut clause)),
+                    ')' => clause = clauses.pop().unwrap_or_default(),
+                    _ => {}
+                }
+                prev = c.to_string();
+            }
+        }
+    }
+    out
+}
+
+enum SqlToken {
+    Word(String),
+    Punct(char),
+}
+
+/// SQL's words (a `"quoted"` identifier included) and punctuation;
+/// strings and comments dropped.
+fn sql_tokens(sql: &str) -> Vec<SqlToken> {
+    let chars: Vec<char> = sql.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    let word = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        if c.is_whitespace() {
+            i += 1;
+        } else if c == '-' && next == Some('-') {
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+        } else if c == '/' && next == Some('*') {
+            i += 2;
+            while i < chars.len() && !(chars[i] == '*' && chars.get(i + 1) == Some(&'/')) {
+                i += 1;
+            }
+            i += 2;
+        } else if c == '\'' {
+            i += 1;
+            while i < chars.len() {
+                if chars[i] == '\'' {
+                    if chars.get(i + 1) == Some(&'\'') {
+                        i += 2;
+                        continue;
+                    }
+                    break;
+                }
+                i += 1;
+            }
+            i += 1;
+        } else if c == '"' {
+            let start = i + 1;
+            i = start;
+            while i < chars.len() && chars[i] != '"' {
+                i += 1;
+            }
+            out.push(SqlToken::Word(
+                chars[start..i.min(chars.len())].iter().collect(),
+            ));
+            i += 1;
+        } else if word(c) {
+            let start = i;
+            while i < chars.len() && word(chars[i]) {
+                i += 1;
+            }
+            out.push(SqlToken::Word(chars[start..i].iter().collect()));
         } else {
+            out.push(SqlToken::Punct(c));
             i += 1;
         }
     }
     out
+}
+
+/// Whether `text` names `name` (a model or a command) as a whole word,
+/// in any case: `v_commit_file` doesn't name `v_commit`, and a sentence's
+/// full stop after `work_item.link` doesn't hide it.
+pub fn names(text: &str, name: &str) -> bool {
+    let (text, name) = (text.to_lowercase(), name.to_lowercase());
+    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    text.match_indices(&name).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let mut after = text[at + name.len()..].chars();
+        let (a1, a2) = (after.next(), after.next());
+        !(word(before) || before == Some('.')) && !word(a1) && !(a1 == Some('.') && word(a2))
+    })
 }
 
 /// What the check needs from its host.
@@ -120,7 +232,7 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
         match (&q.reaches.sql, &q.reaches.command) {
             (Some(sql), None) => {
                 for model in models_in(sql) {
-                    if !text.contains(&model) {
+                    if !names(&text, &model) {
                         out.errors.push(format!(
                             "{at}: skill `{}` never names `{model}` — fix: say in the skill what \
                              `{model}` answers",
@@ -151,7 +263,7 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
                 }
             }
             (None, Some(name)) => {
-                if !text.contains(name.as_str()) {
+                if !names(&text, name) {
                     out.errors.push(format!(
                         "{at}: skill `{}` never names `{name}` — fix: say in the skill when to \
                          run it",
@@ -246,6 +358,34 @@ pub async fn live(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// tsk570: a model is a table a query reads — not a `v_*` word in a
+    /// string, a comment or an alias — whatever its case.
+    #[test]
+    fn models_are_the_tables_a_query_reads() {
+        assert_eq!(
+            models_in(
+                "WITH x AS (SELECT 1 FROM V_Task) \
+                 SELECT a.n AS v_total, 'v_quoted' -- v_comment\n\
+                 FROM v_commit a, v_branch b /* v_block */ \
+                 JOIN (SELECT * FROM v_tag) t ON 1 LEFT JOIN json_each(a.parents) p"
+            ),
+            vec!["v_task", "v_commit", "v_branch", "v_tag"]
+        );
+    }
+
+    /// tsk570: a skill names a model or command as a whole word, in any
+    /// case — `v_commit_file` doesn't name `v_commit`.
+    #[test]
+    fn a_skill_names_a_thing_as_a_whole_word() {
+        assert!(names("read `v_commit` for history", "v_commit"));
+        assert!(names("Read V_COMMIT.", "v_commit"));
+        assert!(!names("read v_commit_file", "v_commit"));
+        assert!(!names("read xv_commit", "v_commit"));
+        assert!(names("run work_item.link.", "work_item.link"));
+        assert!(!names("run work_item.link_all", "work_item.link"));
+        assert!(!names("run work_item.links", "work_item.link"));
+    }
 
     #[test]
     fn models_are_the_v_words_of_a_query() {

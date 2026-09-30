@@ -525,8 +525,12 @@ for. A questions file is a list of `{ question, skill, reaches: { sql } |
   `oxplow-runtime`, `oxplow-wiki-capture`). The in-tree test
   (`every_capability_question_reaches_what_its_skill_names`) runs them
   against a throwaway `Services::in_memory`.
-- **Per question**: the skill's text names every model (`v_*`) the SQL
-  reads and the command it runs; the SQL runs through the gateway and
+- **Per question**: the skill's text names every model the SQL reads
+  and the command it runs — as a whole word, in any case
+  (`answerability::names`: `v_commit_file` doesn't name `v_commit`); a
+  model is a table the query reads (`models_in`: after `FROM`, `JOIN` or
+  a comma in a `FROM` list), never a `v_*` word in a string, a comment
+  or an alias (tsk570); the SQL runs through the gateway and
   returns exactly `shape.columns`; a command's input validates against
   its schema. A question whose skill doesn't lead there is a finding,
   which is the point: when a capability grows, its questions say which

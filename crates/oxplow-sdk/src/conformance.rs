@@ -46,6 +46,21 @@ struct Monitor {
 
 impl Monitor {
     fn saw(&mut self, from: Side, line: &str) {
+        // An error reply is checked against the `error` golden as sent
+        // (the codec would only say it isn't JSON-RPC).
+        if let Ok(raw) = serde_json::from_str::<Value>(line) {
+            if let (Some(error), None) = (raw.get("error"), raw.get("method")) {
+                if let Err(errors) = validate("error", error) {
+                    self.violations.push(format!(
+                        "the {}'s error doesn't match the protocol: {}",
+                        from.name(),
+                        errors.join("; ")
+                    ));
+                    self.transcript.push((from, raw));
+                    return;
+                }
+            }
+        }
         let message = match Message::from_line(line) {
             Ok(m) => m,
             Err(e) => {
@@ -67,14 +82,27 @@ impl Monitor {
                 self.pending.insert((from, *id), method.clone());
                 Some((method.clone(), false, params))
             }
+            Message::Notification { method, .. }
+                if from == Side::Provider && HOST_ONLY.contains(&method.as_str()) =>
+            {
+                self.violations.push(format!(
+                    "the provider sent `{method}`, which only the host sends"
+                ));
+                None
+            }
             Message::Notification { method, params } => Some((method.clone(), false, params)),
-            Message::Response { id, result } => self
-                .pending
-                .remove(&(other, *id))
-                .map(|method| (method, true, result)),
+            Message::Response { id, result } => match self.pending.remove(&(other, *id)) {
+                Some(method) => Some((method, true, result)),
+                None => {
+                    self.unasked(from, other, *id);
+                    None
+                }
+            },
             Message::Error { id, .. } => {
                 if let Some(id) = id {
-                    self.pending.remove(&(other, *id));
+                    if self.pending.remove(&(other, *id)).is_none() {
+                        self.unasked(from, other, *id);
+                    }
                 }
                 None
             }
@@ -106,6 +134,21 @@ impl Monitor {
             }
         }
         self.transcript.push((from, message.to_value()));
+    }
+}
+
+/// The notifications only the host sends.
+const HOST_ONLY: &[&str] = &[notify::CANCEL];
+
+impl Monitor {
+    /// A reply to an id the other side never asked (or already had
+    /// answered).
+    fn unasked(&mut self, from: Side, other: Side, id: u64) {
+        self.violations.push(format!(
+            "the {} answered id {id}, which no request of the {} is waiting on",
+            from.name(),
+            other.name()
+        ));
     }
 }
 
@@ -370,5 +413,49 @@ mod tests {
             m.violations
         );
         assert_eq!(m.transcript.len(), 4);
+    }
+
+    /// tsk570: an error reply is checked against the `error` golden, a
+    /// reply must answer a request the other side sent, and a provider
+    /// may not send the host's notifications.
+    #[test]
+    fn the_monitor_checks_errors_replies_and_who_notifies() {
+        let mut m = Monitor::default();
+        let ask = |m: &mut Monitor, id: u64| {
+            m.saw(
+                Side::Host,
+                &format!(
+                    r#"{{"jsonrpc":"2.0","id":{id},"method":"check","params":{{"config":{{}},"credentials":[]}}}}"#
+                ),
+            )
+        };
+        ask(&mut m, 1);
+        m.saw(
+            Side::Provider,
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"x","why":"extra"}}"#,
+        );
+        ask(&mut m, 2);
+        m.saw(
+            Side::Provider,
+            r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"fine"}}"#,
+        );
+        m.saw(
+            Side::Provider,
+            r#"{"jsonrpc":"2.0","id":99,"result":{"problems":[]}}"#,
+        );
+        m.saw(
+            Side::Provider,
+            r#"{"jsonrpc":"2.0","id":98,"error":{"code":-32603,"message":"late"}}"#,
+        );
+        m.saw(
+            Side::Provider,
+            r#"{"jsonrpc":"2.0","method":"$/cancel","params":{"id":1}}"#,
+        );
+        let v = &m.violations;
+        assert_eq!(v.len(), 4, "{v:?}");
+        assert!(v[0].contains("error") && v[0].contains("why"), "{v:?}");
+        assert!(v[1].contains("99"), "{v:?}");
+        assert!(v[2].contains("98"), "{v:?}");
+        assert!(v[3].contains("$/cancel") && v[3].contains("host"), "{v:?}");
     }
 }

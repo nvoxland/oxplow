@@ -5,8 +5,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-/// A JSON-RPC error object.
+/// A JSON-RPC error object: `code`, `message` and `data`, nothing else
+/// (like every wire type).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ErrorObject {
     pub code: i64,
     pub message: String,

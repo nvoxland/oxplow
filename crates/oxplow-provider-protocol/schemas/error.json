@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "A JSON-RPC error object.",
+  "additionalProperties": false,
+  "description": "A JSON-RPC error object: `code`, `message` and `data`, nothing else\n(like every wire type).",
   "properties": {
     "code": {
       "format": "int64",

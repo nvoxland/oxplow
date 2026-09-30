@@ -262,8 +262,12 @@ names).
   (`host::spawn`: scrubbed env, sandbox, kill on drop) and taps both
   pipes: every line is recorded and validated against the schema goldens
   (`schemas::for_message` by method; a reply is checked against the
-  method its request named). A provider-sent notification or request
-  outside the protocol, or a line that isn't JSON-RPC, is a violation.
+  method its request named; an error reply's `error` against the
+  `error` golden, which like every wire type allows no unknown field).
+  A provider-sent notification or request outside the protocol, a
+  host-only notification (`$/cancel`) from the provider, a reply to an
+  id the other side isn't waiting on, or a line that isn't JSON-RPC, is
+  a violation (tsk570).
   `finish()` sends `shutdown`, waits for the process and returns the
   session.
 - **The session**: `initialize` (must equal the declarations file,
