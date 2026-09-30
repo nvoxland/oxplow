@@ -4560,6 +4560,7 @@ dependencies = [
  "r2d2_sqlite",
  "refinery",
  "rusqlite",
+ "schemars 1.2.2",
  "serde",
  "serde_json",
  "serde_yaml",

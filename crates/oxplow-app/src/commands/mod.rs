@@ -17,6 +17,7 @@
 
 pub mod config_commands;
 pub mod effort;
+pub mod lens;
 pub mod metric;
 pub mod vcs;
 pub mod work_item;

@@ -175,6 +175,8 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new("comment", &prefixed("cmt")),
         KindSpec::new("event", r"^[0-9a-f-]{36}$"),
         KindSpec::new("lens", r"^[a-z0-9-]+/[a-z0-9-]+(\?.*)?$"),
+        // An agent's answer in a thread (`thread_answer.id`, P6.C1).
+        KindSpec::new("answer", r"^[0-9]+$"),
         KindSpec::new("page", r"^[a-z0-9-]+(\?.*)?$"),
         KindSpec::new("metric", r"^[a-z0-9_.-]+$"),
         KindSpec::new("model", r"^v_[a-z0-9_]+$"),

@@ -38,6 +38,7 @@ mod stream_store;
 pub mod symbol_store;
 pub mod task_satellite;
 pub mod task_store;
+pub mod thread_answer_store;
 mod thread_store;
 pub mod token_usage_store;
 pub mod tool_call_store;
@@ -97,6 +98,7 @@ pub use stream_store::SqliteStreamStore;
 pub use symbol_store::{FileSymbols, SqliteSymbolStore, SymbolCapture, SymbolRow};
 pub use task_satellite::{SqliteTaskLinkStore, SqliteTaskNoteStore};
 pub use task_store::{EffortTransition, SqliteTaskStore};
+pub use thread_answer_store::{AnswerShows, SqliteThreadAnswerStore, ThreadAnswer};
 pub use thread_store::SqliteThreadStore;
 pub use token_usage_store::{
     AgentTokenUsage, NewAgentTokenUsage, SqliteTokenUsageStore, TokenUsageTotals,

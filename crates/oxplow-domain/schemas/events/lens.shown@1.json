@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`lens.shown@1`: an agent showed the person an answer in a thread —\nan existing lens or its own lens spec (`lens.show`, P6.C1).",
+  "properties": {
+    "answer": {
+      "description": "`answer:<id>`.",
+      "type": "string"
+    },
+    "lens": {
+      "description": "`lens:<extension>/<slug>` when it shows an existing lens.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "thread": {
+      "description": "`thread:<id>`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "answer",
+    "thread"
+  ],
+  "title": "LensShownV1",
+  "type": "object"
+}

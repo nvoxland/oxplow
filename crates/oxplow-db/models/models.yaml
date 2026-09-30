@@ -734,6 +734,25 @@
   tests:
     - { not_null: id }
     - { unique: id }
+- name: thread_answer
+  version: 1
+  description: "An agent's answers in a thread (P6.C1): what `show_lens` showed the person — an existing lens with its params, or the answer's own lens spec — and, once kept, the lens it became."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Answer id." }
+    - { name: "ref", type: "TEXT", doc: "`answer:<id>`." }
+    - { name: "thread_id", type: "INTEGER", doc: "The thread it was shown in (v_thread.id)." }
+    - { name: "turn_id", type: "INTEGER", doc: "The turn it was shown in (v_agent_turn.id), when one was open." }
+    - { name: "effort_id", type: "INTEGER", doc: "The effort open in the thread at the time, if any." }
+    - { name: "title", type: "TEXT", doc: "What it's called." }
+    - { name: "lens", type: "TEXT", doc: "An existing lens shown (`<extension>/<slug>`); NULL when the answer has its own spec." }
+    - { name: "spec", type: "TEXT", doc: "The answer's own lens spec (JSON: title, query, viz, columns, chart, …); NULL for an existing lens." }
+    - { name: "params", type: "TEXT", doc: "The params it ran with (JSON object)." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "kept_lens", type: "TEXT", doc: "The lens it was kept as (`lens.keep`), if it was." }
+  tests:
+    - { not_null: id }
+    - { unique: ref }
+    - { relationships: { column: thread_id, to: thread, field: id } }
 - name: token_usage
   version: 1
   description: "Model token usage recorded from agent sessions, per thread, effort and model."

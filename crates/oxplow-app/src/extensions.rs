@@ -25,7 +25,9 @@ pub use manifest_v2::{Intent, IntentExample, Sharing};
 pub const EXTENSIONS_DIR: &str = "oxplow/extensions";
 
 /// How a lens renders its rows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum LensViz {
     /// Rows and columns.
@@ -187,7 +189,9 @@ fn evaluate_alert(alert: &LensAlert, result: &SqlQueryResult) -> AlertState {
 }
 
 /// Which result columns a chart viz draws from.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct LensChart {
     #[serde(default)]
@@ -205,7 +209,9 @@ pub struct LensChart {
 }
 
 /// `tree` viz: which columns nest the rows.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct LensTree {
     pub id: Option<String>,
@@ -214,7 +220,9 @@ pub struct LensTree {
 }
 
 /// `timeline` viz: when each row happened and what it says.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct LensTimeline {
     pub at: Option<String>,
@@ -225,7 +233,9 @@ pub struct LensTimeline {
 }
 
 /// `steps` viz: each step's text and status.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct LensSteps {
     pub label: Option<String>,
@@ -233,18 +243,64 @@ pub struct LensSteps {
 }
 
 /// `form` viz: the command it submits and the values it starts from.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct LensForm {
     pub command: Option<String>,
     /// Input values the form starts with (`{{param.x}}` placeholders bound).
-    #[serde(default)]
+    #[serde(default, serialize_with = "plain_json")]
     #[specta(type = Option<oxplow_domain::Json>)]
     pub defaults: Option<serde_json::Value>,
 }
 
+/// Serialize a JSON value with its numbers as plain numbers, so a YAML
+/// lens file gets `1`, not serde_json's arbitrary-precision number map.
+fn plain_json<S: serde::Serializer>(
+    v: &Option<serde_json::Value>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    struct Plain<'a>(&'a serde_json::Value);
+    impl Serialize for Plain<'_> {
+        fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            use serde::ser::{SerializeMap, SerializeSeq};
+            match self.0 {
+                serde_json::Value::Null => s.serialize_none(),
+                serde_json::Value::Bool(b) => s.serialize_bool(*b),
+                serde_json::Value::Number(n) => match (n.as_i64(), n.as_f64()) {
+                    (Some(i), _) => s.serialize_i64(i),
+                    (None, Some(f)) => s.serialize_f64(f),
+                    _ => s.serialize_str(&n.to_string()),
+                },
+                serde_json::Value::String(t) => s.serialize_str(t),
+                serde_json::Value::Array(items) => {
+                    let mut seq = s.serialize_seq(Some(items.len()))?;
+                    for i in items {
+                        seq.serialize_element(&Plain(i))?;
+                    }
+                    seq.end()
+                }
+                serde_json::Value::Object(map) => {
+                    let mut m = s.serialize_map(Some(map.len()))?;
+                    for (k, v) in map {
+                        m.serialize_entry(k, &Plain(v))?;
+                    }
+                    m.end()
+                }
+            }
+        }
+    }
+    match v {
+        Some(v) => s.serialize_some(&Plain(v)),
+        None => s.serialize_none(),
+    }
+}
+
 /// `hunks` viz: the file and the two revisions each row diffs.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct LensHunks {
     pub path: Option<String>,
@@ -290,7 +346,9 @@ struct LauncherFile {
 }
 
 /// A page a column value can link to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum LensLinkKind {
     /// `task:<id>`; the value is a task id.
@@ -321,7 +379,7 @@ pub enum LensLinkKind {
 }
 
 /// Makes a column's cells link to a page.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LensLink {
     pub kind: LensLinkKind,
@@ -340,7 +398,7 @@ pub struct LensLink {
 }
 
 /// How one result column is shown.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LensColumn {
     /// Result column name.
@@ -354,7 +412,7 @@ pub struct LensColumn {
 
 /// A value the viewer (or an agent) can set when running the lens,
 /// bound into the query as `:name`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LensParam {
     pub name: String,
@@ -1531,6 +1589,17 @@ pub async fn lens_context(
 /// Run a lens: bind supplied params over the viewer's context over
 /// defaults, and query the semantic layer. Unknown params are rejected,
 /// so a typo doesn't silently fall back to a default.
+/// Run a lens made from `spec` (an answer's own lens) as `id`.
+pub async fn run_spec(
+    layer: &crate::sql_gateway::SqlGateway,
+    id: &str,
+    spec: &LensSpec,
+    params: BTreeMap<String, SqlCell>,
+    ctx: &LensContext,
+) -> Result<LensRun, DomainError> {
+    execute(layer, Lens::from_spec(id, spec), params, ctx).await
+}
+
 pub async fn run_lens(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
@@ -2108,26 +2177,146 @@ fn copy_tree_without_git(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// What the Explore Data page saves as a new lens.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct NewLens {
+/// What a lens shows — the view part of a lens file, and the one shape a
+/// lens is made from: a lens file's body, an agent's answer
+/// (`thread_answer.spec`, P6.C1), what Explore Data saves, and what
+/// [`save_lens`] writes. The rest of a lens file (launcher placement,
+/// actions, an alert) is added by editing it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LensSpec {
     pub title: String,
     #[serde(default)]
     pub description: String,
+    /// SQL over the `v_*` models, with `:param` bindings. Only a `form`
+    /// may leave it empty.
+    #[serde(default)]
     pub query: String,
+    #[serde(default = "default_viz")]
     pub viz: LensViz,
+    #[serde(default)]
+    pub params: Vec<LensParam>,
+    #[serde(default)]
+    pub columns: Vec<LensColumn>,
+    #[serde(default)]
+    pub empty: Option<String>,
+    #[serde(default)]
+    pub chart: Option<LensChart>,
+    #[serde(default)]
+    pub tree: Option<LensTree>,
+    #[serde(default)]
+    pub timeline: Option<LensTimeline>,
+    #[serde(default)]
+    pub steps: Option<LensSteps>,
+    #[serde(default)]
+    pub hunks: Option<LensHunks>,
+    #[serde(default)]
+    pub form: Option<LensForm>,
 }
 
-/// Write a new lens file `oxplow/extensions/<extension>/lenses/<slug>.yaml`,
-/// creating the extension (with a minimal `extension.yaml`) if needed.
-/// Refuses to overwrite a lens, and refuses git-installed extensions
-/// (their files are replaced on update).
+impl Lens {
+    /// A lens made from `spec`, as `id` (`<extension>/<slug>`, or an
+    /// answer's `answer/<n>`); it has no actions, alert or children.
+    pub fn from_spec(id: &str, spec: &LensSpec) -> Lens {
+        let (extension, slug) = id.split_once('/').unwrap_or((id, id));
+        Lens {
+            id: id.to_string(),
+            extension: extension.to_string(),
+            slug: slug.to_string(),
+            title: spec.title.clone(),
+            description: spec.description.clone(),
+            query: spec.query.clone(),
+            viz: spec.viz,
+            params: spec.params.clone(),
+            columns: spec.columns.clone(),
+            empty: spec.empty.clone(),
+            chart: spec.chart.clone(),
+            tree: spec.tree.clone(),
+            timeline: spec.timeline.clone(),
+            steps: spec.steps.clone(),
+            hunks: spec.hunks.clone(),
+            form: spec.form.clone(),
+            children: Vec::new(),
+            launcher_category: None,
+            hidden: false,
+            actions: Vec::new(),
+            alert: None,
+            path: String::new(),
+        }
+    }
+
+    /// The spec this lens was made from (its view part).
+    pub fn spec(&self) -> LensSpec {
+        LensSpec {
+            title: self.title.clone(),
+            description: self.description.clone(),
+            query: self.query.clone(),
+            viz: self.viz,
+            params: self.params.clone(),
+            columns: self.columns.clone(),
+            empty: self.empty.clone(),
+            chart: self.chart.clone(),
+            tree: self.tree.clone(),
+            timeline: self.timeline.clone(),
+            steps: self.steps.clone(),
+            hunks: self.hunks.clone(),
+            form: self.form.clone(),
+        }
+    }
+}
+
+/// What's wrong with `spec` as a standalone lens, if anything: no title,
+/// or a component missing what it needs. (A `grid` composes other lenses,
+/// so a standalone spec can't be one.)
+pub fn spec_problem(spec: &LensSpec) -> Option<String> {
+    if spec.title.trim().is_empty() {
+        return Some("a lens needs a `title`".into());
+    }
+    if spec.viz == LensViz::Grid {
+        return Some("a `grid` composes lens files; show each lens instead".into());
+    }
+    shape_problem(&Lens::from_spec("spec/spec", spec), &[])
+}
+
+/// A lens slug from a title: lowercase letters and digits, runs of
+/// anything else one dash.
+pub fn slug_of(title: &str) -> String {
+    let mut out = String::new();
+    for c in title.chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else if !out.is_empty() && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let out = out.trim_end_matches('-').to_string();
+    if out.is_empty() {
+        "lens".into()
+    } else {
+        out
+    }
+}
+
+/// Who asked for a new lens, for its extension's intent when the
+/// extension is created.
+pub struct LensOrigin<'a> {
+    /// What the lens answers (the extension's `intent.purpose`).
+    pub purpose: &'a str,
+    /// The thread or effort ref that asked for it (`intent.origin`).
+    pub origin: Option<&'a str>,
+}
+
+/// Write `spec` as a new lens file
+/// `oxplow/extensions/<extension>/lenses/<slug>.yaml`, creating the
+/// extension (a private v2 manifest whose intent is `origin`) if needed.
+/// Refuses a spec with a problem, overwriting a lens, and bundled or
+/// git-installed extensions (their files are replaced on update).
 pub fn save_lens(
     root: &Path,
     extension: &str,
     slug: &str,
-    lens: NewLens,
+    spec: &LensSpec,
+    origin: &LensOrigin<'_>,
 ) -> Result<Lens, DomainError> {
     let invalid = |m: String| DomainError::Invalid(m);
     let storage = |e: std::io::Error| DomainError::Storage(format!("save lens: {e}"));
@@ -2152,6 +2341,9 @@ pub fn save_lens(
             "`{extension}` is an installed extension (its files are replaced on update); save to another extension"
         )));
     }
+    if let Some(problem) = spec_problem(spec) {
+        return Err(invalid(problem));
+    }
     let file = dir.join("lenses").join(format!("{slug}.yaml"));
     if file.exists() {
         return Err(invalid(format!("lens `{extension}/{slug}` already exists")));
@@ -2166,28 +2358,69 @@ pub fn save_lens(
             scaffold_manifest(&ManifestScaffold {
                 name: extension,
                 description: "TODO: one line on what this extension shows or does",
-                purpose: &format!("TODO: what the `{slug}` lens answers"),
-                origin: None,
+                purpose: origin.purpose,
+                origin: origin.origin,
                 example_name: slug,
                 example_input: &format!("{{ lens: {slug} }}"),
                 example_expect: "TODO: what a run should show",
+                shared: false,
             }),
         )
         .map_err(storage)?;
     }
-    let body = serde_yaml::to_string(&SavedLensFile {
-        title: &lens.title,
-        description: &lens.description,
-        query: &lens.query,
-        viz: lens.viz,
-    })
-    .map_err(|e| DomainError::Storage(format!("save lens: {e}")))?;
+    let body = lens_file_yaml(spec)?;
     std::fs::write(&file, body).map_err(storage)?;
-    load_fresh(root, extension)?
-        .lenses
-        .into_iter()
-        .find(|l| l.slug == slug)
-        .ok_or(DomainError::NotFound)
+    let ext = load_fresh(root, extension)?;
+    match ext.lenses.into_iter().find(|l| l.slug == slug) {
+        Some(lens) => Ok(lens),
+        None => {
+            // It didn't load: take it back out and say why.
+            let _ = std::fs::remove_file(&file);
+            let why: Vec<String> = ext
+                .errors
+                .into_iter()
+                .filter(|e| e.contains(&format!("{slug}.yaml")))
+                .collect();
+            Err(invalid(format!(
+                "the lens `{extension}/{slug}` doesn't load: {}",
+                if why.is_empty() {
+                    "no reason given".to_string()
+                } else {
+                    why.join("; ")
+                }
+            )))
+        }
+    }
+}
+
+/// `spec` as a lens file: what it sets, without the empty and absent
+/// keys at any depth (the file reads like one written by hand). Built as
+/// YAML directly — a JSON detour would carry serde_json's number
+/// representation into the file.
+fn lens_file_yaml(spec: &LensSpec) -> Result<String, DomainError> {
+    fn prune(v: serde_yaml::Value) -> Option<serde_yaml::Value> {
+        use serde_yaml::Value as Y;
+        match v {
+            Y::Null => None,
+            Y::String(s) if s.is_empty() => None,
+            Y::Sequence(items) => {
+                let items: Vec<Y> = items.into_iter().filter_map(prune).collect();
+                (!items.is_empty()).then_some(Y::Sequence(items))
+            }
+            Y::Mapping(map) => {
+                let map: serde_yaml::Mapping = map
+                    .into_iter()
+                    .filter_map(|(k, v)| prune(v).map(|v| (k, v)))
+                    .collect();
+                (!map.is_empty()).then_some(Y::Mapping(map))
+            }
+            other => Some(other),
+        }
+    }
+    let value =
+        serde_yaml::to_value(spec).map_err(|e| DomainError::Storage(format!("save lens: {e}")))?;
+    serde_yaml::to_string(&prune(value).unwrap_or(serde_yaml::Value::Null))
+        .map_err(|e| DomainError::Storage(format!("save lens: {e}")))
 }
 
 /// What a scaffolded `extension.yaml` says. One template for
@@ -2203,9 +2436,13 @@ pub struct ManifestScaffold<'a> {
     /// YAML flow text for the example's input (`{ lens: demo }`).
     pub example_input: &'a str,
     pub example_expect: &'a str,
+    /// A shared extension (`sharing: shared`, targeting this oxplow's
+    /// engine) rather than a private one.
+    pub shared: bool,
 }
 
-/// A private v2 manifest with an `intent` and one example.
+/// A v2 manifest with an `intent` and one example — private, or shared
+/// with the `engine` it targets.
 pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
     let quote = |s: &str| {
         serde_yaml::to_string(s)
@@ -2214,7 +2451,14 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
             .to_string()
     };
     format!(
-        "manifest: 2\nname: {name}\ndescription: {description}\nsharing: private\nintent:\n  purpose: {purpose}\n  origin: {origin}\n  examples:\n    - name: {example_name}\n      input: {input}\n      expect: {expect}\n",
+        "manifest: 2\nname: {name}\ndescription: {description}\n{sharing}intent:\n  purpose: {purpose}\n  origin: {origin}\n  examples:\n    - name: {example_name}\n      input: {input}\n      expect: {expect}\n",
+        sharing = if m.shared {
+            let version = manifest_v2::current_engine();
+            let major_minor: Vec<&str> = version.split('.').take(2).collect();
+            format!("sharing: shared\nengine: \">={}\"\n", major_minor.join("."))
+        } else {
+            "sharing: private\n".to_string()
+        },
         name = m.name,
         description = quote(m.description),
         purpose = quote(m.purpose),
@@ -2223,16 +2467,6 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
         input = m.example_input,
         expect = quote(m.example_expect),
     )
-}
-
-/// The on-disk shape [`save_lens`] writes (a subset of [`LensFile`]).
-#[derive(Serialize)]
-struct SavedLensFile<'a> {
-    title: &'a str,
-    #[serde(skip_serializing_if = "str::is_empty")]
-    description: &'a str,
-    query: &'a str,
-    viz: LensViz,
 }
 
 #[cfg(test)]
@@ -2840,16 +3074,100 @@ empty: No tasks.
         );
     }
 
+    fn spec_base() -> LensSpec {
+        LensSpec {
+            title: String::new(),
+            description: String::new(),
+            query: String::new(),
+            viz: LensViz::Table,
+            params: Vec::new(),
+            columns: Vec::new(),
+            empty: None,
+            chart: None,
+            tree: None,
+            timeline: None,
+            steps: None,
+            hunks: None,
+            form: None,
+        }
+    }
+
+    fn todo_origin() -> LensOrigin<'static> {
+        LensOrigin {
+            purpose: "TODO: what it answers",
+            origin: None,
+        }
+    }
+
+    /// P6.C1: a spec round-trips through a lens file, and one with a
+    /// problem is refused before anything is written.
+    #[test]
+    fn a_spec_is_a_lens_file() {
+        let project = tempfile::tempdir().unwrap();
+        let spec = LensSpec {
+            title: "Busy Files".into(),
+            query: "SELECT path, n FROM v_x".into(),
+            viz: LensViz::Bar,
+            chart: Some(LensChart {
+                x: Some("path".into()),
+                y: Some("n".into()),
+                ..LensChart::default()
+            }),
+            ..spec_base()
+        };
+        let origin = LensOrigin {
+            purpose: "Busy Files",
+            origin: Some("thread:thr1"),
+        };
+        let lens = save_lens(project.path(), "my-lenses", "busy", &spec, &origin).unwrap();
+        assert_eq!(lens.spec(), spec);
+        let manifest = std::fs::read_to_string(
+            project
+                .path()
+                .join("oxplow/extensions/my-lenses/extension.yaml"),
+        )
+        .unwrap();
+        assert!(manifest.contains("origin: thread:thr1"), "{manifest}");
+        let bad = LensSpec {
+            viz: LensViz::Bar,
+            chart: None,
+            ..spec.clone()
+        };
+        let err = save_lens(project.path(), "my-lenses", "bad", &bad, &origin).unwrap_err();
+        assert!(err.to_string().contains("chart"), "{err}");
+        assert!(!project
+            .path()
+            .join("oxplow/extensions/my-lenses/lenses/bad.yaml")
+            .exists());
+    }
+
+    /// A form's numeric defaults are written as numbers and read back.
+    #[test]
+    fn a_form_specs_defaults_round_trip_through_its_file() {
+        let project = tempfile::tempdir().unwrap();
+        let spec = LensSpec {
+            title: "New Task".into(),
+            viz: LensViz::Form,
+            form: Some(LensForm {
+                command: Some("work_item.create".into()),
+                defaults: Some(serde_json::json!({ "title": "x", "n": 3, "tags": ["a"] })),
+            }),
+            ..spec_base()
+        };
+        let lens = save_lens(project.path(), "mine", "new-task", &spec, &todo_origin()).unwrap();
+        assert_eq!(lens.spec(), spec);
+    }
+
     #[test]
     fn save_lens_creates_the_extension_and_refuses_overwrites() {
         let project = tempfile::tempdir().unwrap();
-        let new = || NewLens {
+        let new = || LensSpec {
             title: "Open Tasks".into(),
             description: "From Explore Data".into(),
             query: "SELECT id, title FROM v_task".into(),
-            viz: LensViz::Table,
+            ..spec_base()
         };
-        let lens = save_lens(project.path(), "mine", "open-tasks", new()).unwrap();
+        let lens = save_lens(project.path(), "mine", "open-tasks", &new(), &todo_origin()).unwrap();
         assert_eq!(lens.id, "mine/open-tasks");
         assert_eq!(lens.title, "Open Tasks");
         assert!(project
@@ -2859,12 +3177,14 @@ empty: No tasks.
         let ext = &project_extensions(project.path())[0];
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
 
-        let err = save_lens(project.path(), "mine", "open-tasks", new()).unwrap_err();
+        let err =
+            save_lens(project.path(), "mine", "open-tasks", &new(), &todo_origin()).unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("already exists")),
             "{err:?}"
         );
-        let err = save_lens(project.path(), "mine", "Bad Slug", new()).unwrap_err();
+        let err =
+            save_lens(project.path(), "mine", "Bad Slug", &new(), &todo_origin()).unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("slug")),
             "{err:?}"
@@ -2888,12 +3208,13 @@ empty: No tasks.
             project.path(),
             "shared",
             "x",
-            NewLens {
+            &LensSpec {
                 title: "X".into(),
-                description: String::new(),
                 query: "SELECT 1".into(),
                 viz: LensViz::Number,
+                ..spec_base()
             },
+            &todo_origin(),
         )
         .unwrap_err();
         assert!(
@@ -3282,12 +3603,13 @@ empty: No tasks.
             dir.path(),
             "oxplow-review",
             "x",
-            NewLens {
+            &LensSpec {
                 title: "X".into(),
-                description: String::new(),
                 query: "SELECT 1".into(),
                 viz: LensViz::Number,
+                ..spec_base()
             },
+            &todo_origin(),
         )
         .unwrap_err();
         assert!(

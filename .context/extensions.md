@@ -253,6 +253,30 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       `extensions::scaffold_manifest`, so a saved lens starts as a
       checkable extension with an `intent` to fill in), refuses to
       overwrite a lens, and refuses git-installed extensions.
+  - **Thread answers** (P6.C1, `commands/lens.rs`,
+    `oxplow-db/src/thread_answer_store.rs`). An agent answers with a lens
+    rather than pasting rows: MCP **`show_lens { lens | spec, params? }`**
+    runs `lens.show`, which stores a `thread_answer` (V124, model
+    `v_thread_answer`, ref `answer:<id>`) and returns the text rendering.
+    - **One lens shape, `LensSpec`**: what a lens file holds, what an
+      answer stores and what `save_lens` writes (`Lens::from_spec`,
+      `Lens::spec`). `extensions::save_lens(root, ext, slug, &spec,
+      &LensOrigin)` refuses a spec with a `spec_problem`, writes the YAML
+      pruned of nulls and empties, and — when the file doesn't then load —
+      removes it and reports the loader's errors. Serialize a spec's JSON
+      values with `plain_json` (serde_json's `arbitrary_precision` makes
+      numbers maps under `serde_yaml`).
+    - An answer's query is agent SQL: `lens.show` checks it with the same
+      read-only authorizer as `query_sql` before storing anything.
+      `run_answer` (RPC and MCP) re-runs it.
+    - **Keep This** is `lens.keep`: the answer becomes a private lens in
+      `my-lenses` (params → defaults, `intent.origin` the thread).
+      **`lens.share`** (a person's only) moves a lens into a shared
+      extension, created with `sharing: shared` and `engine`
+      (`ManifestScaffold.shared`), and refuses one that doesn't load or
+      reads beyond models.
+    - Explore Data's **Save as Lens** (`save_lens` RPC) uses the lens's
+      title as a new extension's `intent.purpose`.
   - **Lens tiles.** A lens can be pinned to a dashboard: "Pin to
     Dashboard" on a lens page, or MCP `add_dashboard_item(kind: "lens",
     lens_id)`.

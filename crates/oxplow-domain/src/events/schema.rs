@@ -148,6 +148,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<ProviderDisabled>()
             .expect("core type registers");
+        r.register::<LensShown>().expect("core type registers");
+        r.register::<LensKept>().expect("core type registers");
         r
     }
 
@@ -1079,6 +1081,45 @@ impl EventType for KnowledgePageWritten {
     type Payload = KnowledgePageWrittenV1;
 }
 
+/// `lens.shown@1`: an agent showed the person an answer in a thread —
+/// an existing lens or its own lens spec (`lens.show`, P6.C1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LensShownV1 {
+    /// `answer:<id>`.
+    pub answer: String,
+    /// `thread:<id>`.
+    pub thread: String,
+    /// `lens:<extension>/<slug>` when it shows an existing lens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lens: Option<String>,
+}
+
+pub struct LensShown;
+impl EventType for LensShown {
+    const TYPE: &'static str = "lens.shown";
+    const V: u32 = 1;
+    type Payload = LensShownV1;
+}
+
+/// `lens.kept@1`: an answer was kept — written as a private lens
+/// (`lens.keep`, P6.C1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LensKeptV1 {
+    /// `answer:<id>`.
+    pub answer: String,
+    /// `lens:<extension>/<slug>`.
+    pub lens: String,
+}
+
+pub struct LensKept;
+impl EventType for LensKept {
+    const TYPE: &'static str = "lens.kept";
+    const V: u32 = 1;
+    type Payload = LensKeptV1;
+}
+
 /// `knowledge.page.deleted@1`: a knowledge page is gone, its row and
 /// edges with it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1150,6 +1191,8 @@ mod tests {
                 ("effort.opened", 1),
                 ("knowledge.page.deleted", 1),
                 ("knowledge.page.written", 1),
+                ("lens.kept", 1),
+                ("lens.shown", 1),
                 ("provider.disabled", 1),
                 ("provider.enabled", 1),
                 ("snapshot.taken", 1),

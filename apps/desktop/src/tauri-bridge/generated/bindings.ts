@@ -318,17 +318,17 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listExtensions: (streamId: string | null) => typedError<Extension[], IpcError>(__TAURI_INVOKE("list_extensions", { streamId })),
+	listExtensions: (streamId: string | null) => typedError<Extension_Serialize[], IpcError>(__TAURI_INVOKE("list_extensions", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getLens: (id: string, streamId: string | null) => typedError<Lens, IpcError>(__TAURI_INVOKE("get_lens", { id, streamId })),
+	getLens: (id: string, streamId: string | null) => typedError<Lens_Serialize, IpcError>(__TAURI_INVOKE("get_lens", { id, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	runLens: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<LensRun, IpcError>(__TAURI_INVOKE("run_lens", { id, params, streamId })),
+	runLens: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<LensRun_Serialize, IpcError>(__TAURI_INVOKE("run_lens", { id, params, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -343,6 +343,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	runAnswer: (answer: string) => typedError<LensRun_Serialize, IpcError>(__TAURI_INVOKE("run_answer", { answer })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	lensForm: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<FormStart, IpcError>(__TAURI_INVOKE("lens_form", { id, params, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -353,27 +358,27 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	validateExtension: (name: string, streamId: string | null) => typedError<CheckReport, IpcError>(__TAURI_INVOKE("validate_extension", { name, streamId })),
+	validateExtension: (name: string, streamId: string | null) => typedError<CheckReport_Serialize, IpcError>(__TAURI_INVOKE("validate_extension", { name, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	reviewExtension: (gitUrl: string | null, gitRef: string | null, name: string | null, streamId: string | null) => typedError<ExtensionReview, IpcError>(__TAURI_INVOKE("review_extension", { gitUrl, gitRef, name, streamId })),
+	reviewExtension: (gitUrl: string | null, gitRef: string | null, name: string | null, streamId: string | null) => typedError<ExtensionReview_Serialize, IpcError>(__TAURI_INVOKE("review_extension", { gitUrl, gitRef, name, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	installExtension: (gitUrl: string, gitRef: string | null, reviewedSha: string, streamId: string | null) => typedError<Extension, IpcError>(__TAURI_INVOKE("install_extension", { gitUrl, gitRef, reviewedSha, streamId })),
+	installExtension: (gitUrl: string, gitRef: string | null, reviewedSha: string, streamId: string | null) => typedError<Extension_Serialize, IpcError>(__TAURI_INVOKE("install_extension", { gitUrl, gitRef, reviewedSha, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	updateExtension: (name: string, reviewedSha: string, streamId: string | null) => typedError<Extension, IpcError>(__TAURI_INVOKE("update_extension", { name, reviewedSha, streamId })),
+	updateExtension: (name: string, reviewedSha: string, streamId: string | null) => typedError<Extension_Serialize, IpcError>(__TAURI_INVOKE("update_extension", { name, reviewedSha, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	saveLens: (extension: string, slug: string, lens: NewLens, streamId: string | null) => typedError<Lens, IpcError>(__TAURI_INVOKE("save_lens", { extension, slug, lens, streamId })),
+	saveLens: (extension: string, slug: string, lens: LensSpec_Deserialize, streamId: string | null) => typedError<Lens_Serialize, IpcError>(__TAURI_INVOKE("save_lens", { extension, slug, lens, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -383,7 +388,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setExtensionEnabled: (name: string, enabled: boolean) => typedError<Extension[], IpcError>(__TAURI_INVOKE("set_extension_enabled", { name, enabled })),
+	setExtensionEnabled: (name: string, enabled: boolean) => typedError<Extension_Serialize[], IpcError>(__TAURI_INVOKE("set_extension_enabled", { name, enabled })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1611,7 +1616,10 @@ export type ChangeTarget =
 { kind: "turn"; turnId: string };
 
 // What `check` found.
-export type CheckReport = {
+export type CheckReport = CheckReport_Serialize | CheckReport_Deserialize;
+
+// What `check` found.
+export type CheckReport_Deserialize = {
 	name: string,
 	// No errors (warnings don't fail a check).
 	ok: boolean,
@@ -1620,7 +1628,20 @@ export type CheckReport = {
 	warnings: string[],
 	// Whether every lens and advisory was dry-run against a database.
 	sqlChecked: boolean,
-	extension: Extension,
+	extension: Extension_Deserialize,
+};
+
+// What `check` found.
+export type CheckReport_Serialize = {
+	name: string,
+	// No errors (warnings don't fail a check).
+	ok: boolean,
+	// `file:line: what — fix` lines.
+	errors: string[],
+	warnings: string[],
+	// Whether every lens and advisory was dry-run against a database.
+	sqlChecked: boolean,
+	extension: Extension_Serialize,
 };
 
 /**
@@ -2213,7 +2234,75 @@ export type EventBodyKey = "input" | "output" |
 export type EventId = string;
 
 // A loaded extension and anything wrong with it.
-export type Extension = {
+export type Extension = Extension_Serialize | Extension_Deserialize;
+
+// One instance of an extension's provider (`extensionInstances`).
+export type ExtensionInstanceConfig = {
+	// Run it (once this machine approved the provider).
+	enabled?: boolean,
+	// The instance's config, as the provider's `config_schema` describes.
+	config?: unknown,
+};
+
+/**
+ *  What installing an extension from git would bring in, for a person to
+ *  look at first (tsk378): the extension as it would load (its lenses,
+ *  sources with their programs, hosts and credentials, advisories,
+ *  gauges; `extension.errors` are load errors, which block the install),
+ *  the commit it's at, and `problems` a dry run of its lenses and
+ *  advisories found (reported, not blocking: a lens over a source that
+ *  hasn't synced can't run yet).
+ */
+export type ExtensionReview = ExtensionReview_Serialize | ExtensionReview_Deserialize;
+
+/**
+ *  What installing an extension from git would bring in, for a person to
+ *  look at first (tsk378): the extension as it would load (its lenses,
+ *  sources with their programs, hosts and credentials, advisories,
+ *  gauges; `extension.errors` are load errors, which block the install),
+ *  the commit it's at, and `problems` a dry run of its lenses and
+ *  advisories found (reported, not blocking: a lens over a source that
+ *  hasn't synced can't run yet).
+ */
+export type ExtensionReview_Deserialize = {
+	extension: Extension_Deserialize,
+	git: string,
+	gitRef: string | null,
+	// The commit reviewed; pass it back to install exactly this.
+	sha: string,
+	problems: string[],
+};
+
+/**
+ *  What installing an extension from git would bring in, for a person to
+ *  look at first (tsk378): the extension as it would load (its lenses,
+ *  sources with their programs, hosts and credentials, advisories,
+ *  gauges; `extension.errors` are load errors, which block the install),
+ *  the commit it's at, and `problems` a dry run of its lenses and
+ *  advisories found (reported, not blocking: a lens over a source that
+ *  hasn't synced can't run yet).
+ */
+export type ExtensionReview_Serialize = {
+	extension: Extension_Serialize,
+	git: string,
+	gitRef: string | null,
+	// The commit reviewed; pass it back to install exactly this.
+	sha: string,
+	problems: string[],
+};
+
+// Provenance of an installed extension, kept in its `source.yaml`.
+export type ExtensionSource = {
+	// The git URL it was cloned from.
+	git: string,
+	// The branch, tag or commit asked for; `None` = the remote's default branch.
+	gitRef: string | null,
+	// The commit actually installed.
+	sha: string,
+};
+
+// A loaded extension and anything wrong with it.
+export type Extension_Deserialize = {
 	name: string,
 	description: string,
 	// Repo-relative path of the extension folder.
@@ -2236,7 +2325,7 @@ export type Extension = {
 	sharing: Sharing,
 	// Why it exists (required at v2; `None` for a v1 manifest).
 	intent: Intent | null,
-	lenses: Lens[],
+	lenses: Lens_Deserialize[],
 	/**
 	 *  Where it was installed from, for extensions added with
 	 *  `install_extension`; `None` for ones written in this repo.
@@ -2285,40 +2374,77 @@ export type Extension = {
 	models: ModelSource[],
 };
 
-// One instance of an extension's provider (`extensionInstances`).
-export type ExtensionInstanceConfig = {
-	// Run it (once this machine approved the provider).
-	enabled?: boolean,
-	// The instance's config, as the provider's `config_schema` describes.
-	config?: unknown,
-};
-
-/**
- *  What installing an extension from git would bring in, for a person to
- *  look at first (tsk378): the extension as it would load (its lenses,
- *  sources with their programs, hosts and credentials, advisories,
- *  gauges; `extension.errors` are load errors, which block the install),
- *  the commit it's at, and `problems` a dry run of its lenses and
- *  advisories found (reported, not blocking: a lens over a source that
- *  hasn't synced can't run yet).
- */
-export type ExtensionReview = {
-	extension: Extension,
-	git: string,
-	gitRef: string | null,
-	// The commit reviewed; pass it back to install exactly this.
-	sha: string,
-	problems: string[],
-};
-
-// Provenance of an installed extension, kept in its `source.yaml`.
-export type ExtensionSource = {
-	// The git URL it was cloned from.
-	git: string,
-	// The branch, tag or commit asked for; `None` = the remote's default branch.
-	gitRef: string | null,
-	// The commit actually installed.
-	sha: string,
+// A loaded extension and anything wrong with it.
+export type Extension_Serialize = {
+	name: string,
+	description: string,
+	// Repo-relative path of the extension folder.
+	path: string,
+	/**
+	 *  Problems found while loading; empty when healthy. A lens that
+	 *  failed to load is listed here and missing from `lenses`.
+	 */
+	errors: string[],
+	/**
+	 *  Things worth fixing that don't stop it loading: a v1 manifest, an
+	 *  intent with no examples.
+	 */
+	warnings: string[],
+	/**
+	 *  `2` for a current manifest; `1` for one read through the v1
+	 *  compatibility path (see `warnings`).
+	 */
+	manifestVersion: number,
+	sharing: Sharing,
+	// Why it exists (required at v2; `None` for a v1 manifest).
+	intent: Intent | null,
+	lenses: Lens_Serialize[],
+	/**
+	 *  Where it was installed from, for extensions added with
+	 *  `install_extension`; `None` for ones written in this repo.
+	 */
+	source: ExtensionSource | null,
+	// Declared data sources (valid ones; invalid ones are in `errors`).
+	sources: SourceSpec[],
+	/**
+	 *  Declared providers (experimental: a private extension's only;
+	 *  valid ones — invalid ones are in `errors`).
+	 */
+	providers: ProviderSpec[],
+	/**
+	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
+	 *  read-only).
+	 */
+	origin: string,
+	// Lenses mounted into core pages.
+	slots: LensSlot[],
+	/**
+	 *  False when `.oxplow/project.yaml` disables it; a disabled
+	 *  extension has no lenses, slots, sources or advisories.
+	 */
+	enabled: boolean,
+	// Guidance for the coding agent (valid ones; invalid ones are in `errors`).
+	advisories: Advisory[],
+	/**
+	 *  Measures, metrics and gauges it contributes to the metric catalog
+	 *  (the `project.yaml` schema). Metrics are `key:` definitions and are
+	 *  on while the extension is enabled; gauges are `starlark`/`jaq` only,
+	 *  with their `entryFile` inside the extension.
+	 */
+	measures: MeasureEntry[],
+	metrics: MetricEntry[],
+	gauges: GaugeEntry[],
+	/**
+	 *  Dimensions it contributes (fact or entity), never promoted: an
+	 *  extension toggling would rebuild the metric cube each time.
+	 */
+	dimensions: DimensionEntry[],
+	/**
+	 *  Its SQL models (`models:` plus `models/<name>.sql`), published as
+	 *  `v_<extension>_<name>` (`extension_models`). Empty when any
+	 *  declaration is broken (see `errors`).
+	 */
+	models: ModelSource[],
 };
 
 export type FileSnapshot = {
@@ -2648,41 +2774,7 @@ export type ItemBody =
 export type LauncherCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Data" | "Lenses" | "System";
 
 // A loaded lens.
-export type Lens = {
-	/**
-	 *  `<extension>/<slug>`: the stable id used by `lens:` page refs,
-	 *  `run_lens` and `get_lens`.
-	 */
-	id: string,
-	extension: string,
-	slug: string,
-	title: string,
-	description: string,
-	query: string,
-	viz: LensViz,
-	params: LensParam[],
-	columns: LensColumn[],
-	empty: string | null,
-	// Columns a chart viz draws from.
-	chart: LensChart | null,
-	tree: LensTree | null,
-	timeline: LensTimeline | null,
-	steps: LensSteps | null,
-	hunks: LensHunks | null,
-	form: LensForm | null,
-	// For `grid`: child lens ids.
-	children: string[],
-	// Launcher section; `None` = "Lenses".
-	launcherCategory: LauncherCategory | null,
-	// Not listed in the launcher.
-	hidden: boolean,
-	// Commands the lens offers, as buttons or row actions (P6.B1).
-	actions: LensAction[],
-	// When the lens needs attention (a rail badge when mounted in `rail`).
-	alert: LensAlert | null,
-	// Repo-relative path of the lens file.
-	path: string,
-};
+export type Lens = Lens_Serialize | Lens_Deserialize;
 
 /**
  *  A button on a lens: a command it runs (P6.B1, target §11.4). The
@@ -2745,10 +2837,20 @@ export type LensColumn = {
 };
 
 // `form` viz: the command it submits and the values it starts from.
-export type LensForm = {
+export type LensForm = LensForm_Serialize | LensForm_Deserialize;
+
+// `form` viz: the command it submits and the values it starts from.
+export type LensForm_Deserialize = {
 	command: string | null,
 	// Input values the form starts with (`{{param.x}}` placeholders bound).
 	defaults?: unknown | null,
+};
+
+// `form` viz: the command it submits and the values it starts from.
+export type LensForm_Serialize = {
+	command: string | null,
+	// Input values the form starts with (`{{param.x}}` placeholders bound).
+	defaults: unknown | null,
 };
 
 // `hunks` viz: the file and the two revisions each row diffs.
@@ -2817,8 +2919,21 @@ export type LensParam = {
 };
 
 // The result of running a lens.
-export type LensRun = {
-	lens: Lens,
+export type LensRun = LensRun_Serialize | LensRun_Deserialize;
+
+// The result of running a lens.
+export type LensRun_Deserialize = {
+	lens: Lens_Deserialize,
+	// The parameter values actually used (supplied or default).
+	params: { [key in string]: SqlCell },
+	result: SqlQueryResult,
+	// The lens's alert on this result, if it declares one.
+	alert: AlertState | null,
+};
+
+// The result of running a lens.
+export type LensRun_Serialize = {
+	lens: Lens_Serialize,
 	// The parameter values actually used (supplied or default).
 	params: { [key in string]: SqlCell },
 	result: SqlQueryResult,
@@ -2835,6 +2950,69 @@ export type LensSlot = {
 	 */
 	slot: string,
 	lensId: string,
+};
+
+/**
+ *  What a lens shows — the view part of a lens file, and the one shape a
+ *  lens is made from: a lens file's body, an agent's answer
+ *  (`thread_answer.spec`, P6.C1), what Explore Data saves, and what
+ *  [`save_lens`] writes. The rest of a lens file (launcher placement,
+ *  actions, an alert) is added by editing it.
+ */
+export type LensSpec = LensSpec_Serialize | LensSpec_Deserialize;
+
+/**
+ *  What a lens shows — the view part of a lens file, and the one shape a
+ *  lens is made from: a lens file's body, an agent's answer
+ *  (`thread_answer.spec`, P6.C1), what Explore Data saves, and what
+ *  [`save_lens`] writes. The rest of a lens file (launcher placement,
+ *  actions, an alert) is added by editing it.
+ */
+export type LensSpec_Deserialize = {
+	title: string,
+	description?: string,
+	/**
+	 *  SQL over the `v_*` models, with `:param` bindings. Only a `form`
+	 *  may leave it empty.
+	 */
+	query?: string,
+	viz?: LensViz,
+	params?: LensParam[],
+	columns?: LensColumn[],
+	empty?: string | null,
+	chart?: LensChart | null,
+	tree?: LensTree | null,
+	timeline?: LensTimeline | null,
+	steps?: LensSteps | null,
+	hunks?: LensHunks | null,
+	form?: LensForm_Deserialize | null,
+};
+
+/**
+ *  What a lens shows — the view part of a lens file, and the one shape a
+ *  lens is made from: a lens file's body, an agent's answer
+ *  (`thread_answer.spec`, P6.C1), what Explore Data saves, and what
+ *  [`save_lens`] writes. The rest of a lens file (launcher placement,
+ *  actions, an alert) is added by editing it.
+ */
+export type LensSpec_Serialize = {
+	title: string,
+	description: string,
+	/**
+	 *  SQL over the `v_*` models, with `:param` bindings. Only a `form`
+	 *  may leave it empty.
+	 */
+	query: string,
+	viz: LensViz,
+	params: LensParam[],
+	columns: LensColumn[],
+	empty: string | null,
+	chart: LensChart | null,
+	tree: LensTree | null,
+	timeline: LensTimeline | null,
+	steps: LensSteps | null,
+	hunks: LensHunks | null,
+	form: LensForm_Serialize | null,
 };
 
 // `steps` viz: each step's text and status.
@@ -2919,6 +3097,80 @@ export type LensViz =
  *  Submitting runs the command as the lens (P6.B2).
  */
 "form";
+
+// A loaded lens.
+export type Lens_Deserialize = {
+	/**
+	 *  `<extension>/<slug>`: the stable id used by `lens:` page refs,
+	 *  `run_lens` and `get_lens`.
+	 */
+	id: string,
+	extension: string,
+	slug: string,
+	title: string,
+	description: string,
+	query: string,
+	viz: LensViz,
+	params: LensParam[],
+	columns: LensColumn[],
+	empty: string | null,
+	// Columns a chart viz draws from.
+	chart: LensChart | null,
+	tree: LensTree | null,
+	timeline: LensTimeline | null,
+	steps: LensSteps | null,
+	hunks: LensHunks | null,
+	form: LensForm_Deserialize | null,
+	// For `grid`: child lens ids.
+	children: string[],
+	// Launcher section; `None` = "Lenses".
+	launcherCategory: LauncherCategory | null,
+	// Not listed in the launcher.
+	hidden: boolean,
+	// Commands the lens offers, as buttons or row actions (P6.B1).
+	actions: LensAction[],
+	// When the lens needs attention (a rail badge when mounted in `rail`).
+	alert: LensAlert | null,
+	// Repo-relative path of the lens file.
+	path: string,
+};
+
+// A loaded lens.
+export type Lens_Serialize = {
+	/**
+	 *  `<extension>/<slug>`: the stable id used by `lens:` page refs,
+	 *  `run_lens` and `get_lens`.
+	 */
+	id: string,
+	extension: string,
+	slug: string,
+	title: string,
+	description: string,
+	query: string,
+	viz: LensViz,
+	params: LensParam[],
+	columns: LensColumn[],
+	empty: string | null,
+	// Columns a chart viz draws from.
+	chart: LensChart | null,
+	tree: LensTree | null,
+	timeline: LensTimeline | null,
+	steps: LensSteps | null,
+	hunks: LensHunks | null,
+	form: LensForm_Serialize | null,
+	// For `grid`: child lens ids.
+	children: string[],
+	// Launcher section; `None` = "Lenses".
+	launcherCategory: LauncherCategory | null,
+	// Not listed in the launcher.
+	hidden: boolean,
+	// Commands the lens offers, as buttons or row actions (P6.B1).
+	actions: LensAction[],
+	// When the lens needs attention (a rail badge when mounted in `rail`).
+	alert: LensAlert | null,
+	// Repo-relative path of the lens file.
+	path: string,
+};
 
 export type Lifecycle = "stable" | "experimental";
 
@@ -3154,14 +3406,6 @@ export type MoveTaskRequest = {
 	id: TaskId,
 	// Destination thread, or `None` to move onto the backlog.
 	threadId: ThreadId | null,
-};
-
-// What the Explore Data page saves as a new lens.
-export type NewLens = {
-	title: string,
-	description?: string,
-	query: string,
-	viz: LensViz,
 };
 
 export type NoteId = string;

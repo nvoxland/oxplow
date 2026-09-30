@@ -290,6 +290,7 @@ macro_rules! oxplow_command_table {
                 run_lens_action => $crate::commands::extensions::run_lens_action { id: String, action: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 lens_form => $crate::commands::extensions::lens_form { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::lens_actions::FormStart,
                 submit_lens_form => $crate::commands::extensions::submit_lens_form { id: String, input: ::oxplow_domain::Json, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
+                run_answer => $crate::commands::extensions::run_answer { answer: String } -> ::oxplow_app::extensions::LensRun,
                 lens_text => $crate::commands::extensions::lens_text { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> String,
                 validate_extension => $crate::commands::extensions::validate_extension { name: String, stream_id: Option<String> } -> ::oxplow_sdk::CheckReport,
                 review_extension => $crate::commands::extensions::review_extension { git_url: Option<String>, git_ref: Option<String>, name: Option<String>, stream_id: Option<String> } -> ::oxplow_app::extensions::ExtensionReview,
@@ -313,7 +314,7 @@ macro_rules! oxplow_command_table {
                 check_provider_instance => $crate::commands::providers::check_provider_instance { instance: String, config: ::oxplow_domain::Json } -> ::oxplow_app::providers::ProviderInstanceView,
                 set_provider_instance => $crate::commands::providers::set_provider_instance { instance: String, enabled: bool, config: ::oxplow_domain::Json } -> Vec<::oxplow_app::providers::ProviderInstanceView>,
                 report_open_page => $crate::commands::open_page::report_open_page { thread_id: String, page_id: Option<String>, kind: Option<String>, detail_json: Option<String> } -> (),
-                save_lens => $crate::commands::extensions::save_lens { extension: String, slug: String, lens: ::oxplow_app::extensions::NewLens, stream_id: Option<String> } -> ::oxplow_app::extensions::Lens,
+                save_lens => $crate::commands::extensions::save_lens { extension: String, slug: String, lens: ::oxplow_app::extensions::LensSpec, stream_id: Option<String> } -> ::oxplow_app::extensions::Lens,
                 // comments
                 create_comment => $crate::commands::comments::create_comment { req: $crate::commands::comments::CreateCommentRequest } -> ::oxplow_domain::CommentThread,
                 add_comment_message => $crate::commands::comments::add_comment_message { comment_id: ::oxplow_domain::CommentId, author: String, body: String } -> ::oxplow_domain::CommentMessage,

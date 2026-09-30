@@ -518,6 +518,8 @@ pub struct Services {
     pub ext_source_store: Arc<oxplow_db::SqliteExtSourceStore>,
     /// Runs project sources (the `source.sync` command and the scheduler).
     pub source_runner: source_runner::SourceRunner,
+    /// An agent's answers in threads (`v_thread_answer`, `lens.show`).
+    pub thread_answer_store: oxplow_db::SqliteThreadAnswerStore,
     /// Agent decisions and claims (`v_decision`, `v_claim`).
     pub reasoning_store: Arc<oxplow_db::SqliteReasoningStore>,
     /// Persisted agent tool calls (`v_tool_call` and derived views).
@@ -1067,6 +1069,13 @@ impl Services {
         commands
             .register(source_runner::sync_command(source_runner.clone()))
             .expect("source.sync registers");
+        for command in commands::lens::commands(commands::lens::LensTarget {
+            project_dir: layout.project_dir.clone(),
+            catalog: extension_catalog.clone(),
+        }) {
+            commands.register(command).expect("lens commands register");
+        }
+        let thread_answer_store = oxplow_db::SqliteThreadAnswerStore::new(db.clone());
         let knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider> =
             Arc::new(knowledge::OxplowKnowledge::new(&commands, db.clone()));
         for command in knowledge::commands(knowledge::KnowledgeTarget {
@@ -1196,6 +1205,7 @@ impl Services {
             dashboard_store,
             ext_source_store,
             source_runner,
+            thread_answer_store,
             reasoning_store,
             tool_call_store,
             git_store,

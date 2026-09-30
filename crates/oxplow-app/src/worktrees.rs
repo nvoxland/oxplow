@@ -15,6 +15,17 @@ use oxplow_domain::stores::StreamStore;
 use oxplow_domain::{DomainError, Stream, StreamId};
 use tokio::sync::RwLock;
 
+/// Where a stream whose `worktree_path` is `worktree_path` works: the path
+/// itself when absolute, else under the primary checkout.
+pub fn workspace_path(project_dir: &Path, worktree_path: &str) -> PathBuf {
+    let raw = PathBuf::from(worktree_path);
+    if raw.is_absolute() {
+        raw
+    } else {
+        project_dir.join(raw)
+    }
+}
+
 pub struct WorktreeRouter {
     project_dir: PathBuf,
     streams: Arc<dyn StreamStore>,
@@ -78,12 +89,7 @@ impl WorktreeRouter {
     }
 
     fn path_of(&self, stream: &Stream) -> PathBuf {
-        let raw = PathBuf::from(&stream.worktree_path);
-        if raw.is_absolute() {
-            raw
-        } else {
-            self.project_dir.join(raw)
-        }
+        workspace_path(&self.project_dir, &stream.worktree_path)
     }
 
     /// Forget a deleted stream.

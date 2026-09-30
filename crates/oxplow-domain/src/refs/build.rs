@@ -19,6 +19,16 @@ pub fn thread_ref(id: ThreadId) -> String {
     format!("thread:{id}")
 }
 
+/// An agent's answer in a thread (`thread_answer.id`).
+pub fn answer_ref(id: i64) -> String {
+    format!("answer:{id}")
+}
+
+/// A lens (`<extension>/<slug>`).
+pub fn lens_ref(id: &str) -> String {
+    format!("lens:{id}")
+}
+
 pub fn effort_ref(id: EffortId) -> String {
     format!("effort:{id}")
 }

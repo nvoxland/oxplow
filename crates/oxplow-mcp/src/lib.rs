@@ -730,6 +730,21 @@ pub struct StreamScopeParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ShowLensParams {
+    /// An existing lens to show (`<extension>/<slug>`, see `list_lenses`).
+    /// Give this or `spec`.
+    pub lens: Option<String>,
+    /// A lens of your own: `title`, `query` (read-only SQL over the `v_*`
+    /// models, `:param` bindings), `viz` (`table`, `list`, `number`,
+    /// `markdown`, `bar`, `line`, `treemap`, `tree`, `timeline`, `detail`,
+    /// `steps`, `hunks`) and what the viz needs (`chart: {x, y, series}`,
+    /// `tree: {id, parent, label}`, …; the same keys as a lens file).
+    pub spec: Option<oxplow_app::extensions::LensSpec>,
+    /// Param values by name.
+    pub params: Option<std::collections::BTreeMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LensIdParams {
     /// Lens id: `<extension>/<slug>` (see `list_lenses`).
     pub id: String,
@@ -1763,6 +1778,53 @@ impl OxplowMcp {
             .flat_map(|e| e.lenses.clone())
             .collect();
         json_result(&lenses)
+    }
+
+    #[tool(
+        description = "Show the person an answer in their thread — a table, chart, tree, list of \
+                       refs … — instead of pasting it as text: an existing lens with params, or \
+                       a lens of your own (`spec`). It renders beside the conversation, live, \
+                       with a \"Keep this\" that turns it into a lens they can reopen and share. \
+                       Returns the answer's ref and its text rendering (what they see). Its SQL \
+                       has `query_sql`'s rights: read-only, over the `v_*` models."
+    )]
+    async fn show_lens(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<ShowLensParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let caller = caller_of(&extensions);
+        let actor = self.verified_actor(&caller).await?;
+        let out = self
+            .services
+            .commands
+            .run(
+                &actor,
+                oxplow_app::commands::lens::SHOW,
+                serde_json::json!({ "lens": p.lens, "spec": p.spec, "params": p.params }),
+                false,
+            )
+            .await
+            .map_err(command_error)?;
+        let answer = out.result["answer"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let id: i64 = answer
+            .strip_prefix("answer:")
+            .and_then(|n| n.parse().ok())
+            .ok_or_else(|| internal("lens.show returned no answer"))?;
+        let run = oxplow_app::commands::lens::run_answer(&self.services, id)
+            .await
+            .map_err(domain_err)?;
+        let stream = self.stream_or_callers(&caller, None).await;
+        let root = self.services.worktrees.resolve(stream.as_deref()).await;
+        let ctx = self.lens_context(stream.as_deref(), None).await?;
+        let text = oxplow_app::lens_text::text_of(&self.services, &root, &run, &ctx)
+            .await
+            .map_err(domain_err)?;
+        json_result(&serde_json::json!({ "answer": answer, "title": run.lens.title, "text": text }))
     }
 
     #[tool(
@@ -4524,8 +4586,10 @@ const READ_ONLY_TOOLS: &[&str] = &[
 const WRITE_TOOLS: &[&str] = &[
     // The one write path: every command, audited to the calling thread.
     "run_command",
-    // The dead-letter queue's two decisions.
+    // A lens's action runs its command, as the lens acting for the caller.
     "run_lens_action",
+    // Records an answer in the caller's thread (the `lens.show` command).
+    "show_lens",
     // Stores the change's analysis and starts its duplicate scan.
     "ensure_change",
     // Runs a source's program (stores nothing, but it executes code).
@@ -7097,6 +7161,54 @@ mod tests {
             )
             .await
             .unwrap();
+    }
+
+    /// P6.C1: an agent shows an answer in its thread; the tool returns its
+    /// ref and what the person sees, as text.
+    #[tokio::test]
+    async fn show_lens_records_an_answer_and_returns_its_text() {
+        let (_proj, services, server) = boot();
+        let out: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .show_lens(
+                    as_writer(&services).await,
+                    Parameters(ShowLensParams {
+                        lens: None,
+                        spec: Some(
+                            serde_json::from_value(serde_json::json!({
+                                "title": "Streams",
+                                "query": "SELECT kind FROM v_stream",
+                            }))
+                            .unwrap(),
+                        ),
+                        params: None,
+                    }),
+                )
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert!(
+            out["answer"].as_str().unwrap().starts_with("answer:"),
+            "{out}"
+        );
+        assert!(
+            out["text"].as_str().unwrap().contains("| primary |"),
+            "{out}"
+        );
+        // Without a thread identity there's nowhere to show it.
+        let err = server
+            .show_lens(
+                rmcp::model::Extensions::new(),
+                Parameters(ShowLensParams {
+                    lens: Some("x/y".into()),
+                    spec: None,
+                    params: None,
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(!err.message.is_empty());
     }
 
     #[tokio::test]

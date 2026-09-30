@@ -65,6 +65,9 @@ the §4.2 vocabulary plus `finding`, `task_note` and `run`. Only
 capability's active provider.
 
 `config` (a config key, `config:zones`) is registered too (P2.4b, tsk450).
+`answer` (a lens an agent showed on a thread, `answer:12`, P6.C1) is
+registered with a numeric id; `build::answer_ref` and `build::lens_ref`
+(`lens:<extension>/<slug>`) build them.
 
 ## Building refs in Rust (built, P2.4b)
 

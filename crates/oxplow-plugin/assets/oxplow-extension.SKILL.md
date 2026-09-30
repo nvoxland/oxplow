@@ -15,6 +15,21 @@ You build them with your normal file tools. `oxplow plugin new lens
 <name> --origin <your effort ref>` scaffolds the folder with a v2 manifest,
 an intent, one example and fixture, and a starter lens; then edit.
 
+## 0. Answering with a lens (`show_lens`)
+
+When the user asks a question whose answer is a table, chart or list —
+"which files changed most this week?" — **show** it rather than pasting
+rows into the terminal: call `show_lens` with either `lens` (an existing
+lens id, plus `params`) or `spec` (a lens of your own: `title`, `query`,
+`viz` and what the viz needs, the same keys as a lens file). oxplow runs
+the query read-only (as `query_sql` does), stores the answer on the
+thread and shows it beside the conversation; the tool returns the
+answer's ref and its text rendering, which is what you tell the user.
+
+Nothing is written to the repo. The user presses **Keep This** to turn an
+answer into a private lens (in `my-lenses`), and shares it from there. Build
+a lens file (below) only when they ask for a lasting page.
+
 ## 1. Find the data
 
 - `v_model` lists every queryable view (`v_stream`, `v_thread`, `v_task`,

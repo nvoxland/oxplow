@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_app::extensions::{self, Extension, Lens, LensRun, NewLens};
+use oxplow_app::extensions::{self, Extension, Lens, LensRun, LensSpec};
 use oxplow_app::Services;
 use oxplow_db::SqlCell;
 use oxplow_domain::DomainError;
@@ -67,6 +67,16 @@ pub async fn run_lens(
 async fn context(svc: &Services, stream_id: Option<&str>) -> extensions::LensContext {
     let stream = stream_id.and_then(oxplow_domain::StreamId::try_from_str);
     extensions::lens_context(svc, stream, None).await
+}
+
+/// Run an answer shown in a thread (`answer:<id>`) as the person sees it.
+pub async fn run_answer(svc: &Services, answer: String) -> Result<LensRun, IpcError> {
+    let id: i64 = answer
+        .strip_prefix("answer:")
+        .unwrap_or(&answer)
+        .parse()
+        .map_err(|_| IpcError::invalid(format!("`{answer}` isn't an answer (`answer:<id>`)")))?;
+    Ok(oxplow_app::commands::lens::run_answer(svc, id).await?)
 }
 
 /// A lens's text rendering (`lens_text`): what Copy puts on the
@@ -281,14 +291,23 @@ pub async fn save_lens(
     svc: &Services,
     extension: String,
     slug: String,
-    lens: NewLens,
+    lens: LensSpec,
     stream_id: Option<String>,
 ) -> Result<Lens, IpcError> {
     // A lens reads published models only: the explorer's raw mode can
     // run a physical-table query, but it can't be saved as one.
     svc.sql.check(&lens.query).await?;
     let root = root(svc, stream_id.as_deref()).await;
-    Ok(extensions::save_lens(&root, &extension, &slug, lens)?)
+    Ok(extensions::save_lens(
+        &root,
+        &extension,
+        &slug,
+        &lens,
+        &extensions::LensOrigin {
+            purpose: &lens.title,
+            origin: None,
+        },
+    )?)
 }
 
 #[cfg(test)]

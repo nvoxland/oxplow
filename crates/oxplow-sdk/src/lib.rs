@@ -128,6 +128,7 @@ pub fn scaffold(
         example_name: "basic",
         example_input: &example_input,
         example_expect: &example_expect,
+        shared: false,
     });
     if kind == Kind::Provider {
         manifest.push_str(&format!(

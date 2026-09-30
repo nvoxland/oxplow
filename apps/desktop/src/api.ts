@@ -35,7 +35,7 @@ import type {
   Lens,
   LensRun,
   LensViz,
-  NewLens,
+  LensSpec,
   ProviderConfig,
   RecentProjectView,
   Role,
@@ -77,7 +77,7 @@ export type {
   TranscriptItem,
 };
 export type { DiffEntry };
-export type { DataEntity, Extension, ExtensionReview, Lens, LensRun, LensViz, NewLens, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
+export type { DataEntity, Extension, ExtensionReview, Lens, LensRun, LensViz, LensSpec, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
 export type { ProviderInstanceView };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
@@ -760,7 +760,7 @@ export async function testAiProvider(id: string, model: string): Promise<string>
 export async function saveLens(
   extension: string,
   slug: string,
-  lens: NewLens,
+  lens: LensSpec,
   streamId: string | null,
 ): Promise<Lens> {
   return unwrap(await commands.saveLens(extension, slug, lens, streamId));

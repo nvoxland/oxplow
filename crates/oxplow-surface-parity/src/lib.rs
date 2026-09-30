@@ -170,6 +170,10 @@ pub const MANIFEST: &[Capability] = &[
     both("run_lens_action"),
     // Copy on every lens; an agent reads the same text through run_lens.
     ui("lens_text"),
+    // An agent's answers: it shows one (the `lens.show` command); the UI
+    // runs each for the Answers strip.
+    agent("show_lens"),
+    ui("run_answer"),
     // A form lens: agents run the command itself.
     ui("lens_form"),
     ui("submit_lens_form"),

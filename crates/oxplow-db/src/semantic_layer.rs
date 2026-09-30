@@ -146,7 +146,7 @@ impl SqlQuery {
 /// One SQL value, serialized as a plain JSON scalar (`null`, boolean,
 /// number or string) so the TS binding is `null | boolean | number |
 /// string` rather than serde_json's tagged-enum shape.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum SqlCell {
     Null(()),
@@ -225,28 +225,8 @@ impl SemanticLayer {
     /// [`Self::check`] for a whole query: its temp tables exist while it
     /// compiles, and `raw` records rather than refuses.
     pub async fn check_with(&self, query: SqlQuery) -> Result<Reads, DomainError> {
-        crate::sql_tokens::check_single_read(&query.sql)?;
         self.db
-            .call(move |conn| {
-                Ok((|| {
-                    let _temp = TempTables::create(conn, &query.temp)?;
-                    let access = if query.raw {
-                        Access::Record
-                    } else {
-                        Access::Enforce
-                    };
-                    let session = ReadSession::open(conn, access, &query.sql)?;
-                    {
-                        let stmt = conn
-                            .prepare(&query.sql)
-                            .map_err(|e| session.refusal().unwrap_or_else(|| invalid(e)))?;
-                        if !stmt.readonly() {
-                            return Err(read_only_only());
-                        }
-                    }
-                    Ok(session.reads())
-                })())
-            })
+            .call(move |conn| Ok(check_query_on(conn, &query)))
             .await?
     }
 
@@ -788,6 +768,30 @@ fn run_read_only(
         }
         other => invalid(other),
     })
+}
+
+/// [`SemanticLayer::check_with`] on `conn` — for a command's handler,
+/// which checks an agent's SQL inside its own transaction: a single
+/// read-only `SELECT`/`WITH` over the published models (the `query_sql`
+/// authorizer), compiled but not run. What it would read.
+pub fn check_query_on(conn: &rusqlite::Connection, query: &SqlQuery) -> Result<Reads, DomainError> {
+    crate::sql_tokens::check_single_read(&query.sql)?;
+    let _temp = TempTables::create(conn, &query.temp)?;
+    let access = if query.raw {
+        Access::Record
+    } else {
+        Access::Enforce
+    };
+    let session = ReadSession::open(conn, access, &query.sql)?;
+    {
+        let stmt = conn
+            .prepare(&query.sql)
+            .map_err(|e| session.refusal().unwrap_or_else(|| invalid(e)))?;
+        if !stmt.readonly() {
+            return Err(read_only_only());
+        }
+    }
+    Ok(session.reads())
 }
 
 #[cfg(test)]
