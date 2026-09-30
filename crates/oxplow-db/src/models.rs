@@ -882,6 +882,7 @@ pub fn compile_extensions(
         .cloned()
         .collect();
     let mut done: BTreeSet<String> = BTreeSet::new();
+    let mut published: Vec<(String, &ModelSource)> = Vec::new();
     let mut pending = resolved;
     while !pending.is_empty() {
         let mut progressed = false;
@@ -907,6 +908,7 @@ pub fn compile_extensions(
                         tx.execute_batch("RELEASE extension_model")
                             .map_err(map_sql_err)?;
                         done.insert(m.view.clone());
+                        published.push((ext.clone(), m.source));
                     }
                     Err(err) => {
                         tx.execute_batch("ROLLBACK TO extension_model; RELEASE extension_model")
@@ -935,6 +937,44 @@ pub fn compile_extensions(
             break;
         }
         pending = waiting;
+    }
+    // Declared tests, on what published: a failure is the extension's
+    // health, and the view stays.
+    for e in extensions {
+        let mine: Vec<ModelSource> = published
+            .iter()
+            .filter(|(ext, _)| ext == &e.extension)
+            .map(|(_, src)| (*src).clone())
+            .collect();
+        if mine.is_empty() {
+            continue;
+        }
+        let view_of = |name: &str| {
+            known
+                .get(&(e.extension.clone(), name.to_string()))
+                .or_else(|| known.get(&(CORE.to_string(), name.to_string())))
+                .cloned()
+                .unwrap_or_else(|| extension_view(&e.extension, name))
+        };
+        let file_of: HashMap<String, String> = mine
+            .iter()
+            .map(|src| {
+                (
+                    extension_view(&e.extension, &src.decl.name),
+                    src.file.clone(),
+                )
+            })
+            .collect();
+        for r in run_tests(&tx, &mine, &view_of)? {
+            let file = file_of.get(&r.view).cloned().unwrap_or_default();
+            let detail = r.detail.unwrap_or_default();
+            let problem = match r.state {
+                "failed" => format!("{file}: test {} failed: {detail}", r.test),
+                "error" => format!("{file}: test {} didn't run: {detail}", r.test),
+                _ => continue,
+            };
+            push(&mut errors, &e.extension, problem);
+        }
     }
     tx.commit().map_err(map_sql_err)?;
     Ok(errors)
@@ -1386,5 +1426,55 @@ mod tests {
             published(&conn),
             vec![("v_shaky_fine".into(), "shaky".into(), "v_task".into())]
         );
+    }
+
+    /// P4.9 (tsk494): an extension model's declared tests run after it
+    /// publishes; a failure is in `model_test` and the extension's errors,
+    /// and the view stays published.
+    #[test]
+    fn an_extension_models_failing_test_is_reported_not_fatal() {
+        let mut conn = fresh();
+        conn.execute_batch(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 't', 'main', 'refs/heads/main', 'main', '/r', '2026-01-01', '2026-01-01');",
+        )
+        .unwrap();
+        let mut m = source(
+            "streams",
+            "SELECT id, NULL AS owner FROM ref('stream')",
+            &["id INTEGER", "owner"],
+        );
+        m.decl.tests = vec![
+            serde_yaml::from_str("{ not_null: owner }").unwrap(),
+            serde_yaml::from_str("{ relationships: { column: id, to: stream, field: id } }")
+                .unwrap(),
+        ];
+        let errors = compile_extensions(&mut conn, &[ext("checks", vec![m])]).unwrap();
+        let joined = errors["checks"].join("\n");
+        assert!(
+            joined.contains("not_null(owner) failed: 1 row(s) break it"),
+            "{joined}"
+        );
+        assert!(!joined.contains("relationships"), "{joined}");
+        let states: Vec<(String, String)> = {
+            let mut st = conn
+                .prepare("SELECT test, state FROM model_test WHERE view = 'v_checks_streams' ORDER BY test")
+                .unwrap();
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        assert_eq!(
+            states,
+            vec![
+                ("not_null(owner)".into(), "failed".into()),
+                ("relationships(id -> stream.id)".into(), "passed".into()),
+            ]
+        );
+        conn.query_row("SELECT count(*) FROM v_checks_streams", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .unwrap();
     }
 }
