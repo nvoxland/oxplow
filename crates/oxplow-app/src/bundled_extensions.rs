@@ -718,16 +718,14 @@ mod tests {
     /// Waiting on Me sits in the rail and raises an alert while anything
     /// is waiting on the user.
     #[tokio::test]
-    async fn waiting_on_me_alerts_in_the_rail() {
+    async fn waiting_on_me_is_a_panel_whose_badge_alerts() {
         let f = crate::test_fixtures::services_with_effort().await;
         let review = crate::extensions::load_extensions(f._dir.path())
             .into_iter()
             .find(|e| e.name == "oxplow-review")
             .unwrap();
-        assert!(review
-            .slots
-            .iter()
-            .any(|s| s.slot == "rail" && s.lens_id == "oxplow-review/waiting-on-me"));
+        assert!(review.panels.iter().any(|p| p.id == "oxplow-review/waiting"
+            && p.badge.as_deref() == Some("oxplow-review/waiting-on-me")));
         let layer = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
         let alert = |run: crate::extensions::LensRun| run.alert.unwrap();
         let run = crate::extensions::run_lens(

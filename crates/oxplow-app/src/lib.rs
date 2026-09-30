@@ -519,6 +519,8 @@ pub struct Services {
     pub source_runner: source_runner::SourceRunner,
     /// An agent's answers in threads (`v_thread_answer`, `lens.show`).
     pub thread_answer_store: oxplow_db::SqliteThreadAnswerStore,
+    /// The person's left-nav layout (P6.G1).
+    pub panel_layout_store: oxplow_db::SqlitePanelLayoutStore,
     /// Agent decisions and claims (`v_decision`, `v_claim`).
     pub reasoning_store: Arc<oxplow_db::SqliteReasoningStore>,
     /// Persisted agent tool calls (`v_tool_call` and derived views).
@@ -1070,6 +1072,7 @@ impl Services {
             commands.register(command).expect("lens commands register");
         }
         let thread_answer_store = oxplow_db::SqliteThreadAnswerStore::new(db.clone());
+        let panel_layout_store = oxplow_db::SqlitePanelLayoutStore::new(db.clone());
         let knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider> =
             Arc::new(knowledge::OxplowKnowledge::new(&commands, db.clone()));
         for command in knowledge::commands(knowledge::KnowledgeTarget {
@@ -1200,6 +1203,7 @@ impl Services {
             ext_source_store,
             source_runner,
             thread_answer_store,
+            panel_layout_store,
             reasoning_store,
             tool_call_store,
             git_store,

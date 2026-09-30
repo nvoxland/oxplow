@@ -76,8 +76,8 @@ pub enum LensViz {
 }
 
 /// When a lens needs attention: its row count reaches `min_rows`, or the
-/// first row's `column` goes `above` / `below` a threshold. Shown as a rail
-/// badge when the lens is mounted in the `rail` slot.
+/// first row's `column` goes `above` / `below` a threshold. A left-nav
+/// panel's `badge` lens shows its count, and the Alerts panel lists it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LensAlert {
@@ -682,13 +682,52 @@ pub const SLOTS: &[(&str, &[&str])] = &[
     ("thread", &["thread_id"]),
     ("commit", &["change_id"]),
     ("uncommitted", &["change_id"]),
-    // The rail: no params; mounted lenses must declare an `alert` and show
-    // as a badge while it fires.
-    ("rail", &[]),
     // Settings: a section per extension with the lenses it mounts (its
     // own status or configuration views). No params.
     ("settings", &[]),
 ];
+
+/// What a left-nav panel is bound to: the project, the current stream, or
+/// the current thread — which of `stream_id` / `thread_id` its lenses get.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum PanelScope {
+    Project,
+    Stream,
+    Thread,
+}
+
+/// A left-nav panel an extension contributes (P6.G1, target §11.3): its
+/// `body` lens renders compact in the nav; its `badge` lens's alert gives
+/// the count shown on the panel and in the Alerts panel.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionPanel {
+    /// `<extension>/<panel>`.
+    pub id: String,
+    pub extension: String,
+    pub title: String,
+    pub icon: Option<String>,
+    pub scope: PanelScope,
+    /// The body lens (`<extension>/<slug>`).
+    pub body: String,
+    /// The badge lens, which declares an `alert`.
+    pub badge: Option<String>,
+}
+
+/// A `panels:` entry as the manifest holds it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PanelFile {
+    id: String,
+    title: String,
+    #[serde(default)]
+    icon: Option<String>,
+    scope: PanelScope,
+    body: String,
+    #[serde(default)]
+    badge: Option<String>,
+}
 
 /// A lens an extension mounts into a core page.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -791,6 +830,9 @@ pub struct Extension {
     /// `v_<extension>_<name>` (`extension_models`). Empty when any
     /// declaration is broken (see `errors`).
     pub models: Vec<oxplow_db::models::ModelSource>,
+    /// Left-nav panels it contributes (valid ones; invalid ones are in
+    /// `errors`).
+    pub panels: Vec<ExtensionPanel>,
     /// Launcher entries for what isn't a lens: a page, a command, a
     /// prompt (P6.D1; valid ones — invalid ones are in `errors`).
     pub launcher: Vec<LauncherEntry>,
@@ -984,6 +1026,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         metrics: Vec::new(),
         gauges: Vec::new(),
         launcher: Vec::new(),
+        panels: Vec::new(),
     }
 }
 
@@ -1048,6 +1091,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             "manifest v1 (no `manifest:` key); run `oxplow plugin migrate` to rewrite it as v2 with an `intent`",
         ));
     }
+    let panel_files = m.panels.clone();
     let slot_files = {
         if let Some(v) = &m.collectors {
             let (sources, errors) = crate::extension_sources::parse_sources(name, v);
@@ -1326,7 +1370,17 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             _ => vec![],
         };
         let mount_line = line_under(&manifest, "slot_mounts", &format!("lens: {}", s.lens));
-        if slot_params.is_none() {
+        if s.slot == "rail" {
+            ext.errors.push(at(
+                &file,
+                mount_line,
+                format!(
+                    "the `rail` slot is gone: a lens that needs attention is a left-nav panel's \
+                     badge — `panels: [{{ id, title, scope: project, body: {0}, badge: {0} }}]`",
+                    s.lens
+                ),
+            ));
+        } else if slot_params.is_none() {
             ext.errors.push(at(
                 &file,
                 mount_line,
@@ -1360,15 +1414,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     s.slot, s.lens
                 ),
             ));
-        } else if s.slot == "rail" && lens.is_some_and(|l| l.alert.is_none()) {
-            ext.errors.push(at(
-                &file,
-                mount_line,
-                format!(
-                    "the `rail` slot shows alerts; lens `{}` declares no `alert`",
-                    s.lens
-                ),
-            ));
         } else {
             ext.slots.push(LensSlot {
                 slot: s.slot,
@@ -1376,7 +1421,108 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             });
         }
     }
+    if let Some(v) = panel_files {
+        let (panels, errors) = parse_panels(name, &ext.lenses, v);
+        ext.panels = panels;
+        ext.errors.extend(errors.into_iter().map(|(needle, e)| {
+            at(
+                &file,
+                line_under(&manifest, "panels", &needle).or(key_line(&manifest, "panels")),
+                e,
+            )
+        }));
+    }
     ext
+}
+
+/// Check the manifest's `panels:` against the extension's lenses: a panel
+/// id is kebab-case and unique, its lenses exist, a badge declares an
+/// `alert`, and a `stream` / `thread` scope's lenses declare `stream_id` /
+/// `thread_id` (what the nav binds). Errors carry text to find the line.
+fn parse_panels(
+    extension: &str,
+    lenses: &[Lens],
+    raw: serde_yaml::Value,
+) -> (Vec<ExtensionPanel>, Vec<(String, String)>) {
+    let mut panels: Vec<ExtensionPanel> = Vec::new();
+    let mut errors = Vec::new();
+    let Some(list) = raw.as_sequence() else {
+        return (
+            panels,
+            vec![(String::new(), "`panels` must be a list".into())],
+        );
+    };
+    for v in list {
+        let p = match serde_yaml::from_value::<PanelFile>(v.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                let needle = v
+                    .get("id")
+                    .and_then(|i| i.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                errors.push((needle, format!("panels: {e} (a panel is `{{ id, title, icon?, scope: project | stream | thread, body, badge? }}`)")));
+                continue;
+            }
+        };
+        let err = |e: String| (p.id.clone(), format!("panel `{}`: {e}", p.id));
+        if !is_advisory_id(&p.id) {
+            errors.push(err("a panel id is lowercase letters, digits and `-`".into()));
+            continue;
+        }
+        if panels
+            .iter()
+            .any(|q| q.id == format!("{extension}/{}", p.id))
+        {
+            errors.push(err("declared twice".into()));
+            continue;
+        }
+        let needs = match p.scope {
+            PanelScope::Project => None,
+            PanelScope::Stream => Some("stream_id"),
+            PanelScope::Thread => Some("thread_id"),
+        };
+        let mut ok = true;
+        for (role, slug) in [("body", Some(&p.body)), ("badge", p.badge.as_ref())] {
+            let Some(slug) = slug else { continue };
+            let Some(lens) = lenses.iter().find(|l| &l.slug == slug) else {
+                errors.push(err(format!("its {role} lens `{slug}` isn't in lenses/")));
+                ok = false;
+                continue;
+            };
+            if role == "badge" && lens.alert.is_none() {
+                errors.push(err(format!(
+                    "its badge lens `{slug}` declares no `alert` (the badge is its count)"
+                )));
+                ok = false;
+            }
+            if let Some(param) = needs {
+                if !lens.params.iter().any(|lp| lp.name == param) {
+                    let scope = if param == "stream_id" {
+                        "stream"
+                    } else {
+                        "thread"
+                    };
+                    errors.push(err(format!(
+                        "a `{scope}` panel's lenses get `{param}`; lens `{slug}` must declare `{param}` in `params`"
+                    )));
+                    ok = false;
+                }
+            }
+        }
+        if ok {
+            panels.push(ExtensionPanel {
+                id: format!("{extension}/{}", p.id),
+                extension: extension.to_string(),
+                title: p.title,
+                icon: p.icon,
+                scope: p.scope,
+                body: format!("{extension}/{}", p.body),
+                badge: p.badge.map(|b| format!("{extension}/{b}")),
+            });
+        }
+    }
+    (panels, errors)
 }
 
 /// Why `lens` can't render with its viz, if it can't.
@@ -1517,6 +1663,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.gauges.clear();
         ext.models.clear();
         ext.launcher.clear();
+        ext.panels.clear();
     }
     ext
 }
@@ -4196,29 +4343,78 @@ empty: No tasks.
         assert!(!run("review/cov", "v", 91).await.firing);
     }
 
+    /// P6.G1: the `rail` slot is gone — a lens that needs attention is a
+    /// panel's badge. A rail mount says where it went.
     #[test]
-    fn rail_lenses_must_declare_an_alert() {
+    fn a_rail_mount_is_an_error_naming_panels() {
         let (_d, ext) = load_x(
-            &[
-                ("ok", "title: A\nquery: SELECT 1\nalert: { min_rows: 1 }\n"),
-                ("quiet", "title: Q\nquery: SELECT 1\n"),
-            ],
-            "slots:\n  - { slot: rail, lens: ok }\n  - { slot: rail, lens: quiet }\n",
+            &[("ok", "title: A\nquery: SELECT 1\nalert: { min_rows: 1 }\n")],
+            "slots:\n  - { slot: rail, lens: ok }\n",
         );
-        assert_eq!(
-            ext.slots
-                .iter()
-                .map(|s| s.lens_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["x/ok"]
-        );
+        assert!(ext.slots.is_empty());
+        let errs = ext.errors.join("\n");
         assert!(
-            ext.errors
-                .iter()
-                .any(|e| e.contains("rail") && e.contains("quiet") && e.contains("alert")),
-            "{:?}",
-            ext.errors
+            errs.contains("`rail`") && errs.contains("panels:"),
+            "{errs}"
         );
+    }
+
+    /// P6.G1: a panel is a lens in the left nav, bound to a scope, with an
+    /// optional badge lens whose alert gives its count.
+    #[test]
+    fn panels_are_scoped_lenses_with_a_badge() {
+        let lenses = [
+            ("open", "title: Open\nquery: SELECT 1\nparams: [{ name: stream_id, default: '' }]\n"),
+            ("count", "title: Count\nquery: SELECT 1\nparams: [{ name: stream_id, default: '' }]\nalert: { min_rows: 1 }\n"),
+            ("quiet", "title: Quiet\nquery: SELECT 1\n"),
+        ];
+        let (_d, ext) = load_x(
+            &lenses,
+            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: prs, title: PRs, icon: git-pull-request, scope: stream, body: open, badge: count }\n",
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(
+            ext.panels,
+            vec![ExtensionPanel {
+                id: "x/prs".into(),
+                extension: "x".into(),
+                title: "PRs".into(),
+                icon: Some("git-pull-request".into()),
+                scope: PanelScope::Stream,
+                body: "x/open".into(),
+                badge: Some("x/count".into()),
+            }]
+        );
+        for (panel, says) in [
+            (
+                "{ id: a, title: A, scope: project, body: nope }",
+                "isn't in lenses/",
+            ),
+            (
+                "{ id: a, title: A, scope: project, body: quiet, badge: quiet }",
+                "declares no `alert`",
+            ),
+            (
+                "{ id: a, title: A, scope: thread, body: open }",
+                "must declare `thread_id`",
+            ),
+            ("{ id: a, title: A, scope: galaxy, body: open }", "scope"),
+            (
+                "{ id: Bad Id, title: A, scope: project, body: quiet }",
+                "panel id",
+            ),
+        ] {
+            let (_d, ext) = load_x(
+                &lenses,
+                &format!("manifest: 2\nintent:\n  purpose: p\npanels:\n  - {panel}\n"),
+            );
+            let errs = ext.errors.join("\n");
+            assert!(
+                errs.contains(says) && errs.contains("extension.yaml"),
+                "{panel}: {errs}"
+            );
+            assert!(ext.panels.is_empty(), "{panel}");
+        }
     }
 
     /// P6.B1: an action is a command. Its placeholders must name a param

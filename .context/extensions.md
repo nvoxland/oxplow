@@ -27,7 +27,8 @@ the bundled `oxplow-analytics` example extension.
 >     **`oxplow-analytics` extraction** (tsk280): every analytics page and
 >     widget is now a lens in that bundled extension, and core works with
 >     it disabled (checked headless, 2026-09-27).
->   - lens alerts and the `rail` slot (tsk316), and extension-declared
+>   - lens alerts (tsk316; the `rail` slot they mounted in became panels
+>     in P6.G1), and extension-declared
 >     measures, metrics and gauges (tsk311; see "Contributing metrics").
 > - **Current:** extension-declared dimensions (tsk328).
 > - **Current:** lens action buttons (tsk329) and the `settings` slot
@@ -118,10 +119,16 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     loader refuses one with both or neither condition. Every `LensRun`
     (IPC and MCP `run_lens`) carries `alert: {firing, count, value,
     message}`; the message is `label: count`, `N rows`, or `label: value`.
-  - The `rail` slot (no params) takes only lenses with an `alert`; the
-    rail's **Alerts** section (`AlertsSection` in `RailHud.tsx`, first by
-    default) runs them and lists each firing one, opening the lens.
-    oxplow-review mounts Waiting on Me there.
+  - **Panels** (P6.G1, target §11.3): `panels: [{ id, title, icon?,
+    scope: project | stream | thread, body, badge? }]` put a lens in the
+    left nav (`Extension.panels`, `ExtensionPanel`; checked at load in
+    `parse_panels`: a kebab-case id, lenses that exist, a badge with an
+    `alert`, and a `stream` / `thread` scope's lenses declaring
+    `stream_id` / `thread_id`). The body renders compact; the badge's
+    alert count shows on the panel, and the core **Alerts** panel lists
+    every firing badge. The `rail` slot is gone: a rail mount is a load
+    error naming `panels:`. oxplow-review's Waiting on You is a panel
+    whose badge is its own lens.
   - **Actions are commands** (P6.B1, target §11.4): `actions:` declares
     `{ id, label, command, input?, row? }` — a button above the result, or,
     with `row: true`, an item in each row's right-click menu.

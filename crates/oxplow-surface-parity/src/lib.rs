@@ -162,6 +162,8 @@ pub const MANIFEST: &[Capability] = &[
     // reads v_model and counts with query_sql.
     ui("list_data_entities"),
     ui("prompt_catalog"),
+    ui("get_panel_layout"),
+    ui("set_panel_layout"),
     both("list_extensions"),
     both("get_lens"),
     both("run_lens"),

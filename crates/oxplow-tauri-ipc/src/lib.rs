@@ -135,6 +135,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::query_sql,
             commands::generated::list_data_entities,
             commands::generated::prompt_catalog,
+            commands::generated::get_panel_layout,
+            commands::generated::set_panel_layout,
             // extensions + lenses
             commands::generated::list_extensions,
             commands::generated::get_lens,

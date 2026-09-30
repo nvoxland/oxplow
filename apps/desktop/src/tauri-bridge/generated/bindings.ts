@@ -255,6 +255,16 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	getPanelLayout: () => typedError<PanelPlacement[], IpcError>(__TAURI_INVOKE("get_panel_layout")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	setPanelLayout: (layout: PanelPlacement[]) => typedError<null, IpcError>(__TAURI_INVOKE("set_panel_layout", { layout })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listExtensions: (streamId: string | null) => typedError<Extension_Serialize[], IpcError>(__TAURI_INVOKE("list_extensions", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2132,6 +2142,24 @@ export type ExtensionInstanceConfig = {
 };
 
 /**
+ *  A left-nav panel an extension contributes (P6.G1, target §11.3): its
+ *  `body` lens renders compact in the nav; its `badge` lens's alert gives
+ *  the count shown on the panel and in the Alerts panel.
+ */
+export type ExtensionPanel = {
+	// `<extension>/<panel>`.
+	id: string,
+	extension: string,
+	title: string,
+	icon: string | null,
+	scope: PanelScope,
+	// The body lens (`<extension>/<slug>`).
+	body: string,
+	// The badge lens, which declares an `alert`.
+	badge: string | null,
+};
+
+/**
  *  What installing an extension from git would bring in, for a person to
  *  look at first (tsk378): the extension as it would load (its lenses,
  *  sources with their programs, hosts and credentials, advisories,
@@ -2260,6 +2288,11 @@ export type Extension_Deserialize = {
 	 */
 	models: ModelSource[],
 	/**
+	 *  Left-nav panels it contributes (valid ones; invalid ones are in
+	 *  `errors`).
+	 */
+	panels: ExtensionPanel[],
+	/**
 	 *  Launcher entries for what isn't a lens: a page, a command, a
 	 *  prompt (P6.D1; valid ones — invalid ones are in `errors`).
 	 */
@@ -2337,6 +2370,11 @@ export type Extension_Serialize = {
 	 *  declaration is broken (see `errors`).
 	 */
 	models: ModelSource[],
+	/**
+	 *  Left-nav panels it contributes (valid ones; invalid ones are in
+	 *  `errors`).
+	 */
+	panels: ExtensionPanel[],
 	/**
 	 *  Launcher entries for what isn't a lens: a page, a command, a
 	 *  prompt (P6.D1; valid ones — invalid ones are in `errors`).
@@ -2730,8 +2768,8 @@ export type LensAction = {
 
 /**
  *  When a lens needs attention: its row count reaches `min_rows`, or the
- *  first row's `column` goes `above` / `below` a threshold. Shown as a rail
- *  badge when the lens is mounted in the `rail` slot.
+ *  first row's `column` goes `above` / `below` a threshold. A left-nav
+ *  panel's `badge` lens shows its count, and the Alerts panel lists it.
  */
 export type LensAlert = {
 	minRows: number | null,
@@ -3703,6 +3741,19 @@ export type PageVisit = {
 	duration_ms: number | null,
 	thread_id: string | null,
 };
+
+// One panel's place in the layout.
+export type PanelPlacement = {
+	panel: string,
+	hidden: boolean,
+	collapsed: boolean,
+};
+
+/**
+ *  What a left-nav panel is bound to: the project, the current stream, or
+ *  the current thread — which of `stream_id` / `thread_id` its lenses get.
+ */
+export type PanelScope = "project" | "stream" | "thread";
 
 // How a permission request was answered.
 export type PermissionAnswer = { type: "selected"; optionId: string } | { type: "cancelled" };

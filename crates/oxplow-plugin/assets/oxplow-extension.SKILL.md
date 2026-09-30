@@ -74,7 +74,9 @@ intent:                 # required: what it is for, and how to know it works
     - { prompt: "What's waiting on me?" }
     - { prompt: "Who should review this effort?", about: effort }  # also on effort pages
 slot_mounts:            # optional: mount a lens into a core page
-  - { slot: rail, lens: waiting-on-me }
+  - { slot: task-detail, lens: task-history }
+panels:                 # optional: a left-nav panel (body lens compact, badge = an alert lens's count)
+  - { id: waiting, title: Waiting on Me, icon: bell, scope: stream, body: waiting-on-me, badge: waiting-on-me }
 ```
 
 A manifest without `manifest: 2` is read as the old v1 shape with a
@@ -151,10 +153,14 @@ empty: Nothing is waiting on you.
     `change_id` (the `v_change*` analysis);
   - `task-detail` (task page) → `task_id`;
   - `thread` (the Work panel, compact) → `thread_id`;
-  - `rail` → no params; the lens must have an `alert`, and shows in the
-    rail's Alerts section while it fires;
   - `settings` → no params; Settings shows a section named after the
     extension with its mounted lenses (its status or setup views).
+- **Panels** put a lens in the left nav (`panels: [{ id, title, icon?,
+  scope, body, badge? }]`): `body` renders compact; `badge` (a lens with
+  an `alert`) gives the panel's count and lists in the Alerts panel while
+  it fires. `scope` is `project`, `stream` or `thread` — a `stream` /
+  `thread` panel's lenses must declare `stream_id` / `thread_id`, which the
+  nav binds. The person arranges, hides and collapses panels.
 - **`alert:`** says when a lens needs attention: `{ min_rows: 1 }` (the
   run returned at least that many rows) or `{ column: pct, below: 80 }` /
   `above:` (the first row's value), with an optional `label`. `run_lens`

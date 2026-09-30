@@ -56,6 +56,20 @@ pub async fn prompt_catalog(
     ))
 }
 
+/// The person's left-nav layout (P6.G1): each panel's order, and whether
+/// it's hidden or collapsed. UI-only.
+pub async fn get_panel_layout(svc: &Services) -> Result<Vec<oxplow_db::PanelPlacement>, IpcError> {
+    Ok(svc.panel_layout_store.get().await?)
+}
+
+/// Replace the layout (the order is the list's).
+pub async fn set_panel_layout(
+    svc: &Services,
+    layout: Vec<oxplow_db::PanelPlacement>,
+) -> Result<(), IpcError> {
+    Ok(svc.panel_layout_store.set(layout).await?)
+}
+
 #[cfg(test)]
 mod tests {
     #[tokio::test]

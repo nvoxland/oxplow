@@ -6,12 +6,25 @@ import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, dashboardRef, lensRef } from "../../tabs/pageRefs.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
-import { moveToIndex } from "../CenterTabs/centerTabsReorder.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./sections.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
-import { listExtensions, runLens } from "../../api.js";
-import { firingAlerts, slotRuns } from "../../lens/lensModel.js";
-import { NO_READS, unionReads, useRerunOnChange } from "../../lens/lensRerun.js";
+import { getPanelLayout, listExtensions, runLens, setPanelLayout } from "../../api.js";
+import { firingAlerts } from "../../lens/lensModel.js";
+import { lensDefinitionChanged, NO_READS, unionReads, useRerunOnChange } from "../../lens/lensRerun.js";
+import { LensResultView } from "../../lens/LensResultView.js";
+import type { ExtensionPanel, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
+import {
+  CORE_PANELS,
+  extensionPanelId,
+  hidePanel,
+  movePanel,
+  resolveLayout,
+  showPanel,
+  toggleCollapsed,
+} from "../Panels/panelLayout.js";
+import { usePanelRuns } from "../Panels/usePanelRuns.js";
+import { useContextMenu } from "../useRowContextMenu.js";
+import { recordOpError } from "../opErrorsStore.js";
 import {
   listCommentsForStream,
   listRecentPageVisits,
@@ -69,72 +82,10 @@ export interface RailHudProps {
 // and the section order both persist in localStorage. The Search box is
 // pinned at the top and is not part of this set.
 
-// "bookmarks" is the combined Bookmarks + History pane: collapsed it
+// A panel id: core's (`core:work`, …) or an extension's (`ext:<ext>/<id>`).
+// "core:bookmarks" is the combined Bookmarks + History pane: collapsed it
 // shows bookmarks only; expanded it adds the page-visit History list.
-type RailSectionId =
-  | "alerts"
-  | "uncommitted"
-  | "comments"
-  | "work"
-  | "bookmarks";
-
-const DEFAULT_SECTION_ORDER: RailSectionId[] = [
-  "alerts",
-  "uncommitted",
-  "comments",
-  "work",
-  "bookmarks",
-];
-
-// Work defaults collapsed (it keeps a one-line summary when collapsed);
-// every other section defaults expanded.
-const DEFAULT_SECTION_EXPANDED: Record<RailSectionId, boolean> = {
-  alerts: true,
-  uncommitted: true,
-  comments: true,
-  work: false,
-  bookmarks: true,
-};
-
-const RAIL_SECTION_ORDER_KEY = "oxplow.rail.sectionOrder";
-const RAIL_SECTION_EXPANDED_KEY = "oxplow.rail.sectionExpanded.v1";
-
-
-/** Persisted section order, reconciled with the known set so a renamed /
- *  added / removed section id never strands the list. */
-function loadSectionOrder(): RailSectionId[] {
-  if (typeof window === "undefined") return DEFAULT_SECTION_ORDER;
-  try {
-    const raw = window.localStorage.getItem(RAIL_SECTION_ORDER_KEY);
-    if (!raw) return DEFAULT_SECTION_ORDER;
-    const stored = JSON.parse(raw) as string[];
-    const known = new Set<string>(DEFAULT_SECTION_ORDER);
-    const kept = stored.filter((id): id is RailSectionId => known.has(id));
-    // Append any sections the stored order doesn't mention (new sections).
-    const missing = DEFAULT_SECTION_ORDER.filter((id) => !kept.includes(id));
-    return [...kept, ...missing];
-  } catch {
-    return DEFAULT_SECTION_ORDER;
-  }
-}
-
-// Expanded state is tracked per thread (a pane the user collapses on one
-// thread stays expanded on another). Stored as { [threadKey]: { id: bool } }.
-type ExpandedByThread = Record<string, Partial<Record<RailSectionId, boolean>>>;
-
-function threadKey(threadId: string | null): string {
-  return threadId ?? "__none__";
-}
-
-function loadSectionExpanded(): ExpandedByThread {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(RAIL_SECTION_EXPANDED_KEY);
-    return raw ? (JSON.parse(raw) as ExpandedByThread) : {};
-  } catch {
-    return {};
-  }
-}
+type RailSectionId = string;
 
 interface RailSectionsValue {
   isExpanded(id: RailSectionId): boolean;
@@ -152,40 +103,51 @@ interface RailSectionsValue {
   /** Which edge of `id` the insertion line should draw on (before/after),
    *  or null when this section isn't the current drop target. */
   dropSide(id: RailSectionId): "before" | "after" | null;
+  /** Take the panel out of the nav (the Add Panel menu brings it back). */
+  hide(id: RailSectionId): void;
 }
 
 const RailSectionsContext = createContext<RailSectionsValue | null>(null);
 
-/** Owns the persisted order + expanded map and the in-flight drag state.
- *  Exposes everything `RailSection` needs through context so the
- *  individual section components don't have to thread props. */
-function useRailSections(threadId: string | null): { value: RailSectionsValue; order: RailSectionId[] } {
-  const [order, setOrder] = useState<RailSectionId[]>(loadSectionOrder);
-  const [expandedByThread, setExpandedByThread] =
-    useState<ExpandedByThread>(loadSectionExpanded);
+/** Owns the person's panel layout (`panel_layout`, through
+ *  `get_panel_layout` / `set_panel_layout`: order, hidden, collapsed) and
+ *  the in-flight drag state, for the panels `available` now. Exposes what
+ *  `RailSection` needs through context. */
+function useRailSections(available: string[]): {
+  value: RailSectionsValue;
+  order: RailSectionId[];
+  hidden: RailSectionId[];
+  show(id: RailSectionId): void;
+} {
+  const [stored, setStored] = useState<PanelPlacement[]>([]);
   const [draggingId, setDraggingId] = useState<RailSectionId | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: RailSectionId; side: "before" | "after" } | null>(null);
-  const tkey = threadKey(threadId);
+  useEffect(() => {
+    let live = true;
+    void getPanelLayout()
+      .then((l) => {
+        if (live) setStored(l);
+      })
+      .catch(() => {
+        // No stored layout: the defaults.
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+  const layout = useMemo(() => resolveLayout(available, stored), [available, stored]);
 
-  const persistOrder = useCallback((next: RailSectionId[]) => {
-    setOrder(next);
-    try { window.localStorage.setItem(RAIL_SECTION_ORDER_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  const persist = useCallback((next: PanelPlacement[]) => {
+    setStored(next);
+    void setPanelLayout(next).catch((e: unknown) =>
+      recordOpError({ label: "Save the panel layout", message: e instanceof Error ? e.message : String(e) }),
+    );
   }, []);
 
-  const isExpanded = useCallback(
-    (id: RailSectionId) => expandedByThread[tkey]?.[id] ?? DEFAULT_SECTION_EXPANDED[id],
-    [expandedByThread, tkey],
-  );
-
-  const toggle = useCallback((id: RailSectionId) => {
-    setExpandedByThread((prev) => {
-      const forThread = prev[tkey] ?? {};
-      const current = forThread[id] ?? DEFAULT_SECTION_EXPANDED[id];
-      const next = { ...prev, [tkey]: { ...forThread, [id]: !current } };
-      try { window.localStorage.setItem(RAIL_SECTION_EXPANDED_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-      return next;
-    });
-  }, [tkey]);
+  const isExpanded = useCallback((id: RailSectionId) => !layout.collapsed.has(id), [layout]);
+  const toggle = useCallback((id: RailSectionId) => persist(toggleCollapsed(available, stored, id)), [available, stored, persist]);
+  const hide = useCallback((id: RailSectionId) => persist(hidePanel(available, stored, id)), [available, stored, persist]);
+  const show = useCallback((id: RailSectionId) => persist(showPanel(available, stored, id)), [available, stored, persist]);
 
   const dragHandle = useCallback((id: RailSectionId) => ({
     draggable: true as const,
@@ -218,18 +180,18 @@ function useRailSections(threadId: string | null): { value: RailSectionsValue; o
     },
     onDrop(e: React.DragEvent) {
       e.preventDefault();
-      const sourceId = (e.dataTransfer.getData(RAIL_SECTION_DRAG_MIME) || draggingId) as RailSectionId | "";
+      const sourceId = e.dataTransfer.getData(RAIL_SECTION_DRAG_MIME) || draggingId;
       setDraggingId(null);
       setDropTarget(null);
-      if (!sourceId) return;
+      if (!sourceId || sourceId === id) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const after = e.clientY >= rect.top + rect.height / 2;
-      const targetIdx = order.indexOf(id);
+      const without = layout.order.filter((o) => o !== sourceId);
+      const targetIdx = without.indexOf(id);
       if (targetIdx < 0) return;
-      const next = moveToIndex(order as string[], sourceId, after ? targetIdx + 1 : targetIdx) as RailSectionId[];
-      if (next !== order) persistOrder(next);
+      persist(movePanel(available, stored, sourceId, after ? targetIdx + 1 : targetIdx));
     },
-  }), [draggingId, dropTarget, order, persistOrder]);
+  }), [draggingId, dropTarget, layout, available, stored, persist]);
 
   const dropSide = useCallback(
     (id: RailSectionId): "before" | "after" | null =>
@@ -238,10 +200,10 @@ function useRailSections(threadId: string | null): { value: RailSectionsValue; o
   );
 
   const value = useMemo<RailSectionsValue>(
-    () => ({ isExpanded, toggle, dragHandle, dropZone, dropSide }),
-    [isExpanded, toggle, dragHandle, dropZone, dropSide],
+    () => ({ isExpanded, toggle, dragHandle, dropZone, dropSide, hide }),
+    [isExpanded, toggle, dragHandle, dropZone, dropSide, hide],
   );
-  return { value, order };
+  return { value, order: layout.order, hidden: layout.hidden, show };
 }
 
 /** Uniform section: drag handle + chevron + title (+ optional count and
@@ -272,6 +234,7 @@ function RailSection({
 }) {
   const ctx = useContext(RailSectionsContext);
   const expanded = ctx ? ctx.isExpanded(id) : true;
+  const headerMenu = useContextMenu();
   const side = ctx ? ctx.dropSide(id) : null;
   const titleColor = tone === "danger" ? "var(--diff-del-fg, #f85149)" : "var(--text-secondary)";
   return (
@@ -328,6 +291,11 @@ function RailSection({
           background: "var(--panel-header-bg)",
           borderBottom: expanded ? "1px solid var(--border-subtle)" : undefined,
         }}
+        onContextMenu={(e) =>
+          ctx
+            ? headerMenu.open(e, [{ id: "hide-panel", label: "Hide Panel", enabled: true, run: () => ctx.hide(id) }])
+            : undefined
+        }
       >
         <span
           {...(ctx ? ctx.dragHandle(id) : {})}
@@ -402,6 +370,7 @@ function RailSection({
       </div>
       {expanded ? children : (collapsedContent ?? null)}
       </div>
+      {headerMenu.menu}
     </div>
   );
 }
@@ -433,19 +402,27 @@ export function RailHud({
   // count even though it only renders the first handful when expanded.
   const readyItems = useMemo(() => computeUpNext(threadWork, 50), [threadWork]);
   const width = useRailWidth();
-  const sections = useRailSections(threadId);
+  const extPanels = useExtensionPanels(streamId ?? null);
+  const available = useMemo(
+    () => [...CORE_PANELS.map((p) => p.id), ...extPanels.map(extensionPanelId)],
+    [extPanels],
+  );
+  const sections = useRailSections(available);
+  const addMenu = useContextMenu();
+  const titleOf = (id: string) =>
+    CORE_PANELS.find((p) => p.id === id)?.title ?? extPanels.find((p) => extensionPanelId(p) === id)?.title ?? id;
 
-  // Every section always renders (stable list — panes never appear /
-  // disappear); each shows its own empty state when it has no content.
+  // Every visible panel always renders (a stable list); each shows its own
+  // empty state when it has no content.
   function renderSection(id: RailSectionId): ReactNode {
     switch (id) {
-      case "alerts":
-        return <AlertsSection key={id} streamId={streamId ?? null} onOpenPage={onOpenPage} />;
-      case "uncommitted":
+      case "core:alerts":
+        return <AlertsSection key={id} panels={extPanels} streamId={streamId ?? null} onOpenPage={onOpenPage} />;
+      case "core:uncommitted":
         return <UncommittedSection key={id} summary={uncommitted ?? null} onOpenPage={onOpenPage} />;
-      case "comments":
+      case "core:comments":
         return <CommentsSection key={id} streamId={streamId ?? null} onOpenPage={onOpenPage} />;
-      case "work":
+      case "core:work":
         return (
           <WorkSection
             key={id}
@@ -458,8 +435,14 @@ export function RailHud({
             onClearFinished={onClearFinished}
           />
         );
-      case "bookmarks":
+      case "core:bookmarks":
         return <GoToSection key={id} entries={bookmarks ?? []} threadId={threadId} onOpenPage={onOpenPage} />;
+      default: {
+        const panel = extPanels.find((p) => extensionPanelId(p) === id);
+        return panel ? (
+          <ExtensionPanelSection key={id} panel={panel} streamId={streamId ?? null} onOpenPage={onOpenPage} />
+        ) : null;
+      }
     }
   }
 
@@ -483,6 +466,22 @@ export function RailHud({
         <RailSectionsContext.Provider value={sections.value}>
           {sections.order.map((id) => renderSection(id))}
         </RailSectionsContext.Provider>
+        {sections.hidden.length > 0 ? (
+          <button
+            type="button"
+            data-testid="rail-add-panel"
+            onClick={(e) =>
+              addMenu.open(
+                e,
+                sections.hidden.map((id) => ({ id: `show-${id}`, label: titleOf(id), enabled: true, run: () => sections.show(id) })),
+              )
+            }
+            style={{ margin: "0 6px 6px", background: "none", border: "1px dashed var(--border-subtle)", borderRadius: 6, padding: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}
+          >
+            + Add Panel
+          </button>
+        ) : null}
+        {addMenu.menu}
       </div>
       <RailResizeHandle onChange={width.setFromDelta} />
     </aside>
@@ -527,7 +526,7 @@ function WorkSection({
 
   return (
     <RailSection
-      id="work"
+      id="core:work"
       title="Work"
       collapsedContent={collapsedContent}
       onOpen={() => onOpenPage(tasksRef())}
@@ -1144,7 +1143,7 @@ function UncommittedSection({
 
   return (
     <RailSection
-      id="uncommitted"
+      id="core:uncommitted"
       title="Uncommitted"
       count={total}
       onOpen={() => onOpenPage(uncommittedChangesRef())}
@@ -1165,50 +1164,35 @@ function UncommittedSection({
 /// stream, split by intent — "for me" (notes-to-self) and "for the
 /// agent" (follow-ups). Self-fetching + live like the history rows;
 /// hidden when there are none. Each row opens the Comments inbox.
-/** Alerts from extension lenses mounted in the `rail` slot: one row per
- *  lens whose `alert` fires, opening the lens. Re-runs (debounced) when
- *  oxplow data changes. */
+/** Alerts (a core panel, P6.G1): every panel badge that fires, one row
+ *  each with its message, opening the badge's lens. Live. */
 function AlertsSection({
+  panels,
   streamId,
   onOpenPage,
 }: {
+  panels: ExtensionPanel[];
   streamId: string | null;
   onOpenPage(ref: TabRef): void;
 }) {
   const [alerts, setAlerts] = useState<{ id: string; title: string; message: string }[]>([]);
   const [reads, setReads] = useState(NO_READS);
-  const refreshRef = useRef<(() => Promise<void>) | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const mounts = slotRuns(await listExtensions(streamId), "rail", {});
-        const runs = await Promise.all(
-          mounts.map(async ({ id, params }) => ({
-            id,
-            run: await runLens(id, params, streamId).catch(() => null),
-          })),
-        );
-        if (!cancelled) {
-          setAlerts(firingAlerts(runs));
-          setReads(unionReads(runs.map(({ run }) => run?.result.reads)));
-        }
-      } catch {
-        if (!cancelled) setAlerts([]);
-      }
-    };
-    refreshRef.current = refresh;
-    void refresh();
-    return () => {
-      cancelled = true;
-      refreshRef.current = null;
-    };
-  }, [streamId]);
-  useRerunOnChange(reads, () => void refreshRef.current?.());
+  const badges = useMemo(
+    () => panels.filter((p): p is ExtensionPanel & { badge: string } => p.badge !== null),
+    [panels],
+  );
+  const refresh = useCallback(async () => {
+    const runs = await Promise.all(
+      badges.map(async (p) => ({ id: p.badge, run: await runLens(p.badge, {}, streamId).catch(() => null) })),
+    );
+    setAlerts(firingAlerts(runs));
+    setReads(unionReads(runs.map(({ run }) => run?.result.reads)));
+  }, [badges, streamId]);
+  useEffect(() => void refresh(), [refresh]);
+  useRerunOnChange(reads, () => void refresh());
 
   return (
-    <RailSection id="alerts" title="Alerts" count={alerts.length || undefined}>
+    <RailSection id="core:alerts" title="Alerts" count={alerts.length || undefined}>
       {alerts.length === 0 ? <RailEmpty label="Nothing needs you" /> : null}
       {alerts.map((a) => (
         <button
@@ -1226,6 +1210,63 @@ function AlertsSection({
       ))}
     </RailSection>
   );
+}
+
+/** An extension's panel (P6.G1): its body lens, compact, and its badge's
+ *  count in the header while the badge fires. */
+function ExtensionPanelSection({
+  panel,
+  streamId,
+  onOpenPage,
+}: {
+  panel: ExtensionPanel;
+  streamId: string | null;
+  onOpenPage(ref: TabRef): void;
+}) {
+  const runs = usePanelRuns(panel, streamId);
+  return (
+    <RailSection
+      id={extensionPanelId(panel)}
+      title={panel.title}
+      count={runs.count ?? undefined}
+      onOpen={() => onOpenPage(lensRef(panel.body))}
+      openTitle={`Open ${panel.title}`}
+    >
+      <div style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
+        {runs.body ? (
+          <LensResultView run={runs.body} compact maxRows={8} streamId={streamId} onOpenPage={onOpenPage} />
+        ) : (
+          <RailEmpty label="Loading…" />
+        )}
+      </div>
+    </RailSection>
+  );
+}
+
+/** The enabled extensions' panels for this stream, re-read when an
+ *  extension's files change. */
+function useExtensionPanels(streamId: string | null): ExtensionPanel[] {
+  const [panels, setPanels] = useState<ExtensionPanel[]>([]);
+  useEffect(() => {
+    let live = true;
+    const load = () =>
+      void listExtensions(streamId)
+        .then((exts) => {
+          if (live) setPanels(exts.filter((e) => e.enabled).flatMap((e) => e.panels));
+        })
+        .catch(() => {
+          if (live) setPanels([]);
+        });
+    load();
+    const off = subscribeOxplowEvents((event) => {
+      if (lensDefinitionChanged(event as Record<string, unknown>)) load();
+    });
+    return () => {
+      live = false;
+      off();
+    };
+  }, [streamId]);
+  return panels;
 }
 
 function CommentsSection({
@@ -1271,7 +1312,7 @@ function CommentsSection({
 
   return (
     <RailSection
-      id="comments"
+      id="core:comments"
       title="Comments"
       onOpen={() => onOpenPage(commentsRef())}
       openTitle="Open the Comments inbox"
@@ -1389,7 +1430,7 @@ function GoToSection({
 
   return (
     <RailSection
-      id="bookmarks"
+      id="core:bookmarks"
       title="Go To"
       onOpen={() => onOpenPage(dashboardRef("visits"))}
       openTitle="Open Go To"

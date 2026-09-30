@@ -270,6 +270,8 @@ macro_rules! oxplow_command_table {
                 query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,
                 list_data_entities => $crate::commands::semantic::list_data_entities {} -> Vec<::oxplow_app::semantic_catalog::DataEntity>,
                 prompt_catalog => $crate::commands::semantic::prompt_catalog { stream_id: Option<String> } -> Vec<::oxplow_app::prompt_catalog::CatalogPrompt>,
+                get_panel_layout => $crate::commands::semantic::get_panel_layout {} -> Vec<::oxplow_db::PanelPlacement>,
+                set_panel_layout => $crate::commands::semantic::set_panel_layout { layout: Vec<::oxplow_db::PanelPlacement> } -> (),
                 list_extensions => $crate::commands::extensions::list_extensions { stream_id: Option<String> } -> Vec<::oxplow_app::extensions::Extension>,
                 get_lens => $crate::commands::extensions::get_lens { id: String, stream_id: Option<String> } -> ::oxplow_app::extensions::Lens,
                 run_lens => $crate::commands::extensions::run_lens { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::extensions::LensRun,

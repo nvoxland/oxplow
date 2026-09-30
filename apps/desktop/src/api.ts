@@ -23,6 +23,7 @@ import { IpcCallError, ipcErrorCode, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
   CatalogPrompt,
+  PanelPlacement,
   ChangeRow,
   ChangeTarget,
   CheckReport,
@@ -663,6 +664,16 @@ export async function submitLensForm(
  *  enabled extensions' prompts (the catalog; contextual suggestions). */
 export async function promptCatalog(streamId: string | null): Promise<CatalogPrompt[]> {
   return unwrap(await commands.promptCatalog(streamId));
+}
+
+/** The person's left-nav layout: each panel's order, and whether it's
+ *  hidden or collapsed (P6.G1). */
+export async function getPanelLayout(): Promise<PanelPlacement[]> {
+  return unwrap(await commands.getPanelLayout());
+}
+
+export async function setPanelLayout(layout: PanelPlacement[]): Promise<void> {
+  unwrap(await commands.setPanelLayout(layout));
 }
 
 /** Run an answer an agent showed in a thread (`answer:<id>`). */
