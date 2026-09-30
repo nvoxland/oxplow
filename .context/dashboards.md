@@ -25,8 +25,9 @@ Two tables, mirroring the `comment` / `comment_message` two-table shape:
   view, which is gone — the column stays, unused), `created_at` /
   `updated_at`.
 - **`dashboard_item`** — `id`, `dashboard_id` (FK `ON DELETE CASCADE`),
-  `sort_index`, `kind` (`metric` | `text`), `metric_key` (null for text tiles),
-  `options_json` (**opaque** per-tile blob: viz / size / per-tile range+branch
+  `sort_index`, `kind` (`query` | `lens` | `text`, `TILE_KINDS`; `add_item`
+  refuses anything else), `options_json` (**opaque** per-tile blob: a query
+  tile's `sql` / `display` / `metric`, viz / size / per-tile range+branch
   override / title override / text body / lens id — grows with no migration,
   exactly like task `payload_json`), `created_at` /
   `updated_at`. Index `idx_dashboard_item_dashboard_sort(dashboard_id,
@@ -64,7 +65,7 @@ Tauri delegates in `oxplow-tauri-ipc/src/commands/dashboards.rs`; frontend
 wrappers + `subscribeDashboardEvents` in `apps/desktop/src/api.ts` (filter
 `event.kind === "dashboardsChanged"`).
 
-**Response types serialize snake_case** (`metric_key`, `sort_index`,
+**Response types serialize snake_case** (`sort_index`,
 `dashboard_id`) — no `rename_all`, matching the codebase's read-type convention
 (e.g. `SeriesPoint`). The *request* structs, by contrast, use camelCase
 (`#[serde(rename = "metricId")]` etc.). The generated bindings capture both
@@ -78,8 +79,10 @@ on request ("make me a dashboard of the coverage metrics"), matching the
 
 - `list_dashboards`, `get_dashboard` — reads.
 - `create_dashboard {title}` → returns the new dashboard.
-- `add_dashboard_item {dashboard_id, kind, metric_key?, options_json?}` →
-  returns the new tile id.
+- `add_dashboard_item {dashboard_id, kind, sql?, display?, options_json?}` →
+  returns the new tile id. A `query` tile's `sql` is checked through the SQL
+  gateway before it is stored (`oxplow-app/src/dashboard_tiles.rs`
+  `new_tile`, shared with the IPC command), so a tile that saves runs.
 
 These four are **`both(...)`** in `oxplow-surface-parity/src/lib.rs`; the pure-UI
 edits (`rename` / `delete` / `update_item` / `remove_item` / `reorder_items`)
@@ -103,14 +106,26 @@ checklist:
   responsive flow grid
   (`grid-template-columns: repeat(auto-fill, minmax(320px, 1fr))`) of tiles;
   empty state is a dashed drop-zone card. Live-refreshes on `dashboardsChanged`
-  (structure) + `configChanged` (defs).
+  (structure); the metric specs and catalog re-read when their models change
+  (`useRerunOnChange`).
 - **`dashboards`** — a literal-id index kind (**in `INDEX_KINDS`**,
   `dashboardsRef()`): `DashboardsIndexPage` lists the user's dashboards (rows via
   `RouteLink` → `customDashboardRef`) + a **+ New dashboard** action. In the
   launcher via a `computePagesDirectory` **Activity** entry.
 
-**Tiles** — `components/Dashboard/MetricTile.tsx` (+ `TextTile.tsx`). A `metric`
-tile switches on the `options_json` `viz`:
+**Query tiles (P4.7, tsk492).** A dashboard tile is `query` (pinned SQL
+plus how to show it), `lens` or `text`; the `metric` kind and its
+`metric_key` column are gone. `V108__dashboard_query_tiles.sql` rewrote each
+metric tile into a query tile over `metric_grid('capture')` with `display:
+"metric"` and `metric: <key>`, keeping its other options. `display` is a
+lens visualization (`QueryTile.tsx`, the explorer's "Pin to dashboard",
+`PinToDashboard.tsx`) or `metric`, the metric card below; `metricTile(key)`
+in `customDashboardData.ts` builds that tile for the picker and the metric
+page. `update_dashboard_item {id, optionsJson}` re-checks a changed `sql`.
+
+**Metric card** — `components/Dashboard/MetricTile.tsx` (+ `TextTile.tsx`).
+A `display: "metric"` query tile runs its `sql` through `query_sql` and
+switches on the `options_json` `viz`:
 
 | `viz` | Renders |
 |---|---|
@@ -142,8 +157,9 @@ were considered and declined as beyond the "just a grid that flows" scope
 (tsk147). New text tiles seed **empty** so the placeholder invites a real title.
 
 The page resolves each tile's `def` from one `listMetricDefinitions()` fetch and
-passes it in; the tile fetches its own samples and refreshes on
-`metricSamplesChanged`. Clicking the title drills through to the metric detail;
+passes it in; the tile runs its own query and re-runs through
+`useRerunOnChange` when what it read changed — its metric's measures, or a
+model the query read. Clicking the title drills through to the metric detail;
 right-click is the tile menu — **Visualization** and **Size** submenus (checked
 = current, writing through `updateDashboardItem`), plus open /
 open-in-new-tab / remove.

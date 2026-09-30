@@ -297,15 +297,14 @@
     - { not_null: id }
     - { unique: id }
 - name: dashboard_item
-  version: 1
-  description: "Tiles on dashboards: a metric, a lens or a text note."
+  version: 2
+  description: "Tiles on dashboards: a query (pinned SQL shown as a lens viz or the metric card), a lens or a text note. v2 (P4.7): `query` replaces `metric`; its SQL is in `options_json`."
   columns:
     - { name: "id", type: "INTEGER", doc: "Tile id." }
     - { name: "dashboard_id", type: "INTEGER", doc: "Its dashboard (v_dashboard.id)." }
     - { name: "sort_index", type: "INTEGER", doc: "Position on the dashboard." }
-    - { name: "kind", type: "TEXT", doc: "`metric`, `lens` or `text`." }
-    - { name: "metric_key", type: "TEXT", doc: "The metric, for a `metric` tile." }
-    - { name: "options_json", type: "TEXT", doc: "Tile options (size, view, lens id, text), JSON." }
+    - { name: "kind", type: "TEXT", doc: "`query`, `lens` or `text`." }
+    - { name: "options_json", type: "TEXT", doc: "Tile options, JSON: a query tile's `sql` and `display` (a lens viz, or `metric` with its `metric` key), a lens tile's `lensId`, a text tile's `text`, and every tile's size and filter overrides." }
   tests:
     - { not_null: id }
     - { unique: id }

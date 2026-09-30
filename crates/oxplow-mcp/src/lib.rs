@@ -352,15 +352,20 @@ pub struct GetDashboardParams {
 pub struct AddDashboardItemParams {
     /// Dashboard id (`dsh<n>`) to add the tile to.
     pub dashboard_id: String,
-    /// `metric` (charts one metric) | `text` (a heading / markdown note) |
-    /// `lens` (shows a lens's current result; see `list_lenses`).
+    /// `query` (pinned SQL over the published models, e.g. a
+    /// `metric_grid()` read) | `lens` (a lens's current result; see
+    /// `list_lenses`) | `text` (a heading).
     pub kind: String,
-    /// Metric spec key for a `metric` tile (see `list_metric_definitions`).
-    pub metric_key: Option<String>,
+    /// A `query` tile's SQL (checked like `query_sql`).
+    pub sql: Option<String>,
+    /// A `query` tile's display: `table` (default), `list`, `number`,
+    /// `markdown`, `bar`, `line`, `treemap`, or `metric` (the metric card —
+    /// set the metric key as `metric` in `options_json`).
+    pub display: Option<String>,
     /// Lens id (`<extension>/<slug>`) for a `lens` tile.
     pub lens_id: Option<String>,
-    /// Optional per-tile options JSON (viz/mode/scale/size/title; or, for a
-    /// `text` tile, `{"text":"…"}`).
+    /// Optional per-tile options JSON (size, title; a `text` tile's
+    /// `{"text":"…"}`).
     pub options_json: Option<String>,
 }
 
@@ -1388,11 +1393,12 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Add a tile to a dashboard. `kind` is `metric` (charts one metric — set \
-                       `metric_key` to a metric spec key from `list_metric_definitions`) or `text` \
-                       (a heading / markdown note — put the markdown in `options_json` as \
-                       `{\"text\":\"…\"}`). `options_json` may also set the tile's viz/mode/scale/\
-                       size. Returns the new tile id."
+        description = "Add a tile to a dashboard. `kind` is `query` (pinned SQL — `sql`, checked \
+                       like query_sql — shown per `display`: a lens viz, or `metric` for the metric \
+                       card over a `metric_grid('capture')` read with the metric key as `metric` in \
+                       `options_json`), `lens` (set `lens_id`) or `text` (put the text in \
+                       `options_json` as `{\"text\":\"…\"}`). `options_json` may also set the tile's \
+                       size and title. Returns the new tile id."
     )]
     async fn add_dashboard_item(
         &self,
@@ -1401,44 +1407,25 @@ impl OxplowMcp {
         let p = params.0;
         let dash = oxplow_domain::DashboardId::try_from_str(&p.dashboard_id)
             .ok_or_else(|| McpError::invalid_params("expected a dashboard id (dsh…)", None))?;
-        let options_json = match p.kind.as_str() {
-            "metric" | "text" => p.options_json,
-            "lens" => {
-                let lens_id = p.lens_id.ok_or_else(|| {
-                    McpError::invalid_params(
-                        "a `lens` tile needs lens_id (`<extension>/<slug>`)",
-                        None,
-                    )
-                })?;
-                // The lens id rides in the opaque per-tile options blob.
-                let mut opts: serde_json::Map<String, serde_json::Value> =
-                    match p.options_json.as_deref() {
-                        Some(raw) => serde_json::from_str(raw).map_err(|e| {
-                            McpError::invalid_params(format!("options_json: {e}"), None)
-                        })?,
-                        None => serde_json::Map::new(),
-                    };
-                opts.insert("lensId".into(), serde_json::Value::String(lens_id));
-                Some(serde_json::Value::Object(opts).to_string())
-            }
-            other => {
-                return Err(McpError::invalid_params(
-                    format!("unknown tile kind `{other}` (metric | text | lens)"),
-                    None,
-                ))
-            }
-        };
+        let tile = oxplow_app::dashboard_tiles::new_tile(
+            &self.services.sql,
+            oxplow_app::dashboard_tiles::TileInput {
+                kind: p.kind,
+                sql: p.sql,
+                display: p.display,
+                lens_id: p.lens_id,
+                options_json: p.options_json,
+            },
+        )
+        .await
+        .map_err(|e| match e {
+            oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
+            other => internal(other),
+        })?;
         let id = self
             .services
             .dashboard_store
-            .add_item(
-                dash,
-                oxplow_db::NewDashboardItem {
-                    kind: p.kind,
-                    metric_key: p.metric_key,
-                    options_json,
-                },
-            )
+            .add_item(dash, tile)
             .await
             .map_err(internal)?;
         self.services.events.emit(OxplowEvent::DashboardsChanged);
@@ -9520,10 +9507,11 @@ mod tests {
             server
                 .add_dashboard_item(Parameters(AddDashboardItemParams {
                     dashboard_id: dash_id.clone(),
-                    kind: "metric".into(),
-                    metric_key: Some("oxplow.coverage.line_pct".into()),
+                    kind: "query".into(),
+                    sql: Some("SELECT count(*) FROM v_task".into()),
+                    display: Some("number".into()),
                     lens_id: None,
-                    options_json: Some(r#"{"viz":"line"}"#.into()),
+                    options_json: None,
                 }))
                 .await
                 .unwrap(),
@@ -9544,8 +9532,11 @@ mod tests {
         assert_eq!(got["dashboard"]["id"], dash_id);
         let items = got["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0]["kind"], "metric");
-        assert_eq!(items[0]["metric_key"], "oxplow.coverage.line_pct");
+        assert_eq!(items[0]["kind"], "query");
+        let opts: serde_json::Value =
+            serde_json::from_str(items[0]["options_json"].as_str().unwrap()).unwrap();
+        assert_eq!(opts["sql"], "SELECT count(*) FROM v_task");
+        assert_eq!(opts["display"], "number");
 
         // list_dashboards surfaces it.
         let listed: serde_json::Value =
@@ -9567,7 +9558,8 @@ mod tests {
             .add_dashboard_item(Parameters(AddDashboardItemParams {
                 dashboard_id: did.clone(),
                 kind: "lens".into(),
-                metric_key: None,
+                sql: None,
+                display: None,
                 lens_id: Some("review/waiting".into()),
                 options_json: Some(r#"{"size":"wide"}"#.into()),
             }))
@@ -9590,18 +9582,20 @@ mod tests {
             .add_dashboard_item(Parameters(AddDashboardItemParams {
                 dashboard_id: did.clone(),
                 kind: "lens".into(),
-                metric_key: None,
+                sql: None,
+                display: None,
                 lens_id: None,
                 options_json: None,
             }))
             .await
             .unwrap_err();
-        assert!(err.message.contains("lens_id"), "{err:?}");
+        assert!(err.message.contains("lens id"), "{err:?}");
         let err = server
             .add_dashboard_item(Parameters(AddDashboardItemParams {
                 dashboard_id: did,
                 kind: "chart".into(),
-                metric_key: None,
+                sql: None,
+                display: None,
                 lens_id: None,
                 options_json: None,
             }))
@@ -9617,7 +9611,8 @@ mod tests {
             .add_dashboard_item(Parameters(AddDashboardItemParams {
                 dashboard_id: "not-an-id".into(),
                 kind: "metric".into(),
-                metric_key: None,
+                sql: None,
+                display: None,
                 lens_id: None,
                 options_json: None,
             }))

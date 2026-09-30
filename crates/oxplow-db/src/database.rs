@@ -482,6 +482,15 @@ pub enum DbInitError {
     Models(String),
 }
 
+/// Migrate `conn` up to `version` only — a migration test's "before".
+#[cfg(test)]
+pub(crate) fn migrate_to_for_tests(conn: &mut Connection, version: i32) {
+    embedded::migrations::runner()
+        .set_target(refinery::Target::Version(version))
+        .run(conn)
+        .expect("migrations run");
+}
+
 /// Bring a database to this build: drop the model views, apply the
 /// migrations, then compile the models (P4.2). The views are recreated at
 /// every open, so a migration never works around one — and never creates
@@ -1015,7 +1024,7 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(before, vec![3, 2, 1], "the pre-V95 order is inverted");
-        embedded::migrations::runner().run(&mut conn).unwrap();
+        migrate_and_compile(&mut conn).unwrap();
         let after: Vec<(i64, String)> = conn
             .prepare("SELECT id, created_at FROM streams ORDER BY created_at")
             .unwrap()
@@ -1059,7 +1068,7 @@ mod tests {
                       (1, 'b', 'h', 1, '2026-01-01T00:00:01.000000Z', 'oxplow', 1);",
         )
         .unwrap();
-        embedded::migrations::runner().run(&mut conn).unwrap();
+        migrate_and_compile(&mut conn).unwrap();
         let ops: Vec<(i64, Option<i64>, String, i64)> = conn
             .prepare("SELECT snapshot_id, parent_snapshot_id, trigger, file_count FROM snapshot_op ORDER BY seq")
             .unwrap()
@@ -1133,7 +1142,7 @@ mod tests {
                VALUES (1, 1, 't', 'in_progress', 'medium', 'user', '{now}', '{now}');"
         ))
         .unwrap();
-        embedded::migrations::runner().run(&mut conn).unwrap();
+        migrate_and_compile(&mut conn).unwrap();
         let (agent, acp): (String, Option<String>) = conn
             .query_row(
                 "SELECT agent, acp_agent FROM threads WHERE id = 1",
@@ -1221,7 +1230,7 @@ mod tests {
         ))
         .unwrap();
 
-        embedded::migrations::runner().run(&mut conn).unwrap();
+        migrate_and_compile(&mut conn).unwrap();
 
         let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
         for child in [
@@ -1371,7 +1380,7 @@ mod tests {
         ))
         .unwrap();
 
-        embedded::migrations::runner().run(&mut conn).unwrap();
+        migrate_and_compile(&mut conn).unwrap();
 
         let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
         assert_eq!(

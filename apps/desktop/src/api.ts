@@ -1,5 +1,5 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
-import type { SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
+import type { Reads, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
 import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
 export { onRemoteReconnect, triggerRemoteResync };
@@ -1893,27 +1893,28 @@ export async function renameDashboard(id: string, title: string): Promise<void> 
 export async function deleteDashboard(id: string): Promise<void> {
   unwrap(await commands.deleteDashboard(id));
 }
+/** Add a tile: `query` (pinned `sql` shown per `display`), `lens` or `text`. */
 export async function addDashboardItem(req: {
   dashboardId: string;
-  kind: string;
-  metricKey?: string | null;
+  kind: "query" | "lens" | "text";
+  sql?: string | null;
+  display?: string | null;
+  lensId?: string | null;
   optionsJson?: string | null;
 }): Promise<string> {
   return unwrap(
     await commands.addDashboardItem({
       dashboardId: req.dashboardId,
       kind: req.kind,
-      metricKey: req.metricKey ?? null,
+      sql: req.sql ?? null,
+      display: req.display ?? null,
+      lensId: req.lensId ?? null,
       optionsJson: req.optionsJson ?? null,
     }),
   );
 }
-export async function updateDashboardItem(
-  id: string,
-  metricKey: string | null,
-  optionsJson: string | null,
-): Promise<void> {
-  unwrap(await commands.updateDashboardItem({ id, metricKey, optionsJson }));
+export async function updateDashboardItem(id: string, optionsJson: string | null): Promise<void> {
+  unwrap(await commands.updateDashboardItem({ id, optionsJson }));
 }
 export async function removeDashboardItem(id: string): Promise<void> {
   unwrap(await commands.removeDashboardItem(id));
@@ -1928,9 +1929,17 @@ export function subscribeDashboardEvents(fn: () => void): () => void {
   });
 }
 
+/** Rows a metric reader returned, and what the query read — hand `reads` to
+ *  `useRerunOnChange` so the view refreshes when (and only when) they change. */
+export interface MetricRows<T> {
+  rows: T[];
+  reads: Reads;
+}
+
 /** Every metric definition — `v_metric_spec` (P4.7: metrics read through SQL). */
-export async function listMetricDefinitions(): Promise<MetricSpec[]> {
-  return metricSpecRows(await querySql(METRIC_SPECS_SQL, [], 10_000));
+export async function listMetricDefinitions(): Promise<MetricRows<MetricSpec>> {
+  const result = await querySql(METRIC_SPECS_SQL, [], 10_000);
+  return { rows: metricSpecRows(result), reads: result.reads };
 }
 
 /** One metric's captures, newest first — `metric_grid('capture')` joined to
@@ -1941,16 +1950,16 @@ export async function listMetricSamples(
   limit?: number,
   groupBy?: string | null,
   range?: { from: number; to: number } | null,
-): Promise<SeriesPoint[]> {
+): Promise<MetricRows<SeriesPoint>> {
   const params = range ? [new Date(range.from).toISOString(), new Date(range.to).toISOString()] : [];
-  return seriesPointRows(
-    await querySql(metricSeriesSql(metricKey, groupBy, !!range), params, limit ?? 200),
-  );
+  const result = await querySql(metricSeriesSql(metricKey, groupBy, !!range), params, limit ?? 200);
+  return { rows: seriesPointRows(result), reads: result.reads };
 }
 
 /** Every metric this project can use, with whether it's on — `v_metric_catalog`. */
-export async function listMetricCatalog(): Promise<MetricCatalogEntry[]> {
-  return catalogEntries(await querySql(METRIC_CATALOG_SQL, [], 10_000));
+export async function listMetricCatalog(): Promise<MetricRows<MetricCatalogEntry>> {
+  const result = await querySql(METRIC_CATALOG_SQL, [], 10_000);
+  return { rows: catalogEntries(result), reads: result.reads };
 }
 
 /** Turn metrics on or off in this project (the `metric.enable` command). */
@@ -2436,81 +2445,6 @@ export function subscribeOxplowEvents(
   return () => {
     stopped = true;
     void unlistenPromise.then((u) => u());
-  };
-}
-
-/** What a metric view should do with an event (tsk197). Pure — exported for tests. */
-export type MetricRefreshAction = "now" | "debounce" | "ignore";
-
-/** A metric consumer's scope: which measures it cares about, and whether a config write refreshes it. */
-export interface MetricRefreshScope {
-  /** Measure keys this view depends on. Empty/omitted = fail open (refresh on any measure event). */
-  measures?: string[];
-  /** Refresh immediately on `configChanged` (a user action). Off by default. */
-  alsoConfig?: boolean;
-}
-
-/**
- * Route an event for a metric consumer (tsk197, measure-scoped in tsk198).
- *
- * `metricSamplesChanged` (the OTLP token burst, ~every 10s while an agent runs)
- * is *debounced* — unless the event names the measures it touched AND the
- * consumer names the measures it depends on AND they're disjoint, in which case
- * the event can't affect this view and is *ignored*. Fail-open on either empty
- * set: an un-migrated emit site (no event measures) or a formula/whole-page
- * consumer (no scope) always refreshes. `configChanged` is a user action —
- * *now*, and never measure-filtered — but only for views that opted in.
- */
-export function metricRefreshAction(
-  event: { kind: string; measures?: string[] | null },
-  scope: MetricRefreshScope,
-): MetricRefreshAction {
-  if (event.kind === "metricSamplesChanged") {
-    const want = scope.measures ?? [];
-    const got = event.measures ?? [];
-    if (want.length > 0 && got.length > 0 && !got.some((m) => want.includes(m))) {
-      return "ignore";
-    }
-    return "debounce";
-  }
-  if (scope.alsoConfig && event.kind === "configChanged") return "now";
-  return "ignore";
-}
-
-/**
- * Subscribe a metric view's `refresh` to the bus with the burst-coalescing
- * discipline `MetricsPage` established (tsk91): trailing-debounce
- * `metricSamplesChanged` so a turn's worth of token exports becomes one reload,
- * refresh `configChanged` immediately when `alsoConfig` is set, and skip events
- * whose measures this view doesn't depend on (`measures`, tsk198). Composes with
- * the cube read cache (tsk196) — this cuts the *number* of reads, the cache
- * makes each one cheap. The teardown clears any pending timer.
- */
-export function subscribeMetricRefresh(
-  refresh: () => void,
-  opts: MetricRefreshScope & { debounceMs?: number } = {},
-): () => void {
-  const debounceMs = opts.debounceMs ?? 2_500;
-  const scope: MetricRefreshScope = { measures: opts.measures, alsoConfig: opts.alsoConfig };
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const off = subscribeOxplowEvents((e) => {
-    // `measures` lives only on the metricSamplesChanged member; narrow before reading.
-    const measures = e.kind === "metricSamplesChanged" ? e.measures : undefined;
-    switch (metricRefreshAction({ kind: e.kind, measures }, scope)) {
-      case "now":
-        refresh();
-        break;
-      case "debounce":
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(refresh, debounceMs);
-        break;
-      case "ignore":
-        break;
-    }
-  });
-  return () => {
-    off();
-    if (timer) clearTimeout(timer);
   };
 }
 

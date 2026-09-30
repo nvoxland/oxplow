@@ -167,8 +167,9 @@ welded to collection.
 > `v_effort_metric_delta` refreshes are debounced (the OTLP token tick fires
 > `MetricSamplesChanged` every ~10s while an agent runs).
 >
-> **Every `metricSamplesChanged` listener needs that debounce — it bit twice
-> (tsk91).** `RecordedMetricsPage` + `MetricsExplorerPage` reloaded un-debounced,
+> **Every `metricSamplesChanged` listener needs a bound on how often it
+> reloads — it bit twice (tsk91); today that is the measure scope plus
+> single-flight below.** `RecordedMetricsPage` + `MetricsExplorerPage` reloaded un-debounced,
 > so oxplow burned **~20 CPU-seconds per agent tool call** (bursting to ~500% /
 > ~200 threads, profiled straight to `row_to_fact_row`): a reload is one
 > `listMetricSamples` per catalogued metric, fired as ~40 concurrent blocking
@@ -178,10 +179,15 @@ welded to collection.
 > **The full mitigation stack (tsk191 idle-CPU profile → tsk196/197/198).** The
 > ~10s OTLP token tick was still spiking to 400%+ while "idle". Three composing
 > fixes, cheapest read to root cause:
-> - **Shared debounce helper** (`subscribeMetricRefresh` in `api.ts`, tsk197).
->   The 2.5s trailing-debounce discipline now lives in ONE place; all five
->   consumers (`MetricTile`, `MetricDetailPage`, `MetricsPage`) route through it instead of hand-rolling it. `configChanged`
->   (a user action) still refreshes immediately via `{ alsoConfig: true }`.
+> - **Reads-based refresh** (P4.7, replacing tsk197's `subscribeMetricRefresh`).
+>   Each metric reader in `api.ts` returns its rows with the query's `reads`,
+>   and every metric view (`MetricTile`, `MetricDetailPage`, `MetricsPage`,
+>   the dashboard's spec and catalog load) re-runs through
+>   `useRerunOnChange`, so a view refreshes only when a model or measure it
+>   read changed. An enable toggle or a `project.yaml` edit arrives as
+>   `modelsChanged` for `v_metric_catalog` / `v_metric_spec`. `MetricsPage`
+>   reads every metric, so its refresh sits behind `coalescedRefresh`
+>   (single-flight): a refresh never overlaps the one before it.
 > - **Cube read cache** (`cube_rows_for_measure`, tsk196). The read is memoized on
 >   a new **`metric_cube_epoch.version`** counter — distinct from the `epoch`
 >   fence below, which deliberately does NOT move on a fold. `version` is bumped
@@ -1466,7 +1472,8 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   drives compute via config + the runner, not ad-hoc IPC.
 - **The desktop reads metrics through SQL** (P4.7, tsk492 — the metric IPC
   reads are gone). `src/metricsSql.ts` builds the queries and row shapes;
-  `api.ts` runs them through `query_sql`: `listMetricSamples` is
+  `api.ts` runs them through `query_sql` and returns the rows with the
+  query's `reads` (what the views subscribe to): `listMetricSamples` is
   `metric_grid('capture'[, dim])` joined to `v_capture` (one row per capture,
   newest first, bounded to a range in SQL), `listMetricDefinitions` reads
   `v_metric_spec` (v2 adds `entity_json`), `listMetricCatalog` reads
@@ -1540,8 +1547,8 @@ just carries a Help blurb pointing there.
   `useRouteDispatch(metricRef(key))`, passing the **sibling chain**
   (`metricSiblings`) so the detail page gets up/down nav (tsk119). A Help
   blurb (`recorded-new-metric-help`) points at the agent for new metrics
-  (`scaffold_metric` + `/oxplow:new-metric`). Live on `metricSamplesChanged`
-  (debounced) and `configChanged`. **Simplified (tsk309):** the Line value
+  (`scaffold_metric` + `/oxplow:new-metric`). Re-runs when a model or measure
+  its reads read changed (`useRerunOnChange`, single-flight). **Simplified (tsk309):** the Line value
   stat picker, the Off target mode and the saved-view presets are gone.
 
 > ### Sectioning — one rule, both pages (`buildMetricSections`, tsk81)

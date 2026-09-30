@@ -1,4 +1,5 @@
 import type { Dashboard, SeriesPoint } from "../api.js";
+import { metricSeriesSql } from "../metricsSql.js";
 import type { MenuItem } from "../menu.js";
 import { type TimeRange, rangeFromPreset, seriesPoints } from "./metricDetailData.js";
 
@@ -31,6 +32,13 @@ export interface TileOptions {
   range?: string;
   /** Per-tile branch override. Absent → inherit the dashboard's filter. */
   branch?: string;
+  /** A `query` tile's pinned SQL (P4.7). */
+  sql?: string;
+  /** How a `query` tile shows its rows: a lens viz, or `metric` — the
+   *  metric card over a metric's captures. */
+  display?: string;
+  /** The metric a `metric` display shows (its key). */
+  metric?: string;
 }
 
 const VIZ = new Set<TileOptions["viz"]>(["line", "number"]);
@@ -62,7 +70,21 @@ export function parseTileOptions(json: string | null | undefined): TileOptions {
   if (typeof obj.lensId === "string") out.lensId = obj.lensId;
   if (typeof obj.range === "string") out.range = obj.range;
   if (typeof obj.branch === "string") out.branch = obj.branch;
+  if (typeof obj.sql === "string") out.sql = obj.sql;
+  if (typeof obj.display === "string") out.display = obj.display;
+  if (typeof obj.metric === "string") out.metric = obj.metric;
   return out;
+}
+
+/** A new tile showing metric `key` as the metric card: a query tile over its
+ *  captures (P4.7). */
+export function metricTile(key: string): { kind: "query"; sql: string; display: "metric"; optionsJson: string } {
+  return {
+    kind: "query",
+    sql: metricSeriesSql(key),
+    display: "metric",
+    optionsJson: JSON.stringify({ metric: key, viz: "line" }),
+  };
 }
 
 /** Grid footprint for a tile size — `full` spans every column (a heading band),

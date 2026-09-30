@@ -29,16 +29,16 @@ pub struct Dashboard {
     pub updated_at: Timestamp,
 }
 
-/// One tile on a dashboard. `kind` is `metric` | `text`; `metric_key` names the
-/// charted metric (null for text tiles); `options_json` is the opaque per-tile
-/// options blob (viz/mode/scale/size/overrides/text body).
+/// One tile on a dashboard: its `kind` ([`TILE_KINDS`]) and `options_json`,
+/// the per-tile options — a `query` tile's SQL and how it's displayed, a
+/// `lens` tile's lens id, a `text` tile's text, and the size and filter
+/// overrides every tile has.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct DashboardItem {
     pub id: DashboardItemId,
     pub dashboard_id: DashboardId,
     pub sort_index: i64,
     pub kind: String,
-    pub metric_key: Option<String>,
     pub options_json: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
@@ -52,8 +52,7 @@ pub struct DashboardWithItems {
 }
 
 const DASH_COLS: &str = "id, title, sort_index, settings_json, created_at, updated_at";
-const ITEM_COLS: &str =
-    "id, dashboard_id, sort_index, kind, metric_key, options_json, created_at, updated_at";
+const ITEM_COLS: &str = "id, dashboard_id, sort_index, kind, options_json, created_at, updated_at";
 
 fn row_to_dashboard(row: &rusqlite::Row<'_>) -> rusqlite::Result<Dashboard> {
     let map_err = |e: DomainError| {
@@ -78,18 +77,20 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<DashboardItem> {
         dashboard_id: DashboardId::new(row.get(1)?),
         sort_index: row.get(2)?,
         kind: row.get(3)?,
-        metric_key: row.get(4)?,
-        options_json: row.get(5)?,
-        created_at: string_to_ts(&row.get::<_, String>(6)?).map_err(map_err)?,
-        updated_at: string_to_ts(&row.get::<_, String>(7)?).map_err(map_err)?,
+        options_json: row.get(4)?,
+        created_at: string_to_ts(&row.get::<_, String>(5)?).map_err(map_err)?,
+        updated_at: string_to_ts(&row.get::<_, String>(6)?).map_err(map_err)?,
     })
 }
 
-/// New-tile input; `kind` is `metric` | `text`.
+/// The tile kinds: `query` (pinned SQL, shown as a lens viz or the metric
+/// card), `lens` (a lens by id) and `text` (a heading).
+pub const TILE_KINDS: &[&str] = &["query", "lens", "text"];
+
+/// New-tile input; `kind` is one of [`TILE_KINDS`].
 #[derive(Debug, Clone)]
 pub struct NewDashboardItem {
     pub kind: String,
-    pub metric_key: Option<String>,
     pub options_json: Option<String>,
 }
 
@@ -204,6 +205,13 @@ impl SqliteDashboardStore {
         dashboard_id: DashboardId,
         item: NewDashboardItem,
     ) -> Result<DashboardItemId, DomainError> {
+        if !TILE_KINDS.contains(&item.kind.as_str()) {
+            return Err(DomainError::Invalid(format!(
+                "unknown tile kind `{}` ({})",
+                item.kind,
+                TILE_KINDS.join(" | ")
+            )));
+        }
         let dash_val = dashboard_id.value();
         self.db
             .call_mut(move |conn| {
@@ -217,9 +225,9 @@ impl SqliteDashboardStore {
                     .map_err(map_sql_err)?;
                 conn.execute(
                     "INSERT INTO dashboard_item
-                       (dashboard_id, sort_index, kind, metric_key, options_json, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-                    params![dash_val, next, item.kind, item.metric_key, item.options_json, now],
+                       (dashboard_id, sort_index, kind, options_json, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+                    params![dash_val, next, item.kind, item.options_json, now],
                 )
                 .map_err(map_sql_err)?;
                 Ok(DashboardItemId::new(conn.last_insert_rowid()))
@@ -227,11 +235,10 @@ impl SqliteDashboardStore {
             .await
     }
 
-    /// Update a tile's metric_key / options. No-op if it doesn't exist.
+    /// Update a tile's options. No-op if it doesn't exist.
     pub async fn update_item(
         &self,
         id: DashboardItemId,
-        metric_key: Option<String>,
         options_json: Option<String>,
     ) -> Result<(), DomainError> {
         let id_val = id.value();
@@ -240,9 +247,9 @@ impl SqliteDashboardStore {
                 let now = ts_to_string(Timestamp::now());
                 conn.execute(
                     "UPDATE dashboard_item
-                        SET metric_key = ?2, options_json = ?3, updated_at = ?4
+                        SET options_json = ?2, updated_at = ?3
                       WHERE id = ?1",
-                    params![id_val, metric_key, options_json, now],
+                    params![id_val, options_json, now],
                 )
                 .map_err(map_sql_err)?;
                 Ok(())
@@ -298,12 +305,76 @@ mod tests {
         SqliteDashboardStore::new(Database::in_memory())
     }
 
-    fn metric_tile(key: &str) -> NewDashboardItem {
+    fn query_tile(sql: &str) -> NewDashboardItem {
         NewDashboardItem {
-            kind: "metric".into(),
-            metric_key: Some(key.into()),
-            options_json: Some(r#"{"viz":"line"}"#.into()),
+            kind: "query".into(),
+            options_json: Some(serde_json::json!({ "sql": sql, "display": "table" }).to_string()),
         }
+    }
+
+    #[tokio::test]
+    async fn an_unknown_tile_kind_is_refused() {
+        let s = store();
+        let d = s.create("D".into()).await.unwrap();
+        let err = s
+            .add_item(
+                d,
+                NewDashboardItem {
+                    kind: "metric".into(),
+                    options_json: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown tile kind `metric`"),
+            "{err}"
+        );
+    }
+
+    /// P4.7 (tsk492): V108 turns a metric tile into a query tile reading
+    /// its metric's captures, displayed as the metric card, keeping its
+    /// other options.
+    #[test]
+    fn v108_turns_metric_tiles_into_query_tiles() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::migrate_to_for_tests(&mut conn, 107);
+        conn.execute_batch(
+            "INSERT INTO dashboard (id, title, sort_index, created_at, updated_at) VALUES (1, 'D', 0, 't', 't');
+             INSERT INTO dashboard_item (dashboard_id, sort_index, kind, metric_key, options_json, created_at, updated_at)
+               VALUES (1, 0, 'metric', 'it''s.a', '{\"viz\":\"number\",\"size\":\"wide\"}', 't', 't'),
+                      (1, 1, 'text', NULL, '{\"text\":\"Hi\"}', 't', 't');",
+        )
+        .unwrap();
+        crate::database::migrate_and_compile(&mut conn).unwrap();
+        let rows: Vec<(String, String)> = conn
+            .prepare("SELECT kind, options_json FROM dashboard_item ORDER BY sort_index")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(rows[0].0, "query");
+        let opts: serde_json::Value = serde_json::from_str(&rows[0].1).unwrap();
+        assert_eq!(opts["display"], "metric");
+        assert_eq!(opts["metric"], "it's.a");
+        assert_eq!(opts["viz"], "number");
+        assert_eq!(opts["size"], "wide");
+        let sql = opts["sql"].as_str().unwrap();
+        assert!(sql.contains("MEASURE('it''s.a') AS value"), "{sql}");
+        assert!(
+            sql.contains("FROM metric_grid('capture') g LEFT JOIN v_capture c"),
+            "{sql}"
+        );
+        assert_eq!(rows[1].0, "text");
+        let cols: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('dashboard_item') WHERE name = 'metric_key'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cols, 0);
     }
 
     #[tokio::test]
@@ -338,24 +409,15 @@ mod tests {
     async fn items_append_and_cascade_on_delete() {
         let s = store();
         let d = s.create("D".into()).await.unwrap();
-        let t1 = s
-            .add_item(d, metric_tile("oxplow.coverage.abs_pct"))
-            .await
-            .unwrap();
-        let t2 = s
-            .add_item(d, metric_tile("repo.complexity_avg"))
-            .await
-            .unwrap();
+        let t1 = s.add_item(d, query_tile("SELECT 1")).await.unwrap();
+        let t2 = s.add_item(d, query_tile("SELECT 2")).await.unwrap();
         let got = s.get(d).await.unwrap().unwrap();
         assert_eq!(got.items.len(), 2);
         assert_eq!(got.items[0].id, t1);
         assert_eq!(got.items[0].sort_index, 0);
         assert_eq!(got.items[1].id, t2);
         assert_eq!(got.items[1].sort_index, 1);
-        assert_eq!(
-            got.items[0].metric_key.as_deref(),
-            Some("oxplow.coverage.abs_pct")
-        );
+        assert_eq!(got.items[0].kind, "query");
 
         // Deleting the dashboard cascades to its tiles.
         s.delete(d).await.unwrap();
@@ -366,12 +428,11 @@ mod tests {
     async fn update_and_remove_item() {
         let s = store();
         let d = s.create("D".into()).await.unwrap();
-        let t = s.add_item(d, metric_tile("a")).await.unwrap();
-        s.update_item(t, Some("b".into()), Some(r#"{"viz":"number"}"#.into()))
+        let t = s.add_item(d, query_tile("SELECT 1")).await.unwrap();
+        s.update_item(t, Some(r#"{"viz":"number"}"#.into()))
             .await
             .unwrap();
         let got = s.get(d).await.unwrap().unwrap();
-        assert_eq!(got.items[0].metric_key.as_deref(), Some("b"));
         assert_eq!(
             got.items[0].options_json.as_deref(),
             Some(r#"{"viz":"number"}"#)
@@ -384,9 +445,9 @@ mod tests {
     async fn reorder_items_rewrites_sort_index() {
         let s = store();
         let d = s.create("D".into()).await.unwrap();
-        let t1 = s.add_item(d, metric_tile("a")).await.unwrap();
-        let t2 = s.add_item(d, metric_tile("b")).await.unwrap();
-        let t3 = s.add_item(d, metric_tile("c")).await.unwrap();
+        let t1 = s.add_item(d, query_tile("SELECT 1")).await.unwrap();
+        let t2 = s.add_item(d, query_tile("SELECT 2")).await.unwrap();
+        let t3 = s.add_item(d, query_tile("SELECT 3")).await.unwrap();
         // Move t3 to the front.
         s.reorder_items(d, vec![t3, t1, t2]).await.unwrap();
         let got = s.get(d).await.unwrap().unwrap();

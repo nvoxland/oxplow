@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use oxplow_app::{OxplowEvent, Services};
-use oxplow_db::{Dashboard, DashboardWithItems, NewDashboardItem};
+use oxplow_db::{Dashboard, DashboardWithItems};
 use oxplow_domain::{DashboardId, DashboardItemId};
 
 use crate::error::IpcError;
@@ -58,10 +58,15 @@ pub async fn delete_dashboard(svc: &Services, id: DashboardId) -> Result<(), Ipc
 pub struct AddDashboardItemRequest {
     #[serde(rename = "dashboardId")]
     pub dashboard_id: DashboardId,
-    /// `metric` | `text`.
+    /// `query` | `lens` | `text`.
     pub kind: String,
-    #[serde(rename = "metricKey")]
-    pub metric_key: Option<String>,
+    /// A `query` tile's SQL.
+    pub sql: Option<String>,
+    /// A `query` tile's display: a lens viz, or `metric` (the metric card).
+    pub display: Option<String>,
+    /// A `lens` tile's lens id.
+    #[serde(rename = "lensId")]
+    pub lens_id: Option<String>,
     #[serde(rename = "optionsJson")]
     pub options_json: Option<String>,
 }
@@ -70,17 +75,18 @@ pub async fn add_dashboard_item(
     svc: &Services,
     req: AddDashboardItemRequest,
 ) -> Result<DashboardItemId, IpcError> {
-    let id = svc
-        .dashboard_store
-        .add_item(
-            req.dashboard_id,
-            NewDashboardItem {
-                kind: req.kind,
-                metric_key: req.metric_key,
-                options_json: req.options_json,
-            },
-        )
-        .await?;
+    let tile = oxplow_app::dashboard_tiles::new_tile(
+        &svc.sql,
+        oxplow_app::dashboard_tiles::TileInput {
+            kind: req.kind,
+            sql: req.sql,
+            display: req.display,
+            lens_id: req.lens_id,
+            options_json: req.options_json,
+        },
+    )
+    .await?;
+    let id = svc.dashboard_store.add_item(req.dashboard_id, tile).await?;
     svc.events.emit(OxplowEvent::DashboardsChanged);
     Ok(id)
 }
@@ -88,8 +94,6 @@ pub async fn add_dashboard_item(
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct UpdateDashboardItemRequest {
     pub id: DashboardItemId,
-    #[serde(rename = "metricKey")]
-    pub metric_key: Option<String>,
     #[serde(rename = "optionsJson")]
     pub options_json: Option<String>,
 }
@@ -98,8 +102,17 @@ pub async fn update_dashboard_item(
     svc: &Services,
     req: UpdateDashboardItemRequest,
 ) -> Result<(), IpcError> {
+    // A query tile's SQL is held to the read contract on every edit too.
+    if let Some(sql) = req
+        .options_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|v| v.get("sql").and_then(|s| s.as_str()).map(str::to_string))
+    {
+        svc.sql.check(&sql).await?;
+    }
     svc.dashboard_store
-        .update_item(req.id, req.metric_key, req.options_json)
+        .update_item(req.id, req.options_json)
         .await?;
     svc.events.emit(OxplowEvent::DashboardsChanged);
     Ok(())

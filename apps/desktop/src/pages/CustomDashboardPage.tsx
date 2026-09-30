@@ -15,10 +15,14 @@ import {
   subscribeOxplowEvents,
   updateDashboardItem,
 } from "../api.js";
+import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
+import { useRequestGuard } from "../request-guard.js";
+import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import { MetricPickerPanel } from "../components/Dashboard/MetricPickerPanel.js";
 import { MetricTile } from "../components/Dashboard/MetricTile.js";
 import { TextTile } from "../components/Dashboard/TextTile.js";
 import { LensTile } from "../components/Dashboard/LensTile.js";
+import { QueryTile } from "../components/Dashboard/QueryTile.js";
 import { moveToIndex } from "../components/CenterTabs/centerTabsReorder.js";
 import { InlineConfirm } from "../components/InlineConfirm.js";
 import { InlineEdit } from "../components/InlineEdit.js";
@@ -28,7 +32,7 @@ import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { RANGE_PRESETS, rangeFromPreset } from "./metricDetailData.js";
-import { type TileOptions, parseTileOptions, tileSpanStyle } from "./customDashboardData.js";
+import { type TileOptions, metricTile, parseTileOptions, tileSpanStyle } from "./customDashboardData.js";
 
 /** Drag payload for tile reordering — distinct from the rail's section MIME so
  *  a rail drag can never drop into the grid. */
@@ -63,7 +67,8 @@ const buttonStyle: React.CSSProperties = {
  * **dashboard filter** (time range + branch) that every tile inherits unless it
  * overrides it. Tiles flow in a responsive grid, reorder by drag-and-drop, and
  * are added via the header button, the empty state, or a right-click menu.
- * Live-refreshes on `dashboardsChanged` (structure) + `configChanged` (defs).
+ * Live-refreshes on `dashboardsChanged` (structure); the metric specs and
+ * catalog re-read when their models change.
  */
 export function CustomDashboardPage({
   dashboardId,
@@ -97,11 +102,6 @@ export function CustomDashboardPage({
       return;
     }
     let cancelled = false;
-    const loadDefs = () => {
-      void listMetricDefinitions().then((rows) => {
-        if (!cancelled) setDefs(new Map(rows.map((d) => [d.key, d])));
-      });
-    };
     const refresh = () => {
       void getDashboard(dashboardId).then((d) => {
         if (cancelled) return;
@@ -110,19 +110,32 @@ export function CustomDashboardPage({
       });
     };
     refresh();
-    loadDefs();
-    void listMetricCatalog().then((rows) => {
-      if (!cancelled) setCatalog(rows);
-    });
     const off = subscribeOxplowEvents((e) => {
       if (e.kind === "dashboardsChanged") refresh();
-      if (e.kind === "configChanged") loadDefs();
     });
     return () => {
       cancelled = true;
       off();
     };
   }, [dashboardId]);
+
+  // The metric specs (each metric tile's title, unit, direction) and the
+  // catalog (the add-metric picker): re-read when either model changes.
+  const [metricReads, setMetricReads] = useState<Reads>(NO_READS);
+  const metricGuard = useRequestGuard();
+  const loadMetrics = useCallback(() => {
+    const current = metricGuard.begin();
+    void Promise.all([listMetricDefinitions(), listMetricCatalog()]).then(([specs, entries]) => {
+      if (!current()) return;
+      setDefs(new Map(specs.rows.map((d) => [d.key, d])));
+      setCatalog(entries.rows);
+      setMetricReads(unionReads([specs.reads, entries.reads]));
+    });
+  }, [metricGuard]);
+  useEffect(() => {
+    loadMetrics();
+  }, [loadMetrics]);
+  useRerunOnChange(metricReads, loadMetrics);
 
   // Tiles report the branches present in their samples; the filter offers the
   // union. Returns the previous array when nothing is new so the identity stays
@@ -149,12 +162,7 @@ export function CustomDashboardPage({
     async (metricKey: string) => {
       if (!dashboardId) return;
       try {
-        await addDashboardItem({
-          dashboardId,
-          kind: "metric",
-          metricKey,
-          optionsJson: JSON.stringify({ viz: "line" }),
-        });
+        await addDashboardItem({ dashboardId, ...metricTile(metricKey) });
       } catch (e) {
         recordOpError({ label: "Add tile", message: e instanceof Error ? e.message : String(e) });
       }
@@ -188,8 +196,8 @@ export function CustomDashboardPage({
 
   /** Merge a partial option change into the tile's existing blob and persist. */
   const configureTile = useCallback(
-    (itemId: string, metricKey: string | null, current: TileOptions, next: Partial<TileOptions>) => {
-      void updateDashboardItem(itemId, metricKey, JSON.stringify({ ...current, ...next })).catch((e) =>
+    (itemId: string, current: TileOptions, next: Partial<TileOptions>) => {
+      void updateDashboardItem(itemId, JSON.stringify({ ...current, ...next })).catch((e) =>
         recordOpError({ label: "Configure tile", message: e instanceof Error ? e.message : String(e) }),
       );
     },
@@ -239,7 +247,12 @@ export function CustomDashboardPage({
   // Metric keys already on this dashboard — the picker marks them ✓ so a
   // second pass doesn't silently duplicate a tile.
   const addedKeys = useMemo(
-    () => new Set(items.map((i) => i.metric_key).filter((k): k is string => !!k)),
+    () =>
+      new Set(
+        items
+          .map((i) => (i.kind === "query" ? parseTileOptions(i.options_json).metric : undefined))
+          .filter((k): k is string => !!k),
+      ),
     [items],
   );
 
@@ -470,24 +483,32 @@ export function CustomDashboardPage({
                       opts={opts}
                       onOpenPage={onOpenPage ? (ref) => onOpenPage(ref) : undefined}
                       onRemove={() => void removeTile(it.id)}
-                      onConfigure={(next) => configureTile(it.id, it.metric_key, opts, next)}
+                      onConfigure={(next) => configureTile(it.id, opts, next)}
                     />
                   ) : it.kind === "text" ? (
                     <TextTile
                       item={it}
                       opts={opts}
                       onRemove={() => void removeTile(it.id)}
-                      onConfigure={(next) => configureTile(it.id, it.metric_key, opts, next)}
+                      onConfigure={(next) => configureTile(it.id, opts, next)}
+                    />
+                  ) : opts.display !== "metric" ? (
+                    <QueryTile
+                      item={it}
+                      opts={opts}
+                      onOpenPage={onOpenPage ? (ref) => onOpenPage(ref) : undefined}
+                      onRemove={() => void removeTile(it.id)}
+                      onConfigure={(next) => configureTile(it.id, opts, next)}
                     />
                   ) : (
                     <MetricTile
                       item={it}
                       opts={opts}
-                      def={it.metric_key ? (defs.get(it.metric_key) ?? null) : null}
+                      def={opts.metric ? (defs.get(opts.metric) ?? null) : null}
                       dashboard={dashboardFilter}
                       onOpenPage={onOpenPage}
                       onRemove={() => void removeTile(it.id)}
-                      onConfigure={(next) => configureTile(it.id, it.metric_key, opts, next)}
+                      onConfigure={(next) => configureTile(it.id, opts, next)}
                       onBranches={mergeBranches}
                     />
                   )}

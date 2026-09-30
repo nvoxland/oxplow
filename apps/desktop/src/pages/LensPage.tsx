@@ -3,18 +3,8 @@ import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../tauri-bridge/index.js";
-import {
-  addDashboardItem,
-  createDashboard,
-  listDashboards,
-  runLens,
-  type Dashboard,
-  type LensRun,
-  type SqlCell,
-} from "../api.js";
-import { showToast } from "../components/toastStore.js";
-import { recordOpError } from "../components/opErrorsStore.js";
-import { customDashboardRef, lensRef } from "../tabs/pageRefs.js";
+import { runLens, type LensRun, type SqlCell } from "../api.js";
+import { lensRef } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
@@ -22,6 +12,7 @@ import { changedParams, parseParamInput } from "../lens/lensModel.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { useRequestGuard } from "../request-guard.js";
 import { LensResultView } from "../lens/LensResultView.js";
+import { PinToDashboard } from "../components/Dashboard/PinToDashboard.js";
 
 export interface LensPageProps {
   /** `<extension>/<slug>`. */
@@ -97,7 +88,11 @@ export function LensPage({ lensId, initialParams, stream, onOpenPage }: LensPage
       <button type="button" data-testid="lens-refresh" onClick={() => void refresh()}>
         Refresh
       </button>
-      <PinToDashboard lensId={lensId} onOpenPage={onOpenPage} />
+      <PinToDashboard
+        tile={{ kind: "lens", lensId, optionsJson: JSON.stringify({ size: "wide" }) }}
+        testId="lens-pin"
+        onOpenPage={onOpenPage}
+      />
       <button
         type="button"
         data-testid="lens-improve-with-agent"
@@ -154,91 +149,6 @@ export function LensPage({ lensId, initialParams, stream, onOpenPage }: LensPage
 
 /** "Pin to Dashboard": adds a `lens` tile to a chosen dashboard (or a new
  *  "My Dashboard" when there are none), then offers to open it. */
-function PinToDashboard({ lensId, onOpenPage }: { lensId: string; onOpenPage(ref: TabRef): void }) {
-  const [dashboards, setDashboards] = useState<Dashboard[] | null>(null);
-  const wrapRef = useRef<HTMLSpanElement | null>(null);
-  const isOpen = dashboards !== null;
-
-  // Close on an outside press or Escape, like the app's other popovers.
-  useEffect(() => {
-    if (!isOpen) return;
-    const onDown = (e: PointerEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setDashboards(null);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setDashboards(null);
-    };
-    document.addEventListener("pointerdown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [isOpen]);
-
-  async function pin(dashboardId: string, title: string) {
-    setDashboards(null);
-    try {
-      await addDashboardItem({
-        dashboardId,
-        kind: "lens",
-        optionsJson: JSON.stringify({ lensId, size: "wide" }),
-      });
-      showToast({ message: `Pinned to ${title}.` });
-      onOpenPage(customDashboardRef(dashboardId));
-    } catch (e) {
-      recordOpError({ label: "Pin lens to dashboard", message: String(e) });
-    }
-  }
-
-  async function toggle() {
-    if (dashboards) {
-      setDashboards(null);
-      return;
-    }
-    try {
-      setDashboards(await listDashboards());
-    } catch (e) {
-      recordOpError({ label: "List dashboards", message: String(e) });
-    }
-  }
-
-  async function pinToNew() {
-    try {
-      const d = await createDashboard("My Dashboard");
-      await pin(d.id, d.title);
-    } catch (e) {
-      recordOpError({ label: "Create dashboard", message: String(e) });
-    }
-  }
-
-  return (
-    <span ref={wrapRef} style={{ position: "relative" }}>
-      <button type="button" data-testid="lens-pin" onClick={() => void toggle()}>
-        Pin to Dashboard
-      </button>
-      {dashboards ? (
-        <div data-testid="lens-pin-menu" style={pinMenuStyle}>
-          {dashboards.map((d) => (
-            <button
-              key={d.id}
-              type="button"
-              data-testid={`lens-pin-to-${d.id}`}
-              style={pinItemStyle}
-              onClick={() => void pin(d.id, d.title)}
-            >
-              {d.title}
-            </button>
-          ))}
-          <button type="button" data-testid="lens-pin-new" style={pinItemStyle} onClick={() => void pinToNew()}>
-            New Dashboard…
-          </button>
-        </div>
-      ) : null}
-    </span>
-  );
-}
-
 function ParamsForm({
   lens,
   values,
@@ -291,29 +201,6 @@ function ParamInput({
   );
 }
 
-const pinMenuStyle: CSSProperties = {
-  position: "absolute",
-  top: "100%",
-  right: 0,
-  zIndex: 10,
-  marginTop: 4,
-  minWidth: 200,
-  display: "flex",
-  flexDirection: "column",
-  background: "var(--surface-card)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 6,
-  padding: 4,
-};
-const pinItemStyle: CSSProperties = {
-  background: "none",
-  border: "none",
-  textAlign: "left",
-  padding: "6px 8px",
-  font: "inherit",
-  color: "var(--text-primary)",
-  cursor: "pointer",
-};
 const errorStyle: CSSProperties = {
   border: "1px solid var(--border-subtle)",
   borderRadius: 6,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatMetricValue, formatMetricValueExact } from "../components/format";
 
 import {
@@ -7,8 +7,11 @@ import {
   listMetricCatalog,
   listMetricDefinitions,
   listMetricSamples,
-  subscribeMetricRefresh,
 } from "../api.js";
+import { coalescedRefresh } from "../coalesced-refresh.js";
+import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
+import { useRequestGuard } from "../request-guard.js";
+import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import {
   CollapsibleSection,
   CollapsibleSections,
@@ -135,56 +138,51 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
   const [query, setQuery] = useState("");
   const [showMode, setShowMode] = useState<ShowMode>(DEFAULT_SHOW_MODE);
 
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = () => {
-      void Promise.all([listMetricCatalog(), listMetricDefinitions()]).then(
-        async ([catalog, defs]) => {
-          const specs = new Map(defs.map((d) => [d.key, d]));
-          const built = await Promise.all(
-            catalog.map(async (entry) => {
-              const def = specs.get(entry.key) ?? null;
-              // No spec ⇒ no spec-driven reads ⇒ don't pay for the IPC. Bound the
-              // read to the widest preset (tsk202) — the page filters to the
-              // selected range client-side (filterByRange), a subset of this.
-              const samples = def
-                ? await listMetricSamples(entry.key, SAMPLE_LIMIT, null, widestPresetWindow(Date.now()))
-                : [];
-              return {
-                key: entry.key,
-                title: entry.title,
-                category: entry.category,
-                language: entry.language,
-                enabled: entry.enabled,
-                def,
-                latest: samples[0] ?? null,
-                samples,
-              };
-            }),
-          );
-          if (!cancelled) {
-            setRows(built);
-            setLoading(false);
-          }
-        },
+  const [reads, setReads] = useState<Reads>(NO_READS);
+  const guard = useRequestGuard();
+
+  // One read per catalogued metric. It re-runs when something those reads
+  // read changed: the catalog or a spec (an enable toggle, a project.yaml
+  // edit) or facts for any listed metric's measure (P4.6/P4.7).
+  // Behind a single-flight gate: the facts for token measures land every
+  // agent turn, and a refresh must never overlap the one before it (tsk91).
+  const load = useCallback(() => {
+    const current = guard.begin();
+    return Promise.all([listMetricCatalog(), listMetricDefinitions()]).then(async ([catalog, defs]) => {
+      const specs = new Map(defs.rows.map((d) => [d.key, d]));
+      const built = await Promise.all(
+        catalog.rows.map(async (entry) => {
+          const def = specs.get(entry.key) ?? null;
+          // No spec ⇒ nothing to grid. Bound the read to the widest preset
+          // (tsk202); the page filters to the selected range client-side.
+          const samples = def
+            ? await listMetricSamples(entry.key, SAMPLE_LIMIT, null, widestPresetWindow(Date.now()))
+            : { rows: [], reads: NO_READS };
+          const row: Row = {
+            key: entry.key,
+            title: entry.title,
+            category: entry.category,
+            language: entry.language,
+            enabled: entry.enabled,
+            def,
+            latest: samples.rows[0] ?? null,
+            samples: samples.rows,
+          };
+          return { row, reads: samples.reads };
+        }),
       );
-    };
-    refresh();
-    // A refresh is one `listMetricSamples` per catalogued metric, and each of
-    // those walks its measure's whole fact history (`oxplow.test_case` alone is
-    // ~235k facts) — ~20 CPU-seconds a go. The OTLP token ingest emits
-    // metricSamplesChanged on every agent turn, so an un-debounced reload made
-    // oxplow's CPU proportional to how hard the agent was working (tsk91). Same
-    // bug tsk75 fixed for `EffortMetricsBlock`. This helper is where that
-    // trailing-debounce discipline now lives (tsk197): debounce the burst,
-    // refresh configChanged (an enable toggle / scaffold / project.yaml edit)
-    // immediately.
-    const off = subscribeMetricRefresh(refresh, { alsoConfig: true });
-    return () => {
-      cancelled = true;
-      off();
-    };
-  }, []);
+      if (!current()) return;
+      setRows(built.map((b) => b.row));
+      setReads(unionReads([catalog.reads, defs.reads, ...built.map((b) => b.reads)]));
+      setLoading(false);
+    });
+  }, [guard]);
+  const gate = useMemo(() => coalescedRefresh(load, 0), [load]);
+  useEffect(() => {
+    gate.schedule();
+    return () => gate.cancel();
+  }, [gate]);
+  useRerunOnChange(reads, gate.schedule);
 
   const branches = useMemo(() => branchOptions(rows.flatMap((r) => r.samples)), [rows]);
   // Which metrics are LISTED (Show mode + search), each scoped to the range +

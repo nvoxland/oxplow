@@ -33,6 +33,7 @@ pub mod commit_indexer;
 pub mod config_service;
 pub mod config_watch;
 pub mod daemon_supervisor;
+pub mod dashboard_tiles;
 pub mod diagnostics;
 pub mod duplication_scan;
 pub mod effort_evidence;

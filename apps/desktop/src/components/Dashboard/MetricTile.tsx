@@ -1,12 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import {
-  type DashboardItem,
-  type MetricSpec,
-  type SeriesPoint,
-  listMetricSamples,
-  subscribeMetricRefresh,
-} from "../../api.js";
+import { type DashboardItem, type MetricSpec, type SeriesPoint, querySql } from "../../api.js";
+import { seriesPoints as seriesPointRows } from "../../metricsSql.js";
+import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
+import { useRequestGuard } from "../../request-guard.js";
 import { formatMetricValue } from "../format.js";
 import { metricRef } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
@@ -20,7 +17,6 @@ import {
   filterByRange,
   seriesPoints,
   transformSeries,
-  widestPresetWindow,
 } from "../../pages/metricDetailData.js";
 import {
   type TileOptions,
@@ -142,50 +138,43 @@ export function MetricTile({
   onBranches?: (branches: string[]) => void;
 }) {
   const [samples, setSamples] = useState<SeriesPoint[]>([]);
+  const [reads, setReads] = useState(NO_READS);
   const [loading, setLoading] = useState(true);
   const ctxMenu = useContextMenu();
 
-  const metricKey = item.metric_key ?? null;
+  // A query tile shown as the metric card: its pinned SQL reads the metric's
+  // captures (`metric_grid('capture')`, P4.7); `metric` names the metric.
+  const metricKey = opts.metric ?? null;
+  const sql = opts.sql ?? null;
   const viz = opts.viz ?? "line";
+  const guard = useRequestGuard();
 
-  // Measure scope for event filtering (tsk198): a base metric reads exactly its
-  // `source_measure`, so skip metricSamplesChanged events for other measures. A
-  // formula metric (source_measure null) stays undefined → fail-open.
-  const scopeMeasures = useMemo(
-    () => (def?.source_measure ? [def.source_measure] : undefined),
-    [def?.source_measure],
-  );
-
-  // Bound each sample fetch to the widest preset (tsk202) unless this tile shows
-  // "all" time (then it must fetch the whole history). Mirrors
-  // `resolveTileWindow`'s all-detection.
-  const tileIsAll = opts.range === "all" || (!opts.range && dashboard.range === null);
-
-  useEffect(() => {
-    if (!metricKey) {
+  const refresh = useCallback(() => {
+    if (!sql) {
       setLoading(false);
       return;
     }
-    let cancelled = false;
-    const refresh = () => {
-      const win = tileIsAll ? null : widestPresetWindow(Date.now());
-      // A metric with nothing to grid (no spec, or a formula) shows no data.
-      void listMetricSamples(metricKey, SAMPLE_LIMIT, null, win).catch(() => []).then((rows) => {
-        if (cancelled) return;
+    const current = guard.begin();
+    // A metric with nothing to grid (no spec, or a formula) shows no data.
+    void querySql(sql, [], SAMPLE_LIMIT)
+      .then((result) => ({ rows: seriesPointRows(result), reads: result.reads }))
+      .catch(() => ({ rows: [] as SeriesPoint[], reads: NO_READS }))
+      .then(({ rows, reads: r }) => {
+        if (!current()) return;
         setSamples(rows);
+        setReads(r);
         setLoading(false);
         // Feed the dashboard's branch filter its options (union across tiles).
         onBranches?.(branchOptions(rows));
       });
-    };
-    refresh();
-    const off = subscribeMetricRefresh(refresh, { measures: scopeMeasures });
-    return () => {
-      cancelled = true;
-      off();
-    };
     // `onBranches` is a report-upward callback, excluded from deps on purpose.
-  }, [metricKey, scopeMeasures, tileIsAll]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sql, guard]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+  useRerunOnChange(reads, refresh);
 
   const title = opts.title ?? def?.title ?? metricKey ?? "Metric";
 
@@ -238,7 +227,7 @@ export function MetricTile({
   ];
 
   const body = (() => {
-    if (!metricKey) return <div style={{ opacity: 0.6, fontSize: 13 }}>No metric selected.</div>;
+    if (!metricKey || !sql) return <div style={{ opacity: 0.6, fontSize: 13 }}>No metric selected.</div>;
     if (loading) return <div style={{ opacity: 0.6, fontSize: 13 }}>Loading…</div>;
     if (!def)
       return (

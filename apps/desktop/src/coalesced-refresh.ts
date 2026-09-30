@@ -1,9 +1,8 @@
 /**
  * Trailing-debounce + single-flight wrapper for an expensive async refresh.
  *
- * Extends the `subscribeMetricRefresh` discipline (tsk91/tsk197) with an
- * in-flight guard, which is the part that matters when the refresh can
- * outlast the event cadence that triggers it. Debouncing alone still lets
+ * The in-flight guard (tsk91/tsk197) is the part that matters when the
+ * refresh can outlast the event cadence that triggers it. Debouncing alone still lets
  * a slow refresh overlap the next one; single-flight bounds concurrency to
  * exactly one regardless of how slow the work is.
  *

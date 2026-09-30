@@ -12,6 +12,7 @@ import {
   type SchemaEntity,
 } from "../api.js";
 import { LensResultView } from "../lens/LensResultView.js";
+import { PinToDashboard } from "../components/Dashboard/PinToDashboard.js";
 import { adHocLens, NEW_LENS_PROMPT, slugify } from "../lens/lensModel.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
@@ -161,6 +162,13 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
           </select>
         </label>
         <span style={{ flex: 1 }} />
+        {run ? (
+          <PinToDashboard
+            tile={{ kind: "query", sql: run.lens.query, display: viz, optionsJson: JSON.stringify({ size: "wide" }) }}
+            testId="explore-pin"
+            onOpenPage={onOpenPage}
+          />
+        ) : null}
         {run ? <SaveAsLens query={run.lens.query} viz={viz} stream={stream} onOpenPage={onOpenPage} /> : null}
       </div>
       {error ? (

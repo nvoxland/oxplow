@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   type Dashboard,
@@ -14,12 +14,14 @@ import {
   removeDashboardItem,
   enableMetrics,
   subscribeDashboardEvents,
-  subscribeMetricRefresh,
 } from "../api.js";
+import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
+import { useRequestGuard } from "../request-guard.js";
+import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
-import { buildAddToDashboardMenu } from "./customDashboardData.js";
+import { buildAddToDashboardMenu, metricTile } from "./customDashboardData.js";
 import { customDashboardRef } from "../tabs/pageRefs.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
@@ -97,52 +99,42 @@ export function MetricDetailPage({
   // Chart the metric the way it rolls up (sum → cumulative, …).
   const mode = def ? defaultChartMode(def.aggregation) : "value";
 
-  useEffect(() => {
+  const [reads, setReads] = useState<Reads>(NO_READS);
+  const guard = useRequestGuard();
+
+  // The spec, the catalog entry (what a DISABLED metric still has: title,
+  // enabled, resolved target — what the Configure block toggles, tsk117) and
+  // the captures. It re-runs when something they read changed (P4.6/P4.7).
+  const refresh = useCallback(() => {
     if (!metricKey) {
       setLoading(false);
       return;
     }
-    let cancelled = false;
-    const refresh = () => {
-      void listMetricDefinitions().then((defs) => {
-        if (!cancelled) {
-          setDef(defs.find((d) => d.key === metricKey) ?? null);
-          setLoading(false);
-        }
-      });
-      // The catalog entry is what a DISABLED metric still has (its spec is
-      // pruned): it carries title + enabled + resolved target, and it is what
-      // the Configure block toggles (tsk117 — Metric Settings folded in here).
-      void listMetricCatalog().then((entries) => {
-        if (!cancelled) setEntry(entries.find((e) => e.key === metricKey) ?? null);
-      });
-      // Bound the read to the widest preset (tsk202); the chart's range dropdown
-      // still switches instantly client-side within it (filterByRange below).
-      // A metric with nothing to grid (no spec, or a formula) shows no data.
-      void listMetricSamples(metricKey, SAMPLE_LIMIT, null, widestPresetWindow(Date.now()))
-        .catch(() => [])
-        .then((rows) => {
-          if (!cancelled) setSamples(rows);
-        });
-    };
-    refresh();
-    // Debounce the OTLP-burst metricSamplesChanged and skip events for measures
-    // this metric doesn't read (tsk197/198); configChanged (an enable/target
-    // write, ours or an external .oxplow/project.yaml edit that re-resolves the
-    // catalog + spec) refreshes immediately. Scope is undefined until `def`
-    // loads → fail-open, then narrows to the metric's own measure (a formula
-    // metric stays null → fail-open, as it aggregates several).
-    const off = subscribeMetricRefresh(refresh, {
-      alsoConfig: true,
-      measures: def?.source_measure ? [def.source_measure] : undefined,
+    const current = guard.begin();
+    void Promise.all([
+      listMetricDefinitions(),
+      listMetricCatalog(),
+      // Bound the read to the widest preset (tsk202); the chart's range
+      // dropdown switches client-side within it. A metric with nothing to
+      // grid (no spec, or a formula) shows no data.
+      listMetricSamples(metricKey, SAMPLE_LIMIT, null, widestPresetWindow(Date.now())).catch(() => ({
+        rows: [] as SeriesPoint[],
+        reads: NO_READS,
+      })),
+    ]).then(([defs, catalog, captures]) => {
+      if (!current()) return;
+      setDef(defs.rows.find((d) => d.key === metricKey) ?? null);
+      setEntry(catalog.rows.find((e) => e.key === metricKey) ?? null);
+      setSamples(captures.rows);
+      setReads(unionReads([defs.reads, catalog.reads, captures.reads]));
+      setLoading(false);
     });
-    return () => {
-      cancelled = true;
-      off();
-    };
-    // `def?.source_measure` changes at most once (null → key) as the spec loads.
-  }, [metricKey, def?.source_measure]);
+  }, [metricKey, guard]);
 
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+  useRerunOnChange(reads, refresh);
 
   const branches = useMemo(() => branchOptions(samples), [samples]);
   // The range + branch window feeds the chart, the recordings and the stats.
@@ -166,17 +158,10 @@ export function MetricDetailPage({
       setConfigBusy(false);
     }
   };
-  const tileOptionsJson = () => JSON.stringify({ viz: "line" });
-
   const addToDashboard = async (dashboardId: string) => {
     if (!metricKey) return;
     try {
-      const tileId = await addDashboardItem({
-        dashboardId,
-        kind: "metric",
-        metricKey,
-        optionsJson: tileOptionsJson(),
-      });
+      const tileId = await addDashboardItem({ dashboardId, ...metricTile(metricKey) });
       const title = dashboards.find((d) => d.id === dashboardId)?.title ?? "dashboard";
       // Stay on the metric — the toast carries the undo (remove the new tile).
       showToast({ message: `Added to ${title}`, onUndo: () => void removeDashboardItem(tileId) });
@@ -189,12 +174,7 @@ export function MetricDetailPage({
     if (!metricKey) return;
     try {
       const created = await createDashboard("Untitled dashboard");
-      await addDashboardItem({
-        dashboardId: created.id,
-        kind: "metric",
-        metricKey,
-        optionsJson: tileOptionsJson(),
-      });
+      await addDashboardItem({ dashboardId: created.id, ...metricTile(metricKey) });
       // A brand-new dashboard is worth showing; adding to an existing one
       // leaves you here with an undo toast instead.
       onOpenPage?.(customDashboardRef(created.id));

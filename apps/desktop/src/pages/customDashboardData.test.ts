@@ -5,6 +5,7 @@ import {
   buildAddToDashboardMenu,
   deltaTone,
   latestValue,
+  metricTile,
   parseTileOptions,
   resolveTileWindow,
   tileSpanStyle,
@@ -189,5 +190,23 @@ describe("buildAddToDashboardMenu", () => {
 describe("parseTileOptions lens tiles", () => {
   it("keeps a lens tile's lensId", () => {
     expect(parseTileOptions('{"lensId":"mine/threads","size":"wide"}')).toEqual({ lensId: "mine/threads", size: "wide" });
+  });
+});
+
+describe("query tiles (P4.7)", () => {
+  it("parses a query tile's sql, display and metric", () => {
+    expect(
+      parseTileOptions('{"sql":"SELECT 1","display":"metric","metric":"oxplow.coverage","viz":"number"}'),
+    ).toEqual({ sql: "SELECT 1", display: "metric", metric: "oxplow.coverage", viz: "number" });
+    expect(parseTileOptions('{"sql":7,"display":null,"metric":[]}')).toEqual({});
+  });
+
+  it("metricTile pins a query over the metric's captures, shown as the metric card", () => {
+    const tile = metricTile("oxplow.coverage");
+    expect(tile.kind).toBe("query");
+    expect(tile.display).toBe("metric");
+    expect(tile.sql).toContain("metric_grid('capture')");
+    expect(tile.sql).toContain("MEASURE('oxplow.coverage')");
+    expect(parseTileOptions(tile.optionsJson)).toEqual({ metric: "oxplow.coverage", viz: "line" });
   });
 });

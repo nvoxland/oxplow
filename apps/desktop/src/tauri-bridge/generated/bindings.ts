@@ -1390,9 +1390,14 @@ export type AcpStatus = "starting" | "idle" | "running" | "awaiting_permission" 
 
 export type AddDashboardItemRequest = {
 	dashboardId: DashboardId,
-	// `metric` | `text`.
+	// `query` | `lens` | `text`.
 	kind: string,
-	metricKey: string | null,
+	// A `query` tile's SQL.
+	sql: string | null,
+	// A `query` tile's display: a lens viz, or `metric` (the metric card).
+	display: string | null,
+	// A `lens` tile's lens id.
+	lensId: string | null,
 	optionsJson: string | null,
 };
 
@@ -1977,16 +1982,16 @@ export type Dashboard = {
 export type DashboardId = string;
 
 /**
- *  One tile on a dashboard. `kind` is `metric` | `text`; `metric_key` names the
- *  charted metric (null for text tiles); `options_json` is the opaque per-tile
- *  options blob (viz/mode/scale/size/overrides/text body).
+ *  One tile on a dashboard: its `kind` ([`TILE_KINDS`]) and `options_json`,
+ *  the per-tile options — a `query` tile's SQL and how it's displayed, a
+ *  `lens` tile's lens id, a `text` tile's text, and the size and filter
+ *  overrides every tile has.
  */
 export type DashboardItem = {
 	id: DashboardItemId,
 	dashboard_id: DashboardId,
 	sort_index: number,
 	kind: string,
-	metric_key: string | null,
 	options_json: string | null,
 	created_at: Timestamp,
 	updated_at: Timestamp,
@@ -4292,7 +4297,6 @@ export type UiLogEntry = {
 
 export type UpdateDashboardItemRequest = {
 	id: DashboardItemId,
-	metricKey: string | null,
 	optionsJson: string | null,
 };
 
