@@ -30,13 +30,20 @@ written — by an agent (`run_command`), by the desktop editor, and by
 4. logs `knowledge.page.written@1 { page: "wiki:<slug>", outbound,
    snapshot }` with the actor's anchors;
 
-and once committed writes the file (if it differs) and announces
-`WikiPagesChanged`. `@version` literals in links are stripped from the
+5. writes the file (if it differs; a temp file renamed into place) —
+   **inside the run**: the file is the page, so a file that can't be
+   written fails the run and nothing is recorded (tsk562). Were the
+   commit to fail after it, the file is ahead of the row and the watcher
+   converges them. The search index reads the body from the file, which
+   is therefore already the committed one when the pump sees the event;
+
+and once committed announces `WikiPagesChanged`. `@version` literals in links are stripped from the
 body: a version is the edge's pin, not the prose's. `title` sets the
 body's `# ` heading.
 
 Beside it: `knowledge.delete_page { slug }` (Destructive; row, edges and
-file; `knowledge.page.deleted@1`), `knowledge.link { page, target }`
+file — the file removed inside the run, a failure failing it;
+`knowledge.page.deleted@1`), `knowledge.link { page, target }`
 (adds `- [[target]]` under the page's `## Related`, validated), and
 `knowledge.resync { slug }` (restate from the file; the repair when a row
 and its file disagree). All are `Record`: a read-only thread captures

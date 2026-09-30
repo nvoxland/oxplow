@@ -585,28 +585,33 @@ fn links_resolve(
     ))
 }
 
-/// Write `body` to the page's file after the run commits (unless it
-/// already holds it) and announce the page.
-fn write_file_after(
-    target: &KnowledgeTarget,
-    slug: &str,
-    body: String,
-) -> Box<dyn FnOnce() + Send + Sync> {
-    let path = page_path(&target.project_dir, slug);
-    let announce = target.changed(slug);
-    Box::new(move || {
-        if std::fs::read_to_string(&path).ok().as_deref() == Some(body.as_str()) {
-            return;
-        }
-        let written = path
-            .parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&path, &body));
-        if let Err(e) = written {
-            tracing::error!(path = %path.display(), error = %e, "couldn't write the wiki page's file");
-        }
-        announce();
-    })
+/// Write `body` to the page's file (unless it already holds it), inside
+/// the run: the file is the page, so a write that fails fails the run and
+/// the transaction records nothing. A temp file renamed into place means
+/// the file is never half-written; were the commit itself to fail after
+/// it, the file is ahead of the row and the watcher converges them.
+fn write_file(path: &Path, body: &str) -> Result<(), CommandError> {
+    if std::fs::read_to_string(path).ok().as_deref() == Some(body) {
+        return Ok(());
+    }
+    let failed = |e: std::io::Error| CommandError::Failed {
+        message: format!("couldn't write {}: {e}", path.display()),
+    };
+    let dir = path.parent().ok_or_else(|| CommandError::Failed {
+        message: format!("{} has no directory", path.display()),
+    })?;
+    std::fs::create_dir_all(dir).map_err(failed)?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
+    let temp = dir.join(format!(".{name}.tmp"));
+    std::fs::write(&temp, body)
+        .and_then(|()| std::fs::rename(&temp, path))
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&temp);
+            failed(e)
+        })
 }
 
 fn spec(name: &str, summary: &str, schema: serde_json::Value, confirm: Confirm) -> CommandSpec {
@@ -687,11 +692,12 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
             },
         )
         .map_err(domain)?;
+        write_file(&page_path(&t.project_dir, slug), &body)?;
         Ok(HandlerOutput {
             result: serde_json::to_value(&written).expect("Written serializes"),
             inverse: None,
             events: Vec::new(),
-            after_commit: Some(write_file_after(&t, slug, body)),
+            after_commit: Some(Box::new(t.changed(slug))),
         })
     }));
 
@@ -706,18 +712,20 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
         if !existed && !path.exists() {
             return Err(invalid("/slug", format!("no page `{slug}`")));
         }
+        // Inside the run, like a write: a file that stays fails it.
+        match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(CommandError::Failed {
+                    message: format!("couldn't delete {}: {e}", path.display()),
+                })
+            }
+            _ => {}
+        }
         Ok(HandlerOutput {
             result: json!({ "page": page_ref(slug) }),
             inverse: None,
             events: Vec::new(),
-            after_commit: Some(Box::new(move || {
-                if let Err(e) = std::fs::remove_file(&path) {
-                    if e.kind() != std::io::ErrorKind::NotFound {
-                        tracing::error!(path = %path.display(), error = %e, "couldn't delete the wiki page's file");
-                    }
-                }
-                announce();
-            })),
+            after_commit: Some(Box::new(announce)),
         })
     }));
 
@@ -752,11 +760,12 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
             },
         )
         .map_err(domain)?;
+        write_file(&page_path(&t.project_dir, slug), &body)?;
         Ok(HandlerOutput {
             result: serde_json::to_value(&written).expect("Written serializes"),
             inverse: None,
             events: Vec::new(),
-            after_commit: Some(write_file_after(&t, slug, body)),
+            after_commit: Some(Box::new(t.changed(slug))),
         })
     }));
 
@@ -931,6 +940,31 @@ mod tests {
         .await
         .unwrap());
         assert_eq!(events_of(&fx, "knowledge.page.written").await.len(), 1);
+    }
+
+    /// The file is the page: a file that can't be written fails the run,
+    /// and nothing — row, edges, event — is recorded (tsk562).
+    #[tokio::test]
+    async fn a_file_that_cant_be_written_fails_the_run_and_records_nothing() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        // A directory where the page's file goes.
+        std::fs::create_dir_all(page_path(&dir(&fx), "blocked")).unwrap();
+        let err = run(
+            &fx,
+            WRITE_PAGE,
+            json!({ "slug": "blocked", "body": "# Blocked\n" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("blocked.md"), "{err}");
+        assert!(fx
+            .svc
+            .wiki_page_store
+            .get("blocked")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(events_of(&fx, "knowledge.page.written").await.is_empty());
     }
 
     /// A dangling link is refused, naming it, and nothing is written.
