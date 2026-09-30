@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { Stream, ThreadWorkState, WikiRefFreshness } from "../tauri-bridge/index.js";
+import type { Stream, WikiRefFreshness } from "../tauri-bridge/index.js";
+import type { ThreadWorkState } from "../workItems.js";
 import { commands } from "../tauri-bridge/index.js";
 import { summarizeWikiFreshness } from "../components/Wiki/wikiFreshness.js";
 import { Page } from "../tabs/Page.js";

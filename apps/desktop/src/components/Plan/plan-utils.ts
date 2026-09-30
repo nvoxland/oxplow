@@ -260,10 +260,10 @@ export function buildBacklogGroups(state: BacklogState | null): TaskGroup[] {
 export function filterAutoAuthored(groups: TaskGroup[]): TaskGroup[] {
   return groups.map((group) => {
     const isParent = (id: string) => (group.epicChildren.get(id)?.length ?? 0) > 0;
-    const items = group.items.filter((item) => isParent(item.id) || item.created_by !== "agent");
+    const items = group.items.filter((item) => isParent(item.id) || item.author !== "agent");
     const epicChildren = new Map<string, Task[]>();
     for (const [epicId, children] of group.epicChildren.entries()) {
-      epicChildren.set(epicId, children.filter((child) => child.created_by !== "agent"));
+      epicChildren.set(epicId, children.filter((child) => child.author !== "agent"));
     }
     return { epic: group.epic, items, epicChildren };
   });

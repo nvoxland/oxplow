@@ -215,22 +215,12 @@ macro_rules! oxplow_command_table {
                 list_closed_threads => $crate::commands::threads::list_closed_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 reorder_thread_queue => $crate::commands::threads::reorder_thread_queue { req: $crate::commands::threads::ReorderThreadQueueRequest } -> (),
                 get_thread_state => $crate::commands::threads::get_thread_state { stream_id: ::oxplow_domain::StreamId } -> $crate::commands::threads::ThreadState,
-                get_thread_work_state => $crate::commands::threads::get_thread_work_state { thread_id: ::oxplow_domain::ThreadId } -> $crate::commands::threads::ThreadWorkState,
                 select_thread => $crate::commands::threads::select_thread { req: $crate::commands::threads::SelectThreadRequest } -> (),
                 // backlog
-                list_backlog => $crate::commands::backlog::list_backlog {} -> Vec<::oxplow_domain::Task>,
-                get_backlog_state => $crate::commands::backlog::get_backlog_state {} -> ::oxplow_app::BacklogState,
                 // notes
                 add_thread_note => $crate::commands::notes::add_thread_note { thread_id: ::oxplow_domain::ThreadId, body: String, author: String } -> ::oxplow_domain::TaskNote,
                 list_thread_notes => $crate::commands::notes::list_thread_notes { thread_id: ::oxplow_domain::ThreadId } -> Vec<::oxplow_domain::TaskNote>,
                 // tasks
-                get_task => $crate::commands::tasks::get_task { id: ::oxplow_domain::TaskId } -> Option<::oxplow_domain::Task>,
-                upsert_task => $crate::commands::tasks::upsert_task { item: ::oxplow_domain::Task } -> ::oxplow_domain::Task,
-                delete_task => $crate::commands::tasks::delete_task { id: ::oxplow_domain::TaskId } -> (),
-                create_task => $crate::commands::tasks::create_task { req: $crate::commands::tasks::CreateTaskRequest } -> ::oxplow_domain::Task,
-                update_task => $crate::commands::tasks::update_task { req: $crate::commands::tasks::UpdateTaskRequest } -> ::oxplow_domain::Task,
-                reorder_tasks => $crate::commands::tasks::reorder_tasks { req: $crate::commands::tasks::ReorderTasksRequest } -> (),
-                move_task => $crate::commands::tasks::move_task { req: $crate::commands::tasks::MoveTaskRequest } -> ::oxplow_domain::Task,
                 // dashboards (tsk138)
                 list_dashboards => $crate::commands::dashboards::list_dashboards {} -> Vec<::oxplow_db::Dashboard>,
                 get_dashboard => $crate::commands::dashboards::get_dashboard { id: ::oxplow_domain::DashboardId } -> Option<::oxplow_db::DashboardWithItems>,
@@ -242,7 +232,6 @@ macro_rules! oxplow_command_table {
                 remove_dashboard_item => $crate::commands::dashboards::remove_dashboard_item { id: ::oxplow_domain::DashboardItemId } -> (),
                 reorder_dashboard_items => $crate::commands::dashboards::reorder_dashboard_items { req: $crate::commands::dashboards::ReorderDashboardItemsRequest } -> (),
                 // effort
-                list_work_item_efforts => $crate::commands::effort::list_work_item_efforts { work_item: String } -> Vec<::oxplow_db::Effort>,
                 list_efforts_in_window => $crate::commands::effort::list_efforts_in_window { window_start: ::oxplow_domain::Timestamp, window_end: ::oxplow_domain::Timestamp } -> Vec<::oxplow_db::Effort>,
                 get_effort_files => $crate::commands::effort::get_effort_files { effort_id: ::oxplow_domain::EffortId } -> Vec<::oxplow_db::EffortFile>,
                 get_effort => $crate::commands::effort::get_effort { effort_id: ::oxplow_domain::EffortId } -> Option<::oxplow_db::Effort>,
@@ -331,8 +320,6 @@ macro_rules! oxplow_command_table {
                 list_recent_page_visits => $crate::commands::page_visit::list_recent_page_visits { limit: u32, thread_id: Option<String> } -> Vec<::oxplow_db::PageVisit>,
                 top_visited_pages => $crate::commands::page_visit::top_visited_pages { limit: u32, thread_id: Option<String> } -> Vec<$crate::commands::page_visit::VisitedPage>,
                 forget_page => $crate::commands::page_visit::forget_page { page_kind: String, page_id: String } -> (),
-                list_recently_finished => $crate::commands::page_visit::list_recently_finished { thread_id: Option<String>, limit: u32 } -> Vec<$crate::commands::page_visit::FinishedEntry>,
-                clear_recently_finished => $crate::commands::page_visit::clear_recently_finished { thread_id: Option<String> } -> (),
                 // usage
                 record_usage => $crate::commands::usage::record_usage { kind: String, payload_json: String } -> ::oxplow_db::UsageEvent,
                 list_recent_usage_rollup => $crate::commands::usage::list_recent_usage_rollup { kind: String, stream_id: Option<String>, limit: u32 } -> Vec<::oxplow_db::UsageRollup>,
@@ -488,14 +475,29 @@ mod tests {
         assert!(out.is_array(), "expected a JSON array, got {out}");
     }
 
+    /// P6.E1b: the UI reads tasks through the models and writes them with
+    /// `work_item.*` commands; the typed task RPCs are gone.
     #[tokio::test]
-    async fn get_task_deserializes_arg_and_returns_null_for_missing() {
+    async fn the_typed_task_rpcs_are_gone() {
         let (svc, _dir) = services();
-        // A task id that doesn't exist → core returns None → JSON null.
-        let out = dispatch("get_task", json!({ "id": "tsk999" }), &svc)
-            .await
-            .unwrap();
-        assert_eq!(out, json!(null));
+        for name in [
+            "get_thread_work_state",
+            "get_backlog_state",
+            "list_backlog",
+            "get_task",
+            "upsert_task",
+            "create_task",
+            "update_task",
+            "delete_task",
+            "reorder_tasks",
+            "move_task",
+            "list_work_item_efforts",
+            "list_recently_finished",
+            "clear_recently_finished",
+        ] {
+            let err = dispatch(name, json!({}), &svc).await.unwrap_err();
+            assert_eq!(err.code, "NOT_FOUND", "{name}");
+        }
     }
 
     #[tokio::test]
@@ -510,8 +512,8 @@ mod tests {
     #[tokio::test]
     async fn bad_args_are_rejected_as_invalid() {
         let (svc, _dir) = services();
-        // `id` is required; an empty object can't deserialize into Args.
-        let err = dispatch("get_task", json!({}), &svc).await.unwrap_err();
+        // `effortId` is required; an empty object can't deserialize into Args.
+        let err = dispatch("get_effort", json!({}), &svc).await.unwrap_err();
         assert_eq!(err.code, "INVALID");
     }
 }

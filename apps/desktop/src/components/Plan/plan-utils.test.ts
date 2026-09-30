@@ -24,7 +24,7 @@ function item(id: number, status: TaskStatus, sort_index: number): Task {
     status,
     priority: "medium",
     sort_index,
-    created_by: "user",
+    author: "user",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
     completed_at: null,
@@ -247,9 +247,9 @@ test("filterAutoAuthored drops agent-authored rows but keeps user-authored ones"
   const groups = [{
     epic: null,
     items: [
-      { ...item(201, "ready", 0), created_by: "user" },
-      { ...item(301, "ready", 1), created_by: "agent" },
-      { ...item(202, "in_progress", 2), created_by: "user" },
+      { ...item(201, "ready", 0), author: "user" },
+      { ...item(301, "ready", 1), author: "agent" },
+      { ...item(202, "in_progress", 2), author: "user" },
     ] as Task[],
     epicChildren: new Map<number, Task[]>(),
   }];
@@ -258,15 +258,15 @@ test("filterAutoAuthored drops agent-authored rows but keeps user-authored ones"
 });
 
 test("filterAutoAuthored keeps epic rows even if agent-authored, and filters their children", () => {
-  const epic = { ...item(1, "ready", 0), created_by: "agent" };
+  const epic = { ...item(1, "ready", 0), author: "agent" };
   const groups = [{
     epic: null,
     items: [epic] as Task[],
     epicChildren: new Map<number, Task[]>([[
       1,
       [
-        { ...item(401, "ready", 1), created_by: "user" },
-        { ...item(402, "ready", 2), created_by: "agent" },
+        { ...item(401, "ready", 1), author: "user" },
+        { ...item(402, "ready", 2), author: "agent" },
       ] as Task[],
     ]]),
   }];

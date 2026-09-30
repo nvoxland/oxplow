@@ -1,1 +1,1 @@
-pub use oxplow_rpc::commands::page_visit::{FinishedEntry, VisitedPage};
+pub use oxplow_rpc::commands::page_visit::VisitedPage;

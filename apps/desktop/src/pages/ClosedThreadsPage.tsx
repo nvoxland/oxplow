@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Page } from "../tabs/Page.js";
-import type { Stream, Thread, Task } from "../tauri-bridge/index.js";
+import type { Stream, Thread } from "../tauri-bridge/index.js";
+import { readThreadWork, type Task } from "../workItems.js";
 import {
-  getThreadWorkState,
   listClosedThreads,
   reopenThread,
   subscribeOxplowEvents,
@@ -36,7 +36,7 @@ export function ClosedThreadsPage({ stream, onAfterReopen }: ClosedThreadsPagePr
       const next: RowState[] = await Promise.all(
         closed.map(async (thread) => {
           try {
-            const work = await getThreadWorkState(stream.id, thread.id);
+            const work = await readThreadWork(thread.id);
             return { thread, items: work.items, loading: false };
           } catch {
             return { thread, items: [], loading: false };

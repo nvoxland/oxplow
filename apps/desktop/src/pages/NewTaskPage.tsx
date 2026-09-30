@@ -25,12 +25,12 @@ const STATUS_OPTIONS: Array<Extract<TaskStatus, "ready" | "blocked">> = ["ready"
  * carry-forward logic.
  */
 export function resolveSaveAndAnotherDefaults(input: {
-  parentId?: number | null;
+  parentId?: string | null;
   initialCategory?: string | null;
   initialPriority?: string | null;
   lastCategory?: string | null;
   lastPriority?: string | null;
-} = {}): { parentId: number | null; initialCategory: string; initialPriority: string } {
+} = {}): { parentId: string | null; initialCategory: string; initialPriority: string } {
   return {
     parentId: input.parentId ?? null,
     initialCategory: input.lastCategory ?? input.initialCategory ?? "task",
@@ -41,7 +41,7 @@ export function resolveSaveAndAnotherDefaults(input: {
 export interface NewTaskPageProps {
   /** Defaults from the page-ref payload (incl. parentId for + Task on epic). */
   defaults?: {
-    parentId?: number | null;
+    parentId?: string | null;
     initialCategory?: string | null;
     initialPriority?: string | null;
   };
@@ -53,7 +53,7 @@ export interface NewTaskPageProps {
   onSubmit(input: {
     title: string;
     description?: string;
-    parentId?: number | null;
+    parentId?: string | null;
     status?: TaskStatus;
     priority?: TaskPriority;
   }): Promise<void>;
@@ -75,7 +75,7 @@ export function NewTaskPage({
 }: NewTaskPageProps) {
   const [lastKind, setLastKind] = useState<TaskKind | null>(null);
   const [lastPriority, setLastPriority] = useState<TaskPriority | null>(null);
-  const [lastParentId, setLastParentId] = useState<number | null>(null);
+  const [lastParentId, setLastParentId] = useState<string | null>(null);
 
   const resolved = resolveSaveAndAnotherDefaults({
     parentId: lastParentId ?? defaults.parentId,
@@ -88,7 +88,7 @@ export function NewTaskPage({
   const [kind, setKind] = useState<TaskKind>(coerceKind(resolved.initialCategory));
   const [priority, setPriority] = useState<TaskPriority>(coercePriority(resolved.initialPriority));
   const [status, setStatus] = useState<"ready" | "blocked">("ready");
-  const [parentId, setParentId] = useState<number | null>(resolved.parentId);
+  const [parentId, setParentId] = useState<string | null>(resolved.parentId);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -221,7 +221,7 @@ export function NewTaskPage({
               <select
                 data-testid="tasks-parent"
                 value={parentId ?? ""}
-                onChange={(e) => setParentId(e.target.value ? Number(e.target.value) : null)}
+                onChange={(e) => setParentId(e.target.value || null)}
                 style={inputStyle}
               >
                 <option value="">(none)</option>

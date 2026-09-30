@@ -5,9 +5,56 @@
  * returns what it read (`reads`) so a page re-runs with
  * `useRerunOnChange`. Writes are `work_item.*` commands.
  */
-import { querySql, runCommand, type SqlCell } from "./api.js";
+import { listEffortFiles, querySql, runCommand, type EffortDetail, type SqlCell, type TaskEffort } from "./api.js";
 import { taskIdOf, threadIdOf, threadRowId } from "./modelIds.js";
-import type { Reads, SqlQueryResult, TaskPriority, TaskStatus } from "./tauri-bridge/generated/bindings.js";
+import type { Followup, Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
+import { commands } from "./tauri-bridge/index.js";
+
+/** An oxplow task's status (`v_task.status`). */
+export type TaskStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
+export type TaskPriority = "low" | "medium" | "high" | "urgent";
+export type TaskAuthor = "user" | "agent";
+
+/** An oxplow task as `v_task` holds it, with the UI's ids (`tsk42`,
+ *  `thr3`) and its note count. */
+export interface Task {
+  id: string;
+  /** `null` on the project-wide backlog. */
+  thread_id: string | null;
+  parent_id: string | null;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  sort_index: number;
+  /** Who it came from. */
+  author: TaskAuthor | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  note_count: number;
+}
+
+/** A thread's tasks as the Work panel shows them. An epic is a task with
+ *  a child in the thread; the rest go by status (`done` holds done,
+ *  canceled and archived). Followups are the thread's in-memory notes. */
+export interface ThreadWorkState {
+  threadId: string;
+  waiting: Task[];
+  inProgress: Task[];
+  done: Task[];
+  epics: Task[];
+  items: Task[];
+  followups: Followup[];
+}
+
+/** The backlog's tasks by status. */
+export interface BacklogState {
+  items: Task[];
+  waiting: Task[];
+  in_progress: Task[];
+  done: Task[];
+}
 
 /** The state every provider maps to. */
 export type CanonicalState = "todo" | "in_progress" | "blocked" | "done" | "canceled";
@@ -151,4 +198,286 @@ export async function moveWorkItem(
   place: { before: string } | { after: string } | "end" = "end",
 ): Promise<void> {
   await runCommand("work_item.move", place === "end" ? { ref, to } : { ref, to, ...place });
+}
+
+// ---- oxplow's tasks (v_task) ----
+
+/** The models a task read depends on. */
+export const TASK_MODELS = ["v_task", "v_task_note", "v_work_item", "v_effort", "v_effort_file"] as const;
+
+/** Whether an event says a task read is stale: a model it reads changed. */
+export function tasksChanged(event: Readonly<Record<string, unknown>>): boolean {
+  const models = event.models;
+  return (
+    event.kind === "modelsChanged" &&
+    Array.isArray(models) &&
+    models.some((m) => (TASK_MODELS as readonly string[]).includes(m as string))
+  );
+}
+
+const TASK_COLUMNS = `t.id, t.thread_id, t.parent_id, t.title, t.description, t.status, t.priority, t.sort_index,
+  t.author, t.created_at, t.updated_at, t.completed_at,
+  (SELECT count(*) FROM v_task_note n WHERE n.task_id = t.id) AS note_count`;
+
+export function tasksFromResult(result: SqlQueryResult): Task[] {
+  const col = (name: string) => result.columns.indexOf(name);
+  return result.rows.map((row) => {
+    const at = (name: string) => row[col(name)];
+    const num = (name: string) => {
+      const v = at(name);
+      return v === null || v === undefined ? null : Number(v);
+    };
+    const thread = num("thread_id");
+    const parent = num("parent_id");
+    return {
+      id: taskIdOf(Number(at("id"))),
+      thread_id: thread === null ? null : threadIdOf(thread),
+      parent_id: parent === null ? null : taskIdOf(parent),
+      title: String(at("title") ?? ""),
+      description: String(at("description") ?? ""),
+      status: String(at("status")) as TaskStatus,
+      priority: String(at("priority")) as TaskPriority,
+      sort_index: Number(at("sort_index") ?? 0),
+      author: (text(at("author")) as TaskAuthor | null) ?? null,
+      created_at: String(at("created_at") ?? ""),
+      updated_at: String(at("updated_at") ?? ""),
+      completed_at: text(at("completed_at")),
+      note_count: Number(at("note_count") ?? 0),
+    };
+  });
+}
+
+async function readTasks(where: string, params: SqlCell[]): Promise<{ tasks: Task[]; reads: Reads }> {
+  const res = await querySql(
+    `SELECT ${TASK_COLUMNS} FROM v_task t WHERE ${where} ORDER BY t.sort_index, t.created_at`,
+    params,
+    10_000,
+  );
+  return { tasks: tasksFromResult(res), reads: res.reads };
+}
+
+export function bucketThreadWork(threadId: string, tasks: Task[], followups: Followup[]): ThreadWorkState {
+  const parents = new Set(tasks.map((t) => t.parent_id).filter((p): p is string => p !== null));
+  const work: ThreadWorkState = { threadId, waiting: [], inProgress: [], done: [], epics: [], items: [], followups };
+  for (const t of tasks) {
+    if (parents.has(t.id)) work.epics.push(t);
+    else if (t.status === "blocked") work.waiting.push(t);
+    else if (t.status === "in_progress") work.inProgress.push(t);
+    else if (t.status === "ready") work.items.push(t);
+    else work.done.push(t);
+  }
+  return work;
+}
+
+/** Every task of a thread's work, in list order (`sort_index`). */
+export function orderedTaskIds(work: ThreadWorkState): string[] {
+  return [...work.epics, ...work.items, ...work.waiting, ...work.inProgress, ...work.done]
+    .sort((a, b) => a.sort_index - b.sort_index)
+    .map((t) => t.id);
+}
+
+/** A thread's work: its tasks from `v_task`, and its followups. */
+export async function readThreadWork(threadId: string): Promise<ThreadWorkState> {
+  const [{ tasks }, followups] = await Promise.all([
+    readTasks("t.thread_id = ?1", [threadRowId(threadId)]),
+    commands.listFollowups(threadId).then((r) => (r.status === "ok" ? r.data : [])),
+  ]);
+  return bucketThreadWork(threadId, tasks, followups);
+}
+
+/** The backlog's tasks by status. */
+export async function readBacklog(): Promise<BacklogState> {
+  const { tasks } = await readTasks("t.thread_id IS NULL", []);
+  const state: BacklogState = { items: [], waiting: [], in_progress: [], done: [] };
+  for (const t of tasks) {
+    if (t.status === "blocked") state.waiting.push(t);
+    else if (t.status === "in_progress") state.in_progress.push(t);
+    else if (t.status === "ready") state.items.push(t);
+    else state.done.push(t);
+  }
+  return state;
+}
+
+/** One live task, or null. */
+export async function readTask(id: string): Promise<Task | null> {
+  const { tasks } = await readTasks("t.id = ?1", [Number(id.replace(/^tsk/, ""))]);
+  return tasks[0] ?? null;
+}
+
+/** Several tasks' titles and statuses, in one read. */
+export async function readTasksById(ids: string[]): Promise<Task[]> {
+  if (ids.length === 0) return [];
+  const numbers = ids.map((id) => Number(id.replace(/^tsk/, ""))).filter((n) => Number.isFinite(n));
+  const { tasks } = await readTasks(`t.id IN (${numbers.map((_, i) => `?${i + 1}`).join(", ")})`, numbers);
+  return tasks;
+}
+
+/** A task's efforts, newest first (`v_effort`). */
+async function readTaskEffortRows(taskId: string): Promise<TaskEffort[]> {
+  const res = await querySql(
+    `SELECT id, work_item, started_at, ended_at, start_snapshot_id, end_snapshot_id, summary
+       FROM v_effort WHERE work_item = ?1 ORDER BY started_at DESC`,
+    [`work_item:oxplow:${taskId}`],
+    1000,
+  );
+  return res.rows.map(([id, workItem, started, ended, start, end, summary]) => ({
+    id: `eff${Number(id)}`,
+    work_item: String(workItem),
+    started_at: String(started),
+    ended_at: text(ended),
+    start_snapshot_id: start === null ? null : String(start),
+    end_snapshot_id: end === null ? null : String(end),
+    summary: text(summary),
+  }));
+}
+
+/** A task's efforts with the files each changed (`v_effort` plus the
+ *  effort's files), newest first — the task page's activity. */
+export async function readTaskEfforts(taskId: string): Promise<EffortDetail[]> {
+  const rows = await readTaskEffortRows(taskId);
+  const files = await Promise.all(rows.map((e) => listEffortFiles(e.id).catch(() => [])));
+  return rows.map((effort, i) => {
+    const changed = files[i] ?? [];
+    const counts = { created: 0, updated: 0, deleted: 0 };
+    for (const f of changed) counts[f.change]++;
+    return { effort, start_snapshot: null, end_snapshot: null, changed_paths: changed.map((f) => f.path), counts };
+  });
+}
+
+// ---- writes (work_item.* commands) ----
+
+const taskRef = (id: string) => `work_item:oxplow:${id}`;
+
+/** File a task on a thread (or the backlog, `null`). */
+export async function createTask(
+  threadId: string | null,
+  input: { title: string; description?: string; parentId?: string | null; status?: TaskStatus; priority?: TaskPriority },
+): Promise<string> {
+  const out = await runCommand("work_item.create", {
+    title: input.title,
+    ...(input.description ? { description: input.description } : {}),
+    ...(input.parentId ? { parent_ref: taskRef(input.parentId) } : {}),
+    ...(input.status ? { status: input.status } : {}),
+    ...(input.priority ? { priority: input.priority } : {}),
+    ...(threadId ? { thread: threadId } : {}),
+  });
+  return String((out.result as { ref?: unknown } | null)?.ref ?? "");
+}
+
+/** Edit a task's fields and/or status, atomically. */
+export async function updateTask(
+  id: string,
+  changes: { title?: string; description?: string; parentId?: string | null; status?: TaskStatus; priority?: TaskPriority },
+): Promise<void> {
+  await runCommand("work_item.update", {
+    ref: taskRef(id),
+    ...(changes.title !== undefined ? { title: changes.title } : {}),
+    ...(changes.description !== undefined ? { description: changes.description } : {}),
+    ...(changes.parentId !== undefined ? { parent_ref: changes.parentId === null ? "" : taskRef(changes.parentId) } : {}),
+    ...(changes.status !== undefined ? { status: changes.status } : {}),
+    ...(changes.priority !== undefined ? { priority: changes.priority } : {}),
+  });
+}
+
+/** Delete a task. The command asks first: call with `confirmed` once the
+ *  person has (an inline confirm). */
+export async function deleteTask(id: string, confirmed: boolean): Promise<void> {
+  await runCommand("work_item.delete", { ref: taskRef(id) }, confirmed);
+}
+
+/** The one item a drag moved, and its new neighbour: what
+ *  `work_item.reorder` takes. `null` when nothing moved. */
+export function placementFromOrder(
+  before: string[],
+  after: string[],
+): { id: string; place: { before: string } | { after: string } } | null {
+  const same = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+  if (same(before, after)) return null;
+  for (let i = 0; i < after.length; i++) {
+    const id = after[i]!;
+    if (!same(before.filter((x) => x !== id), after.filter((x) => x !== id))) continue;
+    return { id, place: i > 0 ? { after: after[i - 1]! } : { before: after[1]! } };
+  }
+  return null;
+}
+
+/** Apply a drag's new order to a list with `work_item.reorder`. */
+export async function reorderTasks(before: string[], after: string[]): Promise<void> {
+  const moved = placementFromOrder(before, after);
+  if (moved) await runCommand("work_item.reorder", { ref: taskRef(moved.id), ...prefixed(moved.place) });
+}
+
+const prefixed = (place: { before: string } | { after: string }) =>
+  "before" in place ? { before: taskRef(place.before) } : { after: taskRef(place.after) };
+
+/** Take a task to a thread's list or the backlog (`null`), at its end. */
+export async function moveTask(id: string, threadId: string | null): Promise<void> {
+  await runCommand("work_item.move", { ref: taskRef(id), to: threadId ? { thread: threadId } : "backlog" });
+}
+
+// ---- recently finished (the rail's Finished section) ----
+
+export type FinishedEntry =
+  | { kind: "task"; itemId: string; title: string; t: string }
+  | { kind: "wiki"; slug: string; title: string; t: string };
+
+/** Newest first, after `clearedAt`, at most `limit`. */
+export function recentlyFinished(entries: FinishedEntry[], clearedAt: string | null, limit: number): FinishedEntry[] {
+  return entries
+    .filter((e) => clearedAt === null || e.t > clearedAt)
+    .sort((a, b) => (a.t < b.t ? 1 : a.t > b.t ? -1 : 0))
+    .slice(0, limit);
+}
+
+/** What a thread (or, `null`, the project) recently finished: done
+ *  tasks and the knowledge pages it wrote (`v_knowledge_touch`). */
+export async function readRecentlyFinished(threadId: string | null, limit: number): Promise<{ entries: FinishedEntry[]; reads: Reads }> {
+  const thread = threadId === null ? null : threadRowId(threadId);
+  const [tasks, pages] = await Promise.all([
+    querySql(
+      `SELECT id, title, completed_at FROM v_task WHERE status = 'done' AND completed_at IS NOT NULL
+         AND (?1 IS NULL OR thread_id = ?1) ORDER BY completed_at DESC LIMIT ?2`,
+      [thread, limit],
+      limit,
+    ),
+    thread === null
+      ? querySql(`SELECT slug, title, updated_at FROM v_knowledge_page ORDER BY updated_at DESC LIMIT ?1`, [limit], limit)
+      : querySql(
+          `SELECT p.slug, p.title, k.last_seen_at FROM v_knowledge_touch k JOIN v_knowledge_page p ON p.ref = k.page
+             WHERE k.thread_id = ?1 ORDER BY k.last_seen_at DESC LIMIT ?2`,
+          [thread, limit],
+          limit,
+        ),
+  ]);
+  const entries: FinishedEntry[] = [
+    ...tasks.rows.map(([id, title, t]) => ({ kind: "task" as const, itemId: taskIdOf(Number(id)), title: String(title), t: String(t) })),
+    ...pages.rows.map(([slug, title, t]) => ({ kind: "wiki" as const, slug: String(slug), title: String(title), t: String(t) })),
+  ];
+  return {
+    entries: recentlyFinished(entries, finishedClearedAt(threadId), limit),
+    reads: { models: [...new Set([...tasks.reads.models, ...pages.reads.models])], tables: [], measures: [] },
+  };
+}
+
+const CLEARED_KEY = "oxplow.finished.clearedAt";
+
+/** When the person last cleared the Finished section (per thread; `""`
+ *  for the project view). A viewer's own gesture, kept in this browser. */
+export function finishedClearedAt(threadId: string | null): string | null {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(CLEARED_KEY) ?? "{}") as Record<string, string>;
+    return all[threadId ?? ""] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearRecentlyFinished(threadId: string | null, now = new Date().toISOString()): void {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(CLEARED_KEY) ?? "{}") as Record<string, string>;
+    all[threadId ?? ""] = now;
+    window.localStorage.setItem(CLEARED_KEY, JSON.stringify(all));
+  } catch {
+    // Storage off: the section clears for this view only.
+  }
 }

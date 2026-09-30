@@ -60,3 +60,72 @@ test("the Board groups by canonical state, in workflow order, each column in lis
     ["canceled", []],
   ]);
 });
+
+import { bucketThreadWork, placementFromOrder, recentlyFinished, tasksFromResult } from "./workItems.js";
+
+const taskResult = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
+  ({
+    columns: ["id", "thread_id", "parent_id", "title", "description", "status", "priority", "sort_index", "author", "created_at", "updated_at", "completed_at", "note_count"],
+    rows,
+    truncated: false,
+    reads: { models: ["v_task"], tables: [], measures: [] },
+    freshness: {},
+  }) as unknown as SqlQueryResult;
+
+test("tasks read from v_task with the UI's ids", () => {
+  expect(tasksFromResult(taskResult([[4, 2, 1, "Fix", "body", "ready", "high", 3, "agent", "t0", "t1", null, 2]]))).toEqual([
+    {
+      id: "tsk4",
+      thread_id: "thr2",
+      parent_id: "tsk1",
+      title: "Fix",
+      description: "body",
+      status: "ready",
+      priority: "high",
+      sort_index: 3,
+      author: "agent",
+      created_at: "t0",
+      updated_at: "t1",
+      completed_at: null,
+      note_count: 2,
+    },
+  ]);
+});
+
+test("a thread's work: a task with a child is an epic, the rest by status", () => {
+  const tasks = tasksFromResult(
+    taskResult([
+      [1, 2, null, "Epic", "", "ready", "medium", 0, "user", "t", "t", null, 0],
+      [2, 2, 1, "Child", "", "in_progress", "medium", 1, "user", "t", "t", null, 0],
+      [3, 2, null, "Blocked", "", "blocked", "medium", 2, "user", "t", "t", null, 0],
+      [4, 2, null, "Done", "", "archived", "medium", 3, "user", "t", "t", "t", 0],
+      [5, 2, null, "Next", "", "ready", "medium", 4, "user", "t", "t", null, 0],
+    ]),
+  );
+  const work = bucketThreadWork("thr2", tasks, []);
+  expect(work.epics.map((t) => t.id)).toEqual(["tsk1"]);
+  expect(work.inProgress.map((t) => t.id)).toEqual(["tsk2"]);
+  expect(work.waiting.map((t) => t.id)).toEqual(["tsk3"]);
+  expect(work.done.map((t) => t.id)).toEqual(["tsk4"]);
+  expect(work.items.map((t) => t.id)).toEqual(["tsk5"]);
+});
+
+test("a reordered list is one item placed next to a neighbour", () => {
+  expect(placementFromOrder(["a", "b", "c", "d"], ["a", "d", "b", "c"])).toEqual({ id: "d", place: { after: "a" } });
+  expect(placementFromOrder(["a", "b", "c"], ["c", "a", "b"])).toEqual({ id: "c", place: { before: "a" } });
+  expect(placementFromOrder(["a", "b", "c"], ["b", "c", "a"])).toEqual({ id: "a", place: { after: "c" } });
+  expect(placementFromOrder(["a", "b"], ["a", "b"])).toBeNull();
+});
+
+test("recently finished: done tasks and touched pages, newest first, after the cleared cursor", () => {
+  const out = recentlyFinished(
+    [
+      { kind: "task", itemId: "tsk1", title: "Old", t: "2026-01-01T00:00:00Z" },
+      { kind: "task", itemId: "tsk2", title: "New", t: "2026-01-03T00:00:00Z" },
+      { kind: "wiki", slug: "notes", title: "Notes", t: "2026-01-02T00:00:00Z" },
+    ],
+    "2026-01-01T12:00:00Z",
+    5,
+  );
+  expect(out.map((e) => e.title)).toEqual(["New", "Notes"]);
+});

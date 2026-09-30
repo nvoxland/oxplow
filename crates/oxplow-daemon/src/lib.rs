@@ -528,7 +528,7 @@ mod tests {
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
-        let url = format!("http://{}/ipc/get_task", daemon.bind_addr);
+        let url = format!("http://{}/ipc/get_effort", daemon.bind_addr);
         let resp: serde_json::Value = client()
             .post(&url)
             .json(&serde_json::json!({}))

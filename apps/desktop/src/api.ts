@@ -322,17 +322,9 @@ export interface ThreadState {
   threads: Thread[];
 }
 
-// tasks types now come from the Tauri bindings. The bindings
-// emit a `deleted_at` field that the earlier UI interface didn't model;
-// readers either ignore it or filter on it (earlier stores already
-// excluded soft-deleted rows in their list queries). New code can
-// read `deleted_at` directly when needed.
-import type {
-  Task,
-  TaskStatus,
-  TaskPriority,
-} from "./tauri-bridge/index.js";
-export type { Task, TaskStatus, TaskPriority };
+// Tasks are read from the models by the work-item data layer
+// (`workItems.ts`, P6.E1b), which owns their shape.
+export type { Task, TaskStatus, TaskPriority, ThreadWorkState, BacklogState, FinishedEntry } from "./workItems.js";
 
 export interface TaskNote {
   id: string;
@@ -400,12 +392,8 @@ export interface EffortDetail {
   counts: { created: number; updated: number; deleted: number };
 }
 
-// Followup is bindings.Followup; ThreadWorkState is the bundle the
-// Work panel renders. Both are emitted by tauri-specta now.
-import type { Followup as ThreadFollowup, ThreadWorkState as TauriThreadWorkState, BacklogState as TauriBacklogState } from "./tauri-bridge/index.js";
+import type { Followup as ThreadFollowup } from "./tauri-bridge/index.js";
 export type { ThreadFollowup };
-export type ThreadWorkState = TauriThreadWorkState;
-export type BacklogState = TauriBacklogState;
 
 export const BACKLOG_SCOPE = "__backlog__";
 
@@ -1239,137 +1227,6 @@ export async function setThreadPrompt(
   return [];
 }
 
-export async function getThreadWorkState(_streamId: string, threadId: string): Promise<ThreadWorkState> {
-  return unwrap(await commands.getThreadWorkState(threadId)) as unknown as ThreadWorkState;
-}
-
-export async function createTask(
-  streamId: string,
-  threadId: string,
-  input: {
-    title: string;
-    description?: string;
-    parentId?: number | null;
-    status?: TaskStatus;
-    priority?: TaskPriority;
-  },
-): Promise<ThreadWorkState> {
-  unwrap(await commands.createTask({ threadId, input: input as never }));
-  return getThreadWorkState(streamId, threadId);
-}
-
-export async function updateTask(
-  streamId: string,
-  threadId: string,
-  itemId: string,
-  changes: {
-    title?: string;
-    description?: string;
-    parentId?: string | null;
-    status?: TaskStatus;
-    priority?: TaskPriority;
-  },
-): Promise<ThreadWorkState> {
-  unwrap(await commands.updateTask({ id: itemId, changes: changes as never }));
-  return getThreadWorkState(streamId, threadId);
-}
-
-export async function deleteTask(
-  streamId: string,
-  threadId: string,
-  itemId: string,
-): Promise<ThreadWorkState> {
-  unwrap(await commands.deleteTask(itemId));
-  return getThreadWorkState(streamId, threadId);
-}
-
-export async function reorderTasks(
-  streamId: string,
-  threadId: string,
-  orderedItemIds: string[],
-): Promise<ThreadWorkState> {
-  unwrap(await commands.reorderTasks({ threadId, order: orderedItemIds }));
-  return getThreadWorkState(streamId, threadId);
-}
-
-export async function moveTaskToThread(
-  streamId: string,
-  fromThreadId: string,
-  itemId: string,
-  toThreadId: string,
-  _toStreamId?: string,
-): Promise<{ from: ThreadWorkState; to: ThreadWorkState }> {
-  unwrap(await commands.moveTask({ id: itemId, threadId: toThreadId }));
-  const [from, to] = await Promise.all([
-    getThreadWorkState(streamId, fromThreadId),
-    getThreadWorkState(streamId, toThreadId),
-  ]);
-  return { from, to };
-}
-
-export async function getBacklogState(): Promise<BacklogState> {
-  return unwrap(await commands.getBacklogState()) as unknown as BacklogState;
-}
-
-export async function createBacklogItem(input: {
-  title: string;
-  description?: string;
-  status?: TaskStatus;
-  priority?: TaskPriority;
-}): Promise<BacklogState> {
-  unwrap(await commands.createTask({ threadId: null, input: input as never }));
-  return getBacklogState();
-}
-
-export async function updateBacklogItem(
-  itemId: string,
-  changes: {
-    title?: string;
-    description?: string;
-    status?: TaskStatus;
-    priority?: TaskPriority;
-  },
-): Promise<BacklogState> {
-  unwrap(await commands.updateTask({ id: itemId, changes: changes as never }));
-  return getBacklogState();
-}
-
-export async function deleteBacklogItem(itemId: string): Promise<BacklogState> {
-  unwrap(await commands.deleteTask(itemId));
-  return getBacklogState();
-}
-
-export async function reorderBacklog(orderedItemIds: string[]): Promise<BacklogState> {
-  unwrap(await commands.reorderTasks({ threadId: null, order: orderedItemIds }));
-  return getBacklogState();
-}
-
-export async function moveTaskToBacklog(
-  streamId: string,
-  fromThreadId: string,
-  itemId: string,
-): Promise<{ from: ThreadWorkState; backlog: BacklogState }> {
-  unwrap(await commands.moveTask({ id: itemId, threadId: null }));
-  const [from, backlog] = await Promise.all([
-    getThreadWorkState(streamId, fromThreadId),
-    getBacklogState(),
-  ]);
-  return { from, backlog };
-}
-
-export async function moveBacklogItemToThread(
-  streamId: string,
-  itemId: string,
-  toThreadId: string,
-): Promise<{ backlog: BacklogState; to: ThreadWorkState }> {
-  unwrap(await commands.moveTask({ id: itemId, threadId: toThreadId }));
-  const [backlog, to] = await Promise.all([
-    getBacklogState(),
-    getThreadWorkState(streamId, toThreadId),
-  ]);
-  return { backlog, to };
-}
-
 export async function getChangeScopes(
   streamId: string,
 ): Promise<import("./api-types.js").ChangeScopes> {
@@ -1659,36 +1516,6 @@ export async function listFrequentUsage(input: {
   );
 }
 
-export async function getTask(id: string): Promise<Task | null> {
-  return unwrap(await commands.getTask(id)) as unknown as Task | null;
-}
-
-export async function getTaskSummaries(ids: string[]): Promise<Array<{
-  id: string;
-  title: string;
-  status: import("./api-types.js").TaskStatus;
-  thread_id: string | null;
-}>> {
-  if (ids.length === 0) return [];
-  const items = await Promise.all(
-    ids.map(async (id) => {
-      try {
-        return unwrap(await commands.getTask(id)) as unknown as Task | null;
-      } catch {
-        return null;
-      }
-    }),
-  );
-  return items
-    .filter((x): x is Task => x !== null)
-    .map((w) => ({
-      id: w.id,
-      title: w.title,
-      status: w.status,
-      thread_id: w.thread_id,
-    }));
-}
-
 /**
  * Subscribe to `usage.recorded` events. Optionally filter by `kind` so a
  * Wiki-pane consumer only refetches on wiki visits.
@@ -1803,50 +1630,6 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
     void getBackgroundTask(taskId).then((task) => {
       if (task && (task.status === "done" || task.status === "failed")) void finish();
     });
-  });
-}
-
-export async function listTaskEfforts(itemId: string): Promise<EffortDetail[]> {
-  // The Tauri command returns flat `TaskEffort` rows. Consumers
-  // (TaskPage activity timeline, useBacklinks, TaskDetail) expect
-  // the richer `EffortDetail` shape with changed paths + counts.
-  // Pull the per-effort `effort_file` rows in parallel —
-  // that's the canonical authorship list (what the agent declared
-  // via `complete_task` / `amend_effort`). start_snapshot and
-  // end_snapshot are still null until a "snapshot by id" IPC
-  // exists; consumers tolerate that.
-  const rows = unwrap(
-    await commands.listWorkItemEfforts(workItemRef(itemId)),
-  ) as unknown as TaskEffort[];
-  const filesByEffort = await Promise.all(
-    rows.map(async (effort) => {
-      try {
-        const files = await listEffortFiles(effort.id);
-        return [effort.id, files] as const;
-      } catch {
-        return [effort.id, [] as Array<{ path: string; change: "created" | "updated" | "deleted" }>] as const;
-      }
-    }),
-  );
-  const filesById = new Map(filesByEffort);
-  return rows.map((rawEffort) => {
-    const files = filesById.get(rawEffort.id) ?? [];
-    const counts = { created: 0, updated: 0, deleted: 0 };
-    for (const f of files) counts[f.change]++;
-    // The binding types snapshot ids as numbers; normalize to the
-    // app's string contract.
-    const effort: TaskEffort = {
-      ...rawEffort,
-      start_snapshot_id: normalizeSnapshotId(rawEffort.start_snapshot_id),
-      end_snapshot_id: normalizeSnapshotId(rawEffort.end_snapshot_id),
-    };
-    return {
-      effort,
-      start_snapshot: null,
-      end_snapshot: null,
-      changed_paths: files.map((f) => f.path),
-      counts,
-    };
   });
 }
 
@@ -2463,15 +2246,6 @@ export function subscribeGitRefsEvents(
   });
 }
 
-export type tasksChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered" | "moved";
-
-export interface tasksChangeEvent {
-  streamId: string;
-  threadId: string;
-  kind: tasksChangeKind;
-  itemId: number | null;
-}
-
 export type AgentStatus = "working" | "waiting" | "stalled" | "awaiting";
 
 export interface AgentStatusEntry {
@@ -2540,18 +2314,6 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
       question: status === "awaiting" ? (row.detail ?? undefined) : undefined,
     };
   });
-}
-
-export type FinishedEntry =
-  | { kind: "task"; itemId: string; title: string; t: string }
-  | { kind: "wiki"; slug: string; title: string; t: string };
-
-export async function listRecentlyFinished(threadId: string | null, limit: number): Promise<FinishedEntry[]> {
-  return unwrap(await commands.listRecentlyFinished(threadId, limit)) as FinishedEntry[];
-}
-
-export async function clearRecentlyFinished(threadId: string | null): Promise<void> {
-  unwrap(await commands.clearRecentlyFinished(threadId));
 }
 
 export interface PageVisitInputApi {
@@ -2771,46 +2533,6 @@ export function formatAgentStallAlert(alert: AgentStallAlertEvent): string {
   const minutes = Math.max(1, Math.round(alert.waitingMs / 60_000));
   const tasks = alert.inProgressCount === 1 ? "1 in-progress task" : `${alert.inProgressCount} in-progress tasks`;
   return `Agent appears stalled: ${tasks} but no agent activity for ${minutes} min`;
-}
-
-export interface BacklogChangeEvent {
-  kind: tasksChangeKind;
-  itemId: number | null;
-}
-
-export function subscribeBacklogEvents(onEvent: (event: BacklogChangeEvent) => void): () => void {
-  // Backlog == tasks not attached to a thread. The backend
-  // collapses both onto `tasksChanged { threadId? }`; threadId is
-  // null for backlog rows. The bus event no longer carries kind/itemId
-  // so we synthesize a coarse "updated" — receivers refetch.
-  return subscribeOxplowEvents((event) => {
-    if (event.kind !== "tasksChanged") return;
-    if (event.threadId != null) return;
-    onEvent({ kind: "updated", itemId: null });
-  });
-}
-
-export function subscribeTaskEvents(
-  _streamId: string | "all",
-  onEvent: (event: tasksChangeEvent) => void,
-): () => void {
-  // The backend `tasksChanged` payload only carries `threadId`
-  // (no streamId / itemId / kind), so we can't honour the streamId
-  // filter or report which item changed. Fire a coarse "updated"
-  // for every thread-scoped tasks change — receivers refetch.
-  // The streamId filter parameter is preserved for API compatibility
-  // but is currently a no-op.
-  return subscribeOxplowEvents((event) => {
-    if (event.kind !== "tasksChanged") return;
-    const threadId = event.threadId as string | undefined | null;
-    if (!threadId) return;
-    onEvent({
-      streamId: "",
-      threadId,
-      kind: "updated",
-      itemId: null,
-    });
-  });
 }
 
 export async function probeDaemon(): Promise<boolean> {

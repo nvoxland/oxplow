@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 
 use oxplow_domain::events::schema::{
     WorkItemCreated, WorkItemCreatedV1, WorkItemDeleted, WorkItemDeletedV1, WorkItemEdited,
@@ -426,6 +426,57 @@ pub fn next_sort_index_tx(
         |r| r.get(0),
     )
     .map_err(crate::database::map_sql_err)
+}
+
+/// Soft-delete task `id` at `now` in the caller's transaction — the core
+/// of `work_item.delete`: the row's `deleted_at`, its `work_item` row, an
+/// open effort closed, its body's `page_ref` edges dropped, and
+/// `work_item.deleted@1` logged. `NotFound` when it's missing or already
+/// deleted.
+pub fn soft_delete_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    id: TaskId,
+    now: Timestamp,
+) -> Result<(), DomainError> {
+    use rusqlite::OptionalExtension;
+    let thread: Option<i64> = conn
+        .query_row(
+            "UPDATE task SET deleted_at = ?2, updated_at = ?2
+             WHERE id = ?1 AND deleted_at IS NULL
+             RETURNING thread_id",
+            params![id.value(), ts_to_string(now)],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(crate::database::map_sql_err)?
+        .ok_or(DomainError::NotFound)?;
+    project_work_item_tx(conn, id).map_err(crate::database::map_sql_err)?;
+    let work_item = work_item_ref(id);
+    if let Some(open) = crate::effort_store::find_open_for_work_item_tx(conn, &work_item)
+        .map_err(crate::database::map_sql_err)?
+    {
+        crate::effort_store::finish_tx(conn, ev, open.id, None, None, now, false)?;
+    }
+    crate::page_ref_store::replace_source_for_ref_types_tx(
+        conn,
+        KIND_WORK_ITEM,
+        &work_item_id(id),
+        &task_body_ref_types(),
+        vec![],
+    )?;
+    let anchors = match thread {
+        Some(t) => anchors_for_thread_tx(conn, ThreadId::new(t))?,
+        None => Anchors::default(),
+    };
+    let env = ev
+        .typed::<WorkItemDeleted>(&WorkItemDeletedV1 {
+            work_item: work_item.clone(),
+        })
+        .with_anchors(anchors)
+        .with_subject([work_item]);
+    ev.append(conn, &env)?;
+    Ok(())
 }
 
 /// Where in a list a task goes: its end, or next to another task there.
@@ -951,54 +1002,14 @@ impl TaskStore for SqliteTaskStore {
         let schemas = self.event_schemas.clone();
         self.db
             .transaction(move |tx| {
-                let now = Timestamp::now();
-                let thread: Option<Option<i64>> = tx
-                    .query_row(
-                        "UPDATE task SET deleted_at = ?2, updated_at = ?2
-                         WHERE id = ?1 AND deleted_at IS NULL
-                         RETURNING thread_id",
-                        params![id.value(), ts_to_string(now)],
-                        |r| r.get(0),
-                    )
-                    .optional()
-                    .map_err(crate::database::map_sql_err)?;
-                project_work_item_tx(tx, id).map_err(crate::database::map_sql_err)?;
-                if let Some(open) =
-                    crate::effort_store::find_open_for_work_item_tx(tx, &work_item_ref(id))
-                        .map_err(crate::database::map_sql_err)?
-                {
-                    let ev = EventCtx::system(&schemas, "task_service");
-                    crate::effort_store::finish_tx(tx, &ev, open.id, None, None, now, false)?;
+                let ev = EventCtx::system(&schemas, "task_store");
+                match soft_delete_tx(tx, &ev, id, Timestamp::now()) {
+                    // Deleting a deleted (or missing) task is a no-op here.
+                    Err(DomainError::NotFound) => Ok(()),
+                    other => other,
                 }
-                if let Some(thread) = thread {
-                    // What indexes or links the task learns it's gone.
-                    let ev = EventCtx::system(&schemas, "task_store");
-                    let work_item = work_item_ref(id);
-                    let anchors = match thread {
-                        Some(t) => anchors_for_thread_tx(tx, ThreadId::new(t))?,
-                        None => Anchors::default(),
-                    };
-                    let env = ev
-                        .typed::<WorkItemDeleted>(&WorkItemDeletedV1 {
-                            work_item: work_item.clone(),
-                        })
-                        .with_anchors(anchors)
-                        .with_subject([work_item]);
-                    ev.append(tx, &env)?;
-                }
-                Ok(())
             })
             .await?;
-        {
-            let refs = &self.page_refs;
-            refs.replace_source_for_ref_types(
-                KIND_WORK_ITEM,
-                &work_item_id(id),
-                task_body_ref_types(),
-                vec![],
-            )
-            .await?;
-        }
         Ok(())
     }
 }

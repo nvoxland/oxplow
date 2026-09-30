@@ -1281,7 +1281,8 @@ intermediate `ready` step.
   skill at `.oxplow/runtime/claude-plugin/skills/oxplow-runtime/SKILL.md`
   for the decision rule (follow-up vs. task). Storage:
   `crates/oxplow-app/src/followup.rs`; runtime publishes the bus event
-  `followup.changed` so the UI re-fetches `getThreadWorkState`.
+  `followup.changed` so the UI re-reads that thread's work
+  (`workItems.readThreadWork`).
 - `fork_thread({ sourceThreadId, title, summary, moveItemIds? })` — see
   "fork_thread" above. Creates a new queued thread on the same stream,
   seeds a note item, optionally moves ready / blocked items across in
@@ -2008,8 +2009,8 @@ when takes happen.
 - **HEAD moves.** The git-refs listener runs a `git_refs` take, then —
   on a clean tree — a `head_moved` re-stamp (`vcs.head.moved@1`).
 - **Effort-level diffs** are `diff_snapshots(start, end)` (content
-  identity), exposed to the UI via `listTaskEfforts` (the
-  `list_work_item_efforts` RPC).
+  identity); the task page lists a task's efforts from `v_effort`
+  (`workItems.readTaskEfforts`).
 
 ## Per-effort write log
 

@@ -26,28 +26,6 @@ export interface ThreadState {
   threads: import("./tauri-bridge/index.js").Thread[];
 }
 
-export type TaskKind = "epic" | "task" | "subtask" | "bug" | "note";
-export type TaskStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
-export type TaskPriority = "low" | "medium" | "high" | "urgent";
-
-export interface Task {
-  id: string;
-  thread_id: string | null;
-  parent_id: number | null;
-  kind: TaskKind;
-  title: string;
-  description: string;
-  status: TaskStatus;
-  priority: TaskPriority;
-  sort_index: number;
-  created_by: "user" | "agent" | "system";
-  created_at: string;
-  updated_at: string;
-  completed_at: string | null;
-  note_count: number;
-  author: "user" | "agent" | null;
-}
-
 export interface TaskNote {
   id: string;
   task_id: string | null;
@@ -64,12 +42,6 @@ export interface TaskNote {
 // renderer-side aggregate surface is richer than the bindings
 // shape (label, source enum, created_at) and is the version every
 // consumer reads.
-
-// ---- Backlog / efforts ----
-
-export interface BacklogState {
-  items: Task[];
-}
 
 // ---- Branches & git ----
 

@@ -16,7 +16,7 @@
 mod harness;
 
 use harness::TestApp;
-use oxplow_domain::{StreamId, TaskId, ThreadId};
+use oxplow_domain::{StreamId, ThreadId};
 use oxplow_tauri_ipc::commands;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -64,24 +64,6 @@ async fn list_streams_returns_primary_for_fresh_project() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_backlog_returns_empty_for_fresh_project() {
-    let app = TestApp::build();
-    let items = commands::generated::list_backlog(app.state())
-        .await
-        .unwrap();
-    assert!(items.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn get_backlog_state_starts_at_zero() {
-    let app = TestApp::build();
-    let state = commands::generated::get_backlog_state(app.state())
-        .await
-        .unwrap();
-    assert_eq!(state.items.len(), 0);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_threads_empty_for_unknown_stream() {
     let app = TestApp::build();
     let threads = commands::generated::list_threads(app.state(), StreamId::new(999999))
@@ -97,79 +79,6 @@ async fn list_closed_threads_empty_for_unknown_stream() {
         .await
         .unwrap();
     assert!(threads.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn get_task_missing_returns_none() {
-    let app = TestApp::build();
-    let item = commands::generated::get_task(app.state(), TaskId::new(999))
-        .await
-        .unwrap();
-    assert!(item.is_none());
-}
-
-/// End-to-end: a task with at least one child lands in
-/// `ThreadWorkState.epics`, NOT in `items`. The frontend's
-/// `computeActiveEpicContext` relies on this bucketing — if a parent
-/// row drops into `items` instead, the rail's "Active epic" affordance
-/// silently goes away. Drive the IPC create_task path twice (parent
-/// + child) and read back the bucketed work state.
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn get_thread_work_state_buckets_parents_with_children_as_epics() {
-    use oxplow_app::CreateTaskInput;
-    use oxplow_domain::stores::{StreamStore, ThreadStore};
-    let app = TestApp::build();
-    // The boot wires up a primary stream + its default active thread
-    // via ensure_primary. Reuse them rather than insert a second
-    // primary (the unique partial index would reject it).
-    let stream = app.state.stream_store.primary().await.unwrap().unwrap();
-    let thread = app
-        .state
-        .thread_store
-        .list_for_stream(&stream.id)
-        .await
-        .unwrap()
-        .into_iter()
-        .next()
-        .expect("primary stream should have a default thread");
-    let parent = commands::generated::create_task(
-        app.state(),
-        commands::tasks::CreateTaskRequest {
-            thread_id: Some(thread.id),
-            input: CreateTaskInput {
-                title: "parent".into(),
-                ..Default::default()
-            },
-        },
-    )
-    .await
-    .unwrap();
-    let _child = commands::generated::create_task(
-        app.state(),
-        commands::tasks::CreateTaskRequest {
-            thread_id: Some(thread.id),
-            input: CreateTaskInput {
-                title: "child".into(),
-                parent_id: Some(parent.id),
-                ..Default::default()
-            },
-        },
-    )
-    .await
-    .unwrap();
-    let work_state = commands::generated::get_thread_work_state(app.state(), thread.id)
-        .await
-        .unwrap();
-    assert!(
-        work_state.epics.iter().any(|e| e.id == parent.id),
-        "parent should appear in epics: {:?}",
-        work_state.epics
-    );
-    assert!(
-        !work_state.items.iter().any(|i| i.id == parent.id),
-        "parent should NOT appear in items: {:?}",
-        work_state.items
-    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -290,36 +199,9 @@ async fn read_workspace_file_missing_path_errors() {
 
 // ---- Page-visit commands ----
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_recently_finished_empty_for_fresh_project() {
-    let app = TestApp::build();
-    let v = commands::generated::list_recently_finished(app.state(), None, 10)
-        .await
-        .unwrap();
-    assert!(v.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn clear_recently_finished_no_throw_on_empty() {
-    let app = TestApp::build();
-    commands::generated::clear_recently_finished(app.state(), None)
-        .await
-        .unwrap();
-}
-
 // ---- Wiki commands ----
 
 // ---- Effort commands ----
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_work_item_efforts_empty_for_unknown_item() {
-    let app = TestApp::build();
-    let v =
-        commands::generated::list_work_item_efforts(app.state(), "work_item:oxplow:tsk999".into())
-            .await
-            .unwrap();
-    assert!(v.is_empty());
-}
 
 // ---------------------------------------------------------------------------
 // Broad read-command coverage. The harness boots a real git repo + a primary

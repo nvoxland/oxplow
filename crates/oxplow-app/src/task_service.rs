@@ -1447,38 +1447,6 @@ fn close_end_snapshot(captured: Option<i64>, effort_start: Option<i64>) -> Optio
     captured.or(effort_start)
 }
 
-/// The bucketed view the Backlog page renders.
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct BacklogState {
-    pub items: Vec<Task>,
-    pub waiting: Vec<Task>,
-    pub in_progress: Vec<Task>,
-    pub done: Vec<Task>,
-}
-
-impl BacklogState {
-    pub fn from_rows(rows: Vec<Task>) -> Self {
-        let mut items = Vec::new();
-        let mut waiting = Vec::new();
-        let mut in_progress = Vec::new();
-        let mut done = Vec::new();
-        for r in rows {
-            match r.status {
-                TaskStatus::InProgress => in_progress.push(r),
-                TaskStatus::Done | TaskStatus::Canceled | TaskStatus::Archived => done.push(r),
-                TaskStatus::Blocked => waiting.push(r),
-                TaskStatus::Ready => items.push(r),
-            }
-        }
-        Self {
-            items,
-            waiting,
-            in_progress,
-            done,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3142,81 +3110,6 @@ mod tests {
         let list = svc.list_for_thread(&tid).await.unwrap();
         let order: Vec<_> = list.iter().map(|i| i.id).collect();
         assert_eq!(order, vec![c.id, a.id, b.id]);
-    }
-
-    #[test]
-    fn backlog_state_buckets_by_status() {
-        let now = Timestamp::from_unix_ms(1);
-        let mk = |id: i64, status| Task {
-            id: TaskId::new(id),
-            thread_id: None,
-            parent_id: None,
-            title: id.to_string(),
-            description: String::new(),
-            status,
-            priority: TaskPriority::Medium,
-            sort_index: 0,
-            created_by: TaskActorKind::User,
-            created_at: now,
-            updated_at: now,
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: Some(TaskAuthor::User),
-        };
-        let rows = vec![
-            mk(1, TaskStatus::Ready),
-            mk(2, TaskStatus::InProgress),
-            mk(3, TaskStatus::Done),
-            mk(4, TaskStatus::Blocked),
-        ];
-        let st = BacklogState::from_rows(rows);
-        assert_eq!(st.items.len(), 1);
-        assert_eq!(st.in_progress.len(), 1);
-        assert_eq!(st.done.len(), 1);
-        assert_eq!(st.waiting.len(), 1);
-    }
-
-    #[test]
-    fn backlog_state_collapses_canceled_and_archived_into_done() {
-        let now = Timestamp::from_unix_ms(1);
-        let mk = |id: i64, status| Task {
-            id: TaskId::new(id),
-            thread_id: None,
-            parent_id: None,
-            title: id.to_string(),
-            description: String::new(),
-            status,
-            priority: TaskPriority::Medium,
-            sort_index: 0,
-            created_by: TaskActorKind::User,
-            created_at: now,
-            updated_at: now,
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: Some(TaskAuthor::User),
-        };
-        let st = BacklogState::from_rows(vec![
-            mk(1, TaskStatus::Done),
-            mk(2, TaskStatus::Canceled),
-            mk(3, TaskStatus::Archived),
-        ]);
-        assert_eq!(st.done.len(), 3);
-        assert!(st.items.is_empty());
-        assert!(st.in_progress.is_empty());
-        assert!(st.waiting.is_empty());
-    }
-
-    #[test]
-    fn backlog_state_empty_input() {
-        let st = BacklogState::from_rows(vec![]);
-        assert!(
-            st.items.is_empty()
-                && st.waiting.is_empty()
-                && st.in_progress.is_empty()
-                && st.done.is_empty()
-        );
     }
 
     // ---- read_task_options edge cases ----

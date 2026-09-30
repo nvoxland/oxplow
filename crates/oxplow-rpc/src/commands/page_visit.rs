@@ -4,8 +4,6 @@
 use oxplow_app::{OxplowEvent, Services};
 use oxplow_db::analytics_stores::PageVisitStore as _;
 use oxplow_db::PageVisit;
-use oxplow_domain::stores::TaskStore as _;
-use oxplow_domain::{TaskId, TaskStatus, ThreadId, Timestamp};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -82,138 +80,6 @@ pub async fn forget_page(
     Ok(())
 }
 
-/// Recently completed tasks merged with recently updated wiki
-/// notes, sorted by timestamp DESC. Drives the rail's "Finished"
-/// section. Items whose timestamp is `<= finished_cleared_at` are
-/// hidden until something newer lands.
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum FinishedEntry {
-    #[serde(rename = "task")]
-    Task {
-        // A prefixed `TaskId` ("tsk42"), not a raw rowid: the renderer
-        // feeds `itemId` straight into `taskRef(...)` → `get_task`, whose
-        // backend arg deserializes as a `TaskId` and rejects a bare JSON
-        // number ("invalid type: number, expected a string").
-        #[serde(rename = "itemId")]
-        item_id: TaskId,
-        title: String,
-        t: Timestamp,
-    },
-    #[serde(rename = "wiki")]
-    Wiki {
-        slug: String,
-        title: String,
-        t: Timestamp,
-    },
-}
-
-impl FinishedEntry {
-    fn timestamp(&self) -> Timestamp {
-        match self {
-            FinishedEntry::Task { t, .. } => *t,
-            FinishedEntry::Wiki { t, .. } => *t,
-        }
-    }
-}
-
-pub async fn list_recently_finished(
-    svc: &Services,
-    thread_id: Option<String>,
-    limit: u32,
-) -> Result<Vec<FinishedEntry>, IpcError> {
-    let cap = limit.max(1) as usize;
-    let cursor_key = thread_id.clone().unwrap_or_default();
-    let cleared_at = svc
-        .finished_cleared_at
-        .read()
-        .expect("finished_cleared_at rwlock")
-        .get(&cursor_key)
-        .copied();
-
-    let mut entries: Vec<FinishedEntry> = Vec::new();
-
-    if let Some(tid) = thread_id.as_ref() {
-        // Thread-scoped: only items filed against this thread, only
-        // wiki pages the thread actually touched.
-        let tid = ThreadId::try_from_str(tid).unwrap_or(ThreadId::placeholder());
-        let items = svc.task_store.list_for_thread(&tid).await?;
-        for item in items {
-            if item.status != TaskStatus::Done {
-                continue;
-            }
-            let Some(t) = item.completed_at else { continue };
-            entries.push(FinishedEntry::Task {
-                item_id: item.id,
-                title: item.title,
-                t,
-            });
-        }
-        let touches = svc
-            .wiki_page_thread_updates
-            .list_for_thread(&tid, cap * 4)
-            .await?;
-        for touch in touches {
-            let Some(page) = svc.wiki_page_store.get(&touch.slug).await? else {
-                continue;
-            };
-            entries.push(FinishedEntry::Wiki {
-                slug: page.slug,
-                title: page.title,
-                // Use the per-thread timestamp so a different thread
-                // editing the same page doesn't promote this thread's
-                // entry.
-                t: touch.last_seen_at,
-            });
-        }
-    } else {
-        // No thread context — fall back to a global view (used for
-        // initial paint before a thread is selected).
-        let done = svc.task_store.list_recently_done(cap).await?;
-        for item in done {
-            let Some(t) = item.completed_at else { continue };
-            entries.push(FinishedEntry::Task {
-                item_id: item.id,
-                title: item.title,
-                t,
-            });
-        }
-        let pages = svc.wiki_page_store.list().await?;
-        for page in pages.into_iter().take(cap) {
-            entries.push(FinishedEntry::Wiki {
-                slug: page.slug,
-                title: page.title,
-                t: page.updated_at,
-            });
-        }
-    }
-
-    entries.retain(|e| match cleared_at {
-        Some(cursor) => e.timestamp() > cursor,
-        None => true,
-    });
-    entries.sort_by_key(|e| std::cmp::Reverse(e.timestamp()));
-    entries.truncate(cap);
-    Ok(entries)
-}
-
-/// Hide the current "Finished" entries behind a cursor. Source rows
-/// (tasks / wiki pages) are untouched; new finishes still surface
-/// because their timestamp is newer than the cursor. Cursor is
-/// per-thread so clearing one thread's section doesn't blank another.
-pub async fn clear_recently_finished(
-    svc: &Services,
-    thread_id: Option<String>,
-) -> Result<(), IpcError> {
-    let key = thread_id.unwrap_or_default();
-    svc.finished_cleared_at
-        .write()
-        .expect("finished_cleared_at rwlock")
-        .insert(key, Timestamp::now());
-    svc.events.emit(OxplowEvent::PageVisitChanged);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     #[tokio::test]
@@ -227,36 +93,5 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_array());
-    }
-
-    #[tokio::test]
-    async fn list_recently_finished_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch(
-            "list_recently_finished",
-            serde_json::json!({"threadId": "thr1", "limit": 5}),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert!(out.is_array());
-    }
-
-    /// Regression: a finished task entry must carry its id as the
-    /// prefixed string ("tsk42"), not a raw integer. The renderer feeds
-    /// `itemId` straight into `taskRef(...)` → `get_task`, whose backend
-    /// arg is a `TaskId` and rejects a JSON number with
-    /// "invalid type: number, expected a string". Serializing the raw
-    /// rowid here is what produced the silent unhandled-rejection in the
-    /// rail's Finished section.
-    #[test]
-    fn finished_task_serializes_item_id_as_prefixed_string() {
-        let entry = super::FinishedEntry::Task {
-            item_id: oxplow_domain::TaskId::new(42),
-            title: "demo".into(),
-            t: oxplow_domain::Timestamp::now(),
-        };
-        let v = serde_json::to_value(&entry).unwrap();
-        assert_eq!(v["itemId"], serde_json::json!("tsk42"));
     }
 }

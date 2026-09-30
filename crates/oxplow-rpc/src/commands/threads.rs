@@ -193,59 +193,6 @@ pub async fn get_thread_state(
     })
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct ThreadWorkState {
-    #[serde(rename = "threadId")]
-    pub thread_id: ThreadId,
-    pub waiting: Vec<oxplow_domain::Task>,
-    #[serde(rename = "inProgress")]
-    pub in_progress: Vec<oxplow_domain::Task>,
-    pub done: Vec<oxplow_domain::Task>,
-    pub epics: Vec<oxplow_domain::Task>,
-    pub items: Vec<oxplow_domain::Task>,
-    pub followups: Vec<oxplow_app::Followup>,
-}
-
-/// Bucketed task view for the Work panel.
-pub async fn get_thread_work_state(
-    svc: &Services,
-    thread_id: ThreadId,
-) -> Result<ThreadWorkState, IpcError> {
-    use oxplow_domain::stores::TaskStore;
-    use oxplow_domain::TaskStatus;
-    let rows = svc.task_store.list_for_thread(&thread_id).await?;
-    // An "epic" is any task that has at least one child within this scope.
-    let child_parents: std::collections::HashSet<oxplow_domain::TaskId> =
-        rows.iter().filter_map(|r| r.parent_id).collect();
-    let mut waiting = vec![];
-    let mut in_progress = vec![];
-    let mut done = vec![];
-    let mut epics = vec![];
-    let mut items = vec![];
-    for r in rows {
-        if child_parents.contains(&r.id) {
-            epics.push(r);
-            continue;
-        }
-        match r.status {
-            TaskStatus::Blocked => waiting.push(r),
-            TaskStatus::InProgress => in_progress.push(r),
-            TaskStatus::Done | TaskStatus::Canceled | TaskStatus::Archived => done.push(r),
-            TaskStatus::Ready => items.push(r),
-        }
-    }
-    let followups = svc.followups.list_for_thread(&thread_id);
-    Ok(ThreadWorkState {
-        thread_id,
-        waiting,
-        in_progress,
-        done,
-        epics,
-        items,
-        followups,
-    })
-}
-
 pub async fn select_thread(svc: &Services, req: SelectThreadRequest) -> Result<(), IpcError> {
     svc.threads
         .select(&req.stream_id, req.thread_id.as_ref())

@@ -852,6 +852,16 @@
   tests:
     - { not_null: page }
     - { relationships: { column: page, to: knowledge_page, field: ref } }
+- name: knowledge_touch
+  version: 1
+  description: "Which threads wrote or updated which knowledge pages, and when a thread last did (the rail's Finished section)."
+  columns:
+    - { name: "page", type: "TEXT", doc: "The page (`wiki:<slug>`, v_knowledge_page.ref)." }
+    - { name: "thread_id", type: "INTEGER", doc: "The thread (v_thread.id)." }
+    - { name: "last_seen_at", type: "TEXT", doc: "RFC 3339 timestamp of that thread's latest write to it." }
+  tests:
+    - { not_null: page }
+    - { relationships: { column: page, to: knowledge_page, field: ref } }
 - name: model
   version: 2
   description: "Models: every published view, as compiled at this open — core ones and each extension's. Read a model's columns in `v_model_column`, what it reads in `v_model_lineage` and its declared tests' results in `v_model_test`."

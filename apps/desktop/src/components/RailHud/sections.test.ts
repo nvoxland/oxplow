@@ -17,7 +17,6 @@ function makeItem(partial: Partial<Task> & { id: number; status: Task["status"];
     status: partial.status,
     priority: "medium",
     sort_index: 0,
-    created_by: "user",
     created_at: "2026-04-01",
     updated_at: "2026-04-01",
     completed_at: null,

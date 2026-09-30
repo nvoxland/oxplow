@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { DiffEntry, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
+import { readTask, readTasksById } from "../workItems.js";
 import {
   getAgentTurn,
   getEffort,
-  getTask,
-  getTaskSummaries,
   listEffortFiles,
   listEffortsOverlappingRange,
   listSnapshots,
@@ -328,7 +327,7 @@ function ResolvedEndpointDiff({
       return;
     }
     let cancelled = false;
-    void getTaskSummaries([taskId])
+    void readTasksById([taskId])
       .then((rows) => {
         if (cancelled) return;
         setTaskTitle(rows.find((r) => r.id === taskId)?.title ?? null);
@@ -358,7 +357,7 @@ function ResolvedEndpointDiff({
           return;
         }
         const taskIds = overlapping.flatMap((o) => (o.taskId ? [o.taskId] : []));
-        const titles = await getTaskSummaries(Array.from(new Set(taskIds))).catch(
+        const titles = await readTasksById(Array.from(new Set(taskIds))).catch(
           () => [] as Array<{ id: string; title: string }>,
         );
         const titleByTask = new Map(titles.map((t) => [t.id, t.title] as const));
@@ -446,7 +445,7 @@ function ResolvedEndpointDiff({
       return;
     }
     let cancelled = false;
-    void getTask(primaryTaskId)
+    void readTask(primaryTaskId)
       .then((t) => {
         if (!cancelled) setEffortDescription(t?.description ?? null);
       })

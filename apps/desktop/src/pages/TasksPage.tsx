@@ -17,12 +17,13 @@ import type { TaskSectionKind } from "../components/Plan/plan-utils.js";
 import { backlogRef, doneWorkRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import {
-  getThreadWorkState,
   listThreads,
+  subscribeOxplowEvents,
   type Stream,
   type Thread,
   type ThreadWorkState,
 } from "../api.js";
+import { readThreadWork, tasksChanged } from "../workItems.js";
 
 export type TasksPageProps =
   Omit<
@@ -100,6 +101,19 @@ export function TasksPage({
     if (currentStreamId) requestThreads(currentStreamId);
   }, [currentStreamId, requestThreads]);
 
+  // A task write anywhere (a command, an agent) changes the models: drop
+  // the cached states so the active scope re-reads.
+  const [tasksVersion, setTasksVersion] = useState(0);
+  useEffect(
+    () =>
+      subscribeOxplowEvents((event) => {
+        if (!tasksChanged(event as Record<string, unknown>)) return;
+        setScopedWorkStates({});
+        setTasksVersion((v) => v + 1);
+      }),
+    [],
+  );
+
   // Fetch the work states needed by the active scope. For "stream" we load
   // every thread in that stream; for "all" we load every thread across
   // every stream. Results cache in scopedWorkStates by threadId.
@@ -112,7 +126,7 @@ export function TasksPage({
           if (!scope.streamId || !scope.threadId) return;
           if (scopedWorkStates[scope.threadId]) return;
           setScopedLoading(true);
-          const work = await getThreadWorkState(scope.streamId, scope.threadId);
+          const work = await readThreadWork(scope.threadId);
           if (cancelled) return;
           setScopedWorkStates((prev) => ({ ...prev, [scope.threadId]: work }));
         } else if (scope.kind === "stream") {
@@ -126,7 +140,7 @@ export function TasksPage({
           setScopedLoading(true);
           const missing = threads.filter((t) => !scopedWorkStates[t.id]);
           const loaded = await Promise.all(
-            missing.map(async (t) => [t.id, await getThreadWorkState(scope.streamId, t.id)] as const),
+            missing.map(async (t) => [t.id, await readThreadWork(t.id)] as const),
           );
           if (cancelled) return;
           if (loaded.length) {
@@ -156,7 +170,7 @@ export function TasksPage({
           );
           const missing = all.filter((p) => !scopedWorkStates[p.threadId]);
           const loaded = await Promise.all(
-            missing.map(async (p) => [p.threadId, await getThreadWorkState(p.streamId, p.threadId)] as const),
+            missing.map(async (p) => [p.threadId, await readThreadWork(p.threadId)] as const),
           );
           if (cancelled) return;
           if (loaded.length) {
@@ -177,7 +191,7 @@ export function TasksPage({
     void load();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, streams]);
+  }, [scope, streams, tasksVersion]);
 
   const effectiveThreadWork: ThreadWorkState | null = useMemo(() => {
     if (scope.kind === "currentThread") return rest.threadWork ?? null;

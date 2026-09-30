@@ -293,12 +293,10 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
   captured file row. The old `get_snapshot_summary` /
   `get_snapshot_pair_diff` RPCs had no caller and are gone; diffs go
   through the `diff` RPC (`Trees`, `.context/vcs.md`).
-- `listTaskEfforts(itemId)` (RPC `list_work_item_efforts { workItem }`,
-  called with `work_item:oxplow:<itemId>`) — returns per-effort rows (one per
-  `in_progress → human_check` cycle) with pre-joined start/end
-  snapshot metadata, linked turn ids, and the changed-paths list
-  computed from the pair summary. Used by the Plan modal's Efforts
-  section and the "Show in history" jump.
+- `readTaskEfforts(taskId)` (`workItems.ts`) — a task's efforts from
+  `v_effort` (`work_item = work_item:oxplow:<id>`), newest first, each
+  with its changed files (`get_effort_files`). Used by the task page's
+  Activity timeline and the "Show in history" jump.
 
 UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
 `file-snapshot.created` by stream and unpacks the payload.
@@ -318,18 +316,17 @@ Surfaces:
   re-publishes its `subscribe` events as `followup.changed`
   (`{ threadId, kind: "added" | "removed" | "cleared", id }`) on the
   EventBus.
-- `getThreadWorkState` (the main IPC for the Work panel) layers the
-  thread's current followups onto its response inside the
-  `followups` field, so PlanPane / WorkGroupList see them alongside
-  durable tasks without a second round-trip. The task-api
-  wrapper owns that overlay; the persistence-layer
-  `taskstore.getState` always returns `followups: []`.
+- `workItems.readThreadWork(threadId)` (the Work panel's read, P6.E1b)
+  buckets the thread's `v_task` rows and adds its current followups
+  (`list_followups`) in the `followups` field, so PlanPane /
+  WorkGroupList see them alongside durable tasks.
 - IPC: only one new method — `removeFollowup(threadId, id)` — used by
   the ✕ dismiss button on each follow-up row. Adds happen
   exclusively via the MCP tool surface; the UI never adds.
-- App.tsx subscribes to `followup.changed` and re-fetches
-  `getThreadWorkState` for the affected thread (stream id is recovered
-  from the cached `threadStates` map).
+- `useBackendSubscriptions` re-reads the affected thread's work on
+  `followup.changed`, and every loaded thread's (and the backlog's) when
+  a task model changes (`modelsChanged` naming `v_task`, `v_task_note`,
+  `v_work_item`, `v_effort` or `v_effort_file` — `workItems.tasksChanged`).
 
 Rendering: `WorkGroupList.tsx` renders each follow-up as an italic
 muted "↳ follow-up: <note>" line at the very top of the To Do section

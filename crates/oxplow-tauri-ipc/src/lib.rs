@@ -118,15 +118,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::reorder_thread_queue,
             commands::generated::select_thread,
             commands::generated::get_thread_state,
-            commands::generated::get_thread_work_state,
             // tasks
-            commands::generated::get_task,
-            commands::generated::upsert_task,
-            commands::generated::delete_task,
-            commands::generated::create_task,
-            commands::generated::update_task,
-            commands::generated::reorder_tasks,
-            commands::generated::move_task,
             commands::generated::list_dashboards,
             commands::generated::get_dashboard,
             commands::generated::create_dashboard,
@@ -137,8 +129,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::remove_dashboard_item,
             commands::generated::reorder_dashboard_items,
             // backlog
-            commands::generated::list_backlog,
-            commands::generated::get_backlog_state,
             // search
             commands::generated::search,
             // semantic layer
@@ -206,8 +196,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_recent_page_visits,
             commands::generated::top_visited_pages,
             commands::generated::forget_page,
-            commands::generated::list_recently_finished,
-            commands::generated::clear_recently_finished,
             // usage
             commands::generated::record_usage,
             commands::generated::list_recent_usage_rollup,
@@ -247,7 +235,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::set_agent_model,
             commands::generated::get_workspace_context,
             // efforts
-            commands::generated::list_work_item_efforts,
             commands::generated::get_effort_files,
             commands::generated::get_effort,
             commands::generated::list_efforts_at_snapshots,

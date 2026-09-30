@@ -5,25 +5,22 @@ import {
   type AgentStatus,
   type BacklogState,
   formatAgentStallAlert,
-  getBacklogState,
   getConfig,
   getThreadState,
-  getThreadWorkState,
   listAgentStatuses,
   listStreams,
   onRemoteReconnect,
   type Stream,
   subscribeAgentStallAlerts,
   subscribeAgentStatus,
-  subscribeBacklogEvents,
   subscribeOxplowEvents,
-  subscribeTaskEvents,
   subscribeWorkspaceContext,
   type ThreadState,
   type ThreadWorkState,
   type WorkspaceContext,
 } from "./api.js";
 import { showToast } from "./components/toastStore.js";
+import { readBacklog, readThreadWork, tasksChanged } from "./workItems.js";
 import { logUi } from "./logger.js";
 
 /**
@@ -33,14 +30,13 @@ import { logUi } from "./logger.js";
  * passed in by the caller or an imported singleton, so none of these
  * re-subscribe across renders.
  *
- * `threadStatesRef` is the one piece of mutable state a callback needs to
- * read (the followup.changed handler recovers a stream id from the cached
- * thread map). It's a ref rather than a value so the subscription can stay
- * mounted once instead of tearing down and re-subscribing on every thread
- * change — the source of a long-standing re-subscribe churn in App.tsx.
+ * `threadWorkStatesRef` is the one piece of mutable state a callback needs
+ * to read (which threads' work is loaded, to re-read when a task model
+ * changes). It's a ref rather than a value so the subscription can stay
+ * mounted once instead of tearing down and re-subscribing on every change.
  */
 export interface BackendSubscriptionHandlers {
-  threadStatesRef: RefObject<Record<string, ThreadState>>;
+  threadWorkStatesRef: RefObject<Record<string, ThreadWorkState>>;
   setWorkspaceContext: (next: WorkspaceContext) => void;
   setBacklogState: (next: BacklogState) => void;
   setThreadWorkStates: Dispatch<SetStateAction<Record<string, ThreadWorkState>>>;
@@ -61,10 +57,8 @@ export interface BackendSubscriptionHandlers {
  */
 export interface BackendSubscriptionApi {
   subscribeWorkspaceContext: typeof subscribeWorkspaceContext;
-  getBacklogState: typeof getBacklogState;
-  subscribeBacklogEvents: typeof subscribeBacklogEvents;
-  subscribeTaskEvents: typeof subscribeTaskEvents;
-  getThreadWorkState: typeof getThreadWorkState;
+  readBacklog: typeof readBacklog;
+  readThreadWork: typeof readThreadWork;
   subscribeOxplowEvents: typeof subscribeOxplowEvents;
   getThreadState: typeof getThreadState;
   listStreams: typeof listStreams;
@@ -77,10 +71,8 @@ export interface BackendSubscriptionApi {
 
 const defaultApi: BackendSubscriptionApi = {
   subscribeWorkspaceContext,
-  getBacklogState,
-  subscribeBacklogEvents,
-  subscribeTaskEvents,
-  getThreadWorkState,
+  readBacklog,
+  readThreadWork,
   subscribeOxplowEvents,
   getThreadState,
   listStreams,
@@ -96,7 +88,7 @@ export function useBackendSubscriptions(
   api: BackendSubscriptionApi = defaultApi,
 ): void {
   const {
-    threadStatesRef,
+    threadWorkStatesRef,
     setWorkspaceContext,
     setBacklogState,
     setThreadWorkStates,
@@ -110,10 +102,8 @@ export function useBackendSubscriptions(
   } = handlers;
   const {
     subscribeWorkspaceContext,
-    getBacklogState,
-    subscribeBacklogEvents,
-    subscribeTaskEvents,
-    getThreadWorkState,
+    readBacklog,
+    readThreadWork,
     subscribeOxplowEvents,
     getThreadState,
     listStreams,
@@ -128,77 +118,40 @@ export function useBackendSubscriptions(
     return subscribeWorkspaceContext((next) => setWorkspaceContext(next));
   }, [setWorkspaceContext]);
 
+  // Tasks are read from the models (P6.E1b): the backlog and every loaded
+  // thread's work re-read when a task model changes — whoever wrote it (a
+  // person's command, an agent's MCP tool).
   useEffect(() => {
     let cancelled = false;
-    const loadBacklog = () =>
-      getBacklogState()
+    const reloadThread = (threadId: string) =>
+      readThreadWork(threadId)
+        .then((work) => {
+          if (!cancelled) setThreadWorkStates((prev) => ({ ...prev, [threadId]: work }));
+        })
+        .catch((error) => logUi("warn", "failed to refresh thread work", { threadId, error: String(error) }));
+    const reloadAll = () => {
+      void readBacklog()
         .then((state) => {
           if (!cancelled) setBacklogState(state);
         })
         .catch((error) => logUi("warn", "failed to refresh backlog state", { error: String(error) }));
-    void loadBacklog();
-    const unsubscribe = subscribeBacklogEvents(() => void loadBacklog());
-    // Re-hydrate after a remote-daemon WS reconnect (events missed
-    // while the socket was down).
-    const unsubReconnect = onRemoteReconnect(() => void loadBacklog());
+      for (const threadId of Object.keys(threadWorkStatesRef.current ?? {})) void reloadThread(threadId);
+    };
+    reloadAll();
+    const unsubscribe = subscribeOxplowEvents((event) => {
+      if (tasksChanged(event as Record<string, unknown>)) reloadAll();
+      // Followups are in-memory, not a model: their own event.
+      else if (event.kind === "followupsChanged") void reloadThread(event.threadId as string);
+    });
+    // Re-hydrate after a remote-daemon WS reconnect (events missed while
+    // the socket was down).
+    const unsubReconnect = onRemoteReconnect(reloadAll);
     return () => {
       cancelled = true;
       unsubscribe();
       unsubReconnect();
     };
-  }, [setBacklogState]);
-
-  useEffect(() => {
-    const unsubscribe = subscribeTaskEvents("all", (event) => {
-      void getThreadWorkState(event.streamId, event.threadId)
-        .then((workState) => {
-          setThreadWorkStates((prev) => ({ ...prev, [event.threadId]: workState }));
-        })
-        .catch((error) => {
-          logUi("warn", "failed to refresh thread work state after change event", {
-            streamId: event.streamId,
-            threadId: event.threadId,
-            kind: event.kind,
-            error: String(error),
-          });
-        });
-    });
-    return unsubscribe;
-  }, [setThreadWorkStates]);
-
-  // Followups are transient (in-memory), but we still want the Ready
-  // section to live-update when the agent adds/removes one mid-turn.
-  // Re-fetch the same ThreadWorkState envelope (followups are layered
-  // in by the tasks API wrapper) after every followup.changed event.
-  // Stream id is recovered from the cached threadState map — the event
-  // itself only carries threadId. Read the ref (not a closed-over value)
-  // so this subscription stays mounted instead of re-subscribing on
-  // every thread change.
-  useEffect(() => {
-    const unsubscribe = subscribeOxplowEvents((event) => {
-      if (event.kind !== "followupsChanged") return;
-      const threadId = event.threadId;
-      let streamIdForThread: string | null = null;
-      for (const [sid, state] of Object.entries(threadStatesRef.current ?? {})) {
-        if (state.threads.some((t) => t.id === threadId)) {
-          streamIdForThread = sid;
-          break;
-        }
-      }
-      if (!streamIdForThread) return;
-      void getThreadWorkState(streamIdForThread, threadId)
-        .then((workState) => {
-          setThreadWorkStates((prev) => ({ ...prev, [threadId]: workState }));
-        })
-        .catch((error) => {
-          logUi("warn", "failed to refresh thread work state after followup.changed", {
-            threadId,
-            error: String(error),
-          });
-        });
-    });
-    return unsubscribe;
-  }, [threadStatesRef, setThreadWorkStates]);
+  }, [threadWorkStatesRef, setBacklogState, setThreadWorkStates]);
 
   useEffect(() => {
     const unsubscribe = subscribeOxplowEvents((event) => {

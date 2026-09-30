@@ -345,9 +345,9 @@ AUTOINCREMENT` — stored as a plain integer, surfaced as `tsk<int>` (see
 [Entity ids](#entity-ids)). The
 `kind` column was dropped: there is no `epic`/`subtask`/`bug`/`note`
 discriminator any more. An **epic is any task that has children** —
-i.e. any row that's a `parent_id` target. The IPC's
-`get_thread_work_state` computes this on read and the renderer reads
-`ThreadWorkState.epics` directly; there's no flag on the row itself.
+i.e. any row that's a `parent_id` target. The UI's data layer
+(`workItems.bucketThreadWork`) computes this on read and the renderer
+reads `ThreadWorkState.epics`; there's no flag on the row itself.
 
 Statuses: `ready`, `in_progress`, `blocked`, `done`, `canceled`,
 `archived`. `archived` is a terminal state that hides the item from
@@ -559,10 +559,8 @@ Read API: `listEffortsForTask(itemId)`, `listOpenEfforts()`,
 efforts that touched `path` via `effort_file`, joined to the
 owning task's title/status, newest-first by `ended_at` — drives
 the local-blame overlay described in `.context/editor-and-monaco.md`).
-`createTaskApi` exposes `listTaskEfforts(itemId)` (over the
-`list_work_item_efforts { workItem }` RPC) which returns
-per-effort rows with pre-joined start/end snapshot metadata and the
-list of changed paths (computed from the pair diff).
+The task page reads a task's efforts from `v_effort`
+(`workItems.readTaskEfforts`) with each one's changed files.
 
 `list_changed_paths_for_effort` returns a **claimed/unclaimed split**
 (`EffortChangedPaths { claimed, unclaimed }`) rather than a flat list:
@@ -1698,22 +1696,15 @@ boot-screen visits with no active thread still record). Indexes on
 
 Insert publishes `page-visit.changed` for renderer-side invalidation.
 
-### `finished_seen` — runtime watermark for the rail's Finished section
+### The rail's Finished section
 
-`finished_seen (scope TEXT PRIMARY KEY, t TEXT NOT NULL)`. Tiny KV
-table holding "mark all as seen" watermarks for the rail's *Finished*
-section. Two scope keys are written: `thread:<id>` (filters task
-closes for that thread) and `notes` (filters wiki-note updates,
-globally). `listRecentlyFinished` filters out rows whose timestamp is
-≤ the matching watermark; `clearRecentlyFinished` upserts both scopes
-to `now()`.
-
-`FinishedEntry::Task.item_id` must be a `TaskId` (serializes to the
-prefixed `"tsk42"`), **not** a raw rowid (`item.id.value()`). The
-renderer feeds `itemId` straight into `taskRef(...)` → `get_task`,
-whose backend arg deserializes as a `TaskId` and rejects a bare JSON
-number with "invalid type: number, expected a string" — a silent
-unhandled-rejection when a finished task is opened from the rail.
+Read from the models (`workItems.readRecentlyFinished`, P6.E1b): done
+tasks (`v_task.completed_at`) and the knowledge pages the thread wrote
+(`v_knowledge_touch`, over `wiki_page_thread_update`; the project view
+reads `v_knowledge_page.updated_at`), newest first. "Clear" is the
+viewer's own gesture: a per-thread cursor in this browser
+(`oxplow.finished.clearedAt`), and entries at or before it are hidden
+until something newer lands. No table, no RPC.
 
 ### `comment` + `comment_message` — `SqliteCommentStore` (`crates/oxplow-db/src/comment_store.rs`, migrations `V22__comments.sql`, `V23__comment_resolved_at.sql`)
 

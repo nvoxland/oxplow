@@ -7,7 +7,6 @@
 
 pub mod app;
 pub mod background;
-pub mod backlog;
 pub mod branch;
 pub mod comments;
 pub mod config;
@@ -26,7 +25,6 @@ pub mod page_refs;
 pub mod page_visit;
 pub mod search;
 pub mod streams;
-pub mod tasks;
 pub mod terminal;
 pub mod threads;
 pub mod usage;

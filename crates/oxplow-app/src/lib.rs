@@ -139,9 +139,7 @@ pub use hook_ingest::{
     HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
 };
 pub use oxplow_lsp::{LspError, LspProxy};
-pub use task_service::{
-    BacklogState, CreateTaskInput, TaskService, TaskServiceError, UpdateTaskChanges,
-};
+pub use task_service::{CreateTaskInput, TaskService, TaskServiceError, UpdateTaskChanges};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -601,14 +599,6 @@ pub struct Services {
     /// Keeps `stream.branch` equal to the checked-out branch; spawned at
     /// boot.
     pub branch_reconciler: Arc<branch_reconciler::BranchReconciler>,
-    /// Per-thread cursor for the rail's "Recently finished" section.
-    /// Entries whose timestamp is `<= cursor` are filtered out. Keyed
-    /// by thread id; entries with no thread (global view) live under
-    /// the empty string. In-memory only — clearing the section is a UX
-    /// gesture, not a destructive op, and re-appearing after a restart
-    /// is fine.
-    pub finished_cleared_at:
-        Arc<RwLock<std::collections::HashMap<String, oxplow_domain::Timestamp>>>,
 }
 
 impl Services {
@@ -1032,6 +1022,7 @@ impl Services {
             commands::work_item::comment_command(work_items.clone()),
             commands::work_item::reorder_command(work_items.clone()),
             commands::work_item::move_command(work_items.clone()),
+            commands::work_item::delete_command(work_items.clone()),
             commands::effort::open_command(work_items.clone()),
             commands::effort::close_command(work_items.clone()),
         ] {
@@ -1252,7 +1243,6 @@ impl Services {
             workspace_files,
             branch_reconciler,
             trees,
-            finished_cleared_at: Arc::new(RwLock::new(std::collections::HashMap::new())),
         })
     }
 

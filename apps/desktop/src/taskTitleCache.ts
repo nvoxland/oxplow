@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getTaskSummaries } from "./api.js";
+import { readTasksById } from "./workItems.js";
 
 /**
  * Shared in-memory task-id → title map. The wiki/markdown renderer uses
@@ -7,7 +7,7 @@ import { getTaskSummaries } from "./api.js";
  * of the raw id — readers should see the task title, not `tsk42`.
  *
  * Unlike the wiki cache (which lists every page up front), tasks are
- * resolved **lazily per id** via `getTaskSummaries`, so a wiki page that
+ * resolved **lazily per id** via `readTasksById`, so a wiki page that
  * links a handful of tasks doesn't pull the whole task list. A resolved
  * miss is cached as `null` so a stale/deleted id doesn't refetch on every
  * render. Components subscribe via `useTaskTitle(id)`.
@@ -28,7 +28,7 @@ function fetchTitle(id: string): Promise<void> {
   if (existing) return existing;
   const p = (async () => {
     try {
-      const rows = await getTaskSummaries([id]);
+      const rows = await readTasksById([id]);
       titles.set(id, rows.find((r) => r.id === id)?.title ?? null);
       notify();
     } catch {

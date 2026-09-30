@@ -2,14 +2,8 @@ import { LensSlots } from "../lens/LensSlots.js";
 import { numericRowId } from "../lens/lensModel.js";
 import { useEffect, useMemo, useState } from "react";
 import type { EffortDetail, Stream, Thread, ThreadWorkState, Task, TaskPriority, TaskStatus } from "../api.js";
-import {
-  getTask,
-  listTaskEfforts,
-  moveBacklogItemToThread,
-  moveTaskToBacklog,
-  subscribeOxplowEvents,
-  updateTask,
-} from "../api.js";
+import { subscribeOxplowEvents } from "../api.js";
+import { moveTask, readTask, readTaskEfforts, tasksChanged, updateTask } from "../workItems.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, snapshotRef, taskRef } from "../tabs/pageRefs.js";
@@ -105,7 +99,7 @@ export function TaskPage({
       // Swallow + log rather than letting a rejected fetch (e.g. a
       // malformed task id) bubble to `window.unhandledrejection`, which
       // reads as a silent failure with no surfaced error.
-      void getTask(itemId)
+      void readTask(itemId)
         .then((row) => {
           if (!cancelled) setFetchedItem(row);
         })
@@ -115,10 +109,9 @@ export function TaskPage({
     };
     if (!inThreadItems) refetch();
     const unsub = subscribeOxplowEvents((event) => {
-      // Oxplow events are `kind`-tagged (`{ kind: "tasksChanged", threadId }`);
-      // there is no `type` field. Only the out-of-thread task needs this — the
-      // in-thread case is driven by the live `items` prop.
-      if (event.kind !== "tasksChanged") return;
+      // Only the out-of-thread task needs this — the in-thread case is
+      // driven by the live `items` prop.
+      if (!tasksChanged(event as Record<string, unknown>)) return;
       refetch();
     });
     return () => {
@@ -130,19 +123,17 @@ export function TaskPage({
   useEffect(() => {
     if (!item) return;
     let cancelled = false;
-    void listTaskEfforts(item.id).then((rows) => {
-      if (!cancelled) setEfforts(rows);
-    });
+    const load = () =>
+      void readTaskEfforts(item.id)
+        .then((rows) => {
+          if (!cancelled) setEfforts(rows);
+        })
+        .catch((err) => logUi("warn", "task efforts fetch failed", { itemId: item.id, error: String(err) }));
+    load();
+    // An effort opens or closes with a status move: re-read so the
+    // Activity timeline reflects it without a remount.
     const unsub = subscribeOxplowEvents((event) => {
-      // `tasksChanged` is thread-scoped and fires when an effort opens/closes
-      // as part of a status transition — refetch this task's efforts so the
-      // Activity timeline reflects the close without a remount.
-      if (event.kind !== "tasksChanged") return;
-      const threadId = (event as { threadId?: string | null }).threadId ?? null;
-      if (item.thread_id != null && threadId !== item.thread_id) return;
-      void listTaskEfforts(item.id).then((rows) => {
-        if (!cancelled) setEfforts(rows);
-      });
+      if (tasksChanged(event as Record<string, unknown>)) load();
     });
     return () => {
       cancelled = true;
@@ -154,8 +145,7 @@ export function TaskPage({
     targetId: string,
     changes: { title?: string; description?: string; status?: TaskStatus; priority?: TaskPriority; category?: string | null; tags?: string | null },
   ) => {
-    if (!stream || !thread) return;
-    await updateTask(stream.id, thread.id, targetId, changes);
+    await updateTask(targetId, changes);
   };
 
   const itemThreadId = item?.thread_id ?? null;
@@ -165,7 +155,7 @@ export function TaskPage({
       return {
         label: "Bring to this thread",
         run: async () => {
-          await moveBacklogItemToThread(stream.id, item.id, thread.id);
+          await moveTask(item.id, thread.id);
         },
       };
     }
@@ -173,7 +163,7 @@ export function TaskPage({
       return {
         label: "Send to backlog",
         run: async () => {
-          await moveTaskToBacklog(stream.id, thread.id, item.id);
+          await moveTask(item.id, null);
         },
       };
     }

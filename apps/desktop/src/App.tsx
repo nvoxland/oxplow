@@ -1,20 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import {
-  createTask,
   closeThread,
   createThread,
-  deleteTask,
-  getThreadWorkState,
   getThreadState,
   getConfig,
   createWorkspaceDirectory,
-  reorderTasks,
-  moveTaskToThread,
-  updateBacklogItem,
-  deleteBacklogItem,
-  reorderBacklog,
-  moveTaskToBacklog,
   type AgentStatus,
   createWorkspaceFile,
   deleteWorkspacePath,
@@ -32,10 +23,7 @@ import {
   renameThread,
   renameStream,
   subscribeWikiPageEvents,
-  subscribeTaskEvents,
   subscribeWorkspaceEvents,
-  listRecentlyFinished,
-  clearRecentlyFinished,
   openExternalUrl,
   type FinishedEntry,
   diffRevisions,
@@ -50,7 +38,6 @@ import {
   reorderStreams,
   switchStream,
   createDashboard,
-  updateTask,
   writeWorkspaceFile,
   type BacklogState,
   type DiffEntry,
@@ -62,6 +49,21 @@ import {
   type Stream,
   type WorkspaceContext,
 } from "./api.js";
+import {
+  clearRecentlyFinished,
+  createTask,
+  deleteTask,
+  moveTask,
+  orderedTaskIds,
+  readRecentlyFinished,
+  readThreadWork,
+  reorderTasks,
+  updateTask,
+  type TaskPriority,
+  type TaskStatus,
+} from "./workItems.js";
+import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
+import type { Reads } from "./tauri-bridge/generated/bindings.js";
 import {
   closeOpenFile,
   createEmptyFileSession,
@@ -258,8 +260,6 @@ export function App() {
   // Mirror of threadStates for subscription callbacks that need the
   // latest map without re-subscribing when it changes (see
   // useBackendSubscriptions). Kept current on every render.
-  const threadStatesRef = useRef(threadStates);
-  threadStatesRef.current = threadStates;
 
   useEffect(() => {
     let cancelled = false;
@@ -273,6 +273,8 @@ export function App() {
     };
   }, []);
   const [threadWorkStates, setThreadWorkStates] = useState<Record<string, ThreadWorkState>>({});
+  const threadWorkStatesRef = useRef(threadWorkStates);
+  threadWorkStatesRef.current = threadWorkStates;
   const [backlogState, setBacklogState] = useState<BacklogState | null>(null);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   // Parallel to agentStatuses: the await_user question per thread, set
@@ -359,7 +361,7 @@ export function App() {
         const initialThreadState = await getThreadState(current.id);
         const initialThread = initialThreadState.threads.find((thread) => thread.id === initialThreadState.selectedThreadId);
         if (initialThread) {
-          const initialWork = await getThreadWorkState(current.id, initialThread.id);
+          const initialWork = await readThreadWork(initialThread.id);
           setThreadWorkStates((prev) => ({ ...prev, [initialThread.id]: initialWork }));
         }
         setStreams(allStreams);
@@ -458,7 +460,7 @@ export function App() {
       }
       const nextThread = nextThreadState.threads.find((thread) => thread.id === nextThreadState.selectedThreadId);
       if (nextThread && !threadWorkStates[nextThread.id]) {
-        const nextWork = await getThreadWorkState(next.id, nextThread.id);
+        const nextWork = await readThreadWork(nextThread.id);
         setThreadWorkStates((prev) => ({ ...prev, [nextThread.id]: nextWork }));
       }
       setThreadStates((prev) => ({ ...prev, [next.id]: nextThreadState }));
@@ -533,7 +535,7 @@ export function App() {
         setThreadCenterActive((prev) => (
           prev[thread.id] !== undefined ? prev : { ...prev, [thread.id]: seeded }
         ));
-        void getThreadWorkState(next.id, thread.id).then((work) => {
+        void readThreadWork(thread.id).then((work) => {
           setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
         });
       }
@@ -782,7 +784,7 @@ export function App() {
       setThreadStates((prev) => ({ ...prev, [streamId]: next }));
       const thread = next.threads.find((candidate) => candidate.id === threadId);
       if (thread) {
-        const work = await getThreadWorkState(streamId, thread.id);
+        const work = await readThreadWork(thread.id);
         setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
       }
       setError(null);
@@ -798,7 +800,7 @@ export function App() {
       setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
       const thread = next.threads.find((candidate) => candidate.id === next.selectedThreadId);
       if (thread) {
-        const work = await getThreadWorkState(stream.id, thread.id);
+        const work = await readThreadWork(thread.id);
         setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
       }
       setError(null);
@@ -854,129 +856,62 @@ export function App() {
     }
   }
 
-  async function handleCreateTask(input: {
-    title: string;
-    description?: string;
-    parentId?: number | null;
-    status?: "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
-    priority?: "low" | "medium" | "high" | "urgent";
-  }) {
-    if (!stream || !selectedThread) return;
+  // Task writes are work_item.* commands (P6.E1b); the thread's and the
+  // backlog's work re-read from the models when they change
+  // (useBackendSubscriptions), so a handler only runs the command.
+  async function runTaskWrite(write: () => Promise<unknown>) {
     try {
-      const next = await createTask(stream.id, selectedThread.id, input);
-      setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
+      await write();
       setError(null);
     } catch (e) {
       setError(String(e));
       throw e;
     }
+  }
+
+  async function handleCreateTask(input: {
+    title: string;
+    description?: string;
+    parentId?: string | null;
+    status?: TaskStatus;
+    priority?: TaskPriority;
+  }) {
+    if (!selectedThread) return;
+    await runTaskWrite(() => createTask(selectedThread.id, input));
   }
 
   async function handleUpdateTask(
     itemId: string,
-    changes: {
-      title?: string;
-      description?: string;
-      parentId?: string | null;
-      status?: "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
-      priority?: "low" | "medium" | "high" | "urgent";
-    },
+    changes: { title?: string; description?: string; parentId?: string | null; status?: TaskStatus; priority?: TaskPriority },
   ) {
-    if (!stream || !selectedThread) return;
-    try {
-      const next = await updateTask(stream.id, selectedThread.id, itemId, changes);
-      setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      throw e;
-    }
+    await runTaskWrite(() => updateTask(itemId, changes));
   }
 
+  /** The person chose Delete (a right-click menu item, the task page's
+   *  confirm): that is the confirmation the command asks for. */
   async function handleDeleteTask(itemId: string) {
-    if (!stream || !selectedThread) return;
-    try {
-      const next = await deleteTask(stream.id, selectedThread.id, itemId);
-      setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
-      // If the deleted task is open in a tab, go back in its history
-      // rather than leaving a stale "task not found" page (or close it
-      // if there's nothing to go back to).
-      closeOrGoBackPageTab(taskRef(itemId).id);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      throw e;
-    }
+    await runTaskWrite(() => deleteTask(itemId, true));
+    // If the deleted task is open in a tab, go back in its history rather
+    // than leaving a stale "task not found" page (or close it if there's
+    // nothing to go back to).
+    closeOrGoBackPageTab(taskRef(itemId).id);
   }
 
   async function handleReorderTasks(orderedItemIds: string[]) {
-    if (!stream || !selectedThread) return;
-    try {
-      const next = await reorderTasks(stream.id, selectedThread.id, orderedItemIds);
-      setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      throw e;
-    }
+    if (!selectedThread) return;
+    const current = threadWorkStates[selectedThread.id];
+    const before = current ? orderedTaskIds(current) : [];
+    await runTaskWrite(() => reorderTasks(before.filter((id) => orderedItemIds.includes(id)), orderedItemIds));
   }
 
-  async function handleMoveTaskToThread(itemId: string, fromThreadId: string, toThreadId: string) {
-    if (!stream || fromThreadId === toThreadId) return;
-    try {
-      const { from, to } = await moveTaskToThread(stream.id, fromThreadId, itemId, toThreadId);
-      setThreadWorkStates((prev) => ({ ...prev, [fromThreadId]: from, [toThreadId]: to }));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      throw e;
-    }
-  }
-
-  async function handleMoveItemToBacklog(itemId: string, fromThreadId: string) {
-    if (!stream) return;
-    try {
-      const { from, backlog } = await moveTaskToBacklog(stream.id, fromThreadId, itemId);
-      setThreadWorkStates((prev) => ({ ...prev, [fromThreadId]: from }));
-      setBacklogState(backlog);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      throw e;
-    }
-  }
-
-  async function handleUpdateBacklogItem(itemId: string, changes: Parameters<typeof updateBacklogItem>[1]) {
-    try {
-      const next = await updateBacklogItem(itemId, changes);
-      setBacklogState(next);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      throw e;
-    }
-  }
-
-  async function handleDeleteBacklogItem(itemId: string) {
-    try {
-      const next = await deleteBacklogItem(itemId);
-      setBacklogState(next);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      throw e;
-    }
+  async function handleMoveItemToBacklog(itemId: string) {
+    await runTaskWrite(() => moveTask(itemId, null));
   }
 
   async function handleReorderBacklog(orderedItemIds: string[]) {
-    try {
-      const next = await reorderBacklog(orderedItemIds);
-      setBacklogState(next);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      throw e;
-    }
+    const all = backlogState ? [...backlogState.items, ...backlogState.waiting, ...backlogState.in_progress, ...backlogState.done] : [];
+    const before = [...all].sort((a, b) => a.sort_index - b.sort_index).map((t) => t.id);
+    await runTaskWrite(() => reorderTasks(before.filter((id) => orderedItemIds.includes(id)), orderedItemIds));
   }
 
   const currentSession = useMemo(
@@ -1059,18 +994,6 @@ export function App() {
     return out;
   }, [streams, threadStates]);
 
-  async function handleDropTaskOnStream(targetStreamId: string, itemId: string, fromThreadId: string | null) {
-    if (!stream || !fromThreadId) return;
-    const toThreadId = streamActiveThreadIds[targetStreamId];
-    if (!toThreadId || toThreadId === fromThreadId) return;
-    try {
-      const { from, to } = await moveTaskToThread(stream.id, fromThreadId, itemId, toThreadId, targetStreamId);
-      setThreadWorkStates((prev) => ({ ...prev, [fromThreadId]: from, [toThreadId]: to }));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
-  }
   const currentFileRef = useRef(currentFile);
   currentFileRef.current = currentFile;
 
@@ -1172,7 +1095,7 @@ export function App() {
 
   useEffect(() => {
     if (!stream || !selectedThread || threadWorkStates[selectedThread.id]) return;
-    void getThreadWorkState(stream.id, selectedThread.id)
+    void readThreadWork(selectedThread.id)
       .then((next) => {
         setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
       })
@@ -1187,7 +1110,7 @@ export function App() {
     if (missing.length === 0) return;
     let cancelled = false;
     void Promise.all(
-      missing.map(async (thread) => [thread.id, await getThreadWorkState(stream.id, thread.id)] as const),
+      missing.map(async (thread) => [thread.id, await readThreadWork(thread.id)] as const),
     )
       .then((results) => {
         if (cancelled) return;
@@ -1210,7 +1133,7 @@ export function App() {
   // events, followup/thread/stream changes, config, agent status) lives
   // in this hook so App doesn't carry ~10 inline subscription effects.
   useBackendSubscriptions({
-    threadStatesRef,
+    threadWorkStatesRef,
     setWorkspaceContext,
     setBacklogState,
     setThreadWorkStates,
@@ -1227,7 +1150,7 @@ export function App() {
     for (const [streamId, state] of Object.entries(threadStates)) {
       for (const thread of state.threads) {
         if (threadWorkStates[thread.id]) continue;
-        void getThreadWorkState(streamId, thread.id)
+        void readThreadWork(thread.id)
           .then((work) => setThreadWorkStates((prev) => (prev[thread.id] ? prev : { ...prev, [thread.id]: work })))
           .catch((error) => logUi("warn", "failed to preload thread work state", { streamId, threadId: thread.id, error: String(error) }));
       }
@@ -1858,23 +1781,20 @@ export function App() {
     return () => { cancelled = true; coalesced.cancel(); offGit(); offWs(); };
   }, [stream?.id]);
 
+  // The rail's Finished section: done tasks and the knowledge pages this
+  // thread wrote, from the models, re-read when they change.
   const [recentlyFinished, setRecentlyFinished] = useState<FinishedEntry[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = () => {
-      void listRecentlyFinished(selectedThreadId, 5)
-        .then((entries) => { if (!cancelled) setRecentlyFinished(entries); })
-        .catch(() => { /* ignore — empty list keeps the section hidden */ });
-    };
-    refresh();
-    const offWork = subscribeTaskEvents("all", () => refresh());
-    const offNotes = subscribeWikiPageEvents(() => refresh());
-    return () => {
-      cancelled = true;
-      offWork();
-      offNotes();
-    };
+  const [finishedReads, setFinishedReads] = useState<Reads>(NO_READS);
+  const refreshFinished = useCallback(() => {
+    void readRecentlyFinished(selectedThreadId, 5)
+      .then(({ entries, reads }) => {
+        setRecentlyFinished(entries);
+        setFinishedReads(reads);
+      })
+      .catch(() => { /* ignore — empty list keeps the section hidden */ });
   }, [selectedThreadId]);
+  useEffect(() => refreshFinished(), [refreshFinished]);
+  useRerunOnChange(finishedReads, refreshFinished);
 
   const handleOpenPage = useCallback((ref: TabRef) => {
     // Page-visit recording lives in the central activation effect
@@ -2460,8 +2380,8 @@ export function App() {
         onUpdateTask: handleUpdateTask,
         onDeleteTask: handleDeleteTask,
         onReorderTasks: handleReorderTasks,
-        onUpdateBacklogItem: handleUpdateBacklogItem,
-        onDeleteBacklogItem: handleDeleteBacklogItem,
+        onUpdateBacklogItem: handleUpdateTask,
+        onDeleteBacklogItem: handleDeleteTask,
         onReorderBacklog: handleReorderBacklog,
         onMoveItemToBacklog: handleMoveItemToBacklog,
         editRequest: planEditRequest,
@@ -3096,7 +3016,7 @@ export function App() {
       },
       "new-task": (ref, nav) => {
         const payload = (ref.payload as {
-          parentId?: number | null;
+          parentId?: string | null;
           initialCategory?: string | null;
           initialPriority?: string | null;
         } | null) ?? {};
@@ -3380,10 +3300,8 @@ export function App() {
           recentlyFinished={recentlyFinished}
           uncommitted={uncommittedSummary}
           onClearFinished={() => {
-            void clearRecentlyFinished(selectedThreadId)
-              .then(() => listRecentlyFinished(selectedThreadId, 5))
-              .then((entries) => { setRecentlyFinished(entries); })
-              .catch(() => {});
+            clearRecentlyFinished(selectedThreadId);
+            refreshFinished();
           }}
           bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => ({
             ref: b.ref,

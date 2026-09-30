@@ -42,6 +42,20 @@ page re-runs with `useRerunOnChange`. Writes are `work_item.*` commands
 (`transitionWorkItem`, `reorderWorkItem`, `moveWorkItem`). `modelIds.ts`
 converts the models' integer ids to the UI's `thr3` / `tsk42`.
 
+It is also the **only** way the UI reads and writes oxplow's tasks
+(P6.E1b): `Task`, `ThreadWorkState` and `BacklogState` are its types over
+`v_task` (with `author`, not the vestigial `created_by`);
+`readThreadWork`, `readBacklog`, `readTask`, `readTasksById`,
+`readTaskEfforts` and `readRecentlyFinished` read the models;
+`createTask`, `updateTask`, `deleteTask`, `reorderTasks` (a drag's new
+order becomes one `work_item.reorder` by neighbour, `placementFromOrder`)
+and `moveTask` run commands. Pages re-read when a task model changes
+(`tasksChanged`). The typed task RPCs (`get_thread_work_state`,
+`get_backlog_state`, `list_backlog`, `get_task`, `upsert_task`,
+`create_task`, `update_task`, `delete_task`, `reorder_tasks`, `move_task`,
+`list_work_item_efforts`, `list_recently_finished`,
+`clear_recently_finished`) are gone; the MCP task tools stay.
+
 The **Board** (`page:board`, `components/Board/WorkBoard.tsx`) shows
 items as cards in one column per canonical state (archived tasks left
 out). Drag a card to a column, or right-click → Move To, to transition

@@ -187,64 +187,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getThreadWorkState: (threadId: ThreadId) => typedError<ThreadWorkState, IpcError>(__TAURI_INVOKE("get_thread_work_state", { threadId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	getTask: (id: TaskId) => typedError<{
-	id: TaskId,
-	// `None` when the task is on the project-wide backlog.
-	thread_id: ThreadId | null,
-	parent_id: TaskId | null,
-	title: string,
-	// The task's prose body — the canonical markdown detail.
-	description: string,
-	status: TaskStatus,
-	priority: TaskPriority,
-	sort_index: number,
-	created_by: TaskActorKind,
-	created_at: Timestamp,
-	updated_at: Timestamp,
-	completed_at: Timestamp | null,
-	deleted_at: Timestamp | null,
-	note_count: number,
-	author: TaskAuthor | null,
-} | null, IpcError>(__TAURI_INVOKE("get_task", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	upsertTask: (item: Task) => typedError<Task, IpcError>(__TAURI_INVOKE("upsert_task", { item })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	deleteTask: (id: TaskId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_task", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	createTask: (req: CreateTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("create_task", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	updateTask: (req: UpdateTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("update_task", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	reorderTasks: (req: ReorderTasksRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_tasks", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	moveTask: (req: MoveTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("move_task", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listDashboards: () => typedError<Dashboard[], IpcError>(__TAURI_INVOKE("list_dashboards")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -289,16 +231,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	reorderDashboardItems: (req: ReorderDashboardItemsRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_dashboard_items", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listBacklog: () => typedError<Task[], IpcError>(__TAURI_INVOKE("list_backlog")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	getBacklogState: () => typedError<BacklogState, IpcError>(__TAURI_INVOKE("get_backlog_state")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -592,16 +524,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listRecentlyFinished: (threadId: string | null, limit: number) => typedError<FinishedEntry[], IpcError>(__TAURI_INVOKE("list_recently_finished", { threadId, limit })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	clearRecentlyFinished: (threadId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("clear_recently_finished", { threadId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	recordUsage: (kind: string, payloadJson: string) => typedError<UsageEvent, IpcError>(__TAURI_INVOKE("record_usage", { kind, payloadJson })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -816,11 +738,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError>(__TAURI_INVOKE("get_workspace_context")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listWorkItemEfforts: (workItem: string) => typedError<Effort[], IpcError>(__TAURI_INVOKE("list_work_item_efforts", { workItem })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1515,14 +1432,6 @@ export type BacklinkEdge = {
 	source_label: string | null,
 };
 
-// The bucketed view the Backlog page renders.
-export type BacklogState = {
-	items: Task[],
-	waiting: Task[],
-	in_progress: Task[],
-	done: Task[],
-};
-
 // Who last changed one line.
 export type BlameLine = {
 	// 1-based.
@@ -1936,21 +1845,6 @@ export type CreateCommentRequest = {
 	intent: CommentIntent,
 	author: string,
 	body: string,
-};
-
-export type CreateTaskInput = {
-	title: string,
-	// The task's prose body (canonical markdown).
-	description: string | null,
-	parent_id: TaskId | null,
-	status: TaskStatus | null,
-	priority: TaskPriority | null,
-	author: TaskAuthor | null,
-};
-
-export type CreateTaskRequest = {
-	threadId: ThreadId | null,
-	input: CreateTaskInput,
 };
 
 export type CreateThreadRequest = {
@@ -2530,14 +2424,6 @@ export type FilterConfig = {
 	// Keep facts whose dimension `[key]` equals `[value]` — a 2-element list.
 	dimEq?: string[] | null,
 };
-
-/**
- *  Recently completed tasks merged with recently updated wiki
- *  notes, sorted by timestamp DESC. Drives the rail's "Finished"
- *  section. Items whose timestamp is `<= finished_cleared_at` are
- *  hidden until something newer lands.
- */
-export type FinishedEntry = { kind: "task"; itemId: TaskId; title: string; t: Timestamp } | { kind: "wiki"; slug: string; title: string; t: Timestamp };
 
 export type Followup = {
 	id: string,
@@ -3461,12 +3347,6 @@ export type ModelSource = {
 	twin: Twin | null,
 };
 
-export type MoveTaskRequest = {
-	id: TaskId,
-	// Destination thread, or `None` to move onto the backlog.
-	threadId: ThreadId | null,
-};
-
 export type NoteId = string;
 
 /**
@@ -4089,11 +3969,6 @@ export type ReorderDashboardItemsRequest = {
 	order: DashboardItemId[],
 };
 
-export type ReorderTasksRequest = {
-	threadId: ThreadId | null,
-	order: TaskId[],
-};
-
 export type ReorderThreadQueueRequest = {
 	streamId: StreamId,
 	order: ThreadId[],
@@ -4529,33 +4404,6 @@ export type StreamId = string;
 // Whether a stream is the project's primary stream or a worktree.
 export type StreamKind = "primary" | "worktree";
 
-// A task row.
-export type Task = {
-	id: TaskId,
-	// `None` when the task is on the project-wide backlog.
-	thread_id: ThreadId | null,
-	parent_id: TaskId | null,
-	title: string,
-	// The task's prose body — the canonical markdown detail.
-	description: string,
-	status: TaskStatus,
-	priority: TaskPriority,
-	sort_index: number,
-	created_by: TaskActorKind,
-	created_at: Timestamp,
-	updated_at: Timestamp,
-	completed_at: Timestamp | null,
-	deleted_at: Timestamp | null,
-	note_count: number,
-	author: TaskAuthor | null,
-};
-
-// Who or what wrote a task row to the DB.
-export type TaskActorKind = "user" | "agent" | "system";
-
-// Semantic origin — distinct from `created_by` (the writer).
-export type TaskAuthor = "user" | "agent";
-
 export type TaskId = string;
 
 /**
@@ -4570,10 +4418,6 @@ export type TaskNote = {
 	author: string,
 	created_at: Timestamp,
 };
-
-export type TaskPriority = "low" | "medium" | "high" | "urgent";
-
-export type TaskStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
 
 /**
  *  One declared test, written as a one-key map: `{ not_null: id }`,
@@ -4654,16 +4498,6 @@ export type ThreadState = {
  */
 export type ThreadStatus = "active" | "queued" | "closed";
 
-export type ThreadWorkState = {
-	threadId: ThreadId,
-	waiting: Task[],
-	inProgress: Task[],
-	done: Task[],
-	epics: Task[],
-	items: Task[],
-	followups: Followup[],
-};
-
 // Wall-clock UTC timestamp serialized as a fixed-width RFC 3339 string.
 export type Timestamp = string;
 
@@ -4736,23 +4570,6 @@ export type UiLogEntry = {
 export type UpdateDashboardItemRequest = {
 	id: DashboardItemId,
 	optionsJson: string | null,
-};
-
-/**
- *  Partial-patch for `update_task`. Each `Option` follows
- *  "missing -> keep, present -> replace" semantics.
- */
-export type UpdateTaskChanges = {
-	title: string | null,
-	description: string | null,
-	parent_id: TaskId | null,
-	status: TaskStatus | null,
-	priority: TaskPriority | null,
-};
-
-export type UpdateTaskRequest = {
-	id: TaskId,
-	changes: UpdateTaskChanges,
 };
 
 export type UsageEvent = {

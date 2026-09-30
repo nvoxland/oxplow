@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CommitRefLabel, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
+import { readTasksById } from "../workItems.js";
 import type { SnapshotTrigger } from "../tauri-bridge/generated/bindings.js";
 import {
   getSnapshotStats,
-  getTaskSummaries,
   listEffortsAtSnapshots,
   listSnapshots,
   listWikiSlugsForSnapshots,
@@ -183,7 +183,7 @@ export function LocalHistoryDashboardPage({
       const uniqueTaskIds = Array.from(
         new Set(effortsAt.flatMap((e) => (e.tasksId ? [e.tasksId] : []))),
       );
-      const taskSummaries = await getTaskSummaries(uniqueTaskIds).catch((err) => {
+      const taskSummaries = await readTasksById(uniqueTaskIds).catch((err) => {
         logUi("warn", "task summaries fetch failed", { error: String(err) });
         return [] as Array<{ id: string; title: string }>;
       });

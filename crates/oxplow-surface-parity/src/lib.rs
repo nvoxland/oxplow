@@ -111,13 +111,12 @@ pub const MANIFEST: &[Capability] = &[
     // A dry run for an agent writing a source in its worktree.
     agent("preview_source"),
     both("list_streams"),
-    ui("list_backlog"),
-    both("get_task"),
-    both("create_task"),
-    both("update_task"),
-    both("upsert_task"),
-    both("delete_task"),
-    both("reorder_tasks"),
+    agent("get_task"),
+    agent("create_task"),
+    agent("update_task"),
+    agent("upsert_task"),
+    agent("delete_task"),
+    agent("reorder_tasks"),
     both("add_thread_note"),
     both("list_thread_notes"),
     agent("list_effort_observations"),
@@ -325,10 +324,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_closed_threads"),
     ui("reorder_thread_queue"),
     ui("get_thread_state"),
-    ui("get_thread_work_state"),
     // ---- ui-only: tasks / backlog ----
-    ui("move_task"),
-    ui("get_backlog_state"),
     // ---- dashboards (tsk138) — reads + create/add-tile are agent-authorable
     // (both); the rest are pure-UI edits (tsk140). ----
     both("list_dashboards"),
@@ -354,8 +350,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_recent_page_visits"),
     ui("top_visited_pages"),
     ui("forget_page"),
-    ui("list_recently_finished"),
-    ui("clear_recently_finished"),
     // ---- ui-only: usage ----
     ui("record_usage"),
     ui("list_recent_usage_rollup"),
@@ -386,7 +380,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("set_agent_model"),
     ui("get_workspace_context"),
     // ---- ui-only: efforts ----
-    ui("list_work_item_efforts"),
     ui("get_effort_files"),
     ui("get_effort"),
     ui("list_efforts_at_snapshots"),

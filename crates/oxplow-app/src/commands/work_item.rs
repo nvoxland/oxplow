@@ -527,6 +527,53 @@ pub fn comment_command(registry: WorkItemsRegistry) -> Command {
     .expect("work_item.comment registers")
 }
 
+pub const DELETE: &str = "work_item.delete";
+
+/// `work_item.delete`: remove a task (soft: the row stays, marked deleted).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemDeleteInput {
+    /// The task's ref (`work_item:oxplow:tsk42`).
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+}
+
+/// Destructive (asks first) and not undoable. An open effort on it
+/// closes; `work_item.deleted@1` is logged caused by the run.
+pub fn delete_command(registry: WorkItemsRegistry) -> Command {
+    let spec = CommandSpec {
+        name: DELETE.into(),
+        summary: "Delete a task (its open effort closes).".into(),
+        input_schema: serde_json::to_value(schemars::schema_for!(WorkItemDeleteInput))
+            .expect("schema serializes"),
+        invokers: Invokers::ALL,
+        confirm: Confirm::Destructive,
+        undoable: false,
+        lifecycle: Lifecycle::Stable,
+        atomicity: Atomicity::Tx,
+        effect: oxplow_domain::CommandEffect::Record,
+    };
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+        let input: WorkItemDeleteInput = parse(input)?;
+        let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
+        oxplow_db::task_store::soft_delete_tx(ctx.conn, &ctx.events, id, Timestamp::now())
+            .map_err(|e| match e {
+                oxplow_domain::DomainError::NotFound => CommandError::Invalid {
+                    field: Some("/ref".into()),
+                    message: format!("no work item `{}`", input.item_ref),
+                },
+                other => CommandError::from(other),
+            })?;
+        Ok(HandlerOutput {
+            result: serde_json::json!({ "ref": input.item_ref }),
+            inverse: None,
+            events: Vec::new(),
+            after_commit: None,
+        })
+    }));
+    Command::new(spec, handler).expect("work_item.delete registers")
+}
+
 pub const REORDER: &str = "work_item.reorder";
 pub const MOVE: &str = "work_item.move";
 
@@ -1444,5 +1491,45 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("thr999"), "{err}");
+    }
+
+    /// `work_item.delete` asks first, then removes the task, closing its
+    /// open effort, logged as caused by the run.
+    #[tokio::test]
+    async fn delete_asks_first_then_removes_the_task() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let t = work_item_ref(fx.task);
+        let err = fx
+            .svc
+            .commands
+            .run(&Actor::Human, DELETE, json!({ "ref": t }), false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CommandError::NeedsConfirmation { .. }),
+            "{err:?}"
+        );
+        let out = fx
+            .svc
+            .commands
+            .run(&Actor::Human, DELETE, json!({ "ref": t }), true)
+            .await
+            .unwrap();
+        assert!(list_order(&fx, Some(fx.thread)).await.is_empty());
+        let executed = out.event_id.unwrap();
+        let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
+        let caused: Vec<&str> = events
+            .iter()
+            .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
+            .map(|e| e.envelope.event_type.as_str())
+            .collect();
+        assert_eq!(caused, vec!["effort.closed", "work_item.deleted"]);
+        let again = fx
+            .svc
+            .commands
+            .run(&Actor::Human, DELETE, json!({ "ref": t }), true)
+            .await
+            .unwrap_err();
+        assert!(matches!(again, CommandError::Invalid { .. }), "{again:?}");
     }
 }

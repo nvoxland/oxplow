@@ -23,16 +23,6 @@ fn current_filter(svc: &Services) -> WorkspaceFilter {
         .unwrap_or_default()
 }
 
-/// Every effort on a work item (`work_item:oxplow:tsk42`,
-/// `work_item:linear:ENG-12`), newest first.
-pub async fn list_work_item_efforts(
-    svc: &Services,
-    work_item: String,
-) -> Result<Vec<Effort>, IpcError> {
-    oxplow_domain::refs::build::validate_work_item_ref(&work_item)?;
-    Ok(svc.effort_store.list_for_work_item(&work_item).await?)
-}
-
 /// Efforts whose span overlaps `[window_start, window_end]` — the time-range
 /// overlay the Metrics Explorer draws as effort bands (tsk233).
 pub async fn list_efforts_in_window(
@@ -121,26 +111,6 @@ pub async fn list_changed_paths_for_effort(
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
-    async fn list_work_item_efforts_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch(
-            "list_work_item_efforts",
-            serde_json::json!({"workItem": "work_item:oxplow:tsk999999"}),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert!(out.is_array());
-        assert!(crate::dispatch(
-            "list_work_item_efforts",
-            serde_json::json!({"workItem": "tsk1"}),
-            &svc,
-        )
-        .await
-        .is_err());
-    }
-
     #[tokio::test]
     async fn get_effort_dispatches_and_returns_null_for_missing() {
         let (svc, _dir) = crate::test_support::services();

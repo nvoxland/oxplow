@@ -259,7 +259,7 @@ export function TaskDetailRail({
         <RailMetaRow label="ID">#{item.id}</RailMetaRow>
         <RailMetaRow label="Created">{formatTimestamp(item.created_at)}</RailMetaRow>
         <RailMetaRow label="Updated">{formatTimestamp(item.updated_at)}</RailMetaRow>
-        <RailMetaRow label="By">{item.created_by}</RailMetaRow>
+        <RailMetaRow label="By">{item.author ?? "—"}</RailMetaRow>
       </div>
 
       {scopeAction || onDelete ? (
