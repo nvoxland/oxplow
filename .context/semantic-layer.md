@@ -188,6 +188,15 @@ under `oxplow/extensions/`, a config change, or a registry change (a
 source syncing a new entity); its fingerprint — the enabled extensions'
 model sources plus the registered entity views — makes a pass over the
 same inputs, including the one its own registry writes set off, a no-op.
+**Versions** (core and extensions alike): a changed contract at the same
+version is refused, so a breaking change bumps `version` — and may keep
+the old one published under `deprecated: [{ version, file, until }]`.
+The kept version compiles from its own SQL file (beside the model's) as
+`<view>_v<version>`, held to the contract that version published
+(`model_contract`), until `until` (`YYYY-MM-DD`). Past its date, or
+for a version that never published, it isn't kept: an extension hears
+why in its errors; core just drops it (a date can't fail boot).
+
 After publishing, each extension model's declared tests run
 (`run_tests`, results in `model_test` / `v_model_test`; a relationship's
 `to` resolves like a `ref()`); a failing or erroring test is reported for

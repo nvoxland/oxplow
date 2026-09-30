@@ -2035,6 +2035,17 @@ export type DeadLetter = {
 };
 
 /**
+ *  An earlier version kept after a breaking change: its SQL (in `file`,
+ *  beside the model's) still keeps the contract that version published,
+ *  until `until` (`YYYY-MM-DD`).
+ */
+export type Deprecated = {
+	version: number,
+	file: string,
+	until: string,
+};
+
+/**
  *  One endpoint of a diff: a captured local-history snapshot, a git
  *  commit (any revspec libgit2 resolves), or the live working tree
  *  (reserved for an in-progress effort's open end).
@@ -3101,6 +3112,11 @@ export type ModelDecl = {
 	// The contract: the view's columns, in order.
 	columns: ColumnDecl[],
 	tests?: TestDecl[],
+	/**
+	 *  Earlier versions kept published beside this one after a breaking
+	 *  change, each as `<view>_v<version>` until its date.
+	 */
+	deprecated?: Deprecated[],
 };
 
 // When one model last changed.
@@ -3116,6 +3132,12 @@ export type ModelSource = {
 	// Where the SQL came from, for error locations (`models/task.sql`).
 	file: string,
 	sql: string,
+	/**
+	 *  For a kept earlier version (named `<name>_v<version>`): what it's a
+	 *  version of. Its columns are filled from the contract that version
+	 *  published when it compiles.
+	 */
+	twin: Twin | null,
 };
 
 export type MoveTaskRequest = {
@@ -4343,6 +4365,13 @@ export type TreeVersion =
  *  this crate yet — see [`SnapshotTreeSource`].
  */
 { kind: "snapshot"; id: string };
+
+// What a kept earlier version is a version of.
+export type Twin = {
+	// The model's name.
+	of: string,
+	until: string,
+};
 
 export type UiLogEntry = {
 	clientId: string | null,

@@ -47,6 +47,29 @@ pub struct ModelDecl {
     pub columns: Vec<ColumnDecl>,
     #[serde(default)]
     pub tests: Vec<TestDecl>,
+    /// Earlier versions kept published beside this one after a breaking
+    /// change, each as `<view>_v<version>` until its date.
+    #[serde(default)]
+    pub deprecated: Vec<Deprecated>,
+}
+
+/// An earlier version kept after a breaking change: its SQL (in `file`,
+/// beside the model's) still keeps the contract that version published,
+/// until `until` (`YYYY-MM-DD`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct Deprecated {
+    pub version: u32,
+    pub file: String,
+    pub until: String,
+}
+
+/// What a kept earlier version is a version of.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct Twin {
+    /// The model's name.
+    pub of: String,
+    pub until: String,
 }
 
 /// One promised column.
@@ -103,6 +126,10 @@ pub struct ModelSource {
     /// Where the SQL came from, for error locations (`models/task.sql`).
     pub file: String,
     pub sql: String,
+    /// For a kept earlier version (named `<name>_v<version>`): what it's a
+    /// version of. Its columns are filled from the contract that version
+    /// published when it compiles.
+    pub twin: Option<Twin>,
 }
 
 fn invalid(msg: impl Into<String>) -> DomainError {
@@ -169,10 +196,48 @@ pub fn join_sources(
                 decl.name
             ))
         })?;
+        for d in &decl.deprecated {
+            if d.version >= decl.version {
+                return Err(invalid(format!(
+                    "{declared_in}: `{}` keeps version {} under deprecated, but it is at version {}",
+                    decl.name, d.version, decl.version
+                )));
+            }
+            let twin_sql = file(&d.file).ok_or_else(|| {
+                invalid(format!(
+                    "{declared_in} keeps `{}` v{} in {dir}/{}, which is missing",
+                    decl.name, d.version, d.file
+                ))
+            })?;
+            seen.insert(d.file.trim_end_matches(".sql").to_string());
+            out.push(ModelSource {
+                decl: ModelDecl {
+                    name: format!("{}_v{}", decl.name, d.version),
+                    version: d.version,
+                    description: format!(
+                        "{} (version {} of `{}`, kept until {}.)",
+                        decl.description.trim_end_matches('.'),
+                        d.version,
+                        decl.name,
+                        d.until
+                    ),
+                    columns: Vec::new(),
+                    tests: Vec::new(),
+                    deprecated: Vec::new(),
+                },
+                file: format!("{dir}/{}", d.file),
+                sql: twin_sql,
+                twin: Some(Twin {
+                    of: decl.name.clone(),
+                    until: d.until.clone(),
+                }),
+            });
+        }
         out.push(ModelSource {
             decl,
             file: format!("{dir}/{path}"),
             sql,
+            twin: None,
         });
     }
     for stem in sql_files() {
@@ -415,6 +480,61 @@ pub fn drop_all(conn: &Connection) -> Result<(), DomainError> {
     Ok(())
 }
 
+/// Whether a source compiles: a kept earlier version is kept only until
+/// its date, and only if its version published.
+enum Kept {
+    Yes(ModelSource),
+    /// Why not.
+    No(String),
+}
+
+/// A source ready to compile: a kept earlier version gets the columns its
+/// version published (`model_contract`).
+fn fill_twin(
+    conn: &Connection,
+    src: &ModelSource,
+    view_of: &dyn Fn(&str) -> String,
+    today: &str,
+) -> Result<Kept, DomainError> {
+    let Some(twin) = &src.twin else {
+        return Ok(Kept::Yes(src.clone()));
+    };
+    if twin.until.as_str() < today {
+        return Ok(Kept::No(format!(
+            "{}: `{}` v{} was kept until {}; remove it from `deprecated`",
+            src.file, twin.of, src.decl.version, twin.until
+        )));
+    }
+    let stored: Option<String> = conn
+        .query_row(
+            "SELECT columns_json FROM model_contract WHERE view = ?1 AND version = ?2",
+            params![view_of(&twin.of), src.decl.version],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    let columns: Vec<ColumnDecl> = match stored {
+        Some(json) => serde_json::from_str(&json).map_err(|e| invalid(e.to_string()))?,
+        None => {
+            return Ok(Kept::No(format!(
+                "{}: no published contract for `{}` v{} to keep",
+                src.file, twin.of, src.decl.version
+            )))
+        }
+    };
+    let mut filled = src.clone();
+    filled.decl.columns = columns;
+    Ok(Kept::Yes(filled))
+}
+
+fn today() -> String {
+    oxplow_domain::Timestamp::now()
+        .to_text()
+        .chars()
+        .take(10)
+        .collect()
+}
+
 /// Compile the core models on `conn` (after migrations, at every open).
 pub fn compile_core(conn: &mut Connection) -> Result<(), DomainError> {
     let sources = core_sources()?;
@@ -431,7 +551,16 @@ pub fn compile(
     view_of: &dyn Fn(&str) -> String,
 ) -> Result<(), DomainError> {
     let tx = conn.transaction().map_err(map_sql_err)?;
-    let models = ordered(resolve(&tx, sources, view_of)?)?;
+    // A core twin past its date (or never published) is simply not kept.
+    let today = today();
+    let mut kept = Vec::with_capacity(sources.len());
+    for s in sources {
+        if let Kept::Yes(s) = fill_twin(&tx, s, view_of, &today)? {
+            kept.push(s);
+        }
+    }
+    let sources = kept;
+    let models = ordered(resolve(&tx, &sources, view_of)?)?;
     let previous: Vec<String> = {
         let mut st = tx
             .prepare("SELECT view FROM model WHERE owner = ?1 AND kind = 'sql'")
@@ -761,6 +890,24 @@ pub fn compile_extensions(
         .iter()
         .map(|e| (e.extension.clone(), Vec::new()))
         .collect();
+    // Kept earlier versions take the columns they published, or aren't kept.
+    let today = today();
+    let mut ready = Vec::with_capacity(extensions.len());
+    for e in extensions {
+        let view_of = |name: &str| extension_view(&e.extension, name);
+        let mut sources = Vec::with_capacity(e.sources.len());
+        for s in &e.sources {
+            match fill_twin(&tx, s, &view_of, &today)? {
+                Kept::Yes(s) => sources.push(s),
+                Kept::No(why) => push(&mut errors, &e.extension, why),
+            }
+        }
+        ready.push(ExtensionModels {
+            extension: e.extension.clone(),
+            sources,
+        });
+    }
+    let extensions = &ready;
     // The last pass's views go first: the set is recompiled whole.
     let previous: Vec<String> = {
         let mut st = tx
@@ -1016,9 +1163,11 @@ mod tests {
                     })
                     .collect(),
                 tests: vec![],
+                deprecated: vec![],
             },
             file: format!("models/{name}.sql"),
             sql: sql.into(),
+            twin: None,
         }
     }
 
@@ -1476,5 +1625,109 @@ mod tests {
             r.get::<_, i64>(0)
         })
         .unwrap();
+    }
+
+    /// P4.9 (tsk494): a breaking change ships a new version with the old
+    /// one kept under `deprecated` — its own view, `…_v1`, held to the
+    /// contract v1 published, until its date. A twin without a published
+    /// contract, or past its date, isn't kept, and the extension hears why.
+    #[test]
+    fn a_deprecated_version_is_kept_beside_the_new_one_until_its_date() {
+        let mut conn = fresh();
+        let v1 = source("late", "SELECT id FROM ref('task')", &["id INTEGER"]);
+        compile_extensions(&mut conn, &[ext("late-work", vec![v1])]).unwrap();
+
+        let twin = |until: &str, sql: &str| {
+            let mut v2 = source(
+                "late",
+                "SELECT id, title FROM ref('task')",
+                &["id INTEGER", "title TEXT"],
+            );
+            v2.decl.version = 2;
+            v2.decl.deprecated = vec![Deprecated {
+                version: 1,
+                file: "late.v1.sql".into(),
+                until: until.into(),
+            }];
+            let files: HashMap<String, String> = [
+                ("late.sql".to_string(), v2.sql.clone()),
+                ("late.v1.sql".to_string(), sql.to_string()),
+            ]
+            .into();
+            ext(
+                "late-work",
+                join_sources(
+                    vec![v2.decl],
+                    "models",
+                    "extension.yaml",
+                    |f| files.get(f).cloned(),
+                    || vec!["late".into(), "late.v1".into()],
+                )
+                .unwrap(),
+            )
+        };
+        let errors = compile_extensions(
+            &mut conn,
+            &[twin("2999-01-01", "SELECT id FROM ref('task')")],
+        )
+        .unwrap();
+        assert!(errors["late-work"].is_empty(), "{errors:?}");
+        assert_eq!(
+            view_columns(&conn, "v_late_work_late_v1").unwrap(),
+            vec![("id".to_string(), "INTEGER".to_string())]
+        );
+        assert_eq!(view_columns(&conn, "v_late_work_late").unwrap().len(), 2);
+
+        // Its SQL must still keep v1's promise.
+        let errors = compile_extensions(
+            &mut conn,
+            &[twin("2999-01-01", "SELECT title FROM ref('task')")],
+        )
+        .unwrap();
+        assert!(
+            errors["late-work"].join("\n").contains("late.v1.sql"),
+            "{errors:?}"
+        );
+        // Past its date: gone, and said so.
+        let errors = compile_extensions(
+            &mut conn,
+            &[twin("2020-01-01", "SELECT id FROM ref('task')")],
+        )
+        .unwrap();
+        assert!(
+            errors["late-work"]
+                .join("\n")
+                .contains("kept until 2020-01-01"),
+            "{errors:?}"
+        );
+        assert!(conn.prepare("SELECT * FROM v_late_work_late_v1").is_err());
+        // A version that never published has no promise to keep.
+        let mut never = source("fresh", "SELECT id FROM ref('task')", &["id INTEGER"]);
+        never.decl.version = 3;
+        never.decl.deprecated = vec![Deprecated {
+            version: 2,
+            file: "fresh.sql".into(),
+            until: "2999-01-01".into(),
+        }];
+        let never = ModelSource {
+            twin: None,
+            ..never
+        };
+        let files: HashMap<String, String> = [("fresh.sql".to_string(), never.sql.clone())].into();
+        let sources = join_sources(
+            vec![never.decl],
+            "models",
+            "extension.yaml",
+            |f| files.get(f).cloned(),
+            || vec!["fresh".into()],
+        )
+        .unwrap();
+        let errors = compile_extensions(&mut conn, &[ext("late-work", sources)]).unwrap();
+        assert!(
+            errors["late-work"]
+                .join("\n")
+                .contains("no published contract for `fresh` v2"),
+            "{errors:?}"
+        );
     }
 }
