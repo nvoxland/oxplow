@@ -1,13 +1,15 @@
-//! Inferred decisions: when an effort closes, oxplow's `summarize` model
-//! reads what the agent did (its turns and tool calls) and proposes the
-//! decisions it made without recording them. They're stored with
-//! provenance `inferred` for the review packet, never fed back to the
-//! agent. Off until a `summarize` model is assigned. See
+//! Inferred decisions: when an effort closes, oxplow's `main` model reads
+//! what the agent did (its turns and tool calls) and proposes the
+//! decisions it made without recording them — a recorded `extract`
+//! (`ai_compute`), so an unchanged effort isn't asked about twice. They're
+//! stored with provenance `inferred` for the review packet, never fed back
+//! to the agent. Off until a `main` model is assigned. See
 //! `.context/ai-providers.md` → "Inferred decisions".
 
 use oxplow_db::{NewDecision, SqlCell};
 use serde::Deserialize;
 
+use crate::ai_compute::AiComputeError;
 use crate::ai_service::{AiServiceError, Role};
 
 /// Caller name on the `v_ai_call` rows this makes.
@@ -45,10 +47,34 @@ pub const SYSTEM_PROMPT: &str = "You review a coding agent's work session. Find 
 decisions it made without asking: forks where it picked one approach over another \
 (where to put code, which library, what to change or leave, how to handle a case). \
 Only real forks with a plausible alternative; skip routine steps. Don't repeat decisions \
-it already recorded. Reply with JSON only: {\"decisions\": [{\"question\": \"what had to be \
-decided\", \"choice\": \"what it chose\", \"alternatives\": [\"options not taken\"], \
-\"why\": \"its reasoning, if visible\", \"confidence\": \"low|medium|high\"}]}. \
-Confidence is how sure you are it was a real decision. At most 8; an empty list is fine.";
+it already recorded. For each: `question` is what had to be decided, `choice` what it \
+chose, `alternatives` the options not taken, `why` its reasoning if visible, and \
+`confidence` (low, medium or high) how sure you are it was a real decision. At most 8; \
+an empty list is fine.";
+
+/// The shape `extract` asks the model for.
+pub fn reply_schema() -> serde_json::Value {
+    let text = serde_json::json!({ "type": "string" });
+    serde_json::json!({
+        "type": "object",
+        "required": ["decisions"],
+        "properties": {
+            "decisions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "question": text,
+                        "choice": text,
+                        "alternatives": { "type": "array", "items": text },
+                        "why": text,
+                        "confidence": text
+                    }
+                }
+            }
+        }
+    })
+}
 
 /// The user prompt for the model, or `None` when there's nothing to read.
 pub fn build_prompt(activity: &EffortActivity) -> Option<String> {
@@ -131,19 +157,15 @@ fn clip(s: &str, max: usize) -> String {
     }
 }
 
-/// Parse the model's reply into decisions for `thread_id` / `task_id`.
+/// The model's reply as decisions for `thread_id` / `task_id`: entries
+/// without a question or choice are skipped, a missing or unknown
+/// confidence is `low`, and at most [`MAX_PROPOSALS`] are kept.
 pub fn parse_proposals(
-    text: &str,
+    reply: &serde_json::Value,
     thread_id: i64,
     task_id: Option<i64>,
 ) -> Result<Vec<NewDecision>, String> {
-    let t = text.trim();
-    let t = t
-        .strip_prefix("```json")
-        .or_else(|| t.strip_prefix("```"))
-        .unwrap_or(t);
-    let t = t.strip_suffix("```").unwrap_or(t).trim();
-    let reply: Reply = serde_json::from_str(t)
+    let reply: Reply = serde_json::from_value(reply.clone())
         .map_err(|e| format!("the model's reply wasn't the expected JSON ({e})"))?;
     let str_of =
         |v: &serde_json::Value, k: &str| v[k].as_str().unwrap_or_default().trim().to_string();
@@ -178,7 +200,7 @@ pub fn parse_proposals(
 /// What an inference pass did.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InferOutcome {
-    /// No `summarize` model is assigned; nothing ran.
+    /// No `main` model is assigned; nothing ran.
     Off,
     /// Nothing to read for this effort.
     NoActivity,
@@ -186,8 +208,9 @@ pub enum InferOutcome {
     Stored(usize),
 }
 
-/// Gather `effort_id`'s activity, ask the `summarize` model, and replace
-/// the effort's inferred decisions.
+/// Gather `effort_id`'s activity, extract its decisions with the `main`
+/// model (recorded: the same activity isn't asked about twice), and
+/// replace the effort's inferred decisions.
 pub async fn infer_for_effort(
     svc: &crate::Services,
     effort_id: i64,
@@ -196,7 +219,7 @@ pub async fn infer_for_effort(
         .ai
         .config()
         .map_err(|e| e.to_string())?
-        .resolve(Role::Summarize)
+        .resolve(Role::Main)
         .is_some();
     if !configured {
         return Ok(InferOutcome::Off);
@@ -207,13 +230,13 @@ pub async fn infer_for_effort(
         return Ok(InferOutcome::NoActivity);
     };
     let reply = match svc
-        .ai
-        .complete(Role::Summarize, CALLER, Some(SYSTEM_PROMPT), &prompt, true)
+        .ai_compute
+        .extract(CALLER, SYSTEM_PROMPT, &prompt, &reply_schema())
         .await
     {
-        Ok(c) => c.text,
+        Ok(recorded) => recorded.value,
         // Unassigned between the check and the call.
-        Err(AiServiceError::NotConfigured(_)) => return Ok(InferOutcome::Off),
+        Err(AiComputeError::Ai(AiServiceError::NotConfigured(_))) => return Ok(InferOutcome::Off),
         Err(e) => return Err(e.to_string()),
     };
     let proposals = parse_proposals(&reply, activity.thread_id, activity.task_id)?;
@@ -374,8 +397,7 @@ mod tests {
         for i in 0..20 {
             items.push(serde_json::json!({"question": format!("q{i}"), "choice": "c"}));
         }
-        let text = format!("```json\n{}\n```", serde_json::json!({"decisions": items}));
-        let got = parse_proposals(&text, 3, Some(9)).unwrap();
+        let got = parse_proposals(&serde_json::json!({"decisions": items}), 3, Some(9)).unwrap();
         assert_eq!(got.len(), MAX_PROPOSALS);
         assert_eq!(got[0].question, "Which CSV library?");
         assert_eq!(got[0].alternatives, vec!["hand-rolled"]);
@@ -383,7 +405,7 @@ mod tests {
         assert_eq!((got[0].thread_id, got[0].task_id), (3, Some(9)));
         assert_eq!(got[1].question, "q0");
         assert_eq!(got[1].confidence, "low", "missing confidence defaults low");
-        assert!(parse_proposals("not json", 1, None).is_err());
+        assert!(parse_proposals(&serde_json::json!([1]), 1, None).is_err());
     }
 
     /// A long effort keeps its newest activity, in order (tsk369).
@@ -413,12 +435,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_effort_is_inferred_stored_and_replaced_when_summarize_is_assigned() {
+    async fn an_effort_is_inferred_stored_and_replaced_when_main_is_assigned() {
         use crate::ai_service::{ProviderConfig, ProviderKind, RoleBinding};
         let f = crate::test_fixtures::services_with_effort().await;
         let effort = f.effort.value();
 
-        // Off until a summarize model is assigned.
+        // Off until a main model is assigned.
         assert_eq!(
             infer_for_effort(&f.svc, effort).await.unwrap(),
             InferOutcome::Off
@@ -445,7 +467,7 @@ mod tests {
         f.svc
             .ai
             .set_role(
-                Role::Summarize,
+                Role::Main,
                 Some(RoleBinding {
                     provider: "m".into(),
                     model: "x".into(),
@@ -525,14 +547,14 @@ mod tests {
             serde_json::json!([["Which CSV library?", "inferred"]]),
             "a second pass replaced the first"
         );
+        // The second pass read the recorded extraction: one call.
         let calls = crate::sql_gateway::SqlGateway::new(f.svc.db.clone())
             .query_sql("SELECT caller, role FROM v_ai_call", vec![], None)
             .await
             .unwrap();
-        assert_eq!(calls.rows.len(), 2);
         assert_eq!(
-            serde_json::to_value(&calls.rows[0]).unwrap(),
-            serde_json::json!([CALLER, "summarize"])
+            serde_json::to_value(&calls.rows).unwrap(),
+            serde_json::json!([[CALLER, "main"]])
         );
     }
 
@@ -561,7 +583,7 @@ mod tests {
         f.svc
             .ai
             .set_role(
-                Role::Summarize,
+                Role::Main,
                 Some(RoleBinding {
                     provider: "m".into(),
                     model: "x".into(),

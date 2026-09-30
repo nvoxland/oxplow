@@ -16,6 +16,8 @@ pub struct NewAiCall {
     pub latency_ms: i64,
     pub ok: bool,
     pub error: Option<String>,
+    /// For a recorded computation, the hash of its input.
+    pub input_hash: Option<String>,
 }
 
 #[derive(Clone)]
@@ -28,7 +30,8 @@ impl SqliteAiCallStore {
         Self { db }
     }
 
-    pub async fn record(&self, call: NewAiCall) -> Result<(), DomainError> {
+    /// Record a call; its row id.
+    pub async fn record(&self, call: NewAiCall) -> Result<i64, DomainError> {
         let at = serde_json::to_value(oxplow_domain::Timestamp::now())
             .ok()
             .and_then(|v| v.as_str().map(str::to_string))
@@ -36,8 +39,8 @@ impl SqliteAiCallStore {
         self.db
             .call(move |c| {
                 c.execute(
-                    "INSERT INTO ai_call (role, provider, model, caller, input_tokens, output_tokens, latency_ms, ok, error, at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    "INSERT INTO ai_call (role, provider, model, caller, input_tokens, output_tokens, latency_ms, ok, error, at, input_hash)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     rusqlite::params![
                         call.role,
                         call.provider,
@@ -48,10 +51,11 @@ impl SqliteAiCallStore {
                         call.latency_ms,
                         i64::from(call.ok),
                         call.error,
-                        at
+                        at,
+                        call.input_hash
                     ],
                 )
-                .map(|_| ())
+                .map(|_| c.last_insert_rowid())
             })
             .await
     }
@@ -73,6 +77,7 @@ mod tests {
             latency_ms: 42,
             ok: true,
             error: None,
+            input_hash: None,
         }
     }
 

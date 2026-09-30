@@ -7,9 +7,10 @@ providers you configure, the roles that decide which model does what, the
 > **Status (epic tsk275):** built: providers, keychain keys, roles, the
 > client, call records (`oxplow-ai`, `oxplow-app/src/ai_service.rs`,
 > `v_ai_call`), Settings → AI, and the `list_ai_roles` / `ai_decide` /
-> `ai_summarize` MCP tools, inferred decisions, and project role
-> overrides. **Not yet:** the `ai_*` functions for sources and lenses, and
-> a models.dev catalog.
+> `ai_summarize` MCP tools, inferred decisions, project role overrides,
+> and recorded computations (`AiCompute`, `v_ai_result`, P5.E1). **Not
+> yet:** the `ai_*` functions for sources (P5.E2), and a models.dev
+> catalog.
 > Sections below say which parts are target design.
 
 ## Why
@@ -135,14 +136,40 @@ ai:
   need (`Role`, `ProviderConfig`, `Question`, …), so `oxplow-rpc`,
   `oxplow-tauri-ipc` and `oxplow-mcp` depend only on `oxplow-app`.
 
-## `ai_*` functions (target)
+## Recorded computations (current, P5.E1)
 
-Sources and lenses use `ai_decide(role, input, questions)`, `ai_score`,
-`ai_summarize` and `ai_embed`.
+`crates/oxplow-app/src/ai_compute.rs`, `Services.ai_compute`. A model
+computation oxplow asks for is **recorded**: kept in `ai_result`
+(`v_ai_result`, V118) by `UNIQUE (input_hash, model, prompt_version)`,
+where `input_hash = sha256(canonical JSON of { op, args })` (object keys
+sorted, so argument order doesn't matter). Asking again for the same
+thing — same input, same model, same prompt — reads the recorded result:
+`Recorded { value, cached: true, ai_call_id, input_tokens,
+output_tokens }`, and **no call and no `ai_call` row** are made. A miss
+calls, then records (a concurrent duplicate keeps the first). A failed
+or unusable answer is never recorded. Tokens only; no cost.
 
-Results are **cached as facts, keyed by a hash of the input**. Lenses never
-call a model when they render; they read cached results. This keeps lenses
-fast, deterministic and cheap.
+| op | role | returns | prompt version |
+|---|---|---|---|
+| `classify(caller, text, labels)` | `decide` (a `choice` question) | `{ label, probabilities }` | `classify@1` |
+| `score(caller, text, levels)` | `decide` (a `score` question, levels lowest first) | `{ level, score, probabilities }` | `score@1` |
+| `summarize(caller, text, focus?)` | `summarize` (the same prompt as `AiService::summarize`, `summarize_system`) | the summary | `summarize@1` |
+| `extract(caller, instructions, text, schema)` | `main`, JSON mode; the schema is in the system prompt | JSON matching `schema` (checked with `InputValidator`; a mismatch is refused, naming the pointer) | `extract@1` |
+
+Changing an op's prompt means bumping its version constant: old results
+stay (for their version) and new ones are computed. The model is the
+role's model *now* (`AiService::model_for`), so reassigning a role
+computes afresh. `AiService::complete_as` / `decide_as` take a
+`CallSite { caller, input_hash }`, so the computing call's `ai_call` row
+carries the hash, and return its row id; plain `complete` / `decide`
+record `input_hash` NULL.
+
+## `ai_*` functions for sources (target, P5.E2)
+
+Collectors call `ai_classify`, `ai_summarize`, `ai_score` and
+`ai_extract` (Starlark builtins over `AiCompute`, caller
+`source:<ext>/<id>`); lenses never call a model when they render — they
+read recorded results.
 
 ## MCP (current)
 
@@ -163,13 +190,16 @@ The first built-in use of a role (`oxplow-app/src/inferred_decisions.rs`).
   `infer_for_effort` for each `effort.finished` — logged once the
   effort's end snapshot is pinned — on its own loop, so a slow model
   never delays other consumers.
-- Off until the `summarize` role has a model: `InferOutcome::Off`, no call.
+- Off until the `main` role has a model: `InferOutcome::Off`, no call.
 - It digests the effort: task title; the thread's turns that overlap the
   effort's time window (`v_agent_turn` has no `effort_id`); its tool calls;
   and decisions already recorded, so they aren't repeated. The digest is
   capped at 40k characters, keeping the most recent turns.
-- The model returns `{"decisions": [...]}` (JSON mode). At most 8 are
-  kept; junk entries are skipped and a missing confidence becomes `low`.
+- It is a recorded `AiCompute::extract` (`reply_schema()`:
+  `{"decisions": [...]}`), so re-running an unchanged effort reads the
+  recorded answer instead of calling again. At most 8 are kept; entries
+  without a question or choice are skipped and a missing confidence
+  becomes `low`.
 - `SqliteReasoningStore::replace_inferred` swaps the effort's inferred rows
   in one transaction, so a re-run replaces rather than piles up.
   `ReasoningChanged` is emitted so open review lenses re-run.

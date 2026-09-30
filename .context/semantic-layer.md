@@ -358,7 +358,8 @@ and `v_model_test` are the catalog of all of them:
 | `v_tool_call` | every agent tool call: the `tool_call.project` pump consumer's projection of `agent.tool.finished` (one row per event; the ingest parses the payload with `oxplow-app/src/tool_calls.rs`; paths worktree-relative; Bash `ok` is NULL when Claude reports no exit code) (V77; `turn_id`, `event_id` since V102) |
 | `v_context_read` | `Read`s of `.context/*.md` (V77) |
 | `v_struggle` | per effort: a file edited 5+ times, or 3+ failed commands (V77) |
-| `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, ok/error (V78; see [ai-providers.md](./ai-providers.md)) |
+| `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, ok/error, and a recorded computation's `input_hash` (V78, V118; see [ai-providers.md](./ai-providers.md)) |
+| `v_ai_result` | recorded AI computations (`classify` / `score` / `summarize` / `extract`), keyed by input hash, model and prompt version, with the output, tokens and the computing call (V118; [ai-providers.md](./ai-providers.md) "Recorded computations") |
 | `v_metric_spec` | metric definitions: aggregation, direction, target / warn / fail (enabled lives in project.yaml) (V80) |
 | `v_agent_nudge` | guidance oxplow sent the agent mid-effort (V80; `turn_id`, `delivered_at` since V102) |
 | `v_code_quality_scan`, `v_code_quality_finding` | code-quality scans and their findings (duplicate blocks, with the peer in `extra_json`) (V80) |

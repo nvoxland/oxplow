@@ -36,7 +36,7 @@
     - { not_null: id }
     - { unique: id }
 - name: ai_call
-  version: 1
+  version: 2
   description: "Every model call oxplow itself made (not the coding agent's): role, provider, model, tokens, latency and whether it succeeded."
   columns:
     - { name: "id", type: "INTEGER", doc: "Row id." }
@@ -50,9 +50,30 @@
     - { name: "ok", type: "INTEGER", doc: "1 succeeded, 0 failed." }
     - { name: "error", type: "TEXT", doc: "Error message when it failed." }
     - { name: "at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "input_hash", type: "TEXT", doc: "For a recorded computation (`v_ai_result`), the hash of its input; NULL for other calls." }
   tests:
     - { not_null: id }
     - { unique: id }
+- name: ai_result
+  version: 1
+  description: "Recorded AI computations (P5.E1): a classify / score / summarize / extract result kept by the hash of its input, the model and the prompt version, so asking again reads it instead of calling. Tokens only; no cost."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Row id." }
+    - { name: "input_hash", type: "TEXT", doc: "sha256 of the canonical `{ op, args }`." }
+    - { name: "model", type: "TEXT", doc: "The model that computed it." }
+    - { name: "prompt_version", type: "TEXT", doc: "The op's prompt version (`classify@1`); a new prompt is a new result." }
+    - { name: "op", type: "TEXT", doc: "`classify`, `score`, `summarize` or `extract`." }
+    - { name: "role", type: "TEXT", doc: "The role it ran on (`decide`, `summarize`, `main`)." }
+    - { name: "caller", type: "TEXT", doc: "What first asked, e.g. `inferred-decisions`, `source:<ext>/<id>`." }
+    - { name: "output_json", type: "TEXT", doc: "The result as JSON." }
+    - { name: "input_tokens", type: "INTEGER", doc: "Input tokens of the call that computed it." }
+    - { name: "output_tokens", type: "INTEGER", doc: "Output tokens of that call." }
+    - { name: "at", type: "TEXT", doc: "When it was computed (RFC 3339)." }
+    - { name: "ai_call_id", type: "INTEGER", doc: "The call that computed it (v_ai_call.id)." }
+  tests:
+    - { not_null: input_hash }
+    - { unique: id }
+    - { relationships: { column: ai_call_id, to: ai_call, field: id } }
 - name: branch
   version: 2
   description: "Local and remote-tracking branches, refreshed on boot and whenever refs move."

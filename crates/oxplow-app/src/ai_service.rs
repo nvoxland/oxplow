@@ -57,6 +57,24 @@ pub struct AiSettings {
     pub roles: Vec<RoleStatus>,
 }
 
+/// Who a call is for, as its `ai_call` row records it.
+#[derive(Debug, Clone, Copy)]
+pub struct CallSite<'a> {
+    /// What asked (`mcp:ai_decide`, `inferred-decisions`, …).
+    pub caller: &'a str,
+    /// For a recorded computation (`ai_compute`), the hash of its input.
+    pub input_hash: Option<&'a str>,
+}
+
+impl<'a> CallSite<'a> {
+    pub fn new(caller: &'a str) -> Self {
+        Self {
+            caller,
+            input_hash: None,
+        }
+    }
+}
+
 pub struct AiService {
     client: Client,
     secrets: Arc<dyn SecretStore>,
@@ -241,16 +259,14 @@ impl AiService {
         text: &str,
         instructions: Option<&str>,
     ) -> Result<String, AiServiceError> {
-        let mut system = String::from(
-            "Summarize the text you're given for a software developer. Be brief and concrete; \
-             keep names, numbers and file paths exact. Reply with the summary only.",
-        );
-        if let Some(i) = instructions.map(str::trim).filter(|i| !i.is_empty()) {
-            system.push_str("\n\nFocus: ");
-            system.push_str(i);
-        }
         let c = self
-            .complete(Role::Summarize, caller, Some(&system), text, false)
+            .complete(
+                Role::Summarize,
+                caller,
+                Some(&summarize_system(instructions)),
+                text,
+                false,
+            )
             .await?;
         Ok(c.text.trim().to_string())
     }
@@ -274,6 +290,21 @@ impl AiService {
         prompt: &str,
         json: bool,
     ) -> Result<Completion, AiServiceError> {
+        self.complete_as(role, CallSite::new(caller), system, prompt, json)
+            .await
+            .map(|(c, _)| c)
+    }
+
+    /// [`Self::complete`], recorded against `site`; the call's `ai_call`
+    /// row id comes back with it.
+    pub async fn complete_as(
+        &self,
+        role: Role,
+        site: CallSite<'_>,
+        system: Option<&str>,
+        prompt: &str,
+        json: bool,
+    ) -> Result<(Completion, Option<i64>), AiServiceError> {
         let (provider, binding, key) = self.prepare(role)?;
         let started = Instant::now();
         let result = self
@@ -288,9 +319,10 @@ impl AiService {
             )
             .await;
         let outcome = result.as_ref().map(|c| (c.input_tokens, c.output_tokens));
-        self.record(role, caller, &provider, &binding, started, outcome)
+        let call_id = self
+            .record(role, site, &provider, &binding, started, outcome)
             .await;
-        Ok(result?)
+        Ok((result?, call_id))
     }
 
     /// Answer typed questions about `state` with the model `role` is bound to.
@@ -301,6 +333,20 @@ impl AiService {
         state: &str,
         questions: &BTreeMap<String, Question>,
     ) -> Result<Decision, AiServiceError> {
+        self.decide_as(role, CallSite::new(caller), state, questions)
+            .await
+            .map(|(d, _)| d)
+    }
+
+    /// [`Self::decide`], recorded against `site`; the call's `ai_call` row
+    /// id comes back with it.
+    pub async fn decide_as(
+        &self,
+        role: Role,
+        site: CallSite<'_>,
+        state: &str,
+        questions: &BTreeMap<String, Question>,
+    ) -> Result<(Decision, Option<i64>), AiServiceError> {
         let (provider, binding, key) = self.prepare(role)?;
         let started = Instant::now();
         let result = self
@@ -308,9 +354,19 @@ impl AiService {
             .decide(&provider, key.as_deref(), &binding.model, state, questions)
             .await;
         let outcome = result.as_ref().map(|d| (d.input_tokens, d.output_tokens));
-        self.record(role, caller, &provider, &binding, started, outcome)
+        let call_id = self
+            .record(role, site, &provider, &binding, started, outcome)
             .await;
-        Ok(result?)
+        Ok((result?, call_id))
+    }
+
+    /// The model `role` is bound to now (what a recorded result is keyed
+    /// by), without calling it.
+    pub fn model_for(&self, role: Role) -> Result<String, AiServiceError> {
+        self.config()?
+            .resolve(role)
+            .map(|(_, b)| b.model.clone())
+            .ok_or_else(|| AiServiceError::NotConfigured(role_name(role)))
     }
 
     /// Resolve `role` and fetch its provider's key.
@@ -383,30 +439,37 @@ impl AiService {
             .map_err(|e| AiServiceError::Config(e.to_string()))
     }
 
+    /// Record a call in `ai_call`; its row id (`None` when recording
+    /// failed, which is logged, never an error).
     async fn record(
         &self,
         role: Role,
-        caller: &str,
+        site: CallSite<'_>,
         provider: &ProviderConfig,
         binding: &RoleBinding,
         started: Instant,
         outcome: Result<(i64, i64), &AiError>,
-    ) {
+    ) -> Option<i64> {
         let (input_tokens, output_tokens) = outcome.unwrap_or((0, 0));
         let error = outcome.err();
         let call = NewAiCall {
             role: role_name(role),
             provider: provider.id.clone(),
             model: binding.model.clone(),
-            caller: caller.to_string(),
+            caller: site.caller.to_string(),
             input_tokens,
             output_tokens,
             latency_ms: started.elapsed().as_millis() as i64,
             ok: error.is_none(),
             error: error.map(|e| e.to_string()),
+            input_hash: site.input_hash.map(str::to_string),
         };
-        if let Err(e) = self.calls.record(call).await {
-            tracing::warn!(error = %e, "failed to record an AI call");
+        match self.calls.record(call).await {
+            Ok(id) => Some(id),
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to record an AI call");
+                None
+            }
         }
     }
 }
@@ -470,7 +533,20 @@ fn endpoint_of(provider: Option<&ProviderConfig>) -> String {
         .unwrap_or_default()
 }
 
-fn role_name(role: Role) -> String {
+/// The `summarize` role's system prompt, focused on `focus`.
+pub fn summarize_system(focus: Option<&str>) -> String {
+    let mut system = String::from(
+        "Summarize the text you're given for a software developer. Be brief and concrete; \
+         keep names, numbers and file paths exact. Reply with the summary only.",
+    );
+    if let Some(f) = focus.map(str::trim).filter(|f| !f.is_empty()) {
+        system.push_str("\n\nFocus: ");
+        system.push_str(f);
+    }
+    system
+}
+
+pub fn role_name(role: Role) -> String {
     serde_json::to_value(role)
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))

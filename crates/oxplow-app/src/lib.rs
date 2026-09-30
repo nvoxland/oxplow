@@ -17,6 +17,7 @@ pub mod agent_policy;
 pub mod agent_prompt;
 pub mod agent_stall_watch;
 pub mod agent_status_derive;
+pub mod ai_compute;
 pub mod ai_service;
 pub mod attribution;
 pub mod background_task;
@@ -519,6 +520,8 @@ pub struct Services {
     pub symbol_store: oxplow_db::SqliteSymbolStore,
     /// Oxplow's own model calls by role (`v_ai_call` records each one).
     pub ai: Arc<ai_service::AiService>,
+    /// Recorded AI computations over `ai` (`ai_result`).
+    pub ai_compute: Arc<ai_compute::AiCompute>,
     /// Stored change analysis (`v_change*`) and its producer state.
     pub change_store: Arc<oxplow_db::SqliteChangeStore>,
     pub change_analyzer: Arc<change_analysis::ChangeAnalyzer>,
@@ -802,6 +805,10 @@ impl Services {
                 )
             })),
         );
+        let ai_compute = Arc::new(ai_compute::AiCompute::new(
+            ai.clone(),
+            oxplow_db::SqliteAiResultStore::new(db.clone()),
+        ));
         let lsp = lsp_sessions::LspSessionManager::new(config_arc.clone());
         let lsp_installer_svc =
             lsp_installer::LspInstallerService::new(&layout.state_dir, lsp.clone());
@@ -1162,6 +1169,7 @@ impl Services {
             diagnostic_store,
             symbol_store,
             ai,
+            ai_compute,
             secrets: machine.secrets,
             effort_evidence_store,
             advisories,
