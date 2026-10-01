@@ -5402,7 +5402,9 @@ impl OxplowMcp {
                 preview,
                 supersedes,
             }) => {
+                // `kind` tells it apart from a run's outcome.
                 return json_result(&serde_json::json!({
+                    "kind": "proposed",
                     "proposal": proposal,
                     "message": proposed_message(&preview.command, &proposal, &supersedes),
                 }));
@@ -6690,6 +6692,7 @@ mod tests {
             .unwrap();
         let text = out.content[0].as_text().unwrap().text.clone();
         let proposed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(proposed["kind"], "proposed");
         let proposal = proposed["proposal"].as_str().unwrap().to_string();
         assert!(proposal.starts_with("proposal:"), "{proposed}");
         let message = proposed["message"].as_str().unwrap();

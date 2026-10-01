@@ -14,7 +14,7 @@ use oxplow_provider_protocol::model::InitializeResult;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::extension_sources::SourceSpec;
+use crate::extension_sources::{SourceRuntime, SourceSpec};
 use crate::providers::ProviderSpec;
 
 /// How one thing differs between the installed version and the candidate.
@@ -41,7 +41,7 @@ fn change_of<T: PartialEq>(before: Option<&T>, after: Option<&T>) -> Change {
 #[serde(rename_all = "camelCase")]
 pub struct Grants {
     pub entry: String,
-    pub runtime: String,
+    pub runtime: SourceRuntime,
     pub args: Vec<String>,
     pub hosts: Vec<String>,
     pub credentials: Vec<String>,
@@ -215,10 +215,7 @@ pub fn models_diff(
 fn collector_grants(s: &SourceSpec) -> Grants {
     Grants {
         entry: s.entry.clone(),
-        runtime: serde_json::to_value(s.runtime)
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string))
-            .unwrap_or_default(),
+        runtime: s.runtime,
         args: Vec::new(),
         hosts: s.network.clone(),
         credentials: s.credentials.clone(),
@@ -246,7 +243,7 @@ pub fn collectors_diff(before: &[SourceSpec], after: &[SourceSpec]) -> Vec<Colle
 fn provider_grants(p: &ProviderSpec) -> Grants {
     Grants {
         entry: p.entry.clone(),
-        runtime: "exec".into(),
+        runtime: SourceRuntime::Exec,
         args: p.args.clone(),
         hosts: p.network.clone(),
         credentials: p.credentials.clone(),
@@ -323,7 +320,10 @@ pub fn providers_diff(
             ProviderEffect {
                 id,
                 capability: a.or(b).map(|p| p.0.capability.clone()).unwrap_or_default(),
-                change: change_of(db.as_ref(), da.as_ref()),
+                change: change_of(
+                    b.map(|p| (&p.0, &p.1)).as_ref(),
+                    a.map(|p| (&p.0, &p.1)).as_ref(),
+                ),
                 first_difference,
                 before: b.map(|p| provider_grants(&p.0)),
                 after: a.map(|p| provider_grants(&p.0)),
@@ -420,6 +420,14 @@ pub struct Version<'a> {
     pub read: &'a (dyn Fn(&str) -> Option<String> + Sync),
     /// Its lenses, already run once (`extensions::run_lenses`).
     pub lenses: &'a crate::extensions::LensRuns,
+}
+
+/// A version's instance config schema (its manifest's `config:`), read
+/// from its files — only a review needs it, so the loaded `Extension`
+/// doesn't carry it.
+fn config_schema(v: &Version<'_>) -> Option<Value> {
+    let manifest: serde_yaml::Value = serde_yaml::from_str(&(v.read)("extension.yaml")?).ok()?;
+    serde_json::to_value(manifest.get("config")?).ok()
 }
 
 /// Each lens's rendered text, by slug: what `lens_text` gives an agent,
@@ -533,8 +541,8 @@ pub async fn effects(
         &declared(&after),
     );
     let config = config_diff(
-        before.as_ref().and_then(|b| b.extension.config.as_ref()),
-        after.extension.config.as_ref(),
+        before.as_ref().and_then(config_schema).as_ref(),
+        config_schema(&after).as_ref(),
     );
     EffectReport {
         lenses,
@@ -864,7 +872,7 @@ mod tests {
         write(
             d.path(),
             "oxplow/extensions/x/extension.yaml",
-            "manifest: 2\nname: x\nintent:\n  purpose: p\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\nconfig:\n  type: object\n  properties:\n    team: { type: string }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n",
         );
         write(d.path(), "oxplow/extensions/x/bin/p", "#!/bin/sh\nexit 1\n");
         let declared = serde_json::to_string(&oxplow_provider_fake::declarations()).unwrap();
@@ -893,6 +901,8 @@ mod tests {
         assert!(!p.commands.is_empty());
         assert!(p.commands.iter().all(|c| c.change == Change::Added));
         assert!(p.features_after.is_some());
+        // Its config schema is read from its manifest.
+        assert_eq!(report.config.unwrap().changed_keys, vec!["team"]);
     }
 
     #[tokio::test]

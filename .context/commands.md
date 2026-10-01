@@ -165,7 +165,7 @@ refused (`CommandBus::unconfirmed`):
    naming the replaced proposals so the replacement is never silent.
 3. **`Proposed { proposal: "proposal:N", preview, supersedes }`** — IPC
    code `PROPOSED`; MCP `run_command` turns it into a *successful*
-   result `{ proposal, message }` (`proposed_message`: it waits in
+   result `{ kind: "proposed", proposal, message }` (`proposed_message`: it waits in
    Approvals and on the setting's row; "It replaces proposal:M" when it
    did; tell the person; don't run it again). Other MCP
    tools that run a command report the same message as an error.
@@ -364,7 +364,7 @@ Agents reach every command through two generic tools — `list_commands`
 (the specs the calling agent may run, with `input_schema`, `summary`,
 `confirm`, `undoable`) and `run_command { name, input }` (the outcome:
 `result`, `audit_id`, `event_id`, `inverse?` — or, for a run that needs
-a person's confirmation, `{ proposal, message }`). Extensions never add MCP
+a person's confirmation, `{ kind: "proposed", proposal, message }`). Extensions never add MCP
 tools. `transition_tasks` is `run_command("work_item.transition")` per
 id.
 

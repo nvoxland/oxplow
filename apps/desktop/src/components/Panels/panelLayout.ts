@@ -93,10 +93,8 @@ export function toggleCollapsed(available: string[], stored: PanelPlacement[], p
 /** Make `panel` visible and expanded: shown at the bottom if hidden, and
  *  uncollapsed (the Alerts row that points at Approvals uses it). */
 export function revealPanel(available: string[], stored: PanelPlacement[], panel: string): PanelPlacement[] {
-  const layout = resolveLayout(available, stored);
-  const shown = layout.hidden.includes(panel)
-    ? { ...layout, order: [...layout.order, panel], hidden: layout.hidden.filter((id) => id !== panel) }
-    : layout;
+  const hidden = resolveLayout(available, stored).hidden.includes(panel);
+  const shown = resolveLayout(available, hidden ? showPanel(available, stored, panel) : stored);
   const collapsed = new Set(shown.collapsed);
   collapsed.delete(panel);
   return store({ ...shown, collapsed });

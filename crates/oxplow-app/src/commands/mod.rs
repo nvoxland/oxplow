@@ -946,10 +946,7 @@ impl CommandBus {
                 message: format!(
                     "{} is already {}",
                     proposal_ref(id),
-                    serde_json::to_value(proposal.decision)
-                        .ok()
-                        .and_then(|v| v.as_str().map(str::to_string))
-                        .unwrap_or_default()
+                    proposal.decision.as_str()
                 ),
             });
         }
@@ -963,9 +960,12 @@ impl CommandBus {
     /// its input must fit, and its own `invokers`, the agent policy and
     /// its `confirm` apply, so a composite never widens what its children
     /// allow; a child that asks makes the parent ask, unless the run was
-    /// confirmed — then every handler runs on `ctx`. The children's events
-    /// ride out on the parent's; the inverse is the children's inverses,
-    /// reversed, as a `command.sequence`, or none when a child has none.
+    /// confirmed — then every handler runs on `ctx`, one level deeper. The
+    /// children's events ride out on the parent's; the inverse is the
+    /// children's inverses, reversed, as a `command.sequence`, or none when
+    /// a child has none — so a composite declared undoable whose child
+    /// isn't (or gave no inverse) is recorded with no inverse, and its
+    /// undo is refused as "not undoable" rather than half-applied.
     pub fn run_nested(
         &self,
         ctx: &TxCtx<'_>,

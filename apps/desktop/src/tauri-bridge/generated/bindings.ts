@@ -2495,8 +2495,6 @@ export type Extension_Deserialize = {
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
 	 */
 	commands: ExtensionCommand[],
-	// Its instance config schema (`config:`), as declared.
-	config: unknown | null,
 };
 
 // A loaded extension and anything wrong with it.
@@ -2592,8 +2590,6 @@ export type Extension_Serialize = {
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
 	 */
 	commands: ExtensionCommand[],
-	// Its instance config schema (`config:`), as declared.
-	config: unknown | null,
 };
 
 export type FileSnapshot = {
@@ -2763,7 +2759,7 @@ export type GeneratedConfig = {
 // What a program may reach: what a person approves.
 export type Grants = {
 	entry: string,
-	runtime: string,
+	runtime: SourceRuntime,
 	args: string[],
 	hosts: string[],
 	credentials: string[],

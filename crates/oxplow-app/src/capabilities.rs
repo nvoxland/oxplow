@@ -18,14 +18,17 @@ pub async fn publish_core(svc: &crate::Services) -> Result<(), DomainError> {
         features,
         active: true,
     };
-    let mut rows = Vec::new();
-    if let Ok(p) = svc.work_items.get(crate::work_items::PROVIDER) {
-        rows.push(row(
-            "work_items",
-            p.provider(),
-            serde_json::to_value(p.features()).unwrap_or(Value::Null),
-        ));
-    }
+    // Oxplow's own work items always exist: a missing provider is a boot
+    // bug, not a capability to leave out.
+    let work_items = svc
+        .work_items
+        .get(crate::work_items::PROVIDER)
+        .map_err(|e| DomainError::Invariant(format!("oxplow's work items provider: {e}")))?;
+    let mut rows = vec![row(
+        "work_items",
+        work_items.provider(),
+        serde_json::to_value(work_items.features()).unwrap_or(Value::Null),
+    )];
     rows.push(row(
         "vcs",
         svc.vcs.rev_kind(),

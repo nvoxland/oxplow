@@ -955,9 +955,6 @@ pub struct Extension {
     /// Commands it registers on the bus, each a Starlark script composing
     /// core commands (P6b; valid ones — invalid ones are in `errors`).
     pub commands: Vec<crate::extension_commands::ExtensionCommand>,
-    /// Its instance config schema (`config:`), as declared.
-    #[specta(type = Option<oxplow_domain::Json>)]
-    pub config: Option<serde_json::Value>,
 }
 
 /// What an extension adds to the core UI (`ui:` in its manifest).
@@ -1185,7 +1182,6 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         panels: Vec::new(),
         pages: Vec::new(),
         commands: Vec::new(),
-        config: None,
     }
 }
 
@@ -1244,7 +1240,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.sharing = m.sharing;
     ext.intent = m.intent.clone();
     ext.description = m.description.clone();
-    ext.config = m.config.as_ref().and_then(|c| serde_json::to_value(c).ok());
     if is_v2 {
         let (errors, warnings) = manifest_v2::check(&m, &file, &manifest, origin == "bundled");
         ext.errors.extend(errors);
@@ -2696,11 +2691,11 @@ fn installed_source(root: &Path, name: &str) -> Result<ExtensionSource, DomainEr
     })
 }
 
-/// Lowercase letters, digits and single dashes — safe as a folder name
-/// and a lens-id prefix.
+/// A lowercase letter, then lowercase letters, digits and single dashes —
+/// safe as a folder name, a lens-id prefix and (dashes as underscores) a
+/// command namespace.
 pub fn is_valid_name(name: &str) -> bool {
-    !name.is_empty()
-        && !name.starts_with('-')
+    name.starts_with(|c: char| c.is_ascii_lowercase())
         && !name.ends_with('-')
         && !name.contains("--")
         && name
@@ -2793,7 +2788,7 @@ fn fetch(
     }
     if !is_valid_name(&name) {
         return Err(invalid(format!(
-            "extension name `{name}` must be lowercase letters, digits and single dashes"
+            "extension name `{name}` must start with a letter and be lowercase letters, digits and single dashes"
         )));
     }
     if let Some(expected) = replacing {
@@ -3037,7 +3032,7 @@ pub struct LensOrigin<'a> {
 pub fn writable_extension_dir(root: &Path, name: &str) -> Result<PathBuf, DomainError> {
     if !is_valid_name(name) {
         return Err(DomainError::Invalid(format!(
-            "extension name `{name}` must be lowercase letters, digits and single dashes"
+            "extension name `{name}` must start with a letter and be lowercase letters, digits and single dashes"
         )));
     }
     if crate::bundled_extensions::is_reserved(name) {
@@ -3066,7 +3061,7 @@ pub fn save_lens(
     let dir = writable_extension_dir(root, extension)?;
     if !is_valid_name(slug) {
         return Err(invalid(format!(
-            "lens slug `{slug}` must be lowercase letters, digits and single dashes"
+            "lens slug `{slug}` must start with a letter and be lowercase letters, digits and single dashes"
         )));
     }
     if let Some(problem) = spec_problem(spec) {
@@ -4410,6 +4405,18 @@ empty: No tasks.
                 .title,
             "Decisions Made"
         );
+    }
+
+    #[test]
+    fn a_name_starts_with_a_letter() {
+        for ok in ["review", "review-notes", "a1", "x"] {
+            assert!(is_valid_name(ok), "{ok}");
+        }
+        // `1x` would be the command namespace `1x`, which no command
+        // name can have.
+        for bad in ["1x", "9-lives", "", "-a", "a-", "a--b", "A", "a_b"] {
+            assert!(!is_valid_name(bad), "{bad}");
+        }
     }
 
     #[test]

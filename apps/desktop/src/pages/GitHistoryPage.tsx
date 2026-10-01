@@ -23,16 +23,18 @@ export function GitHistoryPage({ stream, onOpenPage, revealSha }: GitHistoryPage
   // side column only when something is mounted there.
   const streamRow = stream ? numericRowId(stream.id) : null;
   const sidebar = useSlotMounted("vcs.history.sidebar", stream?.id ?? null) && streamRow !== null;
+  const sidebarParams = { stream_id: streamRow };
   return (
     <Page
       testId="page-git-history"
       title="Git History"
       layout={sidebar ? "details" : "full"}
+      rightRailTitle="From extensions"
       rightRail={
         sidebar ? (
           <LensSlots
             slot="vcs.history.sidebar"
-            params={{ stream_id: streamRow }}
+            params={sidebarParams}
             streamId={stream?.id ?? null}
             onOpenPage={(ref) => onOpenPage(ref)}
           />

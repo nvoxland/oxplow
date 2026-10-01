@@ -80,7 +80,7 @@ pub fn scaffold(
 ) -> Result<Scaffolded, SdkError> {
     if !extensions::is_valid_name(name) {
         return Err(SdkError::Invalid(format!(
-            "`{name}` must be lowercase letters, digits and single dashes (e.g. `review-notes`)"
+            "`{name}` must start with a letter and be lowercase letters, digits and single dashes (e.g. `review-notes`)"
         )));
     }
     if let Some(o) = origin {

@@ -3,32 +3,18 @@
 /// extension. Each runs as the person through `personCommands` (which
 /// asks first when the command asks). Hidden when nothing applies.
 import type { CSSProperties } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { personCommands } from "../personCommands.js";
 import type { AskTarget } from "./Prompts/AskMenu.js";
 import { bindRefInput, groupUiCommands, uiCommandsAbout } from "./uiCommands.js";
+import { usePopoverDismiss } from "./usePopoverDismiss.js";
 import { useUiCommands } from "./useUiCommands.js";
 
 export function RefCommandsMenu({ target, buttonStyle }: { target: AskTarget; buttonStyle: CSSProperties }) {
   const all = useUiCommands(target.streamId);
   const [open, setOpen] = useState(false);
-  const boxRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (!boxRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("pointerdown", onPointerDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const boxRef = usePopoverDismiss<HTMLDivElement>(open, () => setOpen(false));
   const commands = uiCommandsAbout(all, target.ref, "menu");
   if (commands.length === 0) return null;
   return (
@@ -89,7 +75,7 @@ const popoverStyle: CSSProperties = {
 };
 const groupStyle: CSSProperties = {
   color: "var(--text-secondary)",
-  fontSize: 10,
+  fontSize: "var(--text-xs)",
   textTransform: "uppercase",
   letterSpacing: 0.4,
   padding: "2px 6px",

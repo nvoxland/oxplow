@@ -3,10 +3,11 @@
 /// of ref, each asked about this one. Nothing is sent. Closes on Escape or
 /// a click outside.
 import type { CSSProperties } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { formatContextMention } from "../../agent-context-ref.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
+import { usePopoverDismiss } from "../usePopoverDismiss.js";
 import { SuggestedPrompts } from "./SuggestedPrompts.js";
 
 export interface AskTarget {
@@ -18,22 +19,7 @@ export interface AskTarget {
 
 export function AskMenu({ ask, buttonStyle }: { ask: AskTarget; buttonStyle: CSSProperties }) {
   const [open, setOpen] = useState(false);
-  const boxRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (!boxRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("pointerdown", onPointerDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const boxRef = usePopoverDismiss<HTMLDivElement>(open, () => setOpen(false));
   return (
     <div ref={boxRef} style={{ position: "relative", display: "inline-flex" }}>
       <button

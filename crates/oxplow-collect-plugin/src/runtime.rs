@@ -493,15 +493,22 @@ fn helper_anyhow(e: crate::HelperError) -> anyhow::Error {
     anyhow::anyhow!(e.to_string())
 }
 
-/// Whether `script` parses as Starlark and defines `transform` — what a
-/// loader checks before anything runs it. A message saying what's wrong.
-pub fn check_starlark(script: &str) -> Result<(), String> {
+/// Whether `script` (the file at `path`, which parse errors name) parses
+/// as Starlark and defines `transform` at the top level of its module —
+/// what a loader checks before anything runs it. A message saying what's
+/// wrong.
+pub fn check_starlark(path: &str, script: &str) -> Result<(), String> {
+    use starlark::syntax::ast::StmtP;
     use starlark::syntax::{AstModule, Dialect};
-    AstModule::parse("plugin.star", script.to_string(), &Dialect::Standard)
+    let ast = AstModule::parse(path, script.to_string(), &Dialect::Standard)
         .map_err(|e| format!("doesn't parse: {e}"))?;
-    let defines = script
-        .lines()
-        .any(|l| l.trim_start() == l && l.starts_with("def transform("));
+    let top = match &ast.statement().node {
+        StmtP::Statements(stmts) => stmts.iter().collect::<Vec<_>>(),
+        _ => vec![ast.statement()],
+    };
+    let defines = top
+        .iter()
+        .any(|s| matches!(&s.node, StmtP::Def(d) if d.name.ident == "transform"));
     if defines {
         Ok(())
     } else {
@@ -1172,5 +1179,27 @@ def transform(input):
         let f = out.as_coverage().unwrap().files.get("x").unwrap().clone();
         assert_eq!((f.branches_found, f.branches_hit), (4, 3));
         assert_eq!((f.functions_found, f.functions_hit), (2, 2));
+    }
+}
+
+#[cfg(test)]
+mod check_starlark_tests {
+    use super::check_starlark;
+
+    /// `transform` is found in the parsed module, not by text: one inside
+    /// a string or a block doesn't count; a parse error names the file.
+    #[test]
+    fn transform_is_a_top_level_def_in_the_ast() {
+        assert!(check_starlark("handlers/a.star", "def transform(x):\n    return {}\n").is_ok());
+        for script in [
+            "X = \"\"\"\ndef transform(x):\n\"\"\"\n",
+            "def other(x):\n    def transform(y):\n        return y\n    return transform\n",
+            "transform = 1\n",
+        ] {
+            let err = check_starlark("handlers/a.star", script).unwrap_err();
+            assert!(err.contains("must define `transform`"), "{script}: {err}");
+        }
+        let err = check_starlark("handlers/a.star", "def transform(x:\n").unwrap_err();
+        assert!(err.contains("handlers/a.star"), "{err}");
     }
 }

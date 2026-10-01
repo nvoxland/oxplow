@@ -215,7 +215,7 @@ fn command_of(
     }
     let script = read(&f.entry)
         .ok_or_else(|| at_name(format!("entry `{}` isn't a file in the extension", f.entry)))?;
-    oxplow_collect_plugin::runtime::check_starlark(&script)
+    oxplow_collect_plugin::runtime::check_starlark(&f.entry, &script)
         .map_err(|e| at_name(format!("entry `{}` {e}", f.entry)))?;
     if f.examples.len() > MAX_EXAMPLES {
         return Err(at_name(format!(

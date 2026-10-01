@@ -81,13 +81,16 @@ export function UncommittedChangesPage({
     );
   }
 
+  // What the `vcs.status.header` strip binds.
+  const streamRow = numericRowId(streamId);
+  const streamParams = streamRow === null ? null : { stream_id: streamRow };
   return (
     <Page testId="page-uncommitted-changes" title="Uncommitted Changes">
       <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 16, overflow: "auto" }}>
         {changed.error ? <div style={errorBanner}>{changed.error}</div> : null}
         <LensSlots
           slot="vcs.status.header"
-          params={numericRowId(streamId) === null ? null : { stream_id: numericRowId(streamId) }}
+          params={streamParams}
           streamId={streamId}
           onOpenPage={(ref) => onOpenPage(ref)}
           variant="strip"

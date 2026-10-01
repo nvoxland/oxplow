@@ -27,7 +27,8 @@ pub enum ProposalDecision {
 }
 
 impl ProposalDecision {
-    fn as_str(self) -> &'static str {
+    /// Its stored and serialized name (`pending`, …).
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
             Self::Approved => "approved",
@@ -48,7 +49,7 @@ impl ProposalDecision {
 }
 
 /// One proposal.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Proposal {
     pub id: i64,
     pub created_at: Timestamp,

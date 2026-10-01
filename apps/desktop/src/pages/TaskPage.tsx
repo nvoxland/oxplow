@@ -175,6 +175,9 @@ export function TaskPage({
 
   // The rail's Delete asks inline before it calls this.
   const requestDelete = onDelete ? () => onDelete(item.id) : undefined;
+  // What the item's two `work_item.detail.*` slots bind.
+  const taskRow = numericRowId(String(item.id));
+  const slotParams = taskRow === null ? null : { ref: workItemRef(String(item.id)), task_id: taskRow };
   const rail = (
     <>
       <TaskDetailRail
@@ -185,11 +188,7 @@ export function TaskPage({
       />
       <LensSlots
         slot="work_item.detail.sidebar"
-        params={
-          numericRowId(String(item.id)) === null
-            ? null
-            : { ref: workItemRef(String(item.id)), task_id: numericRowId(String(item.id)) }
-        }
+        params={slotParams}
         streamId={stream?.id ?? null}
         onOpenPage={onOpenPage}
       />
@@ -224,11 +223,7 @@ export function TaskPage({
         />
         <LensSlots
           slot="work_item.detail.body"
-          params={
-            numericRowId(String(item.id)) === null
-              ? null
-              : { ref: workItemRef(String(item.id)), task_id: numericRowId(String(item.id)) }
-          }
+          params={slotParams}
           streamId={stream?.id ?? null}
           onOpenPage={onOpenPage}
           h2ClassName="task-activity-heading"

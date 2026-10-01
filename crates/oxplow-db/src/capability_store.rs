@@ -110,7 +110,7 @@ impl SqliteCapabilityStore {
     }
 
     pub async fn list(&self) -> Result<Vec<CapabilityProvider>, DomainError> {
-        self.db.call_mut(|c| list_tx(c)).await
+        self.db.read(|tx| list_tx(tx)).await
     }
 }
 

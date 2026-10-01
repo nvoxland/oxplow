@@ -416,6 +416,8 @@ export function RailHud({
   const panelRuns = useExtensionPanelRuns(extPanels, streamId ?? null, threadId);
   const alerts = useMemo(() => panelAlerts(extPanels, panelRuns), [extPanels, panelRuns]);
   const proposals = useProposals();
+  // Bumped by the Alerts row; Approvals scrolls itself into view.
+  const [revealApprovals, setRevealApprovals] = useState(0);
   const available = useMemo(
     () => [...CORE_PANELS.map((p) => p.id), ...extPanels.map(extensionPanelId)],
     [extPanels],
@@ -437,13 +439,13 @@ export function RailHud({
             proposals={proposals.length}
             onShowApprovals={() => {
               sections.reveal("core:approvals");
-              document.querySelector(`[data-testid="rail-section-core:approvals"]`)?.scrollIntoView({ block: "nearest" });
+              setRevealApprovals((n) => n + 1);
             }}
             onOpenPage={onOpenPage}
           />
         );
       case "core:approvals":
-        return <ApprovalsSection key={id} proposals={proposals} />;
+        return <ApprovalsSection key={id} proposals={proposals} reveal={revealApprovals} />;
       case "core:uncommitted":
         return <UncommittedSection key={id} summary={uncommitted ?? null} onOpenPage={onOpenPage} />;
       case "core:comments":
@@ -1248,16 +1250,24 @@ function AlertsSection({
 
 /** Approvals (a core panel, P6b.A4): the agent's runs that wait for the
  *  person, newest first, each with Approve and Decline. */
-function ApprovalsSection({ proposals }: { proposals: Proposal[] }) {
+function ApprovalsSection({ proposals, reveal }: { proposals: Proposal[]; reveal: number }) {
+  // Asked to show itself (the Alerts row): once mounted with the new
+  // layout, scroll it into view.
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (reveal > 0) ref.current?.scrollIntoView?.({ block: "nearest" });
+  }, [reveal]);
   return (
-    <RailSection id="core:approvals" title="Approvals" count={proposals.length || undefined}>
-      {proposals.length === 0 ? <RailEmpty label="Nothing waits for your approval" /> : null}
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: proposals.length ? "6px 8px 8px" : 0 }}>
-        {proposals.map((p) => (
-          <ProposalCard key={p.id} proposal={p} onDecide={decide} />
-        ))}
-      </div>
-    </RailSection>
+    <div ref={ref}>
+      <RailSection id="core:approvals" title="Approvals" count={proposals.length || undefined}>
+        {proposals.length === 0 ? <RailEmpty label="Nothing waits for your approval" /> : null}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: proposals.length ? "6px 8px 8px" : 0 }}>
+          {proposals.map((p) => (
+            <ProposalCard key={p.id} proposal={p} onDecide={decide} />
+          ))}
+        </div>
+      </RailSection>
+    </div>
   );
 }
 

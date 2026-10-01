@@ -25,7 +25,7 @@ export function EffectDiff({ id, before, after }: { id: string; before: string; 
   );
 }
 
-const labelStyle: CSSProperties = { fontSize: 10, color: "var(--text-secondary)", textTransform: "uppercase" };
+const labelStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-secondary)", textTransform: "uppercase" };
 const textStyle: CSSProperties = {
   margin: 0,
   padding: 6,

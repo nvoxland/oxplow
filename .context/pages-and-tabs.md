@@ -175,9 +175,12 @@ the one owner of every panel's runs (`components/Panels/usePanelRuns.ts`
 shows, re-runs when either changes or when a read changes, and hands each
 section its runs. **Alerts** is derived from the same runs
 (`panelAlerts`): every firing badge, once, so a badge never runs twice
-and the header count and Alerts can't disagree. Alerts leads with "N
-proposals await your approval" while any agent proposal is pending; the
-row reveals **Approvals** (`revealPanel`: shown if hidden, expanded).
+and a panel's header count and its Alerts row can't disagree. Alerts
+leads with "N proposals await your approval" while any agent proposal is
+pending; the row reveals **Approvals** (`revealPanel`: shown if hidden,
+expanded — Approvals then scrolls itself into view). Alerts' own count
+is its rows: each firing badge, plus one for the proposals row however
+many proposals wait (Approvals' count says how many).
 **Approvals** (P6b.A4) lists the pending proposals from
 `v_command_proposal` (`proposals.ts` → `useProposals`, re-read through
 `useRerunOnChange`) as `ProposalCard`s with Approve and Decline
