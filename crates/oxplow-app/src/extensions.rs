@@ -16,6 +16,7 @@ use oxplow_db::{SqlCell, SqlQueryResult};
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
+pub mod custom_components;
 pub mod decorators;
 pub mod manifest_v2;
 pub mod migrate_v1;
@@ -75,6 +76,24 @@ pub enum LensViz {
     /// like an action's) and the query's first row, if the lens has one.
     /// Submitting runs the command as the lens (P6.B2).
     Form,
+    /// The extension's own web component (`custom.component`, P6b.D1), in
+    /// a sandboxed frame; its rows are what it shows and what an agent
+    /// reads (as a table).
+    Custom,
+}
+
+/// A `custom` lens's component and the props it starts with.
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct LensCustom {
+    /// One of the extension's `custom_components` ids.
+    pub component: Option<String>,
+    /// Handed to the component as is.
+    #[serde(default, serialize_with = "plain_json")]
+    #[specta(type = Option<oxplow_domain::Json>)]
+    pub props: Option<serde_json::Value>,
 }
 
 /// When a lens needs attention: its row count reaches `min_rows`, or the
@@ -458,6 +477,8 @@ struct LensFile {
     hunks: Option<LensHunks>,
     #[serde(default)]
     form: Option<LensForm>,
+    #[serde(default)]
+    custom: Option<LensCustom>,
     /// For `grid`: lens slugs in this extension, or `<ext>/<slug>` ids.
     #[serde(default)]
     children: Vec<String>,
@@ -851,6 +872,8 @@ pub struct Lens {
     pub steps: Option<LensSteps>,
     pub hunks: Option<LensHunks>,
     pub form: Option<LensForm>,
+    /// For `custom`: the component and its props.
+    pub custom: Option<LensCustom>,
     /// For `grid`: child lens ids.
     pub children: Vec<String>,
     /// Launcher section; `None` = "Lenses".
@@ -894,6 +917,9 @@ pub struct Extension {
     /// Declared providers (experimental: a private extension's only;
     /// valid ones — invalid ones are in `errors`).
     pub providers: Vec<crate::providers::ProviderSpec>,
+    /// Web components its `custom` lenses render, sandboxed (experimental:
+    /// a private extension's only; valid ones).
+    pub custom_components: Vec<custom_components::CustomComponent>,
     /// `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
     /// read-only).
     pub origin: String,
@@ -1069,6 +1095,9 @@ trait ExtensionFiles {
     fn read(&self, rel: &str) -> Option<String>;
     /// File names directly inside `dir` (e.g. `lenses`).
     fn list(&self, dir: &str) -> Vec<String>;
+    /// What the folder `rel` holds, for a custom component's bundle;
+    /// `None` when it isn't a folder (or the files aren't on disk).
+    fn bundle_stat(&self, rel: &str) -> Option<custom_components::BundleStat>;
 }
 
 struct Disk(std::path::PathBuf);
@@ -1086,6 +1115,9 @@ impl ExtensionFiles for Disk {
                     .collect()
             })
             .unwrap_or_default()
+    }
+    fn bundle_stat(&self, rel: &str) -> Option<custom_components::BundleStat> {
+        custom_components::stat_bundle(&self.0.join(rel))
     }
 }
 
@@ -1109,6 +1141,10 @@ impl ExtensionFiles for Embedded {
             .map(str::to_string)
             .collect()
     }
+    /// A bundled extension is shared: it has no custom components.
+    fn bundle_stat(&self, _rel: &str) -> Option<custom_components::BundleStat> {
+        None
+    }
 }
 
 pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
@@ -1125,6 +1161,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         source: None,
         sources: Vec::new(),
         providers: Vec::new(),
+        custom_components: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
         enabled: true,
@@ -1248,6 +1285,19 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     files.read(rel)
                 });
             ext.commands = commands;
+            ext.errors.extend(errors);
+        }
+        // An experimental kind: a shared manifest's is refused by `check`.
+        if let Some(v) = m
+            .custom_components
+            .as_ref()
+            .filter(|_| m.sharing == Sharing::Private)
+        {
+            let (components, errors) =
+                custom_components::parse_custom_components(name, v, &file, &manifest, &|rel| {
+                    files.bundle_stat(rel)
+                });
+            ext.custom_components = components;
             ext.errors.extend(errors);
         }
         for v in m.advisories.clone() {
@@ -1456,6 +1506,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 steps: l.steps,
                 hunks: l.hunks,
                 form: l.form,
+                custom: l.custom,
                 children: l
                     .children
                     .into_iter()
@@ -1477,11 +1528,35 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }
     }
 
-    // Drop lenses whose viz lacks what it needs, so every loaded lens renders.
+    // A component's assets in this extension must be its lenses.
     let ids: Vec<String> = ext.lenses.iter().map(|l| l.id.clone()).collect();
+    let mut missing_assets = Vec::new();
+    for c in &ext.custom_components {
+        let prefix = format!("{name}/");
+        if let Some(a) = c
+            .assets
+            .iter()
+            .find(|a| a.starts_with(&prefix) && !ids.contains(a))
+        {
+            ext.errors.push(at(
+                &file,
+                line_under(&manifest, "custom_components", &format!("id: {}", c.id)),
+                format!(
+                    "custom component `{}`: asset `{a}` isn't in this extension's lenses/",
+                    c.id
+                ),
+            ));
+            missing_assets.push(c.id.clone());
+        }
+    }
+    ext.custom_components
+        .retain(|c| !missing_assets.contains(&c.id));
+
+    // Drop lenses whose viz lacks what it needs, so every loaded lens renders.
+    let components: Vec<String> = ext.custom_components.iter().map(|c| c.id.clone()).collect();
     let mut bad = Vec::new();
     for l in &ext.lenses {
-        if let Some(problem) = shape_problem(l, &ids) {
+        if let Some(problem) = shape_problem(l, &ids, &components) {
             ext.errors.push(format!("{}: {problem}", l.path));
             bad.push(l.id.clone());
         }
@@ -1758,7 +1833,11 @@ fn grid_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
         .map(|c| format!("child lens `{c}` isn't in this extension's lenses/"))
 }
 
-fn shape_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
+fn shape_problem(
+    lens: &Lens,
+    ids_in_extension: &[String],
+    components: &[String],
+) -> Option<String> {
     // `block` names the lens key the missing columns go under.
     let need = |block: &str, fields: &[(&str, &Option<String>)]| -> Option<String> {
         let missing: Vec<&str> = fields
@@ -1814,8 +1893,18 @@ fn shape_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
             })
         }
         // A grid composes its children; it renders no rows of its own.
-        // A grid composes its children; it renders no rows of its own.
         LensViz::Grid => grid_problem(lens, ids_in_extension),
+        // Its rows are what the component shows and what an agent reads.
+        LensViz::Custom if lens.query.trim().is_empty() => {
+            Some("viz `custom` needs a `query`: its rows are what the component shows".into())
+        }
+        LensViz::Custom => match lens.custom.as_ref().and_then(|c| c.component.as_ref()) {
+            None => Some("viz `custom` needs `custom: { component: <id> }`".into()),
+            Some(c) if !components.contains(c) => Some(format!(
+                "viz `custom`: `{c}` isn't one of this extension's `custom_components`"
+            )),
+            Some(_) => None,
+        },
         _ if lens.query.trim().is_empty() => Some(format!(
             "viz `{}` needs a `query`",
             format!("{:?}", lens.viz).to_lowercase()
@@ -1880,6 +1969,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.ui = ExtensionUi::default();
         ext.sources.clear();
         ext.providers.clear();
+        ext.custom_components.clear();
         ext.advisories.clear();
         ext.measures.clear();
         ext.dimensions.clear();
@@ -2190,6 +2280,54 @@ pub fn check_commands(ext: &mut Extension, root: &Path, commands: Option<Command
     }
 }
 
+/// A custom component's declared commands must exist; a `custom` lens
+/// that also fills a kit role block gets a nudge — the kit may already
+/// render it (the honest extent of a "this reimplements the kit" lint).
+fn check_components(ext: &mut Extension, commands: Option<CommandSchemas<'_>>) {
+    if let Some(schema_of) = commands {
+        let missing: Vec<(String, String)> = ext
+            .custom_components
+            .iter()
+            .flat_map(|c| {
+                c.commands
+                    .iter()
+                    .filter(|n| schema_of(n).is_none())
+                    .map(|n| (c.id.clone(), n.clone()))
+            })
+            .collect();
+        for (component, command) in missing {
+            ext.errors.push(format!(
+                "{}/extension.yaml: custom component `{component}` declares command `{command}`, \
+                 which isn't registered",
+                ext.path
+            ));
+        }
+    }
+    let lookalikes: Vec<(String, &'static str)> = ext
+        .lenses
+        .iter()
+        .filter(|l| l.viz == LensViz::Custom)
+        .flat_map(|l| {
+            [
+                ("chart", l.chart.is_some()),
+                ("tree", l.tree.is_some()),
+                ("timeline", l.timeline.is_some()),
+                ("steps", l.steps.is_some()),
+                ("hunks", l.hunks.is_some()),
+            ]
+            .into_iter()
+            .filter(|(_, set)| *set)
+            .map(|(block, _)| (l.path.clone(), block))
+        })
+        .collect();
+    for (path, block) in lookalikes {
+        ext.warnings.push(format!(
+            "{path}: a custom lens that fills `{block}`: the kit's `{block}` viz may already cover \
+             it — prefer the kit where it does"
+        ));
+    }
+}
+
 /// `command`'s input schema from the declarations of one of `ext`'s own
 /// providers, when the command is in its namespace.
 fn provider_command_schema(
@@ -2220,6 +2358,7 @@ async fn check_extension(
     commands: Option<CommandSchemas<'_>>,
 ) {
     check_commands(ext, root, commands);
+    check_components(ext, commands);
     crate::extension_commands::check_examples(layer, ext, commands).await;
     // Its models, beside the other enabled extensions' (a ref() may name
     // theirs): compiled as temp views, published nowhere (P4.9).
@@ -2709,6 +2848,7 @@ impl Lens {
             steps: spec.steps.clone(),
             hunks: spec.hunks.clone(),
             form: spec.form.clone(),
+            custom: None,
             children: Vec::new(),
             launcher_category: None,
             hidden: false,
@@ -2748,7 +2888,14 @@ pub fn spec_problem(spec: &LensSpec) -> Option<String> {
     if spec.viz == LensViz::Grid {
         return Some("a `grid` composes lens files; show each lens instead".into());
     }
-    shape_problem(&Lens::from_spec("spec/spec", spec), &[])
+    if spec.viz == LensViz::Custom {
+        return Some(
+            "a `custom` lens renders an extension's component; write it as a lens file in a \
+             private extension that declares the component"
+                .into(),
+        );
+    }
+    shape_problem(&Lens::from_spec("spec/spec", spec), &[], &[])
 }
 
 /// A lens slug from a title: lowercase letters and digits, runs of

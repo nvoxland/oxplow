@@ -223,6 +223,7 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     steps: null,
     hunks: null,
     form: null,
+    custom: null,
     children: [],
     launcherCategory: null,
     hidden: false,

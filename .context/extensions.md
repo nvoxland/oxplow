@@ -787,6 +787,49 @@ the extensions list (`useUiCommands`, reloaded on `extensionsChanged`)
 and runs each as the person through `personCommands`
 (`components/uiCommands.ts`).
 
+## Custom components (experimental)
+
+`custom_components:` (a private extension only, P6b.D1;
+`extensions/custom_components.rs`) are web bundles a `viz: custom` lens
+renders in a sandboxed frame. **The sandbox is the consent**: the frame
+has no origin, no network and no daemon token, so a bundle runs without
+a person's approval and reaches only the lenses it may query (`assets`)
+and the commands it may invoke (`commands`).
+
+```yaml
+custom_components:
+  - id: burndown                       # [a-z0-9-]+
+    title: Burndown
+    bundle: components/burndown        # default components/<id>; holds index.html
+    assets: [open-tasks, oxplow-analytics/visits]   # lens ids; a bare slug is this extension's
+    commands: [work_item.transition]
+```
+```yaml
+# lenses/burn.yaml
+title: Burndown
+query: SELECT day, remaining FROM v_x_burndown WHERE stream_id = :stream_id
+params: [{ name: stream_id }]
+viz: custom
+custom: { component: burndown, props: { color: accent } }
+```
+
+**Assets are lens ids, not models**: accepting a model would mean
+accepting SQL from the frame; a component that needs a model writes a
+`hidden: true` lens over it. Load checks, each at its line: the id, a
+duplicate, `bundle` a relative folder without `..` that holds
+`index.html`, no symlink anywhere in it, at most 256 files and 5 MiB
+(`stat_bundle`; a bundled extension has none), each asset a lens id —
+this extension's must be among its lenses — and each command a command
+name. A `custom` lens needs `custom.component` naming one of the
+extension's components and a `query` (its rows are what the component
+shows and what an agent reads); `spec_problem` refuses `custom` (an
+answer can't carry one); an agent reads it through `lens_text` as its
+table, prefixed ``(custom component `<ext>/<id>`; its table rendering)``.
+`check_extension` checks that the declared commands are registered and
+warns when a custom lens also fills a kit role block (`chart`, `tree`,
+`timeline`, `steps`, `hunks`) — the kit may already render it; that is
+the honest extent of a "this reimplements the kit" lint.
+
 ## Decorators (experimental)
 
 `ui.decorators` (a private extension only, P6b.C5;

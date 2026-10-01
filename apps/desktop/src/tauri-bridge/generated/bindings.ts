@@ -1883,6 +1883,26 @@ export type CredentialStatus = {
 };
 
 /**
+ *  A declared component (valid ones; invalid ones are in the extension's
+ *  `errors`).
+ */
+export type CustomComponent = {
+	/**
+	 *  `[a-z0-9-]+`, unique in the extension; a lens names it in
+	 *  `custom.component`.
+	 */
+	id: string,
+	extension: string,
+	title: string | null,
+	// The bundle's folder inside the extension, holding `index.html`.
+	bundle: string,
+	// Lens ids (`<extension>/<slug>`) the component may query.
+	assets: string[],
+	// Commands the component may invoke.
+	commands: string[],
+};
+
+/**
  *  One dashboard (a named grid of tiles). Project-global.
  * 
  *  `settings_json` is the saved default **view** — the filter row's range,
@@ -2355,6 +2375,11 @@ export type Extension_Deserialize = {
 	 */
 	providers: ProviderSpec[],
 	/**
+	 *  Web components its `custom` lenses render, sandboxed (experimental:
+	 *  a private extension's only; valid ones).
+	 */
+	customComponents: CustomComponent[],
+	/**
 	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).
 	 */
@@ -2444,6 +2469,11 @@ export type Extension_Serialize = {
 	 *  valid ones — invalid ones are in `errors`).
 	 */
 	providers: ProviderSpec[],
+	/**
+	 *  Web components its `custom` lenses render, sandboxed (experimental:
+	 *  a private extension's only; valid ones).
+	 */
+	customComponents: CustomComponent[],
 	/**
 	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).
@@ -2914,6 +2944,25 @@ export type LensColumn = {
 	link?: LensLink | null,
 };
 
+// A `custom` lens's component and the props it starts with.
+export type LensCustom = LensCustom_Serialize | LensCustom_Deserialize;
+
+// A `custom` lens's component and the props it starts with.
+export type LensCustom_Deserialize = {
+	// One of the extension's `custom_components` ids.
+	component: string | null,
+	// Handed to the component as is.
+	props?: unknown | null,
+};
+
+// A `custom` lens's component and the props it starts with.
+export type LensCustom_Serialize = {
+	// One of the extension's `custom_components` ids.
+	component: string | null,
+	// Handed to the component as is.
+	props: unknown | null,
+};
+
 // `form` viz: the command it submits and the values it starts from.
 export type LensForm = LensForm_Serialize | LensForm_Deserialize;
 
@@ -3173,7 +3222,13 @@ export type LensViz =
  *  like an action's) and the query's first row, if the lens has one.
  *  Submitting runs the command as the lens (P6.B2).
  */
-"form";
+"form" | 
+/**
+ *  The extension's own web component (`custom.component`, P6b.D1), in
+ *  a sandboxed frame; its rows are what it shows and what an agent
+ *  reads (as a table).
+ */
+"custom";
 
 // A loaded lens.
 export type Lens_Deserialize = {
@@ -3198,6 +3253,8 @@ export type Lens_Deserialize = {
 	steps: LensSteps | null,
 	hunks: LensHunks | null,
 	form: LensForm_Deserialize | null,
+	// For `custom`: the component and its props.
+	custom: LensCustom_Deserialize | null,
 	// For `grid`: child lens ids.
 	children: string[],
 	// Launcher section; `None` = "Lenses".
@@ -3235,6 +3292,8 @@ export type Lens_Serialize = {
 	steps: LensSteps | null,
 	hunks: LensHunks | null,
 	form: LensForm_Serialize | null,
+	// For `custom`: the component and its props.
+	custom: LensCustom_Serialize | null,
 	// For `grid`: child lens ids.
 	children: string[],
 	// Launcher section; `None` = "Lenses".

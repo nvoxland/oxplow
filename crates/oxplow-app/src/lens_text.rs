@@ -228,6 +228,17 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
         LensViz::Steps => steps(run),
         LensViz::Hunks => hunks(run, &resolved.diffs),
         LensViz::Table | LensViz::List | LensViz::Grid | LensViz::Form => table(run),
+        // A component's rendering is its own; an agent reads its rows.
+        LensViz::Custom => format!(
+            "(custom component `{}/{}`; its table rendering)\n{}",
+            run.lens.extension,
+            run.lens
+                .custom
+                .as_ref()
+                .and_then(|c| c.component.clone())
+                .unwrap_or_default(),
+            table(run)
+        ),
     };
     if run.result.truncated {
         format!("{body}\n(the query stopped at its row limit)")
@@ -660,6 +671,7 @@ mod tests {
                 steps: None,
                 hunks: None,
                 form: None,
+                custom: None,
                 children: Vec::new(),
                 launcher_category: None,
                 hidden: false,
