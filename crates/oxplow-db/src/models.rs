@@ -527,7 +527,7 @@ fn fill_twin(
     Ok(Kept::Yes(filled))
 }
 
-fn today() -> String {
+pub(crate) fn today() -> String {
     oxplow_domain::Timestamp::now()
         .to_text()
         .chars()

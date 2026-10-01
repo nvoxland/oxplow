@@ -290,6 +290,58 @@ lens is invisible, and worktrees the watcher doesn't cover behave the
 same. Write paths (install, update, save_lens) read the disk directly, and
 consent hashing (`approval_hash`) always reads the bytes it approves.
 
+## The dev loop: build and test time (tsk678, 2026-10-01)
+
+Measured on the 14-core dev Mac (under background load ~11, so expect
+±30% run to run), for a one-line body edit in `oxplow-app`:
+
+| Step | Before | After |
+|---|---|---|
+| Coverage-instrumented test build (`cargo cov`'s compile) | 16–18 s | same |
+| Rust test execution (nextest, every test its own process) | 47–75 s | 22–31 s |
+| Coverage report (`cargo llvm-cov report`) | ~5 s | same |
+| Desktop tests (`test:junit`) / typecheck | ~15 s / <1 s | same |
+| Clippy (`lint:collect`, its own target dir) | ~23 s after the run | overlapped with it |
+
+**What the time was.** Rust test execution was throughput-bound, not
+latency-bound: ~1,045 test-seconds over 14 cores. ~2,000 tests each built
+a fresh database, and `Database::in_memory()` ran 128 migrations plus the
+core model compile — **~330 ms per test**, in its own process under
+nextest, so no in-process cache could help. Now it restores a migrated
+template from `<temp>/oxplow-db-templates/<build+date>.sqlite`
+(`database::load_migrated`: keyed by the test executable's path, size
+and mtime and today's date, written once per build — migrated in memory,
+then copied out with SQLite's backup API, since a migration's
+journal-mode switch is refused on a file inside its transaction — and
+restored with `Connection::restore`; templates older than a day are
+pruned). Test-seconds fell to ~320; `oxplow-app`'s median test went
+0.36 s → 0.05 s. And two `daemon_supervisor` tests took 30 s about half
+the time, setting the suite's floor: a real bug — `stop` asked `getpgid`
+of a daemon leader that could already be a zombie (macOS then fails it),
+so the SIGKILL spared a child still holding stdout. The supervisor now
+puts the daemon in its own process group itself and signals `-pid`
+(`signal_group`); `kill_orphan_daemon` keeps the cautious check for a
+daemon it didn't start.
+
+**What it isn't** (measured; don't redo): the **linker** (0.8 s of a
+14 s `oxplow-app` test-lib build — lld/mold won't help); **incremental
+compilation** (works: a body, private-fn or pub-fn edit recompiles
+`oxplow-app`'s test lib in ~5 s alone; inside the workspace build its two
+units take 6–10 s each in parallel, then dependents ~6 s each — an edit
+that adds public API rebuilds rpc/mcp/tauri-ipc too); coverage
+instrumentation (its build costs about the same as the plain one);
+**splitting `oxplow-app`** (not worth it at these numbers);
+**Cranelift / `-Z threads`** (nightly only, and the coverage build needs
+LLVM anyway). `cargo cov` clears old `.profraw` files at start; only
+`--no-report` runs leave them behind.
+
+**Run lint alongside tests.** `lint:collect` and `test:collect` use
+different target dirs, and clippy mostly waits on one crate, so running
+them together cut a close from ~174 s to ~115 s:
+`(bun run lint:collect >/dev/null 2>&1 & bun run test:collect; wait)` —
+still one foreground command, so collection sees both. Read
+`target/clippy.json` (or rerun plain clippy) when it fails.
+
 ## Related
 
 - [metrics.md](./metrics.md) — the metric substrate itself: the cube, its two

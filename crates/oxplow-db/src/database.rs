@@ -213,7 +213,7 @@ impl Database {
             .build(manager)
             .expect("in-memory sqlite pool builds");
         let mut conn = pool.get().expect("in-memory sqlite connection");
-        migrate_and_compile(&mut conn).expect("in-memory migrations and models");
+        load_migrated(&mut conn).expect("in-memory migrations and models");
         let permits = pool.max_size() as usize;
         Self {
             pool: Arc::new(pool),
@@ -542,6 +542,87 @@ pub(crate) fn migrate_to_for_tests(conn: &mut Connection, version: i32) {
 /// migrations, then compile the models (P4.2). The views are recreated at
 /// every open, so a migration never works around one — and never creates
 /// one: a published view is a model file.
+/// `conn` (empty) as `migrate_and_compile` would leave it, restored from a
+/// migrated template kept on disk: 128 migrations and the core models
+/// cost ~300 ms, and every test builds a fresh database — in its own
+/// process under nextest, so only a file outlives one. The template is
+/// keyed by this executable's build and today's date (a model twin's
+/// keep-until compares against today), written once and atomically.
+/// Without a usable temp dir it migrates directly.
+fn load_migrated(conn: &mut Connection) -> Result<(), DbInitError> {
+    let Some(path) = template_path() else {
+        return migrate_and_compile(conn);
+    };
+    if !path.exists() {
+        write_template(&path)?;
+    }
+    match conn.restore(
+        rusqlite::MAIN_DB,
+        &path,
+        None::<fn(rusqlite::backup::Progress)>,
+    ) {
+        Ok(()) => Ok(()),
+        // An unreadable template is dropped; this one migrates directly.
+        Err(_) => {
+            let _ = std::fs::remove_file(&path);
+            migrate_and_compile(conn)
+        }
+    }
+}
+
+/// Where this build's migrated template lives:
+/// `<temp>/oxplow-db-templates/<build + date>.sqlite`.
+fn template_path() -> Option<std::path::PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let exe = std::env::current_exe().ok()?;
+    let meta = std::fs::metadata(&exe).ok()?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    exe.hash(&mut h);
+    meta.len().hash(&mut h);
+    meta.modified().ok()?.hash(&mut h);
+    crate::models::today().hash(&mut h);
+    Some(
+        std::env::temp_dir()
+            .join("oxplow-db-templates")
+            .join(format!("{:016x}.sqlite", h.finish())),
+    )
+}
+
+/// Write a new template at `path` (through a temporary file renamed into
+/// place, so a concurrent reader never sees half of one), and drop
+/// templates older than a day.
+fn write_template(path: &std::path::Path) -> Result<(), DbInitError> {
+    let fail = |e: String| DbInitError::Migration(format!("migrated template: {e}"));
+    let dir = path.parent().ok_or_else(|| fail("no parent".into()))?;
+    std::fs::create_dir_all(dir).map_err(|e| fail(e.to_string()))?;
+    let tmp = dir.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
+    // Migrated in memory, as a test database is (a migration's journal
+    // mode switch is refused on a file inside its transaction), then
+    // copied out page for page.
+    let mut conn = Connection::open_in_memory().map_err(|e| fail(e.to_string()))?;
+    migrate_and_compile(&mut conn)?;
+    conn.backup(
+        rusqlite::MAIN_DB,
+        &tmp,
+        None::<fn(rusqlite::backup::Progress)>,
+    )
+    .map_err(|e| fail(e.to_string()))?;
+    std::fs::rename(&tmp, path).map_err(|e| fail(e.to_string()))?;
+    let day = std::time::Duration::from_secs(24 * 3600);
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > day);
+        if old {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn migrate_and_compile(conn: &mut Connection) -> Result<(), DbInitError> {
     crate::models::drop_all(conn).map_err(|e| DbInitError::Models(e.to_string()))?;
     embedded::migrations::runner()
@@ -553,6 +634,40 @@ pub(crate) fn migrate_and_compile(conn: &mut Connection) -> Result<(), DbInitErr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A database restored from the migrated template is exactly what
+    /// migrating from scratch makes: same tables, views, indexes and
+    /// triggers, same migration history.
+    #[test]
+    fn an_in_memory_database_matches_a_fresh_migration() {
+        let schema = |c: &Connection| -> Vec<(String, String, Option<String>)> {
+            let mut stmt = c
+                .prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name")
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let history = |c: &Connection| -> i64 {
+            c.query_row("SELECT count(*) FROM refinery_schema_history", [], |r| {
+                r.get(0)
+            })
+            .unwrap()
+        };
+        let mut fresh = Connection::open_in_memory().unwrap();
+        migrate_and_compile(&mut fresh).unwrap();
+        for _ in 0..2 {
+            let db = Database::in_memory();
+            let conn = db.conn().unwrap();
+            assert_eq!(schema(&conn), schema(&fresh));
+            assert_eq!(history(&conn), history(&fresh));
+        }
+        assert!(
+            template_path().is_some_and(|p| p.exists()),
+            "the template is kept"
+        );
+    }
 
     /// Bringing a pool connection up must never contend with a writer.
     ///

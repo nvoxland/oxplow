@@ -130,21 +130,35 @@ fn process_alive(_pid: u32) -> bool {
     false
 }
 
+#[derive(Clone, Copy)]
+enum Signal {
+    Term,
+    Kill,
+}
+
+/// Signal the process group a daemon this supervisor started leads
+/// (`own_process_group`): the daemon and every process it spawned.
+#[cfg(unix)]
+fn signal_group(pgid: u32, sig: Signal) {
+    let sig = match sig {
+        Signal::Term => libc::SIGTERM,
+        Signal::Kill => libc::SIGKILL,
+    };
+    unsafe {
+        libc::kill(-(pgid as libc::pid_t), sig);
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_group(_pgid: u32, _sig: Signal) {}
+
 #[cfg(unix)]
 fn terminate(pid: u32) {
     signal_tree(pid, libc::SIGTERM);
 }
 
-#[cfg(unix)]
-fn hard_kill(pid: u32) {
-    signal_tree(pid, libc::SIGKILL);
-}
-
 #[cfg(not(unix))]
 fn terminate(_pid: u32) {}
-
-#[cfg(not(unix))]
-fn hard_kill(_pid: u32) {}
 
 /// Kill a daemon left running for `project_dir` by a previous shell.
 /// Returns whether one was actually running. The endpoint file is
@@ -194,7 +208,6 @@ impl BundledDaemon {
 impl DaemonLauncher for BundledDaemon {
     fn command(&self, project_dir: &Path) -> Command {
         let mut cmd = Command::new(Self::binary_path());
-        own_process_group(&mut cmd);
         cmd.arg("--project")
             .arg(project_dir)
             // Port 0: the OS picks, so two projects can't collide.
@@ -283,6 +296,9 @@ impl DaemonSupervisor {
         }
 
         let mut cmd = self.launcher.command(&key);
+        // The daemon leads a process group of its own, so `stop` can
+        // signal it and everything it spawned as one (`signal_group`).
+        own_process_group(&mut cmd);
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
@@ -353,8 +369,7 @@ impl DaemonSupervisor {
                         self.startup_timeout
                     ),
                 };
-                hard_kill(child.id());
-                let _ = child.kill();
+                signal_group(child.id(), Signal::Kill);
                 let _ = child.wait();
                 clear_daemon_info(&canonical(project_dir));
                 Err(std::io::Error::other(message))
@@ -393,8 +408,11 @@ impl DaemonSupervisor {
     pub fn stop(&self, project_dir: &Path) {
         let key = canonical(project_dir);
         if let Some(mut handle) = self.lock().remove(&key) {
+            // `start` made the daemon lead its own group, so the group is
+            // `pid` — known, not asked of the OS (`getpgid` fails once the
+            // leader is a zombie, which would spare its children).
             let pid = handle.child.id();
-            terminate(pid);
+            signal_group(pid, Signal::Term);
             if !wait_for_exit(&mut handle.child, self.shutdown_grace) {
                 tracing::warn!(project = %key.display(), "daemon ignored SIGTERM; killing");
             }
@@ -405,7 +423,7 @@ impl DaemonSupervisor {
             // reserved while it is a zombie, and once reaped the OS may
             // recycle it onto an unrelated process whose group we would
             // then be signalling.
-            hard_kill(pid);
+            signal_group(pid, Signal::Kill);
             let _ = handle.child.wait();
             if let Some(reader) = handle.reader.take() {
                 let _ = reader.join();
@@ -469,7 +487,6 @@ mod tests {
     impl DaemonLauncher for FakeDaemon {
         fn command(&self, _project_dir: &std::path::Path) -> std::process::Command {
             let mut cmd = std::process::Command::new("/bin/sh");
-            super::own_process_group(&mut cmd);
             cmd.arg("-c").arg(self.0);
             cmd
         }
@@ -647,6 +664,51 @@ mod tests {
         assert!(
             !process_alive(grandchild),
             "stopping the daemon must kill its children too"
+        );
+    }
+
+    /// The daemon dies on SIGTERM but a child of it ignores TERM (and
+    /// holds its stdout): once the leader is gone — a zombie, whose group
+    /// `getpgid` no longer reports on macOS — the SIGKILL must still reach
+    /// the group, or the child lives on and `stop` waits on its output.
+    #[test]
+    fn stop_kills_a_child_that_outlives_the_daemon() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pidfile = tmp.path().join("stubborn.pid");
+        let script: &'static str = Box::leak(
+            format!(
+                "(trap '' TERM; exec sleep 30) & echo $! > {}; \
+                 echo 'oxplow-daemon listening on http://127.0.0.1:12345'; \
+                 wait",
+                pidfile.display()
+            )
+            .into_boxed_str(),
+        );
+        let sup = DaemonSupervisor::with_launcher(Box::new(FakeDaemon(script)))
+            .with_startup_timeout(Duration::from_secs(5))
+            .with_shutdown_grace(Duration::from_millis(500));
+        sup.start(tmp.path()).unwrap();
+        let stubborn: u32 = std::fs::read_to_string(&pidfile)
+            .expect("child pid file")
+            .trim()
+            .parse()
+            .unwrap();
+        let started = std::time::Instant::now();
+        sup.stop(tmp.path());
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "stop waited {:?} on a surviving child",
+            started.elapsed()
+        );
+        for _ in 0..40 {
+            if !process_alive(stubborn) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(
+            !process_alive(stubborn),
+            "the TERM-ignoring child must be killed"
         );
     }
 

@@ -140,6 +140,16 @@ Rust half needs `cargo-llvm-cov` + `cargo-nextest` installed (`cargo
 install cargo-llvm-cov cargo-nextest`) to write `target/coverage/lcov.info`.
 See `.context/collection.md`.
 
+**Closing a change runs lint and tests together** — they don't share a
+target dir: `(bun run lint:collect >/dev/null 2>&1 & bun run
+test:collect; wait)`, still one foreground command (see
+[performance.md](./performance.md) → "The dev loop").
+
+**A test database comes from a migrated template**
+(`Database::in_memory()` restores `<temp>/oxplow-db-templates/<build+date>.sqlite`
+instead of running every migration, ~330 ms → a few ms). A new migration
+or model needs nothing: a rebuilt test binary is a new template key.
+
 ### Timing assertions flake under `cargo cov` (tsk175)
 
 `cargo cov` runs every test as its **own process, all concurrently, on an
