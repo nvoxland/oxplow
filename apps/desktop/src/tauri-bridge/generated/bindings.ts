@@ -1485,6 +1485,9 @@ export type CatalogPrompt = {
 	source: PromptSource,
 };
 
+// How one thing differs between the installed version and the candidate.
+export type Change = "added" | "removed" | "changed" | "unchanged";
+
 export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked";
 
 // A change's identity and state.
@@ -1643,6 +1646,15 @@ export type CollectionConfig = {
 	plugins?: PluginConfig[],
 };
 
+export type CollectorEffect = {
+	id: string,
+	change: Change,
+	before: Grants | null,
+	after: Grants | null,
+	// The views it fills.
+	entities: string[],
+};
+
 // One promised column.
 export type ColumnDecl = {
 	name: string,
@@ -1666,6 +1678,14 @@ export type ColumnType = "text" | "int" | "real" | "bool" |
 export type CommandCall = {
 	name: string,
 	input: unknown,
+};
+
+// One of a provider's declared commands.
+export type CommandChange = {
+	name: string,
+	change: Change,
+	before: unknown | null,
+	after: unknown | null,
 };
 
 /**
@@ -1820,6 +1840,13 @@ export type CommitRefLabel = {
 };
 
 export type CommitRefLabelKind = "branch" | "tag";
+
+// The instance config schema (`config:`), by property.
+export type ConfigEffect = {
+	before: unknown | null,
+	after: unknown | null,
+	changedKeys: string[],
+};
 
 // Where a setting's value comes from.
 export type ConfigOrigin = "default" | "global" | "project" | "extension";
@@ -2066,6 +2093,15 @@ export type Divergence = {
 	readiness: MergeReadiness,
 };
 
+// Everything installing or updating an extension would change.
+export type EffectReport = {
+	lenses: LensEffect[],
+	models: ModelEffect[],
+	collectors: CollectorEffect[],
+	providers: ProviderEffect[],
+	config: ConfigEffect | null,
+};
+
 // One setting as the Settings view shows it.
 export type EffectiveSetting = {
 	/**
@@ -2304,6 +2340,11 @@ export type ExtensionReview_Deserialize = {
 	// The commit reviewed; pass it back to install exactly this.
 	sha: string,
 	problems: string[],
+	/**
+	 *  What installing it would change, against the installed version
+	 *  when it replaces one (P6b.E2).
+	 */
+	effects: EffectReport,
 };
 
 /**
@@ -2322,6 +2363,11 @@ export type ExtensionReview_Serialize = {
 	// The commit reviewed; pass it back to install exactly this.
 	sha: string,
 	problems: string[],
+	/**
+	 *  What installing it would change, against the installed version
+	 *  when it replaces one (P6b.E2).
+	 */
+	effects: EffectReport,
 };
 
 // Provenance of an installed extension, kept in its `source.yaml`.
@@ -2440,6 +2486,8 @@ export type Extension_Deserialize = {
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
 	 */
 	commands: ExtensionCommand[],
+	// Its instance config schema (`config:`), as declared.
+	config: unknown | null,
 };
 
 // A loaded extension and anything wrong with it.
@@ -2535,6 +2583,8 @@ export type Extension_Serialize = {
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
 	 */
 	commands: ExtensionCommand[],
+	// Its instance config schema (`config:`), as declared.
+	config: unknown | null,
 };
 
 export type FileSnapshot = {
@@ -2699,6 +2749,16 @@ export type GaugeEntry = {
 export type GeneratedConfig = {
 	exclude?: string[],
 	include?: string[],
+};
+
+// What a program may reach: what a person approves.
+export type Grants = {
+	entry: string,
+	runtime: string,
+	args: string[],
+	hosts: string[],
+	credentials: string[],
+	env: string[],
 };
 
 // Where a stream's workspace is.
@@ -2971,6 +3031,16 @@ export type LensCustom_Serialize = {
 	component: string | null,
 	// Handed to the component as is.
 	props: unknown | null,
+};
+
+// A lens, by its rendered text before and after (P6b.E2).
+export type LensEffect = {
+	id: string,
+	change: Change,
+	before: string | null,
+	after: string | null,
+	// Why a side couldn't render (its query failed).
+	error: string | null,
 };
 
 // `form` viz: the command it submits and the values it starts from.
@@ -3527,6 +3597,17 @@ export type ModelDecl = {
 	deprecated?: Deprecated[],
 };
 
+export type ModelEffect = {
+	view: string,
+	change: Change,
+	beforeColumns: string[],
+	afterColumns: string[],
+	// The first difference in its contract (columns, types, docs).
+	contractChange: string | null,
+	// Models that read it, which a contract change can break (P6b.E2).
+	downstream: string[],
+};
+
 // When one model last changed.
 export type ModelFreshness = {
 	model: string,
@@ -4047,6 +4128,17 @@ export type ProviderConfig = {
 	kind: ProviderKind,
 	// Required for `openai-compatible`; optional override for others.
 	baseUrl?: string | null,
+};
+
+export type ProviderEffect = {
+	id: string,
+	capability: string,
+	change: Change,
+	before: Grants | null,
+	after: Grants | null,
+	commands: CommandChange[],
+	featuresBefore: unknown | null,
+	featuresAfter: unknown | null,
 };
 
 // An instance as Settings → Integrations shows it.

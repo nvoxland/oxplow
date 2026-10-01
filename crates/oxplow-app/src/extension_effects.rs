@@ -333,6 +333,136 @@ pub fn config_diff(before: Option<&Value>, after: Option<&Value>) -> Option<Conf
     })
 }
 
+/// A loaded extension and how to read its files (the installed one from
+/// the project, a candidate from its clone).
+pub struct Version<'a> {
+    pub extension: &'a crate::extensions::Extension,
+    pub read: &'a (dyn Fn(&str) -> Option<String> + Sync),
+}
+
+/// Each lens's rendered text, by slug: what `lens_text` gives an agent,
+/// with default params; a grid renders its children empty. A query that
+/// fails is the lens's error.
+async fn lens_texts(
+    layer: &crate::sql_gateway::SqlGateway,
+    ext: &crate::extensions::Extension,
+) -> BTreeMap<String, Result<String, String>> {
+    let mut out = BTreeMap::new();
+    for lens in &ext.lenses {
+        let text = crate::extensions::run_lens_spec(layer, lens.clone())
+            .await
+            .map(|run| crate::lens_text::render(&run, &Default::default()))
+            .map_err(|e| e.to_string().replacen("invalid value: ", "", 1));
+        out.insert(lens.slug.clone(), text);
+    }
+    out
+}
+
+/// The views that read `view` directly (`v_model_lineage`).
+pub async fn downstream_of(layer: &crate::sql_gateway::SqlGateway, view: &str) -> Vec<String> {
+    layer
+        .query_sql(
+            "SELECT DISTINCT view FROM v_model_lineage WHERE input = ?1 AND kind = 'ref' ORDER BY view",
+            vec![oxplow_db::SqlCell::Text(view.to_string())],
+            None,
+        )
+        .await
+        .map(|r| {
+            r.rows
+                .into_iter()
+                .filter_map(|row| match row.into_iter().next() {
+                    Some(oxplow_db::SqlCell::Text(v)) => Some(v),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// What installing `after` — over `before`, when one is installed — would
+/// change. Lenses are rendered (their queries run read-only, against the
+/// models as published now); collectors and providers are only compared.
+pub async fn effects(
+    layer: &crate::sql_gateway::SqlGateway,
+    before: Option<Version<'_>>,
+    after: Version<'_>,
+) -> EffectReport {
+    let name = &after.extension.name;
+    let texts_before = match &before {
+        Some(b) => lens_texts(layer, b.extension).await,
+        None => BTreeMap::new(),
+    };
+    let texts_after = lens_texts(layer, after.extension).await;
+    let slugs: BTreeSet<&String> = texts_before.keys().chain(texts_after.keys()).collect();
+    let lenses = slugs
+        .into_iter()
+        .map(|slug| {
+            let (b, a) = (texts_before.get(slug), texts_after.get(slug));
+            let ok = |r: Option<&Result<String, String>>| r.and_then(|r| r.as_ref().ok().cloned());
+            let error = a.or(b).and_then(|r| r.as_ref().err().cloned());
+            LensEffect {
+                id: format!("{name}/{slug}"),
+                change: match (b, a) {
+                    (None, _) => Change::Added,
+                    (_, None) => Change::Removed,
+                    (Some(Ok(x)), Some(Ok(y))) if x == y => Change::Unchanged,
+                    _ => Change::Changed,
+                },
+                before: ok(b),
+                after: ok(a),
+                error,
+            }
+        })
+        .collect();
+    let empty: Vec<ModelSource> = Vec::new();
+    let mut models = models_diff(
+        name,
+        before.as_ref().map_or(&empty, |b| &b.extension.models),
+        &after.extension.models,
+    );
+    for m in &mut models {
+        m.downstream = downstream_of(layer, &m.view)
+            .await
+            .into_iter()
+            .filter(|v| !v.starts_with(&oxplow_db::models::extension_view(name, "")))
+            .collect();
+    }
+    let no_sources: Vec<SourceSpec> = Vec::new();
+    let collectors = collectors_diff(
+        before
+            .as_ref()
+            .map_or(&no_sources, |b| &b.extension.sources),
+        &after.extension.sources,
+    );
+    let declared = |v: &Version<'_>| -> Vec<DeclaredProvider> {
+        v.extension
+            .providers
+            .iter()
+            .map(|p| {
+                (
+                    p.clone(),
+                    crate::providers::spec::read_declarations(p, v.read).ok(),
+                )
+            })
+            .collect()
+    };
+    let providers = providers_diff(
+        &before.as_ref().map(declared).unwrap_or_default(),
+        &declared(&after),
+    );
+    let config = config_diff(
+        before.as_ref().and_then(|b| b.extension.config.as_ref()),
+        after.extension.config.as_ref(),
+    );
+    EffectReport {
+        lenses,
+        models,
+        collectors,
+        providers,
+        config,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -482,5 +612,102 @@ mod tests {
         assert_eq!(c.changed_keys, vec!["new", "old", "team"]);
         let first = config_diff(None, Some(&after)).unwrap();
         assert_eq!(first.changed_keys, vec!["new", "team"]);
+    }
+
+    fn write(root: &std::path::Path, rel: &str, body: &str) {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    }
+
+    /// Extension `x` with `lenses` (slug, body), loaded from its own folder.
+    fn version(lenses: &[(&str, &str)]) -> (tempfile::TempDir, crate::extensions::Extension) {
+        let d = tempfile::tempdir().unwrap();
+        write(
+            d.path(),
+            "oxplow/extensions/x/extension.yaml",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\n",
+        );
+        for (slug, body) in lenses {
+            write(
+                d.path(),
+                &format!("oxplow/extensions/x/lenses/{slug}.yaml"),
+                body,
+            );
+        }
+        let ext = crate::extensions::load_extensions(d.path())
+            .into_iter()
+            .find(|e| e.name == "x")
+            .unwrap();
+        (d, ext)
+    }
+
+    #[tokio::test]
+    async fn a_changed_lens_renders_before_and_after_text() {
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let (_b, before) = version(&[
+            ("same", "title: Same\nquery: SELECT 1 AS n\nviz: number\n"),
+            ("count", "title: Count\nquery: SELECT 1 AS n\nviz: number\n"),
+            ("old", "title: Old\nquery: SELECT 1 AS n\n"),
+        ]);
+        let (_a, after) = version(&[
+            ("same", "title: Same\nquery: SELECT 1 AS n\nviz: number\n"),
+            ("count", "title: Count\nquery: SELECT 2 AS n\nviz: number\n"),
+            (
+                "broken",
+                "title: Broken\nquery: SELECT n FROM v_no_such_model\n",
+            ),
+        ]);
+        let none = |_: &str| None;
+        let report = effects(
+            &layer,
+            Some(Version {
+                extension: &before,
+                read: &none,
+            }),
+            Version {
+                extension: &after,
+                read: &none,
+            },
+        )
+        .await;
+        let by: BTreeMap<&str, &LensEffect> =
+            report.lenses.iter().map(|l| (l.id.as_str(), l)).collect();
+        assert_eq!(by["x/same"].change, Change::Unchanged);
+        assert_eq!(by["x/count"].change, Change::Changed);
+        assert_eq!(by["x/count"].before.as_deref(), Some("1"));
+        assert_eq!(by["x/count"].after.as_deref(), Some("2"));
+        assert_eq!(by["x/old"].change, Change::Removed);
+        assert_eq!(by["x/broken"].change, Change::Added);
+        assert!(
+            by["x/broken"]
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("v_no_such_model")),
+            "{:?}",
+            by["x/broken"]
+        );
+        // A first install: everything is added.
+        let fresh = effects(
+            &layer,
+            None,
+            Version {
+                extension: &after,
+                read: &none,
+            },
+        )
+        .await;
+        assert!(fresh.lenses.iter().all(|l| l.change == Change::Added));
+    }
+
+    #[tokio::test]
+    async fn downstream_models_come_from_the_lineage() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let readers = downstream_of(&fx.svc.sql, "v_knowledge_ref").await;
+        assert!(
+            readers.contains(&"v_knowledge_page".to_string()),
+            "{readers:?}"
+        );
+        assert!(downstream_of(&fx.svc.sql, "v_nothing").await.is_empty());
     }
 }

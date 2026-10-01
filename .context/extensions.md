@@ -778,6 +778,24 @@ The report is built from the two loaded versions: **it never runs a
 collector or a provider** — consent forbids running a version nobody
 approved.
 
+`extension_effects::effects(layer, before, after)` (P6b.E2) builds it:
+each lens is rendered (`run_lens_spec`: default params, no viewer
+context; `lens_text::render`, a grid's children rendering empty) against
+the models **as published now** — a lens over a model the candidate
+changes or adds renders against today's model, or fails (its `error`) —
+and each model's `downstream` is its direct readers from
+`v_model_lineage` (`downstream_of`), outside the extension itself; a
+provider's declarations are read from each version's files.
+`review_extension` fills `ExtensionReview.effects`, with the installed
+version as `before` when it replaces one (`review_update`), else none
+(everything is `added`). Settings → Extensions shows it (`effectLines`:
+collectors' and providers' grants first — "now reaches x (was y)", a
+provider command added (destructive) — then models with their readers,
+lenses, the config keys) and each changed lens's text before and after,
+side by side (`EffectDiff`; no line diff yet). Deferred: model row
+counts, collector dry-run output, `plugin check --effects`, and the
+effort-review view of an extension change.
+
 ## Commands in core menus (`ui.commands`)
 
 `ui.commands` (stable, P6b.C4; `extensions/ui_commands.rs`) puts a

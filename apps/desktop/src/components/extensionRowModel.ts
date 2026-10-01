@@ -1,5 +1,5 @@
 /** Pure row presentation for the Settings → Extensions list. */
-import type { Extension, ExtensionReview, SourceListing } from "../tauri-bridge/generated/bindings.js";
+import type { EffectReport, Extension, ExtensionReview, Grants, SourceListing } from "../tauri-bridge/generated/bindings.js";
 
 export interface ExtensionRowModel {
   name: string;
@@ -126,7 +126,67 @@ export interface ReviewModel {
   errors: string[];
   /** What a dry run of its lenses found; shown, not blocking. */
   problems: string[];
+  /** What installing it would change, one line each — grants first. */
+  effects: string[];
+  /** Lenses whose text changes: before and after, side by side. */
+  lensDiffs: { id: string; before: string; after: string }[];
   canInstall: boolean;
+}
+
+const list = (xs: string[]) => (xs.length > 0 ? xs.join(", ") : "none");
+
+/** What a program's grants became, as phrases ("now reaches x (was y)"). */
+function grantChanges(before: Grants | null, after: Grants | null): string[] {
+  if (!before || !after) return [];
+  const out: string[] = [];
+  if (before.entry !== after.entry || before.runtime !== after.runtime) out.push(`now runs ${after.entry} (was ${before.entry})`);
+  if (list(before.args) !== list(after.args)) out.push(`args now ${list(after.args)} (was ${list(before.args)})`);
+  if (list(before.hosts) !== list(after.hosts)) out.push(`now reaches ${list(after.hosts)} (was ${list(before.hosts)})`);
+  if (list(before.credentials) !== list(after.credentials)) out.push(`now reads ${list(after.credentials)} (was ${list(before.credentials)})`);
+  if (list(before.env) !== list(after.env)) out.push(`now reads env ${list(after.env)} (was ${list(before.env)})`);
+  return out;
+}
+
+const reaches = (g: Grants | null) => (g ? `runs ${g.entry} · reaches ${list(g.hosts)} · reads ${list(g.credentials)}` : "");
+
+/** The report as lines: collectors' and providers' grants first (what a
+ *  person approves), then models, lenses and the config schema. */
+export function effectLines(report: EffectReport): string[] {
+  const out: string[] = [];
+  for (const c of report.collectors) {
+    if (c.change === "added") out.push(`Collector ${c.id}: added — ${reaches(c.after)}`);
+    else if (c.change === "removed") out.push(`Collector ${c.id}: removed`);
+    else for (const g of grantChanges(c.before, c.after)) out.push(`Collector ${c.id}: ${g}`);
+  }
+  for (const p of report.providers) {
+    if (p.change === "added") out.push(`Provider ${p.id}: added — ${reaches(p.after)}`);
+    else if (p.change === "removed") out.push(`Provider ${p.id}: removed`);
+    else for (const g of grantChanges(p.before, p.after)) out.push(`Provider ${p.id}: ${g}`);
+    if (p.change !== "added" && p.change !== "removed") {
+      for (const c of p.commands.filter((c) => c.change !== "unchanged")) {
+        const destructive = (c.after as { confirm?: string } | null)?.confirm === "destructive" ? " (destructive)" : "";
+        out.push(`Provider ${p.id}: command \`${c.name}\` ${c.change}${destructive}`);
+      }
+      if (JSON.stringify(p.featuresBefore) !== JSON.stringify(p.featuresAfter)) {
+        out.push(`Provider ${p.id}: features now ${JSON.stringify(p.featuresAfter)} (were ${JSON.stringify(p.featuresBefore)})`);
+      }
+    }
+  }
+  for (const m of report.models) {
+    if (m.change === "unchanged") continue;
+    const what =
+      m.change === "changed" ? (m.contractChange ?? "its query changed (same columns)") : m.change;
+    const downstream = m.downstream.length > 0 ? `; read by ${m.downstream.join(", ")}` : "";
+    out.push(`Model ${m.view}: ${what}${downstream}`);
+  }
+  for (const l of report.lenses) {
+    if (l.error) out.push(`Lens ${l.id}: ${l.change === "unchanged" ? "" : `${l.change}; `}its query fails: ${l.error}`);
+    else if (l.change !== "unchanged") out.push(`Lens ${l.id}: ${l.change}`);
+  }
+  if (report.config && report.config.changedKeys.length > 0) {
+    out.push(`Config: ${report.config.changedKeys.join(", ")} changed`);
+  }
+  return out;
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -166,6 +226,10 @@ export function reviewModel(review: ExtensionReview): ReviewModel {
     declares,
     errors: ext.errors,
     problems: review.problems,
+    effects: effectLines(review.effects),
+    lensDiffs: review.effects.lenses
+      .filter((l) => l.change === "changed" && l.before !== null && l.after !== null)
+      .map((l) => ({ id: l.id, before: l.before!, after: l.after! })),
     canInstall: ext.errors.length === 0,
   };
 }

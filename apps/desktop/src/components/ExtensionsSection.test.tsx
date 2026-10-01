@@ -28,6 +28,7 @@ const review = (over: Partial<Extension> = {}): ExtensionReview => ({
   gitRef: null,
   sha: "0123456789abcdef0123456789abcdef01234567",
   problems: [],
+  effects: { lenses: [], models: [], collectors: [], providers: [], config: null },
 });
 
 // tsk378: an install shows what it brings in; the person confirms or cancels.
@@ -56,4 +57,22 @@ test("the review panel confirms, cancels on Escape, and blocks on load errors", 
   );
   expect((getByTestId("extension-review-confirm") as HTMLButtonElement).disabled).toBe(true);
   expect(getByTestId("extension-review").textContent).toContain("bogus");
+});
+
+// P6b.E2: an update's changed lens shows its text before and after.
+test("a changed lens shows both texts in the review", () => {
+  const changed: ExtensionReview = {
+    ...review(),
+    effects: {
+      lenses: [{ id: "shared/count", change: "changed", before: "1", after: "2", error: null }],
+      models: [],
+      collectors: [],
+      providers: [],
+      config: null,
+    },
+  };
+  const view = render(<ReviewPanel review={changed} action="Update" busy={false} onConfirm={() => {}} onCancel={() => {}} />);
+  expect(view.getByTestId("extension-review-effects").textContent).toContain("Lens shared/count: changed");
+  expect(view.getByTestId("effect-lens-shared/count-before").textContent).toBe("1");
+  expect(view.getByTestId("effect-lens-shared/count-after").textContent).toBe("2");
 });

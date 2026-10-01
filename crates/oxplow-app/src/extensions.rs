@@ -955,6 +955,9 @@ pub struct Extension {
     /// Commands it registers on the bus, each a Starlark script composing
     /// core commands (P6b; valid ones — invalid ones are in `errors`).
     pub commands: Vec<crate::extension_commands::ExtensionCommand>,
+    /// Its instance config schema (`config:`), as declared.
+    #[specta(type = Option<oxplow_domain::Json>)]
+    pub config: Option<serde_json::Value>,
 }
 
 /// What an extension adds to the core UI (`ui:` in its manifest).
@@ -1175,6 +1178,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         panels: Vec::new(),
         pages: Vec::new(),
         commands: Vec::new(),
+        config: None,
     }
 }
 
@@ -1233,6 +1237,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.sharing = m.sharing;
     ext.intent = m.intent.clone();
     ext.description = m.description.clone();
+    ext.config = m.config.as_ref().and_then(|c| serde_json::to_value(c).ok());
     if is_v2 {
         let (errors, warnings) = manifest_v2::check(&m, &file, &manifest, origin == "bundled");
         ext.errors.extend(errors);
@@ -2155,6 +2160,15 @@ pub fn resolve_params(
     Ok(params)
 }
 
+/// Run `lens` with its default params and no viewer context — how a
+/// review renders a lens it isn't showing anyone.
+pub async fn run_lens_spec(
+    layer: &crate::sql_gateway::SqlGateway,
+    lens: Lens,
+) -> Result<LensRun, DomainError> {
+    execute(layer, lens, BTreeMap::new(), &LensContext::default()).await
+}
+
 async fn execute(
     layer: &crate::sql_gateway::SqlGateway,
     lens: Lens,
@@ -2482,6 +2496,9 @@ pub struct ExtensionReview {
     /// The commit reviewed; pass it back to install exactly this.
     pub sha: String,
     pub problems: Vec<String>,
+    /// What installing it would change, against the installed version
+    /// when it replaces one (P6b.E2).
+    pub effects: crate::extension_effects::EffectReport,
 }
 
 /// Clone an extension and report what it declares, installing nothing.
@@ -2510,12 +2527,37 @@ pub async fn review_extension(
     let load_errors = extension.errors.len();
     check_extension(layer, catalog, root, &mut extension, Some(commands)).await;
     let problems = extension.errors.split_off(load_errors);
+    let installed: Option<Extension> = replacing.and_then(|name| {
+        catalog
+            .get(root)
+            .iter()
+            .find(|e| e.name == name && e.origin == "project")
+            .cloned()
+    });
+    let read_installed = |rel: &str| read_extension_file(root, &extension.name, rel);
+    let clone = Disk(fetched.clone.clone());
+    let read_candidate = |rel: &str| clone.read(rel);
+    let effects = crate::extension_effects::effects(
+        layer,
+        installed
+            .as_ref()
+            .map(|e| crate::extension_effects::Version {
+                extension: e,
+                read: &read_installed,
+            }),
+        crate::extension_effects::Version {
+            extension: &extension,
+            read: &read_candidate,
+        },
+    )
+    .await;
     Ok(ExtensionReview {
         extension,
         git: git_url.to_string(),
         git_ref: git_ref.map(str::to_string),
         sha: fetched.sha,
         problems,
+        effects,
     })
 }
 
@@ -3549,6 +3591,45 @@ empty: No tasks.
     /// declares (sources with their programs, hosts and credentials) and
     /// what's wrong with it; install then takes exactly the commit they
     /// reviewed (tsk378).
+    /// P6b.E2: an update is reviewed against the installed version — a
+    /// changed lens shows its text before and after.
+    #[tokio::test]
+    async fn review_update_shows_before_and_after_against_the_installed_version() {
+        let project = tempfile::tempdir().unwrap();
+        let repo = published_repo("Count");
+        let url = repo.path().to_string_lossy().to_string();
+        let sl = layer().await;
+        let first = review_extension(&sl, &cat(), project.path(), &url, None, None, &|_| None)
+            .await
+            .unwrap();
+        assert!(first
+            .effects
+            .lenses
+            .iter()
+            .all(|l| l.change == crate::extension_effects::Change::Added));
+        install_extension(project.path(), &url, None, &first.sha).unwrap();
+        write(
+            repo.path(),
+            "lenses/count.yaml",
+            "title: Count\nquery: SELECT 2 AS n\nviz: number\n",
+        );
+        git(repo.path(), &["commit", "-qam", "two"]);
+        let update = review_update(&sl, &cat(), project.path(), "shared", &|_| None)
+            .await
+            .unwrap();
+        let count = update
+            .effects
+            .lenses
+            .iter()
+            .find(|l| l.id == "shared/count")
+            .unwrap();
+        assert_eq!(count.change, crate::extension_effects::Change::Changed);
+        assert_eq!(
+            (count.before.as_deref(), count.after.as_deref()),
+            (Some("1"), Some("2"))
+        );
+    }
+
     #[tokio::test]
     async fn review_shows_what_an_extension_declares_before_install() {
         let project = tempfile::tempdir().unwrap();
