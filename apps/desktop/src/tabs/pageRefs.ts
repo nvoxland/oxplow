@@ -128,6 +128,15 @@ export function taskRef(itemId: string): TabRef {
   return { id: canonicalId("work_item", `${OXPLOW_PROVIDER}${itemId}`), kind: "work_item", payload: { itemId } };
 }
 
+/** Any work item's page: oxplow's tasks open as their task page, another
+ *  provider's as the provider-neutral work item page (P6b.C3). */
+export function workItemTabRef(ref: string): TabRef {
+  if (ref.startsWith(`work_item:${OXPLOW_PROVIDER}`)) {
+    return taskRef(ref.slice(`work_item:${OXPLOW_PROVIDER}`.length));
+  }
+  return { id: ref, kind: "work_item", payload: { ref } };
+}
+
 /** Single git commit page. */
 export function gitCommitRef(sha: string): TabRef {
   return { id: canonicalId("commit", sha), kind: "commit", payload: { sha } };
@@ -591,9 +600,7 @@ export function refFromTabId(id: string): TabRef | null {
     case "wiki":
       return wikiPageRef(canonical.id);
     case "work_item":
-      return canonical.id.startsWith(OXPLOW_PROVIDER)
-        ? taskRef(canonical.id.slice(OXPLOW_PROVIDER.length))
-        : null;
+      return workItemTabRef(`work_item:${canonical.id}`);
     case "commit":
       return gitCommitRef(canonical.id);
     case "metric":

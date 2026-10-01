@@ -305,3 +305,15 @@ describe("refFromTabId", () => {
     expect(lensRef("x/y", {}).id).toBe("lens:x/y");
   });
 });
+
+import { taskRef, workItemTabRef } from "./pageRefs.js";
+
+// P6b.C3: any provider's work item opens — oxplow's as its task page,
+// another's as the provider-neutral work item page.
+test("a work item ref opens for every provider", () => {
+  expect(workItemTabRef("work_item:oxplow:tsk3")).toEqual(taskRef("tsk3"));
+  const theirs = workItemTabRef("work_item:fake:W-1");
+  expect(theirs).toEqual({ id: "work_item:fake:W-1", kind: "work_item", payload: { ref: "work_item:fake:W-1" } });
+  expect(refFromTabId("work_item:fake:W-1")).toEqual(theirs);
+  expect(refFromTabId("work_item:oxplow:tsk3")).toEqual(taskRef("tsk3"));
+});

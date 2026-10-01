@@ -141,6 +141,7 @@ import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { TaskPage } from "./pages/TaskPage.js";
+import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { WikiPage } from "./pages/WikiPage.js";
 import { WikiFreshnessPage } from "./pages/WikiFreshnessPage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
@@ -2969,6 +2970,16 @@ export function App() {
         };
       },
       work_item: (ref, nav) => {
+        // Another provider's item: the provider-neutral page (P6b.C3).
+        const otherRef = (ref.payload as { ref?: string } | null)?.ref;
+        if (otherRef) {
+          return {
+            id: ref.id,
+            label: otherRef,
+            closable: true,
+            render: () => <WorkItemPage workItemRef={otherRef} streamId={stream?.id ?? null} onOpenPage={nav.navOpen} />,
+          };
+        }
         const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";
         // ThreadWorkState splits items by status (Ready→items, InProgress→inProgress,
         // Done/Canceled/Archived→done, Blocked→waiting, Epics→epics). Merge them all

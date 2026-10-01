@@ -160,6 +160,25 @@ export function itemsFromResult(result: SqlQueryResult): WorkItem[] {
   });
 }
 
+/** One work item by ref, with what it read. */
+export async function readWorkItem(ref: string): Promise<{ item: WorkItem | null; reads: Reads }> {
+  const res = await querySql(`SELECT ${COLUMNS} ${FROM} WHERE w.ref = ?1`, [ref], 1);
+  return { item: itemsFromResult(res)[0] ?? null, reads: res.reads };
+}
+
+/** The provider segment of a work item ref (`work_item:<provider>:<id>`). */
+export function providerOf(ref: string): string | null {
+  const m = /^work_item:([a-z][a-z0-9_-]*):/.exec(ref);
+  return m ? m[1]! : null;
+}
+
+/** The command that does `verb` to `ref`'s item: oxplow's `work_item.*`,
+ *  another provider's `<provider>.<verb>`. */
+export function workItemCommand(ref: string, verb: "transition" | "comment" | "link"): string {
+  const provider = providerOf(ref);
+  return provider === null || provider === "oxplow" ? `work_item.${verb}` : `${provider}.${verb}`;
+}
+
 /** A list of work items, with what it read. */
 export async function readWorkItems(opts: {
   scope: WorkItemScope;
@@ -186,9 +205,12 @@ export function statusFor(state: CanonicalState): TaskStatus {
   return state === "todo" ? "ready" : state;
 }
 
-/** Move an item to a canonical state (`work_item.transition`). */
+/** Move an item to a canonical state through its provider: oxplow's
+ *  `work_item.transition` (with oxplow's status), another provider's
+ *  `<provider>.transition` (with the canonical state). */
 export async function transitionWorkItem(ref: string, state: CanonicalState): Promise<void> {
-  await runCommand("work_item.transition", { ref, to: statusFor(state) });
+  const command = workItemCommand(ref, "transition");
+  await runCommand(command, { ref, to: command === "work_item.transition" ? statusFor(state) : state });
 }
 
 // ---- what each provider can do (v_capability_provider, P6b) ----

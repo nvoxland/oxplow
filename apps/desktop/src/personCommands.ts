@@ -28,18 +28,22 @@ export function createPersonCommands(deps: PersonCommandDeps) {
     pending = next;
     for (const l of [...listeners]) l();
   };
-  const attempt = async (p: PendingCommand, confirmed: boolean) => {
+  /** Whether the command ran (false when it failed, or waits for the
+   *  person's confirmation). */
+  const attempt = async (p: PendingCommand, confirmed: boolean): Promise<boolean> => {
     try {
       await deps.runCommand(p.command, p.input, confirmed);
       set(null);
       deps.toast(`${p.label}: done.`);
+      return true;
     } catch (e) {
       if (!confirmed && needsConfirmation(e)) {
         set(p);
-        return;
+        return false;
       }
       set(null);
       deps.recordError(p.label, e instanceof Error ? e.message : String(e));
+      return false;
     }
   };
   return {

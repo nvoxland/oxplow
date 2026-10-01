@@ -73,7 +73,25 @@ with them (P6 review, tsk609).
 The **Board** (`page:board`, `components/Board/WorkBoard.tsx`) shows
 items as cards in one column per canonical state (archived tasks left
 out). Drag a card to a column, or right-click → Move To, to transition
-it; another provider's items are shown but move in that provider.
+it through its provider (`transitionWorkItem`: oxplow's
+`work_item.transition` with oxplow's status, another provider's
+`<provider>.transition` with the canonical state — `workItemCommand`).
+Every card opens its item's page (`workItemTabRef`).
+
+**Another provider's item has a page of its own** (P6b.C3,
+`pages/WorkItemPage.tsx`; oxplow's tasks keep `TaskPage`):
+`refFromTabId("work_item:<p>:<id>")` is a `work_item` tab with a `ref`
+payload. It reads the item (`readWorkItem`) and the provider's features
+(`readCapabilityProviders` → `featuresFor`) and shows title, state
+(canonical and native), body and Move To; its Parent only with
+`hierarchy`, **Comment…** only with `comments` and **Link…** only with
+`links`, each run through `personCommands` as `<provider>.comment` /
+`<provider>.link` (the field keeps its text until the run succeeds —
+`personCommands.run` returns whether it ran). Comments on another
+provider's item are write-only here: `v_comment` is oxplow's store. Both
+pages mount the `work_item.detail.body` and `work_item.detail.sidebar`
+slots with `{ ref, task_id }` (`task_id` null for another provider's
+item).
 
 ## The capability
 

@@ -743,7 +743,8 @@ manifest still using top-level `slot_mounts:` / `decorators:` /
 | Slot | Core page | Params |
 |---|---|---|
 | `effort.review.details` | diff-view for an effort | `effort_id`, `change_id` |
-| `work_item.detail.body` | TaskPage, below the body | `ref`, `task_id` |
+| `work_item.detail.body` | TaskPage / WorkItemPage, below the body | `ref`, `task_id` (null for another provider's item) |
+| `work_item.detail.sidebar` | TaskPage / WorkItemPage, in the side rail | `ref`, `task_id` |
 | `thread.plan.header` | PlanPane (compact strip) | `thread_id` |
 | `vcs.commit.details` | GitCommitPage | `change_id` |
 | `vcs.status.details` | UncommittedChangesPage | `change_id` |

@@ -19,6 +19,7 @@ mock.module("../../api.js", () => ({
       rows: [
         ["work_item:oxplow:tsk1", "oxplow", "Plan it", "", "todo", "ready", null, "t", "t", 1, 1, "ready", "medium", 0, "user", null, 0],
         ["work_item:oxplow:tsk2", "oxplow", "Ship it", "", "in_progress", "in_progress", null, "t", "t", 2, 1, "in_progress", "high", 1, "agent", null, 2],
+        ["work_item:fake:W-1", "fake", "Their bug", "", "todo", "Backlog", null, "t", "t", null, null, null, null, null, null, null, 0],
       ],
       truncated: false,
       reads: { models: ["v_work_item"], tables: [], measures: [] },
@@ -26,7 +27,7 @@ mock.module("../../api.js", () => ({
     };
   },
   runCommand: async (name: string, input: unknown, ...rest: unknown[]) => {
-    if (!name.startsWith("work_item.")) return (realRunCommand as (...a: unknown[]) => unknown)(name, input, ...rest);
+    if (!name.startsWith("work_item.") && !name.startsWith("fake.")) return (realRunCommand as (...a: unknown[]) => unknown)(name, input, ...rest);
     ran.push([name, input]);
     return { result: null, audit_id: 1, event_id: null, undo: null };
   },
@@ -58,4 +59,17 @@ test("dropping a card on a column, or its menu's Move To, transitions it", async
   fireEvent.contextMenu(view.getByText("Ship it"));
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-board-move-done")));
   await waitFor(() => expect(ran[1]).toEqual(["work_item.transition", { ref: "work_item:oxplow:tsk2", to: "done" }]));
+});
+
+// P6b.C3: every provider's card opens its page and moves through its own
+// provider (`<provider>.transition` with the canonical state).
+test("another provider's card links to its page and moves through its provider", async () => {
+  const opened: string[] = [];
+  const view = render(<WorkBoard scope="all" onOpenPage={(ref) => opened.push(ref.id)} />);
+  fireEvent.click(await waitFor(() => view.getByText("Their bug")));
+  expect(opened).toEqual(["work_item:fake:W-1"]);
+  const data = new Map<string, string>([[WORK_ITEM_DRAG_MIME, "work_item:fake:W-1"]]);
+  const dataTransfer = { getData: (k: string) => data.get(k) ?? "", types: [WORK_ITEM_DRAG_MIME], dropEffect: "move" };
+  fireEvent.drop(view.getByTestId("board-column-done"), { dataTransfer });
+  await waitFor(() => expect(ran).toEqual([["fake.transition", { ref: "work_item:fake:W-1", to: "done" }]]));
 });

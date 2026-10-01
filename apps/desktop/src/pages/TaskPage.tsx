@@ -176,12 +176,24 @@ export function TaskPage({
   // The rail's Delete asks inline before it calls this.
   const requestDelete = onDelete ? () => onDelete(item.id) : undefined;
   const rail = (
-    <TaskDetailRail
-      item={item}
-      onUpdateTask={handleUpdate}
-      onDelete={requestDelete}
-      scopeAction={scopeAction ? { label: scopeAction.label, run: () => void scopeAction.run() } : undefined}
-    />
+    <>
+      <TaskDetailRail
+        item={item}
+        onUpdateTask={handleUpdate}
+        onDelete={requestDelete}
+        scopeAction={scopeAction ? { label: scopeAction.label, run: () => void scopeAction.run() } : undefined}
+      />
+      <LensSlots
+        slot="work_item.detail.sidebar"
+        params={
+          numericRowId(String(item.id)) === null
+            ? null
+            : { ref: workItemRef(String(item.id)), task_id: numericRowId(String(item.id)) }
+        }
+        streamId={stream?.id ?? null}
+        onOpenPage={onOpenPage}
+      />
+    </>
   );
 
   return (

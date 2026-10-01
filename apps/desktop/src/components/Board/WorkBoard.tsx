@@ -1,16 +1,15 @@
 /// The Board (P6.E1a): work items as cards in one column per canonical
 /// state (`workItems.ts`), live through `useRerunOnChange`. Drag a card to
-/// a column, or right-click it → Move To, to transition it
-/// (`work_item.transition`; only oxplow's tasks — another provider's
-/// items move in that provider). Drop targets highlight while a card is
-/// over them.
+/// a column, or right-click it → Move To, to transition it through its
+/// provider (`transitionWorkItem`). Every card opens its item's page.
+/// Drop targets highlight while a card is over them.
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useState } from "react";
 
 import { WORK_ITEM_DRAG_MIME } from "../../dragMimes.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import { RouteLink } from "../../tabs/RouteLink.js";
-import { taskRef } from "../../tabs/pageRefs.js";
+import { workItemTabRef } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import type { Reads } from "../../tauri-bridge/generated/bindings.js";
 import {
@@ -83,13 +82,12 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
             {LABEL[col.state]} <span style={countStyle}>{col.items.length}</span>
           </h3>
           {col.items.map((item) => {
-            const own = item.task !== null;
             return (
               <div
                 key={item.ref}
                 data-testid="board-card"
                 tabIndex={0}
-                draggable={own}
+                draggable
                 style={cardStyle}
                 onDragStart={(e) => {
                   e.dataTransfer.setData(WORK_ITEM_DRAG_MIME, item.ref);
@@ -101,23 +99,19 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
                     CANONICAL_STATES.filter((s) => s !== item.state).map((s) => ({
                       id: `board-move-${s}`,
                       label: `Move to ${LABEL[s]}`,
-                      enabled: own,
+                      enabled: true,
                       run: () => void move(item.ref, s),
                     })),
                   )
                 }
               >
-                {item.task ? (
-                  <RouteLink
-                    to={taskRef(item.task.id)}
-                    onNavigate={onOpenPage ? () => onOpenPage(taskRef(item.task!.id)) : undefined}
-                    style={titleLinkStyle}
-                  >
-                    {item.title}
-                  </RouteLink>
-                ) : (
-                  <span>{item.title}</span>
-                )}
+                <RouteLink
+                  to={workItemTabRef(item.ref)}
+                  onNavigate={onOpenPage ? () => onOpenPage(workItemTabRef(item.ref)) : undefined}
+                  style={titleLinkStyle}
+                >
+                  {item.title}
+                </RouteLink>
                 <div style={metaStyle}>
                   {item.provider === "oxplow" ? item.task?.priority : `${item.provider} · ${item.nativeState}`}
                   {item.task && item.task.noteCount > 0 ? ` · ${item.task.noteCount} notes` : ""}

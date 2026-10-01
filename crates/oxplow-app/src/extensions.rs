@@ -719,6 +719,8 @@ pub const SLOTS: &[(&str, &[&str])] = &[
     // A work item's page, below its body; `task_id` is null for an item
     // that isn't an oxplow task.
     ("work_item.detail.body", &["ref", "task_id"]),
+    // The same page's side rail.
+    ("work_item.detail.sidebar", &["ref", "task_id"]),
     // A thread's plan, as a compact strip.
     ("thread.plan.header", &["thread_id"]),
     ("vcs.commit.details", &["change_id"]),
