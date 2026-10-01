@@ -50,10 +50,29 @@ type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
 export function LensResultView(props: LensResultViewProps) {
   const { run, streamId = null, compact = false, toolbar = true } = props;
   const actions = useLensActions(run, streamId);
+  // A command's confirmation shows wherever the row is — an answer in the
+  // strip, a grid child, a dashboard tile — not only where the toolbar is.
+  const confirm = actions.pending ? (
+    <CommandConfirm
+      label={actions.pending.action.label}
+      command={actions.pending.action.command}
+      onConfirm={actions.confirm}
+      onCancel={actions.cancel}
+      testIdPrefix="lens-action-confirm"
+    />
+  ) : null;
   // Compact strips (a number inline) have no room for buttons.
-  if (compact || !toolbar) return <LensBody {...props} runRowAction={actions.run} />;
+  if (compact || !toolbar) {
+    return (
+      <>
+        {confirm}
+        <LensBody {...props} runRowAction={actions.run} />
+      </>
+    );
+  }
   return (
     <div>
+      {confirm}
       <LensToolbar run={run} streamId={streamId} actions={actions} />
       <LensBody {...props} runRowAction={actions.run} />
     </div>
@@ -105,22 +124,12 @@ function useLensActions(run: LensRun, streamId: string | null) {
 
 type LensActionsState = ReturnType<typeof useLensActions>;
 
-/** Copy, Add to Agent Context, and the lens's whole-lens actions — and,
- *  when a command asks, its confirmation. */
+/** Copy, Add to Agent Context, and the lens's whole-lens actions. */
 function LensToolbar({ run, streamId, actions }: { run: LensRun; streamId: string | null; actions: LensActionsState }) {
   const [copied, setCopied] = useState(false);
   const buttons = run.lens.actions.filter((a) => !a.row);
   return (
     <>
-    {actions.pending ? (
-      <CommandConfirm
-        label={actions.pending.action.label}
-        command={actions.pending.action.command}
-        onConfirm={actions.confirm}
-        onCancel={actions.cancel}
-        testIdPrefix="lens-action-confirm"
-      />
-    ) : null}
     <div data-testid="lens-actions" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, marginBottom: 6 }}>
       <button
         type="button"

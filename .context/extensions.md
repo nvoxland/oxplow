@@ -137,7 +137,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     whose badge is its own lens.
   - **Actions are commands** (P6.B1, target §11.4): `actions:` declares
     `{ id, label, command, input?, row? }` — a button above the result, or,
-    with `row: true`, an item in each row's right-click menu.
+    with `row: true`, an item in each row's right-click menu. A command
+    that asks shows `CommandConfirm` from `LensResultView` itself, above
+    the body, so it asks wherever the row is (an answer in the strip, a
+    grid child, a dashboard tile), not only where the toolbar is shown.
     - `input` is the command's input. A string that is exactly
       `{{param.<name>}}` or `{{row.<column>}}` becomes that value, typed
       (a number stays a number); a string containing them has them spliced
