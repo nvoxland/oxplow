@@ -355,7 +355,9 @@ was refreshed by it (the agent ran `bun test` instead of the
 report-emitting `bun run test:collect`, for example), the `collection`
 reactor persists a one-shot nudge, which the thread's next tool-hook
 response delivers (`take_undelivered`; see Nudge persistence). The nudge names the project's
-own `collection.testCommand` when set, points at the configured `reports`
+own `collection.testCommand` when set — and, when a `fastTestCommand` is
+declared, offers that for iterating and `testCommand` for the closing run
+(this repo's `agentHint` says the same) — points at the configured `reports`
 paths if a profile exists without a `testCommand`, or routes to
 `/oxplow:configure` when no profile is present at all.
 

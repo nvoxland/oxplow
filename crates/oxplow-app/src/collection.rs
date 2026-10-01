@@ -3236,12 +3236,24 @@ fn report_nudge_message(cfg: &oxplow_config::CollectionConfig, command: &str) ->
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        format!(
-            "Tests ran (`{cmd}`) but produced no report, so this run won't appear in the \
-             effort's Tests panel — only report-emitting runs do. Run EVERY test invocation \
-             (including failing/red-phase and single-test runs, not just the final green one) \
-             via `{tc}` in the foreground so they all show."
-        )
+        match cfg
+            .fast_test_command
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(fast) => format!(
+                "Tests ran (`{cmd}`) but produced no report, so this run won't appear in the \
+                 effort's Tests panel — only report-emitting runs do. While iterating (red and \
+                 green, filtered runs) use `{fast}`; close with `{tc}`. Both in the foreground."
+            ),
+            None => format!(
+                "Tests ran (`{cmd}`) but produced no report, so this run won't appear in the \
+                 effort's Tests panel — only report-emitting runs do. Run EVERY test invocation \
+                 (including failing/red-phase and single-test runs, not just the final green \
+                 one) via `{tc}` in the foreground so they all show."
+            ),
+        }
     } else if !cfg.reports.is_empty() {
         format!(
             "Tests ran (`{cmd}`) but refreshed none of the configured collection reports, so \
@@ -3606,6 +3618,21 @@ mod tests {
         assert!(msg.contains("bun run test:collect"), "{msg}");
         assert!(msg.contains("bun test"), "{msg}");
         assert!(!msg.contains("/oxplow:configure"), "{msg}");
+    }
+
+    /// With a fast command configured, the nudge offers it for iterating
+    /// and keeps the full one for the closing run.
+    #[test]
+    fn report_nudge_offers_the_fast_command_for_iterating() {
+        let cfg = oxplow_config::CollectionConfig {
+            test_command: Some("bun run test:collect".into()),
+            fast_test_command: Some("bun run test:fast".into()),
+            ..Default::default()
+        };
+        let msg = report_nudge_message(&cfg, "cargo test -p x");
+        assert!(msg.contains("`bun run test:fast`"), "{msg}");
+        assert!(msg.contains("`bun run test:collect`"), "{msg}");
+        assert!(!msg.contains("EVERY"), "{msg}");
     }
 
     #[test]

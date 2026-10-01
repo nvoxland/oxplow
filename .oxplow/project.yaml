@@ -107,7 +107,7 @@ collection:
   analysisRunPatterns:
   - clippy --message-format=json
   - lint:collect
-  agentHint: 'Run EVERY test invocation via `OXPLOW_TASK=<your task id> bun run test:collect` in the FOREGROUND — including red-phase/failing runs and quick single-test runs, not just the final green one. Never use bare `cargo test`/`bun test`/`bun run test` (or background it): only `test:collect` emits the lcov + JUnit reports oxplow parses into the effort''s Tests/coverage panel, so any other run won''t show there. The `OXPLOW_TASK=` prefix pins the run to your effort even with concurrent efforts; a backgrounded run finishes after the collection hook fires, so its reports are never ingested. Run it (foreground) before closing any task that changes logic.'
+  agentHint: 'While iterating (red phase, green phase, single tests) run `OXPLOW_TASK=<your task id> bun run test:fast` with a filter (e.g. `bun run test:fast -p oxplow-app some_test`) and `bun run test:fast:ts` for the frontend: they write the JUnit reports the effort''s Tests panel shows, without coverage instrumentation. Close a task that changes logic with one full run, lint alongside: `OXPLOW_TASK=<your task id> bash -c ''(bun run lint:collect >/dev/null 2>&1 & bun run test:collect; wait)''` — `test:collect` is the only run that emits coverage. Always in the FOREGROUND (a backgrounded run finishes after the collection hook fires, so its reports are never ingested). Never bare `cargo test`/`bun test`/`bun run test`: they emit no reports. The `OXPLOW_TASK=` prefix pins the run to your effort even with concurrent efforts.'
 metrics:
 - key: repo.rust_clone
   title: .clone() calls
