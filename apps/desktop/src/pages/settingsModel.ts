@@ -44,10 +44,13 @@ export function valueText(value: unknown): string {
   return text.length > 80 ? `${text.slice(0, 77)}…` : text;
 }
 
+/** Whether a row matches a search: its key, its doc, or anywhere in its
+ *  whole value (not `valueText`'s truncated display). */
 export function matchesSearch(s: EffectiveSetting, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return [s.key, s.doc, valueText(s.value)].some((t) => t.toLowerCase().includes(q));
+  const value = typeof s.value === "string" ? s.value : JSON.stringify(s.value ?? null);
+  return [s.key, s.doc, value].some((t) => t.toLowerCase().includes(q));
 }
 
 /** The prompt Ask the Agent to Change This puts in the agent's input:

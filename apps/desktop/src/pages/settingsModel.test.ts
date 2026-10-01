@@ -35,6 +35,10 @@ test("search matches the key, its doc or its value", () => {
   expect(matchesSearch(row("zones", { doc: "Code areas" }), "code")).toBe(true);
   expect(matchesSearch(row("snapshotRetentionDays", { value: 14 }), "14")).toBe(true);
   expect(matchesSearch(row("zones"), "nope")).toBe(false);
+  // The whole value, not its compact display: a term past the 80th
+  // character still finds the row.
+  const zones = [{ name: "core", paths: ["crates/oxplow-app/**", "crates/oxplow-db/**"] }, { name: "ui", paths: ["apps/desktop/src/components/**"] }];
+  expect(matchesSearch(row("zones", { value: zones }), "components")).toBe(true);
 });
 
 test("Ask the Agent to Change This names the key, its doc and its value", () => {
