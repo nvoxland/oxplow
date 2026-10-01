@@ -843,9 +843,14 @@ and runs each as the person through `personCommands`
 `custom_components:` (a private extension only, P6b.D1;
 `extensions/custom_components.rs`) are web bundles a `viz: custom` lens
 renders in a sandboxed frame. **The sandbox is the consent**: the frame
-has no origin, no network and no daemon token, so a bundle runs without
-a person's approval and reaches only the lenses it may query (`assets`)
-and the commands it may invoke (`commands`).
+has an opaque origin (the iframe's `sandbox="allow-scripts"` *and* the
+daemon's `sandbox allow-scripts` CSP directive), no daemon token and no
+way to send data — no fetch/XHR/WebSocket (`connect-src 'none'`), no
+forms, no storage. The one way out is navigating itself: the main
+window's `frame-src http://127.0.0.1:*` bounds that to this machine, and
+the host ends the component on its second `load`. So a bundle runs
+without a person's approval and reaches only the lenses it may query
+(`assets`) and the commands it may invoke (`commands`).
 
 ```yaml
 custom_components:

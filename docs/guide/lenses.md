@@ -175,8 +175,11 @@ Problems show under Settings → Extensions. Agents check their work with
 
 When none of the built-in views fit, a private extension can ship its own
 web component and a `viz: custom` lens that renders it. It runs in a
-sandboxed frame: scripts only, no network, no storage, no access to the
-app. It can only ask for the lenses and commands it declares.
+sandboxed frame: scripts only, no storage, no access to the app, and no
+way to send data out — it can't fetch, open a socket or submit a form.
+If it navigates itself away, the frame can only go to this machine, and
+the app ends the component and shows its table instead. It can only ask
+for the lenses and commands it declares.
 
 ```yaml
 # extension.yaml (sharing: private)

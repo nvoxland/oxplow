@@ -173,12 +173,17 @@ NUL segment, no absolute path, no symlink or directory, and resolved
 inside the bundle); 413 past the size cap. Every 200 has `Content-Type`
 from a small table (`content_type_for`), `X-Content-Type-Options:
 nosniff`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer` and
-a CSP that lets the bundle load only its own files — `default-src
-'none'`, scripts, styles, images and fonts from `'self'` and the bundle
-folder's URL (a sandboxed frame's origin is opaque), `connect-src
-'none'`, `form-action 'none'`, `base-uri 'none'` (`bundle_csp`). The
-main window's CSP (`tauri.conf.json`) has `frame-src http://127.0.0.1:*`
-for it, pinned by `tauriCsp.test.ts`.
+a CSP that sandboxes the document itself (`sandbox allow-scripts`, so
+its origin is opaque however it is loaded, not only inside the host's
+iframe) and lets it load only its own files — `default-src 'none'`,
+scripts, styles, images and fonts from `'self'` and the bundle folder's
+URL (the origin is opaque), `connect-src 'none'`, `form-action 'none'`,
+`base-uri 'none'` (`bundle_csp`). `style-src` keeps `'unsafe-inline'`
+because the host hands the bundle the kit CSS and theme tokens as text
+it injects as a `<style>`; inline scripts stay refused. The main
+window's CSP (`tauri.conf.json`) has `frame-src http://127.0.0.1:*` for
+it, pinned by `tauriCsp.test.ts`; with no `devCsp`, Tauri applies the
+same `csp` in dev.
 
 ## Dispatch context
 
