@@ -16,6 +16,7 @@ use oxplow_db::{SqlCell, SqlQueryResult};
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
+pub mod decorators;
 pub mod manifest_v2;
 pub mod migrate_v1;
 pub mod ui_commands;
@@ -935,6 +936,9 @@ pub struct ExtensionUi {
     pub slots: Vec<LensSlot>,
     /// Commands in core menus, for a page's or a row's ref (valid ones).
     pub commands: Vec<ui_commands::UiCommand>,
+    /// Labels from its models on core refs (experimental: a private
+    /// extension's only; valid ones).
+    pub decorators: Vec<decorators::UiDecorator>,
 }
 
 /// Provenance of an installed extension, kept in its `source.yaml`.
@@ -1205,6 +1209,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     }
     let panel_files = m.panels.clone();
     let ui_command_files = m.ui.commands.clone();
+    // An experimental kind: a shared manifest's is refused by `check`.
+    let decorator_files =
+        m.ui.decorators
+            .clone()
+            .filter(|_| m.sharing == Sharing::Private);
     let page_files = m.pages.clone();
     let slot_files = {
         if let Some(v) = &m.collectors {
@@ -1555,6 +1564,12 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         let (commands, errors) =
             ui_commands::parse_ui_commands(name, &provider_ids, &v, &file, &manifest);
         ext.ui.commands = commands;
+        ext.errors.extend(errors);
+    }
+    if let Some(v) = decorator_files {
+        let (decorators, errors) =
+            decorators::parse_decorators(name, &ext.models, &v, &file, &manifest);
+        ext.ui.decorators = decorators;
         ext.errors.extend(errors);
     }
     if let Some(v) = page_files {

@@ -37,6 +37,9 @@ import { insertIntoAgent } from "../agent-input-bus.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import { uiCommandMenuItems, uiCommandsAbout } from "../components/uiCommands.js";
 import { useUiCommands } from "../components/useUiCommands.js";
+import { safeColor } from "../components/decorators.js";
+import { useDecorations } from "../components/useDecorations.js";
+import { RefBadge } from "../components/RefBadge.js";
 import { personCommands } from "../personCommands.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
@@ -198,6 +201,14 @@ function RowsBody({
   const result = limitRows(run.result, maxRows);
   const ctxMenu = useContextMenu();
   const uiCommands = useUiCommands(streamId);
+  // Extensions' badges for the refs these rows link to (P6b.C5).
+  const linkedRefs = result.rows.flatMap((row) =>
+    lens.columns.flatMap((c) => {
+      const ref = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
+      return ref ? [ref.id] : [];
+    }),
+  );
+  const badges = useDecorations("row-badge", linkedRefs, streamId);
   if (result.rows.length === 0) {
     return (
       <p data-testid="lens-empty" style={{ color: "var(--text-secondary)" }}>
@@ -210,10 +221,20 @@ function RowsBody({
     const text = formatCell(row[c.index] ?? null);
     const ref = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
     if (!ref) return text;
-    return (
+    const link = (
       <RouteLink to={ref} onNavigate={onOpenPage ? () => onOpenPage(ref) : undefined} style={linkStyle}>
         {text}
       </RouteLink>
+    );
+    const mine = badges.filter((b) => b.ref === ref.id);
+    if (mine.length === 0) return link;
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+        {link}
+        {mine.map((b, i) => (
+          <RefBadge key={i} label={b.label} tone="label" color={safeColor(b.color) ?? undefined} title={`from ${b.extension}`} />
+        ))}
+      </span>
     );
   };
   const first = result.rows[0]?.[0] ?? null;

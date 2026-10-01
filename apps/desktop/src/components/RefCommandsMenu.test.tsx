@@ -19,6 +19,7 @@ mock.module("../api.js", () => ({
           { id: "tracker/0", extension: "tracker", group: "fake", command: "fake.comment", label: "Comment in Fake…", about: "work_item", placement: ["menu"], input: { ref: "{{ref}}", body: "+1" } },
           { id: "tracker/1", extension: "tracker", group: "tracker", command: "tracker.sync", label: "Sync", about: "commit", placement: ["menu"], input: { sha: "{{ref.id}}" } },
         ],
+        decorators: [],
       },
     },
   ],

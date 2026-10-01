@@ -80,8 +80,8 @@ describe("formatCell", () => {
 describe("lensDirectoryEntries", () => {
   test("one launcher entry per loaded lens, under Lenses", () => {
     const exts: Extension[] = [
-      { name: "review", description: "Review helpers", path: "oxplow/extensions/review", errors: [], lenses: [lens()], source: null, sources: [], origin: "project", ui: { slots: [], commands: [] }, enabled: true },
-      { name: "broken", description: "", path: "oxplow/extensions/broken", errors: ["bad"], lenses: [], source: null, sources: [], origin: "project", ui: { slots: [], commands: [] }, enabled: true },
+      { name: "review", description: "Review helpers", path: "oxplow/extensions/review", errors: [], lenses: [lens()], source: null, sources: [], origin: "project", ui: { slots: [], commands: [], decorators: [] }, enabled: true },
+      { name: "broken", description: "", path: "oxplow/extensions/broken", errors: ["bad"], lenses: [], source: null, sources: [], origin: "project", ui: { slots: [], commands: [], decorators: [] }, enabled: true },
     ];
     const entries = lensDirectoryEntries(exts);
     expect(entries).toHaveLength(1);
@@ -195,7 +195,7 @@ describe("launcher entries", () => {
       source: null,
       sources: [],
       origin: "project",
-      ui: { slots: [], commands: [] },
+      ui: { slots: [], commands: [], decorators: [] },
       enabled: true,
       ...over,
     }) as Extension;

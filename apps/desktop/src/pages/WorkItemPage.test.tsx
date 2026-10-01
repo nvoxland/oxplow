@@ -48,6 +48,7 @@ mock.module("../api.js", () => ({
           { slot: "work_item.detail.sidebar", lensId: "x/side" },
         ],
         commands: [],
+        decorators: [],
       },
       lenses: ["x/body", "x/side"].map((id) => ({ id, params: [{ name: "ref", label: null, default: null }] })),
     },

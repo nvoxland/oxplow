@@ -131,6 +131,13 @@ Things I keep forgetting. Read this before adding any UI.
   `page-nav-command-<id>`, `menu-item-ui-commands-<group>`,
   `menu-item-ui-command-<id>`.
 
+## Decorations are additive
+
+- An extension's decorator adds a chip to a page's header (after the
+  page's own) or a badge after a lens cell; a page or row is complete
+  without them, and a decorator that fails shows nothing. They're labels
+  with an extension's name in their tooltip, never actions.
+
 ## Destructive actions
 
 - **Per-row destructives use `InlineConfirm`** at

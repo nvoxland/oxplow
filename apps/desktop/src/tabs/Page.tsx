@@ -4,6 +4,8 @@ import { PageNavBar } from "./PageNavBar.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 import type { BookmarkScope } from "./bookmarks.js";
 import type { AskTarget } from "../components/Prompts/AskMenu.js";
+import { chipsFor } from "../components/decorators.js";
+import { useDecorations } from "../components/useDecorations.js";
 
 export interface PageNavBarConfig {
   canBack: boolean;
@@ -147,7 +149,7 @@ export const pageH1Style: CSSProperties = {
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, kind, chips, actions, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, showNavBar = true, showHeader = true, titleInBody = false, layout = "full", rightRail, rightRailTitle }: PageProps) {
+export function Page({ title, kind, chips: ownChips, actions, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, showNavBar = true, showHeader = true, titleInBody = false, layout = "full", rightRail, rightRailTitle }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // In the details layout the `⋯` actions move into the right rail's
   // panel header; keep them out of the page header to avoid duplication.
@@ -158,6 +160,12 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
   // how the host (App.tsx) injects browser-style back/forward into
   // every page without requiring each page module to wire it.
   const ctxNav = useOptionalPageNavigation();
+  // Extensions' decorations for this page's ref (P6b.C5), after the page's
+  // own chips: additive, the header is complete without them.
+  const pageRef = ctxNav?.ask?.ref ?? null;
+  const decorations = useDecorations("ref-chip", pageRef ? [pageRef] : [], ctxNav?.ask?.streamId ?? null);
+  const decorationChips = pageRef ? chipsFor(decorations, pageRef) : [];
+  const chips = decorationChips.length > 0 ? [...(ownChips ?? []), ...decorationChips] : ownChips;
   // Normalize the `backlinks` prop: `{ count, body }` shape carries an
   // explicit count for the dropdown badge; a bare ReactNode means the
   // count is unknown (label shows just "Backlinks").

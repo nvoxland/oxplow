@@ -441,9 +441,15 @@ async fn ui_commands_are_checked_against_the_registry_or_the_providers_declarati
     .await
     .unwrap();
     let errs = v.errors.join("\n");
-    assert!(!errs.contains("`Comment`"), "the provider declares it: {errs}");
+    assert!(
+        !errs.contains("`Comment`"),
+        "the provider declares it: {errs}"
+    );
     assert!(!errs.contains("`Done`"), "{errs}");
-    assert!(errs.contains("`ui.commands` `Nope`: no command `fake.nope`"), "{errs}");
+    assert!(
+        errs.contains("`ui.commands` `Nope`: no command `fake.nope`"),
+        "{errs}"
+    );
     assert!(
         errs.contains("`ui.commands` `Bad`: the input doesn't fit `work_item.transition`"),
         "{errs}"

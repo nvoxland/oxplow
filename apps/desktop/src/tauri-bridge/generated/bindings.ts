@@ -1954,6 +1954,13 @@ export type DeadLetter = {
 	state: string,
 };
 
+// Where a decoration shows.
+export type DecoratorPlacement = 
+// A chip in the header of a page whose ref the model lists.
+"ref-chip" | 
+// A badge after a lens cell that links to a listed ref.
+"row-badge";
+
 /**
  *  An earlier version kept after a breaking change: its SQL (in `file`,
  *  beside the model's) still keeps the contract that version published,
@@ -2303,6 +2310,11 @@ export type ExtensionUi = {
 	slots: LensSlot[],
 	// Commands in core menus, for a page's or a row's ref (valid ones).
 	commands: UiCommand[],
+	/**
+	 *  Labels from its models on core refs (experimental: a private
+	 *  extension's only; valid ones).
+	 */
+	decorators: UiDecorator[],
 };
 
 // A loaded extension and anything wrong with it.
@@ -4704,6 +4716,22 @@ export type UiCommand = {
 	 *  are the ref it runs for and its id.
 	 */
 	input: unknown,
+};
+
+// A decorator (valid ones; invalid ones are in the extension's `errors`).
+export type UiDecorator = {
+	// `<extension>/<n>`.
+	id: string,
+	extension: string,
+	// The model's view (`v_<extension>_<model>`), which has a `ref` column.
+	view: string,
+	// The ref kind it decorates (`work_item`).
+	kind: string,
+	placement: DecoratorPlacement,
+	// The view's column holding the text shown.
+	label: string,
+	// The view's column holding a color (`#rrggbb` or a CSS color name).
+	color: string | null,
 };
 
 export type UiLogEntry = {

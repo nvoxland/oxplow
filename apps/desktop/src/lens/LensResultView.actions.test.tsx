@@ -4,6 +4,7 @@ import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
 import { IpcCallError } from "../ipc-error.js";
 
 const realApi = await import("../api.js");
+const realQuerySql = realApi.querySql;
 // Bun's `mock.module` is process-wide: everything not faked here delegates
 // to the real module so other test files keep working.
 const calls: boolean[] = [];
@@ -32,9 +33,22 @@ mock.module("../api.js", () => ({
         commands: [
           { id: "tracker/0", extension: "tracker", group: "tracker", command: "tracker.flag", label: "Flag It", about: "work_item", placement: ["context"], input: { ref: "{{ref}}" } },
         ],
+        decorators: [
+          { id: "tracker/0", extension: "tracker", view: "v_tracker_flags", kind: "work_item", placement: "row-badge", label: "label", color: null },
+        ],
       },
     },
   ],
+  querySql: async (sql: string, ...rest: unknown[]) => {
+    if (!sql.includes("FROM v_tracker_flags")) return (realQuerySql as (...a: unknown[]) => unknown)(sql, ...rest);
+    return {
+      columns: ["ref", "label"],
+      rows: [["work_item:oxplow:tsk1", "flaky"]],
+      truncated: false,
+      reads: { models: ["v_tracker_flags"], tables: [], measures: [] },
+      freshness: {},
+    };
+  },
   runCommand: async (name: string, input: unknown) => {
     commandRuns.push([name, input]);
     return { result: null, audit_id: 1, event_id: null, inverse: null };
@@ -125,4 +139,15 @@ test("a row's linked ref gets its extensions' commands", async () => {
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ui-commands-tracker")));
   fireEvent.click(view.getByTestId("menu-item-ui-command-tracker/0"));
   await waitFor(() => expect(commandRuns).toEqual([["tracker.flag", { ref: "work_item:oxplow:tsk1" }]]));
+});
+
+// P6b.C5: a decorator's label follows a cell that links to its ref.
+test("a linked cell gets its ref's badges", async () => {
+  const linked: LensRun = {
+    lens: { ...lens, columns: [{ key: "ref", label: null, link: { kind: "page", from: null, line: null, base: null, head: null } }] },
+    params: {},
+    result: run.result,
+  };
+  const view = render(<LensResultView run={linked} onOpenPage={() => {}} />);
+  await waitFor(() => expect(view.getByTestId("lens-row-0").textContent).toContain("flaky"));
 });

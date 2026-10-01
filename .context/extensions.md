@@ -784,6 +784,32 @@ the extensions list (`useUiCommands`, reloaded on `extensionsChanged`)
 and runs each as the person through `personCommands`
 (`components/uiCommands.ts`).
 
+## Decorators (experimental)
+
+`ui.decorators` (a private extension only, P6b.C5;
+`extensions/decorators.rs`) put labels from one of the extension's
+**models** on core refs:
+
+```yaml
+ui:
+  decorators:
+    - { model: flags, kind: work_item, placement: ref-chip, label: label, color: color }
+```
+
+The model (`v_<extension>_<model>`) must declare a `ref` column and the
+`label` (and optional `color`) columns named — checked at load against
+the model's declared columns, which are its contract; column names must
+be plain identifiers, since the desktop names them in its query. The
+desktop (`components/decorators.ts`, `useDecorations`) runs one query per
+decorator over the refs it shows (`SELECT ref, "<label>" AS label[,
+"<color>" AS color] FROM <view> WHERE ref IN (…)`), re-run when the model
+changes. `ref-chip`: a chip in the header of a page whose ref the model
+lists, after the page's own chips (`Page`, by the page's ref from its
+navigation context). `row-badge`: a `RefBadge` (tone `label`) after a
+lens cell that links to a listed ref. A color is used only when it's a
+plain one (`#rgb…` or a CSS color name, `safeColor`). Decorations are
+additive: a decorator whose query fails shows nothing.
+
 ## Commands
 
 An extension's `commands:` (a stable kind, P6b; `extension_commands.rs`)
