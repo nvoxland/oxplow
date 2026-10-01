@@ -711,15 +711,33 @@ struct AdvisoryFile {
 /// Places in core pages an extension can mount a lens, and the params each
 /// offers (`change_id` = the page's `v_change` row). A mounted lens gets
 /// the ones it declares and must declare at least one.
+/// Slot names are one dotted namespace, `<capability>.<page>.<region>`
+/// (P6b): what a page shows a lens is named by what the page is about.
 pub const SLOTS: &[(&str, &[&str])] = &[
-    ("effort-review", &["effort_id", "change_id"]),
-    ("task-detail", &["task_id"]),
-    ("thread", &["thread_id"]),
-    ("commit", &["change_id"]),
-    ("uncommitted", &["change_id"]),
+    // An effort's review (its diff view).
+    ("effort.review.details", &["effort_id", "change_id"]),
+    // A work item's page, below its body; `task_id` is null for an item
+    // that isn't an oxplow task.
+    ("work_item.detail.body", &["ref", "task_id"]),
+    // A thread's plan, as a compact strip.
+    ("thread.plan.header", &["thread_id"]),
+    ("vcs.commit.details", &["change_id"]),
+    // Uncommitted changes.
+    ("vcs.status.details", &["change_id"]),
     // Settings: a section per extension with the lenses it mounts (its
     // own status or configuration views). No params.
-    ("settings", &[]),
+    ("settings.section", &[]),
+];
+
+/// Slot names before they were one namespace: a mount using one is an
+/// error naming the new name.
+pub const RENAMED_SLOTS: &[(&str, &str)] = &[
+    ("effort-review", "effort.review.details"),
+    ("task-detail", "work_item.detail.body"),
+    ("thread", "thread.plan.header"),
+    ("commit", "vcs.commit.details"),
+    ("uncommitted", "vcs.status.details"),
+    ("settings", "settings.section"),
 ];
 
 /// What a left-nav panel is bound to: the project, the current stream, or
@@ -797,9 +815,8 @@ struct PanelFile {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LensSlot {
-    /// Which page, from [`SLOTS`]: `effort-review` (an effort's diff
-    /// view: `:effort_id`, `:change_id`), `task-detail` (`:task_id`),
-    /// `thread` (`:thread_id`), `commit` or `uncommitted` (`:change_id`).
+    /// Which page region, from [`SLOTS`] (`effort.review.details`,
+    /// `vcs.commit.details`, …); the lens takes the params it offers.
     pub slot: String,
     pub lens_id: String,
 }
@@ -873,8 +890,8 @@ pub struct Extension {
     /// `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
     /// read-only).
     pub origin: String,
-    /// Lenses mounted into core pages.
-    pub slots: Vec<LensSlot>,
+    /// What it adds to the core UI (`ui:`).
+    pub ui: ExtensionUi,
     /// False when `.oxplow/project.yaml` disables it; a disabled
     /// extension has no lenses, slots, sources or advisories.
     pub enabled: bool,
@@ -905,6 +922,14 @@ pub struct Extension {
     /// Commands it registers on the bus, each a Starlark script composing
     /// core commands (P6b; valid ones — invalid ones are in `errors`).
     pub commands: Vec<crate::extension_commands::ExtensionCommand>,
+}
+
+/// What an extension adds to the core UI (`ui:` in its manifest).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionUi {
+    /// Lenses mounted into core pages (valid ones).
+    pub slots: Vec<LensSlot>,
 }
 
 /// Provenance of an installed extension, kept in its `source.yaml`.
@@ -1089,7 +1114,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         sources: Vec::new(),
         providers: Vec::new(),
         origin: origin.to_string(),
-        slots: Vec::new(),
+        ui: ExtensionUi::default(),
         enabled: true,
         advisories: Vec::new(),
         measures: Vec::new(),
@@ -1131,6 +1156,14 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     } else {
         migrate_v1::migrate_v1_to_v2(&manifest)
     };
+    if let Some((line, old, new)) = manifest_v2::moved_key(&manifest) {
+        ext.errors.push(at(
+            &file,
+            Some(line),
+            format!("`{old}` moved to `{new}`: write it under `ui:`"),
+        ));
+        return ext;
+    }
     let parsed: Result<ManifestV2, String> =
         serde_yaml::from_str::<ManifestV2>(&manifest).map_err(|e| e.to_string());
     let m = match parsed {
@@ -1357,7 +1390,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 }
             }
         }
-        m.slot_mounts.clone()
+        m.ui.slots.clone()
     };
     if let Some(text) = files.read(SOURCE_FILE) {
         match serde_yaml::from_str::<ExtensionSource>(&text) {
@@ -1452,8 +1485,15 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             }
             _ => vec![],
         };
-        let mount_line = line_under(&manifest, "slot_mounts", &format!("lens: {}", s.lens));
-        if s.slot == "rail" {
+        let mount_line = line_under(&manifest, "ui", &format!("lens: {}", s.lens));
+        let renamed = RENAMED_SLOTS.iter().find(|(old, _)| *old == s.slot);
+        if let Some((old, new)) = renamed {
+            ext.errors.push(at(
+                &file,
+                mount_line,
+                format!("slot `{old}` is now `{new}`"),
+            ));
+        } else if s.slot == "rail" {
             ext.errors.push(at(
                 &file,
                 mount_line,
@@ -1498,7 +1538,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 ),
             ));
         } else {
-            ext.slots.push(LensSlot {
+            ext.ui.slots.push(LensSlot {
                 slot: s.slot,
                 lens_id: format!("{name}/{}", s.lens),
             });
@@ -1806,7 +1846,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
     if disabled.iter().any(|d| d == &ext.name) {
         ext.enabled = false;
         ext.lenses.clear();
-        ext.slots.clear();
+        ext.ui = ExtensionUi::default();
         ext.sources.clear();
         ext.providers.clear();
         ext.advisories.clear();
@@ -3770,7 +3810,7 @@ empty: No tasks.
     #[test]
     fn a_slot_mount_to_a_missing_lens_names_its_line() {
         let dir = tempfile::tempdir().unwrap();
-        let manifest = format!("{EXT_V2}slot_mounts:\n  - {{ slot: rail, lens: tasks }}\n  - {{ slot: task-detail, lens: nope }}\n");
+        let manifest = format!("{EXT_V2}ui:\n  slots:\n    - {{ slot: rail, lens: tasks }}\n    - {{ slot: work_item.detail.body, lens: nope }}\n");
         write(
             dir.path(),
             "oxplow/extensions/review/extension.yaml",
@@ -3788,7 +3828,7 @@ empty: No tasks.
             .find(|m| m.contains("mounts lens `nope`"))
             .unwrap_or_else(|| panic!("{:?}", e.errors));
         assert!(
-            err.starts_with("oxplow/extensions/review/extension.yaml:10:"),
+            err.starts_with("oxplow/extensions/review/extension.yaml:11:"),
             "{err}"
         );
     }
@@ -3821,7 +3861,7 @@ empty: No tasks.
         write(
             dir.path(),
             "oxplow/extensions/review/extension.yaml",
-            "name: review\ndescription: Review helpers\nslots:\n  - { slot: task-detail, lens: tasks }\n",
+            "name: review\ndescription: Review helpers\nslots:\n  - { slot: work_item.detail.body, lens: tasks }\n",
         );
         write(
             dir.path(),
@@ -3843,7 +3883,7 @@ empty: No tasks.
             "{:?}",
             e.warnings
         );
-        assert_eq!(e.slots.len(), 1, "v1 `slots` become slot mounts");
+        assert_eq!(e.ui.slots.len(), 1, "v1 `slots` become slot mounts");
     }
 
     /// Rewriting a manifest from v1 to v2 must not ask the person to
@@ -3961,13 +4001,16 @@ empty: No tasks.
             .iter()
             .any(|l| l.id == "oxplow-review/decisions"));
         assert!(review
+            .ui
             .slots
             .iter()
-            .any(|s| s.slot == "effort-review" && s.lens_id == "oxplow-review/decisions"));
+            .any(|s| s.slot == "effort.review.details" && s.lens_id == "oxplow-review/decisions"));
         assert!(review
+            .ui
             .slots
             .iter()
-            .any(|s| s.slot == "effort-review" && s.lens_id == "oxplow-review/inferred-decisions"));
+            .any(|s| s.slot == "effort.review.details"
+                && s.lens_id == "oxplow-review/inferred-decisions"));
         // The analytics extension's advisory and lens SQL runs too.
         let a = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-analytics", None)
             .await
@@ -4035,7 +4078,7 @@ empty: No tasks.
         write(
             dir.path(),
             "oxplow/extensions/mine/extension.yaml",
-            "name: mine\nslots:\n  - { slot: effort-review, lens: nope }\n  - { slot: sidebar, lens: a }\n  - { slot: effort-review, lens: a }\n",
+            "name: mine\nslots:\n  - { slot: effort.review.details, lens: nope }\n  - { slot: sidebar, lens: a }\n  - { slot: effort.review.details, lens: a }\n",
         );
         write(
             dir.path(),
@@ -4046,8 +4089,8 @@ empty: No tasks.
             .into_iter()
             .find(|e| e.name == "mine")
             .unwrap();
-        assert_eq!(e.slots.len(), 1);
-        assert_eq!(e.slots[0].lens_id, "mine/a");
+        assert_eq!(e.ui.slots.len(), 1);
+        assert_eq!(e.ui.slots[0].lens_id, "mine/a");
         assert_eq!(e.errors.len(), 2, "{:?}", e.errors);
         assert!(e.errors.iter().any(|m| m.contains("nope")));
         assert!(e.errors.iter().any(|m| m.contains("sidebar")));
@@ -4059,7 +4102,7 @@ empty: No tasks.
         write(
             dir.path(),
             "oxplow/extensions/mine/extension.yaml",
-            "name: mine\nslots:\n  - { slot: settings, lens: status }\n",
+            "name: mine\nslots:\n  - { slot: settings.section, lens: status }\n",
         );
         write(
             dir.path(),
@@ -4071,7 +4114,7 @@ empty: No tasks.
             .find(|e| e.name == "mine")
             .unwrap();
         assert!(e.errors.is_empty(), "{:?}", e.errors);
-        assert_eq!(e.slots[0].slot, "settings");
+        assert_eq!(e.ui.slots[0].slot, "settings.section");
     }
 
     /// The documented examples in `examples/extensions/` load cleanly, so
@@ -4301,14 +4344,21 @@ empty: No tasks.
         let thread_lens = "title: Th\nparams: [{ name: thread_id }]\nquery: SELECT :thread_id\n";
         let (_d, ext) = load_x(
             &[("t", task_lens), ("th", thread_lens), ("plain", "title: P\nquery: SELECT 1\n")],
-            "slots:\n  - { slot: task-detail, lens: t }\n  - { slot: thread, lens: th }\n  - { slot: task-detail, lens: plain }\n",
+            "slots:\n  - { slot: work_item.detail.body, lens: t }\n  - { slot: thread.plan.header, lens: th }\n  - { slot: work_item.detail.body, lens: plain }\n",
         );
         let mounted: Vec<(&str, &str)> = ext
+            .ui
             .slots
             .iter()
             .map(|s| (s.slot.as_str(), s.lens_id.as_str()))
             .collect();
-        assert_eq!(mounted, vec![("task-detail", "x/t"), ("thread", "x/th")]);
+        assert_eq!(
+            mounted,
+            vec![
+                ("work_item.detail.body", "x/t"),
+                ("thread.plan.header", "x/th")
+            ]
+        );
         let errs = ext.errors.join("\n");
         assert!(errs.contains("task_id") && errs.contains("plain"), "{errs}");
     }
@@ -4567,6 +4617,42 @@ empty: No tasks.
         assert!(!run("review/cov", "v", 91).await.firing);
     }
 
+    /// P6b.C1: slot names are one dotted namespace; an old name says its
+    /// new one, and the top-level keys that moved under `ui:` say where.
+    #[test]
+    fn old_slot_names_and_moved_keys_say_where_they_went() {
+        let (_d, ext) = load_x(
+            &[(
+                "c",
+                "title: C\nparams: [{ name: change_id }]\nquery: SELECT 1\n",
+            )],
+            "slots:\n  - { slot: commit, lens: c }\n",
+        );
+        assert!(ext.ui.slots.is_empty());
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("slot `commit` is now `vcs.commit.details`")
+                && errs.contains("extension.yaml:"),
+            "{errs}"
+        );
+        for (key, to) in [
+            ("slot_mounts", "ui.slots"),
+            ("decorators", "ui.decorators"),
+            ("replacements", "ui.replacements"),
+        ] {
+            let (_d, ext) = load_x(
+                &[],
+                &format!("manifest: 2\nintent:\n  purpose: p\n{key}: []\n"),
+            );
+            let errs = ext.errors.join("\n");
+            assert!(
+                errs.contains(&format!("`{key}` moved to `{to}`"))
+                    && errs.contains("extension.yaml:5"),
+                "{key}: {errs}"
+            );
+        }
+    }
+
     /// P6.G1: the `rail` slot is gone — a lens that needs attention is a
     /// panel's badge. A rail mount says where it went.
     #[test]
@@ -4575,7 +4661,7 @@ empty: No tasks.
             &[("ok", "title: A\nquery: SELECT 1\nalert: { min_rows: 1 }\n")],
             "slots:\n  - { slot: rail, lens: ok }\n",
         );
-        assert!(ext.slots.is_empty());
+        assert!(ext.ui.slots.is_empty());
         let errs = ext.errors.join("\n");
         assert!(
             errs.contains("`rail`") && errs.contains("panels:"),
@@ -4768,7 +4854,7 @@ empty: No tasks.
             let e = exts.iter().find(|e| e.name == name).unwrap();
             assert!(!e.enabled, "{name}");
             assert!(
-                e.lenses.is_empty() && e.slots.is_empty() && e.sources.is_empty(),
+                e.lenses.is_empty() && e.ui.slots.is_empty() && e.sources.is_empty(),
                 "{name}"
             );
         }
@@ -4823,7 +4909,7 @@ empty: No tasks.
                 ("both", "title: B\nparams: [{ name: effort_id }]\nquery: SELECT 1\n"),
                 ("none", "title: N\nparams: [{ name: other }]\nquery: SELECT 1\n"),
             ],
-            "slots:\n  - { slot: commit, lens: files }\n  - { slot: uncommitted, lens: files }\n  - { slot: effort-review, lens: files }\n  - { slot: effort-review, lens: both }\n  - { slot: commit, lens: none }\n",
+            "slots:\n  - { slot: vcs.commit.details, lens: files }\n  - { slot: vcs.status.details, lens: files }\n  - { slot: effort.review.details, lens: files }\n  - { slot: effort.review.details, lens: both }\n  - { slot: vcs.commit.details, lens: none }\n",
         );
         let link = ext
             .lenses
@@ -4840,6 +4926,7 @@ empty: No tasks.
             (Some("b"), Some("h"))
         );
         let mounted: Vec<(&str, &str)> = ext
+            .ui
             .slots
             .iter()
             .map(|s| (s.slot.as_str(), s.lens_id.as_str()))
@@ -4847,10 +4934,10 @@ empty: No tasks.
         assert_eq!(
             mounted,
             vec![
-                ("commit", "x/files"),
-                ("uncommitted", "x/files"),
-                ("effort-review", "x/files"),
-                ("effort-review", "x/both")
+                ("vcs.commit.details", "x/files"),
+                ("vcs.status.details", "x/files"),
+                ("effort.review.details", "x/files"),
+                ("effort.review.details", "x/both")
             ],
             "a slot lens needs at least one of the slot's params"
         );

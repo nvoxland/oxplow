@@ -16,15 +16,16 @@ intent:
     - name: a metric pushed past its warn threshold during an effort
       input: { advisory: threshold-crossed, effort_id: 1 }
       expect: one "⚠ <metric> crossed its warn threshold" line, once per metric
-slot_mounts:
-  - { slot: effort-review, lens: change-review }
-  - { slot: commit, lens: change-review }
-  - { slot: uncommitted, lens: change-review }
-  - { slot: effort-review, lens: effort-tests }
-  - { slot: effort-review, lens: effort-metric-deltas }
-  - { slot: effort-review, lens: effort-nudges }
-  - { slot: task-detail, lens: task-tokens }
-  - { slot: thread, lens: thread-tokens }
+ui:
+  slots:
+    - { slot: effort.review.details, lens: change-review }
+    - { slot: vcs.commit.details, lens: change-review }
+    - { slot: vcs.status.details, lens: change-review }
+    - { slot: effort.review.details, lens: effort-tests }
+    - { slot: effort.review.details, lens: effort-metric-deltas }
+    - { slot: effort.review.details, lens: effort-nudges }
+    - { slot: work_item.detail.body, lens: task-tokens }
+    - { slot: thread.plan.header, lens: thread-tokens }
 advisories:
   # Steer the agent to add tests when this effort's changed lines are poorly
   # covered. Reads the stored observation, so it fires on the tool call after

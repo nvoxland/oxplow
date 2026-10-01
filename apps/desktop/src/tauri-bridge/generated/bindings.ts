@@ -2297,6 +2297,12 @@ export type ExtensionSource = {
 	sha: string,
 };
 
+// What an extension adds to the core UI (`ui:` in its manifest).
+export type ExtensionUi = {
+	// Lenses mounted into core pages (valid ones).
+	slots: LensSlot[],
+};
+
 // A loaded extension and anything wrong with it.
 export type Extension_Deserialize = {
 	name: string,
@@ -2339,8 +2345,8 @@ export type Extension_Deserialize = {
 	 *  read-only).
 	 */
 	origin: string,
-	// Lenses mounted into core pages.
-	slots: LensSlot[],
+	// What it adds to the core UI (`ui:`).
+	ui: ExtensionUi,
 	/**
 	 *  False when `.oxplow/project.yaml` disables it; a disabled
 	 *  extension has no lenses, slots, sources or advisories.
@@ -2429,8 +2435,8 @@ export type Extension_Serialize = {
 	 *  read-only).
 	 */
 	origin: string,
-	// Lenses mounted into core pages.
-	slots: LensSlot[],
+	// What it adds to the core UI (`ui:`).
+	ui: ExtensionUi,
 	/**
 	 *  False when `.oxplow/project.yaml` disables it; a disabled
 	 *  extension has no lenses, slots, sources or advisories.
@@ -3002,9 +3008,8 @@ export type LensRun_Serialize = {
 // A lens an extension mounts into a core page.
 export type LensSlot = {
 	/**
-	 *  Which page, from [`SLOTS`]: `effort-review` (an effort's diff
-	 *  view: `:effort_id`, `:change_id`), `task-detail` (`:task_id`),
-	 *  `thread` (`:thread_id`), `commit` or `uncommitted` (`:change_id`).
+	 *  Which page region, from [`SLOTS`] (`effort.review.details`,
+	 *  `vcs.commit.details`, …); the lens takes the params it offers.
 	 */
 	slot: string,
 	lensId: string,

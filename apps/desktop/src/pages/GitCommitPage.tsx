@@ -170,7 +170,7 @@ export function GitCommitPage({
           </>
         )}
         <LensSlots
-          slot="commit"
+          slot="vcs.commit.details"
           params={change ? { change_id: change.id } : null}
           streamId={stream?.id ?? null}
           onOpenPage={(ref) => onOpenPage(ref)}

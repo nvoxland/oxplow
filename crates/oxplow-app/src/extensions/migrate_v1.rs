@@ -3,8 +3,9 @@
 //! Textual on purpose: a YAML round trip through a parser would drop
 //! comments and restyle every line, and the bytes of a `collectors`
 //! (v1 `sources`) or `advisories` node are what a person's consent
-//! covers. So the migration only **inserts lines at the top** and
-//! **renames two top-level keys**; everything below is byte-identical.
+//! covers. So the migration only **inserts lines at the top**, **renames
+//! `sources:`** and **moves `slots:` under `ui:`** (its block indented two
+//! spaces); every other line is byte-identical.
 //! The loader runs it in memory on a v1 manifest (then reads the result
 //! as v2), and `oxplow plugin migrate` writes it to the file — one
 //! conversion, two callers.
@@ -18,7 +19,9 @@ use super::manifest_v2::key_line;
 /// - `sharing: private` and an `intent` skeleton (its `purpose` from
 ///   `description`) are inserted after the header (`name`,
 ///   `description`); the agent fills in `origin` and `examples`;
-/// - `sources:` becomes `collectors:` and `slots:` becomes `slot_mounts:`.
+/// - `sources:` becomes `collectors:`, and `slots:` becomes `ui:` /
+///   `  slots:` with its block (comments and blank lines included)
+///   indented under it.
 pub fn migrate_v1_to_v2(text: &str) -> String {
     if key_line(text, "manifest").is_some() {
         return text.to_string();
@@ -55,11 +58,25 @@ pub fn migrate_v1_to_v2(text: &str) -> String {
     );
     let mut out = String::with_capacity(text.len() + 96);
     out.push_str("manifest: 2\n");
+    let mut in_slots = false;
     for (i, line) in lines.iter().enumerate() {
         if i == header_end {
             out.push_str(&inserted);
         }
-        out.push_str(&rename_key(line));
+        let top_level = !line.starts_with([' ', '-', '#']) && !line.trim().is_empty();
+        if top_level {
+            in_slots = false;
+        }
+        if let Some(rest) = line.strip_prefix("slots:") {
+            out.push_str("ui:\n  slots:");
+            out.push_str(rest);
+            in_slots = true;
+        } else if in_slots && !line.trim().is_empty() {
+            out.push_str("  ");
+            out.push_str(line);
+        } else {
+            out.push_str(&rename_key(line));
+        }
     }
     if header_end == lines.len() {
         out.push_str(&inserted);
@@ -67,14 +84,12 @@ pub fn migrate_v1_to_v2(text: &str) -> String {
     out
 }
 
-/// `sources:` → `collectors:` and `slots:` → `slot_mounts:`, top level only.
+/// `sources:` → `collectors:`, top level only.
 fn rename_key(line: &str) -> String {
-    for (from, to) in [("sources:", "collectors:"), ("slots:", "slot_mounts:")] {
-        if let Some(rest) = line.strip_prefix(from) {
-            return format!("{to}{rest}");
-        }
+    match line.strip_prefix("sources:") {
+        Some(rest) => format!("collectors:{rest}"),
+        None => line.to_string(),
     }
-    line.to_string()
 }
 
 /// The manifest's `description`, read by a parser (a scalar in any style).
@@ -115,29 +130,33 @@ mod tests {
     const V1: &str = "name: review\ndescription: Review helpers\nsources:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities: []\n# the mounts\nslots:\n  - { slot: rail, lens: waiting }\nadvisories:\n  - id: a\n    on: prompt\n    query: SELECT 'x' AS message\n";
 
     #[test]
-    fn inserts_the_header_renames_two_keys_and_leaves_the_body_bytes_alone() {
+    fn inserts_the_header_renames_sources_moves_slots_under_ui_and_leaves_the_rest_alone() {
         let out = migrate_v1_to_v2(V1);
-        let expected = "manifest: 2\nname: review\ndescription: Review helpers\nsharing: private\nintent:\n  purpose: Review helpers\n  origin: null\n  examples: []\ncollectors:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities: []\n# the mounts\nslot_mounts:\n  - { slot: rail, lens: waiting }\nadvisories:\n  - id: a\n    on: prompt\n    query: SELECT 'x' AS message\n";
+        let expected = "manifest: 2\nname: review\ndescription: Review helpers\nsharing: private\nintent:\n  purpose: Review helpers\n  origin: null\n  examples: []\ncollectors:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities: []\n# the mounts\nui:\n  slots:\n    - { slot: rail, lens: waiting }\nadvisories:\n  - id: a\n    on: prompt\n    query: SELECT 'x' AS message\n";
         assert_eq!(out, expected);
-        // Below the inserted block, only the two key lines differ.
-        let body_v1: Vec<&str> = V1.lines().skip(2).collect();
-        let body_v2: Vec<&str> = out.lines().skip(8).collect();
-        assert_eq!(body_v1.len(), body_v2.len());
-        for (a, b) in body_v1.iter().zip(&body_v2) {
-            if *a == "sources:" {
-                assert_eq!(*b, "collectors:");
-            } else if *a == "slots:" {
-                assert_eq!(*b, "slot_mounts:");
-            } else {
-                assert_eq!(a, b);
-            }
-        }
         let parsed: ManifestV2 = serde_yaml::from_str(&out).unwrap();
         assert_eq!(parsed.manifest, 2);
         assert_eq!(parsed.intent.unwrap().purpose, "Review helpers");
         assert!(parsed.collectors.is_some());
-        assert_eq!(parsed.slot_mounts.len(), 1);
+        assert_eq!(parsed.ui.slots.len(), 1);
         assert_eq!(parsed.advisories.len(), 1);
+    }
+
+    /// A slots block's comments and blank lines move with it; a
+    /// column-0 sequence is indented too; the next key ends it.
+    #[test]
+    fn the_slots_block_moves_whole() {
+        let out = migrate_v1_to_v2(
+            "name: x\nslots:\n# review\n- { slot: commit, lens: a }\n\n- { slot: thread, lens: b }\nadvisories: []\n",
+        );
+        assert!(
+            out.ends_with(
+                "ui:\n  slots:\n  # review\n  - { slot: commit, lens: a }\n\n  - { slot: thread, lens: b }\nadvisories: []\n"
+            ),
+            "{out}"
+        );
+        let parsed: ManifestV2 = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(parsed.ui.slots.len(), 2);
     }
 
     #[test]
@@ -161,7 +180,7 @@ mod tests {
             out.contains("  purpose: \"Two lines: yes really\"\n"),
             "{out}"
         );
-        assert!(out.ends_with("slot_mounts: []\n"), "{out}");
+        assert!(out.ends_with("ui:\n  slots: []\n"), "{out}");
         let parsed: ManifestV2 = serde_yaml::from_str(&out).unwrap();
         assert_eq!(parsed.intent.unwrap().purpose, "Two lines: yes really");
     }

@@ -27,7 +27,7 @@ for the user to install.
 > `crates/oxplow-app/src/change_analysis.rs` computes and stores each change
 > behind `v_change*` ([semantic-layer.md](./semantic-layer.md) → "Change
 > analysis"), and the oxplow-analytics `change-review` lens grid shows it in
-> the commit, uncommitted and effort-review slots.
+> the `vcs.commit.details`, `vcs.status.details` and `effort.review.details` slots.
 
 ## Per-function metrics (change analysis, not a persisted scan)
 
@@ -316,7 +316,7 @@ quieter UI; a false-positive is a wrong "wrong layer" callout.
 ### Where it shows
 
 The oxplow-analytics `change-review` grid (commit, uncommitted and
-effort-review slots): summary, look-here-first, a churn treemap grouped
+`effort.review.details` slots): summary, look-here-first, a churn treemap grouped
 by zone, function changes, test changes, co-change surprises,
 duplication (with compare links) and new cross-zone imports. Zone badges
 also render in the core changed-files tree (`ChangedFilesTree`).

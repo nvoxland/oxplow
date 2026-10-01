@@ -1667,7 +1667,7 @@ The mechanics behind those controls (unchanged by tsk117):
   project dir).
 
 Metrics are also surfaced **organically off the Metrics pages** (tsk250): the
-effort review (`DiffViewPage`'s `effort-review` slot) shows the oxplow-analytics
+effort review (`DiffViewPage`'s `effort.review.details` slot) shows the oxplow-analytics
 `effort-metric-deltas` lens — the metrics the effort moved, before→after with
 Δ, better/worse and any threshold crossing, over `v_effort_metric_delta`
 (tests, coverage, analysis, tokens and nudges have their own lenses and are

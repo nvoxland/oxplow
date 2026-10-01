@@ -15,7 +15,7 @@ const review = (over: Partial<Extension> = {}): ExtensionReview => ({
     source: null,
     sources: [],
     origin: "project",
-    slots: [],
+    ui: { slots: [] },
     enabled: true,
     advisories: [],
     measures: [],

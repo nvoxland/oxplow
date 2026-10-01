@@ -1,4 +1,5 @@
 import { LensSlots } from "../lens/LensSlots.js";
+import { workItemRef } from "../workItemRef.js";
 import { numericRowId } from "../lens/lensModel.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { EffortDetail, Stream, Thread, ThreadWorkState, Task, TaskPriority, TaskStatus } from "../api.js";
@@ -210,8 +211,12 @@ export function TaskPage({
           }
         />
         <LensSlots
-          slot="task-detail"
-          params={numericRowId(String(item.id)) === null ? null : { task_id: numericRowId(String(item.id)) }}
+          slot="work_item.detail.body"
+          params={
+            numericRowId(String(item.id)) === null
+              ? null
+              : { ref: workItemRef(String(item.id)), task_id: numericRowId(String(item.id)) }
+          }
           streamId={stream?.id ?? null}
           onOpenPage={onOpenPage}
           h2ClassName="task-activity-heading"

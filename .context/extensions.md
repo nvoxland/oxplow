@@ -16,13 +16,13 @@ the bundled `oxplow-analytics` example extension.
 >   - the core explorer: the Explore Data page (with Save as Lens) and
 >     lens tiles on dashboards;
 >   - **bundled extensions** (compiled in, read-only, reserved names) and
->     the `effort-review` **slot**; the bundled `oxplow-review` extension
+>     the `effort.review.details` **slot**; the bundled `oxplow-review` extension
 >     is the effort review packet;
 >   - `exec` **sources** that bring external records in as entities. The
 >     mechanics and decisions are in
 >     [semantic-layer.md](./semantic-layer.md) → "User and extension
 >     sources", and a tested example is in `examples/extensions/github/`.
->   - **slots** (`effort-review`, `commit`, `uncommitted`, `task-detail`,
+>   - **slots** (`effort.review.details`, `commit`, `uncommitted`, `work_item.detail.body`,
 >     `thread`), **advisories**, per-project **disabling**, and the
 >     **`oxplow-analytics` extraction** (tsk280): every analytics page and
 >     widget is now a lens in that bundled extension, and core works with
@@ -31,7 +31,7 @@ the bundled `oxplow-analytics` example extension.
 >     in P6.G1), and extension-declared
 >     measures, metrics and gauges (tsk311; see "Contributing metrics").
 > - **Current:** extension-declared dimensions (tsk328).
-> - **Current:** lens action buttons (tsk329) and the `settings` slot
+> - **Current:** lens action buttons (tsk329) and the `settings.section` slot (then `settings`)
 >   (tsk330).
 > - **Current (P1, 2026-09-28/29):** manifest v2 with `intent`,
 >   `sharing` and the stable/experimental split (tsk413), the textual
@@ -359,13 +359,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       shadows the bundled one;
     - `install_extension` refuses the name;
     - `save_lens` refuses to write into a bundled extension.
-- **Slots (current: `effort-review`, `task-detail`, `thread`, `commit`,
-  `uncommitted`).**
-  - `extension.yaml` declares `slot_mounts: [{slot, lens}]` (v1:
-    `slots`). `SLOTS` in
+- **Slots (current: see "Slots" below).**
+  - `extension.yaml` declares `ui: { slots: [{slot, lens}] }` (v1:
+    top-level `slots`). `SLOTS` in
     `extensions.rs` names each slot and the params it **offers**; a
     mounted lens gets the ones it declares and must declare at least one,
-    or the mount is an error. Loaded as `Extension.slots`.
+    or the mount is an error. Loaded as `Extension.ui.slots`.
   - `src/lens/LensSlots.tsx` renders a slot: every mounted lens, run with
     the slot params it declares (`slotRuns`), re-run on data events.
     DiffViewPage offers `effort_id` and `change_id`, TaskPage `task_id`,
@@ -399,7 +398,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   ignores it; `find_lens` and `run_lens` say it's disabled. Settings →
   Extensions toggles it through the UI-only `set_extension_enabled`.
 - **`oxplow-review` (the review packet).** Its lenses, mounted in
-  `effort-review`:
+  `effort.review.details`:
   - Decisions Made (`v_decision`, `provenance = 'recorded'`)
   - Decisions Oxplow Noticed (`v_decision`, `provenance = 'inferred'`)
   - Unverified Claims (`v_claim` where `verified = 0`)
@@ -409,7 +408,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     area)
   - Tests Weakened (deleted test functions from `v_change_function`,
     fewer assertions and new skip markers from `v_change_test_file`;
-    also mounted in the `commit` and `uncommitted` slots)
+    also mounted in the `vcs.commit.details` and `vcs.status.details` slots)
   - Struggled Here (`v_struggle`)
   - Review Prompt (a copyable markdown prompt for reviewing the effort
     with a second harness: the task, the agent's summary, the files it
@@ -510,8 +509,12 @@ metrics:     [...]   # `key:` definitions; sourceMeasure must be declared here o
 gauges:      [...]   # starlark / jaq only; emits must be declared here or oxplow.*
 dimensions:  [...]
 collectors:  [...]   # v1 `sources`: exec / starlark / jaq programs → entities (see semantic-layer.md)
-slot_mounts:         # v1 `slots`: mount lenses into core pages
-  - { slot: effort-review, lens: change-review }
+ui:                  # what it adds to the core UI
+  slots:             # lenses mounted into core pages (v1 `slots`); see "Slots"
+    - { slot: effort.review.details, lens: change-review }
+  commands: …        # its commands in core menus (stable; P6b)
+  decorators: …      # experimental: a private extension only
+  replacements: …    # experimental, parsed as data only (P7)
 advisories:  [...]   # see "Advisories"
 launcher:            # entries for non-lens targets; a lens uses its own launcher: block
   - { label: …, category: Data, target: { ref: page:… } }        # a page (a ref of a kind that opens as one)
@@ -523,7 +526,7 @@ commands:  [...]   # Starlark scripts composing core commands (see "Commands")
 config: …          # parsed as data
 # experimental kinds — a PRIVATE extension only
 providers: [...]    # external providers over the provider protocol (providers.md); the others below are parsed as data only
-effects: … event_types: … ref_kinds: … custom_components: … decorators: … replacements: …
+effects: … event_types: … ref_kinds: … custom_components: …   # and ui.decorators / ui.replacements
 ```
 
 Lenses aren't listed here: every `lenses/*.yaml` file in the folder is
@@ -543,7 +546,7 @@ its line.
   `intent.origin` a canonical ref; an empty `intent.examples` is a
   warning;
 - lifecycle: sharing rules above; `engine` is `>=MAJOR.MINOR[.PATCH]`;
-- cross-references: a `slot_mounts` lens exists (and declares a param
+- cross-references: a `ui.slots` lens exists (and declares a param
   the slot binds); a grid's `children` exist — in this extension or,
   once everything is loaded, in another; a `launcher` target is a
   canonical ref. A metric's `sourceMeasure` or a gauge's `emits` that
@@ -565,7 +568,8 @@ so a person's consent survives it: it prepends `manifest: 2`, inserts
 `sharing: private` and an `intent` skeleton (`purpose` from
 `description`, `origin: null`, `examples: []` — the agent fills those
 in) after the header, and renames the top-level `sources:` →
-`collectors:` and `slots:` → `slot_mounts:`; every other byte,
+`collectors:` and moves `slots:` under `ui:` (its block indented two
+spaces); every other byte,
 comments included, is unchanged, and it is idempotent.
 `Extension.manifest_version` says which path a loaded extension took.
 
@@ -728,17 +732,22 @@ never types into the agent.
 Slots are the **only** way an extension reaches a core page. Core pages
 declare them (`SLOTS` in `extensions.rs`) and render whatever is mounted,
 in declaration order (there is no `order` field). With nothing mounted,
-the page is plain.
+the page is plain. **Slot names are one dotted namespace,
+`<capability>.<page>.<region>`** (P6b.C1): a mount using an old name
+(`effort-review`, `task-detail`, `thread`, `commit`, `uncommitted`,
+`settings` — `RENAMED_SLOTS`) is an error naming the new one, and a
+manifest still using top-level `slot_mounts:` / `decorators:` /
+`replacements:` fails at that line with where it moved under `ui:`
+(`manifest_v2::moved_key`).
 
-| Slot | Core page |
-|---|---|
-| `effort-review` | diff-view for an effort |
-| `task-detail` | TaskPage |
-| `thread` | PlanPane (compact strip) |
-| `commit` | GitCommitPage |
-| `uncommitted` | UncommittedChangesPage |
-| `rail` | rail HUD Alerts section |
-| `settings` | Settings: a section per mounting extension, titled with its name, before AI (tsk330; `SettingsSlotSections`, `slotRuns(…, extension)`). No params |
+| Slot | Core page | Params |
+|---|---|---|
+| `effort.review.details` | diff-view for an effort | `effort_id`, `change_id` |
+| `work_item.detail.body` | TaskPage, below the body | `ref`, `task_id` |
+| `thread.plan.header` | PlanPane (compact strip) | `thread_id` |
+| `vcs.commit.details` | GitCommitPage | `change_id` |
+| `vcs.status.details` | UncommittedChangesPage | `change_id` |
+| `settings.section` | Settings: a section per mounting extension, titled with its name, before AI (tsk330; `SettingsSlotSections`, `slotRuns(…, extension)`) | none |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
 
@@ -1046,12 +1055,12 @@ What moves out of core, and what it becomes:
 |---|---|
 | Planning / Review / Quality dashboards | `grid` lenses (**done**: `planning`, `review`, `quality`) |
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
-| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` grid in the `effort-review` / `commit` / `uncommitted` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
+| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` grid in the `effort.review.details` / `commit` / `uncommitted` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
 | Gauges (`oxplow/gauges/*.star`, idiom `.star`) | extensions can declare gauges now (tsk311); the built-in catalog stays core as the opt-in standard library |
 | Gauge-threshold nudges | **done:** the `threshold-crossed` advisory (with `coverage-target` and `metric-deltas`) |
-| Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`task-detail` slot) and `thread-tokens` (`thread` slot) |
+| Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread` slot) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
-| Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort-review` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
+| Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
 
 **Stays in core, deliberately simple:** a basic **metrics explorer** and
 **simple dashboards** (Nathan, 2026-09-27). The base version must let
@@ -1070,7 +1079,7 @@ and lenses under a range/branch filter ([dashboards.md](./dashboards.md)).
 collection ingest, attribution, token ingest, page visits (the rail and
 launcher use them), the fact store and engine, Go To / bookmarks, the Git
 dashboard. diff-view shrinks to title + file list + diff + the
-`effort-review` slot; TaskPage keeps the `task-detail` slot.
+`effort.review.details` slot; TaskPage keeps the `work_item.detail.body` slot.
 
 New in the extension: the **effort review packet**, all live exception
 lenses:
@@ -1097,7 +1106,7 @@ available to every extension:
 - `bar`, `line`, `treemap` and `grid` viz, with `chart` and `children`.
 - `commit` and `metric` link kinds; `file` links with `line`; `task`
   links accept a bare `v_task.id`.
-- `task-detail` and `thread` slots, with slot params checked at load.
+- `work_item.detail.body` and `thread` slots, with slot params checked at load.
 - Lens `launcher.category` and `hidden`.
 - Lens `actions:` as commands (P6.B1; the tsk329 registry retired).
 - Disabling extensions per project.

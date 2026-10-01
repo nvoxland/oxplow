@@ -154,7 +154,7 @@ export function UncommittedChangesPage({
               <ChangedFilesTree files={changed.files} onOpenFile={onOpenFile} onOpenFileDiff={openDiff} />
             </section>
             <LensSlots
-              slot="uncommitted"
+              slot="vcs.status.details"
               params={change ? { change_id: change.id } : null}
               streamId={streamId}
               onOpenPage={(ref) => onOpenPage(ref)}

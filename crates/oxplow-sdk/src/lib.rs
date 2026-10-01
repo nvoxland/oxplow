@@ -570,7 +570,7 @@ mod tests {
         assert!(first.changed);
         let text = std::fs::read_to_string(dir.path().join(&first.path)).unwrap();
         assert!(text.starts_with("manifest: 2\nname: old\n"), "{text}");
-        assert!(text.contains("slot_mounts: []"), "{text}");
+        assert!(text.contains("ui:\n  slots: []"), "{text}");
         let second = migrate(dir.path(), "old").unwrap();
         assert!(!second.changed);
         assert!(matches!(

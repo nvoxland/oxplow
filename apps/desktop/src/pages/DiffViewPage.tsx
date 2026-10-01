@@ -643,7 +643,7 @@ function ResolvedEndpointDiff({
 
       {primaryEffortId ? (
         <LensSlots
-          slot="effort-review"
+          slot="effort.review.details"
           params={
             effortRowId(primaryEffortId) === null
               ? null

@@ -156,8 +156,8 @@ export function reviewModel(review: ExtensionReview): ReviewModel {
   if (gauges.length > 0) declares.push(`${plural(gauges.length, "gauge")} (starlark/jaq, sandboxed)`);
   const metrics = ext.metrics ?? [];
   if (metrics.length > 0) declares.push(plural(metrics.length, "metric"));
-  if (ext.slots.length > 0) {
-    declares.push(`Adds to pages: ${[...new Set(ext.slots.map((s) => s.slot))].join(", ")}`);
+  if (ext.ui.slots.length > 0) {
+    declares.push(`Adds to pages: ${[...new Set(ext.ui.slots.map((s) => s.slot))].join(", ")}`);
   }
   return {
     name: ext.name,

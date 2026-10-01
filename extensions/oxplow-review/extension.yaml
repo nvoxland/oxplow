@@ -17,16 +17,17 @@ intent:
     - name: a stream with blocked tasks and open follow-ups
       input: { lens: waiting-on-me, params: { stream_id: 1 } }
       expect: the blocked tasks and open follow-up comments, and the Waiting panel's badge firing
-slot_mounts:
-  - { slot: effort-review, lens: decisions }
-  - { slot: effort-review, lens: inferred-decisions }
-  - { slot: effort-review, lens: unverified-claims }
-  - { slot: effort-review, lens: what-deviated }
-  - { slot: effort-review, lens: tests-weakened }
-  - { slot: commit, lens: tests-weakened }
-  - { slot: uncommitted, lens: tests-weakened }
-  - { slot: effort-review, lens: struggled }
-  - { slot: effort-review, lens: context-read }
-  - { slot: effort-review, lens: review-prompt }
+ui:
+  slots:
+    - { slot: effort.review.details, lens: decisions }
+    - { slot: effort.review.details, lens: inferred-decisions }
+    - { slot: effort.review.details, lens: unverified-claims }
+    - { slot: effort.review.details, lens: what-deviated }
+    - { slot: effort.review.details, lens: tests-weakened }
+    - { slot: vcs.commit.details, lens: tests-weakened }
+    - { slot: vcs.status.details, lens: tests-weakened }
+    - { slot: effort.review.details, lens: struggled }
+    - { slot: effort.review.details, lens: context-read }
+    - { slot: effort.review.details, lens: review-prompt }
 panels:
   - { id: waiting, title: Waiting on You, icon: bell, scope: project, body: waiting-on-me, badge: waiting-on-me }

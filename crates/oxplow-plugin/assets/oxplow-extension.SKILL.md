@@ -73,8 +73,9 @@ intent:                 # required: what it is for, and how to know it works
   prompts:              # optional: questions it helps answer, offered with Ask
     - { prompt: "What's waiting on me?" }
     - { prompt: "Who should review this effort?", about: effort }  # also on effort pages
-slot_mounts:            # optional: mount a lens into a core page
-  - { slot: task-detail, lens: task-history }
+ui:                     # optional: what it adds to core pages
+  slots:                #   mount a lens into a core page
+    - { slot: work_item.detail.body, lens: task-history }
 panels:                 # optional: a left-nav panel (body lens compact, badge = an alert lens's count)
   - { id: waiting, title: Waiting on Me, icon: bell, scope: stream, body: waiting-on-me, badge: waiting-on-me }
 ```
@@ -145,16 +146,16 @@ empty: Nothing is waiting on you.
   the command asks) or `{ prompt: "…" }` (puts the prompt in the agent's
   input for them to send). `validate_extension` checks that a command
   exists and the input fits it.
-- **Slots** mount a lens into a core page (`slot_mounts: [{ slot, lens }]`
+- **Slots** mount a lens into a core page (`ui: { slots: [{ slot, lens }] }`
   in `extension.yaml`). The lens must declare at least one param the slot
   binds, and gets only the ones it declares:
-  - `effort-review` (an effort's diff) → `effort_id`, `change_id`;
-  - `commit` (a commit page) and `uncommitted` (the working tree) →
-    `change_id` (the `v_change*` analysis);
-  - `task-detail` (task page) → `task_id`;
-  - `thread` (the Work panel, compact) → `thread_id`;
-  - `settings` → no params; Settings shows a section named after the
-    extension with its mounted lenses (its status or setup views).
+  - `effort.review.details` (an effort's diff) → `effort_id`, `change_id`;
+  - `vcs.commit.details` (a commit page) and `vcs.status.details` (the
+    working tree) → `change_id` (the `v_change*` analysis);
+  - `work_item.detail.body` (a work item's page) → `ref`, `task_id`;
+  - `thread.plan.header` (the Work panel, compact) → `thread_id`;
+  - `settings.section` → no params; Settings shows a section named after
+    the extension with its mounted lenses (its status or setup views).
 - **Pages** give a lens a place of its own: `pages: [{ id, title, icon?,
   category, lens }]` opens it full-page at `page:ext.<extension>.<id>` and
   lists it in the launcher under `category` (Work, Code, Git, Activity,

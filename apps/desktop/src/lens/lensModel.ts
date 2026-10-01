@@ -251,7 +251,7 @@ export function rowAsk(lens: Lens, columns: string[], row: SqlCell[]): string {
 }
 
 /** What a slot runs: each mounted lens with the slot params it declares
- *  (a slot offers several, e.g. effort-review's `effort_id` and
+ *  (a slot offers several, e.g. `effort.review.details`'s `effort_id` and
  *  `change_id`; `run_lens` rejects undeclared ones). */
 export function slotRuns(
   extensions: Extension[],
@@ -264,7 +264,7 @@ export function slotRuns(
   for (const ext of extensions) {
     if (!ext.enabled) continue;
     if (extension !== undefined && ext.name !== extension) continue;
-    for (const s of ext.slots) {
+    for (const s of ext.ui.slots) {
       if (s.slot !== slot) continue;
       const lens = ext.lenses.find((l) => l.id === s.lensId);
       if (lens) out.push({ id: s.lensId, params: childParams(lens, params) });
@@ -275,13 +275,7 @@ export function slotRuns(
 
 /** Enabled extensions that mount something into `slot`, in order. */
 export function slotExtensions(extensions: Extension[], slot: string): string[] {
-  return extensions.filter((e) => e.enabled && e.slots.some((s) => s.slot === slot)).map((e) => e.name);
-}
-
-/** Lens ids extensions mount into `slot` (e.g. `effort-review`), in
- *  extension order. */
-export function slotMounts(extensions: Extension[], slot: string): string[] {
-  return extensions.flatMap((e) => e.slots.filter((s) => s.slot === slot).map((s) => s.lensId));
+  return extensions.filter((e) => e.enabled && e.ui.slots.some((s) => s.slot === slot)).map((e) => e.name);
 }
 
 /** The numeric row id the `v_*` views use, from a UI effort id like

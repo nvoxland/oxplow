@@ -1604,9 +1604,9 @@ The cursor is **persisted** (not in-memory) so a daemon restart never
 re-sums already-recorded usage. Display is **tokens-only** for now; the
 stored `model` lets cost be layered on later. Everything reads it through
 `v_token_usage` (which carries each turn's `prompt`, V82): the
-oxplow-analytics `task-tokens` lens in the task page's `task-detail` slot
+oxplow-analytics `task-tokens` lens in the task page's `work_item.detail.body` slot
 (a total plus a per-turn log of prompt, model and tokens across the task's
-efforts), the `thread-tokens` strip in the Work panel's `thread` slot, and
+efforts), the `thread-tokens` strip in the Work panel's `thread.plan.header` slot, and
 the `usage` lenses. Tables: see `.context/data-model.md`
 (`agent_token_usage` / `agent_token_cursor`).
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, slotMounts, effortRowId, slotExtensions } from "./lensModel.js";
+import { treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions } from "./lensModel.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
   id: "review/waiting",
@@ -80,8 +80,8 @@ describe("formatCell", () => {
 describe("lensDirectoryEntries", () => {
   test("one launcher entry per loaded lens, under Lenses", () => {
     const exts: Extension[] = [
-      { name: "review", description: "Review helpers", path: "oxplow/extensions/review", errors: [], lenses: [lens()], source: null, sources: [], origin: "project", slots: [], enabled: true },
-      { name: "broken", description: "", path: "oxplow/extensions/broken", errors: ["bad"], lenses: [], source: null, sources: [], origin: "project", slots: [], enabled: true },
+      { name: "review", description: "Review helpers", path: "oxplow/extensions/review", errors: [], lenses: [lens()], source: null, sources: [], origin: "project", ui: { slots: [] }, enabled: true },
+      { name: "broken", description: "", path: "oxplow/extensions/broken", errors: ["bad"], lenses: [], source: null, sources: [], origin: "project", ui: { slots: [] }, enabled: true },
     ];
     const entries = lensDirectoryEntries(exts);
     expect(entries).toHaveLength(1);
@@ -156,19 +156,6 @@ describe("rowAsk", () => {
   });
 });
 
-describe("slotMounts", () => {
-  test("lens ids mounted in a slot, in extension order", () => {
-    const ext = (name: string, slots: { slot: string; lensId: string }[]): Extension => ({
-      name, description: "", path: "", errors: [], lenses: [], source: null, sources: [], origin: "bundled", slots,
-    });
-    const exts = [
-      ext("oxplow-review", [{ slot: "effort-review", lensId: "oxplow-review/decisions" }, { slot: "effort-review", lensId: "oxplow-review/claims" }]),
-      ext("mine", [{ slot: "effort-review", lensId: "mine/x" }, { slot: "other", lensId: "mine/y" }]),
-    ];
-    expect(slotMounts(exts, "effort-review")).toEqual(["oxplow-review/decisions", "oxplow-review/claims", "mine/x"]);
-  });
-});
-
 describe("effortRowId", () => {
   test("the numeric id v_* views use, from an effort id like eff262", () => {
     expect(effortRowId("eff262")).toBe(262);
@@ -208,7 +195,7 @@ describe("launcher entries", () => {
       source: null,
       sources: [],
       origin: "project",
-      slots: [],
+      ui: { slots: [] },
       enabled: true,
       ...over,
     }) as Extension;
@@ -348,22 +335,22 @@ test("slot lenses get only the slot params they declare", () => {
     {
       name: "x",
       enabled: true,
-      slots: [{ slot: "effort-review", lensId: "x/a" }],
+      ui: { slots: [{ slot: "effort.review.details", lensId: "x/a" }] },
       lenses: [lens({ id: "x/a", params: [{ name: "effort_id", label: null, default: null }] })],
     },
   ] as unknown as Extension[];
-  expect(slotRuns(exts, "effort-review", { effort_id: 7, change_id: 9 })).toEqual([{ id: "x/a", params: { effort_id: 7 } }]);
+  expect(slotRuns(exts, "effort.review.details", { effort_id: 7, change_id: 9 })).toEqual([{ id: "x/a", params: { effort_id: 7 } }]);
 });
 
 test("a slot can be narrowed to one extension, and lists who mounts there", () => {
   const exts = [
-    { name: "a", enabled: true, slots: [{ slot: "settings", lensId: "a/x" }], lenses: [lens({ id: "a/x" })] },
-    { name: "b", enabled: true, slots: [{ slot: "settings", lensId: "b/y" }], lenses: [lens({ id: "b/y" })] },
-    { name: "c", enabled: false, slots: [{ slot: "settings", lensId: "c/z" }], lenses: [lens({ id: "c/z" })] },
-    { name: "d", enabled: true, slots: [{ slot: "rail", lensId: "d/w" }], lenses: [lens({ id: "d/w" })] },
+    { name: "a", enabled: true, ui: { slots: [{ slot: "settings.section", lensId: "a/x" }] }, lenses: [lens({ id: "a/x" })] },
+    { name: "b", enabled: true, ui: { slots: [{ slot: "settings.section", lensId: "b/y" }] }, lenses: [lens({ id: "b/y" })] },
+    { name: "c", enabled: false, ui: { slots: [{ slot: "settings.section", lensId: "c/z" }] }, lenses: [lens({ id: "c/z" })] },
+    { name: "d", enabled: true, ui: { slots: [{ slot: "thread.plan.header", lensId: "d/w" }] }, lenses: [lens({ id: "d/w" })] },
   ] as unknown as Extension[];
-  expect(slotRuns(exts, "settings", {}, "b")).toEqual([{ id: "b/y", params: {} }]);
-  expect(slotExtensions(exts, "settings")).toEqual(["a", "b"]);
+  expect(slotRuns(exts, "settings.section", {}, "b")).toEqual([{ id: "b/y", params: {} }]);
+  expect(slotExtensions(exts, "settings.section")).toEqual(["a", "b"]);
 });
 
 test("page links open any oxplow page by its tab id", () => {

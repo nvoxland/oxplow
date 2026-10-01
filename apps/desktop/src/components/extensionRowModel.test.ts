@@ -11,7 +11,7 @@ const ext = (over: Partial<Extension> = {}): Extension => ({
   source: null,
   sources: [],
   origin: "project",
-  slots: [],
+  ui: { slots: [] },
   enabled: true,
   ...over,
 });

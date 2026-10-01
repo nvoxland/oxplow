@@ -488,7 +488,7 @@ export function PlanPane({
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {mode === "thread" && threadId ? (
           <LensSlots
-            slot="thread"
+            slot="thread.plan.header"
             params={numericRowId(threadId) === null ? null : { thread_id: numericRowId(threadId) }}
             streamId={streamId}
             variant="strip"

@@ -81,6 +81,32 @@ pub struct SlotMount {
     pub lens: String,
 }
 
+/// `ui:` — everything an extension adds to the core UI (P6b): lenses
+/// mounted into core pages (`slots`, stable), its commands in core menus
+/// (`commands`, stable), decorations on core refs (`decorators`,
+/// experimental) and replaced sub-components (`replacements`,
+/// experimental, parsed as data until P7).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UiBlock {
+    #[serde(default)]
+    pub slots: Vec<SlotMount>,
+    #[serde(default)]
+    pub commands: Option<Value>,
+    #[serde(default)]
+    pub decorators: Option<Value>,
+    #[serde(default)]
+    pub replacements: Option<Value>,
+}
+
+/// Top-level keys that moved under `ui:` — a manifest still using one is
+/// an error naming where it went.
+pub const MOVED_KEYS: &[(&str, &str)] = &[
+    ("slot_mounts", "ui.slots"),
+    ("decorators", "ui.decorators"),
+    ("replacements", "ui.replacements"),
+];
+
 /// A launcher entry as the manifest holds it; [`launcher_entries`]
 /// checks its target and types it.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -286,9 +312,9 @@ pub struct ManifestV2 {
     /// its own `launcher:` block.
     #[serde(default)]
     pub launcher: Vec<LauncherEntryFile>,
-    /// Lenses mounted into core pages (v1 `slots`).
+    /// What it adds to the core UI: slots, commands in menus, decorators.
     #[serde(default)]
-    pub slot_mounts: Vec<SlotMount>,
+    pub ui: UiBlock,
     /// The instance config schema (§10.3). Parsed as data in P1.
     #[serde(default)]
     pub config: Option<Value>,
@@ -309,10 +335,6 @@ pub struct ManifestV2 {
     pub ref_kinds: Option<Value>,
     #[serde(default)]
     pub custom_components: Option<Value>,
-    #[serde(default)]
-    pub decorators: Option<Value>,
-    #[serde(default)]
-    pub replacements: Option<Value>,
 }
 
 /// The kinds a shared extension may not use, with the key each rides on.
@@ -322,8 +344,8 @@ pub const EXPERIMENTAL_KINDS: &[&str] = &[
     "event_types",
     "ref_kinds",
     "custom_components",
-    "decorators",
-    "replacements",
+    "ui.decorators",
+    "ui.replacements",
 ];
 
 /// The stable kinds (permanent API), by manifest key.
@@ -339,7 +361,8 @@ pub const STABLE_KINDS: &[&str] = &[
     "pages",
     "panels",
     "launcher",
-    "slot_mounts",
+    "ui.slots",
+    "ui.commands",
     "config",
     "advisories",
 ];
@@ -364,11 +387,11 @@ impl ManifestV2 {
         if present(&self.custom_components) {
             out.push("custom_components");
         }
-        if present(&self.decorators) {
-            out.push("decorators");
+        if present(&self.ui.decorators) {
+            out.push("ui.decorators");
         }
-        if present(&self.replacements) {
-            out.push("replacements");
+        if present(&self.ui.replacements) {
+            out.push("ui.replacements");
         }
         out
     }
@@ -393,6 +416,22 @@ pub fn line_under(text: &str, key: &str, needle: &str) -> Option<usize> {
         .take_while(|(_, l)| l.starts_with(' ') || l.starts_with('-') || l.trim().is_empty())
         .find(|(_, l)| l.contains(needle))
         .map(|(i, _)| i + 1)
+}
+
+/// The line of a kind's key: a top-level key, or `ui.<key>` under `ui:`.
+pub fn kind_line(text: &str, kind: &str) -> Option<usize> {
+    match kind.strip_prefix("ui.") {
+        Some(sub) => line_under(text, "ui", &format!("{sub}:")).or(key_line(text, "ui")),
+        None => key_line(text, kind),
+    }
+}
+
+/// The first top-level key that moved under `ui:`, with its line and
+/// where it went.
+pub fn moved_key(text: &str) -> Option<(usize, &'static str, &'static str)> {
+    MOVED_KEYS
+        .iter()
+        .find_map(|(old, new)| key_line(text, old).map(|line| (line, *old, *new)))
 }
 
 /// `file:line: message`, or `file: message` when no line is known.
@@ -526,7 +565,7 @@ pub fn check(m: &ManifestV2, file: &str, text: &str, bundled: bool) -> (Vec<Stri
         for kind in m.experimental_kinds_used() {
             errors.push(at(
                 file,
-                key_line(text, kind),
+                kind_line(text, kind),
                 format!(
                     "`{kind}` is experimental: a shared extension may use stable kinds only ({})",
                     STABLE_KINDS.join(", ")

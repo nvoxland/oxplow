@@ -20,7 +20,7 @@ export function SettingsSlotSections({
   useEffect(() => {
     const load = () =>
       void listExtensions(null)
-        .then((exts) => setNames(slotExtensions(exts, "settings")))
+        .then((exts) => setNames(slotExtensions(exts, "settings.section")))
         .catch(() => setNames([]));
     load();
     return subscribeOxplowEvents((event) => {
@@ -31,7 +31,7 @@ export function SettingsSlotSections({
     <div data-testid="settings-slot">
       {names.map((name) => (
         <div key={name} data-testid={`settings-slot-${name}`}>
-          {section(name, <LensSlots slot="settings" extension={name} params={NO_PARAMS} streamId={null} />)}
+          {section(name, <LensSlots slot="settings.section" extension={name} params={NO_PARAMS} streamId={null} />)}
         </div>
       ))}
     </div>
