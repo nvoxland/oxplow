@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { subscribeOxplowEvents } from "./api.js";
-import { knowledgeChanged, readWikiPages } from "./knowledge.js";
+import { readWikiPages } from "./knowledge.js";
+import { NO_READS, readsChanged } from "./lens/lensRerun.js";
+import type { Reads } from "./tauri-bridge/generated/bindings.js";
 
 /**
  * Shared in-memory slug → title map. The wiki body markdown renderer
@@ -8,12 +10,13 @@ import { knowledgeChanged, readWikiPages } from "./knowledge.js";
  * title instead of the raw slug — readers should see "Local Snapshots"
  * not `local-snapshots`.
  *
- * One load on first subscribe; refreshed when the runtime emits
- * `wikiPagesChanged` (page added, renamed, deleted). Components
- * subscribe via `useWikiTitle(slug)`.
+ * One load on first subscribe; refreshed when a model the read read
+ * changes (`readsChanged` over the read's own `reads` — the one rerun
+ * rule, outside a component). Components subscribe via `useWikiTitle`.
  */
 
 let titles = new Map<string, string>();
+let reads: Reads = NO_READS;
 let loaded = false;
 let inFlight: Promise<void> | null = null;
 const listeners = new Set<() => void>();
@@ -28,12 +31,13 @@ async function refresh(): Promise<void> {
   if (inFlight) return inFlight;
   inFlight = (async () => {
     try {
-      const pages = await readWikiPages();
+      const result = await readWikiPages();
       const next = new Map<string, string>();
-      for (const p of pages) {
+      for (const p of result.pages) {
         if (p.slug && p.title) next.set(p.slug, p.title);
       }
       titles = next;
+      reads = result.reads;
       loaded = true;
       notify();
     } catch {
@@ -49,7 +53,7 @@ let unsubscribeEvents: (() => void) | null = null;
 function ensureSubscribed() {
   if (unsubscribeEvents) return;
   unsubscribeEvents = subscribeOxplowEvents((event) => {
-    if (knowledgeChanged(event as Record<string, unknown>)) void refresh();
+    if (readsChanged(event as Record<string, unknown>, reads)) void refresh();
   });
 }
 

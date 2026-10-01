@@ -18,12 +18,12 @@ import { backlogRef, doneWorkRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import {
   listThreads,
-  subscribeOxplowEvents,
   type Stream,
   type Thread,
   type ThreadWorkState,
 } from "../api.js";
-import { readThreadWork, tasksChanged } from "../workItems.js";
+import { readThreadWork } from "../workItems.js";
+import { unionReads, useRerunOnChange } from "../lens/lensRerun.js";
 
 export type TasksPageProps =
   Omit<
@@ -101,18 +101,18 @@ export function TasksPage({
     if (currentStreamId) requestThreads(currentStreamId);
   }, [currentStreamId, requestThreads]);
 
-  // A task write anywhere (a command, an agent) changes the models: drop
-  // the cached states so the active scope re-reads.
+  // A task write anywhere (a command, an agent) changes the models the
+  // scoped states read: drop the cached states so the active scope
+  // re-reads (the one rerun rule, over what those reads read).
   const [tasksVersion, setTasksVersion] = useState(0);
-  useEffect(
-    () =>
-      subscribeOxplowEvents((event) => {
-        if (!tasksChanged(event as Record<string, unknown>)) return;
-        setScopedWorkStates({});
-        setTasksVersion((v) => v + 1);
-      }),
-    [],
+  const scopedReads = useMemo(
+    () => unionReads(Object.values(scopedWorkStates).map((s) => s.reads)),
+    [scopedWorkStates],
   );
+  useRerunOnChange(scopedReads, () => {
+    setScopedWorkStates({});
+    setTasksVersion((v) => v + 1);
+  });
 
   // Fetch the work states needed by the active scope. For "stream" we load
   // every thread in that stream; for "all" we load every thread across

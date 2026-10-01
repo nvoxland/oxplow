@@ -6,7 +6,8 @@
  * Writes are `knowledge.*` commands (`writeWikiPage`).
  */
 import { querySql, searchSite } from "./api.js";
-import type { SearchHit, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
+import { unionReads } from "./lens/lensRerun.js";
+import type { Reads, SearchHit, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /** One file ref of a page and whether its file drifted since it was
  *  pinned (`v_knowledge_ref`). */
@@ -43,17 +44,8 @@ export interface WikiPageSearchHit {
   snippet: string;
 }
 
-export const KNOWLEDGE_MODELS = ["v_knowledge_page", "v_knowledge_body", "v_knowledge_ref"] as const;
-
-/** Whether an event says a knowledge read is stale. */
-export function knowledgeChanged(event: Readonly<Record<string, unknown>>): boolean {
-  const models = event.models;
-  return (
-    event.kind === "modelsChanged" &&
-    Array.isArray(models) &&
-    models.some((m) => (KNOWLEDGE_MODELS as readonly string[]).includes(m as string))
-  );
-}
+// Every read returns what it read (`reads`); a consumer re-runs it through
+// `useRerunOnChange` (or `readsChanged`) when one of those models changes.
 
 const cell = (result: SqlQueryResult, row: SqlCell[], name: string) => row[result.columns.indexOf(name)];
 
@@ -79,18 +71,21 @@ export function pagesFromResult(result: SqlQueryResult): WikiPageSummary[] {
 }
 
 /** Every page, most recently updated first. */
-export async function readWikiPages(): Promise<WikiPageSummary[]> {
+export async function readWikiPages(): Promise<{ pages: WikiPageSummary[]; reads: Reads }> {
   const res = await querySql(
     `SELECT ref, slug, title, excerpt, updated_at, stale_ref_count, outbound_refs
        FROM v_knowledge_page ORDER BY updated_at DESC`,
     [],
     100_000,
   );
-  return pagesFromResult(res);
+  return { pages: pagesFromResult(res), reads: res.reads };
 }
 
-/** One page's summary and body, or null when there's no such page. */
-export async function readWikiPage(slug: string): Promise<{ summary: WikiPageSummary; body: string } | null> {
+/** One page's summary and body (null when there's no such page), and
+ *  what the read read. */
+export async function readWikiPage(
+  slug: string,
+): Promise<{ page: { summary: WikiPageSummary; body: string } | null; reads: Reads }> {
   const [pages, body] = await Promise.all([
     querySql(
       `SELECT ref, slug, title, excerpt, updated_at, stale_ref_count, outbound_refs
@@ -100,9 +95,10 @@ export async function readWikiPage(slug: string): Promise<{ summary: WikiPageSum
     ),
     querySql("SELECT body FROM v_knowledge_body WHERE ref = ?1", [`wiki:${slug}`], 1),
   ]);
+  const reads = unionReads([pages.reads, body.reads]);
   const summary = pagesFromResult(pages)[0];
-  if (!summary) return null;
-  return { summary, body: String(body.rows[0]?.[0] ?? "") };
+  if (!summary) return { page: null, reads };
+  return { page: { summary, body: String(body.rows[0]?.[0] ?? "") }, reads };
 }
 
 export function freshnessFromResult(result: SqlQueryResult): WikiRefFreshness[] {
@@ -118,14 +114,14 @@ export function freshnessFromResult(result: SqlQueryResult): WikiRefFreshness[] 
 }
 
 /** A page's file refs and whether each has drifted since it was pinned. */
-export async function readWikiFreshness(slug: string): Promise<WikiRefFreshness[]> {
+export async function readWikiFreshness(slug: string): Promise<{ rows: WikiRefFreshness[]; reads: Reads }> {
   const res = await querySql(
     `SELECT path, pinned_snapshot_id, pinned_vcs_rev, pinned_vcs_rev_exact, latest_snapshot_id, stale
        FROM v_knowledge_ref WHERE page = ?1 ORDER BY path`,
     [`wiki:${slug}`],
     10_000,
   );
-  return freshnessFromResult(res);
+  return { rows: freshnessFromResult(res), reads: res.reads };
 }
 
 export function searchHitsOf(hits: SearchHit[]): WikiPageSearchHit[] {

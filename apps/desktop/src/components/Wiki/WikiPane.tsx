@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   listRecentUsage,
-  subscribeOxplowEvents,
   subscribeUsageEvents,
   writeWikiPage,
   type Stream,
   type UsageRollup,
 } from "../../api.js";
 import {
-  knowledgeChanged,
   readWikiPages,
   searchWikiPages,
   type WikiPageSearchHit,
   type WikiPageSummary,
 } from "../../knowledge.js";
+import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
+import type { Reads } from "../../tauri-bridge/generated/bindings.js";
 import { logUi } from "../../logger.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
@@ -49,13 +49,16 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
 
   const streamId = stream?.id ?? null;
 
+  const [notesReads, setNotesReads] = useState<Reads>(NO_READS);
   const refreshNotes = useCallback(async () => {
     if (!streamId) {
       setNotes([]);
       return;
     }
     try {
-      setNotes(await readWikiPages());
+      const { pages, reads } = await readWikiPages();
+      setNotes(pages);
+      setNotesReads(reads);
     } catch (error) {
       logUi("error", "readWikiPages failed", { error: String(error) });
     }
@@ -76,12 +79,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
   useEffect(() => { void refreshNotes(); }, [refreshNotes]);
   useEffect(() => { void refreshUsage(); }, [refreshUsage]);
 
-  useEffect(() => {
-    const unsub = subscribeOxplowEvents((event) => {
-      if (knowledgeChanged(event as Record<string, unknown>)) void refreshNotes();
-    });
-    return unsub;
-  }, [refreshNotes]);
+  useRerunOnChange(notesReads, () => void refreshNotes());
 
   useEffect(() => {
     const unsub = subscribeUsageEvents(() => { void refreshUsage(); }, { kind: "wiki" });

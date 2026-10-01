@@ -1,9 +1,10 @@
 import { LensSlots } from "../lens/LensSlots.js";
 import { numericRowId } from "../lens/lensModel.js";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { EffortDetail, Stream, Thread, ThreadWorkState, Task, TaskPriority, TaskStatus } from "../api.js";
-import { subscribeOxplowEvents } from "../api.js";
-import { moveTask, readTask, readTaskEfforts, tasksChanged, updateTask } from "../workItems.js";
+import { moveTask, readTask, readTaskEfforts, updateTask } from "../workItems.js";
+import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
+import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, snapshotRef, taskRef } from "../tabs/pageRefs.js";
@@ -93,53 +94,44 @@ export function TaskPage({
       : undefined;
 
   const inThreadItems = items.some((i) => i.id === itemId);
-  useEffect(() => {
-    let cancelled = false;
-    const refetch = () => {
-      // Swallow + log rather than letting a rejected fetch (e.g. a
-      // malformed task id) bubble to `window.unhandledrejection`, which
-      // reads as a silent failure with no surfaced error.
-      void readTask(itemId)
-        .then((row) => {
-          if (!cancelled) setFetchedItem(row);
-        })
-        .catch((err) => {
-          logUi("warn", "task fetch failed", { itemId, error: String(err) });
-        });
-    };
-    if (!inThreadItems) refetch();
-    const unsub = subscribeOxplowEvents((event) => {
-      // Only the out-of-thread task needs this — the in-thread case is
-      // driven by the live `items` prop.
-      if (!tasksChanged(event as Record<string, unknown>)) return;
-      refetch();
-    });
-    return () => {
-      cancelled = true;
-      unsub();
-    };
+  // What the page's own reads read; a change to one of those models
+  // re-runs them (the one rerun rule). The in-thread task itself is
+  // driven by the live `items` prop.
+  const [taskReads, setTaskReads] = useState<Reads>(NO_READS);
+  const [effortReads, setEffortReads] = useState<Reads>(NO_READS);
+  const refetchTask = useCallback(() => {
+    if (inThreadItems) return;
+    // Swallow + log rather than letting a rejected fetch (e.g. a
+    // malformed task id) bubble to `window.unhandledrejection`, which
+    // reads as a silent failure with no surfaced error.
+    void readTask(itemId)
+      .then(({ task, reads }) => {
+        setFetchedItem(task);
+        setTaskReads(reads);
+      })
+      .catch((err) => {
+        logUi("warn", "task fetch failed", { itemId, error: String(err) });
+      });
   }, [itemId, inThreadItems]);
+  useEffect(() => refetchTask(), [refetchTask]);
 
-  useEffect(() => {
-    if (!item) return;
-    let cancelled = false;
-    const load = () =>
-      void readTaskEfforts(item.id)
-        .then((rows) => {
-          if (!cancelled) setEfforts(rows);
-        })
-        .catch((err) => logUi("warn", "task efforts fetch failed", { itemId: item.id, error: String(err) }));
-    load();
-    // An effort opens or closes with a status move: re-read so the
-    // Activity timeline reflects it without a remount.
-    const unsub = subscribeOxplowEvents((event) => {
-      if (tasksChanged(event as Record<string, unknown>)) load();
-    });
-    return () => {
-      cancelled = true;
-      unsub();
-    };
-  }, [item?.id]);
+  const effortTaskId = item?.id ?? null;
+  const loadEfforts = useCallback(() => {
+    if (!effortTaskId) return;
+    void readTaskEfforts(effortTaskId)
+      .then(({ efforts, reads }) => {
+        setEfforts(efforts);
+        setEffortReads(reads);
+      })
+      .catch((err) => logUi("warn", "task efforts fetch failed", { itemId: effortTaskId, error: String(err) }));
+  }, [effortTaskId]);
+  useEffect(() => loadEfforts(), [loadEfforts]);
+  // An effort opens or closes with a status move: the Activity timeline
+  // re-reads without a remount.
+  useRerunOnChange(unionReads([taskReads, effortReads]), () => {
+    refetchTask();
+    loadEfforts();
+  });
 
   const handleUpdate = async (
     targetId: string,

@@ -28,8 +28,8 @@ function fetchTitle(id: string): Promise<void> {
   if (existing) return existing;
   const p = (async () => {
     try {
-      const rows = await readTasksById([id]);
-      titles.set(id, rows.find((r) => r.id === id)?.title ?? null);
+      const { tasks } = await readTasksById([id]);
+      titles.set(id, tasks.find((r) => r.id === id)?.title ?? null);
       notify();
     } catch {
       // Leave it unresolved so a later render retries.

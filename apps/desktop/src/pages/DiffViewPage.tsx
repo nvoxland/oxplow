@@ -328,9 +328,9 @@ function ResolvedEndpointDiff({
     }
     let cancelled = false;
     void readTasksById([taskId])
-      .then((rows) => {
+      .then(({ tasks }) => {
         if (cancelled) return;
-        setTaskTitle(rows.find((r) => r.id === taskId)?.title ?? null);
+        setTaskTitle(tasks.find((r) => r.id === taskId)?.title ?? null);
       })
       .catch(() => setTaskTitle(null));
     return () => {
@@ -357,9 +357,9 @@ function ResolvedEndpointDiff({
           return;
         }
         const taskIds = overlapping.flatMap((o) => (o.taskId ? [o.taskId] : []));
-        const titles = await readTasksById(Array.from(new Set(taskIds))).catch(
-          () => [] as Array<{ id: string; title: string }>,
-        );
+        const titles = await readTasksById(Array.from(new Set(taskIds)))
+          .then((r) => r.tasks)
+          .catch(() => [] as Array<{ id: string; title: string }>);
         const titleByTask = new Map(titles.map((t) => [t.id, t.title] as const));
         if (cancelled) return;
         setEffortRows(
@@ -446,8 +446,8 @@ function ResolvedEndpointDiff({
     }
     let cancelled = false;
     void readTask(primaryTaskId)
-      .then((t) => {
-        if (!cancelled) setEffortDescription(t?.description ?? null);
+      .then(({ task }) => {
+        if (!cancelled) setEffortDescription(task?.description ?? null);
       })
       .catch(() => {
         if (!cancelled) setEffortDescription(null);

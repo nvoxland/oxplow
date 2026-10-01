@@ -20,7 +20,9 @@ import {
   type WorkspaceContext,
 } from "./api.js";
 import { showToast } from "./components/toastStore.js";
-import { readBacklog, readThreadWork, tasksChanged } from "./workItems.js";
+import { readBacklog, readThreadWork } from "./workItems.js";
+import { NO_READS, readsChanged, unionReads } from "./lens/lensRerun.js";
+import type { Reads } from "./tauri-bridge/generated/bindings.js";
 import { logUi } from "./logger.js";
 
 /**
@@ -119,27 +121,35 @@ export function useBackendSubscriptions(
   }, [setWorkspaceContext]);
 
   // Tasks are read from the models (P6.E1b): the backlog and every loaded
-  // thread's work re-read when a task model changes — whoever wrote it (a
-  // person's command, an agent's MCP tool).
+  // thread's work re-read when a model they read changes — whoever wrote
+  // it (a person's command, an agent's MCP tool). What they read is the
+  // union of the reads the last loads reported (`readsChanged`, the same
+  // rule as `useRerunOnChange`), not a list of task models.
   useEffect(() => {
     let cancelled = false;
+    const reads: { backlog: Reads; threads: Record<string, Reads> } = { backlog: NO_READS, threads: {} };
+    const allReads = () => unionReads([reads.backlog, ...Object.values(reads.threads)]);
     const reloadThread = (threadId: string) =>
       readThreadWork(threadId)
         .then((work) => {
-          if (!cancelled) setThreadWorkStates((prev) => ({ ...prev, [threadId]: work }));
+          if (cancelled) return;
+          reads.threads[threadId] = work.reads;
+          setThreadWorkStates((prev) => ({ ...prev, [threadId]: work }));
         })
         .catch((error) => logUi("warn", "failed to refresh thread work", { threadId, error: String(error) }));
     const reloadAll = () => {
       void readBacklog()
         .then((state) => {
-          if (!cancelled) setBacklogState(state);
+          if (cancelled) return;
+          reads.backlog = state.reads;
+          setBacklogState(state);
         })
         .catch((error) => logUi("warn", "failed to refresh backlog state", { error: String(error) }));
       for (const threadId of Object.keys(threadWorkStatesRef.current ?? {})) void reloadThread(threadId);
     };
     reloadAll();
     const unsubscribe = subscribeOxplowEvents((event) => {
-      if (tasksChanged(event as Record<string, unknown>)) reloadAll();
+      if (readsChanged(event as Record<string, unknown>, allReads())) reloadAll();
       // Followups are in-memory, not a model: their own event.
       else if (event.kind === "followupsChanged") void reloadThread(event.threadId as string);
     });

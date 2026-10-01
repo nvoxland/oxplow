@@ -6,6 +6,7 @@
  * `useRerunOnChange`. Writes are `work_item.*` commands.
  */
 import { listEffortFiles, querySql, runCommand, type EffortDetail, type SqlCell, type TaskEffort } from "./api.js";
+import { NO_READS } from "./lens/lensRerun.js";
 import { taskIdOf, threadIdOf, threadRowId } from "./modelIds.js";
 import type { Followup, Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 import { commands } from "./tauri-bridge/index.js";
@@ -46,6 +47,8 @@ export interface ThreadWorkState {
   epics: Task[];
   items: Task[];
   followups: Followup[];
+  /** What the read read: a change to one of these models re-reads it. */
+  reads: Reads;
 }
 
 /** The backlog's tasks by status. */
@@ -54,6 +57,8 @@ export interface BacklogState {
   waiting: Task[];
   in_progress: Task[];
   done: Task[];
+  /** What the read read: a change to one of these models re-reads it. */
+  reads: Reads;
 }
 
 /** The state every provider maps to. */
@@ -201,19 +206,10 @@ export async function moveWorkItem(
 }
 
 // ---- oxplow's tasks (v_task) ----
-
-/** The models a task read depends on. */
-export const TASK_MODELS = ["v_task", "v_task_note", "v_work_item", "v_effort", "v_effort_file"] as const;
-
-/** Whether an event says a task read is stale: a model it reads changed. */
-export function tasksChanged(event: Readonly<Record<string, unknown>>): boolean {
-  const models = event.models;
-  return (
-    event.kind === "modelsChanged" &&
-    Array.isArray(models) &&
-    models.some((m) => (TASK_MODELS as readonly string[]).includes(m as string))
-  );
-}
+//
+// Every read returns what it read (`reads`); a consumer re-runs it through
+// `useRerunOnChange` (or `readsChanged`) when one of those models changes.
+// There is no list of "task models" to keep in step with the queries.
 
 const TASK_COLUMNS = `t.id, t.thread_id, t.parent_id, t.title, t.description, t.status, t.priority, t.sort_index,
   t.author, t.created_at, t.updated_at, t.completed_at,
@@ -256,9 +252,9 @@ async function readTasks(where: string, params: SqlCell[]): Promise<{ tasks: Tas
   return { tasks: tasksFromResult(res), reads: res.reads };
 }
 
-export function bucketThreadWork(threadId: string, tasks: Task[], followups: Followup[]): ThreadWorkState {
+export function bucketThreadWork(threadId: string, tasks: Task[], followups: Followup[], reads: Reads): ThreadWorkState {
   const parents = new Set(tasks.map((t) => t.parent_id).filter((p): p is string => p !== null));
-  const work: ThreadWorkState = { threadId, waiting: [], inProgress: [], done: [], epics: [], items: [], followups };
+  const work: ThreadWorkState = { threadId, waiting: [], inProgress: [], done: [], epics: [], items: [], followups, reads };
   for (const t of tasks) {
     if (parents.has(t.id)) work.epics.push(t);
     else if (t.status === "blocked") work.waiting.push(t);
@@ -278,17 +274,17 @@ export function orderedTaskIds(work: ThreadWorkState): string[] {
 
 /** A thread's work: its tasks from `v_task`, and its followups. */
 export async function readThreadWork(threadId: string): Promise<ThreadWorkState> {
-  const [{ tasks }, followups] = await Promise.all([
+  const [{ tasks, reads }, followups] = await Promise.all([
     readTasks("t.thread_id = ?1", [threadRowId(threadId)]),
     commands.listFollowups(threadId).then((r) => (r.status === "ok" ? r.data : [])),
   ]);
-  return bucketThreadWork(threadId, tasks, followups);
+  return bucketThreadWork(threadId, tasks, followups, reads);
 }
 
 /** The backlog's tasks by status. */
 export async function readBacklog(): Promise<BacklogState> {
-  const { tasks } = await readTasks("t.thread_id IS NULL", []);
-  const state: BacklogState = { items: [], waiting: [], in_progress: [], done: [] };
+  const { tasks, reads } = await readTasks("t.thread_id IS NULL", []);
+  const state: BacklogState = { items: [], waiting: [], in_progress: [], done: [], reads };
   for (const t of tasks) {
     if (t.status === "blocked") state.waiting.push(t);
     else if (t.status === "in_progress") state.in_progress.push(t);
@@ -299,28 +295,27 @@ export async function readBacklog(): Promise<BacklogState> {
 }
 
 /** One live task, or null. */
-export async function readTask(id: string): Promise<Task | null> {
-  const { tasks } = await readTasks("t.id = ?1", [Number(id.replace(/^tsk/, ""))]);
-  return tasks[0] ?? null;
+export async function readTask(id: string): Promise<{ task: Task | null; reads: Reads }> {
+  const { tasks, reads } = await readTasks("t.id = ?1", [Number(id.replace(/^tsk/, ""))]);
+  return { task: tasks[0] ?? null, reads };
 }
 
 /** Several tasks' titles and statuses, in one read. */
-export async function readTasksById(ids: string[]): Promise<Task[]> {
-  if (ids.length === 0) return [];
+export async function readTasksById(ids: string[]): Promise<{ tasks: Task[]; reads: Reads }> {
+  if (ids.length === 0) return { tasks: [], reads: NO_READS };
   const numbers = ids.map((id) => Number(id.replace(/^tsk/, ""))).filter((n) => Number.isFinite(n));
-  const { tasks } = await readTasks(`t.id IN (${numbers.map((_, i) => `?${i + 1}`).join(", ")})`, numbers);
-  return tasks;
+  return readTasks(`t.id IN (${numbers.map((_, i) => `?${i + 1}`).join(", ")})`, numbers);
 }
 
 /** A task's efforts, newest first (`v_effort`). */
-async function readTaskEffortRows(taskId: string): Promise<TaskEffort[]> {
+async function readTaskEffortRows(taskId: string): Promise<{ efforts: TaskEffort[]; reads: Reads }> {
   const res = await querySql(
     `SELECT id, work_item, started_at, ended_at, start_snapshot_id, end_snapshot_id, summary
        FROM v_effort WHERE work_item = ?1 ORDER BY started_at DESC`,
     [`work_item:oxplow:${taskId}`],
     1000,
   );
-  return res.rows.map(([id, workItem, started, ended, start, end, summary]) => ({
+  const efforts = res.rows.map(([id, workItem, started, ended, start, end, summary]) => ({
     id: `eff${Number(id)}`,
     work_item: String(workItem),
     started_at: String(started),
@@ -329,19 +324,21 @@ async function readTaskEffortRows(taskId: string): Promise<TaskEffort[]> {
     end_snapshot_id: end === null ? null : String(end),
     summary: text(summary),
   }));
+  return { efforts, reads: res.reads };
 }
 
 /** A task's efforts with the files each changed (`v_effort` plus the
  *  effort's files), newest first — the task page's activity. */
-export async function readTaskEfforts(taskId: string): Promise<EffortDetail[]> {
-  const rows = await readTaskEffortRows(taskId);
+export async function readTaskEfforts(taskId: string): Promise<{ efforts: EffortDetail[]; reads: Reads }> {
+  const { efforts: rows, reads } = await readTaskEffortRows(taskId);
   const files = await Promise.all(rows.map((e) => listEffortFiles(e.id).catch(() => [])));
-  return rows.map((effort, i) => {
+  const efforts = rows.map((effort, i) => {
     const changed = files[i] ?? [];
     const counts = { created: 0, updated: 0, deleted: 0 };
     for (const f of changed) counts[f.change]++;
     return { effort, start_snapshot: null, end_snapshot: null, changed_paths: changed.map((f) => f.path), counts };
   });
+  return { efforts, reads };
 }
 
 // ---- writes (work_item.* commands) ----

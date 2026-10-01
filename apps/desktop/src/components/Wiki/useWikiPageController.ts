@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { deleteWikiPage, subscribeOxplowEvents, writeWikiPage, type Stream } from "../../api.js";
-import { knowledgeChanged, readWikiPage, type WikiPageSummary } from "../../knowledge.js";
+import { deleteWikiPage, writeWikiPage, type Stream } from "../../api.js";
+import { readWikiPage, type WikiPageSummary } from "../../knowledge.js";
+import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
+import type { Reads } from "../../tauri-bridge/generated/bindings.js";
 import { recordOpError } from "../opErrorsStore.js";
 
 export interface WikiPageController {
@@ -30,13 +32,16 @@ export function useWikiPageController(stream: Stream, slug: string, onClosed: ()
   const [notFound, setNotFound] = useState(false);
   const [draftInitialized, setDraftInitialized] = useState(false);
 
+  const [reads, setReads] = useState<Reads>(NO_READS);
+
   const refresh = useCallback(async () => {
     try {
-      const page = await readWikiPage(slug);
+      const { page, reads } = await readWikiPage(slug);
       setSummary(page?.summary ?? null);
       setBody(page?.body ?? "");
       setNotFound(page === null);
       setLoadError(null);
+      setReads(reads);
     } catch (error) {
       setLoadError(String(error));
       setNotFound(false);
@@ -48,12 +53,9 @@ export function useWikiPageController(stream: Stream, slug: string, onClosed: ()
     setEditing(false);
   }, [refresh]);
 
-  // Stable subscription — see WikiPageTab original for the rationale.
-  const refreshRef = useRef(refresh);
-  useEffect(() => { refreshRef.current = refresh; }, [refresh]);
-  useEffect(() => subscribeOxplowEvents((event) => {
-    if (knowledgeChanged(event as Record<string, unknown>)) void refreshRef.current();
-  }), [slug]);
+  // Re-read when a model the read read changes (the page row, its body,
+  // its refs) — the one rerun rule every model read uses.
+  useRerunOnChange(reads, () => void refresh());
 
   useEffect(() => {
     if (!draftInitialized) {

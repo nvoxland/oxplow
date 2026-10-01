@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Stream } from "../tauri-bridge/index.js";
+import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import type { WikiRefFreshness } from "../knowledge.js";
+import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import type { ThreadWorkState } from "../workItems.js";
 import { readWikiFreshness } from "../knowledge.js";
 import { summarizeWikiFreshness } from "../components/Wiki/wikiFreshness.js";
@@ -112,15 +114,26 @@ function WikiPageBody({
   // referenced-files footer all derive from these rows (see
   // wikiFreshness.ts for why splitting sources is forbidden).
   const [freshnessRows, setFreshnessRows] = useState<WikiRefFreshness[] | null>(null);
-  useEffect(() => {
+  const [freshnessReads, setFreshnessReads] = useState<Reads>(NO_READS);
+  const loadFreshness = useCallback(() => {
     let cancelled = false;
-    (async () => {
-      const rows = await readWikiFreshness(slug).catch(() => null);
-      if (cancelled) return;
-      setFreshnessRows(rows);
-    })();
-    return () => { cancelled = true; };
-  }, [slug, controller.summary?.updated_at]);
+    void readWikiFreshness(slug)
+      .then(({ rows, reads }) => {
+        if (cancelled) return;
+        setFreshnessRows(rows);
+        setFreshnessReads(reads);
+      })
+      .catch(() => {
+        if (!cancelled) setFreshnessRows(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+  useEffect(() => loadFreshness(), [loadFreshness]);
+  // A drifting ref (a new snapshot) changes `v_knowledge_ref.stale`
+  // without touching the page row: re-read on what the read read.
+  useRerunOnChange(freshnessReads, () => void loadFreshness());
   const freshness = freshnessRows != null ? summarizeWikiFreshness(freshnessRows) : null;
   const openFreshness = () => {
     const ref = wikiFreshnessRef(slug);

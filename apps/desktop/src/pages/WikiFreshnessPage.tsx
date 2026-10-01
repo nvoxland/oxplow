@@ -3,6 +3,8 @@ import { Page } from "../tabs/Page.js";
 import { writeWikiPage } from "../api.js";
 import { readWikiFreshness, readWikiPage } from "../knowledge.js";
 import type { WikiRefFreshness } from "../knowledge.js";
+import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
+import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import { fileRef, wikiPageRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { useOptionalPageNavigation, usePageTitle } from "../tabs/PageNavigationContext.js";
@@ -29,12 +31,15 @@ export function WikiFreshnessPage({ slug, onOpenPage }: WikiFreshnessPageProps) 
   usePageTitle(`Freshness — ${slug}`);
   const nav = useOptionalPageNavigation();
   const [rows, setRows] = useState<WikiRefFreshness[] | null>(null);
+  const [reads, setReads] = useState<Reads>(NO_READS);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      setRows(await readWikiFreshness(slug));
+      const result = await readWikiFreshness(slug);
+      setRows(result.rows);
+      setReads(result.reads);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -44,13 +49,16 @@ export function WikiFreshnessPage({ slug, onOpenPage }: WikiFreshnessPageProps) 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  // Re-read when a model the read read changes (a new snapshot drifts a
+  // ref; a write re-pins it).
+  useRerunOnChange(reads, () => void refresh());
 
   // Marking refs verified is re-writing the page with them in
   // `verified_refs` (knowledge.write_page moves their pins to now).
   async function markVerified(paths: string[]) {
     setBusy(true);
     try {
-      const page = await readWikiPage(slug);
+      const { page } = await readWikiPage(slug);
       if (!page) throw new Error(`no wiki page \`${slug}\``);
       await writeWikiPage(slug, page.body, { verifiedRefs: paths });
     } catch (e) {

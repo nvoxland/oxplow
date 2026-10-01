@@ -11,8 +11,11 @@ type Handler = (event: Record<string, unknown>) => void;
 let oxplowHandlers: Handler[] = [];
 let reconnectHandlers: Array<() => void> = [];
 let unsubCount = 0;
-const readThreadWork = mock(async () => ({}));
-const readBacklog = mock(async () => ({}));
+// What the reads read: the hook re-runs them on a change to those models
+// (`readsChanged`), not on a hard-coded list.
+const taskReads = { reads: { models: ["v_task", "v_task_note"], tables: [], measures: [] } };
+const readThreadWork = mock(async () => taskReads);
+const readBacklog = mock(async () => taskReads);
 const listAgentStatuses = mock(async () => []);
 const getConfig = mock(async () => ({ generated: { exclude: [], include: [] } }));
 
@@ -135,22 +138,32 @@ test("re-hydrates core stores on a remote reconnect", async () => {
   expect(listAgentStatuses).toHaveBeenCalledTimes(2);
 });
 
-test("a task model change re-reads the backlog and every loaded thread; followups re-read their thread", async () => {
-  render(<Harness workStates={{ thr1: {}, thr2: {} }} />);
+test("a change to a model the reads read re-reads the backlog and every loaded thread; followups re-read their thread", async () => {
+  render(<Harness workStates={{ thr1: taskReads, thr2: taskReads }} />);
+  // Let the mount's reads land, so the hook knows what they read.
+  await act(async () => {
+    await Promise.resolve();
+  });
   readThreadWork.mockClear();
   readBacklog.mockClear();
   await act(async () => {
-    for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_task"] });
+    for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_task_note"] });
     await Promise.resolve();
   });
   expect(readBacklog).toHaveBeenCalledTimes(1);
   expect(readThreadWork.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["thr1", "thr2"]);
 
   readThreadWork.mockClear();
+  readBacklog.mockClear();
   await act(async () => {
+    // A model nothing here read — and a model a task read *could* name
+    // but these didn't (what the hook knows comes from the reads, not a
+    // list of task models).
     for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_commit"] });
+    for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_effort_file"] });
     for (const handler of oxplowHandlers) handler({ kind: "followupsChanged", threadId: "thr3" });
     await Promise.resolve();
   });
+  expect(readBacklog).toHaveBeenCalledTimes(0);
   expect(readThreadWork.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["thr3"]);
 });

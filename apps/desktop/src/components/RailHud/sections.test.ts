@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ThreadWorkState, Task } from "../../api.js";
+import { NO_READS } from "../../lens/lensRerun.js";
 import { computeActiveEpicContext, computeActiveItem, computePagesDirectory, computeUpNext } from "./sections.js";
 import { gitDashboardRef, uncommittedChangesRef } from "../../tabs/pageRefs.js";
 
@@ -36,6 +37,7 @@ const baseState = (items: Task[]): ThreadWorkState => ({
   epics: items.filter((parent) => items.some((c) => c.parent_id === parent.id)),
   items,
   followups: [],
+  reads: NO_READS,
 });
 
 describe("computeActiveItem", () => {
@@ -62,6 +64,7 @@ describe("computeActiveItem", () => {
       epics: [epic],
       items: [epic, task],
       followups: [],
+      reads: NO_READS,
     };
     expect(computeActiveItem(state)?.id).toBe(9001);
   });

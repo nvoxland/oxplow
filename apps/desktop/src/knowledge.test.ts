@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SearchHit, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import { freshnessFromResult, knowledgeChanged, pagesFromResult, searchHitsOf } from "./knowledge.js";
+import { freshnessFromResult, pagesFromResult, searchHitsOf } from "./knowledge.js";
 
 const result = (columns: string[], rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({ columns, rows, truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }) as unknown as SqlQueryResult;
@@ -46,9 +46,4 @@ test("title and body search is the site search's wiki hits", () => {
     { kind: "task", ref_id: "tsk1", stream_id: null, title: "x", snippet: "", score: 1 },
   ] as SearchHit[];
   expect(searchHitsOf(hits)).toEqual([{ slug: "auth", title: "Auth", snippet: "…login…" }]);
-});
-
-test("knowledge reads re-run when a knowledge model changes", () => {
-  expect(knowledgeChanged({ kind: "modelsChanged", models: ["v_knowledge_body"] })).toBe(true);
-  expect(knowledgeChanged({ kind: "modelsChanged", models: ["v_task"] })).toBe(false);
 });

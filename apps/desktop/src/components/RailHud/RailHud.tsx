@@ -9,9 +9,9 @@ import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./sections.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
 import { getPanelLayout, listExtensions, setPanelLayout } from "../../api.js";
-import { extensionsChanged } from "../../lens/lensRerun.js";
+import { extensionsChanged, NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import { LensResultView } from "../../lens/LensResultView.js";
-import type { ExtensionPanel, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
+import type { ExtensionPanel, PanelPlacement, Reads } from "../../tauri-bridge/generated/bindings.js";
 import {
   CORE_PANELS,
   extensionPanelId,
@@ -35,7 +35,7 @@ import {
   type TopVisitedRowApi,
 } from "../../api.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
-import { knowledgeChanged, readWikiPages } from "../../knowledge.js";
+import { readWikiPages } from "../../knowledge.js";
 
 export interface UncommittedSummary {
   added: number;
@@ -1563,28 +1563,25 @@ function useHistoryRows(threadId: string | null): HistoryRowsState {
     };
   }, [threadId]);
 
-  // Maintain the slug → title map, refreshed on wiki-page events
-  // (creation, title rename, deletion) so a renamed page updates in
+  // Maintain the slug → title map, re-read when a model it read changes
+  // (a page created, renamed or deleted) so a renamed page updates in
   // the history list without waiting for the next visit.
-  useEffect(() => {
+  const [titleReads, setTitleReads] = useState<Reads>(NO_READS);
+  const refreshTitles = useCallback(() => {
     let cancelled = false;
-    const refresh = () => {
-      void readWikiPages().then((pages) => {
-        if (cancelled) return;
-        const map: Record<string, string> = {};
-        for (const p of pages) map[p.slug] = p.title;
-        setWikiTitles(map);
-      });
-    };
-    refresh();
-    const off = subscribeOxplowEvents((event) => {
-      if (knowledgeChanged(event as Record<string, unknown>)) refresh();
+    void readWikiPages().then(({ pages, reads }) => {
+      if (cancelled) return;
+      const map: Record<string, string> = {};
+      for (const p of pages) map[p.slug] = p.title;
+      setWikiTitles(map);
+      setTitleReads(reads);
     });
     return () => {
       cancelled = true;
-      off();
     };
   }, []);
+  useEffect(() => refreshTitles(), [refreshTitles]);
+  useRerunOnChange(titleReads, () => void refreshTitles());
 
   const toggleMode = useCallback(() => setMode((m) => (m === "recent" ? "top" : "recent")), []);
   return { mode, toggleMode, recent, top, wikiTitles };

@@ -120,8 +120,11 @@ hand alike), reading the body from the row. The old excerpt-only
 
 **The desktop** (`apps/desktop/src/knowledge.ts`) reads the index, a
 page and its freshness from these models and finds pages with the site
-search (`kinds: ["wiki"]`, matches marked `«…»`); every wiki surface
-re-reads when a knowledge model changes (`knowledgeChanged`). The RPCs
+search (`kinds: ["wiki"]`, matches marked `«…»`); every read returns what
+it read (`reads`) and every wiki surface re-reads it through
+`useRerunOnChange` (the title cache through `readsChanged`) when one of
+those models changes — a drifting ref re-reads the freshness rows without
+reopening the page (`WikiFreshnessPage.rerun.test.tsx`). The RPCs
 `list_wiki_pages`, `read_wiki_page_body`, `search_wiki_titles` and
 `list_wiki_freshness` are gone.
 

@@ -52,8 +52,13 @@ It is also the **only** way the UI reads and writes oxplow's tasks
 `readTaskEfforts` and `readRecentlyFinished` read the models;
 `createTask`, `updateTask`, `deleteTask`, `reorderTasks` (a drag's new
 order becomes one `work_item.reorder` by neighbour, `placementFromOrder`)
-and `moveTask` run commands. Pages re-read when a task model changes
-(`tasksChanged`). The typed task RPCs (`get_thread_work_state`,
+and `moveTask` run commands. Every read returns what it read (`reads`;
+`ThreadWorkState` and `BacklogState` carry theirs), and a consumer
+re-runs it through `useRerunOnChange` — or `readsChanged`, outside a
+component (`useBackendSubscriptions`, the title caches) — when one of
+those models changes: the one rerun rule, with no list of "task models"
+to keep in step with the queries (P6 review, tsk610). The typed task RPCs
+(`get_thread_work_state`,
 `get_backlog_state`, `list_backlog`, `get_task`, `upsert_task`,
 `create_task`, `update_task`, `delete_task`, `reorder_tasks`, `move_task`,
 `list_work_item_efforts`, `list_recently_finished`,

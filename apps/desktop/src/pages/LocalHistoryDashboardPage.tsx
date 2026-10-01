@@ -183,10 +183,12 @@ export function LocalHistoryDashboardPage({
       const uniqueTaskIds = Array.from(
         new Set(effortsAt.flatMap((e) => (e.tasksId ? [e.tasksId] : []))),
       );
-      const taskSummaries = await readTasksById(uniqueTaskIds).catch((err) => {
-        logUi("warn", "task summaries fetch failed", { error: String(err) });
-        return [] as Array<{ id: string; title: string }>;
-      });
+      const taskSummaries = await readTasksById(uniqueTaskIds)
+        .then((r) => r.tasks)
+        .catch((err) => {
+          logUi("warn", "task summaries fetch failed", { error: String(err) });
+          return [] as Array<{ id: string; title: string }>;
+        });
       const titleByTaskId = new Map<string, string>(
         taskSummaries.map((t) => [t.id, t.title] as [string, string]),
       );
