@@ -734,6 +734,18 @@
   tests:
     - { not_null: id }
     - { unique: id }
+- name: capability_provider
+  version: 1
+  description: "Each capability's providers and the feature flags they declare (P6b): oxplow's own (`work_items/oxplow`, `vcs/git`, `knowledge/oxplow`) and every running external provider. The UI shows a provider's enhancements only when its flags allow them (a Comment… action only for a work-items provider with `comments`)."
+  columns:
+    - { name: "capability", type: "TEXT", doc: "`work_items`, `vcs`, `knowledge`." }
+    - { name: "provider", type: "TEXT", doc: "The provider's name: a work item ref's segment (`work_item:<provider>:…`), `git`." }
+    - { name: "extension", type: "TEXT", doc: "The extension it comes from; NULL for oxplow's own." }
+    - { name: "features", type: "TEXT", doc: "The capability's feature flags as JSON (`work_items`: `hierarchy`, `comments`, `links`, `in_progress_opens_effort`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`)." }
+    - { name: "active", type: "INTEGER", doc: "1 when it's the capability's active provider (every provider today)." }
+  tests:
+    - { not_null: capability }
+    - { not_null: provider }
 - name: command_proposal
   version: 1
   description: "Commands an agent ran that need a person's confirmation (P6b): each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Approvals panel lists the pending ones."

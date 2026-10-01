@@ -379,6 +379,37 @@ async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
     assert!(health.mean_invoke_ms.is_some() && health.last_ok_at.is_some());
 }
 
+/// P6b.C2: a running instance's capability and features are a model row
+/// (as the host reads them); stopping it takes the row away.
+#[tokio::test]
+async fn a_running_instance_publishes_its_features() {
+    let (fx, ext) = approved("").await;
+    let store = oxplow_db::SqliteCapabilityStore::new(fx.svc.db.clone());
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    let fake = store
+        .list()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.provider == "fake")
+        .expect("published");
+    assert_eq!(fake.capability, "work_items");
+    assert_eq!(fake.extension.as_deref(), Some("tracker"));
+    let declared = fx.svc.work_items.get("fake").unwrap().features();
+    assert_eq!(fake.features, serde_json::to_value(declared).unwrap());
+    assert!(fx.svc.providers.stop(INSTANCE).await);
+    assert!(store
+        .list()
+        .await
+        .unwrap()
+        .iter()
+        .all(|r| r.provider != "fake"));
+}
+
 /// tsk546: a provider's args are hashed where it runs (its extension
 /// folder), and an arg reaching outside the folder is refused, so no file
 /// it runs escapes the approval.

@@ -104,6 +104,20 @@ decided with a real second provider (P7). `effort.open` asks the ref's
 provider's features: refused when it declares `in_progress_opens_effort`,
 open to an unregistered provider's item.
 
+**Features reach the UI as a model** (P6b.C2): `v_capability_provider`
+(`capability`, `provider`, `extension`, `features` JSON, `active`) lists
+each capability's providers with the flags **the provider** declares —
+never a manifest. Core's (`work_items/oxplow`, `vcs/git`,
+`knowledge/oxplow`) are restated at boot (`capabilities::publish_core`,
+which also drops a previous run's external rows); an external provider's
+row is written while its instance runs (`ProviderRegistry::publish`, a
+work-items provider's features as `ExternalWorkItems` reads them) and
+removed when it stops. `active` is P7's hook for choosing a capability's
+active provider; every row is `1` today. The desktop reads it with
+`readCapabilityProviders(capability)` (`workItems.ts`, with `reads`) and
+`featuresFor(providers, provider)`, which turns every flag a provider
+doesn't declare — or a provider that isn't listed — off.
+
 ## Conformance
 
 `oxplow_app::work_items_conformance::suite(provider, probe, actor)` —

@@ -251,6 +251,11 @@ reason logged, keeps it off across a reconcile, refuses an agent's
 `provider.enable` and comes back on a person's; and the work-items
 conformance suite passes through `ExternalWorkItems` over the fake.
 
+**Its features are published** while it runs: `admit` writes the
+instance's `capability_provider` row (`v_capability_provider`) and
+`tear_down` removes it, so the UI offers only what the provider declares
+([work-items.md](./work-items.md)).
+
 ## The conformance kit (`crates/oxplow-sdk/src/conformance.rs`, `plugin_test.rs`)
 
 What `oxplow plugin test <name> [--bless] [--json]` runs for each

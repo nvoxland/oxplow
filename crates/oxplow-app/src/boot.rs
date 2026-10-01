@@ -150,6 +150,11 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     crate::symbol_collector::register(state);
     state.event_pump.clone().spawn();
     crate::source_runner::spawn_scheduler(state.clone());
+    // Core's capability providers, before the registry publishes the
+    // external ones it starts.
+    if let Err(e) = crate::capabilities::publish_core(state).await {
+        tracing::warn!(error = %e, "publishing the core capability providers failed");
+    }
     crate::providers::registry::spawn_reconciler(state.clone());
     crate::extension_commands::spawn_reconciler(state.clone());
     crate::effort_evidence::spawn(state.clone());

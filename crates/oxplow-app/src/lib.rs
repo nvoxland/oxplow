@@ -25,6 +25,7 @@ pub mod blob_store;
 pub mod boot;
 pub mod branch_reconciler;
 pub mod bundled_extensions;
+pub mod capabilities;
 pub mod change_analysis;
 pub mod churn;
 pub mod co_change;

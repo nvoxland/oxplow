@@ -177,3 +177,24 @@ test("orderedTaskIds follows the server's order, ties by creation time", () => {
   };
   expect(orderedTaskIds(work)).toEqual(["tsk1", "tsk2", "tsk3"]);
 });
+
+import { capabilityProvidersFromResult, featuresFor } from "./workItems.js";
+
+// P6b.C2: a provider's flags come from v_capability_provider; a provider
+// the model doesn't list (or a flag it doesn't declare) is off.
+test("capability providers read with their features; an unknown provider has none", () => {
+  const providers = capabilityProvidersFromResult({
+    columns: ["capability", "provider", "extension", "features", "active"],
+    rows: [
+      ["work_items", "oxplow", null, '{"hierarchy":true,"comments":true,"links":true,"in_progress_opens_effort":true}', 1],
+      ["work_items", "fake", "tracker", '{"comments":true}', 1],
+    ],
+    truncated: false,
+    reads: { models: ["v_capability_provider"], tables: [], measures: [] },
+    freshness: {},
+  } as unknown as SqlQueryResult);
+  expect(featuresFor(providers, "oxplow")).toEqual({ hierarchy: true, comments: true, links: true, inProgressOpensEffort: true });
+  expect(featuresFor(providers, "fake")).toEqual({ hierarchy: false, comments: true, links: false, inProgressOpensEffort: false });
+  expect(featuresFor(providers, "linear")).toEqual({ hierarchy: false, comments: false, links: false, inProgressOpensEffort: false });
+  expect(providers.find((p) => p.provider === "fake")?.extension).toBe("tracker");
+});

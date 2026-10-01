@@ -744,8 +744,41 @@ impl ProviderRegistry {
             return Err(format!("`{}` was disabled while it started", instance.name));
         }
         self.register(bus, &instance)?;
+        self.publish(&instance).await;
         running.insert(instance.name.clone(), instance);
         Ok(())
+    }
+
+    /// Its capability and features in `v_capability_provider`, while it
+    /// runs: a work-items provider's as the host reads them (what the UI
+    /// gates on), any other's as declared.
+    async fn publish(&self, instance: &Instance) {
+        let capability = &instance.spec.capability;
+        let features = match self.work_items.get(&instance.spec.id) {
+            Ok(p) if capability == spec::WORK_ITEMS => {
+                serde_json::to_value(p.features()).unwrap_or(Value::Null)
+            }
+            _ => instance
+                .declared
+                .capabilities
+                .iter()
+                .find(|c| &c.capability == capability)
+                .map(|c| c.features.clone())
+                .unwrap_or(Value::Null),
+        };
+        let row = oxplow_db::CapabilityProvider {
+            capability: capability.clone(),
+            provider: instance.spec.id.clone(),
+            extension: Some(instance.ext.name.clone()),
+            features,
+            active: true,
+        };
+        if let Err(e) = oxplow_db::SqliteCapabilityStore::new(self.deps.db.clone())
+            .upsert(row)
+            .await
+        {
+            tracing::warn!(instance = %instance.name, error = %e, "publishing a provider's features failed");
+        }
     }
 
     /// Put `instance`'s commands on the bus and its capability provider
@@ -786,6 +819,12 @@ impl ProviderRegistry {
             bus.unregister_namespace(&running.spec.id);
         }
         self.work_items.unregister(&running.spec.id);
+        if let Err(e) = oxplow_db::SqliteCapabilityStore::new(self.deps.db.clone())
+            .remove(&running.spec.capability, &running.spec.id)
+            .await
+        {
+            tracing::warn!(instance = %running.name, error = %e, "withdrawing a provider's features failed");
+        }
         running.live.lock().await.take();
     }
 

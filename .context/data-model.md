@@ -1686,6 +1686,15 @@ expanded after the ones it does, and a named panel that no longer exists
 is dropped (`components/Panels/panelLayout.ts` `resolveLayout`). UI-only
 RPCs `get_panel_layout` / `set_panel_layout`.
 
+### `capability_provider` — `SqliteCapabilityStore` (`crates/oxplow-db/src/capability_store.rs`)
+
+V128 (P6b.C2). Each capability's providers and the feature flags they
+declare (`capability`, `provider` — the primary key — `extension`, NULL
+for core's, `features_json`, `active`). Restated from what runs: `reset`
+at boot with core's, `upsert` / `remove` as an external instance starts
+and stops. Published as `v_capability_provider`; see
+[work-items.md](./work-items.md).
+
 ### `command_proposal` — `SqliteProposalStore` (`crates/oxplow-db/src/proposal_store.rs`)
 
 V127 (P6b.A2). A command an agent ran that needs a person's confirmation,

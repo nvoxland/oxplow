@@ -191,6 +191,70 @@ export async function transitionWorkItem(ref: string, state: CanonicalState): Pr
   await runCommand("work_item.transition", { ref, to: statusFor(state) });
 }
 
+// ---- what each provider can do (v_capability_provider, P6b) ----
+
+/** A work-items provider's feature flags, as the provider declares them. */
+export interface WorkItemsFeatures {
+  /** Items nest (a parent ref). */
+  hierarchy: boolean;
+  comments: boolean;
+  links: boolean;
+  /** Moving an item to in_progress opens its effort itself. */
+  inProgressOpensEffort: boolean;
+}
+
+/** One capability's provider, with its flags as declared. */
+export interface CapabilityProvider {
+  capability: string;
+  provider: string;
+  /** The extension it comes from; null for oxplow's own. */
+  extension: string | null;
+  features: Record<string, unknown>;
+}
+
+export function capabilityProvidersFromResult(result: SqlQueryResult): CapabilityProvider[] {
+  const at = (row: SqlCell[], name: string) => row[result.columns.indexOf(name)] ?? null;
+  return result.rows.map((row) => {
+    let features: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(String(at(row, "features") ?? "{}"));
+      if (parsed && typeof parsed === "object") features = parsed as Record<string, unknown>;
+    } catch {
+      features = {};
+    }
+    return {
+      capability: String(at(row, "capability")),
+      provider: String(at(row, "provider")),
+      extension: at(row, "extension") == null ? null : String(at(row, "extension")),
+      features,
+    };
+  });
+}
+
+/** `capability`'s providers, and what was read. */
+export async function readCapabilityProviders(
+  capability: string,
+): Promise<{ providers: CapabilityProvider[]; reads: Reads }> {
+  const res = await querySql(
+    "SELECT capability, provider, extension, features, active FROM v_capability_provider WHERE capability = ?1",
+    [capability],
+    100,
+  );
+  return { providers: capabilityProvidersFromResult(res), reads: res.reads };
+}
+
+/** A work-items provider's flags; every flag off for one that isn't
+ *  listed or doesn't declare it, so the UI only offers what it can do. */
+export function featuresFor(providers: CapabilityProvider[], provider: string): WorkItemsFeatures {
+  const f = providers.find((p) => p.capability === "work_items" && p.provider === provider)?.features ?? {};
+  return {
+    hierarchy: f.hierarchy === true,
+    comments: f.comments === true,
+    links: f.links === true,
+    inProgressOpensEffort: f.in_progress_opens_effort === true,
+  };
+}
+
 // ---- oxplow's tasks (v_task) ----
 //
 // Every read returns what it read (`reads`); a consumer re-runs it through
