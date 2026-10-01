@@ -147,6 +147,16 @@ pub fn launcher_entries(
     (entries, errors)
 }
 
+/// A prompt an extension offers is inserted into the agent's input, never
+/// sent — and the terminal treats a pasted line break as Enter, so a
+/// multi-line prompt would send itself. One line, or this says why not.
+fn prompt_line_problem(prompt: &str) -> Option<String> {
+    prompt.contains(['\n', '\r']).then(|| {
+        "a prompt is one line (a line break pasted into the agent's input would send it)"
+            .to_string()
+    })
+}
+
 fn launcher_target(v: &Value) -> Result<LauncherTarget, String> {
     const FORMS: &str =
         "a target is one of `ref`, `command` or `prompt`: `{ ref: page:settings }`, \
@@ -186,6 +196,9 @@ fn launcher_target(v: &Value) -> Result<LauncherTarget, String> {
             let prompt = key("prompt").and_then(|v| v.as_str()).unwrap_or_default();
             if prompt.trim().is_empty() {
                 return Err("an empty prompt — write what to ask the agent".into());
+            }
+            if let Some(problem) = prompt_line_problem(prompt) {
+                return Err(problem);
             }
             Ok(LauncherTarget::Prompt {
                 prompt: prompt.to_string(),
@@ -433,6 +446,9 @@ pub fn check(m: &ManifestV2, file: &str, text: &str, bundled: bool) -> (Vec<Stri
                 if p.prompt.trim().is_empty() {
                     errors.push(at(file, line, "`intent.prompts`: an empty prompt — write the question"));
                 }
+                if let Some(problem) = prompt_line_problem(&p.prompt) {
+                    errors.push(at(file, line, format!("`intent.prompts`: {problem}")));
+                }
                 if let Some(about) = &p.about {
                     if kinds.get(about).is_none() {
                         errors.push(at(
@@ -600,6 +616,8 @@ mod tests {
 
         for (entry, want) in [
             ("{ prompt: '  ' }", "an empty prompt"),
+            // A line break pasted into a terminal is Enter: it would send.
+            ("{ prompt: \"Why?\\nAnd how?\" }", "one line"),
             ("{ prompt: x, about: nope }", "`nope` isn't a kind of ref"),
         ] {
             let text = format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\n  prompts:\n    - {entry}\n");

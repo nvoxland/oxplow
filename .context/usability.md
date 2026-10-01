@@ -663,6 +663,11 @@ The agent terminal accepts dropped references AND a "Add to agent
 context" kebab/menu action; both share one path through
 `apps/desktop/src/agent-input-bus.ts` (`insertIntoAgent`) and
 `apps/desktop/src/agent-context-ref.ts` (`formatContextMention`).
+Inserting fills the agent's input and never sends it. The terminal
+pastes what the bus publishes, and xterm turns every line break into
+Enter, so `insertIntoAgent` collapses line breaks to spaces (`oneLine`)
+for every caller — a manifest's prompt, a selection, a row's text — and
+no caller may bypass the bus to write to the terminal.
 
 - **Sources** (anything the user might want to reference): drag rows
   or pills from the Files tree, NotesPane, the WikiActivityBar, the

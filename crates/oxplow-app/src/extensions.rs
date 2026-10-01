@@ -4781,6 +4781,8 @@ empty: No tasks.
             ("{ command: Not-A-Name }", "`Not-A-Name`"),
             ("{ command: a.b, input: [1] }", "`input` must be a map"),
             ("{ prompt: '  ' }", "an empty prompt"),
+            // A line break pasted into a terminal is Enter: it would send.
+            ("{ prompt: \"Why?\\nAnd how?\" }", "one line"),
             (
                 "{ ref: 'page:settings', prompt: hi }",
                 "one of `ref`, `command` or `prompt`",

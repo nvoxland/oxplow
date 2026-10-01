@@ -881,7 +881,9 @@ tool list stable no matter how many extensions are installed.
     (its `reaches` keeps concrete fixture values for the answerability
     check, which also checks `about` names a registered kind).
   - An extension's are `intent.prompts: [{ prompt, about? }]` in its
-    manifest (checked: non-empty, `about` a registered ref kind).
+    manifest (checked: non-empty, **one line** — a pasted line break is
+    Enter in the terminal, so a multi-line prompt would send itself —
+    and `about` a registered ref kind).
   - `prompt_catalog::prompt_catalog(extensions)` merges them (core first,
     then enabled extensions by name); RPC `prompt_catalog { stream_id }`
     (UI only) serves it.
@@ -894,7 +896,8 @@ tool list stable no matter how many extensions are installed.
   exactly one of `{ ref }` (a canonical ref, opened as a page),
   `{ command, input? }` (run as the person, asking first when the command
   asks — `personCommands.ts` + `PersonCommandConfirm`, mounted once in
-  `App`) or `{ prompt }` (put in the agent's input, never sent).
+  `App`) or `{ prompt }` (put in the agent's input, never sent; one line,
+  like `intent.prompts`, checked by `manifest_v2::prompt_line_problem`).
   `manifest_v2::launcher_entries` types them at load (a bad one is an
   error at its line and is dropped); the dry run (`validate_extension`,
   `review_extension`, with `CommandBus::input_schema` as

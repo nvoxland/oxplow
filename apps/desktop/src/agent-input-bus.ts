@@ -27,12 +27,23 @@ export function subscribeAgentInput(fn: Listener): () => void {
   };
 }
 
+/**
+ * Inserting fills the agent's input and never sends it. The terminal
+ * pastes what arrives here, and xterm turns every line break into Enter —
+ * so this is the one place line breaks become spaces, whatever the
+ * caller handed it (a manifest's prompt, a selection, a row's text).
+ */
+export function oneLine(text: string): string {
+  return text.replace(/\r\n|\r|\n/g, " ");
+}
+
 export function insertIntoAgent(text: string): void {
+  const line = oneLine(text);
   // Snapshot before iterating so a listener that unsubscribes itself
   // during the call doesn't skip subsequent listeners.
   for (const listener of [...listeners]) {
     try {
-      listener(text);
+      listener(line);
     } catch {
       // Swallow — a single bad subscriber must not prevent the rest
       // from receiving the text.
