@@ -1006,25 +1006,29 @@ the schema compiles, `input` is one read, and the entry is a file in the
 extension that parses and defines `transform` (`check_starlark`), and
 it declares at most `MAX_EXAMPLES` (10) examples. The
 script's text is kept on the `ExtensionCommand` (not serialized).
-`check_extension` (Settings → Extensions, `oxplow plugin check` with a
-running oxplow) dry-runs each example: the `input` query's rows (bound
-from the example's fields, capped at `INPUT_ROW_CAP`), the script in the
-sandbox (`run_script` under `COMMAND_SCRIPT_BUDGET` — 5 s, not the
-collectors' 120 s runaway catch, because at run time the script holds
-the bus's write transaction; no files, no `ai_*`), and what it composes
-against the registry — every command exists, its input fits, the names
-are `expect_commands` in order. Without a registry it warns that the
-examples weren't checked.
+`check_extension` (Settings → Extensions, `oxplow plugin check`) runs
+`check_commands`: each `input` query compiles under the models'
+authorizer (`SqlGateway::check`; a raw table is an error at the
+command), examples or not; then, with a running oxplow's registry, each
+example is dry-run — the `input` query's rows (`input_query`: bound from
+the example's fields, capped at `INPUT_ROW_CAP`), then `compose_calls`, and
+what it composes against the registry — every command exists, its input
+fits, the names are `expect_commands` in order. Without a registry it
+warns that the examples weren't checked. **`compose_calls`** is the one
+compose step, for the dry run and the handler alike: the script in the
+sandbox under `COMMAND_SCRIPT_BUDGET` (5 s, not the collectors' 120 s
+runaway catch, because at run time the script holds the bus's write
+transaction; no files, no `ai_*`), then the `{ commands, result? }` shape
+(`composed`; any other key is `Invalid`).
 
 **Running** (`extension_command`): each is a `Tx` command
 `<namespace>.<name>` (summary "… (extension `x`)", the declared
 invokers / confirm / effect, undoable, `Lifecycle::Experimental`). Its
 handler, before any write, reads the `input` rows on the run's own
 connection (`semantic_layer::read_on`: the `query_sql` authorizer, row
-cap and timeout, the read session restored before the writes), runs the
-script (`run_script_blocking`, inside the transaction — pure, so a
-retried transaction re-runs it), checks the `{ commands, result? }`
-shape (`Invalid` otherwise), and runs the commands through
+cap and timeout, the read session restored — `query_only` off — before
+the writes), runs `compose_calls` (inside the transaction — pure, so a retried
+transaction re-runs it), and runs the commands through
 `CommandBus::run_nested` as the run's children: each child's invokers,
 policy and confirmation apply (an agent's run whose child asks becomes a
 proposal with the children as its dry run), one audit row with `{

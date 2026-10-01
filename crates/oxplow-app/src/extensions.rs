@@ -2380,7 +2380,7 @@ async fn check_extension(
 ) {
     check_commands(ext, root, commands);
     check_components(ext, commands);
-    crate::extension_commands::check_examples(layer, ext, commands).await;
+    crate::extension_commands::check_commands(layer, ext, commands).await;
     // Its models, beside the other enabled extensions' (a ref() may name
     // theirs): compiled as temp views, published nowhere (P4.9).
     if !ext.models.is_empty() {

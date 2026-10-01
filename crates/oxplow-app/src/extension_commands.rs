@@ -366,27 +366,36 @@ pub const COMMAND_SCRIPT_BUDGET: oxplow_collect_plugin::SandboxBudget =
 /// each one's script.
 pub const MAX_EXAMPLES: usize = 10;
 
-/// Run a command's script over `{ input, rows }` in the sandbox
-/// ([`COMMAND_SCRIPT_BUDGET`]; no host: no files, no `ai_*`). Blocks: the
-/// handler calls it inside the bus's transaction (off the async runtime
-/// already).
-pub fn run_script_blocking(
-    script: String,
-    input: Value,
-    rows: Vec<Value>,
-) -> Result<Value, String> {
-    use oxplow_collect_plugin::runtime::{run_sandboxed, run_starlark};
-    run_sandboxed(&COMMAND_SCRIPT_BUDGET, move || {
-        run_starlark(&script, &json!({ "input": input, "rows": rows }))
-    })
-    .map_err(|e| e.to_string())
+/// The query a command's `input` runs for `input`: its top-level fields
+/// bound as named parameters, capped at [`INPUT_ROW_CAP`] rows.
+pub fn input_query(sql: &str, input: &Value) -> oxplow_db::SqlQuery {
+    oxplow_db::SqlQuery::new(sql)
+        .named(input_params(input))
+        .limit(Some(INPUT_ROW_CAP))
 }
 
-/// [`run_script_blocking`] off the async runtime.
-pub async fn run_script(script: String, input: Value, rows: Vec<Value>) -> Result<Value, String> {
-    tokio::task::spawn_blocking(move || run_script_blocking(script, input, rows))
-        .await
-        .map_err(|e| format!("the script's worker failed: {e}"))?
+/// Run a command's script over `{ input, rows }` in the sandbox
+/// ([`COMMAND_SCRIPT_BUDGET`]; no host: no files, no `ai_*`) and read what
+/// it composes: the one compose step, for the handler and the examples dry
+/// run alike. Blocks: the handler calls it inside the bus's transaction
+/// (off the async runtime already).
+pub fn compose_calls(
+    script: &str,
+    input: Value,
+    rows: Vec<Value>,
+) -> Result<(Vec<CommandCall>, Option<Value>), oxplow_domain::CommandError> {
+    use oxplow_collect_plugin::runtime::{run_sandboxed, run_starlark};
+    let script = script.to_string();
+    let out = run_sandboxed(&COMMAND_SCRIPT_BUDGET, move || {
+        run_starlark(&script, &json!({ "input": input, "rows": rows }))
+    })
+    .map_err(|e| oxplow_domain::CommandError::Failed {
+        message: format!("the script failed: {e}"),
+    })?;
+    composed(out).map_err(|message| oxplow_domain::CommandError::Invalid {
+        field: None,
+        message,
+    })
 }
 
 /// `decl` of extension `extension` as a command on `bus`: a `Tx` handler
@@ -422,32 +431,20 @@ pub fn extension_command(
                 message: "the command bus is gone".into(),
             })?;
             let rows = match &query {
-                Some(sql) => {
-                    let result = oxplow_db::semantic_layer::read_on(
-                        ctx.conn,
-                        &oxplow_db::SqlQuery::new(sql)
-                            .named(input_params(&input))
-                            .limit(Some(INPUT_ROW_CAP)),
-                    )
-                    .map_err(|e| match e {
-                        oxplow_domain::DomainError::Busy(m) => CommandError::Busy { message: m },
-                        other => CommandError::Failed {
-                            message: format!("the `input` query failed: {other}"),
-                        },
-                    })?;
-                    rows_json(&result)
-                }
+                Some(sql) => rows_json(
+                    &oxplow_db::semantic_layer::read_on(ctx.conn, &input_query(sql, &input))
+                        .map_err(|e| match e {
+                            oxplow_domain::DomainError::Busy(m) => {
+                                CommandError::Busy { message: m }
+                            }
+                            other => CommandError::Failed {
+                                message: format!("the `input` query failed: {other}"),
+                            },
+                        })?,
+                ),
                 None => Vec::new(),
             };
-            let out = run_script_blocking(script.clone(), input, rows).map_err(|e| {
-                CommandError::Failed {
-                    message: format!("the script failed: {e}"),
-                }
-            })?;
-            let (calls, result) = composed(out).map_err(|message| CommandError::Invalid {
-                field: None,
-                message,
-            })?;
+            let (calls, result) = compose_calls(&script, input, rows)?;
             let nested = bus.run_nested(ctx, &parent, &calls)?;
             Ok(HandlerOutput {
                 result: json!({ "result": result, "children": nested.children }),
@@ -587,15 +584,29 @@ pub fn spawn_reconciler(state: std::sync::Arc<crate::Services>) {
     });
 }
 
-/// Dry-run every command example of `ext` (`check_extension`): run the
-/// script on the example's input (and its `input` query's rows), and
-/// check what it composes against the registry — each command exists,
-/// its input fits, and the names are `expect_commands`, in order.
-pub async fn check_examples(
+/// Check `ext`'s commands against the running oxplow (`check_extension`):
+/// each `input` query compiles under the models' authorizer (a raw table
+/// or a write is an error), then every example is dry-run — the `input`
+/// query's rows, the script in the sandbox, and what it composes against
+/// the registry (each command exists, its input fits, and the names are
+/// `expect_commands`, in order).
+pub async fn check_commands(
     layer: &crate::sql_gateway::SqlGateway,
     ext: &mut Extension,
     commands: Option<CommandSchemas<'_>>,
 ) {
+    for cmd in ext.commands.clone() {
+        if let Some(sql) = &cmd.input {
+            if let Err(e) = layer.check(sql).await {
+                ext.errors.push(format!(
+                    "{}/extension.yaml: command `{}` `input`: {}",
+                    ext.path,
+                    cmd.name,
+                    e.to_string().replacen("invalid value: ", "", 1)
+                ));
+            }
+        }
+    }
     let with_examples: Vec<ExtensionCommand> = ext
         .commands
         .iter()
@@ -633,26 +644,23 @@ async fn check_example(
     schema_of: CommandSchemas<'_>,
 ) -> Result<(), String> {
     let rows = match &cmd.input {
-        Some(sql) => {
-            let result = layer
-                .run(
-                    oxplow_db::SqlQuery::new(sql)
-                        .named(input_params(&ex.input))
-                        .limit(Some(INPUT_ROW_CAP)),
-                )
-                .await
-                .map_err(|e| {
-                    format!(
-                        "`input`: {}",
-                        e.to_string().replacen("invalid value: ", "", 1)
-                    )
-                })?;
-            rows_json(&result)
-        }
+        Some(sql) => rows_json(&layer.run(input_query(sql, &ex.input)).await.map_err(|e| {
+            format!(
+                "`input`: {}",
+                e.to_string().replacen("invalid value: ", "", 1)
+            )
+        })?),
         None => Vec::new(),
     };
-    let out = run_script(cmd.script.clone(), ex.input.clone(), rows).await?;
-    let (calls, _) = composed(out)?;
+    let (script, input) = (cmd.script.clone(), ex.input.clone());
+    let (calls, _) = tokio::task::spawn_blocking(move || compose_calls(&script, input, rows))
+        .await
+        .map_err(|e| format!("the script's worker failed: {e}"))?
+        .map_err(|e| match e {
+            oxplow_domain::CommandError::Failed { message }
+            | oxplow_domain::CommandError::Invalid { message, .. } => message,
+            other => other.to_string(),
+        })?;
     for call in &calls {
         let Some(schema) = schema_of(&call.name) else {
             return Err(format!("no command `{}`", call.name));
@@ -951,6 +959,32 @@ mod tests {
             assert!(errs.contains(says), "{handler}: {errs}");
         }
 
+        // The `input` query is checked against the models' authorizer even
+        // without examples or a registry: a raw table is refused.
+        let d = tempfile::tempdir().unwrap();
+        write_ext(
+            d.path(),
+            "x",
+            &GOOD
+                .replace(
+                    "    entry: handlers/finish_review.star\n",
+                    "    entry: handlers/finish_review.star\n    input: \"SELECT title FROM task\"\n",
+                )
+                .replace(
+                    "    examples:\n      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, expect_commands: [work_item.transition] }\n",
+                    "",
+                ),
+            &[("handlers/finish_review.star", HANDLER)],
+        );
+        let v = validate_extension(&layer, &cat, d.path(), "x", None)
+            .await
+            .unwrap();
+        let errs = v.errors.join("\n");
+        assert!(
+            errs.contains("command `x.finish_review` `input`") && errs.contains("task"),
+            "{errs}"
+        );
+
         // Without a registry the examples aren't checked, and it says so.
         let d = check(HANDLER, "");
         let v = validate_extension(&layer, &cat, d.path(), "x", None)
@@ -1097,6 +1131,10 @@ mod tests {
             (
                 "def transform(x):\n    return {\"commands\": [{\"name\": \"vcs.commit\", \"input\": {}}]}\n",
                 "composes Tx commands only",
+            ),
+            (
+                "def transform(x):\n    return {\"commands\": [], \"note\": \"extra\"}\n",
+                "the script must return",
             ),
         ] {
             let fx = crate::test_fixtures::services_with_effort().await;

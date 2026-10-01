@@ -832,6 +832,27 @@ mod tests {
         (db, sl)
     }
 
+    /// A command's handler reads its `input` with `read_on` inside its
+    /// write transaction, then its children write: the read must leave
+    /// the connection writable (`query_only` off, no authorizer left).
+    #[tokio::test]
+    async fn read_on_leaves_the_connection_writable() {
+        let (db, _sl) = seeded().await;
+        db.transaction(|tx| {
+            let read = read_on(tx, &SqlQuery::new("SELECT title FROM v_task WHERE id = 1"))?;
+            assert_eq!(read.rows.len(), 1);
+            let query_only: i64 = tx
+                .query_row("PRAGMA query_only", [], |r| r.get(0))
+                .map_err(crate::database::map_sql_err)?;
+            assert_eq!(query_only, 0);
+            tx.execute("UPDATE task SET title = 'Written after' WHERE id = 1", [])
+                .map_err(crate::database::map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn test_runs_and_their_cases_read_from_the_run_capture() {
         let (db, sl) = seeded().await;
