@@ -1461,7 +1461,7 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
     );
     put(
         "extensionInstances",
-        to_yaml(&config.extension_instances),
+        to_yaml(&instances_as_written(&config.extension_instances)),
         !config.extension_instances.is_empty(),
     );
     put(
@@ -1658,10 +1658,48 @@ pub struct ExtensionInstanceConfig {
     #[serde(default = "empty_object")]
     #[specta(type = oxplow_domain::Json)]
     pub config: serde_json::Value,
+    /// How often its collectors are read, in minutes (absent:
+    /// [`DEFAULT_SYNC_MINUTES`]; `0`: only when someone runs
+    /// `provider.sync`).
+    // No `skip_serializing_if` (specta's unified mode can't express it):
+    // `render_project_config` leaves an absent one out of the file.
+    #[serde(rename = "syncMinutes", default)]
+    pub sync_minutes: Option<u32>,
+}
+
+/// How often an instance's collectors are read when its config doesn't
+/// say (`syncMinutes`).
+pub const DEFAULT_SYNC_MINUTES: u32 = 5;
+
+impl ExtensionInstanceConfig {
+    /// How often its collectors are read; `None` for never on a schedule.
+    pub fn sync_every(&self) -> Option<std::time::Duration> {
+        match self.sync_minutes.unwrap_or(DEFAULT_SYNC_MINUTES) {
+            0 => None,
+            m => Some(std::time::Duration::from_secs(u64::from(m) * 60)),
+        }
+    }
 }
 
 fn empty_object() -> serde_json::Value {
     serde_json::Value::Object(serde_json::Map::new())
+}
+
+/// `extensionInstances` as the file holds it: an instance's absent
+/// `syncMinutes` is left out, not written `null`.
+fn instances_as_written(
+    instances: &std::collections::BTreeMap<String, ExtensionInstanceConfig>,
+) -> serde_json::Value {
+    let mut value = serde_json::to_value(instances).expect("instances serialize");
+    if let Some(all) = value.as_object_mut() {
+        for instance in all
+            .values_mut()
+            .filter_map(serde_json::Value::as_object_mut)
+        {
+            instance.retain(|_, v| !v.is_null());
+        }
+    }
+    value
 }
 
 /// Validate `extensionInstances:`: keyed `<extension>/<provider id>`, each
@@ -3317,11 +3355,16 @@ mod tests {
             ExtensionInstanceConfig {
                 enabled: true,
                 config: serde_json::json!({ "pollMinutes": 5, "ratio": 0.5 }),
+                sync_minutes: None,
             },
         );
         let doc = render_project_config(&config, "demo");
         let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
         assert!(yaml.contains("pollMinutes: 5\n"), "{yaml}");
+        assert!(
+            !yaml.contains("syncMinutes"),
+            "an absent schedule isn't written: {yaml}"
+        );
         assert!(yaml.contains("ratio: 0.5\n"), "{yaml}");
         assert!(!yaml.contains("serde_json"), "{yaml}");
         let back = parse_project_config(serde_yaml::from_str(&yaml).unwrap(), "demo").unwrap();

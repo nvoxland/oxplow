@@ -1692,8 +1692,21 @@ V128 (P6b.C2). Each capability's providers and the feature flags they
 declare (`capability`, `provider` — the primary key — `extension`, NULL
 for core's, `features_json`, `active`). Restated from what runs: `reset`
 at boot with core's, `upsert` / `remove` as an external instance starts
-and stops. Published as `v_capability_provider`; see
+and stops; `set_active` restates which row is a capability's active
+provider (P7.A2). Published as `v_capability_provider`; see
 [work-items.md](./work-items.md).
+
+### `provider_collector_state` — `SqliteProviderCollectorStore` (`crates/oxplow-db/src/provider_collector_store.rs`)
+
+V129 (P7.A3). Where each provider instance's collector left off:
+`instance`, `collector` (the primary key), `state_json` (the provider's
+own opaque `$/state` checkpoint), `status` (`never` / `reading` / `ok` /
+`error`), `error`, `last_read_at`, `records` (what reads have delivered).
+`checkpoint_tx` runs in the same transaction as the
+`work_item.recorded@1` events a checkpoint covers, so a read that fails
+midway resumes from the last batch that landed; `finish_tx` records the
+outcome. Read by `provider.sync` and Settings → Integrations; see
+[providers.md](./providers.md) "Reading: collectors and sync".
 
 ### `command_proposal` — `SqliteProposalStore` (`crates/oxplow-db/src/proposal_store.rs`)
 

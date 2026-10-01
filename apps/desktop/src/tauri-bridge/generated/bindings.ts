@@ -1663,6 +1663,19 @@ export type CollectorEffect = {
 	entities: string[],
 };
 
+// A provider's collector as Settings → Integrations shows it.
+export type CollectorView = {
+	name: string,
+	entity: string,
+	// `never`, `reading`, `ok` or `error`.
+	status: string,
+	error: string | null,
+	// RFC 3339.
+	lastReadAt: string | null,
+	// Records its reads have delivered.
+	records: number,
+};
+
 // One promised column.
 export type ColumnDecl = {
 	name: string,
@@ -2286,6 +2299,12 @@ export type ExtensionInstanceConfig = {
 	enabled?: boolean,
 	// The instance's config, as the provider's `config_schema` describes.
 	config?: unknown,
+	/**
+	 *  How often its collectors are read, in minutes (absent:
+	 *  [`DEFAULT_SYNC_MINUTES`]; `0`: only when someone runs
+	 *  `provider.sync`).
+	 */
+	syncMinutes?: number | null,
 };
 
 /**
@@ -4183,6 +4202,8 @@ export type ProviderInstanceView = {
 	// Each credential it declares and whether this machine has a value.
 	credentials: CredentialStatus[],
 	health: InstanceHealth,
+	// Each collector it declares and where its reads stand (P7.A3).
+	collectors: CollectorView[],
 };
 
 // Kinds of provider oxplow can talk to.

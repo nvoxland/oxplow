@@ -154,3 +154,55 @@ async fn a_request_after_the_other_side_closed_fails_at_once() {
     .expect("answered without waiting");
     assert!(reply.is_err());
 }
+
+/// P7.A3: a streaming request gets the notifications about it — in order,
+/// on its own channel, which closes with its reply; a notification naming
+/// another id (or none in flight) arrives on the general channel.
+#[tokio::test]
+async fn a_streaming_request_gets_its_own_notifications_until_its_reply() {
+    let (a_io, b_io) = tokio::io::duplex(4096);
+    let (a_read, a_write) = tokio::io::split(a_io);
+    let (b_read, b_write) = tokio::io::split(b_io);
+    let (host, mut host_in) = Peer::spawn(a_read, a_write);
+    let (provider, mut provider_in) = Peer::spawn(b_read, b_write);
+
+    tokio::spawn(async move {
+        while let Some(incoming) = provider_in.recv().await {
+            if let Incoming::Request { id, .. } = incoming {
+                for (method, params) in [
+                    (notify::PROGRESS, json!({ "id": id, "message": "page 1" })),
+                    (
+                        notify::RECORD,
+                        json!({ "id": id, "entity": "work_item", "row": { "n": 1 } }),
+                    ),
+                    (notify::STATE, json!({ "id": id, "state": { "after": 1 } })),
+                    (
+                        notify::RECORD,
+                        json!({ "id": 999, "entity": "work_item", "row": {} }),
+                    ),
+                ] {
+                    provider.notify(method, params).await.unwrap();
+                }
+                provider
+                    .respond(id, Ok(json!({ "records": 1 })))
+                    .await
+                    .unwrap();
+            }
+        }
+    });
+
+    let (call, mut stream) = host.start_streaming("read", json!({})).await.unwrap();
+    let mut methods = Vec::new();
+    while let Some(Incoming::Notification { method, .. }) = stream.recv().await {
+        methods.push(method);
+    }
+    assert_eq!(
+        methods,
+        vec![notify::PROGRESS, notify::RECORD, notify::STATE]
+    );
+    assert_eq!(call.reply().await.unwrap(), json!({ "records": 1 }));
+    let Some(Incoming::Notification { params, .. }) = host_in.recv().await else {
+        panic!("the stray record arrives on the general channel");
+    };
+    assert_eq!(params["id"], 999);
+}

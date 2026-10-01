@@ -13,7 +13,7 @@ use crate::error::IpcError;
 pub async fn list_provider_instances(
     svc: &Services,
 ) -> Result<Vec<ProviderInstanceView>, IpcError> {
-    Ok(svc.providers.list())
+    Ok(svc.providers.list().await)
 }
 
 /// Check `instance` against `config` — consent, spawn, handshake,
@@ -39,7 +39,7 @@ pub async fn set_provider_instance(
     svc.providers
         .set_instance(&Actor::Human, &instance, enabled, config.0)
         .await?;
-    Ok(svc.providers.list())
+    Ok(svc.providers.list().await)
 }
 
 #[cfg(test)]

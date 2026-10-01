@@ -115,7 +115,11 @@ const INSTANCE: &str = "tracker/fake";
 fn configure(fx: &EffortFixture, enabled: bool, config: serde_json::Value) {
     fx.svc.config.write().unwrap().extension_instances.insert(
         INSTANCE.into(),
-        oxplow_config::ExtensionInstanceConfig { enabled, config },
+        oxplow_config::ExtensionInstanceConfig {
+            enabled,
+            config,
+            sync_minutes: None,
+        },
     );
 }
 
@@ -455,7 +459,11 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
         .into_iter()
         .map(|r| r.command)
         .collect();
-    assert_eq!(commands, vec!["work_item.transition", "work_item.create"]);
+    // Starting it read it once (as the system), then the two writes.
+    assert_eq!(
+        commands,
+        vec!["work_item.transition", "work_item.create", "provider.sync"]
+    );
 
     // Undo dispatches again: the provider's inverse is renamed to
     // `work_item.transition` and moves the item back.
@@ -933,12 +941,13 @@ async fn a_hung_check_times_out_and_the_instance_can_still_stop() {
 /// failure, instead of blocking the caller forever with health `ready`.
 #[tokio::test]
 async fn a_hung_invoke_times_out_and_counts() {
-    let (fx, ext) = approved("slow:30000").await;
+    let (fx, ext) = approved("").await;
     let providers = &fx.svc.providers;
     providers
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    set_hooks(&fx, "slow:30000").await;
     let ran = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         fx.svc.commands.run(
@@ -1146,4 +1155,264 @@ fn a_capability_verb_is_record_and_never_confirms() {
     no_delete.commands.retain(|c| c.name != "delete");
     let err = spec::check_declarations(&spec, &no_delete).unwrap_err();
     assert!(err.contains("`delete`"), "{err}");
+}
+
+/// The fake's three items, filed through `work_item.create`.
+async fn three_items(fx: &EffortFixture) -> Vec<String> {
+    let items = fx.svc.work_items_client();
+    let mut refs = Vec::new();
+    for title in ["one", "two", "three"] {
+        refs.push(
+            items
+                .create(
+                    &Actor::Human,
+                    crate::work_items::NewItem {
+                        provider: Some("fake".into()),
+                        title: title.into(),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap(),
+        );
+    }
+    refs
+}
+
+async fn collector_state(fx: &EffortFixture) -> oxplow_db::CollectorState {
+    oxplow_db::SqliteProviderCollectorStore::new(fx.svc.db.clone())
+        .get(INSTANCE, "work_items")
+        .await
+        .unwrap()
+        .expect("a read was recorded")
+}
+
+/// How many `work_item.recorded` events name `item`.
+async fn recorded_for(fx: &EffortFixture, item: &str) -> usize {
+    logged(fx, "work_item.recorded")
+        .await
+        .iter()
+        .filter(|p| p["item"]["ref"] == item)
+        .count()
+}
+
+/// P7.A3: a read streams the provider's items into `work_item` and keeps
+/// its cursor; the next read resumes from it. Starting an instance reads
+/// it once.
+#[tokio::test]
+async fn a_read_streams_records_into_work_item_and_keeps_its_cursor() {
+    let (fx, ext) = approved("").await;
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    let first = collector_state(&fx).await;
+    assert_eq!(
+        (first.status.as_str(), first.records),
+        ("ok", 0),
+        "read once on start"
+    );
+    let refs = three_items(&fx).await;
+
+    let out = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            sync::SYNC,
+            json!({ "instance": INSTANCE }),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.result["reads"][0]["records"], 3);
+    let state = collector_state(&fx).await;
+    assert_eq!(state.records, 3);
+    assert_eq!(state.state, Some(json!({ "cursor": 3, "seen": 3 })));
+    for r in &refs {
+        assert_eq!(
+            recorded_for(&fx, r).await,
+            2,
+            "its create's, then the read's"
+        );
+    }
+    // The next read resumes after the cursor: nothing new.
+    let again = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            sync::SYNC,
+            json!({ "instance": INSTANCE }),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(again.result["reads"][0]["records"], 0);
+    fx.svc.event_pump.run_once().await.unwrap();
+    assert!(ServicesProbe(&fx.svc).record(&refs[2]).await.is_some());
+
+    let err = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            sync::SYNC,
+            json!({ "instance": INSTANCE, "collector": "nope" }),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, oxplow_domain::CommandError::Invalid { field: Some(f), .. } if f == "/collector"),
+        "{err:?}"
+    );
+}
+
+/// P7.A3: a read that fails midway keeps the records its last checkpoint
+/// covered (the next read resumes there), and the failure counts; a
+/// record of another provider's item fails the read and writes nothing.
+#[tokio::test]
+async fn a_failed_read_keeps_what_its_checkpoints_covered() {
+    let (fx, ext) = approved("").await;
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    let refs = three_items(&fx).await;
+    set_hooks(&fx, "read-fail-after:2").await;
+    let err = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            sync::SYNC,
+            json!({ "instance": INSTANCE }),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("after 2 records"), "{err}");
+    let state = collector_state(&fx).await;
+    assert_eq!((state.status.as_str(), state.records), ("error", 2));
+    assert_eq!(state.state, Some(json!({ "cursor": 2, "seen": 2 })));
+    assert_eq!(recorded_for(&fx, &refs[2]).await, 1, "only its create's");
+    assert_eq!(
+        fx.svc
+            .providers
+            .health(INSTANCE)
+            .unwrap()
+            .consecutive_failures,
+        1
+    );
+
+    set_hooks(&fx, "bad-record").await;
+    let before = logged(&fx, "work_item.recorded").await.len();
+    let err = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            sync::SYNC,
+            json!({ "instance": INSTANCE }),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("work_item:other:X-1"), "{err}");
+    assert_eq!(logged(&fx, "work_item.recorded").await.len(), before);
+}
+
+/// P7.A3: a read that sends nothing for the call timeout is cancelled
+/// and counts as a failure.
+#[tokio::test]
+async fn a_silent_read_is_cancelled_and_counts() {
+    let (fx, ext) = approved("").await;
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    set_hooks(&fx, "slow:5000").await;
+    let err = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            sync::SYNC,
+            json!({ "instance": INSTANCE }),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("sent nothing"), "{err}");
+    assert_eq!(
+        fx.svc
+            .providers
+            .health(INSTANCE)
+            .unwrap()
+            .consecutive_failures,
+        1
+    );
+}
+
+/// P7.A3: the schedule reads each running instance's collectors that are
+/// due, as the system and audited; one read just now isn't due again; an
+/// instance set to `syncMinutes: 0` is read only on request.
+#[tokio::test]
+async fn scheduled_syncs_run_due_collectors_as_the_system() {
+    let (fx, _ext) = approved("").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    // Starting read it once; it isn't due again for five minutes.
+    assert_eq!(fx.svc.providers.sync_due().await, 0);
+    fx.svc
+        .db
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE provider_collector_state SET last_read_at = '2020-01-01T00:00:00.000000Z'",
+                [],
+            )
+            .map(|_| ())
+            .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+        })
+        .await
+        .unwrap();
+    assert_eq!(fx.svc.providers.sync_due().await, 1);
+    let audits = fx.svc.commands.audit_store().list_recent(10).await.unwrap();
+    let syncs: Vec<_> = audits.iter().filter(|r| r.command == sync::SYNC).collect();
+    assert!(syncs.len() >= 2, "{audits:?}");
+    assert!(syncs
+        .iter()
+        .all(|r| r.actor_kind == oxplow_domain::events::schema::ActorKind::System));
+
+    fx.svc
+        .config
+        .write()
+        .unwrap()
+        .extension_instances
+        .get_mut(INSTANCE)
+        .unwrap()
+        .sync_minutes = Some(0);
+    fx.svc
+        .db
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE provider_collector_state SET last_read_at = '2020-01-01T00:00:00.000000Z'",
+                [],
+            )
+            .map(|_| ())
+            .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+        })
+        .await
+        .unwrap();
+    assert_eq!(fx.svc.providers.sync_due().await, 0);
+}
+
+/// Send the running fake new script hooks.
+async fn set_hooks(fx: &EffortFixture, hooks: &str) {
+    let instance = fx.svc.providers.get(INSTANCE).await.expect("running");
+    instance.hook(hooks).await;
 }

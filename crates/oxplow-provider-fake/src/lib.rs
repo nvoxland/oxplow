@@ -12,8 +12,10 @@
 //! `delete`, over the contract's inputs (`state` / `native_state`, the
 //! fake's `native.points`), plus one command of its own, `estimate` —
 //! each returns `work_item.recorded` events (the item as it now stands).
-//! Collector `work_items` streams every item after the cursor as
-//! `$/record`, then `$/state { cursor }`.
+//! Collector `work_items` streams every item changed after the cursor
+//! (each write bumps an item's revision; a deleted item stays, marked
+//! `deleted`), in revision order, as `$/record` followed by a `$/state`
+//! checkpoint `{ cursor, seen }` — opaque to the host.
 //!
 //! **Hooks**, from `OXPLOW_FAKE_HOOKS` at start or a `fake/hooks { hooks }`
 //! notification later (comma-separated):
@@ -25,7 +27,11 @@
 //! - `crash` — drop the connection on the next request (the binary exits
 //!   with status 3);
 //! - `bad-declarations` — `initialize` declares an extra command the
-//!   checked-in declarations don't have.
+//!   checked-in declarations don't have;
+//! - `progress` — a `read` sends `$/progress` before each record;
+//! - `read-fail-after:<n>` — a `read` fails (`Internal`) after streaming
+//!   (and checkpointing) `n` records;
+//! - `bad-record` — a `read` streams a record of another provider's item.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -50,6 +56,9 @@ pub struct Hooks {
     pub slow_check_ms: u64,
     pub crash: bool,
     pub bad_declarations: bool,
+    pub progress: bool,
+    pub read_fail_after: Option<u64>,
+    pub bad_record: bool,
 }
 
 impl Hooks {
@@ -65,9 +74,12 @@ impl Hooks {
                 Some(("fail-next", n)) => self.fail_next = n.parse().unwrap_or(1),
                 Some(("slow", ms)) => self.slow_ms = ms.parse().unwrap_or(0),
                 Some(("slow-check", ms)) => self.slow_check_ms = ms.parse().unwrap_or(0),
+                Some(("read-fail-after", n)) => self.read_fail_after = n.parse().ok(),
                 None if part == "fail-next" => self.fail_next = 1,
                 None if part == "crash" => self.crash = true,
                 None if part == "bad-declarations" => self.bad_declarations = true,
+                None if part == "progress" => self.progress = true,
+                None if part == "bad-record" => self.bad_record = true,
                 _ => {}
             }
         }
@@ -208,6 +220,9 @@ pub fn declarations() -> InitializeResult {
 
 struct Item {
     record: WorkItemRecord,
+    /// The world's revision when it last changed: a read streams the
+    /// items changed after its cursor.
+    rev: u64,
     links: Vec<(String, String)>,
     comments: Vec<String>,
 }
@@ -217,6 +232,8 @@ struct World {
     hooks: Hooks,
     items: BTreeMap<u64, Item>,
     next: u64,
+    /// Bumped by every write.
+    rev: u64,
     in_flight: HashMap<Id, oneshot::Sender<()>>,
 }
 
@@ -403,33 +420,62 @@ async fn handle(
                 .and_then(|s| s.get("cursor"))
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
-            let rows: Vec<(u64, Value)> = world
-                .lock()
-                .await
-                .items
-                .range(after + 1..)
-                .map(|(n, item)| {
-                    (
-                        *n,
-                        serde_json::to_value(&item.record).expect("record serializes"),
+            let seen = p
+                .state
+                .as_ref()
+                .and_then(|s| s.get("seen"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let (hooks, mut rows) = {
+                let w = world.lock().await;
+                let mut rows: Vec<(u64, Value)> = w
+                    .items
+                    .values()
+                    .filter(|item| item.rev > after)
+                    .map(|item| {
+                        (
+                            item.rev,
+                            serde_json::to_value(&item.record).expect("record serializes"),
+                        )
+                    })
+                    .collect();
+                rows.sort_by_key(|(rev, _)| *rev);
+                (w.hooks.clone(), rows)
+            };
+            if hooks.bad_record {
+                let mut foreign = rows.first().map(|(_, r)| r.clone()).unwrap_or_else(
+                    || json!({ "title": "x", "state": "todo", "native_state": "Backlog" }),
+                );
+                foreign["ref"] = json!("work_item:other:X-1");
+                rows.insert(0, (after + 1, foreign));
+            }
+            let total = rows.len();
+            for (i, (rev, row)) in rows.into_iter().enumerate() {
+                if hooks.read_fail_after == Some(i as u64) {
+                    return Err(ProtocolError::Internal(format!(
+                        "scripted read failure after {i} records"
+                    )));
+                }
+                if hooks.progress {
+                    peer.notify(
+                        notify::PROGRESS,
+                        json!({ "id": id, "message": format!("record {} of {total}", i + 1),
+                                "fraction": (i + 1) as f64 / total as f64 }),
                     )
-                })
-                .collect();
-            let mut cursor = after;
-            for (n, row) in &rows {
+                    .await?;
+                }
                 peer.notify(
                     notify::RECORD,
                     json!({ "id": id, "entity": "work_item", "row": row }),
                 )
                 .await?;
-                cursor = *n;
+                peer.notify(
+                    notify::STATE,
+                    json!({ "id": id, "state": { "cursor": rev, "seen": seen + i as u64 + 1 } }),
+                )
+                .await?;
             }
-            peer.notify(
-                notify::STATE,
-                json!({ "id": id, "state": { "cursor": cursor } }),
-            )
-            .await?;
-            Ok(json!({ "records": rows.len() }))
+            Ok(json!({ "records": total }))
         }
         other => Err(ProtocolError::MethodNotFound(other.into())),
     }
@@ -517,7 +563,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 .map(str::to_string);
             if let Some(parent) = &parent_ref {
                 let n = number_of(parent)?;
-                if !w.items.contains_key(&n) {
+                if !w.items.get(&n).is_some_and(|i| !i.record.deleted) {
                     return Err(ProtocolError::InvalidInput {
                         field: "/parent_ref".into(),
                         message: format!("no item `{parent}`"),
@@ -547,10 +593,13 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
             };
             let events = vec![recorded(&record)];
             let result = json!({ "ref": record.item_ref });
+            w.rev += 1;
+            let rev = w.rev;
             w.items.insert(
                 n,
                 Item {
                     record,
+                    rev,
                     links: Vec::new(),
                     comments: Vec::new(),
                 },
@@ -560,9 +609,12 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
         "update" | "transition" | "link" | "comment" | "delete" | "estimate" => {
             let item_ref = str_field(&input, "ref")?;
             let n = number_of(&item_ref)?;
+            w.rev += 1;
+            let rev = w.rev;
             let item = w
                 .items
                 .get_mut(&n)
+                .filter(|item| !item.record.deleted)
                 .ok_or_else(|| ProtocolError::InvalidInput {
                     field: "/ref".into(),
                     message: format!("no item `{item_ref}`"),
@@ -622,10 +674,9 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 }
                 _ => item.record.deleted = true,
             }
+            // Only a write that happened moves its revision.
+            item.rev = rev;
             let events = vec![recorded(&item.record)];
-            if command == "delete" {
-                w.items.remove(&n);
-            }
             (json!({ "ref": item_ref }), events)
         }
         other => {

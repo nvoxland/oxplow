@@ -24,7 +24,7 @@ import {
   type ProviderInstanceView,
 } from "../api.js";
 import { CredentialRow } from "./ExtensionsSection.js";
-import { activeProviderProblem, integrationRow, workItemsChoices } from "./integrationsModel.js";
+import { activeProviderProblem, collectorLine, integrationRow, workItemsChoices } from "./integrationsModel.js";
 import { SchemaForm } from "./SchemaForm/SchemaForm.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
@@ -135,7 +135,7 @@ function IntegrationRow({
   const saved = view.config as Record<string, unknown>;
   const [config, setConfig] = useState<Record<string, unknown> | null>(saved);
   const [checked, setChecked] = useState<ProviderInstanceView | null>(null);
-  const [busy, setBusy] = useState<"check" | "toggle" | null>(null);
+  const [busy, setBusy] = useState<"check" | "toggle" | "sync" | null>(null);
   useEffect(() => setConfig(saved), [saved]);
 
   const shown = checked ?? view;
@@ -151,6 +151,22 @@ function IntegrationRow({
       recordOpError({ label: `Check ${view.instance}`, message: String(e) });
     } finally {
       setBusy(null);
+    }
+  }
+
+  // Read a collector now, as the person (`provider.sync`), then show
+  // where its reads stand.
+  async function sync(collector: string) {
+    setBusy("sync");
+    try {
+      const out = await runCommand("provider.sync", { instance: view.instance, collector });
+      const records = (out.result as { reads?: Array<{ records: number }> } | null)?.reads?.[0]?.records ?? 0;
+      showToast({ message: `Synced ${collector}: ${records} ${records === 1 ? "record" : "records"}.` });
+    } catch (e) {
+      recordOpError({ label: `Sync ${view.instance}`, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(null);
+      onCredentialChanged();
     }
   }
 
@@ -202,6 +218,25 @@ function IntegrationRow({
           {busy === "toggle" ? "Saving…" : m.enableLabel}
         </button>
       </div>
+      {view.collectors.map((c) => {
+        const line = collectorLine(c);
+        return (
+          <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 8 }} data-testid={`integration-collector-${m.key}-${c.name}`}>
+            <span style={line.problem ? errorStyle : mutedStyle}>{line.text}</span>
+            {view.health.state.state === "ready" ? (
+              <button
+                type="button"
+                data-testid={`integration-sync-${m.key}-${c.name}`}
+                disabled={busy !== null}
+                title="Read this collector now, from where its last read left off"
+                onClick={() => void sync(c.name)}
+              >
+                {busy === "sync" ? "Syncing…" : "Sync Now"}
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
       {m.needsApproval ? (
         <div style={mutedStyle}>Its program isn&apos;t approved on this machine yet: see Data → Programs.</div>
       ) : null}

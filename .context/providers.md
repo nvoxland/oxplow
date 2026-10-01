@@ -15,7 +15,10 @@ symmetric `Peer` (`peer.rs`) is both sides' connection: `start` /
 `request` / `call` (typed) send a request and await its reply through an
 outstanding-id table, `notify` and `cancel` send notifications, `respond`
 answers the other side, and whatever isn't a reply arrives on the
-`Incoming` channel. Ids are the sender's own, from 1. When the stream
+`Incoming` channel — except what a request started with
+`start_streaming` is told about: `$/progress`, `$/record` and `$/state`
+naming its id go, in order, to a channel of its own, registered before
+the request is sent and closed when its reply arrives (P7.A3). Ids are the sender's own, from 1. When the stream
 ends, replies still awaited fail. It is deliberately not the
 `agent-client-protocol` layer: that one is ACP-typed and actor-heavy.
 
@@ -72,9 +75,11 @@ collector over the `work_item` entity, and a config schema requiring
 `team`. `check` returns handle `fake:<team>` or a `/team` problem. Items
 live in memory as `work_item:fake:W-<n>` with native states `Backlog`,
 `Doing`, `Stuck`, `Shipped`, `Dropped` (one per canonical state); every
-`invoke` returns the `work_item.recorded` events the host logs. `read`
-streams each item after the cursor as `$/record`, then `$/state
-{ cursor }`, then `{ records }`.
+`invoke` returns the `work_item.recorded` events the host logs. Each
+write bumps the item's revision (a deleted item stays, marked
+`deleted`); `read` streams each item changed after the cursor, in
+revision order, as `$/record` followed by a `$/state { cursor, seen }`
+checkpoint (opaque to the host), then `{ records }`.
 
 **Script hooks** — `OXPLOW_FAKE_HOOKS` at spawn, or a `fake/hooks
 { hooks }` notification mid-session (comma-separated):
@@ -82,7 +87,10 @@ streams each item after the cursor as `$/record`, then `$/state
 `slow:<ms>` (invoke and read wait first; `$/cancel` interrupts them with
 `Cancelled`), `slow-check:<ms>` (check waits first), `crash` (the next request drops the connection; the binary
 exits 3) and `bad-declarations` (`initialize` answers something other
-than `declarations()`, for the host's handshake check).
+than `declarations()`, for the host's handshake check), `progress` (a
+read sends `$/progress` before each record), `read-fail-after:<n>` (a
+read fails after `n` checkpointed records) and `bad-record` (a read
+streams another provider's item).
 `tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
 notifications against the goldens.
 
@@ -245,6 +253,35 @@ Only a person turns it back on — **`provider.enable { instance }`**
 (human-only, `External`, not undoable), which logs `provider.enabled@1`,
 resets the count and reconciles.
 
+**Reading: collectors and sync** (`sync.rs`, P7.A3). `Instance::read`
+runs one declared collector's `read` from the checkpoint it last stored
+(`provider_collector_state`, [data-model.md](./data-model.md)), through
+`start_streaming`. Each `$/record` must be the collector's entity and —
+for a work-items provider — a `WorkItemRecord` of its own item; it is
+kept as a `work_item.recorded@1` envelope (the actor's source) until the
+next `$/state`, which commits the batch **and** the checkpoint in one
+transaction, so a read that fails midway keeps exactly what its last
+checkpoint covered and the next read resumes there. The result's
+`records` must equal what was streamed; records after the last
+checkpoint of a read that succeeded land too. A record that breaks a
+rule, a count that doesn't match, or a read that sends nothing for
+`call_timeout` (`$/cancel` follows) fails the read and counts toward the
+instance's health like a failed call (a refused input or a cancel
+doesn't). The projection (`work_items.project`) then restates
+`v_work_item`.
+
+**`provider.sync { instance, collector? }`** is the one way to read
+([commands.md](./commands.md)): Settings → Integrations' **Sync Now**, an
+agent, the schedule and the start. **The schedule** (`sync_due`, every
+minute from `spawn_sync_scheduler`) reads each running instance's
+collectors whose last read is older than its `syncMinutes`
+(`extensionInstances.<instance>.syncMinutes`, default 5; `0` means only
+on request), as `Actor::System` through the bus, so each read is
+audited. **A start** reads every collector once (`sync_started`) so the
+items are there before the first scheduled read. An external write whose
+reply was lost (it landed at the tracker but the call timed out) is
+restated by the next read.
+
 **Settings → Integrations** (`IntegrationsSection.tsx`, IPC UI-only in
 the parity table): `list_provider_instances` (every declared provider and
 configured instance, with health, approval, credential status and the
@@ -261,7 +298,10 @@ shows its state, its credentials (set into the keychain through
 `set_source_credential`, which accepts a provider's credentials too),
 the config as a form from the provider's `config_schema`
 (`SchemaForm`, P6.B2: Escape resets an edit; a field's problem disables
-the actions), Check and Enable / Disable / Enable again. Approving the
+the actions), Check and Enable / Disable / Enable again, and each
+collector's line (`collectorLine`: records delivered, last read, a
+failed read's error; the view's `collectors`) with **Sync Now** while it
+runs. Approving the
 program stays in Data → Programs; approving a provider restarts its
 running instance on what was approved (`ProviderRegistry::approved`,
 called by `approve_project_program`), so updated declarations take

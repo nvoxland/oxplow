@@ -7,11 +7,14 @@
 //!   them with `extensionInstances`, their bus commands, health, restart
 //!   with backoff and automatic disable;
 //! - [`work_items`] — `ExternalWorkItems`, the work-items capability over
-//!   an instance.
+//!   an instance;
+//! - [`sync`] — reading an instance's collectors (`provider.sync`, the
+//!   schedule), checkpointed.
 
 pub mod host;
 pub mod registry;
 pub mod spec;
+pub mod sync;
 pub mod work_items;
 
 #[cfg(test)]
@@ -19,7 +22,7 @@ mod tests;
 
 pub use host::HostError;
 pub use registry::{
-    ConfigProblem, HostDeps, Instance, InstanceHealth, InstanceState, ProviderInstanceView,
-    ProviderRegistry,
+    CollectorView, ConfigProblem, HostDeps, Instance, InstanceHealth, InstanceState,
+    ProviderInstanceView, ProviderRegistry,
 };
 pub use spec::{parse_providers, ProviderSpec};

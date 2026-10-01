@@ -1073,6 +1073,9 @@ impl Services {
         commands
             .register(providers::registry::enable_command(&providers))
             .expect("provider.enable registers");
+        commands
+            .register(providers::sync::sync_command(&providers))
+            .expect("provider.sync registers");
         let extension_commands = Arc::new(extension_commands::ExtensionCommands::new(
             &commands,
             extension_catalog.clone(),
@@ -1493,6 +1496,8 @@ mod tests {
                 "metric.rebuild",
                 "metric.run",
                 "provider.enable",
+                // The provider process's collectors (P7.A3).
+                "provider.sync",
                 // The source's own program (P6.B1).
                 "source.sync",
                 "vcs.checkout_branch",

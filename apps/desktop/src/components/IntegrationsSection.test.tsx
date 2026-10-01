@@ -19,6 +19,7 @@ const instance = {
   approved: true,
   credentials: [],
   health: { state: { state: "ready" }, consecutiveFailures: 0, lastOkAt: null, meanInvokeMs: null },
+  collectors: [{ name: "work_items", entity: "work_item", status: "ok", error: null, lastReadAt: "2026-10-01T00:00:00Z", records: 3 }],
 };
 mock.module("../api.js", () => ({
   ...realApi,
@@ -56,4 +57,16 @@ test("an active provider that isn't running is said so", async () => {
   const view = render(<IntegrationsSection />);
   const problem = await waitFor(() => view.getByTestId("integrations-active-problem"));
   expect(problem.textContent).toContain("No enabled extension declares `linear`");
+});
+
+// P7.A3: a running instance's collector shows its last read and records,
+// and Sync Now reads it as the person.
+test("Sync Now runs provider.sync for that collector", async () => {
+  const view = render(<IntegrationsSection />);
+  const line = await waitFor(() => view.getByTestId("integration-collector-tracker/fake-work_items"));
+  expect(line.textContent).toContain("work_items: 3 records · last read 2026-10-01T00:00:00Z");
+  fireEvent.click(view.getByTestId("integration-sync-tracker/fake-work_items"));
+  await waitFor(() =>
+    expect(ran).toEqual([["provider.sync", { instance: "tracker/fake", collector: "work_items" }, false]]),
+  );
 });

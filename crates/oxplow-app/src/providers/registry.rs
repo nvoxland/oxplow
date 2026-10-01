@@ -162,6 +162,23 @@ pub struct ProviderInstanceView {
     /// Each credential it declares and whether this machine has a value.
     pub credentials: Vec<crate::source_runner::CredentialStatus>,
     pub health: InstanceHealth,
+    /// Each collector it declares and where its reads stand (P7.A3).
+    pub collectors: Vec<CollectorView>,
+}
+
+/// A provider's collector as Settings → Integrations shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectorView {
+    pub name: String,
+    pub entity: String,
+    /// `never`, `reading`, `ok` or `error`.
+    pub status: String,
+    pub error: Option<String>,
+    /// RFC 3339.
+    pub last_read_at: Option<String>,
+    /// Records its reads have delivered.
+    pub records: i64,
 }
 
 /// A started process and the handle its `check` returned.
@@ -179,8 +196,8 @@ pub struct Instance {
     pub config: Value,
     /// The approved declarations it was enabled with.
     pub declared: InitializeResult,
-    deps: HostDeps,
-    registry: Weak<ProviderRegistry>,
+    pub(super) deps: HostDeps,
+    pub(super) registry: Weak<ProviderRegistry>,
     live: tokio::sync::Mutex<Option<Live>>,
     /// One start at a time; held across a start, which `live` never is.
     starting: tokio::sync::Mutex<()>,
@@ -252,7 +269,9 @@ impl Instance {
     /// The running process's peer and handle, starting it when it isn't
     /// (unless it's backing off). The start runs without holding `live`,
     /// so a start that hangs never blocks `stop`.
-    async fn connection(&self) -> Result<(oxplow_provider_protocol::Peer, Handle), CommandError> {
+    pub(super) async fn connection(
+        &self,
+    ) -> Result<(oxplow_provider_protocol::Peer, Handle), CommandError> {
         {
             let live = self.live.lock().await;
             if let Some(l) = live.as_ref().filter(|l| !l.conn.peer.is_closed()) {
@@ -300,6 +319,24 @@ impl Instance {
         }
     }
 
+    /// Send the running process a `fake/hooks` notification (the fake
+    /// provider's script hooks, mid-session).
+    #[cfg(test)]
+    pub(super) async fn hook(&self, hooks: &str) {
+        let (peer, _) = self.connection().await.expect("it runs");
+        peer.notify("fake/hooks", json!({ "hooks": hooks }))
+            .await
+            .expect("the hooks reach it");
+    }
+
+    /// Forget the process `peer` talks to when it died under a call, so
+    /// the next call restarts it.
+    pub(super) async fn forget_if_closed(&self, peer: &oxplow_provider_protocol::Peer) {
+        if peer.is_closed() {
+            self.live.lock().await.take();
+        }
+    }
+
     /// Run one of its declared commands.
     pub async fn invoke(&self, command: &str, input: Value) -> Result<InvokeResult, CommandError> {
         let (peer, handle) = self.connection().await?;
@@ -315,10 +352,8 @@ impl Instance {
             self.deps.call_timeout,
         )
         .await;
-        if peer.is_closed() {
-            // It died under the call: the next one restarts it.
-            self.live.lock().await.take();
-        }
+        // It died under the call: the next one restarts it.
+        self.forget_if_closed(&peer).await;
         let registry = self.registry.upgrade();
         match result {
             Ok(out) => {
@@ -342,7 +377,7 @@ impl Instance {
         }
     }
 
-    fn command_error(&self, e: ProtocolError) -> CommandError {
+    pub(super) fn command_error(&self, e: ProtocolError) -> CommandError {
         match e {
             ProtocolError::InvalidInput { field, message } => CommandError::Invalid {
                 field: Some(field),
@@ -408,11 +443,11 @@ pub fn check_subject(provider: &str, extension: &str, subject: &str) -> Result<(
 
 /// The instances and their health.
 pub struct ProviderRegistry {
-    deps: HostDeps,
+    pub(super) deps: HostDeps,
     me: Weak<ProviderRegistry>,
-    bus: Weak<CommandBus>,
+    pub(super) bus: Weak<CommandBus>,
     work_items: WorkItemsRegistry,
-    running: tokio::sync::Mutex<BTreeMap<String, Arc<Instance>>>,
+    pub(super) running: tokio::sync::Mutex<BTreeMap<String, Arc<Instance>>>,
     health: parking_lot::Mutex<BTreeMap<String, InstanceHealth>>,
     /// One reconcile at a time.
     reconciling: tokio::sync::Mutex<()>,
@@ -469,7 +504,9 @@ impl ProviderRegistry {
             })
     }
 
-    fn instances_config(&self) -> BTreeMap<String, oxplow_config::ExtensionInstanceConfig> {
+    pub(super) fn instances_config(
+        &self,
+    ) -> BTreeMap<String, oxplow_config::ExtensionInstanceConfig> {
         crate::config_service::read_config(&self.deps.config).extension_instances
     }
 
@@ -504,7 +541,7 @@ impl ProviderRegistry {
     }
 
     /// Every declared provider and every configured instance, with health.
-    pub fn list(&self) -> Vec<ProviderInstanceView> {
+    pub async fn list(&self) -> Vec<ProviderInstanceView> {
         let configured = self.instances_config();
         let mut out: BTreeMap<String, ProviderInstanceView> = BTreeMap::new();
         for ext in self.extensions().iter().filter(|e| e.enabled) {
@@ -512,11 +549,29 @@ impl ProviderRegistry {
                 let instance = spec.approval_name(&ext.name);
                 let cfg = configured.get(&instance);
                 let dir = host::ext_dir(&self.deps.project_dir, ext);
-                let config_schema = spec::read_declarations(spec, &|rel| {
+                let declared = spec::read_declarations(spec, &|rel| {
                     std::fs::read_to_string(dir.join(rel)).ok()
                 })
-                .map(|d| d.config_schema)
-                .unwrap_or(Value::Null);
+                .ok();
+                let config_schema = declared
+                    .as_ref()
+                    .map(|d| d.config_schema.clone())
+                    .unwrap_or(Value::Null);
+                let collectors = declared
+                    .map(|d| {
+                        d.collectors
+                            .into_iter()
+                            .map(|c| CollectorView {
+                                name: c.name,
+                                entity: c.entity,
+                                status: "never".into(),
+                                error: None,
+                                last_read_at: None,
+                                records: 0,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 out.insert(
                     instance.clone(),
                     ProviderInstanceView {
@@ -553,6 +608,7 @@ impl ProviderRegistry {
                         health: self
                             .health(&instance)
                             .unwrap_or_else(|| InstanceHealth::new(InstanceState::Off)),
+                        collectors,
                         instance,
                     },
                 );
@@ -570,8 +626,21 @@ impl ProviderRegistry {
                     approved: false,
                     credentials: Vec::new(),
                     health: InstanceHealth::new(InstanceState::Missing),
+                    collectors: Vec::new(),
                     instance,
                 });
+        }
+        let store = oxplow_db::SqliteProviderCollectorStore::new(self.deps.db.clone());
+        for view in out.values_mut() {
+            let states = store.for_instance(&view.instance).await.unwrap_or_default();
+            for c in &mut view.collectors {
+                if let Some(st) = states.iter().find(|s| s.collector == c.name) {
+                    c.status = st.status.clone();
+                    c.error = st.error.clone();
+                    c.last_read_at = st.last_read_at.clone();
+                    c.records = st.records;
+                }
+            }
         }
         out.into_values().collect()
     }
@@ -748,13 +817,17 @@ impl ProviderRegistry {
             Ok(live) => {
                 *instance.live.lock().await = Some(live);
                 self.admit(&bus, instance, epoch).await.map_err(&refuse)?;
-                let mut health = self.health.lock();
-                let h = health
-                    .entry(name)
-                    .or_insert_with(|| InstanceHealth::new(InstanceState::Ready));
-                h.state = InstanceState::Ready;
-                h.consecutive_failures = 0;
-                h.last_ok_at = Some(now());
+                {
+                    let mut health = self.health.lock();
+                    let h = health
+                        .entry(name.clone())
+                        .or_insert_with(|| InstanceHealth::new(InstanceState::Ready));
+                    h.state = InstanceState::Ready;
+                    h.consecutive_failures = 0;
+                    h.last_ok_at = Some(now());
+                }
+                // Its items, before the first scheduled read (P7.A3).
+                self.sync_started(&name).await;
                 Ok(())
             }
             // It may come up: enabled and failing, its next call restarts
@@ -935,9 +1008,14 @@ impl ProviderRegistry {
                 .await?;
         }
         let mut all = self.instances_config();
+        let sync_minutes = all.get(instance).and_then(|c| c.sync_minutes);
         all.insert(
             instance.to_string(),
-            oxplow_config::ExtensionInstanceConfig { enabled, config },
+            oxplow_config::ExtensionInstanceConfig {
+                enabled,
+                config,
+                sync_minutes,
+            },
         );
         bus.run(
             actor,
@@ -947,7 +1025,7 @@ impl ProviderRegistry {
         )
         .await?;
         self.reconcile().await;
-        self.view(instance)
+        self.view(instance).await
     }
 
     /// Check `instance` with `config` for a person (Settings' Check): its
@@ -961,7 +1039,7 @@ impl ProviderRegistry {
             field: Some("/instance".into()),
             message: format!("no enabled extension declares provider `{instance}`"),
         })?;
-        let mut view = self.view(instance)?;
+        let mut view = self.view(instance).await?;
         view.health.state = match self.check(&ext, &spec, config).await {
             Ok(()) => InstanceState::Ready,
             Err(HostError::Unapproved(_)) => InstanceState::Unapproved,
@@ -993,8 +1071,9 @@ impl ProviderRegistry {
     }
 
     /// One instance's view.
-    pub fn view(&self, instance: &str) -> Result<ProviderInstanceView, CommandError> {
+    pub async fn view(&self, instance: &str) -> Result<ProviderInstanceView, CommandError> {
         self.list()
+            .await
             .into_iter()
             .find(|v| v.instance == instance)
             .ok_or_else(|| CommandError::Invalid {
@@ -1035,7 +1114,7 @@ impl ProviderRegistry {
 
     /// A start or call failed: count it; [`FAILURES_TO_DISABLE`] in a row
     /// disable the instance. The next start backs off meanwhile.
-    async fn failed(&self, instance: &str, error: String) {
+    pub(super) async fn failed(&self, instance: &str, error: String) {
         let failures = {
             let mut health = self.health.lock();
             let h = health
@@ -1104,7 +1183,7 @@ impl ProviderRegistry {
         }
     }
 
-    fn call_succeeded(&self, instance: &str, took: Duration) {
+    pub(super) fn call_succeeded(&self, instance: &str, took: Duration) {
         let ms = took.as_secs_f64() * 1000.0;
         let mut health = self.health.lock();
         let h = health
@@ -1235,7 +1314,7 @@ pub fn enable_command(registry: &Arc<ProviderRegistry>) -> Command {
                 registry.deps.log.append(event).await?;
                 registry.reset(&instance).await;
                 registry.reconcile().await;
-                let view = registry.view(&instance)?;
+                let view = registry.view(&instance).await?;
                 Ok(HandlerOutput {
                     result: serde_json::to_value(view).expect("view serializes"),
                     ..HandlerOutput::default()

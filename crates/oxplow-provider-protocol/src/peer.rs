@@ -2,6 +2,12 @@
 //! outstanding-id table), send notifications, answer the other side's
 //! requests, and receive what it sends. Symmetric — the host and a
 //! provider both use it.
+//!
+//! A request started with [`Peer::start_streaming`] also gets the
+//! notifications the other side sends about it (`$/progress`,
+//! `$/record`, `$/state`, by their `id`), in order, on a channel of its
+//! own that closes when its reply arrives — so a `read`'s rows can't be
+//! mistaken for another's or lost before the caller is listening.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -31,6 +37,10 @@ pub enum Incoming {
 }
 
 type Pending = Arc<Mutex<HashMap<Id, oneshot::Sender<Result<Value, ProtocolError>>>>>;
+type Streams = Arc<std::sync::Mutex<HashMap<Id, mpsc::UnboundedSender<Incoming>>>>;
+
+/// The notifications that are about an in-flight request (its `id`).
+const ABOUT_A_REQUEST: [&str; 3] = [notify::PROGRESS, notify::RECORD, notify::STATE];
 type Writer = Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>;
 
 /// One side of a connection. Cheap to clone.
@@ -38,6 +48,7 @@ type Writer = Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>;
 pub struct Peer {
     writer: Writer,
     pending: Pending,
+    streams: Streams,
     next_id: Arc<AtomicU64>,
     closed: Arc<AtomicBool>,
 }
@@ -69,12 +80,22 @@ impl Peer {
         let peer = Peer {
             writer: Arc::new(Mutex::new(Box::new(writer))),
             pending: Arc::new(Mutex::new(HashMap::new())),
+            streams: Arc::default(),
             next_id: Arc::new(AtomicU64::new(1)),
             closed: Arc::new(AtomicBool::new(false)),
         };
         let (tx, rx) = mpsc::unbounded_channel();
         let pending = peer.pending.clone();
+        let streams = peer.streams.clone();
         let responder = peer.clone();
+        // A reply ends its request's stream: everything the other side
+        // sent about it came before the reply, so it is all queued.
+        let end_stream = {
+            let streams = streams.clone();
+            move |id: &Id| {
+                streams.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+            }
+        };
         tokio::spawn(async move {
             let mut lines = BufReader::new(reader).lines();
             while let Ok(Some(line)) = lines.next_line().await {
@@ -83,6 +104,7 @@ impl Peer {
                 }
                 match Message::from_line(&line) {
                     Ok(Message::Response { id, result }) => {
+                        end_stream(&id);
                         if let Some(waiter) = pending.lock().await.remove(&id) {
                             let _ = waiter.send(Ok(result));
                         }
@@ -91,6 +113,7 @@ impl Peer {
                         id: Some(id),
                         error,
                     }) => {
+                        end_stream(&id);
                         if let Some(waiter) = pending.lock().await.remove(&id) {
                             let _ = waiter.send(Err(error.into()));
                         }
@@ -100,7 +123,26 @@ impl Peer {
                         let _ = tx.send(Incoming::Request { id, method, params });
                     }
                     Ok(Message::Notification { method, params }) => {
-                        let _ = tx.send(Incoming::Notification { method, params });
+                        let stream = ABOUT_A_REQUEST
+                            .contains(&method.as_str())
+                            .then(|| params.get("id").and_then(Value::as_u64))
+                            .flatten()
+                            .and_then(|id| {
+                                streams
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .get(&id)
+                                    .cloned()
+                            });
+                        let message = Incoming::Notification { method, params };
+                        match stream {
+                            Some(stream) => {
+                                let _ = stream.send(message);
+                            }
+                            None => {
+                                let _ = tx.send(message);
+                            }
+                        }
                     }
                     Err(e) => {
                         let _ = responder
@@ -113,6 +155,7 @@ impl Peer {
                 }
             }
             responder.closed.store(true, Ordering::SeqCst);
+            streams.lock().unwrap_or_else(|e| e.into_inner()).clear();
             for (_, waiter) in pending.lock().await.drain() {
                 let _ = waiter.send(Err(ProtocolError::Internal("the peer closed".into())));
             }
@@ -136,6 +179,29 @@ impl Peer {
 
     /// Send a request; its [`Call`] carries the id and the reply.
     pub async fn start(&self, method: &str, params: Value) -> Result<Call, ProtocolError> {
+        self.start_with(method, params, None).await
+    }
+
+    /// [`Self::start`], with the notifications about this request
+    /// (`$/progress`, `$/record`, `$/state` naming its id) on their own
+    /// channel — registered before the request is sent, and closed when
+    /// its reply arrives (or the stream ends).
+    pub async fn start_streaming(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<(Call, mpsc::UnboundedReceiver<Incoming>), ProtocolError> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let call = self.start_with(method, params, Some(tx)).await?;
+        Ok((call, rx))
+    }
+
+    async fn start_with(
+        &self,
+        method: &str,
+        params: Value,
+        stream: Option<mpsc::UnboundedSender<Incoming>>,
+    ) -> Result<Call, ProtocolError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, reply) = oneshot::channel();
         {
@@ -147,6 +213,12 @@ impl Peer {
                 return Err(ProtocolError::Internal("the peer closed".into()));
             }
             pending.insert(id, tx);
+            if let Some(stream) = stream {
+                self.streams
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(id, stream);
+            }
         }
         if let Err(e) = self
             .send(&Message::Request {
@@ -157,6 +229,10 @@ impl Peer {
             .await
         {
             self.pending.lock().await.remove(&id);
+            self.streams
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&id);
             return Err(e);
         }
         Ok(Call { id, reply })

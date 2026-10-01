@@ -14,6 +14,7 @@ const view = (over: Partial<ProviderInstanceView>): ProviderInstanceView => ({
   approved: true,
   credentials: [],
   health: { state: { state: "off" }, consecutiveFailures: 0, lastOkAt: null, meanInvokeMs: null },
+  collectors: [],
   ...over,
 });
 
@@ -64,4 +65,16 @@ test("work-items choices list oxplow then each declared provider, and name a pro
   expect(activeProviderProblem(choices, "linear")).toBeNull();
   expect(activeProviderProblem(workItemsChoices([view({})]), "linear")).toContain("isn't running");
   expect(activeProviderProblem(choices, "jira")).toContain("No enabled extension declares `jira`");
+});
+
+// P7.A3: a collector's line says what its reads delivered and when, and
+// a failed read is a problem naming why.
+test("collectorLine says what a collector's reads delivered", async () => {
+  const { collectorLine } = await import("./integrationsModel.js");
+  const base = { name: "work_items", entity: "work_item", status: "ok", error: null, lastReadAt: "2026-10-01T00:00:00Z", records: 3 };
+  expect(collectorLine({ ...base, status: "never", records: 0, lastReadAt: null })).toEqual({ text: "work_items: not read yet", problem: false });
+  expect(collectorLine(base).text).toBe("work_items: 3 records · last read 2026-10-01T00:00:00Z");
+  const failed = collectorLine({ ...base, status: "error", error: "timed out" });
+  expect(failed.problem).toBe(true);
+  expect(failed.text).toContain("its last read failed (timed out)");
 });

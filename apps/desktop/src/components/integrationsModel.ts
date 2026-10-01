@@ -2,7 +2,7 @@
 /// extension provider's instance on this machine — where it stands and
 /// what the person can do about it.
 
-import type { ProviderInstanceView } from "../tauri-bridge/generated/bindings.js";
+import type { CollectorView, ProviderInstanceView } from "../tauri-bridge/generated/bindings.js";
 
 export interface IntegrationRowModel {
   key: string;
@@ -83,4 +83,20 @@ export function activeProviderProblem(choices: WorkItemsChoice[], active: string
   if (!choice) return `No enabled extension declares \`${active}\`: new work items can't be filed until one does, or choose another.`;
   if (!choice.running) return `\`${active}\` isn't running on this machine: new work items can't be filed until it is.`;
   return null;
+}
+
+/** One collector's line (P7.A3): what its reads have delivered and when
+ *  it last read. */
+export function collectorLine(c: CollectorView): { text: string; problem: boolean } {
+  const records = `${c.records} ${c.records === 1 ? "record" : "records"}`;
+  switch (c.status) {
+    case "never":
+      return { text: `${c.name}: not read yet`, problem: false };
+    case "reading":
+      return { text: `${c.name}: reading… · ${records}`, problem: false };
+    case "error":
+      return { text: `${c.name}: its last read failed (${c.error ?? "unknown"}) · ${records} · ${c.lastReadAt ?? ""}`, problem: true };
+    default:
+      return { text: `${c.name}: ${records} · last read ${c.lastReadAt ?? ""}`, problem: false };
+  }
 }

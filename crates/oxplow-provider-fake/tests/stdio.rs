@@ -132,7 +132,8 @@ async fn a_peer_drives_the_fake_over_stdio() {
         "{refused:?}"
     );
 
-    // read: records then state, before the result; resuming skips them.
+    // read: each changed item (in the order it changed) then a
+    // checkpoint, before the result; resuming skips them.
     let read: ReadResult = peer
         .call(
             method::READ,
@@ -160,10 +161,12 @@ async fn a_peer_drives_the_fake_over_stdio() {
             other => panic!("unexpected {other}"),
         }
     }
+    // W-1 changed last (its transition), so it comes after W-2.
     assert_eq!(
         streamed,
-        vec![json!("work_item:fake:W-1"), json!("work_item:fake:W-2")]
+        vec![json!("work_item:fake:W-2"), json!("work_item:fake:W-1")]
     );
+    assert_eq!(state, Some(json!({ "cursor": 3, "seen": 2 })));
     let resumed: ReadResult = peer
         .call(
             method::READ,
@@ -225,4 +228,75 @@ async fn the_hooks_script_failures_and_crashes() {
     let died: Result<Value, _> = peer.request(method::INITIALIZE, json!({})).await;
     assert!(died.is_err());
     assert_eq!(child.wait().await.unwrap().code(), Some(3));
+}
+
+/// P7.A3: the read hooks — `progress` (each `$/progress` fits its
+/// golden), `read-fail-after:<n>` (checkpointed records, then a failure)
+/// and `bad-record` (another provider's item).
+#[tokio::test]
+async fn the_read_hooks_stream_progress_fail_midway_and_misreport() {
+    async fn read(
+        peer: &Peer,
+        handle: &Handle,
+        incoming: &mut UnboundedReceiver<Incoming>,
+    ) -> (Result<ReadResult, ProtocolError>, Vec<(String, Value)>) {
+        let result = peer
+            .call(
+                method::READ,
+                &ReadParams {
+                    handle: handle.clone(),
+                    collector: "work_items".into(),
+                    state: None,
+                },
+            )
+            .await;
+        let mut seen = Vec::new();
+        while let Ok(Some(Incoming::Notification { method, params })) =
+            tokio::time::timeout(Duration::from_millis(200), incoming.recv()).await
+        {
+            assert_eq!(
+                validate(for_message(&method, false).unwrap(), &params),
+                Ok(())
+            );
+            seen.push((method, params));
+        }
+        (result, seen)
+    }
+    let (_child, peer, mut incoming) = spawn("progress");
+    initialize(&peer).await;
+    let handle = check(&peer).await;
+    for title in ["a", "b", "c"] {
+        invoke(&peer, &handle, "create", json!({ "title": title }))
+            .await
+            .unwrap();
+    }
+    let (result, seen) = read(&peer, &handle, &mut incoming).await;
+    assert_eq!(result.unwrap().records, 3);
+    let methods: Vec<&str> = seen.iter().map(|(m, _)| m.as_str()).collect();
+    assert_eq!(
+        &methods[..3],
+        &[notify::PROGRESS, notify::RECORD, notify::STATE]
+    );
+    assert_eq!(seen[0].1["fraction"], json!(1.0 / 3.0));
+
+    peer.notify("fake/hooks", json!({ "hooks": "read-fail-after:2" }))
+        .await
+        .unwrap();
+    let (result, seen) = read(&peer, &handle, &mut incoming).await;
+    assert!(
+        matches!(result, Err(ProtocolError::Internal(_))),
+        "{result:?}"
+    );
+    let states: Vec<&Value> = seen
+        .iter()
+        .filter(|(m, _)| m == notify::STATE)
+        .map(|(_, p)| &p["state"])
+        .collect();
+    assert_eq!(states.len(), 2, "checkpointed before failing");
+
+    let (_child, peer, mut incoming) = spawn("bad-record");
+    initialize(&peer).await;
+    let handle = check(&peer).await;
+    let (_, seen) = read(&peer, &handle, &mut incoming).await;
+    assert_eq!(seen[0].1["row"]["ref"], "work_item:other:X-1");
 }

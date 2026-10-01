@@ -156,6 +156,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         tracing::warn!(error = %e, "publishing the core capability providers failed");
     }
     crate::providers::registry::spawn_reconciler(state.clone());
+    crate::providers::sync::spawn_sync_scheduler(state.clone());
     crate::extension_commands::spawn_reconciler(state.clone());
     crate::effort_evidence::spawn(state.clone());
     crate::change_analysis::spawn_invalidation(state.clone());
