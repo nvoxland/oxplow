@@ -14,6 +14,7 @@ use oxplow_db::semantic_layer::check_query_on;
 use oxplow_db::thread_answer_store::{self as answers, AnswerShows};
 use oxplow_db::{SqlCell, SqlQuery};
 use oxplow_domain::events::schema::{LensKept, LensKeptV1, LensShown, LensShownV1};
+use oxplow_domain::events::Envelope;
 use oxplow_domain::refs::build::{answer_ref, lens_ref, thread_ref};
 use oxplow_domain::{
     Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, DomainError, Invokers, Lifecycle,
@@ -32,11 +33,14 @@ pub const SHOW: &str = "lens.show";
 pub const KEEP: &str = "lens.keep";
 pub const SHARE: &str = "lens.share";
 
-/// Where the lens commands find lenses and write them.
+/// Where the lens commands find lenses and write them, and the database
+/// the `External` ones (`keep`, `share`) read and write in transactions
+/// of their own.
 #[derive(Clone)]
 pub struct LensTarget {
     pub project_dir: PathBuf,
     pub catalog: Arc<ExtensionCatalog>,
+    pub db: oxplow_db::Database,
 }
 
 /// `lens.show`: show the person an answer in a thread.
@@ -106,12 +110,12 @@ fn domain(e: DomainError) -> CommandError {
     }
 }
 
-/// The worktree of `thread`'s stream.
+/// The worktree of `thread`'s stream; `Invalid` for an unknown thread.
 fn thread_root_tx(
     conn: &rusqlite::Connection,
     project_dir: &Path,
     thread: i64,
-) -> Result<PathBuf, CommandError> {
+) -> Result<PathBuf, DomainError> {
     let path: Option<String> = conn
         .query_row(
             "SELECT s.worktree_path FROM threads t JOIN streams s ON s.id = t.stream_id
@@ -120,8 +124,8 @@ fn thread_root_tx(
             |r| r.get(0),
         )
         .optional()
-        .map_err(|e| CommandError::from(DomainError::Storage(e.to_string())))?;
-    let path = path.ok_or_else(|| invalid("/thread", format!("no thread `thr{thread}`")))?;
+        .map_err(|e| DomainError::Storage(e.to_string()))?;
+    let path = path.ok_or_else(|| DomainError::Invalid(format!("no thread `thr{thread}`")))?;
     Ok(crate::worktrees::workspace_path(project_dir, &path))
 }
 
@@ -169,7 +173,10 @@ fn show(target: LensTarget) -> Command {
                 .ok_or_else(|| invalid("/thread", "no thread given and the caller has none"))?
                 .value(),
         };
-        let root = thread_root_tx(ctx.conn, &target.project_dir, thread)?;
+        let root = thread_root_tx(ctx.conn, &target.project_dir, thread).map_err(|e| match e {
+            DomainError::Invalid(m) => invalid("/thread", m),
+            other => CommandError::from(other),
+        })?;
         let params = input.params.unwrap_or_default();
         let lens_ctx = LensContext {
             stream_id: thread_stream_tx(ctx.conn, thread),
@@ -245,67 +252,102 @@ fn show(target: LensTarget) -> Command {
     .expect("lens.show registers")
 }
 
+/// What `lens.keep` writes for answer `id`: its spec with the shown
+/// params as defaults, the worktree it goes in, and its thread. Read in
+/// one transaction; refuses an answer that's kept already.
+fn kept_lens_tx(
+    tx: &rusqlite::Connection,
+    project_dir: &Path,
+    id: i64,
+) -> Result<(LensSpec, PathBuf, i64), DomainError> {
+    let answer = answers::get_tx(tx, id)?.ok_or(DomainError::NotFound)?;
+    if let Some(kept) = &answer.kept_lens {
+        return Err(DomainError::Invalid(format!(
+            "it was kept already, as `{kept}`"
+        )));
+    }
+    let mut spec: LensSpec = match &answer.shows {
+        AnswerShows::Lens(lens) => {
+            return Err(DomainError::Invalid(format!(
+                "it shows the lens `{lens}`, which is kept already"
+            )))
+        }
+        AnswerShows::Spec(value) => serde_json::from_value(value.clone())
+            .map_err(|e| DomainError::Invalid(format!("its spec doesn't read: {e}")))?,
+    };
+    // What it was shown with becomes the kept lens's defaults.
+    if let Value::Object(given) = &answer.params {
+        for p in &mut spec.params {
+            if let Some(v) = given.get(&p.name) {
+                p.default = Some(SqlCell::from(v.clone()));
+            }
+        }
+    }
+    let root = thread_root_tx(tx, project_dir, answer.thread_id)?;
+    Ok((spec, root, answer.thread_id))
+}
+
+/// `lens.keep` writes a file, so it's an `External` command: a `Tx`
+/// handler may run more than once (the bus retries on a busy database)
+/// and a retried file write strands the first. The answer is read in one
+/// transaction, the lens file written, the row marked kept in another;
+/// when that fails the file is removed again, so nothing is left half
+/// done. The bus records the run and its `lens.kept@1` after it returns.
 fn keep(target: LensTarget) -> Command {
-    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: KeepInput = parse(input)?;
-        let id = answer_id(&input.answer)?;
-        let answer = answers::get_tx(ctx.conn, id)
-            .map_err(CommandError::from)?
-            .ok_or_else(|| invalid("/answer", format!("no answer `answer:{id}`")))?;
-        if let Some(kept) = &answer.kept_lens {
-            return Err(invalid(
-                "/answer",
-                format!("it was kept already, as `{kept}`"),
-            ));
-        }
-        let mut spec: LensSpec = match &answer.shows {
-            AnswerShows::Lens(lens) => {
-                return Err(invalid(
-                    "/answer",
-                    format!("it shows the lens `{lens}`, which is kept already"),
-                ))
+    let handler = Handler::External(Arc::new(move |actor, input| {
+        let target = target.clone();
+        Box::pin(async move {
+            let input: KeepInput = parse(input)?;
+            let id = answer_id(&input.answer)?;
+            let project_dir = target.project_dir.clone();
+            let (spec, root, thread) = target
+                .db
+                .read(move |tx| kept_lens_tx(tx, &project_dir, id))
+                .await
+                .map_err(|e| match e {
+                    DomainError::NotFound => invalid("/answer", format!("no answer `answer:{id}`")),
+                    DomainError::Invalid(m) => invalid("/answer", m),
+                    other => CommandError::from(other),
+                })?;
+            let extension = input.extension.unwrap_or_else(|| "my-lenses".into());
+            let slug = input
+                .slug
+                .unwrap_or_else(|| extensions::slug_of(&spec.title));
+            let origin = thread_ref(ThreadId::new(thread));
+            let lens = extensions::save_lens(
+                &root,
+                &extension,
+                &slug,
+                &spec,
+                &LensOrigin {
+                    purpose: &spec.title,
+                    origin: Some(&origin),
+                },
+            )
+            .map_err(domain)?;
+            let lens_id = lens.id.clone();
+            if let Err(e) = target
+                .db
+                .transaction(move |tx| answers::set_kept_tx(tx, id, &lens_id))
+                .await
+            {
+                let _ = std::fs::remove_file(root.join(&lens.path));
+                return Err(CommandError::from(e));
             }
-            AnswerShows::Spec(value) => serde_json::from_value(value.clone())
-                .map_err(|e| invalid("/answer", format!("its spec doesn't read: {e}")))?,
-        };
-        // What it was shown with becomes the kept lens's defaults.
-        if let Value::Object(given) = &answer.params {
-            for p in &mut spec.params {
-                if let Some(v) = given.get(&p.name) {
-                    p.default = Some(SqlCell::from(v.clone()));
-                }
-            }
-        }
-        let root = thread_root_tx(ctx.conn, &target.project_dir, answer.thread_id)?;
-        let extension = input.extension.unwrap_or_else(|| "my-lenses".into());
-        let slug = input
-            .slug
-            .unwrap_or_else(|| extensions::slug_of(&spec.title));
-        let origin = thread_ref(ThreadId::new(answer.thread_id));
-        let lens = extensions::save_lens(
-            &root,
-            &extension,
-            &slug,
-            &spec,
-            &LensOrigin {
-                purpose: &spec.title,
-                origin: Some(&origin),
-            },
-        )
-        .map_err(domain)?;
-        answers::set_kept_tx(ctx.conn, id, &lens.id).map_err(CommandError::from)?;
-        let event = ctx
-            .events
-            .typed::<LensKept>(&LensKeptV1 {
-                answer: answer_ref(id),
-                lens: lens_ref(&lens.id),
-            })
+            let event = Envelope::typed::<LensKept>(
+                actor.source(),
+                &LensKeptV1 {
+                    answer: answer_ref(id),
+                    lens: lens_ref(&lens.id),
+                },
+            )
             .with_subject([answer_ref(id), lens_ref(&lens.id)]);
-        Ok(HandlerOutput {
-            result: json!({ "lens": lens.id, "path": lens.path }),
-            inverse: None,
-            events: vec![event],
-            after_commit: None,
+            Ok(HandlerOutput {
+                result: json!({ "lens": lens.id, "path": lens.path }),
+                inverse: None,
+                events: vec![event],
+                after_commit: None,
+            })
         })
     }));
     Command::new(
@@ -320,7 +362,7 @@ fn keep(target: LensTarget) -> Command {
             confirm: Confirm::Never,
             undoable: false,
             lifecycle: Lifecycle::Stable,
-            atomicity: Atomicity::Tx,
+            atomicity: Atomicity::External,
             effect: CommandEffect::Write,
         },
         handler,
@@ -328,31 +370,50 @@ fn keep(target: LensTarget) -> Command {
     .expect("lens.keep registers")
 }
 
+/// `lens.share` writes, load-checks, then removes the private copy —
+/// filesystem work that must happen before the check can run, so it's an
+/// `External` command (see `keep`).
 fn share(target: LensTarget) -> Command {
-    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: ShareInput = parse(input)?;
-        let root = match input.stream.as_deref() {
-            Some(raw) => {
-                let stream: oxplow_domain::StreamId = raw
-                    .parse()
-                    .map_err(|_| invalid("/stream", format!("`{raw}` isn't a stream")))?;
-                let path: String = ctx
-                    .conn
-                    .query_row(
-                        "SELECT worktree_path FROM streams WHERE id = ?1",
-                        [stream.value()],
-                        |r| r.get(0),
-                    )
-                    .map_err(|_| invalid("/stream", format!("no stream `{raw}`")))?;
-                crate::worktrees::workspace_path(&target.project_dir, &path)
-            }
-            None => target.project_dir.clone(),
-        };
-        share_lens(ctx.conn, &target, &root, &input.lens, &input.extension).map(|id| {
-            HandlerOutput {
+    let handler = Handler::External(Arc::new(move |_actor, input| {
+        let target = target.clone();
+        Box::pin(async move {
+            let input: ShareInput = parse(input)?;
+            let root = match input.stream.as_deref() {
+                Some(raw) => {
+                    let stream: oxplow_domain::StreamId = raw
+                        .parse()
+                        .map_err(|_| invalid("/stream", format!("`{raw}` isn't a stream")))?;
+                    let project_dir = target.project_dir.clone();
+                    let raw = raw.to_string();
+                    target
+                        .db
+                        .read(move |tx| {
+                            let path: Option<String> = tx
+                                .query_row(
+                                    "SELECT worktree_path FROM streams WHERE id = ?1",
+                                    [stream.value()],
+                                    |r| r.get(0),
+                                )
+                                .optional()
+                                .map_err(|e| DomainError::Storage(e.to_string()))?;
+                            let path = path.ok_or_else(|| {
+                                DomainError::Invalid(format!("no stream `{raw}`"))
+                            })?;
+                            Ok(crate::worktrees::workspace_path(&project_dir, &path))
+                        })
+                        .await
+                        .map_err(|e| match e {
+                            DomainError::Invalid(m) => invalid("/stream", m),
+                            other => CommandError::from(other),
+                        })?
+                }
+                None => target.project_dir.clone(),
+            };
+            let id = share_lens(&target, &root, &input.lens, &input.extension).await?;
+            Ok(HandlerOutput {
                 result: json!({ "lens": id }),
                 ..HandlerOutput::default()
-            }
+            })
         })
     }));
     Command::new(
@@ -368,7 +429,7 @@ fn share(target: LensTarget) -> Command {
             confirm: Confirm::Never,
             undoable: false,
             lifecycle: Lifecycle::Stable,
-            atomicity: Atomicity::Tx,
+            atomicity: Atomicity::External,
             effect: CommandEffect::Write,
         },
         handler,
@@ -381,8 +442,7 @@ fn share(target: LensTarget) -> Command {
 /// in it and the lens's query must pass the `query_sql` authorizer — and
 /// only then is the private copy removed; a failed check leaves nothing
 /// behind.
-fn share_lens(
-    conn: &rusqlite::Connection,
+async fn share_lens(
     target: &LensTarget,
     root: &Path,
     id: &str,
@@ -465,13 +525,20 @@ fn share_lens(
             p
         }
     };
-    let query_problem = (!lens.query.trim().is_empty())
-        .then(|| check_query_on(conn, &SqlQuery::new(&lens.query)).err())
-        .flatten();
+    let query_problem = if lens.query.trim().is_empty() {
+        None
+    } else {
+        let query = SqlQuery::new(&lens.query);
+        target
+            .db
+            .read(move |tx| Ok(check_query_on(tx, &query).err().map(|e| e.to_string())))
+            .await
+            .map_err(CommandError::from)?
+    };
     if !problems.is_empty() || query_problem.is_some() {
         undo();
         let mut all = problems;
-        all.extend(query_problem.map(|e| e.to_string()));
+        all.extend(query_problem);
         return Err(invalid(
             "/lens",
             format!("it doesn't pass the shared checks: {}", all.join("; ")),
@@ -739,6 +806,19 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+    }
+
+    /// Both write lens files, which a `Tx` handler may not do: the bus
+    /// retries a `Tx` handler on a busy database, and a retried file write
+    /// strands the first one. They run as `External` commands, recorded
+    /// after they return.
+    #[tokio::test]
+    async fn keep_and_share_are_external_commands() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        for name in [KEEP, SHARE] {
+            let spec = fx.svc.commands.spec(name).unwrap();
+            assert_eq!(spec.atomicity, oxplow_domain::Atomicity::External, "{name}");
+        }
     }
 
     /// The target is an extension name, checked the way `save_lens` checks

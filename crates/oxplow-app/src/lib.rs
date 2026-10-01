@@ -1069,6 +1069,7 @@ impl Services {
         for command in commands::lens::commands(commands::lens::LensTarget {
             project_dir: layout.project_dir.clone(),
             catalog: extension_catalog.clone(),
+            db: db.clone(),
         }) {
             commands.register(command).expect("lens commands register");
         }
@@ -1459,6 +1460,10 @@ mod tests {
                 "git.ignore",
                 "git.rebase",
                 "git.revert",
+                // Lens files on disk (P6 review, tsk597): a Tx handler may
+                // run twice, and a retried file write strands the first.
+                "lens.keep",
+                "lens.share",
                 "metric.rebuild",
                 "metric.run",
                 "provider.enable",
