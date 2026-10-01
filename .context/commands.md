@@ -17,7 +17,7 @@ A command is a typed operation named `<capability|plugin>.<verb>`
 |---|---|
 | `input_schema` | JSON Schema; the bus validates the input first and names the failing field |
 | `invokers` | which surfaces may run it: `human`, `agent`, `lens` |
-| `confirm` | `Never`, `Always`, or `Destructive` — a person confirms; an agent never can |
+| `confirm` | `Never`, `Always`, or `Destructive` — a person confirms; an agent never can. A `Read` command may not ask (`Command::new` / `with_confirm_for` refuse it): it runs unrecorded, so nothing would resolve its proposal |
 | `undoable` | the handler returns an inverse call that `undo` applies |
 | `lifecycle` | `Stable` / `Experimental` |
 | `atomicity` | `Tx` (handler runs inside the bus's transaction) or `External` (see below) |
@@ -56,7 +56,9 @@ A command is a typed operation named `<capability|plugin>.<verb>`
    confirmation is needed — a composite whose child asks — raises
    `NeedsConfirmation` itself, and the bus treats it as this step would
    (rolled back, nothing audited; a person asked, an agent's run
-   proposed) (P6b.A1).
+   proposed) (P6b.A1). Only a plain call is proposed: an agent's
+   **undo** that needs a person is `Denied` (a proposal is a plain call
+   and would lose the row it undoes).
 5. **Run and record in one transaction**: the handler, a `command_audit`
    row (`crates/oxplow-db/src/command_audit_store.rs`: actor, input,
    outcome, the handler's `result` — V114, so a run's answer, such as a
@@ -118,7 +120,8 @@ the one mechanism, and `command.sequence { calls: [{ name, input }] }`
 that; an extension's own command (P6b.B2) is "run the script to get
 `calls`, then `run_nested`". It first makes a pass that writes nothing:
 every call must name a `Tx` command (an `External` one can't join the
-transaction — "composes Tx commands only"), its input must fit (a problem
+transaction — "composes Tx commands only"; nor a `Read` one — a
+sequence composes commands that write), its input must fit (a problem
 is reported at `/calls/<i>/input/…`), and its **own** `invokers`, the
 agent policy (with the parent's `may_write`) and its `confirm` apply, so
 a composite never widens what its children allow; a child that asks

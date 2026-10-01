@@ -300,8 +300,8 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
                 change(&t, actor, &input.key, Some(input.value))
             })),
         )
+        .and_then(|c| c.with_confirm_for(Arc::new(confirm_for_key)))
         .expect("config.set registers")
-        .with_confirm_for(Arc::new(confirm_for_key))
     };
     let unset = {
         let t = target;
@@ -319,8 +319,8 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
                 change(&t, actor, &input.key, None)
             })),
         )
+        .and_then(|c| c.with_confirm_for(Arc::new(confirm_for_key)))
         .expect("config.unset registers")
-        .with_confirm_for(Arc::new(confirm_for_key))
     };
     vec![list, get, set, unset]
 }

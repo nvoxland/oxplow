@@ -185,6 +185,9 @@ impl Command {
                 ),
             });
         }
+        if spec.confirm.required() {
+            Self::may_ask(&spec)?;
+        }
         let validator = InputValidator::compile(&spec.input_schema)?;
         Ok(Self {
             spec,
@@ -194,9 +197,28 @@ impl Command {
         })
     }
 
-    pub fn with_confirm_for(mut self, f: Arc<ConfirmFor>) -> Self {
+    /// Its confirmation decided per input. A `Read` command may not have
+    /// one (see [`Self::may_ask`]).
+    pub fn with_confirm_for(mut self, f: Arc<ConfirmFor>) -> Result<Self, CommandError> {
+        Self::may_ask(&self.spec)?;
         self.confirm_for = Some(f);
-        self
+        Ok(self)
+    }
+
+    /// A command that only reads is never asked about: it runs without a
+    /// record, so nothing would resolve its proposal or carry its
+    /// confirmation.
+    fn may_ask(spec: &CommandSpec) -> Result<(), CommandError> {
+        if spec.effect == oxplow_domain::CommandEffect::Read {
+            return Err(CommandError::Invalid {
+                field: Some("/confirm".into()),
+                message: format!(
+                    "`{}` only reads, so it can't need a confirmation",
+                    spec.name
+                ),
+            });
+        }
+        Ok(())
     }
 
     fn confirm(&self, input: &Value) -> oxplow_domain::Confirm {
@@ -215,6 +237,15 @@ pub type WriteGate =
 /// What a run is, beyond the call itself: the undo of an audited run, or
 /// the approval of a proposal. Either is marked in the run's own
 /// transaction (a `Tx` handler) or claimed before it (an `External` one).
+/// Step 3's answers for a run, as its `TxCtx` carries them: may it claim
+/// the worktree, and may the agent's thread write (`None` when the gate
+/// doesn't apply).
+#[derive(Debug, Clone, Copy)]
+struct Gates {
+    may_claim: bool,
+    may_write: Option<bool>,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum RunOrigin {
     Call,
@@ -411,8 +442,10 @@ impl CommandBus {
         // agent policy.
         // A `Record` command isn't refused here; its handler refuses a
         // claim (see `TxCtx::may_claim`).
-        let mut may_claim = true;
-        let mut gate_answer: Option<bool> = None;
+        let mut gates = Gates {
+            may_claim: true,
+            may_write: None,
+        };
         if let Some(thread_id) = actor.agent_thread() {
             use oxplow_domain::CommandEffect;
             let may_write = match (spec.effect, &thread_id, &self.write_gate) {
@@ -421,9 +454,9 @@ impl CommandBus {
                 }
                 _ => None,
             };
-            gate_answer = may_write;
+            gates.may_write = may_write;
             if spec.effect == CommandEffect::Record {
-                may_claim = may_write != Some(false);
+                gates.may_claim = may_write != Some(false);
             }
             let gated = may_write.filter(|_| spec.effect == CommandEffect::Write);
             if let PolicyDecision::Deny { reason, .. } =
@@ -447,7 +480,7 @@ impl CommandBus {
                 destructive: matches!(confirm, oxplow_domain::Confirm::Destructive),
             };
             return Err(self
-                .unconfirmed(actor, &command, input, preview, may_claim, gate_answer)
+                .unconfirmed(actor, origin, &command, input, preview, gates)
                 .await);
         }
         // 5a. A read runs without a record: no audit row, no event.
@@ -479,9 +512,9 @@ impl CommandBus {
                                 source: actor_c.source(),
                                 cause: Some(executed_id.clone()),
                             },
-                            may_claim,
+                            may_claim: gates.may_claim,
                             confirmed,
-                            may_write: gate_answer,
+                            may_write: gates.may_write,
                             depth: 0,
                         };
                         let out = match handler(&ctx, input_c.clone()) {
@@ -550,7 +583,7 @@ impl CommandBus {
             // whose child asks) is step 4's answer, late: rolled back,
             // nothing audited — a person is asked, an agent's run proposed.
             Err(CommandError::NeedsConfirmation { preview }) => Err(self
-                .unconfirmed(actor, &command, input, *preview, may_claim, gate_answer)
+                .unconfirmed(actor, origin, &command, input, *preview, gates)
                 .await),
             Err(err) => {
                 // A handler's refusal (a claim the actor may not take) is a
@@ -613,22 +646,30 @@ impl CommandBus {
     async fn unconfirmed(
         &self,
         actor: &Actor,
+        origin: RunOrigin,
         command: &Arc<Command>,
         input: Value,
         preview: Preview,
-        may_claim: bool,
-        may_write: Option<bool>,
+        gates: Gates,
     ) -> CommandError {
         if !actor.is_agent_driven() {
             return CommandError::NeedsConfirmation {
                 preview: Box::new(preview),
             };
         }
+        // A proposal is a plain call; an undo kept as one would lose the
+        // row it undoes (an approval is a person's, so never here).
+        if !matches!(origin, RunOrigin::Call) {
+            return CommandError::Denied {
+                reason: format!(
+                    "`{}` needs a person's confirmation; ask them to undo it",
+                    command.spec.name
+                ),
+            };
+        }
         let spec = &command.spec;
         let dry_run = match &command.handler {
-            Handler::Tx(handler) => match self
-                .dry_run(handler.clone(), actor, &input, may_claim, may_write)
-                .await
+            Handler::Tx(handler) => match self.dry_run(handler.clone(), actor, &input, gates).await
             {
                 Ok(result) => Some(result),
                 Err(err) => {
@@ -698,8 +739,7 @@ impl CommandBus {
         handler: Arc<TxHandler>,
         actor: &Actor,
         input: &Value,
-        may_claim: bool,
-        may_write: Option<bool>,
+        gates: Gates,
     ) -> Result<Value, CommandError> {
         let (actor, input) = (actor.clone(), input.clone());
         let schemas = self.log.schemas().clone();
@@ -715,9 +755,9 @@ impl CommandBus {
                         source: actor.source(),
                         cause: None,
                     },
-                    may_claim,
+                    may_claim: gates.may_claim,
                     confirmed: true,
-                    may_write,
+                    may_write: gates.may_write,
                     depth: 0,
                 };
                 match handler(&ctx, input.clone()) {
@@ -867,6 +907,15 @@ impl CommandBus {
                     field: Some(format!("/calls/{i}/name")),
                     message: format!(
                         "`{}` is External; a sequence composes Tx commands only",
+                        spec.name
+                    ),
+                });
+            }
+            if spec.effect == oxplow_domain::CommandEffect::Read {
+                return Err(CommandError::Invalid {
+                    field: Some(format!("/calls/{i}/name")),
+                    message: format!(
+                        "`{}` only reads; a sequence composes commands that write",
                         spec.name
                     ),
                 });
@@ -1909,6 +1958,41 @@ mod tests {
             )
             .is_err());
         assert!(bus.external_commands().is_empty());
+        // A read is never asked about: nothing would resolve its proposal.
+        let mut asking_read = kv_spec("kv.peek", Invokers::ALL, Confirm::Always);
+        asking_read.effect = CommandEffect::Read;
+        let err = Command::new(asking_read, kv_set()).err().unwrap();
+        assert!(err.to_string().contains("only reads"), "{err}");
+        let mut read = kv_spec("kv.peek", Invokers::ALL, Confirm::Never);
+        read.effect = CommandEffect::Read;
+        let err = Command::new(read, kv_set())
+            .unwrap()
+            .with_confirm_for(Arc::new(|_| Confirm::Always))
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("only reads"), "{err}");
+    }
+
+    /// An agent's undo or approval that needs a person is refused, not
+    /// proposed as a plain call that would lose what it undoes.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_agents_undo_that_asks_is_denied_not_proposed() {
+        let (db, bus) = bus();
+        bus.register(
+            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Always), kv_set()).unwrap(),
+        )
+        .unwrap();
+        let done = bus
+            .run(&Actor::Human, "kv.set", json!({"k": "a", "v": "1"}), true)
+            .await
+            .unwrap();
+        let err = bus
+            .undo(&agent(), done.audit_id.unwrap(), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Denied { .. }), "{err}");
+        assert!(pending(&db).await.is_empty());
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
     }
 
     // ---- P6b.A1: the bus composes ----
@@ -2094,6 +2178,30 @@ mod tests {
         assert!(
             matches!(&err, CommandError::Invalid { message, .. } if message.contains("composes Tx commands only")),
             "{err:?}"
+        );
+        assert_eq!(kv_value(&db, "a").await, None);
+    }
+
+    /// A composite runs commands that write; a read can't join it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_nested_run_refuses_a_read_child() {
+        let (db, bus) = composing_bus();
+        let mut read = kv_spec("kv.peek", Invokers::ALL, Confirm::Never);
+        read.effect = CommandEffect::Read;
+        bus.register(Command::new(read, kv_set()).unwrap()).unwrap();
+        let err = bus
+            .run(
+                &Actor::Human,
+                "command.sequence",
+                calls(&[("kv.set", "a", "1"), ("kv.peek", "b", "2")]),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), message }
+                if f == "/calls/1/name" && message.contains("only reads")),
+            "{err}"
         );
         assert_eq!(kv_value(&db, "a").await, None);
     }
