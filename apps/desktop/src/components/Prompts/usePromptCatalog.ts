@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { promptCatalog, subscribeOxplowEvents } from "../../api.js";
-import { lensDefinitionChanged } from "../../lens/lensRerun.js";
+import { extensionsChanged } from "../../lens/lensRerun.js";
 import type { CatalogPrompt } from "../../tauri-bridge/generated/bindings.js";
 
 export function usePromptCatalog(streamId: string | null): CatalogPrompt[] {
@@ -20,7 +20,7 @@ export function usePromptCatalog(streamId: string | null): CatalogPrompt[] {
         });
     load();
     const off = subscribeOxplowEvents((e) => {
-      if (lensDefinitionChanged(e as Record<string, unknown>)) load();
+      if (extensionsChanged(e as Record<string, unknown>)) load();
     });
     return () => {
       live = false;

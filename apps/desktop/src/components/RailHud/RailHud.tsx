@@ -10,7 +10,7 @@ import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./se
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
 import { getPanelLayout, listExtensions, runLens, setPanelLayout } from "../../api.js";
 import { firingAlerts } from "../../lens/lensModel.js";
-import { lensDefinitionChanged, NO_READS, unionReads, useRerunOnChange } from "../../lens/lensRerun.js";
+import { extensionsChanged, NO_READS, unionReads, useRerunOnChange } from "../../lens/lensRerun.js";
 import { LensResultView } from "../../lens/LensResultView.js";
 import type { ExtensionPanel, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
 import {
@@ -1268,7 +1268,7 @@ function useExtensionPanels(streamId: string | null): ExtensionPanel[] {
         });
     load();
     const off = subscribeOxplowEvents((event) => {
-      if (lensDefinitionChanged(event as Record<string, unknown>)) load();
+      if (extensionsChanged(event as Record<string, unknown>)) load();
     });
     return () => {
       live = false;

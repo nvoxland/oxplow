@@ -20,6 +20,15 @@ export function lensDefinitionChanged(event: Readonly<Record<string, unknown>>):
   );
 }
 
+/** What the enabled extensions contribute — lenses, panels, pages, slot
+ *  mounts, prompts — changed: a definition did, or the config did (the
+ *  person enabled or disabled an extension). Every host that lists
+ *  contributions reloads on this; a single run re-runs on its definition
+ *  and its reads (`useRerunOnChange`), not on every config change. */
+export function extensionsChanged(event: Readonly<Record<string, unknown>>): boolean {
+  return event.kind === "configChanged" || lensDefinitionChanged(event);
+}
+
 /** Whether `event` changes something a run read. An empty `measures` list
  *  on a samples event means "unknown", so a metric read re-runs. */
 export function readsChanged(

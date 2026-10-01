@@ -6,7 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { listExtensions, subscribeOxplowEvents } from "../api.js";
 import { LensSlots } from "./LensSlots.js";
 import { slotExtensions } from "./lensModel.js";
-import { lensDefinitionChanged } from "./lensRerun.js";
+import { extensionsChanged } from "./lensRerun.js";
 
 const NO_PARAMS = {};
 
@@ -24,7 +24,7 @@ export function SettingsSlotSections({
         .catch(() => setNames([]));
     load();
     return subscribeOxplowEvents((event) => {
-      if (lensDefinitionChanged(event)) load();
+      if (extensionsChanged(event)) load();
     });
   }, []);
   return (

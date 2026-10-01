@@ -170,6 +170,10 @@ lens compact, the badge lens's alert count in the header via
 `usePanelRuns`, which binds the panel's scope — `stream_id` / `thread_id`
 as row ids, from `panelParams` — for the stream and thread the rail shows,
 and re-runs when either changes). **Alerts** lists every firing badge.
+The set of extension panels (like extension pages, slot mounts and the
+prompt catalog) reloads on `lensRerun.extensionsChanged`: a file under
+`oxplow/extensions/` changed, or the config did — enabling or disabling
+an extension is a `configChanged`, so its panel appears or leaves at once.
 
 The person's layout — order (drag the ⠿ handle), collapsed (the chevron),
 hidden (right-click a header → Hide Panel; **+ Add Panel** at the bottom

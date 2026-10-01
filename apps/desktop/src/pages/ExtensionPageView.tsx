@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 import { listExtensions } from "../api.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
-import { lensDefinitionChanged } from "../lens/lensRerun.js";
+import { extensionsChanged } from "../lens/lensRerun.js";
 import { subscribeOxplowEvents } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -37,7 +37,7 @@ export function ExtensionPageView({
         });
     load();
     const off = subscribeOxplowEvents((e) => {
-      if (lensDefinitionChanged(e as Record<string, unknown>)) load();
+      if (extensionsChanged(e as Record<string, unknown>)) load();
     });
     return () => {
       live = false;
