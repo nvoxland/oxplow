@@ -6,8 +6,9 @@
 //! writing the file, updating the in-memory config, and logging
 //! `config.changed@1 { key, before, after }` with an inverse that restores
 //! the prior value. A human-only key (`ai`, `agents`, `lsp`, …) asks for
-//! confirmation per input, so an agent gets `NeedsConfirmation` while a
-//! person's confirmed call goes through.
+//! confirmation per input, so an agent's change is kept as a proposal for
+//! a person (the bus's `Proposed`) while a person's confirmed call goes
+//! through.
 //!
 //! The handlers are `Tx` and **pure**: inside the bus's transaction they
 //! only validate and compute before/after (the closure may run more than

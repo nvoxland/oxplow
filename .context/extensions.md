@@ -438,6 +438,16 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   skill takes one row. ACP agents get the same list as an index in their
   system prompt plus the MCP `get_skill` tool (see agent-model.md → ACP).
 
+- **P6b (epic tsk592, 2026-10-01).** An extension can also *act* and
+  *extend the shell*: `commands:` (Starlark composing core commands, see
+  "Commands"), `ui:` — `slots` in one dotted namespace ("Slots"),
+  `commands` in core menus ("Commands in core menus"), `decorators`
+  (experimental) — and `custom_components:` rendered sandboxed by
+  `viz: custom` lenses ("Custom components"). Installs, updates and
+  provider approvals are reviewed by what they change ("Reviewing by
+  effect"). An agent's run that needs a person waits as a proposal
+  ([commands.md](./commands.md), "Proposals").
+
 ## The rules
 
 - **Controls in core, instruments in extensions.** Core ships what you
