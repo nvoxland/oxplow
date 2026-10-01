@@ -6,7 +6,7 @@
 /// Live: re-run when what they read changes, and when the stream or
 /// thread the rail shows changes. The nav states each scope's binding
 /// (`panelParams`) rather than leaving the backend to infer the thread.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { runLens, type LensRun } from "../../api.js";
 import { NO_READS, unionReads, useRerunOnChange } from "../../lens/lensRerun.js";
@@ -68,13 +68,11 @@ export function useExtensionPanelRuns(
 ): Record<string, PanelRuns> {
   const [runs, setRuns] = useState<Record<string, PanelRuns>>({});
   const [reads, setReads] = useState<Reads>(NO_READS);
-  // Keyed on the panels' fields, not the list's identity: a caller may
-  // build the list per render.
-  const key = panels.map((p) => [p.id, p.scope, p.body, p.badge ?? ""].join("\u0000")).join("\n");
-  const stable = useMemo(() => panels, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  // `panels` is the rail's loaded list (state), so its identity changes
+  // only when the panels do.
   const refresh = useCallback(async () => {
     const entries = await Promise.all(
-      stable.map(async (p) => {
+      panels.map(async (p) => {
         const params = panelParams(p.scope, streamId, threadId);
         const [body, badge] = await Promise.all([
           runLens(p.body, params, streamId).catch(() => null),
@@ -85,7 +83,7 @@ export function useExtensionPanelRuns(
     );
     setRuns(Object.fromEntries(entries));
     setReads(unionReads(entries.flatMap(([, r]) => [r.body?.result.reads, r.badge?.result.reads])));
-  }, [stable, streamId, threadId]);
+  }, [panels, streamId, threadId]);
   useEffect(() => void refresh(), [refresh]);
   useRerunOnChange(reads, () => void refresh());
   return runs;

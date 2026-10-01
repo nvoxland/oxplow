@@ -719,7 +719,10 @@ no caller may bypass the bus to write to the terminal.
   - a lens row's right-click menu (`rowAsk`: the first ref the row links
     to, else the row as a lens mention);
   - an editor selection and a diff's right-side selection
-    (`askAboutSelection`: `file:<path>[@rev]#L<a>-<b>`).
+    (`askAboutSelection`: `file:<path>[@rev]#L<a>-<b>`). A diff offers it
+    only while its right side names a file (`Diff/diffAsk.ts`, a Monaco
+    context key on the action's precondition); a compare with the
+    clipboard has no Ask action rather than one that does nothing.
   The nav bar's Ask is a menu (`components/Prompts/AskMenu.tsx`): Ask
   About This, then the catalog's prompts `about` the page's ref kind
   (`SuggestedPrompts`), each inserted as `[oxplow ref <ref>] <question>`.

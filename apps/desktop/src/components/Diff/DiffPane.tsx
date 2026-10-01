@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { readAt } from "../../api.js";
 import { languageForPath } from "../../editor-language.js";
-import { revisionSlot, type Revision } from "../../revision.js";
+import type { Revision } from "../../revision.js";
 import { askAboutSelection } from "../../agent-context-ref.js";
+import { diffAskTarget } from "./diffAsk.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 
 export interface DiffSpec {
@@ -51,6 +52,13 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
   const modelsRef = useRef<{ left: any; right: any } | null>(null);
   const specRef = useRef(spec);
   specRef.current = spec;
+  // Whether Ask About This applies to the current spec (a Monaco context
+  // key the action's precondition reads).
+  const askableRef = useRef<{ set(value: boolean): void } | null>(null);
+  const askable = diffAskTarget(spec) !== null;
+  useEffect(() => {
+    askableRef.current?.set(askable);
+  }, [askable]);
   const monacoRef = useRef<any>(null);
   const [editorReady, setEditorReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,18 +85,21 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
         minimap: { enabled: false },
       });
       // Ask About This on the right side's selection (P6.D1): its lines
-      // at the right side's revision. A literal right side (compare with
-      // clipboard) has no ref.
-      editor.getModifiedEditor().addAction({
+      // at the right side's revision. Offered only while the right side
+      // names a file (`diffAskTarget`); a literal right side (compare with
+      // clipboard) has no ref, so the action isn't there at all.
+      const modified = editor.getModifiedEditor();
+      askableRef.current = modified.createContextKey("oxplow.diffAskable", diffAskTarget(specRef.current) !== null);
+      modified.addAction({
         id: "oxplow.askAbout",
         label: "Ask About This",
         contextMenuGroupId: "navigation",
-        precondition: "editorHasSelection",
+        precondition: "editorHasSelection && oxplow.diffAskable",
         run: (ed: { getSelection(): { startLineNumber: number; endLineNumber: number; endColumn: number } | null }) => {
-          const current = specRef.current;
+          const target = diffAskTarget(specRef.current);
           const sel = ed.getSelection();
-          if (!sel || current.rightContent !== undefined) return;
-          insertIntoAgent(askAboutSelection(current.path, sel, revisionSlot(current.rightVersion)));
+          if (!sel || !target) return;
+          insertIntoAgent(askAboutSelection(target.path, sel, target.rev));
         },
       });
       editorRef.current = editor;
