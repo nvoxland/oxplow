@@ -781,6 +781,30 @@ against the registry — every command exists, its input fits, the names
 are `expect_commands` in order. Without a registry it warns that the
 examples weren't checked.
 
+**Running** (`extension_command`): each is a `Tx` command
+`<namespace>.<name>` (summary "… (extension `x`)", the declared
+invokers / confirm / effect, undoable, `Lifecycle::Experimental`). Its
+handler, before any write, reads the `input` rows on the run's own
+connection (`semantic_layer::read_on`: the `query_sql` authorizer, row
+cap and timeout, the read session restored before the writes), runs the
+script (`run_script_blocking`, inside the transaction — pure, so a
+retried transaction re-runs it), checks the `{ commands, result? }`
+shape (`Invalid` otherwise), and runs the commands through
+`CommandBus::run_nested` as the run's children: each child's invokers,
+policy and confirmation apply (an agent's run whose child asks becomes a
+proposal with the children as its dry run), one audit row with `{
+result, children }`, the children's events caused by the run, the
+reversed children as its undo. A script can't do I/O: `files()` sees
+nothing and `ai_*` is refused without a host. **Registration**
+(`ExtensionCommands`, `Services.extension_commands`): the enabled
+extensions of the **primary worktree** (one bus, like providers — a
+command authored in another stream registers once merged), one
+namespace at a time, all-or-nothing; reconciled at boot, on
+`ConfigChanged` (enabling or disabling) and on a `WorkspaceChanged` under
+`oxplow/extensions/` (`spawn_reconciler`); a namespace something else
+already holds (a provider) is refused and kept as the extension's
+`problem`. A launcher `{ command }` entry may name one.
+
 ## Contributing metrics (current)
 
 `extension.yaml` takes `measures:`, `metrics:`, `gauges:` and `dimensions:` in the

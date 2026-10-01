@@ -151,6 +151,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     state.event_pump.clone().spawn();
     crate::source_runner::spawn_scheduler(state.clone());
     crate::providers::registry::spawn_reconciler(state.clone());
+    crate::extension_commands::spawn_reconciler(state.clone());
     crate::effort_evidence::spawn(state.clone());
     crate::change_analysis::spawn_invalidation(state.clone());
 

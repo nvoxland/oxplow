@@ -770,6 +770,19 @@ fn run_read_only(
     })
 }
 
+/// [`SemanticLayer::run`] on `conn` — for a command's handler that reads
+/// inside its own transaction (an extension command's `input` query): one
+/// read-only `SELECT`/`WITH` over the published models, under the same
+/// authorizer, row cap and timeout. The read session is restored before
+/// it returns, so the handler's writes that follow are unaffected.
+pub fn read_on(
+    conn: &rusqlite::Connection,
+    query: &SqlQuery,
+) -> Result<SqlQueryResult, DomainError> {
+    crate::sql_tokens::check_single_read(&query.sql)?;
+    run_read_only(conn, query)
+}
+
 /// [`SemanticLayer::check_with`] on `conn` — for a command's handler,
 /// which checks an agent's SQL inside its own transaction: a single
 /// read-only `SELECT`/`WITH` over the published models (the `query_sql`

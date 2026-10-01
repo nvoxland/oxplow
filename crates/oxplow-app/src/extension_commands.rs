@@ -348,19 +348,225 @@ pub fn input_params(input: &Value) -> Vec<(String, oxplow_db::SqlCell)> {
         .unwrap_or_default()
 }
 
-/// Run a command's script over `{ input, rows }` in the sandbox (no host:
-/// no files, no `ai_*`), off the async runtime.
-pub async fn run_script(script: String, input: Value, rows: Vec<Value>) -> Result<Value, String> {
+/// Run a command's script over `{ input, rows }` in the sandbox (5 s; no
+/// host: no files, no `ai_*`). Blocks: the handler calls it inside the
+/// bus's transaction (off the async runtime already).
+pub fn run_script_blocking(
+    script: String,
+    input: Value,
+    rows: Vec<Value>,
+) -> Result<Value, String> {
     use oxplow_collect_plugin::runtime::{run_sandboxed, run_starlark};
-    tokio::task::spawn_blocking(move || {
-        run_sandboxed(
-            &oxplow_collect_plugin::SandboxBudget::default(),
-            move || run_starlark(&script, &json!({ "input": input, "rows": rows })),
-        )
-        .map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| format!("the script's worker failed: {e}"))?
+    run_sandboxed(
+        &oxplow_collect_plugin::SandboxBudget::default(),
+        move || run_starlark(&script, &json!({ "input": input, "rows": rows })),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// [`run_script_blocking`] off the async runtime.
+pub async fn run_script(script: String, input: Value, rows: Vec<Value>) -> Result<Value, String> {
+    tokio::task::spawn_blocking(move || run_script_blocking(script, input, rows))
+        .await
+        .map_err(|e| format!("the script's worker failed: {e}"))?
+}
+
+/// `decl` of extension `extension` as a command on `bus`: a `Tx` handler
+/// that, before any write, reads its `input` rows on the run's own
+/// connection, runs the script, and runs what it composes as the run's
+/// children (`CommandBus::run_nested`: each child's invokers, policy and
+/// confirmation; one audit row; the reversed children undo it). Pure, so
+/// a retried transaction can re-run it.
+pub fn extension_command(
+    bus: &std::sync::Arc<crate::commands::CommandBus>,
+    extension: &str,
+    decl: &ExtensionCommand,
+) -> Result<crate::commands::Command, oxplow_domain::CommandError> {
+    use crate::commands::{Command, Handler, HandlerOutput, TxCtx};
+    use oxplow_domain::{Atomicity, CommandError, Lifecycle};
+    let spec = CommandSpec {
+        name: decl.name.clone(),
+        summary: format!("{} (extension `{extension}`)", decl.summary),
+        input_schema: decl.input_schema.clone(),
+        invokers: decl.invokers,
+        confirm: decl.confirm,
+        undoable: true,
+        lifecycle: Lifecycle::Experimental,
+        atomicity: Atomicity::Tx,
+        effect: decl.effect,
+    };
+    let weak = std::sync::Arc::downgrade(bus);
+    let (script, query, parent) = (decl.script.clone(), decl.input.clone(), spec.clone());
+    Command::new(
+        spec,
+        Handler::Tx(std::sync::Arc::new(move |ctx: &TxCtx<'_>, input: Value| {
+            let bus = weak.upgrade().ok_or_else(|| CommandError::Failed {
+                message: "the command bus is gone".into(),
+            })?;
+            let rows = match &query {
+                Some(sql) => {
+                    let result = oxplow_db::semantic_layer::read_on(
+                        ctx.conn,
+                        &oxplow_db::SqlQuery::new(sql)
+                            .named(input_params(&input))
+                            .limit(Some(INPUT_ROW_CAP)),
+                    )
+                    .map_err(|e| match e {
+                        oxplow_domain::DomainError::Busy(m) => CommandError::Busy { message: m },
+                        other => CommandError::Failed {
+                            message: format!("the `input` query failed: {other}"),
+                        },
+                    })?;
+                    rows_json(&result)
+                }
+                None => Vec::new(),
+            };
+            let out = run_script_blocking(script.clone(), input, rows).map_err(|e| {
+                CommandError::Failed {
+                    message: format!("the script failed: {e}"),
+                }
+            })?;
+            let (calls, result) = composed(out).map_err(|message| CommandError::Invalid {
+                field: None,
+                message,
+            })?;
+            let nested = bus.run_nested(ctx, &parent, &calls)?;
+            Ok(HandlerOutput {
+                result: json!({ "result": result, "children": nested.children }),
+                inverse: nested.inverse,
+                events: nested.events,
+                after_commit: nested.after_commit,
+            })
+        })),
+    )
+}
+
+/// Keeps the bus's extension commands matching the enabled extensions of
+/// the primary worktree (where, like providers, they run from): each
+/// extension's namespace registered all-or-nothing, re-registered when
+/// its declarations change, removed when it is disabled or gone. A
+/// namespace someone else already holds (a provider) is refused and
+/// reported as the extension's [`ExtensionCommands::problem`].
+pub struct ExtensionCommands {
+    bus: std::sync::Arc<crate::commands::CommandBus>,
+    catalog: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
+    root: std::path::PathBuf,
+    /// What's registered, by namespace: the extension and its commands.
+    registered: tokio::sync::Mutex<BTreeMap<String, (String, Vec<ExtensionCommand>)>>,
+    problems: parking_lot::Mutex<BTreeMap<String, String>>,
+}
+
+impl ExtensionCommands {
+    pub fn new(
+        bus: &std::sync::Arc<crate::commands::CommandBus>,
+        catalog: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
+        root: std::path::PathBuf,
+    ) -> Self {
+        Self {
+            bus: bus.clone(),
+            catalog,
+            root,
+            registered: tokio::sync::Mutex::default(),
+            problems: parking_lot::Mutex::default(),
+        }
+    }
+
+    /// Why `extension`'s commands aren't registered, if they aren't.
+    pub fn problem(&self, extension: &str) -> Option<String> {
+        self.problems.lock().get(extension).cloned()
+    }
+
+    /// Make the registered commands match the enabled extensions.
+    pub async fn reconcile(&self) {
+        let mut registered = self.registered.lock().await;
+        let wanted: BTreeMap<String, (String, Vec<ExtensionCommand>)> = self
+            .catalog
+            .get(&self.root)
+            .iter()
+            .filter(|e| e.enabled && !e.commands.is_empty())
+            .map(|e| {
+                (
+                    command_namespace(&e.name),
+                    (e.name.clone(), e.commands.clone()),
+                )
+            })
+            .collect();
+        let stale: Vec<String> = registered
+            .iter()
+            .filter(|(ns, have)| wanted.get(*ns) != Some(*have))
+            .map(|(ns, _)| ns.clone())
+            .collect();
+        for ns in stale {
+            self.bus.unregister_namespace(&ns);
+            registered.remove(&ns);
+        }
+        let mut problems = BTreeMap::new();
+        for (ns, (extension, commands)) in wanted {
+            if registered.contains_key(&ns) {
+                continue;
+            }
+            match self.register(&ns, &extension, &commands) {
+                Ok(()) => {
+                    registered.insert(ns, (extension, commands));
+                }
+                Err(problem) => {
+                    tracing::warn!(extension, problem, "extension commands not registered");
+                    problems.insert(extension, problem);
+                }
+            }
+        }
+        *self.problems.lock() = problems;
+    }
+
+    /// Register every command of one extension, or none.
+    fn register(
+        &self,
+        ns: &str,
+        extension: &str,
+        commands: &[ExtensionCommand],
+    ) -> Result<(), String> {
+        if self.bus.has_namespace(ns) {
+            return Err(format!(
+                "the command namespace `{ns}` is already taken (by a provider, or another \
+                 extension); rename the extension"
+            ));
+        }
+        for decl in commands {
+            let done =
+                extension_command(&self.bus, extension, decl).and_then(|c| self.bus.register(c));
+            if let Err(e) = done {
+                self.bus.unregister_namespace(ns);
+                return Err(format!("`{}`: {e}", decl.name));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Keep the extension commands matching the config and the extension
+/// files: once at boot, then on every config change (enabling or
+/// disabling an extension) and every change under `oxplow/extensions/`.
+pub fn spawn_reconciler(state: std::sync::Arc<crate::Services>) {
+    use crate::events::OxplowEvent;
+    let mut rx = state.events.subscribe();
+    tokio::spawn(async move {
+        state.extension_commands.reconcile().await;
+        loop {
+            match rx.recv().await {
+                Ok(OxplowEvent::ConfigChanged) => state.extension_commands.reconcile().await,
+                Ok(OxplowEvent::WorkspaceChanged { path, .. })
+                    if path.starts_with(crate::extensions::EXTENSIONS_DIR) =>
+                {
+                    state.extension_commands.reconcile().await
+                }
+                Ok(_) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    state.extension_commands.reconcile().await
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 /// Dry-run every command example of `ext` (`check_extension`): run the
@@ -733,6 +939,228 @@ mod tests {
                 .contains("command examples weren't checked"),
             "{:?}",
             v.warnings
+        );
+    }
+
+    // ---- B2: the handler and the reconciler ----
+
+    /// `my-review` (namespace `my_review`) with `finish`, whose script is
+    /// `script`, in the fixture's project; registered.
+    async fn with_finish(fx: &crate::test_fixtures::EffortFixture, script: &str) {
+        write_ext(
+            fx._dir.path(),
+            "my-review",
+            "  - name: finish
+    summary: Finish the task.
+    input_schema: { type: object, required: [ref], properties: { ref: { type: string } }, additionalProperties: false }
+    entry: handlers/finish.star
+    input: \"SELECT ref, title FROM v_work_item WHERE ref = :ref\"
+",
+            &[("handlers/finish.star", script)],
+        );
+        fx.svc.extension_commands.reconcile().await;
+    }
+
+    /// Transitions the task to done and renames it after its row.
+    const FINISH: &str = "def transform(x):
+    row = x[\"rows\"][0]
+    return {
+        \"commands\": [
+            {\"name\": \"work_item.update\", \"input\": {\"ref\": row[\"ref\"], \"title\": row[\"title\"] + \" (reviewed)\"}},
+            {\"name\": \"work_item.transition\", \"input\": {\"ref\": row[\"ref\"], \"to\": \"done\"}},
+        ],
+        \"result\": {\"finished\": row[\"ref\"]},
+    }
+";
+
+    fn agent(fx: &crate::test_fixtures::EffortFixture) -> oxplow_domain::Actor {
+        oxplow_domain::Actor::Agent {
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        }
+    }
+
+    async fn task(fx: &crate::test_fixtures::EffortFixture) -> oxplow_domain::Task {
+        use oxplow_domain::stores::TaskStore as _;
+        fx.svc.task_store.get(fx.task).await.unwrap().unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_extension_command_composes_core_commands_in_one_run() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        with_finish(&fx, FINISH).await;
+        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let out = fx
+            .svc
+            .commands
+            .run(&agent(&fx), "my_review.finish", json!({ "ref": r }), false)
+            .await
+            .unwrap();
+        assert_eq!(out.result["result"], json!({ "finished": r }));
+        assert_eq!(out.result["children"].as_array().unwrap().len(), 2);
+        let t = task(&fx).await;
+        assert_eq!(t.status, oxplow_domain::TaskStatus::Done);
+        assert_eq!(t.title, "t (reviewed)");
+        let audits = fx.svc.commands.audit_store().list_recent(10).await.unwrap();
+        let ok: Vec<_> = audits
+            .iter()
+            .filter(|a| a.outcome == oxplow_domain::events::schema::CommandOutcome::Ok)
+            .collect();
+        assert_eq!(ok.len(), 1, "one audit row for the run");
+        assert_eq!(ok[0].command, "my_review.finish");
+        let events = fx.svc.event_log_store.read_after(0, 200).await.unwrap();
+        let transitioned = events
+            .iter()
+            .rev()
+            .find(|e| e.envelope.event_type == "work_item.transitioned")
+            .expect("the child's event");
+        assert_eq!(
+            transitioned.envelope.cause, out.event_id,
+            "caused by the run"
+        );
+        // One undo reverses both children.
+        fx.svc
+            .commands
+            .undo(&agent(&fx), out.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        let t = task(&fx).await;
+        assert_eq!(t.status, oxplow_domain::TaskStatus::InProgress);
+        assert_eq!(t.title, "t");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_destructive_child_makes_the_agents_run_a_proposal_with_its_children() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        with_finish(
+            &fx,
+            "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.delete\", \"input\": {\"ref\": x[\"input\"][\"ref\"]}}]}\n",
+        )
+        .await;
+        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let err = fx
+            .svc
+            .commands
+            .run(&agent(&fx), "my_review.finish", json!({ "ref": r }), false)
+            .await
+            .unwrap_err();
+        let oxplow_domain::CommandError::Proposed { preview, .. } = err else {
+            panic!("{err:?}");
+        };
+        assert!(preview.destructive);
+        let pending = fx
+            .svc
+            .commands
+            .proposal_store()
+            .list_pending()
+            .await
+            .unwrap();
+        assert_eq!(
+            pending[0].dry_run.as_ref().unwrap()["children"][0]["name"],
+            "work_item.delete"
+        );
+        assert!(task(&fx).await.deleted_at.is_none(), "nothing ran");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_script_that_misbehaves_writes_nothing() {
+        for (script, says) in [
+            ("def transform(x):\n    return [1]\n", "the script must return"),
+            // No host: a model call is refused (and `files()` sees no files).
+            (
+                "def transform(x):\n    return {\"commands\": [], \"result\": ai_summarize(\"x\")}\n",
+                "the script failed",
+            ),
+            (
+                "def transform(x):\n    return {\"commands\": [{\"name\": \"vcs.commit\", \"input\": {}}]}\n",
+                "composes Tx commands only",
+            ),
+        ] {
+            let fx = crate::test_fixtures::services_with_effort().await;
+            with_finish(&fx, script).await;
+            let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+            let err = fx
+                .svc
+                .commands
+                .run(&oxplow_domain::Actor::Human, "my_review.finish", json!({ "ref": r }), false)
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains(says), "{script}: {err}");
+            assert_eq!(task(&fx).await.status, oxplow_domain::TaskStatus::InProgress);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_reconciler_registers_enabled_extensions_commands_only() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let bus = &fx.svc.commands;
+        with_finish(&fx, FINISH).await;
+        assert!(
+            bus.spec("my_review.finish").is_some(),
+            "enabled: registered"
+        );
+        let spec = bus.spec("my_review.finish").unwrap();
+        assert_eq!(spec.lifecycle, oxplow_domain::Lifecycle::Experimental);
+        assert!(
+            spec.summary.contains("extension `my-review`"),
+            "{}",
+            spec.summary
+        );
+
+        // A launcher entry naming it validates against the bus.
+        let schema = |n: &str| bus.input_schema(n);
+        let mut ext = project(fx._dir.path(), "my-review");
+        ext.launcher = vec![crate::extensions::manifest_v2::LauncherEntry {
+            label: "Finish".into(),
+            category: crate::extensions::LauncherCategory::Work,
+            target: crate::extensions::manifest_v2::LauncherTarget::Command {
+                command: "my_review.finish".into(),
+                input: json!({ "ref": "work_item:oxplow:tsk1" }),
+            },
+        }];
+        crate::extensions::check_launcher_commands(&mut ext, Some(&schema));
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+
+        write(
+            fx._dir.path(),
+            ".oxplow/project.yaml",
+            "extensions:\n  disabled: [my-review]\n",
+        );
+        fx.svc.extension_commands.reconcile().await;
+        assert!(bus.spec("my_review.finish").is_none(), "disabled: gone");
+
+        // A namespace someone else holds (a provider's) is refused whole.
+        std::fs::remove_file(fx._dir.path().join(".oxplow/project.yaml")).unwrap();
+        bus.register(
+            crate::commands::Command::new(
+                oxplow_domain::CommandSpec {
+                    name: "my_review.held".into(),
+                    summary: "A provider's.".into(),
+                    input_schema: json!({ "type": "object" }),
+                    invokers: Invokers::ALL,
+                    confirm: Confirm::Never,
+                    undoable: false,
+                    lifecycle: oxplow_domain::Lifecycle::Experimental,
+                    atomicity: oxplow_domain::Atomicity::Tx,
+                    effect: CommandEffect::Write,
+                },
+                crate::commands::Handler::Tx(std::sync::Arc::new(|_, _| {
+                    Ok(crate::commands::HandlerOutput::default())
+                })),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        fx.svc.extension_commands.reconcile().await;
+        assert!(bus.spec("my_review.finish").is_none());
+        assert!(bus.spec("my_review.held").is_some(), "the holder keeps it");
+        assert!(
+            fx.svc
+                .extension_commands
+                .problem("my-review")
+                .is_some_and(|p| p.contains("`my_review` is already taken")),
+            "{:?}",
+            fx.svc.extension_commands.problem("my-review")
         );
     }
 }

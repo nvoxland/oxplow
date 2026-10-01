@@ -469,6 +469,8 @@ pub struct Services {
     pub work_items: oxplow_domain::work_items::WorkItemsRegistry,
     /// The enabled external provider instances (`.context/providers.md`).
     pub providers: Arc<providers::ProviderRegistry>,
+    /// Enabled extensions' `commands:` on the bus (P6b).
+    pub extension_commands: Arc<extension_commands::ExtensionCommands>,
     /// The knowledge provider: oxplow's wiki (`.context/knowledge.md`).
     pub knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
@@ -1057,6 +1059,11 @@ impl Services {
         commands
             .register(providers::registry::enable_command(&providers))
             .expect("provider.enable registers");
+        let extension_commands = Arc::new(extension_commands::ExtensionCommands::new(
+            &commands,
+            extension_catalog.clone(),
+            layout.project_dir.clone(),
+        ));
         let source_runner = source_runner::SourceRunner {
             project_dir: layout.project_dir.clone(),
             approvals: approvals.clone(),
@@ -1185,6 +1192,7 @@ impl Services {
             event_pump,
             extension_models,
             extension_catalog,
+            extension_commands,
             commands,
             work_items,
             providers,
