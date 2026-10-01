@@ -213,21 +213,64 @@ function RowsBody({
   };
   const first = result.rows[0]?.[0] ?? null;
   const rowActions = lens.actions.filter((a) => a.row);
-  const onRowMenu = (e: React.MouseEvent, row: SqlCell[]) =>
-    ctxMenu.open(e, [
-      {
-        id: "ask-about-row",
-        label: "Ask About This",
-        enabled: true,
-        run: () => insertIntoAgent(rowAsk(lens, result.columns, row)),
-      },
-      ...rowActions.map((a) => ({
-        id: `lens-action-${a.id}`,
-        label: a.label,
-        enabled: runRowAction !== undefined,
-        run: () => runRowAction?.(a, rowRecord(result.columns, row)),
-      })),
-    ]);
+  const rowItems = (row: SqlCell[]) => [
+    {
+      id: "ask-about-row",
+      label: "Ask About This",
+      enabled: true,
+      run: () => insertIntoAgent(rowAsk(lens, result.columns, row)),
+    },
+    ...rowActions.map((a) => ({
+      id: `lens-action-${a.id}`,
+      label: a.label,
+      enabled: runRowAction !== undefined,
+      run: () => runRowAction?.(a, rowRecord(result.columns, row)),
+    })),
+  ];
+  // Every row of every row component: focusable, with its menu from a
+  // right-click or the keyboard (Menu key / Shift+F10).
+  const rowMenu: RowMenu = (row) => ({
+    tabIndex: 0,
+    onContextMenu: (e) => ctxMenu.open(e, rowItems(row)),
+    onKeyDown: (e) => ctxMenu.openForKey(e, rowItems(row)),
+  });
+  return (
+    <>
+      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu }} />
+      {ctxMenu.menu}
+    </>
+  );
+}
+
+type RowMenu = (row: SqlCell[]) => {
+  tabIndex: number;
+  onContextMenu(e: React.MouseEvent): void;
+  onKeyDown(e: React.KeyboardEvent): void;
+};
+
+function LensViz({
+  run,
+  result,
+  lens,
+  cols,
+  cell,
+  first,
+  compact,
+  streamId,
+  onOpenPage,
+  rowMenu,
+}: {
+  run: LensRun;
+  result: LensRun["result"];
+  lens: LensRun["lens"];
+  cols: DisplayColumn[];
+  cell: CellRenderer;
+  first: SqlCell | null;
+  compact: boolean;
+  streamId: string | null;
+  onOpenPage?(ref: TabRef): void;
+  rowMenu: RowMenu;
+}) {
   switch (lens.viz) {
     case "bar":
       return (
@@ -244,35 +287,20 @@ function RowsBody({
     case "markdown":
       return <MarkdownViz body={first === null ? "" : String(first)} />;
     case "tree":
-      return (
-        <>
-          <TreeViz nodes={treeNodes(lens, result)} onRowMenu={onRowMenu} />
-          {ctxMenu.menu}
-        </>
-      );
+      return <TreeViz nodes={treeNodes(lens, result)} rowMenu={rowMenu} />;
     case "timeline":
-      return <TimelineViz entries={timelineEntries(lens, result)} onOpenPage={onOpenPage} />;
+      return <TimelineViz entries={timelineEntries(lens, result)} onOpenPage={onOpenPage} rowMenu={rowMenu} />;
     case "detail":
-      return <DetailViz row={result.rows[0]!} cols={cols} cell={cell} />;
+      return <DetailViz row={result.rows[0]!} cols={cols} cell={cell} rowMenu={rowMenu} />;
     case "steps":
-      return <StepsViz steps={stepItems(lens, result)} />;
+      return <StepsViz steps={stepItems(lens, result)} rowMenu={rowMenu} />;
     case "hunks":
-      return <HunksViz rows={hunkRows(lens, result)} streamId={streamId} />;
+      return <HunksViz rows={hunkRows(lens, result)} streamId={streamId} rowMenu={rowMenu} />;
     case "list":
-      return (
-        <>
-          <ListViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} onRowMenu={onRowMenu} />
-          {ctxMenu.menu}
-        </>
-      );
+      return <ListViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} />;
     case "table":
     default:
-      return (
-        <>
-          <TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} onRowMenu={onRowMenu} />
-          {ctxMenu.menu}
-        </>
-      );
+      return <TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} />;
   }
 }
 
@@ -342,22 +370,22 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
 }
 
 /** `tree`: nested rows, each branch collapsible (expanded by default). */
-function TreeViz({ nodes, onRowMenu }: { nodes: TreeNode[]; onRowMenu(e: React.MouseEvent, row: SqlCell[]): void }) {
+function TreeViz({ nodes, rowMenu }: { nodes: TreeNode[]; rowMenu: RowMenu }) {
   return (
     <ul data-testid="lens-tree" style={treeListStyle}>
       {nodes.map((n, i) => (
-        <TreeItem key={i} node={n} onRowMenu={onRowMenu} />
+        <TreeItem key={i} node={n} rowMenu={rowMenu} />
       ))}
     </ul>
   );
 }
 
-function TreeItem({ node, onRowMenu }: { node: TreeNode; onRowMenu(e: React.MouseEvent, row: SqlCell[]): void }) {
+function TreeItem({ node, rowMenu }: { node: TreeNode; rowMenu: RowMenu }) {
   const [open, setOpen] = useState(true);
   const branch = node.children.length > 0;
   return (
     <li data-testid="lens-tree-node">
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 0" }} onContextMenu={(e) => onRowMenu(e, node.row)}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 0" }} {...rowMenu(node.row)}>
         {branch ? (
           <button
             type="button"
@@ -376,7 +404,7 @@ function TreeItem({ node, onRowMenu }: { node: TreeNode; onRowMenu(e: React.Mous
       {branch && open ? (
         <ul style={{ ...treeListStyle, paddingLeft: 16 }}>
           {node.children.map((c, i) => (
-            <TreeItem key={i} node={c} onRowMenu={onRowMenu} />
+            <TreeItem key={i} node={c} rowMenu={rowMenu} />
           ))}
         </ul>
       ) : null}
@@ -388,16 +416,18 @@ function TreeItem({ node, onRowMenu }: { node: TreeNode; onRowMenu(e: React.Mous
 function TimelineViz({
   entries,
   onOpenPage,
+  rowMenu,
 }: {
   entries: ReturnType<typeof timelineEntries>;
   onOpenPage?(ref: TabRef): void;
+  rowMenu: RowMenu;
 }) {
   return (
     <ol data-testid="lens-timeline" style={{ listStyle: "none", padding: 0, margin: 0, borderLeft: "2px solid var(--border-subtle)" }}>
       {entries.map((e, i) => {
         const ref = e.ref ? refFromTabId(e.ref) : null;
         return (
-          <li key={i} data-testid={`lens-timeline-entry-${i}`} style={{ padding: "4px 0 4px 12px" }}>
+          <li key={i} data-testid={`lens-timeline-entry-${i}`} style={{ padding: "4px 0 4px 12px" }} {...rowMenu(e.row)}>
             <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{e.at}</div>
             <div>
               {ref ? (
@@ -416,9 +446,9 @@ function TimelineViz({
 }
 
 /** `detail`: the first row as label/value pairs. */
-function DetailViz({ row, cols, cell }: { row: SqlCell[]; cols: DisplayColumn[]; cell: CellRenderer }) {
+function DetailViz({ row, cols, cell, rowMenu }: { row: SqlCell[]; cols: DisplayColumn[]; cell: CellRenderer; rowMenu: RowMenu }) {
   return (
-    <dl data-testid="lens-detail" style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "4px 12px", margin: 0 }}>
+    <dl data-testid="lens-detail" style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "4px 12px", margin: 0 }} {...rowMenu(row)}>
       {cols.map((c) => (
         <div key={c.key} style={{ display: "contents" }}>
           <dt style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{c.label}</dt>
@@ -437,13 +467,13 @@ const STEP_MARK: Record<StepStatus, { mark: string; color: string; label: string
 };
 
 /** `steps`: an ordered checklist. */
-function StepsViz({ steps }: { steps: ReturnType<typeof stepItems> }) {
+function StepsViz({ steps, rowMenu }: { steps: ReturnType<typeof stepItems>; rowMenu: RowMenu }) {
   return (
     <ol data-testid="lens-steps" style={{ listStyle: "none", padding: 0, margin: 0 }}>
       {steps.map((s, i) => {
         const m = STEP_MARK[s.status];
         return (
-          <li key={i} data-testid={`lens-step-${i}`} data-status={s.status} style={{ display: "flex", gap: 8, padding: "3px 0" }}>
+          <li key={i} data-testid={`lens-step-${i}`} data-status={s.status} style={{ display: "flex", gap: 8, padding: "3px 0" }} {...rowMenu(s.row)}>
             <span title={m.label} aria-label={m.label} style={{ color: m.color, width: 16, textAlign: "center" }}>
               {m.mark}
             </span>
@@ -459,12 +489,12 @@ function StepsViz({ steps }: { steps: ReturnType<typeof stepItems> }) {
 
 /** `hunks`: each file and its revisions; expanding one shows its diff in
  *  the diff viewer (one at a time — each is an editor). */
-function HunksViz({ rows, streamId }: { rows: ReturnType<typeof hunkRows>; streamId: string | null }) {
+function HunksViz({ rows, streamId, rowMenu }: { rows: ReturnType<typeof hunkRows>; streamId: string | null; rowMenu: RowMenu }) {
   const [open, setOpen] = useState<number | null>(rows.length === 1 ? 0 : null);
   return (
     <div data-testid="lens-hunks">
       {rows.map((r, i) => (
-        <section key={i} data-testid={`lens-hunk-${i}`} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+        <section key={i} data-testid={`lens-hunk-${i}`} style={{ borderBottom: "1px solid var(--border-subtle)" }} {...rowMenu(r.row)}>
           <button
             type="button"
             aria-expanded={open === i}
@@ -666,7 +696,7 @@ interface RowsVizProps {
   cell: CellRenderer;
   truncated: boolean;
   /** Right-click on a row (per-row actions are right-click only). */
-  onRowMenu(e: React.MouseEvent, row: SqlCell[]): void;
+  rowMenu: RowMenu;
 }
 
 function TruncatedNote({ rows, truncated }: { rows: number; truncated: boolean }) {
@@ -676,13 +706,13 @@ function TruncatedNote({ rows, truncated }: { rows: number; truncated: boolean }
   );
 }
 
-function ListViz({ rows, cols, cell, truncated, onRowMenu }: RowsVizProps) {
+function ListViz({ rows, cols, cell, truncated, rowMenu }: RowsVizProps) {
   const [head, ...rest] = cols;
   return (
     <>
       <ul data-testid="lens-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
         {rows.map((row, i) => (
-          <li key={i} data-testid={`lens-row-${i}`} style={listRowStyle} onContextMenu={(e) => onRowMenu(e, row)}>
+          <li key={i} data-testid={`lens-row-${i}`} style={listRowStyle} {...rowMenu(row)}>
             <div>{head ? cell(row, head) : null}</div>
             {rest.length > 0 ? (
               <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
@@ -702,7 +732,7 @@ function ListViz({ rows, cols, cell, truncated, onRowMenu }: RowsVizProps) {
   );
 }
 
-function TableViz({ rows, cols, cell, truncated, onRowMenu }: RowsVizProps) {
+function TableViz({ rows, cols, cell, truncated, rowMenu }: RowsVizProps) {
   return (
     <>
       <table data-testid="lens-table" style={tableStyle}>
@@ -717,7 +747,7 @@ function TableViz({ rows, cols, cell, truncated, onRowMenu }: RowsVizProps) {
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <tr key={i} data-testid={`lens-row-${i}`} onContextMenu={(e) => onRowMenu(e, row)}>
+            <tr key={i} data-testid={`lens-row-${i}`} {...rowMenu(row)}>
               {cols.map((c) => (
                 <td key={c.key} style={tdStyle}>
                   {cell(row, c)}

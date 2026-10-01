@@ -71,3 +71,25 @@ test("a row action's confirmation shows when the toolbar is hidden", async () =>
   await waitFor(() => expect(calls).toEqual([false, true]));
   await waitFor(() => expect(queryByTestId("lens-action-confirm")).toBeNull());
 });
+
+// Every row of every row component has the row menu (Ask About This and
+// the lens's row actions), from the mouse and from the keyboard — Menu
+// key or Shift+F10 on the focused row.
+test("rows are focusable and open their menu from the keyboard, in every row component", () => {
+  const { getByTestId, queryByTestId, unmount } = render(<LensResultView run={run} onOpenPage={() => {}} />);
+  const row = getByTestId("lens-row-0");
+  expect(row.tabIndex).toBe(0);
+  fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+  expect(queryByTestId("menu-item-ask-about-row")).not.toBeNull();
+  expect(queryByTestId("menu-item-lens-action-finish")).not.toBeNull();
+  unmount();
+
+  const steps: LensRun = {
+    lens: { ...lens, viz: "steps", steps: { label: "ref", status: null } },
+    params: {},
+    result: run.result,
+  };
+  const view = render(<LensResultView run={steps} onOpenPage={() => {}} />);
+  fireEvent.contextMenu(view.getByTestId("lens-step-0"));
+  expect(view.queryByTestId("menu-item-lens-action-finish")).not.toBeNull();
+});

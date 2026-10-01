@@ -424,10 +424,10 @@ describe("structure components (P6.A2)", () => {
   test("stepItems map statuses, anything unknown pending", () => {
     const l = lens({ viz: "steps", steps: { label: "s", status: "st" } });
     expect(stepItems(l, result(["s", "st"], [["plan", "done"], ["build", "active"], ["test", "failed"], ["ship", "later"]]))).toEqual([
-      { label: "plan", status: "done" },
-      { label: "build", status: "active" },
-      { label: "test", status: "failed" },
-      { label: "ship", status: "pending" },
+      { label: "plan", status: "done", row: ["plan", "done"] },
+      { label: "build", status: "active", row: ["build", "active"] },
+      { label: "test", status: "failed", row: ["test", "failed"] },
+      { label: "ship", status: "pending", row: ["ship", "later"] },
     ]);
   });
 
@@ -435,7 +435,7 @@ describe("structure components (P6.A2)", () => {
     const l = lens({ viz: "hunks", hunks: { path: "p", from: "a", to: "b" } });
     expect(
       hunkRows(l, result(["p", "a", "b"], [["x.rs", "git:abc", "working"], ["y.rs", null, "working"]])),
-    ).toEqual([{ path: "x.rs", from: "git:abc", to: "working" }]);
+    ).toEqual([{ path: "x.rs", from: "git:abc", to: "working", row: ["x.rs", "git:abc", "working"] }]);
   });
 });
 

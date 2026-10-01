@@ -376,30 +376,30 @@ export type StepStatus = "done" | "active" | "failed" | "pending";
 
 /** `steps` viz: each step's label and status, in row order (a status
  *  other than done/active/failed is pending). */
-export function stepItems(lens: Lens, result: SqlQueryResult): { label: string; status: StepStatus }[] {
+export function stepItems(lens: Lens, result: SqlQueryResult): { label: string; status: StepStatus; row: SqlCell[] }[] {
   const labels = columnValues(result, lens.steps?.label);
   if (!labels) return [];
   const statuses = columnValues(result, lens.steps?.status);
   return labels.map((l, i) => {
     const s = statuses?.[i];
     const status: StepStatus = s === "done" || s === "active" || s === "failed" ? s : "pending";
-    return { label: formatCell(l), status };
+    return { label: formatCell(l), status, row: result.rows[i] ?? [] };
   });
 }
 
 /** `hunks` viz: each row's file and the two revisions it diffs. Rows
  *  whose path or revisions are missing drop out. */
-export function hunkRows(lens: Lens, result: SqlQueryResult): { path: string; from: string; to: string }[] {
+export function hunkRows(lens: Lens, result: SqlQueryResult): { path: string; from: string; to: string; row: SqlCell[] }[] {
   const paths = columnValues(result, lens.hunks?.path);
   const froms = columnValues(result, lens.hunks?.from);
   const tos = columnValues(result, lens.hunks?.to);
   if (!paths || !froms || !tos) return [];
-  const out: { path: string; from: string; to: string }[] = [];
+  const out: { path: string; from: string; to: string; row: SqlCell[] }[] = [];
   paths.forEach((p, i) => {
     const from = froms[i];
     const to = tos[i];
     if (typeof p === "string" && p && typeof from === "string" && from && typeof to === "string" && to) {
-      out.push({ path: p, from, to });
+      out.push({ path: p, from, to, row: result.rows[i] ?? [] });
     }
   });
   return out;
