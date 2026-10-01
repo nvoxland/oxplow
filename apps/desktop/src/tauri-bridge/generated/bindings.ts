@@ -2301,6 +2301,8 @@ export type ExtensionSource = {
 export type ExtensionUi = {
 	// Lenses mounted into core pages (valid ones).
 	slots: LensSlot[],
+	// Commands in core menus, for a page's or a row's ref (valid ones).
+	commands: UiCommand[],
 };
 
 // A loaded extension and anything wrong with it.
@@ -4679,6 +4681,31 @@ export type Twin = {
 	until: string,
 };
 
+/**
+ *  A command in core menus (valid ones; invalid ones are in the
+ *  extension's `errors`).
+ */
+export type UiCommand = {
+	// `<extension>/<n>`, its place in the list.
+	id: string,
+	extension: string,
+	/**
+	 *  What the menu groups it under: the provider's id when the command
+	 *  is one of the extension's providers', else the extension's name.
+	 */
+	group: string,
+	command: string,
+	label: string,
+	// The ref kind it acts on (`work_item`, `commit`).
+	about: string,
+	placement: UiPlacement[],
+	/**
+	 *  The command's input; whole-value `{{ref}}` / `{{ref.id}}` strings
+	 *  are the ref it runs for and its id.
+	 */
+	input: unknown,
+};
+
 export type UiLogEntry = {
 	clientId: string | null,
 	level: string,
@@ -4690,6 +4717,13 @@ export type UiLogEntry = {
 	context: string | null,
 	timestamp: string | null,
 };
+
+// Where a command shows.
+export type UiPlacement = 
+// The page nav bar's menu, for the page's ref.
+"menu" | 
+// A row's right-click menu, for the row's ref.
+"context";
 
 export type UpdateDashboardItemRequest = {
 	id: DashboardItemId,

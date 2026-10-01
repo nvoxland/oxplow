@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { AskMenu, type AskTarget } from "../components/Prompts/AskMenu.js";
+import { RefCommandsMenu } from "../components/RefCommandsMenu.js";
 import type { BookmarkScope } from "./bookmarks.js";
 
 export interface PageNavBarProps {
@@ -353,6 +354,9 @@ export function PageNavBar({
       )}
 
       {ask ? <AskMenu ask={ask} buttonStyle={{ ...navButtonStyle(true), color: "var(--text-secondary)", fontSize: 11 }} /> : null}
+      {ask ? (
+        <RefCommandsMenu target={ask} buttonStyle={{ ...navButtonStyle(true), color: "var(--text-secondary)", fontSize: 11 }} />
+      ) : null}
       {bookmark ? (
         <div style={{ position: "relative", display: "inline-flex" }}>
           <button

@@ -24,6 +24,7 @@ import {
   limitRows,
   lineSeries,
   rowAsk,
+  rowRef,
   stepItems,
   timelineEntries,
   treeNodes,
@@ -34,6 +35,9 @@ import {
 } from "./lensModel.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
+import { uiCommandMenuItems, uiCommandsAbout } from "../components/uiCommands.js";
+import { useUiCommands } from "../components/useUiCommands.js";
+import { personCommands } from "../personCommands.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
 import { addLensToContext, copyLens, performLensAction, rowRecord } from "./lensActions.js";
@@ -193,6 +197,7 @@ function RowsBody({
   const lens = run.lens;
   const result = limitRows(run.result, maxRows);
   const ctxMenu = useContextMenu();
+  const uiCommands = useUiCommands(streamId);
   if (result.rows.length === 0) {
     return (
       <p data-testid="lens-empty" style={{ color: "var(--text-secondary)" }}>
@@ -226,6 +231,15 @@ function RowsBody({
       enabled: runRowAction !== undefined,
       run: () => runRowAction?.(a, rowRecord(result.columns, row)),
     })),
+    // Extensions' commands for what the row links to (P6b.C4).
+    ...(() => {
+      const ref = rowRef(lens, result.columns, row);
+      return ref
+        ? uiCommandMenuItems(uiCommandsAbout(uiCommands, ref, "context"), ref, (c, input) =>
+            void personCommands.run(c.label, c.command, input),
+          )
+        : [];
+    })(),
   ];
   // Every row of every row component: focusable, with its menu from a
   // right-click or the keyboard (Menu key / Shift+F10).

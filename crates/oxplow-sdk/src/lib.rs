@@ -320,7 +320,7 @@ pub async fn check(
         // No layer for a dry run, but launcher commands need none: check
         // them against the registry, or report them unchecked.
         None => catalog.named(root, name).map(|mut ext| {
-            extensions::check_launcher_commands(&mut ext, commands);
+            extensions::check_commands(&mut ext, root, commands);
             ext
         }),
     }
@@ -528,7 +528,7 @@ mod tests {
             unchecked
                 .warnings
                 .iter()
-                .any(|w| w.contains("launcher commands weren't checked") && w.contains("Settings")),
+                .any(|w| w.contains("its commands weren't checked") && w.contains("Settings")),
             "{:?}",
             unchecked.warnings
         );

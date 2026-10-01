@@ -251,6 +251,10 @@ reason logged, keeps it off across a reconcile, refuses an agent's
 `provider.enable` and comes back on a person's; and the work-items
 conformance suite passes through `ExternalWorkItems` over the fake.
 
+**Its commands can appear in core menus**: the extension's
+`ui.commands` may name `<provider>.<verb>`, grouped under the provider
+and checked against its declarations ([extensions.md](./extensions.md)).
+
 **Its features are published** while it runs: `admit` writes the
 instance's `capability_provider` row (`v_capability_provider`) and
 `tear_down` removes it, so the UI offers only what the provider declares

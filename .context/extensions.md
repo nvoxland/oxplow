@@ -752,6 +752,38 @@ manifest still using top-level `slot_mounts:` / `decorators:` /
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
 
+## Commands in core menus (`ui.commands`)
+
+`ui.commands` (stable, P6b.C4; `extensions/ui_commands.rs`) puts a
+command — any registered one, or one of the extension's own provider's —
+in core menus, **for a ref**:
+
+```yaml
+ui:
+  commands:
+    - { command: fake.comment, label: "Comment in Fake…", about: work_item, placement: [menu, context] }
+    - { command: work_item.transition, label: Move to Done, about: work_item, input: { ref: "{{ref}}", to: done } }
+```
+
+`about` (a core ref kind) is required; `placement` is `menu` (the page
+nav bar's **Commands** menu for the page's ref — `RefCommandsMenu` beside
+Ask, zero per-page wiring) and/or `context` (a row's right-click menu
+for the row's ref — lens rows, by the first ref the row links to
+(`rowRef`), and Board cards), both by default. `input` defaults to `{
+ref: "{{ref}}" }`; its strings may be exactly `{{ref}}` or `{{ref.id}}`
+and nothing else (`bindRefInput`). There is no launcher placement: a
+launcher has no current ref, and `launcher: [{ target: { command } }]`
+already covers a ref-less command. A command whose namespace is one of
+the extension's providers groups under that provider's id, anything else
+under the extension's name. `check_commands` (it replaced
+`check_launcher_commands`) checks launcher and `ui.commands` entries
+alike against the registry — or, for one of the extension's own
+providers (not on the bus until its instance runs), against its
+declarations (`provider_command_schema`). The desktop reads them from
+the extensions list (`useUiCommands`, reloaded on `extensionsChanged`)
+and runs each as the person through `personCommands`
+(`components/uiCommands.ts`).
+
 ## Commands
 
 An extension's `commands:` (a stable kind, P6b; `extension_commands.rs`)
@@ -998,7 +1030,7 @@ tool list stable no matter how many extensions are installed.
   fits. `oxplow plugin check` has no running app to ask, so it says the
   commands weren't checked and where to check them (Settings →
   Extensions) — with or without a project database
-  (`check_launcher_commands` runs on both of `oxplow_sdk::check`'s
+  (`check_commands` (launcher and `ui.commands` entries) runs on both of `oxplow_sdk::check`'s
   branches). The launcher (`components/extensionLauncher.ts`)
   merges ref entries into the page directory and lists the others as
   actions under their category.

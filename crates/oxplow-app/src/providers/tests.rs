@@ -410,6 +410,46 @@ async fn a_running_instance_publishes_its_features() {
         .all(|r| r.provider != "fake"));
 }
 
+/// P6b.C4: an extension's `ui.commands` name registered commands — or,
+/// for its own provider (not on the bus until its instance runs), commands
+/// its declarations list — and their input must fit.
+#[tokio::test]
+async fn ui_commands_are_checked_against_the_registry_or_the_providers_declarations() {
+    let fx = services_with_effort().await;
+    let root = fx.svc.layout.project_dir.clone();
+    write_extension(&root, "");
+    let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
+    let base = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            "{base}ui:\n  commands:\n    - {{ command: fake.comment, label: Comment, about: work_item, input: {{ ref: \"{{{{ref}}}}\", body: hi }} }}\n    - {{ command: fake.nope, label: Nope, about: work_item }}\n    - {{ command: work_item.transition, label: Done, about: work_item, input: {{ ref: \"{{{{ref}}}}\", to: done }} }}\n    - {{ command: work_item.transition, label: Bad, about: work_item, input: {{ ref: \"{{{{ref}}}}\" }} }}\n"
+        ),
+    )
+    .unwrap();
+    let ext = extension(&root);
+    assert_eq!(ext.ui.commands.len(), 4);
+    assert_eq!(ext.ui.commands[0].group, "fake");
+    let schema = |name: &str| fx.svc.commands.input_schema(name);
+    let v = crate::extensions::validate_extension(
+        &fx.svc.sql,
+        &fx.svc.extension_catalog,
+        &root,
+        EXT,
+        Some(&schema),
+    )
+    .await
+    .unwrap();
+    let errs = v.errors.join("\n");
+    assert!(!errs.contains("`Comment`"), "the provider declares it: {errs}");
+    assert!(!errs.contains("`Done`"), "{errs}");
+    assert!(errs.contains("`ui.commands` `Nope`: no command `fake.nope`"), "{errs}");
+    assert!(
+        errs.contains("`ui.commands` `Bad`: the input doesn't fit `work_item.transition`"),
+        "{errs}"
+    );
+}
+
 /// tsk546: a provider's args are hashed where it runs (its extension
 /// folder), and an arg reaching outside the folder is refused, so no file
 /// it runs escapes the approval.

@@ -239,15 +239,22 @@ export function rowMention(lensId: string, columns: string[], row: SqlCell[]): s
   return `[oxplow lens ${lensId} row: ${fields}] `;
 }
 
+/** The first canonical ref a lens row links to, if any: what the row is
+ *  about (Ask About This, the row's extension commands). */
+export function rowRef(lens: Lens, columns: string[], row: SqlCell[]): string | null {
+  for (const c of lens.columns) {
+    const ref = c.link ? cellLinkRef(c.link, c.key, row, columns) : null;
+    if (ref && parseRef(ref.id)) return ref.id;
+  }
+  return null;
+}
+
 /** Ask About This on a lens row (P6.D1): the first ref the row links to
  *  (`[oxplow ref commit:abc]`), or — a row that links nowhere — the row
  *  itself as a lens mention. */
 export function rowAsk(lens: Lens, columns: string[], row: SqlCell[]): string {
-  for (const c of lens.columns) {
-    const ref = c.link ? cellLinkRef(c.link, c.key, row, columns) : null;
-    if (ref && parseRef(ref.id)) return formatContextMention({ kind: "ref", ref: ref.id });
-  }
-  return rowMention(lens.id, columns, row);
+  const ref = rowRef(lens, columns, row);
+  return ref ? formatContextMention({ kind: "ref", ref }) : rowMention(lens.id, columns, row);
 }
 
 /** What a slot runs: each mounted lens with the slot params it declares

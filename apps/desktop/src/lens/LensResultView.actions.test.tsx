@@ -7,6 +7,7 @@ const realApi = await import("../api.js");
 // Bun's `mock.module` is process-wide: everything not faked here delegates
 // to the real module so other test files keep working.
 const calls: boolean[] = [];
+const commandRuns: Array<[string, unknown]> = [];
 mock.module("../api.js", () => ({
   ...realApi,
   runLensAction: async (
@@ -22,6 +23,22 @@ mock.module("../api.js", () => ({
     return { result: null, auditId: 1, eventId: null, inverse: null };
   },
   getCommand: async () => Promise.reject(new Error("no bridge in tests")),
+  listExtensions: async () => [
+    {
+      name: "tracker",
+      enabled: true,
+      ui: {
+        slots: [],
+        commands: [
+          { id: "tracker/0", extension: "tracker", group: "tracker", command: "tracker.flag", label: "Flag It", about: "work_item", placement: ["context"], input: { ref: "{{ref}}" } },
+        ],
+      },
+    },
+  ],
+  runCommand: async (name: string, input: unknown) => {
+    commandRuns.push([name, input]);
+    return { result: null, audit_id: 1, event_id: null, inverse: null };
+  },
 }));
 
 const { LensResultView } = await import("./LensResultView.js");
@@ -92,4 +109,20 @@ test("rows are focusable and open their menu from the keyboard, in every row com
   const view = render(<LensResultView run={steps} onOpenPage={() => {}} />);
   fireEvent.contextMenu(view.getByTestId("lens-step-0"));
   expect(view.queryByTestId("menu-item-lens-action-finish")).not.toBeNull();
+});
+
+// P6b.C4: a row that links to a ref offers extensions' commands about that
+// kind of ref, after Ask About This and the lens's row actions.
+test("a row's linked ref gets its extensions' commands", async () => {
+  const linked: LensRun = {
+    lens: { ...lens, columns: [{ key: "ref", label: null, link: { kind: "page", from: null, line: null, base: null, head: null } }] },
+    params: {},
+    result: run.result,
+  };
+  const view = render(<LensResultView run={linked} onOpenPage={() => {}} />);
+  await new Promise((r) => setTimeout(r, 20));
+  fireEvent.contextMenu(view.getByTestId("lens-row-0"));
+  fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ui-commands-tracker")));
+  fireEvent.click(view.getByTestId("menu-item-ui-command-tracker/0"));
+  await waitFor(() => expect(commandRuns).toEqual([["tracker.flag", { ref: "work_item:oxplow:tsk1" }]]));
 });

@@ -1118,7 +1118,7 @@ mod tests {
                 input: json!({ "ref": "work_item:oxplow:tsk1" }),
             },
         }];
-        crate::extensions::check_launcher_commands(&mut ext, Some(&schema));
+        crate::extensions::check_commands(&mut ext, fx._dir.path(), Some(&schema));
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
 
         write(

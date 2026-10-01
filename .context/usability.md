@@ -119,6 +119,18 @@ Things I keep forgetting. Read this before adding any UI.
   `proposal-approve-<id>`, `proposal-decline-<id>`, `proposal-error-<id>`,
   `rail-alert-proposals`.
 
+## Menus a page or row gets from extensions
+
+- **Order is fixed.** A page's nav bar: Ask, then **Commands**
+  (extensions' `ui.commands` for the page's ref; hidden when none apply).
+  A row's right-click menu: Ask About This, the lens's row actions, then
+  a separator and one submenu per provider or extension with its
+  commands for the row's ref (`uiCommandMenuItems`). A Board card: Move
+  To, then the same extension tail. Each runs through `personCommands`,
+  which asks first when the command asks. Testids: `page-nav-commands`,
+  `page-nav-command-<id>`, `menu-item-ui-commands-<group>`,
+  `menu-item-ui-command-<id>`.
+
 ## Destructive actions
 
 - **Per-row destructives use `InlineConfirm`** at

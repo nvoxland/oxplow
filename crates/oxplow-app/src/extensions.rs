@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod manifest_v2;
 pub mod migrate_v1;
+pub mod ui_commands;
 use manifest_v2::{at, key_line, line_under, ManifestV2};
 pub use manifest_v2::{
     Intent, IntentExample, IntentPrompt, LauncherEntry, LauncherTarget, Sharing,
@@ -932,6 +933,8 @@ pub struct Extension {
 pub struct ExtensionUi {
     /// Lenses mounted into core pages (valid ones).
     pub slots: Vec<LensSlot>,
+    /// Commands in core menus, for a page's or a row's ref (valid ones).
+    pub commands: Vec<ui_commands::UiCommand>,
 }
 
 /// Provenance of an installed extension, kept in its `source.yaml`.
@@ -1201,6 +1204,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ));
     }
     let panel_files = m.panels.clone();
+    let ui_command_files = m.ui.commands.clone();
     let page_files = m.pages.clone();
     let slot_files = {
         if let Some(v) = &m.collectors {
@@ -1545,6 +1549,13 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 lens_id: format!("{name}/{}", s.lens),
             });
         }
+    }
+    if let Some(v) = ui_command_files {
+        let provider_ids: Vec<String> = ext.providers.iter().map(|p| p.id.clone()).collect();
+        let (commands, errors) =
+            ui_commands::parse_ui_commands(name, &provider_ids, &v, &file, &manifest);
+        ext.ui.commands = commands;
+        ext.errors.extend(errors);
     }
     if let Some(v) = page_files {
         let (pages, errors) = parse_pages(name, &ext.lenses, v);
@@ -2103,35 +2114,47 @@ pub async fn validate_extension(
 /// app to ask (the CLI).
 pub type CommandSchemas<'a> = &'a (dyn Fn(&str) -> Option<serde_json::Value> + Sync);
 
-/// A launcher command entry names a registered command whose input fits.
-pub fn check_launcher_commands(ext: &mut Extension, commands: Option<CommandSchemas<'_>>) {
-    let entries: Vec<(String, String, serde_json::Value)> = ext
+/// A command an extension names — a launcher entry's or a `ui.commands`
+/// entry's — is registered and its input fits. A command in one of the
+/// extension's own providers' namespaces isn't on the bus until its
+/// instance runs, so it is checked against that provider's declarations.
+/// Without a registry (the CLI) the check is skipped, and says so.
+pub fn check_commands(ext: &mut Extension, root: &Path, commands: Option<CommandSchemas<'_>>) {
+    let mut entries: Vec<(String, String, serde_json::Value)> = ext
         .launcher
         .iter()
         .filter_map(|e| match &e.target {
-            LauncherTarget::Command { command, input } => {
-                Some((e.label.clone(), command.clone(), input.clone()))
-            }
+            LauncherTarget::Command { command, input } => Some((
+                format!("launcher entry `{}`", e.label),
+                command.clone(),
+                input.clone(),
+            )),
             _ => None,
         })
         .collect();
+    entries.extend(ext.ui.commands.iter().map(|c| {
+        (
+            format!("`ui.commands` `{}`", c.label),
+            c.command.clone(),
+            c.input.clone(),
+        )
+    }));
     if entries.is_empty() {
         return;
     }
     let Some(schema_of) = commands else {
         ext.warnings.push(format!(
-            "{}/extension.yaml: launcher commands weren't checked (no running oxplow to ask \
-             which commands exist) — check the extension from inside oxplow (Settings → \
-             Extensions)",
+            "{}/extension.yaml: its commands weren't checked (no running oxplow to ask which \
+             commands exist) — check the extension from inside oxplow (Settings → Extensions)",
             ext.path
         ));
         return;
     };
-    for (label, command, input) in entries {
-        match schema_of(&command) {
+    for (what, command, input) in entries {
+        let schema = schema_of(&command).or_else(|| provider_command_schema(ext, root, &command));
+        match schema {
             None => ext.errors.push(format!(
-                "{}/extension.yaml: launcher entry `{label}`: no command `{command}` — name a \
-                 registered one",
+                "{}/extension.yaml: {what}: no command `{command}` — name a registered one",
                 ext.path
             )),
             Some(schema) => {
@@ -2140,14 +2163,33 @@ pub fn check_launcher_commands(ext: &mut Extension, commands: Option<CommandSche
                     .and_then(|v| v.check(&input).map_err(|e| e.to_string()));
                 if let Err(e) = fits {
                     ext.errors.push(format!(
-                        "{}/extension.yaml: launcher entry `{label}`: the input doesn't fit \
-                         `{command}`: {e}",
+                        "{}/extension.yaml: {what}: the input doesn't fit `{command}`: {e}",
                         ext.path
                     ));
                 }
             }
         }
     }
+}
+
+/// `command`'s input schema from the declarations of one of `ext`'s own
+/// providers, when the command is in its namespace.
+fn provider_command_schema(
+    ext: &Extension,
+    root: &Path,
+    command: &str,
+) -> Option<serde_json::Value> {
+    let (namespace, verb) = command.split_once('.')?;
+    let spec = ext.providers.iter().find(|p| p.id == namespace)?;
+    let declared = crate::providers::spec::read_declarations(spec, &|rel| {
+        read_extension_file(root, &ext.name, rel)
+    })
+    .ok()?;
+    declared
+        .commands
+        .into_iter()
+        .find(|c| c.name == verb)
+        .map(|c| c.input_schema)
 }
 
 /// Dry-run a loaded extension's models, advisories and lenses, appending
@@ -2159,7 +2201,7 @@ async fn check_extension(
     ext: &mut Extension,
     commands: Option<CommandSchemas<'_>>,
 ) {
-    check_launcher_commands(ext, commands);
+    check_commands(ext, root, commands);
     crate::extension_commands::check_examples(layer, ext, commands).await;
     // Its models, beside the other enabled extensions' (a ref() may name
     // theirs): compiled as temp views, published nowhere (P4.9).
@@ -5060,7 +5102,7 @@ empty: No tasks.
         assert!(
             v.warnings
                 .join("\n")
-                .contains("launcher commands weren't checked"),
+                .contains("its commands weren't checked"),
             "{:?}",
             v.warnings
         );

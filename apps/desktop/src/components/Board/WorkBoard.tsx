@@ -21,7 +21,10 @@ import {
   type WorkItem,
   type WorkItemScope,
 } from "../../workItems.js";
+import { personCommands } from "../../personCommands.js";
 import { recordOpError } from "../opErrorsStore.js";
+import { uiCommandMenuItems, uiCommandsAbout } from "../uiCommands.js";
+import { useUiCommands } from "../useUiCommands.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 
 const LABEL: Record<CanonicalState, string> = {
@@ -37,6 +40,7 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
   const [reads, setReads] = useState<Reads>(NO_READS);
   const [over, setOver] = useState<CanonicalState | null>(null);
   const ctxMenu = useContextMenu();
+  const uiCommands = useUiCommands(null);
   const scopeKey = JSON.stringify(scope);
   const refresh = useCallback(async () => {
     try {
@@ -94,15 +98,18 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
                   e.dataTransfer.effectAllowed = "move";
                 }}
                 onContextMenu={(e) =>
-                  ctxMenu.open(
-                    e,
-                    CANONICAL_STATES.filter((s) => s !== item.state).map((s) => ({
+                  ctxMenu.open(e, [
+                    ...CANONICAL_STATES.filter((s) => s !== item.state).map((s) => ({
                       id: `board-move-${s}`,
                       label: `Move to ${LABEL[s]}`,
                       enabled: true,
                       run: () => void move(item.ref, s),
                     })),
-                  )
+                    // Extensions' commands for the item (P6b.C4).
+                    ...uiCommandMenuItems(uiCommandsAbout(uiCommands, item.ref, "context"), item.ref, (c, input) =>
+                      void personCommands.run(c.label, c.command, input),
+                    ),
+                  ])
                 }
               >
                 <RouteLink
