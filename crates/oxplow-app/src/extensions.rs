@@ -4151,7 +4151,7 @@ empty: No tasks.
         write(
             dir.path(),
             "oxplow/extensions/review/extension.yaml",
-            "name: review\ndescription: Review helpers\nslots:\n  - { slot: work_item.detail.body, lens: tasks }\n",
+            "name: review\ndescription: Review helpers\nslots:\n  - { slot: task-detail, lens: tasks }\n",
         );
         write(
             dir.path(),
@@ -4368,7 +4368,7 @@ empty: No tasks.
         write(
             dir.path(),
             "oxplow/extensions/mine/extension.yaml",
-            "name: mine\nslots:\n  - { slot: effort.review.details, lens: nope }\n  - { slot: sidebar, lens: a }\n  - { slot: effort.review.details, lens: a }\n",
+            "name: mine\nslots:\n  - { slot: effort-review, lens: nope }\n  - { slot: sidebar, lens: a }\n  - { slot: effort-review, lens: a }\n",
         );
         write(
             dir.path(),
@@ -4392,7 +4392,7 @@ empty: No tasks.
         write(
             dir.path(),
             "oxplow/extensions/mine/extension.yaml",
-            "name: mine\nslots:\n  - { slot: settings.section, lens: status }\n",
+            "name: mine\nslots:\n  - { slot: settings, lens: status }\n",
         );
         write(
             dir.path(),
@@ -4634,7 +4634,7 @@ empty: No tasks.
         let thread_lens = "title: Th\nparams: [{ name: thread_id }]\nquery: SELECT :thread_id\n";
         let (_d, ext) = load_x(
             &[("t", task_lens), ("th", thread_lens), ("plain", "title: P\nquery: SELECT 1\n")],
-            "slots:\n  - { slot: work_item.detail.body, lens: t }\n  - { slot: thread.plan.header, lens: th }\n  - { slot: work_item.detail.body, lens: plain }\n",
+            "slots:\n  - { slot: task-detail, lens: t }\n  - { slot: thread, lens: th }\n  - { slot: task-detail, lens: plain }\n",
         );
         let mounted: Vec<(&str, &str)> = ext
             .ui
@@ -4916,7 +4916,7 @@ empty: No tasks.
                 "c",
                 "title: C\nparams: [{ name: change_id }]\nquery: SELECT 1\n",
             )],
-            "slots:\n  - { slot: commit, lens: c }\n",
+            "manifest: 2\nintent:\n  purpose: p\nui:\n  slots:\n    - { slot: commit, lens: c }\n",
         );
         assert!(ext.ui.slots.is_empty());
         let errs = ext.errors.join("\n");
@@ -4945,6 +4945,16 @@ empty: No tasks.
 
     /// P6.G1: the `rail` slot is gone — a lens that needs attention is a
     /// panel's badge. A rail mount says where it went.
+    /// The migration and the load error both rename into the one
+    /// namespace: every new name is a slot, no old name still is one.
+    #[test]
+    fn every_renamed_slot_names_a_slot() {
+        for (old, new) in RENAMED_SLOTS {
+            assert!(SLOTS.iter().any(|(s, _)| s == new), "{old} → {new}");
+            assert!(SLOTS.iter().all(|(s, _)| s != old), "{old}");
+        }
+    }
+
     #[test]
     fn a_rail_mount_is_an_error_naming_panels() {
         let (_d, ext) = load_x(
@@ -5199,7 +5209,7 @@ empty: No tasks.
                 ("both", "title: B\nparams: [{ name: effort_id }]\nquery: SELECT 1\n"),
                 ("none", "title: N\nparams: [{ name: other }]\nquery: SELECT 1\n"),
             ],
-            "slots:\n  - { slot: vcs.commit.details, lens: files }\n  - { slot: vcs.status.details, lens: files }\n  - { slot: effort.review.details, lens: files }\n  - { slot: effort.review.details, lens: both }\n  - { slot: vcs.commit.details, lens: none }\n",
+            "slots:\n  - { slot: commit, lens: files }\n  - { slot: uncommitted, lens: files }\n  - { slot: effort-review, lens: files }\n  - { slot: effort-review, lens: both }\n  - { slot: commit, lens: none }\n",
         );
         let link = ext
             .lenses

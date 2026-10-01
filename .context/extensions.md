@@ -579,7 +579,10 @@ so a person's consent survives it: it prepends `manifest: 2`, inserts
 `description`, `origin: null`, `examples: []` — the agent fills those
 in) after the header, and renames the top-level `sources:` →
 `collectors:` and moves `slots:` under `ui:` (its block indented two
-spaces); every other byte,
+spaces, and each `slot: <v1 name>` in it renamed through `RENAMED_SLOTS`
+— `task-detail` → `work_item.detail.body` and so on — so a real v1
+manifest loads; a name that isn't a v1 name is left for the loader to
+report); every other byte,
 comments included, is unchanged, and it is idempotent.
 `Extension.manifest_version` says which path a loaded extension took.
 

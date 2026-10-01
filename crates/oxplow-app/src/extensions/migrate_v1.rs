@@ -5,7 +5,7 @@
 //! (v1 `sources`) or `advisories` node are what a person's consent
 //! covers. So the migration only **inserts lines at the top**, **renames
 //! `sources:`** and **moves `slots:` under `ui:`** (its block indented two
-//! spaces); every other line is byte-identical.
+//! spaces, each v1 slot name renamed); every other line is byte-identical.
 //! The loader runs it in memory on a v1 manifest (then reads the result
 //! as v2), and `oxplow plugin migrate` writes it to the file — one
 //! conversion, two callers.
@@ -21,7 +21,7 @@ use super::manifest_v2::key_line;
 ///   `description`); the agent fills in `origin` and `examples`;
 /// - `sources:` becomes `collectors:`, and `slots:` becomes `ui:` /
 ///   `  slots:` with its block (comments and blank lines included)
-///   indented under it.
+///   indented under it and each v1 slot name renamed (`RENAMED_SLOTS`).
 pub fn migrate_v1_to_v2(text: &str) -> String {
     if key_line(text, "manifest").is_some() {
         return text.to_string();
@@ -73,7 +73,7 @@ pub fn migrate_v1_to_v2(text: &str) -> String {
             in_slots = true;
         } else if in_slots && !line.trim().is_empty() {
             out.push_str("  ");
-            out.push_str(line);
+            out.push_str(&rename_slots(line));
         } else {
             out.push_str(&rename_key(line));
         }
@@ -81,6 +81,51 @@ pub fn migrate_v1_to_v2(text: &str) -> String {
     if header_end == lines.len() {
         out.push_str(&inserted);
     }
+    out
+}
+
+/// Each `slot: <v1 name>` on a line of the slots block (flow or block
+/// style, bare or quoted) as its v2 name (`RENAMED_SLOTS`); anything else
+/// is left for the loader to report.
+fn rename_slots(line: &str) -> String {
+    const KEY: &str = "slot:";
+    let mut out = String::with_capacity(line.len() + 16);
+    let mut rest = line;
+    while let Some(at) = rest.find(KEY) {
+        let is_key = rest[..at]
+            .chars()
+            .next_back()
+            .is_none_or(|c| matches!(c, ' ' | '{' | ',' | '-'));
+        let (head, tail) = rest.split_at(at + KEY.len());
+        out.push_str(head);
+        rest = tail;
+        if !is_key {
+            continue;
+        }
+        let spaces = rest.len() - rest.trim_start_matches(' ').len();
+        let (lead, value) = rest.split_at(spaces);
+        out.push_str(lead);
+        let quote = value.chars().next().filter(|c| matches!(c, '"' | '\''));
+        let name_at = quote.map_or(0, char::len_utf8);
+        let name_len = value[name_at..]
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .unwrap_or(value.len() - name_at);
+        let name = &value[name_at..name_at + name_len];
+        let after = &value[name_at + name_len..];
+        let closed = match quote {
+            Some(q) => after.starts_with(q),
+            None => after.is_empty() || after.starts_with([' ', ',', '}', '#', '\n', '\r']),
+        };
+        match super::RENAMED_SLOTS.iter().find(|(old, _)| *old == name) {
+            Some((_, new)) if closed && !name.is_empty() => {
+                out.push_str(&value[..name_at]);
+                out.push_str(new);
+                rest = after;
+            }
+            _ => rest = value,
+        }
+    }
+    out.push_str(rest);
     out
 }
 
@@ -143,7 +188,8 @@ mod tests {
     }
 
     /// A slots block's comments and blank lines move with it; a
-    /// column-0 sequence is indented too; the next key ends it.
+    /// column-0 sequence is indented too; the next key ends it; v1 slot
+    /// names become their v2 names.
     #[test]
     fn the_slots_block_moves_whole() {
         let out = migrate_v1_to_v2(
@@ -151,12 +197,28 @@ mod tests {
         );
         assert!(
             out.ends_with(
-                "ui:\n  slots:\n  # review\n  - { slot: commit, lens: a }\n\n  - { slot: thread, lens: b }\nadvisories: []\n"
+                "ui:\n  slots:\n  # review\n  - { slot: vcs.commit.details, lens: a }\n\n  - { slot: thread.plan.header, lens: b }\nadvisories: []\n"
             ),
             "{out}"
         );
         let parsed: ManifestV2 = serde_yaml::from_str(&out).unwrap();
         assert_eq!(parsed.ui.slots.len(), 2);
+    }
+
+    /// Every v1 slot name is renamed, in a flow or block entry, bare or
+    /// quoted; a name that isn't one (or a `slot:` outside the block)
+    /// is left for the loader to report.
+    #[test]
+    fn v1_slot_names_become_their_v2_names() {
+        let out = migrate_v1_to_v2(
+            "name: x\nslots:\n  - slot: task-detail\n    lens: a\n  - { slot: \"uncommitted\", lens: b }\n  - { lens: c, slot: 'effort-review' }\n  - { slot: settings }\n  - { slot: rail, lens: d }\n  - { slot: commitx, lens: e }\nnote: { slot: commit }\n",
+        );
+        assert!(
+            out.ends_with(
+                "ui:\n  slots:\n    - slot: work_item.detail.body\n      lens: a\n    - { slot: \"vcs.status.details\", lens: b }\n    - { lens: c, slot: 'effort.review.details' }\n    - { slot: settings.section }\n    - { slot: rail, lens: d }\n    - { slot: commitx, lens: e }\nnote: { slot: commit }\n"
+            ),
+            "{out}"
+        );
     }
 
     #[test]
