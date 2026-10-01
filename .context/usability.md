@@ -86,6 +86,9 @@ Things I keep forgetting. Read this before adding any UI.
 - **Escape cancels.** Inline edit fields and inline-confirm pairs
   revert on Escape. The legacy modals that haven't migrated yet still
   close on Escape via their own keydown listener.
+  A control that handles Escape (a form, a confirmation, Keep This)
+  stops its propagation, so a container that also listens — the Answers
+  strip collapsing — doesn't fire on the same key.
 - **Disabled submit button when invalid** rather than erroring on
   submit. Show required-field hints inline.
 - **Autofocus the first input** in any inline edit / prompt strip

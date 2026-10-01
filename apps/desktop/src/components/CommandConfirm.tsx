@@ -46,7 +46,11 @@ export function CommandConfirm({
       aria-label={`Confirm ${label}`}
       style={destructive ? { ...boxStyle, borderColor: "var(--severity-critical)" } : boxStyle}
       onKeyDown={(e) => {
-        if (e.key === "Escape") onCancel();
+        if (e.key === "Escape") {
+          // The confirmation's own cancel: a container's Escape mustn't also fire.
+          e.stopPropagation();
+          onCancel();
+        }
       }}
     >
       <div style={{ fontSize: "var(--text-sm)" }}>

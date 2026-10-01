@@ -56,6 +56,8 @@ export function SchemaForm({
       }}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
+          // The form's own cancel: a container's Escape mustn't also fire.
+          e.stopPropagation();
           setDrafts(initialDrafts);
           const out = valueOf(fields, initialDrafts);
           onChange?.(Object.keys(out.errors).length === 0 ? out.value : null);
