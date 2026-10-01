@@ -52,3 +52,19 @@ test("a frame that never says ready, or navigates away, falls back to the table"
   fireEvent.load(away.getByTestId("custom-component-frame"));
   await waitFor(() => expect(away.getByTestId("custom-component-fallback").textContent).toContain("navigated away"));
 });
+
+// A stream switch changes the bundle's URL: a new frame loads, which is
+// not the old one navigating away.
+test("a new bundle URL is a new frame, not a navigation", async () => {
+  const props = (streamId: string) => (
+    <CustomComponentViz run={run({ component: "burndown", props: null })} streamId={streamId} fallback={fallback} base="http://127.0.0.1:9" />
+  );
+  const view = render(props("str1"));
+  fireEvent.load(view.getByTestId("custom-component-frame"));
+  view.rerender(props("str2"));
+  const frame = view.getByTestId("custom-component-frame");
+  expect(frame.getAttribute("src")).toBe("http://127.0.0.1:9/components/str2/x/burndown/");
+  fireEvent.load(frame);
+  await new Promise((r) => setTimeout(r, 20));
+  expect(view.queryByTestId("custom-component-fallback")).toBeNull();
+});

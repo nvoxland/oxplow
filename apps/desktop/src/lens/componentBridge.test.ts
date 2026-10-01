@@ -75,7 +75,7 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
     confirm: async () => true,
     onReady: () => calls.push(["ready"]),
     ...deps,
-  });
+  }, run);
   const send = (data: unknown) => channel.port2.postMessage(data);
   const settle = () => new Promise((r) => setTimeout(r, 20));
   return { received, calls, send, settle, channel };
@@ -119,5 +119,29 @@ test("navigate opens the ref; a malformed request is answered with an error when
     { id: "n1", ok: true, result: null },
     { id: "b1", ok: false, error: { code: "BAD_REQUEST", message: "Not a query, invoke or navigate request." } },
   ]);
+  h.channel.port1.close();
+});
+
+test("ready is heard once; an update posts only a result the frame hasn't seen", async () => {
+  const h = harness();
+  const host = createBridgeHost(h.channel.port1, {
+    query: async () => run,
+    invoke: async () => ({ result: null, audit_id: 1, event_id: null, inverse: null }),
+    navigate: () => {},
+    confirm: async () => true,
+    onReady: () => h.calls.push(["ready"]),
+  }, run);
+  h.send({ type: "ready" });
+  h.send({ type: "ready" });
+  await h.settle();
+  expect(h.calls).toEqual([["ready"]]);
+  host.update({ ...run });
+  await h.settle();
+  expect(h.received).toEqual([], "the run init carried");
+  const next = { ...run, result: { ...run.result, rows: [[1]] } } as LensRun;
+  host.update(next);
+  host.update({ ...next });
+  await h.settle();
+  expect(h.received).toEqual([{ type: "update", run: next }]);
   h.channel.port1.close();
 });

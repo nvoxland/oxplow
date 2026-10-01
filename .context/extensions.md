@@ -903,9 +903,10 @@ accepting SQL from the frame; a component that needs a model writes a
 `hidden: true` lens over it. Load checks, each at its line: the id, a
 duplicate, `bundle` a relative folder without `..` that holds
 `index.html`, no symlink anywhere in it, at most 256 files and 5 MiB
-(`stat_bundle`; a bundled extension has none), each asset a lens id —
-this extension's must be among its lenses — and each command a command
-name. A `custom` lens needs `custom.component` naming one of the
+(`stat_bundle`; a bundled extension has none), each asset a lens id
+alone (no `?params`, `@rev` or `#fragment` — `query(asset)` names the
+lens) — this extension's must be among its lenses — and each command a
+command name. A `custom` lens needs `custom.component` naming one of the
 extension's components and a `query` (its rows are what the component
 shows and what an agent reads); `spec_problem` refuses `custom` (an
 answer can't carry one); an agent reads it through `lens_text` as its
@@ -939,8 +940,12 @@ goes to that frame alone) and listens on the other end only. Frame
 messages (`parseFrameMessage`): `ready`, `{ id, method: query, asset,
 params }` (params SqlCell values only), `{ id, method: invoke, command,
 input }`, `{ id, method: navigate, ref }`; replies `{ id, ok, result |
-error: { code, message } }`; a re-run sends `update { run }`
-(`createBridgeHost`). An invoke that asks shows the host's
+error: { code, message } }`; a re-run sends `update { run }` — only
+when its params or result differ from what the frame last got
+(`createBridgeHost` takes the run `init` carried); a second `ready` is
+ignored. The frame is keyed by its bundle URL (`ComponentFrame`): a
+stream switch mounts a new frame whose first `load` is its own, and a
+failure is remembered per URL. An invoke that asks shows the host's
 `CommandConfirm`; confirming re-runs it confirmed, declining answers
 `CANCELLED`. No `ready` within 3 s, or a second `load` (the frame
 navigated itself), tears it down and shows the table. `ready` records

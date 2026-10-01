@@ -35,7 +35,59 @@ export function CustomComponentViz({
   readyTimeoutMs?: number;
 }) {
   const component = run.lens.custom?.component ?? null;
-  const [failed, setFailed] = useState<string | null>(null);
+  // Why the frame at `src` was given up on; a new `src` starts afresh.
+  const [failed, setFailed] = useState<{ src: string; reason: string } | null>(null);
+  if (!base || !component) return <>{fallback}</>;
+  const src = componentBundleUrl(base, run.lens.extension, component, streamId);
+  if (failed?.src === src) {
+    return (
+      <div>
+        <div data-testid="custom-component-fallback" style={noteStyle}>
+          {failed.reason} Showing its table.
+        </div>
+        {fallback}
+      </div>
+    );
+  }
+  return (
+    <div data-testid="custom-component" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span data-testid="custom-component-badge" style={badgeStyle} title={`${run.lens.extension}'s own component, sandboxed`}>
+        custom
+      </span>
+      {/* Keyed by its URL: a stream switch mounts a new frame, whose first
+          load is its own — never the old frame navigating away. */}
+      <ComponentFrame
+        key={src}
+        src={src}
+        component={component}
+        run={run}
+        streamId={streamId}
+        onOpenPage={onOpenPage}
+        readyTimeoutMs={readyTimeoutMs}
+        onFail={(reason) => setFailed({ src, reason })}
+      />
+    </div>
+  );
+}
+
+/** One frame at one bundle URL and its bridge. */
+function ComponentFrame({
+  src,
+  component,
+  run,
+  streamId,
+  onOpenPage,
+  readyTimeoutMs,
+  onFail,
+}: {
+  src: string;
+  component: string;
+  run: LensRun;
+  streamId: string | null;
+  onOpenPage?(ref: TabRef): void;
+  readyTimeoutMs: number;
+  onFail(reason: string): void;
+}) {
   const [asking, setAsking] = useState<{ command: string; answer(ok: boolean): void } | null>(null);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const hostRef = useRef<ReturnType<typeof createBridgeHost> | null>(null);
@@ -43,23 +95,12 @@ export function CustomComponentViz({
   const runRef = useRef(run);
   runRef.current = run;
 
-  // A re-run reaches a ready component as `update`.
+  // A re-run reaches a ready component as `update` (the host posts only a
+  // result it hasn't shown).
   useEffect(() => {
     hostRef.current?.update(run);
   }, [run]);
   useEffect(() => () => hostRef.current?.close(), []);
-
-  if (!base || !component) return <>{fallback}</>;
-  if (failed) {
-    return (
-      <div>
-        <div data-testid="custom-component-fallback" style={noteStyle}>
-          {failed} Showing its table.
-        </div>
-        {fallback}
-      </div>
-    );
-  }
 
   const onLoad = () => {
     loadsRef.current += 1;
@@ -67,7 +108,7 @@ export function CustomComponentViz({
       // The frame navigated itself: nothing it shows now is the bundle.
       hostRef.current?.close();
       hostRef.current = null;
-      setFailed("The component navigated away.");
+      onFail("The component navigated away.");
       return;
     }
     let ready = false;
@@ -75,50 +116,52 @@ export function CustomComponentViz({
     const timer = setTimeout(() => {
       if (!ready) {
         channel?.port1.close();
-        setFailed("The component didn't start.");
+        onFail("The component didn't start.");
       }
     }, readyTimeoutMs);
     const frame = frameRef.current?.contentWindow;
     // Unreachable, it can't say `ready`; the timer reports it.
     if (!frame) return;
     channel = new MessageChannel();
-    hostRef.current = createBridgeHost(channel.port1, {
-      query: (asset, params) => runComponentQuery(runRef.current.lens.id, asset, params, streamId),
-      invoke: (command, input, confirmed) =>
-        invokeComponentCommand(runRef.current.lens.id, command, input, streamId, confirmed),
-      navigate: (ref) => {
-        const tab = refFromTabId(ref);
-        if (tab) onOpenPage?.(tab);
+    const initial = runRef.current;
+    hostRef.current = createBridgeHost(
+      channel.port1,
+      {
+        query: (asset, params) => runComponentQuery(runRef.current.lens.id, asset, params, streamId),
+        invoke: (command, input, confirmed) =>
+          invokeComponentCommand(runRef.current.lens.id, command, input, streamId, confirmed),
+        navigate: (ref) => {
+          const tab = refFromTabId(ref);
+          if (tab) onOpenPage?.(tab);
+        },
+        confirm: (command) => new Promise<boolean>((answer) => setAsking({ command, answer })),
+        onReady: () => {
+          ready = true;
+          clearTimeout(timer);
+          void recordUsage({ kind: "custom_component", key: `${initial.lens.extension}/${component}`, streamId }).catch(() => {});
+        },
       },
-      confirm: (command) => new Promise<boolean>((answer) => setAsking({ command, answer })),
-      onReady: () => {
-        ready = true;
-        clearTimeout(timer);
-        void recordUsage({ kind: "custom_component", key: `${run.lens.extension}/${component}`, streamId }).catch(() => {});
-      },
-    });
+      initial,
+    );
     const tokens = tokensFromStyle(getComputedStyle(document.documentElement));
     // An opaque-origin frame can only be addressed with "*"; the port goes
     // to this frame's window alone.
     frame.postMessage(
-      { type: "init", run: runRef.current, props: run.lens.custom?.props ?? null, tokens, kitCss: kitCss(tokens) },
+      { type: "init", run: initial, props: initial.lens.custom?.props ?? null, tokens, kitCss: kitCss(tokens) },
       "*",
       [channel.port2],
     );
   };
 
   return (
-    <div data-testid="custom-component" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span data-testid="custom-component-badge" style={badgeStyle} title={`${run.lens.extension}'s own component, sandboxed`}>
-        custom
-      </span>
+    <>
       <iframe
         ref={frameRef}
         data-testid="custom-component-frame"
         title={run.lens.title}
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
-        src={componentBundleUrl(base, run.lens.extension, component, streamId)}
+        src={src}
         onLoad={onLoad}
         style={frameStyle}
       />
@@ -137,7 +180,7 @@ export function CustomComponentViz({
           }}
         />
       ) : null}
-    </div>
+    </>
   );
 }
 

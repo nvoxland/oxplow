@@ -187,8 +187,11 @@ pub fn parse_custom_components(
                 c.id
             ))
         } else if let Some(bad) = assets.iter().find(|a| {
-            oxplow_domain::refs::grammar::CanonicalRef::parse(&format!("lens:{a}"))
-                .map_or(true, |r| kinds.validate(&r).is_err())
+            // A lens id alone: params, a revision or a fragment would make
+            // it a different ref than the one `query(asset)` names.
+            a.contains(['?', '@', '#'])
+                || oxplow_domain::refs::grammar::CanonicalRef::parse(&format!("lens:{a}"))
+                    .map_or(true, |r| kinds.validate(&r).is_err())
         }) {
             Some(format!(
                 "custom component `{}`: asset `{bad}` isn't a lens id (`<slug>` or `<extension>/<slug>`)",
@@ -329,6 +332,16 @@ mod tests {
             ),
             (
                 "{ id: c, bundle: components/burndown, assets: [\"Not A Lens\"] }",
+                "",
+                "isn't a lens id",
+            ),
+            (
+                "{ id: c, bundle: components/burndown, assets: [\"open-tasks?stream_id=2\"] }",
+                "",
+                "isn't a lens id",
+            ),
+            (
+                "{ id: c, bundle: components/burndown, assets: [\"open-tasks#x\"] }",
                 "",
                 "isn't a lens id",
             ),

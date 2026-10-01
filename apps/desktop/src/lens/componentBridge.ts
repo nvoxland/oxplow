@@ -94,8 +94,19 @@ export interface BridgeDeps {
   onReady(): void;
 }
 
-/** Answer the frame's requests arriving on `port`. */
-export function createBridgeHost(port: MessagePort, deps: BridgeDeps): { update(run: LensRun): void; close(): void } {
+/** What a run shows the frame: an `update` repeats none of it. */
+const shown = (run: LensRun) => JSON.stringify([run.params, run.result]);
+
+/** Answer the frame's requests arriving on `port`. `sent` is the run the
+ *  `init` message carried; `update` posts only a run whose params or
+ *  result the frame hasn't seen, and `ready` is heard once. */
+export function createBridgeHost(
+  port: MessagePort,
+  deps: BridgeDeps,
+  sent: LensRun,
+): { update(run: LensRun): void; close(): void } {
+  let last = shown(sent);
+  let ready = false;
   const reply = (id: string, result: unknown) => port.postMessage({ id, ok: true, result });
   const fail = (id: string, code: string, message: string) => port.postMessage({ id, ok: false, error: { code, message } });
   const failWith = (id: string, e: unknown) => {
@@ -133,13 +144,22 @@ export function createBridgeHost(port: MessagePort, deps: BridgeDeps): { update(
   };
   port.onmessage = (e: MessageEvent) => {
     const m = parseFrameMessage(e.data);
-    if (m?.type === "ready") return deps.onReady();
+    if (m?.type === "ready") {
+      if (ready) return;
+      ready = true;
+      return deps.onReady();
+    }
     if (m?.type === "request") return void handle(m.request);
     const id = (e.data as { id?: unknown } | null)?.id;
     if (typeof id === "string" && id) fail(id, "BAD_REQUEST", "Not a query, invoke or navigate request.");
   };
   return {
-    update: (run) => port.postMessage({ type: "update", run }),
+    update: (run) => {
+      const key = shown(run);
+      if (key === last) return;
+      last = key;
+      port.postMessage({ type: "update", run });
+    },
     close: () => port.close(),
   };
 }

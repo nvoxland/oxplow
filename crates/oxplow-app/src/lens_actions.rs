@@ -235,10 +235,18 @@ fn component_of(
     lens_root: &Path,
     lens_id: &str,
 ) -> Result<extensions::custom_components::CustomComponent, CommandError> {
-    let lens = svc
+    // One catalog read: the lens and its extension's components together.
+    let not_found = || CommandError::from(oxplow_domain::DomainError::NotFound);
+    let (ext_name, slug) = lens_id.split_once('/').ok_or_else(not_found)?;
+    let ext = svc
         .extension_catalog
-        .find_lens(lens_root, lens_id)
+        .named(lens_root, ext_name)
         .map_err(CommandError::from)?;
+    let lens = ext
+        .lenses
+        .iter()
+        .find(|l| l.slug == slug)
+        .ok_or_else(not_found)?;
     let component = match (&lens.viz, &lens.custom) {
         (extensions::LensViz::Custom, Some(c)) => c.component.clone().unwrap_or_default(),
         _ => {
@@ -248,13 +256,10 @@ fn component_of(
             })
         }
     };
-    let ext = svc
-        .extension_catalog
-        .named(lens_root, &lens.extension)
-        .map_err(CommandError::from)?;
     ext.custom_components
-        .into_iter()
+        .iter()
         .find(|c| c.id == component)
+        .cloned()
         .ok_or_else(|| CommandError::Invalid {
             field: Some("/lens".into()),
             message: format!("`{lens_id}`'s component `{component}` isn't loaded"),
