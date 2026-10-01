@@ -543,7 +543,8 @@ declaring *what it is* and mounting the generic layer.
   would be here, one sentence on how it gets here, and 1–3 prompts the
   person can hand the agent. Each prompt is an Ask — it fills the agent's
   input and never sends. `compact` is the one-line form (rail sections,
-  the ACP transcript). Don't offer prompts for what an agent can't do
+  the ACP transcript). A loading state isn't an empty one: "Starting the
+  agent…" is plain text, and only the empty transcript is an `EmptyState`. Don't offer prompts for what an agent can't do
   (AI providers, keys, consent): say who does it instead. Its root
   carries `data-empty-state`, which is how a test tells an `EmptyState`
   from plain copy (`components/Prompts/emptyStates.test.tsx` mounts the

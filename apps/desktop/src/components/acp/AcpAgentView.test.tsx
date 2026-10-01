@@ -66,6 +66,20 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("AcpAgentView", () => {
+  // Starting is a loading state, said plainly; only an empty transcript
+  // is an EmptyState (what would be here, and prompts to start it).
+  test("the starting state is plain text; an empty transcript is an EmptyState", async () => {
+    snapshot = { ...snapshot, status: "starting", items: [] };
+    const starting = render(<AcpAgentView thread={thread} visible={true} />);
+    await waitFor(() => expect(starting.getByTestId("acp-transcript").textContent).toContain("Starting the agent"));
+    expect(starting.container.querySelector("[data-empty-state]")).toBeNull();
+    starting.unmount();
+
+    snapshot = { ...snapshot, status: "idle", items: [] };
+    const empty = render(<AcpAgentView thread={thread} visible={true} />);
+    await waitFor(() => expect(empty.container.querySelector("[data-empty-state]")).not.toBeNull());
+  });
+
   test("Put in input fills the draft and sends nothing; Enter sends once", async () => {
     const view = render(<AcpAgentView thread={thread} visible={true} />);
     await waitFor(() => view.getByTestId("acp-directive"));

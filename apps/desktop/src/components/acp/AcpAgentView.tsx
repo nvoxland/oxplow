@@ -30,7 +30,6 @@ import {
 } from "./acpTranscript.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
 
-const NO_MESSAGES = "No messages yet.";
 
 interface Props {
   thread: Thread;
@@ -192,7 +191,7 @@ export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpen
         onOpenFile={onOpenFile}
         onOpenPage={onOpenPage}
         onError={report}
-        emptyText={opening || state.status === "starting" ? "Starting the agent…" : NO_MESSAGES}
+        starting={opening || state.status === "starting"}
       />
 
       {state.status === "stopped" && state.closedReason && (
@@ -266,7 +265,7 @@ function Transcript({
   onOpenFile,
   onOpenPage,
   onError,
-  emptyText,
+  starting,
 }: {
   items: TranscriptItem[];
   threadId: string;
@@ -275,7 +274,9 @@ function Transcript({
   onOpenFile?(absPath: string): void;
   onOpenPage?(ref: TabRef): void;
   onError(err: unknown): void;
-  emptyText: string;
+  /** The session is starting: said plainly — a loading state isn't an
+   *  empty one. */
+  starting: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pinned = useRef(true);
@@ -298,11 +299,13 @@ function Transcript({
       }}
       style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}
     >
-      {items.length === 0 ? (
+      {items.length === 0 && starting ? (
+        <div style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>Starting the agent…</div>
+      ) : items.length === 0 ? (
         <EmptyState
           compact
-          title={emptyText}
-          prompts={emptyText === NO_MESSAGES ? ["What changed in this project this week?", "What's in progress right now?"] : []}
+          title="No messages yet"
+          prompts={["What changed in this project this week?", "What's in progress right now?"]}
         />
       ) : (
         items.map((item) => (
