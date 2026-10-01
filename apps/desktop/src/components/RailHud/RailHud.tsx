@@ -8,8 +8,9 @@ import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, commentsRef, tas
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./sections.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
-import { getPanelLayout, listExtensions, setPanelLayout } from "../../api.js";
-import { extensionsChanged, NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
+import { getPanelLayout, setPanelLayout } from "../../api.js";
+import { useExtensions } from "../../extensionsStore.js";
+import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import { LensResultView } from "../../lens/LensResultView.js";
 import type { ExtensionPanel, PanelPlacement, Reads } from "../../tauri-bridge/generated/bindings.js";
 import {
@@ -31,7 +32,6 @@ import {
   listCommentsForStream,
   listRecentPageVisits,
   subscribeCommentEvents,
-  subscribeOxplowEvents,
   subscribePageVisitEvents,
   topVisitedPages,
   type PageVisitApi,
@@ -1294,30 +1294,11 @@ function ExtensionPanelSection({
   );
 }
 
-/** The enabled extensions' panels for this stream, re-read when an
- *  extension's files change. */
+/** The enabled extensions' panels for this stream (the shared extensions
+ *  store, so it follows their changes). */
 function useExtensionPanels(streamId: string | null): ExtensionPanel[] {
-  const [panels, setPanels] = useState<ExtensionPanel[]>([]);
-  useEffect(() => {
-    let live = true;
-    const load = () =>
-      void listExtensions(streamId)
-        .then((exts) => {
-          if (live) setPanels(exts.filter((e) => e.enabled).flatMap((e) => e.panels));
-        })
-        .catch(() => {
-          if (live) setPanels([]);
-        });
-    load();
-    const off = subscribeOxplowEvents((event) => {
-      if (extensionsChanged(event as Record<string, unknown>)) load();
-    });
-    return () => {
-      live = false;
-      off();
-    };
-  }, [streamId]);
-  return panels;
+  const exts = useExtensions(streamId);
+  return useMemo(() => (exts ?? []).filter((e) => e.enabled).flatMap((e) => e.panels), [exts]);
 }
 
 function CommentsSection({

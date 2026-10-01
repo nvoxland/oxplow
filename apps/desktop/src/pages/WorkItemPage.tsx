@@ -6,6 +6,7 @@ import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { LensSlots } from "../lens/LensSlots.js";
 import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
 import { personCommands } from "../personCommands.js";
+import { useRequestGuard } from "../request-guard.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { Page } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
@@ -61,18 +62,22 @@ export function WorkItemPage({
   const [features, setFeatures] = useState<WorkItemsFeatures>(NO_FEATURES);
   const [reads, setReads] = useState<Reads>(NO_READS);
   const [loaded, setLoaded] = useState(false);
+  const guard = useRequestGuard();
   const refresh = useCallback(async () => {
+    // A newer read (another ref, or a re-run) wins over an older answer.
+    const current = guard.begin();
     try {
       const [one, providers] = await Promise.all([readWorkItem(workItemRef), readCapabilityProviders("work_items")]);
+      if (!current()) return;
       setItem(one.item);
       setFeatures(one.item ? featuresFor(providers.providers, one.item.provider) : NO_FEATURES);
       setReads(unionReads([one.reads, providers.reads]));
     } catch (e) {
+      if (!current()) return;
       recordOpError({ label: "Load the work item", message: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setLoaded(true);
     }
-  }, [workItemRef]);
+    setLoaded(true);
+  }, [workItemRef, guard]);
   useEffect(() => void refresh(), [refresh]);
   useRerunOnChange(reads, () => void refresh());
   const slotParams = useMemo(() => ({ ref: workItemRef, task_id: null }), [workItemRef]);

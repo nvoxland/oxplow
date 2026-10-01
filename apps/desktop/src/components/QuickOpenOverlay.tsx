@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useExtensions } from "../extensionsStore.js";
 import {
-  listExtensions,
   listRecentPageVisits,
   listWorkspaceFiles,
   searchSite,
@@ -30,7 +30,7 @@ import type { PageCategory, PageDirectoryEntry } from "./RailHud/sections.js";
 import { mergeDirectory } from "../lens/lensModel.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { personCommands } from "../personCommands.js";
-import { launcherDirectory, type LauncherAction } from "./extensionLauncher.js";
+import { launcherDirectory } from "./extensionLauncher.js";
 
 interface Props {
   open: boolean;
@@ -265,31 +265,12 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
 
   // Lenses from this stream's extensions join the page directory under
   // their `launcher.category` ("Lenses" by default), so they're both browsable (start menu) and
-  // searchable. Re-read on every open: lens files are ordinary project
-  // files the agent may have just written.
+  // searchable — from the shared extensions store, which reloads when
+  // lens files change (the agent may have just written one).
   // Their manifest `launcher:` entries join too: a ref as a page, a
   // command or prompt as an action (P6.D1).
-  const [lensPages, setLensPages] = useState<PageDirectoryEntry[]>([]);
-  const [launcherActions, setLauncherActions] = useState<LauncherAction[]>([]);
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    void listExtensions(stream?.id ?? null)
-      .then((exts) => {
-        if (cancelled) return;
-        const dir = launcherDirectory(exts);
-        setLensPages(dir.pages);
-        setLauncherActions(dir.actions);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setLensPages([]);
-        setLauncherActions([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, stream?.id]);
+  const exts = useExtensions(stream?.id ?? null);
+  const { pages: lensPages, actions: launcherActions } = useMemo(() => launcherDirectory(exts ?? []), [exts]);
   const pages = useMemo(() => mergeDirectory(staticPages, lensPages), [staticPages, lensPages]);
 
   // Recent pages for the "Recent" start-menu section: the 10 most recent

@@ -840,9 +840,17 @@ under the extension's name. `check_commands` (it replaced
 alike against the registry — or, for one of the extension's own
 providers (not on the bus until its instance runs), against its
 declarations (`provider_command_schema`). The desktop reads them from
-the extensions list (`useUiCommands`, reloaded on `extensionsChanged`)
-and runs each as the person through `personCommands`
-(`components/uiCommands.ts`).
+the extensions list (`useUiCommands`) and runs each as the person
+through `personCommands` (`components/uiCommands.ts`).
+
+**The desktop reads the extensions from one store**
+(`extensionsStore.ts`, `useExtensions(streamId)`): one `listExtensions`
+per stream and one event subscription however many readers are mounted
+(slots, `useSlotMounted`, `SettingsSlotSections`, `ui.commands` menus,
+decorators, rail panels, extension pages, the launcher), reloaded on
+`extensionsChanged`; an entry lives while something reads it, so a later
+mount loads afresh. Only Settings → Extensions lists them itself — it
+reloads after its own installs and updates.
 
 ## Custom components (experimental)
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
-import { listExtensions, runLens, type LensRun, type SqlCell } from "../api.js";
+import { runLens, type LensRun, type SqlCell } from "../api.js";
+import { useExtensions } from "../extensionsStore.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import { RouteLink } from "../tabs/RouteLink.js";
@@ -45,12 +46,13 @@ export function LensSlots({
   >([]);
   const paramsKey = JSON.stringify(params);
   const guard = useRequestGuard();
+  const exts = useExtensions(streamId);
 
   const refresh = useCallback(async () => {
-    if (params === null) return;
+    if (params === null || exts === null) return;
     const current = guard.begin();
     try {
-      const mounts = slotRuns(await listExtensions(streamId), slot, params, extension);
+      const mounts = slotRuns(exts, slot, params, extension);
       const next = await Promise.all(
         mounts.map(async ({ id, params: lensParams }) => {
           try {
@@ -66,7 +68,7 @@ export function LensSlots({
     }
     // paramsKey stands in for `params` (a fresh object each render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slot, paramsKey, streamId, extension, guard]);
+  }, [exts, slot, paramsKey, streamId, extension, guard]);
 
   useEffect(() => {
     // New inputs: drop the old results (another thread's rows) and any
