@@ -166,10 +166,14 @@ The rail's sections are **panels** (`components/Panels/panelLayout.ts`):
 core's (`core:alerts`, `core:uncommitted`, `core:comments`, `core:work`,
 `core:bookmarks`) and every enabled extension's `panels:`
 (`ext:<extension>/<id>`, rendered by `ExtensionPanelSection`: the body
-lens compact, the badge lens's alert count in the header via
-`usePanelRuns`, which binds the panel's scope — `stream_id` / `thread_id`
-as row ids, from `panelParams` — for the stream and thread the rail shows,
-and re-runs when either changes). **Alerts** lists every firing badge.
+lens compact, the badge lens's alert count in the header). The rail is
+the one owner of every panel's runs (`components/Panels/usePanelRuns.ts`
+→ `useExtensionPanelRuns`): it binds each panel's scope — `stream_id` /
+`thread_id` as row ids, from `panelParams` — for the stream and thread it
+shows, re-runs when either changes or when a read changes, and hands each
+section its runs. **Alerts** is derived from the same runs
+(`panelAlerts`): every firing badge, once, so a badge never runs twice
+and the header count and Alerts can't disagree.
 The set of extension panels (like extension pages, slot mounts and the
 prompt catalog) reloads on `lensRerun.extensionsChanged`: a file under
 `oxplow/extensions/` changed, or the config did — enabling or disabling

@@ -8,9 +8,8 @@ import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, commentsRef, tas
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./sections.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
-import { getPanelLayout, listExtensions, runLens, setPanelLayout } from "../../api.js";
-import { firingAlerts } from "../../lens/lensModel.js";
-import { extensionsChanged, NO_READS, unionReads, useRerunOnChange } from "../../lens/lensRerun.js";
+import { getPanelLayout, listExtensions, setPanelLayout } from "../../api.js";
+import { extensionsChanged } from "../../lens/lensRerun.js";
 import { LensResultView } from "../../lens/LensResultView.js";
 import type { ExtensionPanel, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
 import {
@@ -22,7 +21,7 @@ import {
   showPanel,
   toggleCollapsed,
 } from "../Panels/panelLayout.js";
-import { panelParams, usePanelRuns } from "../Panels/usePanelRuns.js";
+import { panelAlerts, useExtensionPanelRuns, type PanelAlert, type PanelRuns } from "../Panels/usePanelRuns.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import { recordOpError } from "../opErrorsStore.js";
 import {
@@ -403,6 +402,10 @@ export function RailHud({
   const readyItems = useMemo(() => computeUpNext(threadWork, 50), [threadWork]);
   const width = useRailWidth();
   const extPanels = useExtensionPanels(streamId ?? null);
+  // One owner for every panel's lens runs: each section reads its own,
+  // and Alerts is derived from the same runs.
+  const panelRuns = useExtensionPanelRuns(extPanels, streamId ?? null, threadId);
+  const alerts = useMemo(() => panelAlerts(extPanels, panelRuns), [extPanels, panelRuns]);
   const available = useMemo(
     () => [...CORE_PANELS.map((p) => p.id), ...extPanels.map(extensionPanelId)],
     [extPanels],
@@ -417,9 +420,7 @@ export function RailHud({
   function renderSection(id: RailSectionId): ReactNode {
     switch (id) {
       case "core:alerts":
-        return (
-          <AlertsSection key={id} panels={extPanels} streamId={streamId ?? null} threadId={threadId} onOpenPage={onOpenPage} />
-        );
+        return <AlertsSection key={id} alerts={alerts} onOpenPage={onOpenPage} />;
       case "core:uncommitted":
         return <UncommittedSection key={id} summary={uncommitted ?? null} onOpenPage={onOpenPage} />;
       case "core:comments":
@@ -442,7 +443,13 @@ export function RailHud({
       default: {
         const panel = extPanels.find((p) => extensionPanelId(p) === id);
         return panel ? (
-          <ExtensionPanelSection key={id} panel={panel} streamId={streamId ?? null} threadId={threadId} onOpenPage={onOpenPage} />
+          <ExtensionPanelSection
+            key={id}
+            panel={panel}
+            runs={panelRuns[panel.id] ?? { body: null, badge: null, count: null }}
+            streamId={streamId ?? null}
+            onOpenPage={onOpenPage}
+          />
         ) : null;
       }
     }
@@ -1168,36 +1175,7 @@ function UncommittedSection({
 /// hidden when there are none. Each row opens the Comments inbox.
 /** Alerts (a core panel, P6.G1): every panel badge that fires, one row
  *  each with its message, opening the badge's lens. Live. */
-function AlertsSection({
-  panels,
-  streamId,
-  threadId,
-  onOpenPage,
-}: {
-  panels: ExtensionPanel[];
-  streamId: string | null;
-  threadId: string | null;
-  onOpenPage(ref: TabRef): void;
-}) {
-  const [alerts, setAlerts] = useState<{ id: string; title: string; message: string }[]>([]);
-  const [reads, setReads] = useState(NO_READS);
-  const badges = useMemo(
-    () => panels.filter((p): p is ExtensionPanel & { badge: string } => p.badge !== null),
-    [panels],
-  );
-  const refresh = useCallback(async () => {
-    const runs = await Promise.all(
-      badges.map(async (p) => ({
-        id: p.badge,
-        run: await runLens(p.badge, panelParams(p.scope, streamId, threadId), streamId).catch(() => null),
-      })),
-    );
-    setAlerts(firingAlerts(runs));
-    setReads(unionReads(runs.map(({ run }) => run?.result.reads)));
-  }, [badges, streamId, threadId]);
-  useEffect(() => void refresh(), [refresh]);
-  useRerunOnChange(reads, () => void refresh());
-
+function AlertsSection({ alerts, onOpenPage }: { alerts: PanelAlert[]; onOpenPage(ref: TabRef): void }) {
   return (
     <RailSection id="core:alerts" title="Alerts" count={alerts.length || undefined}>
       {alerts.length === 0 ? <RailEmpty label="Nothing needs you" /> : null}
@@ -1223,16 +1201,16 @@ function AlertsSection({
  *  count in the header while the badge fires. */
 function ExtensionPanelSection({
   panel,
+  runs,
   streamId,
-  threadId,
   onOpenPage,
 }: {
   panel: ExtensionPanel;
+  /** The panel's runs, from the rail's one owner (`useExtensionPanelRuns`). */
+  runs: PanelRuns;
   streamId: string | null;
-  threadId: string | null;
   onOpenPage(ref: TabRef): void;
 }) {
-  const runs = usePanelRuns(panel, streamId, threadId);
   return (
     <RailSection
       id={extensionPanelId(panel)}

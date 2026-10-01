@@ -474,15 +474,6 @@ export function childParams(child: Lens, params: Record<string, SqlCell>): Recor
   return out;
 }
 
-/** The rail badges: each mounted rail lens whose alert fires, with the
- *  alert's message. Lenses that failed to run, or have no alert, drop out. */
-export function firingAlerts(
-  runs: { id: string; run: LensRun | null }[],
-): { id: string; title: string; message: string }[] {
-  return runs.flatMap(({ id, run }) =>
-    run?.alert?.firing ? [{ id, title: run.lens.title, message: run.alert.message }] : [],
-  );
-}
 
 /** The starter prompt "New Lens with Your Agent…" puts in the agent's
  *  input for the person to finish and send (it's never sent for them).

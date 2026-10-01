@@ -1,9 +1,12 @@
-/// An extension panel's lens runs (P6.G1): its body, and its badge — the
-/// badge lens's alert count while it fires. Live: re-run when what they
-/// read changes, and when the stream or thread the panel is shown for
-/// changes. The nav states the scope's binding (`panelParams`) rather
-/// than leaving the backend to infer the thread from the selection.
-import { useCallback, useEffect, useState } from "react";
+/// The extension panels' lens runs (P6.G1): each panel's body, and its
+/// badge — the badge lens's alert count while it fires. One owner (the
+/// rail) runs them all, once per refresh, and hands each panel its runs;
+/// the Alerts panel is derived from the same runs (`panelAlerts`), so a
+/// badge never runs twice and the header count and Alerts can't disagree.
+/// Live: re-run when what they read changes, and when the stream or
+/// thread the rail shows changes. The nav states each scope's binding
+/// (`panelParams`) rather than leaving the backend to infer the thread.
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { runLens, type LensRun } from "../../api.js";
 import { NO_READS, unionReads, useRerunOnChange } from "../../lens/lensRerun.js";
@@ -41,29 +44,49 @@ export function panelParams(
   }
 }
 
-export function usePanelRuns(
-  panel: ExtensionPanel,
+export interface PanelAlert {
+  /** The badge lens (`<extension>/<slug>`); opening the alert opens it. */
+  id: string;
+  title: string;
+  message: string;
+}
+
+/** The Alerts panel's rows: every panel whose badge fires, from the runs
+ *  the rail already made. */
+export function panelAlerts(panels: readonly ExtensionPanel[], runs: Readonly<Record<string, PanelRuns>>): PanelAlert[] {
+  return panels.flatMap((p) => {
+    const badge = p.badge ? runs[p.id]?.badge : null;
+    return badge?.alert?.firing ? [{ id: badge.lens.id, title: badge.lens.title, message: badge.alert.message }] : [];
+  });
+}
+
+/** Every panel's runs, by panel id, for the stream and thread shown. */
+export function useExtensionPanelRuns(
+  panels: readonly ExtensionPanel[],
   streamId: string | null,
   threadId: string | null,
-  runBody = true,
-): PanelRuns {
-  const [body, setBody] = useState<LensRun | null>(null);
-  const [badge, setBadge] = useState<LensRun | null>(null);
+): Record<string, PanelRuns> {
+  const [runs, setRuns] = useState<Record<string, PanelRuns>>({});
   const [reads, setReads] = useState<Reads>(NO_READS);
-  // Keyed on the panel's fields, not its identity: a caller may build the
-  // panel object per render.
-  const { body: bodyLens, badge: badgeLens, scope } = panel;
+  // Keyed on the panels' fields, not the list's identity: a caller may
+  // build the list per render.
+  const key = panels.map((p) => [p.id, p.scope, p.body, p.badge ?? ""].join("\u0000")).join("\n");
+  const stable = useMemo(() => panels, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const refresh = useCallback(async () => {
-    const params = panelParams(scope, streamId, threadId);
-    const [b, g] = await Promise.all([
-      runBody ? runLens(bodyLens, params, streamId).catch(() => null) : Promise.resolve(null),
-      badgeLens ? runLens(badgeLens, params, streamId).catch(() => null) : Promise.resolve(null),
-    ]);
-    setBody(b);
-    setBadge(g);
-    setReads(unionReads([b?.result.reads, g?.result.reads]));
-  }, [bodyLens, badgeLens, scope, streamId, threadId, runBody]);
+    const entries = await Promise.all(
+      stable.map(async (p) => {
+        const params = panelParams(p.scope, streamId, threadId);
+        const [body, badge] = await Promise.all([
+          runLens(p.body, params, streamId).catch(() => null),
+          p.badge ? runLens(p.badge, params, streamId).catch(() => null) : Promise.resolve(null),
+        ]);
+        return [p.id, { body, badge, count: badgeCount(badge) }] as const;
+      }),
+    );
+    setRuns(Object.fromEntries(entries));
+    setReads(unionReads(entries.flatMap(([, r]) => [r.body?.result.reads, r.badge?.result.reads])));
+  }, [stable, streamId, threadId]);
   useEffect(() => void refresh(), [refresh]);
   useRerunOnChange(reads, () => void refresh());
-  return { body, badge, count: badgeCount(badge) };
+  return runs;
 }

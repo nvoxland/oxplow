@@ -14,10 +14,10 @@ mock.module("../../api.js", () => ({
     return { lens: { id } as LensRun["lens"], params, result: { columns: [], rows: [], truncated: false }, alert: null };
   },
 }));
-const { badgeCount, panelParams, usePanelRuns } = await import("./usePanelRuns.js");
+const { badgeCount, panelAlerts, panelParams, useExtensionPanelRuns } = await import("./usePanelRuns.js");
 
-const panel = (scope: ExtensionPanel["scope"]): ExtensionPanel =>
-  ({ id: "x/p", extension: "x", title: "P", icon: null, scope, body: "x/body", badge: null }) as ExtensionPanel;
+const panel = (scope: ExtensionPanel["scope"], over: Partial<ExtensionPanel> = {}): ExtensionPanel =>
+  ({ id: "x/p", extension: "x", title: "P", icon: null, scope, body: "x/body", badge: null, ...over }) as ExtensionPanel;
 
 // P6.G1: a panel whose badge lens fires shows the alert's count.
 test("a firing badge's count; a quiet one has none", () => {
@@ -39,14 +39,36 @@ test("a panel's scope binds the stream or thread it's shown for", () => {
   expect(panelParams("thread", "str2", null)).toEqual({});
 });
 
-test("a thread-scoped panel re-runs for the thread it's shown for", async () => {
+// One owner runs every panel's lenses — each body and badge once per
+// refresh — and both the panel's header and the Alerts panel read from
+// those runs, so a badge never runs twice and the two never disagree.
+test("the rail runs each panel's body and badge once; a thread-scoped panel re-runs for its thread", async () => {
   runs.length = 0;
-  const view = renderHook(({ threadId }: { threadId: string | null }) => usePanelRuns(panel("thread"), "str2", threadId), {
-    initialProps: { threadId: "thr1" },
-  });
-  await waitFor(() => expect(runs.length).toBe(1));
-  expect(runs[0]).toEqual({ id: "x/body", params: { thread_id: 1 }, streamId: "str2" });
+  const panels = [panel("thread"), panel("project", { id: "x/q", body: "x/q-body", badge: "x/q-badge" })];
+  const view = renderHook(
+    ({ threadId }: { threadId: string | null }) => useExtensionPanelRuns(panels, "str2", threadId),
+    { initialProps: { threadId: "thr1" } },
+  );
+  await waitFor(() => expect(Object.keys(view.result.current).sort()).toEqual(["x/p", "x/q"]));
+  expect(runs.map((r) => r.id).sort()).toEqual(["x/body", "x/q-badge", "x/q-body"]);
+  expect(runs.find((r) => r.id === "x/body")).toEqual({ id: "x/body", params: { thread_id: 1 }, streamId: "str2" });
   view.rerender({ threadId: "thr2" });
-  await waitFor(() => expect(runs.length).toBe(2));
-  expect(runs[1]?.params).toEqual({ thread_id: 2 });
+  await waitFor(() => expect(runs.filter((r) => r.id === "x/body").length).toBe(2));
+  expect(runs.filter((r) => r.id === "x/body")[1]?.params).toEqual({ thread_id: 2 });
+});
+
+test("the alerts are the badges that fire, from the same runs", () => {
+  const firing = { lens: { id: "x/q-badge", title: "Q" }, alert: { firing: true, count: 2, value: null, message: "2 rows" } } as unknown as LensRun;
+  const quiet = { lens: { id: "x/r-badge", title: "R" }, alert: { firing: false, count: 0, value: null, message: "" } } as unknown as LensRun;
+  const panels = [
+    panel("project", { id: "x/q", badge: "x/q-badge" }),
+    panel("project", { id: "x/r", badge: "x/r-badge" }),
+    panel("project", { id: "x/p" }),
+  ];
+  const alerts = panelAlerts(panels, {
+    "x/q": { body: null, badge: firing, count: 2 },
+    "x/r": { body: null, badge: quiet, count: null },
+    "x/p": { body: null, badge: null, count: null },
+  });
+  expect(alerts).toEqual([{ id: "x/q-badge", title: "Q", message: "2 rows" }]);
 });
