@@ -1,6 +1,5 @@
 title: Review
 description: Recent local-history snapshots and code-quality findings.
-query: SELECT 1
 viz: grid
 children: [recent-snapshots, findings]
 launcher: { category: Code }

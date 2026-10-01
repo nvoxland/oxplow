@@ -1657,6 +1657,21 @@ fn parse_panels(
 }
 
 /// Why `lens` can't render with its viz, if it can't.
+/// A grid's problem, if any: it names children, and each one in its own
+/// extension exists. It needs no `query` — it renders no rows of its own.
+fn grid_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
+    if lens.children.is_empty() {
+        return Some("viz `grid` needs `children: [lens, ...]`".into());
+    }
+    lens.children
+        .iter()
+        .find(|c| {
+            c.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str())
+                && !ids_in_extension.contains(c)
+        })
+        .map(|c| format!("child lens `{c}` isn't in this extension's lenses/"))
+}
+
 fn shape_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
     // `block` names the lens key the missing columns go under.
     let need = |block: &str, fields: &[(&str, &Option<String>)]| -> Option<String> {
@@ -1712,21 +1727,13 @@ fn shape_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
                     .map(|e| format!("form: {e}"))
             })
         }
+        // A grid composes its children; it renders no rows of its own.
+        // A grid composes its children; it renders no rows of its own.
+        LensViz::Grid => grid_problem(lens, ids_in_extension),
         _ if lens.query.trim().is_empty() => Some(format!(
             "viz `{}` needs a `query`",
             format!("{:?}", lens.viz).to_lowercase()
         )),
-        LensViz::Grid if lens.children.is_empty() => {
-            Some("viz `grid` needs `children: [lens, ...]`".into())
-        }
-        LensViz::Grid => lens
-            .children
-            .iter()
-            .find(|c| {
-                c.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str())
-                    && !ids_in_extension.contains(c)
-            })
-            .map(|c| format!("child lens `{c}` isn't in this extension's lenses/")),
         LensViz::Table | LensViz::List | LensViz::Number | LensViz::Markdown | LensViz::Detail => {
             None
         }
@@ -3896,7 +3903,7 @@ empty: No tasks.
         write(
             dir.path(),
             "oxplow/extensions/board/lenses/all.yaml",
-            "title: All\nquery: SELECT 1\nviz: grid\nchildren: [review/tasks, review/missing]\n",
+            "title: All\nviz: grid\nchildren: [review/tasks, review/missing]\n",
         );
         let board = only(dir.path(), "board");
         assert!(
@@ -4089,6 +4096,33 @@ empty: No tasks.
         (dir, ext)
     }
 
+    /// A grid composes its children and never renders rows of its own, so
+    /// it needs no `query` (like a form); every other viz still does.
+    #[test]
+    fn a_grid_needs_no_query() {
+        let (_d, ext) = load_x(
+            &[
+                ("n", "title: N\nquery: SELECT 1 AS n\nviz: number\n"),
+                ("all", "title: All\nviz: grid\nchildren: [n]\n"),
+                ("bare", "title: B\nviz: table\n"),
+            ],
+            "",
+        );
+        assert!(
+            ext.lenses.iter().any(|l| l.slug == "all"),
+            "{:?}",
+            ext.errors
+        );
+        assert!(!ext.lenses.iter().any(|l| l.slug == "bare"));
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("viz `table` needs a `query`")),
+            "{:?}",
+            ext.errors
+        );
+    }
+
     #[test]
     fn chart_lenses_parse_and_missing_fields_are_errors() {
         let (_d, ext) = load_x(
@@ -4096,9 +4130,9 @@ empty: No tasks.
                 ("visits", "title: V\nquery: SELECT 'a' AS day, 1 AS n\nviz: bar\nchart: { x: day, y: n }\n"),
                 ("trend", "title: T\nquery: SELECT 1 AS at, 2 AS v, 'm' AS s\nviz: line\nchart: { x: at, y: v, series: s }\n"),
                 ("map", "title: M\nquery: SELECT 'p' AS path, 3 AS churn, 'core' AS zone\nviz: treemap\nchart: { label: path, size: churn, group: zone }\n"),
-                ("all", "title: All\nquery: SELECT 1\nviz: grid\nchildren: [visits, trend]\n"),
+                ("all", "title: All\nviz: grid\nchildren: [visits, trend]\n"),
                 ("nobar", "title: N\nquery: SELECT 1\nviz: bar\n"),
-                ("badgrid", "title: G\nquery: SELECT 1\nviz: grid\nchildren: [nope]\n"),
+                ("badgrid", "title: G\nviz: grid\nchildren: [nope]\n"),
             ],
             "",
         );

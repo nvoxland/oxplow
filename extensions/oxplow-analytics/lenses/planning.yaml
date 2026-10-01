@@ -1,6 +1,5 @@
 title: Planning
 description: What's ready to pick up, what's parked in the backlog, and the notes that changed lately.
-query: SELECT 1
 viz: grid
 children: [ready-tasks, backlog-tasks, recent-notes]
 launcher: { category: Work }

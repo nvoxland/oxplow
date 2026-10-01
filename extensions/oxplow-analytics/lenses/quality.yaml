@@ -1,6 +1,5 @@
 title: Quality
 description: Duplicated code the scans found. Open a row to compare both copies side by side.
-query: SELECT 1
 viz: grid
 children: [duplicate-blocks]
 launcher: { category: Code }

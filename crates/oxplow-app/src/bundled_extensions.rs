@@ -241,6 +241,8 @@ mod tests {
             let queries = ext
                 .lenses
                 .iter()
+                // A grid or a form reads nothing of its own.
+                .filter(|l| !l.query.trim().is_empty())
                 .map(|l| (format!("lens {}", l.id), l.query.clone()))
                 .chain(
                     ext.advisories

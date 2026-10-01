@@ -205,7 +205,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `lens_actions::submit_form`) runs the command as the lens acting for
     the person, the defaults under what they entered; a command that asks
     shows `CommandConfirm`. A form's text rendering names its command
-    (an agent runs the command itself). Only a form may omit `query`. The loader drops a
+    (an agent runs the command itself). Only a form and a grid (which renders its children, never rows of its own) omit `query`. The loader drops a
     lens missing the column roles its viz needs, naming the block
     (`chart`, `tree`, `timeline`, `steps`, `hunks`), and
     `validate_extension` checks every named column exists in the result

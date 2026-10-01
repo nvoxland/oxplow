@@ -1,7 +1,6 @@
 title: Change Analysis
 description: What changed and where to look first — files by review priority, churn by zone, changed functions, tests, and co-change, duplication and import surprises.
 params: [{ name: change_id }]
-query: SELECT 1
 viz: grid
 children:
   - change-summary
