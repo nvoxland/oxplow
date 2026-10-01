@@ -18,9 +18,12 @@ import {
   hidePanel,
   movePanel,
   resolveLayout,
+  revealPanel,
   showPanel,
   toggleCollapsed,
 } from "../Panels/panelLayout.js";
+import { decide, useProposals, type Proposal } from "../../proposals.js";
+import { ProposalCard } from "../Proposals/ProposalCard.js";
 import { panelAlerts, useExtensionPanelRuns, type PanelAlert, type PanelRuns } from "../Panels/usePanelRuns.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import { recordOpError } from "../opErrorsStore.js";
@@ -118,6 +121,7 @@ function useRailSections(available: string[]): {
   order: RailSectionId[];
   hidden: RailSectionId[];
   show(id: RailSectionId): void;
+  reveal(id: RailSectionId): void;
 } {
   const [stored, setStored] = useState<PanelPlacement[]>([]);
   const [draggingId, setDraggingId] = useState<RailSectionId | null>(null);
@@ -148,6 +152,10 @@ function useRailSections(available: string[]): {
   const toggle = useCallback((id: RailSectionId) => persist(toggleCollapsed(available, stored, id)), [available, stored, persist]);
   const hide = useCallback((id: RailSectionId) => persist(hidePanel(available, stored, id)), [available, stored, persist]);
   const show = useCallback((id: RailSectionId) => persist(showPanel(available, stored, id)), [available, stored, persist]);
+  const reveal = useCallback(
+    (id: RailSectionId) => persist(revealPanel(available, stored, id)),
+    [available, stored, persist],
+  );
 
   const dragHandle = useCallback((id: RailSectionId) => ({
     draggable: true as const,
@@ -203,7 +211,7 @@ function useRailSections(available: string[]): {
     () => ({ isExpanded, toggle, dragHandle, dropZone, dropSide, hide }),
     [isExpanded, toggle, dragHandle, dropZone, dropSide, hide],
   );
-  return { value, order: layout.order, hidden: layout.hidden, show };
+  return { value, order: layout.order, hidden: layout.hidden, show, reveal };
 }
 
 /** Uniform section: drag handle + chevron + title (+ optional count and
@@ -407,6 +415,7 @@ export function RailHud({
   // and Alerts is derived from the same runs.
   const panelRuns = useExtensionPanelRuns(extPanels, streamId ?? null, threadId);
   const alerts = useMemo(() => panelAlerts(extPanels, panelRuns), [extPanels, panelRuns]);
+  const proposals = useProposals();
   const available = useMemo(
     () => [...CORE_PANELS.map((p) => p.id), ...extPanels.map(extensionPanelId)],
     [extPanels],
@@ -421,7 +430,20 @@ export function RailHud({
   function renderSection(id: RailSectionId): ReactNode {
     switch (id) {
       case "core:alerts":
-        return <AlertsSection key={id} alerts={alerts} onOpenPage={onOpenPage} />;
+        return (
+          <AlertsSection
+            key={id}
+            alerts={alerts}
+            proposals={proposals.length}
+            onShowApprovals={() => {
+              sections.reveal("core:approvals");
+              document.querySelector(`[data-testid="rail-section-core:approvals"]`)?.scrollIntoView({ block: "nearest" });
+            }}
+            onOpenPage={onOpenPage}
+          />
+        );
+      case "core:approvals":
+        return <ApprovalsSection key={id} proposals={proposals} />;
       case "core:uncommitted":
         return <UncommittedSection key={id} summary={uncommitted ?? null} onOpenPage={onOpenPage} />;
       case "core:comments":
@@ -1174,12 +1196,38 @@ function UncommittedSection({
 /// stream, split by intent — "for me" (notes-to-self) and "for the
 /// agent" (follow-ups). Self-fetching + live like the history rows;
 /// hidden when there are none. Each row opens the Comments inbox.
-/** Alerts (a core panel, P6.G1): every panel badge that fires, one row
- *  each with its message, opening the badge's lens. Live. */
-function AlertsSection({ alerts, onOpenPage }: { alerts: PanelAlert[]; onOpenPage(ref: TabRef): void }) {
+/** Alerts (a core panel, P6.G1): the proposals waiting for the person
+ *  (one leading row that reveals Approvals), then every panel badge that
+ *  fires, one row each with its message, opening the badge's lens. Live. */
+function AlertsSection({
+  alerts,
+  proposals,
+  onShowApprovals,
+  onOpenPage,
+}: {
+  alerts: PanelAlert[];
+  /** How many proposals are pending. */
+  proposals: number;
+  onShowApprovals(): void;
+  onOpenPage(ref: TabRef): void;
+}) {
+  const count = alerts.length + (proposals > 0 ? 1 : 0);
   return (
-    <RailSection id="core:alerts" title="Alerts" count={alerts.length || undefined}>
-      {alerts.length === 0 ? <RailEmpty label="Nothing needs you" /> : null}
+    <RailSection id="core:alerts" title="Alerts" count={count || undefined}>
+      {count === 0 ? <RailEmpty label="Nothing needs you" /> : null}
+      {proposals > 0 ? (
+        <button
+          type="button"
+          data-testid="rail-alert-proposals"
+          onClick={onShowApprovals}
+          title="Show Approvals"
+          style={{ ...rowStyle, padding: "4px 14px 4px", gap: 8 }}
+        >
+          <span style={{ color: "var(--accent)", fontSize: "var(--text-xs)" }}>
+            {proposals === 1 ? "1 proposal awaits your approval" : `${proposals} proposals await your approval`}
+          </span>
+        </button>
+      ) : null}
       {alerts.map((a) => (
         <button
           key={a.id}
@@ -1194,6 +1242,21 @@ function AlertsSection({ alerts, onOpenPage }: { alerts: PanelAlert[]; onOpenPag
           <span style={{ color: "var(--accent)", fontSize: 11 }}>{a.message}</span>
         </button>
       ))}
+    </RailSection>
+  );
+}
+
+/** Approvals (a core panel, P6b.A4): the agent's runs that wait for the
+ *  person, newest first, each with Approve and Decline. */
+function ApprovalsSection({ proposals }: { proposals: Proposal[] }) {
+  return (
+    <RailSection id="core:approvals" title="Approvals" count={proposals.length || undefined}>
+      {proposals.length === 0 ? <RailEmpty label="Nothing waits for your approval" /> : null}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: proposals.length ? "6px 8px 8px" : 0 }}>
+        {proposals.map((p) => (
+          <ProposalCard key={p.id} proposal={p} onDecide={decide} />
+        ))}
+      </div>
     </RailSection>
   );
 }

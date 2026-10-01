@@ -105,6 +105,20 @@ Things I keep forgetting. Read this before adding any UI.
   them. Carry this convention forward when New task migrates to
   a page (phase 5e).
 
+## Agent proposals
+
+- **Approving is the confirmation.** An agent's run that needs a person
+  (a person-only setting, a destructive command) waits as a proposal; its
+  `ProposalCard` (`components/Proposals/ProposalCard.tsx`) shows who
+  proposed it, what it would change (a setting's before → after; a
+  composite's commands) and Approve / Decline. Approve runs it as the
+  person with no further modal; a destructive one is tinted. A failed
+  decision shows its error on the card, next to the buttons. Cards appear
+  in the **Approvals** rail panel and, for a setting, on that setting's
+  row in Settings (the compact form). Testids: `proposal-<id>`,
+  `proposal-approve-<id>`, `proposal-decline-<id>`, `proposal-error-<id>`,
+  `rail-alert-proposals`.
+
 ## Destructive actions
 
 - **Per-row destructives use `InlineConfirm`** at

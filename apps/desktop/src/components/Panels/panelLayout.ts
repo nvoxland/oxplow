@@ -13,6 +13,7 @@ export interface CorePanel {
 /** Core's panels, in their default order. */
 export const CORE_PANELS: readonly CorePanel[] = [
   { id: "core:alerts", title: "Alerts" },
+  { id: "core:approvals", title: "Approvals" },
   { id: "core:uncommitted", title: "Uncommitted" },
   { id: "core:comments", title: "Comments" },
   { id: "core:work", title: "Work" },
@@ -87,4 +88,16 @@ export function toggleCollapsed(available: string[], stored: PanelPlacement[], p
   if (collapsed.has(panel)) collapsed.delete(panel);
   else collapsed.add(panel);
   return store({ ...layout, collapsed });
+}
+
+/** Make `panel` visible and expanded: shown at the bottom if hidden, and
+ *  uncollapsed (the Alerts row that points at Approvals uses it). */
+export function revealPanel(available: string[], stored: PanelPlacement[], panel: string): PanelPlacement[] {
+  const layout = resolveLayout(available, stored);
+  const shown = layout.hidden.includes(panel)
+    ? { ...layout, order: [...layout.order, panel], hidden: layout.hidden.filter((id) => id !== panel) }
+    : layout;
+  const collapsed = new Set(shown.collapsed);
+  collapsed.delete(panel);
+  return store({ ...shown, collapsed });
 }

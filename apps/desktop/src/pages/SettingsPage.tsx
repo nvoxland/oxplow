@@ -19,6 +19,8 @@ import { DataSection } from "../components/DataSection.js";
 import { IntegrationsSection } from "../components/IntegrationsSection.js";
 import { SettingsSlotSections } from "../lens/SettingsSlotSections.js";
 import { AiSection } from "../components/AiSection.js";
+import { ProposalCard } from "../components/Proposals/ProposalCard.js";
+import { decide, proposalForSetting, useProposals, type Proposal } from "../proposals.js";
 import { agentLabel, ALL_AGENT_KINDS } from "../agentKinds.js";
 
 export interface SettingsPageProps {
@@ -44,6 +46,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const proposals = useProposals();
 
   useEffect(() => {
     setLoaded(false);
@@ -108,8 +111,9 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       <div style={{ padding: "20px 24px", maxWidth: 820 }}>
         <Section title="Every Setting">
           <Hint>
-            What shapes this project, where each value comes from, and Ask the Agent to Change This. A setting only a
-            person may change asks you to confirm when the agent changes it — or change it yourself below.
+            What shapes this project, where each value comes from, and Ask the Agent to Change This. When the agent
+            changes a setting only a person may change, its change waits on the setting's row (and in Approvals) for
+            you to approve — or change it yourself below.
           </Hint>
           <input
             data-testid="settings-search"
@@ -125,7 +129,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             <div key={g.title} data-testid={`settings-group-${g.title}`} style={{ marginBottom: 12 }}>
               <div style={groupTitleStyle}>{g.title}</div>
               {g.settings.map((s) => (
-                <SettingRow key={s.key} setting={s} />
+                <SettingRow key={s.key} setting={s} proposal={proposalForSetting(proposals, s.key)} onDecide={decide} />
               ))}
             </div>
           ))}
@@ -326,7 +330,17 @@ const ORIGIN_LABEL: Record<EffectiveSetting["origin"], string> = {
   extension: "extension",
 };
 
-function SettingRow({ setting: s }: { setting: EffectiveSetting }) {
+/** One setting: its value, where it comes from, and — when the agent has
+ *  proposed a change to it — that change with Approve and Decline. */
+export function SettingRow({
+  setting: s,
+  proposal,
+  onDecide,
+}: {
+  setting: EffectiveSetting;
+  proposal: Proposal | undefined;
+  onDecide(p: Proposal, approve: boolean): Promise<void>;
+}) {
   const control = s.humanOnly ? controlFor(s.key) : null;
   return (
     <div data-testid={`setting-${s.key}`} style={settingRowStyle}>
@@ -361,6 +375,11 @@ function SettingRow({ setting: s }: { setting: EffectiveSetting }) {
         {valueText(s.value)}
       </div>
       {s.doc ? <div style={hintInlineStyle}>{s.doc}</div> : null}
+      {proposal ? (
+        <div style={{ marginTop: 4 }}>
+          <ProposalCard proposal={proposal} compact onDecide={onDecide} />
+        </div>
+      ) : null}
     </div>
   );
 }
