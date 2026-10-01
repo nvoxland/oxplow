@@ -1300,6 +1300,27 @@ mod tests {
     }
 
     /// A list's task refs in order: a thread's, or the backlog's.
+    /// How many tasks whose `work_item.native.sort_index` disagrees with
+    /// the task row — the restated rows must never fall behind `v_task`.
+    async fn stale_native_rows(fx: &crate::test_fixtures::EffortFixture) -> i64 {
+        let rows = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT count(*) FROM v_work_item w JOIN v_task t
+                   ON w.ref = 'work_item:oxplow:tsk' || t.id
+                 WHERE json_extract(w.native, '$.sort_index') IS NOT t.sort_index",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        match &rows.rows[0][0] {
+            oxplow_db::SqlCell::Int(n) => *n,
+            other => panic!("{other:?}"),
+        }
+    }
+
     async fn list_order(
         fx: &crate::test_fixtures::EffortFixture,
         thread: Option<ThreadId>,
@@ -1375,6 +1396,8 @@ mod tests {
             list_order(&fx, Some(fx.thread)).await,
             vec![t.clone(), c.clone(), a.clone(), b.clone()]
         );
+        // Every renumbered neighbour's work_item row is restated too.
+        assert_eq!(stale_native_rows(&fx).await, 0);
         fx.svc
             .commands
             .run(
@@ -1389,6 +1412,7 @@ mod tests {
             list_order(&fx, Some(fx.thread)).await,
             vec![c.clone(), a.clone(), b.clone(), t.clone()]
         );
+        assert_eq!(stale_native_rows(&fx).await, 0);
 
         fx.svc
             .commands
@@ -1399,6 +1423,7 @@ mod tests {
             list_order(&fx, Some(fx.thread)).await,
             vec![a.clone(), b.clone(), c.clone(), t.clone()]
         );
+        assert_eq!(stale_native_rows(&fx).await, 0);
 
         // The anchor must be in the same list, and there's at most one.
         let other = file_on(&fx, "elsewhere", None).await;

@@ -558,11 +558,17 @@ pub fn place_task_tx(
     list.insert(index, id);
     for (i, t) in list.iter().enumerate() {
         if *t != id {
-            conn.execute(
-                "UPDATE task SET sort_index = ?2 WHERE id = ?1 AND sort_index != ?2",
-                params![t.value(), i as i64],
-            )
-            .map_err(crate::database::map_sql_err)?;
+            let renumbered = conn
+                .execute(
+                    "UPDATE task SET sort_index = ?2 WHERE id = ?1 AND sort_index != ?2",
+                    params![t.value(), i as i64],
+                )
+                .map_err(crate::database::map_sql_err)?;
+            // Its work_item row carries `sort_index` in `native`: restate
+            // it with the task row, so `v_work_item` never disagrees.
+            if renumbered > 0 {
+                project_work_item_tx(conn, *t).map_err(crate::database::map_sql_err)?;
+            }
         }
     }
     let moved = dest != from_thread;

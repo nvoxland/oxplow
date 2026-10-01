@@ -21,6 +21,9 @@ There are two writers, one schema:
 - **oxplow's rows** are restated from the task row by the task cores in
   the same transaction (`task_store::project_work_item_tx`), so they
   never disagree with `v_task`; `v_work_item`'s own `sql` test checks it.
+  That includes every row a core touches on the side: `place_task_tx`
+  renumbers the moved item's neighbours and restates each one it changed
+  (`native.sort_index`), checked by the reorder test's `stale_native_rows`.
 - **Another provider's rows** arrive by projection: its
   `work_item.recorded@1 { item }` events (the item as it now stands —
   ref, title, body, canonical and native state, native fields, parent,
