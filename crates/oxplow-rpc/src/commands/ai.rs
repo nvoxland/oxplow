@@ -38,12 +38,16 @@ pub async fn remove_ai_provider(svc: &Services, id: String) -> Result<AiSettings
 }
 
 /// Assign `role` to a provider + model, or unassign it with no binding.
+/// A role's binding is config (an `ai.roles.<role>` row in Settings'
+/// effective-config view), so the change is announced as `ConfigChanged`
+/// like every other config write.
 pub async fn set_ai_role(
     svc: &Services,
     role: Role,
     binding: Option<RoleBinding>,
 ) -> Result<AiSettings, IpcError> {
     svc.ai.set_role(role, binding)?;
+    svc.events.emit(oxplow_app::OxplowEvent::ConfigChanged);
     Ok(svc.ai.settings()?)
 }
 
@@ -109,6 +113,34 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(st["roles"].as_array().unwrap().len(), 6);
+    }
+
+    /// A role's binding is config (an `ai.roles.<role>` row in Settings'
+    /// effective-config view), so changing it announces `ConfigChanged`
+    /// like every other config write — the view refreshes the one way.
+    #[tokio::test]
+    async fn setting_a_role_announces_a_config_change() {
+        let (svc, _dir) = crate::test_support::services();
+        crate::dispatch(
+            "save_ai_provider",
+            json!({ "provider": { "id": "or", "kind": "openrouter" }, "key": "sk-secret" }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        let mut rx = svc.events.subscribe();
+        crate::dispatch(
+            "set_ai_role",
+            json!({ "role": "summarize", "binding": { "provider": "or", "model": "m" } }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        let mut saw = false;
+        while let Ok(event) = rx.try_recv() {
+            saw |= matches!(event, oxplow_app::OxplowEvent::ConfigChanged);
+        }
+        assert!(saw, "set_ai_role emitted no ConfigChanged");
     }
 
     #[tokio::test]

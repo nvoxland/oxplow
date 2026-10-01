@@ -142,7 +142,10 @@ dimension from the global manifests (`global`) and enabled extensions
 a person-only key's `config.set` asks the person to confirm. Direct
 controls remain only for person-only settings (agents, AI, language
 servers, extensions, integrations, programs); `set_snapshot_retention_days`
-and `set_snapshot_max_file_bytes` went with their editors.
+and `set_snapshot_max_file_bytes` went with their editors. The view
+re-reads on `ConfigChanged`, the one signal for every config write: a
+`config.set`, and `set_ai_role` (a role's binding is an `ai.roles.<role>`
+row), which emits it too (P6 review, tsk607).
 
 `CommandBus::list(actor)` is the specs that actor may run —
 `list_commands` for the agent, the launcher for the human.

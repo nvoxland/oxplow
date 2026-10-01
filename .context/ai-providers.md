@@ -235,7 +235,9 @@ The first built-in use of a role (`oxplow-app/src/inferred_decisions.rs`).
 
 `apps/desktop/src/components/AiSection.tsx` (+ pure `aiSettingsModel.ts`),
 a section of the Settings page. IPC: `ai_settings`, `save_ai_provider`,
-`remove_ai_provider`, `set_ai_role`, `test_ai_provider`.
+`remove_ai_provider`, `set_ai_role` (announces `ConfigChanged`: a role's
+binding is a row of the effective-config view, which refreshes on that
+one signal), `test_ai_provider`.
 
 - Providers: add or update by name (kind, base URL, key). A blank key keeps
   the saved one. Remove is refused while a role uses the provider, and
