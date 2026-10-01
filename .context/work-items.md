@@ -57,7 +57,13 @@ and `moveTask` run commands. Pages re-read when a task model changes
 `get_backlog_state`, `list_backlog`, `get_task`, `upsert_task`,
 `create_task`, `update_task`, `delete_task`, `reorder_tasks`, `move_task`,
 `list_work_item_efforts`, `list_recently_finished`,
-`clear_recently_finished`) are gone; the MCP task tools stay.
+`clear_recently_finished`) are gone. The MCP task tools stay, and write
+the same way: `reorder_tasks` runs `work_item.reorder` once per listed
+item as the agent (the listed items in order, ahead of the rest), so a
+reorder is audited and dense like the UI's; `delete_task` is gone, since
+`work_item.delete` is destructive and an agent never confirms one (an
+agent cancels or archives). `TaskService::reorder` and `soft_delete` went
+with them (P6 review, tsk609).
 
 The **Board** (`page:board`, `components/Board/WorkBoard.tsx`) shows
 items as cards in one column per canonical state (archived tasks left

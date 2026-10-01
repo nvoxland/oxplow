@@ -2707,12 +2707,16 @@ impl OxplowMcp {
 
     #[tool(
         description = "Reorder tasks on a thread (or backlog). The ordered_item_ids array becomes \
-                       the new sort order; items not in the list keep their relative order at the end."
+                       the new sort order; items not in the list keep their relative order at the end. \
+                       Each placement is the `work_item.reorder` command, run as you. Requires the \
+                       connection's thread identity."
     )]
     async fn reorder_tasks(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<ReorderTasksParams>,
     ) -> Result<CallToolResult, McpError> {
+        use oxplow_domain::refs::build::work_item_ref;
         if let Some(t) = params.0.thread_id.as_deref() {
             expect_id_kind("reorder_tasks", "thread_id", t, ID_THREAD)?;
         }
@@ -2726,11 +2730,43 @@ impl OxplowMcp {
             .as_deref()
             .map(parse_thread_id)
             .transpose()?;
-        self.services
-            .tasks
-            .reorder(thread.as_ref(), &ids)
-            .await
-            .map_err(internal)?;
+        let actor = self.verified_actor(&caller_of(&extensions)).await?;
+        let current: Vec<TaskId> = match thread {
+            Some(t) => self.services.tasks.list_for_thread(&t).await,
+            None => self.services.tasks.list_backlog().await,
+        }
+        .map_err(internal)?
+        .iter()
+        .map(|t| t.id)
+        .collect();
+        // Only this list's items; the given order, ahead of the rest. The
+        // first goes before the list's head, each next one after the one
+        // before it — one `work_item.reorder` per item, audited to the agent.
+        let listed: Vec<TaskId> = ids.into_iter().filter(|i| current.contains(i)).collect();
+        for (k, id) in listed.iter().enumerate() {
+            let place = if k == 0 {
+                match current.first() {
+                    Some(head) if head != id => {
+                        serde_json::json!({ "before": work_item_ref(*head) })
+                    }
+                    _ => continue,
+                }
+            } else {
+                serde_json::json!({ "after": work_item_ref(listed[k - 1]) })
+            };
+            let mut input = place;
+            input["ref"] = serde_json::Value::String(work_item_ref(*id));
+            self.services
+                .commands
+                .run(
+                    &actor,
+                    oxplow_app::commands::work_item::REORDER,
+                    input,
+                    false,
+                )
+                .await
+                .map_err(command_error)?;
+        }
         self.emit_tasks_changed(thread);
         json_result(&serde_json::json!({ "ok": true }))
     }
@@ -2761,22 +2797,6 @@ impl OxplowMcp {
             .map_err(command_error)?;
         self.emit_tasks_changed(item.thread_id);
         json_result(&item)
-    }
-
-    #[tool(description = "Soft-delete a task by id.")]
-    async fn delete_task(
-        &self,
-        params: Parameters<TaskIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let id = parse_task_id("delete_task", "id", &params.0.id)?;
-        let item = self.services.task_store.get(id).await.map_err(internal)?;
-        self.services
-            .task_store
-            .soft_delete(id)
-            .await
-            .map_err(internal)?;
-        self.emit_tasks_changed(item.and_then(|i| i.thread_id));
-        Ok(CallToolResult::success(vec![ContentBlock::text("deleted")]))
     }
 
     // ---------- thread notes ----------
@@ -4625,7 +4645,6 @@ const WRITE_TOOLS: &[&str] = &[
     "rename_stream",
     "reorder_tasks",
     "upsert_task",
-    "delete_task",
     "add_thread_note",
     "ingest_coverage",
     "ingest_analysis",
@@ -6267,30 +6286,67 @@ mod tests {
         assert!(body.contains("round trip"), "unexpected body: {body}");
     }
 
+    /// A reorder from the agent is the `work_item.reorder` command, one
+    /// placement per listed item, run as the agent — audited to its thread
+    /// and dense like the UI's — not a second write path around the bus.
+    /// Items it doesn't list keep their relative order after the listed.
     #[tokio::test]
-    async fn delete_task_soft_deletes() {
+    async fn reorder_tasks_runs_work_item_reorder_as_the_agent() {
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
         let (_proj, services, server) = boot();
-        let item = make_task(None, "to delete");
-        let id = services.task_store.insert(&item).await.unwrap();
-
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let mut ids = Vec::new();
+        for (i, title) in ["a", "b", "c"].iter().enumerate() {
+            let mut t = make_task(Some(thread.id), title);
+            t.sort_index = i as i64;
+            ids.push(services.task_store.insert(&t).await.unwrap());
+        }
+        let (a, b, c) = (ids[0], ids[1], ids[2]);
+        let params = || ReorderTasksParams {
+            thread_id: Some(thread.id.to_string()),
+            ordered_item_ids: vec![c.to_string(), a.to_string()],
+        };
         server
-            .delete_task(Parameters(TaskIdParams { id: id.to_string() }))
+            .reorder_tasks(as_writer(&services).await, Parameters(params()))
             .await
             .unwrap();
-
-        // Soft-deleted: list_tasks(backlog) should no longer include it.
-        let r = server
-            .list_tasks(Parameters(ListTasksParams {
-                status: Some("backlog".to_string()),
-                thread_id: None,
-            }))
+        let order: Vec<TaskId> = services
+            .tasks
+            .list_for_thread(&thread.id)
+            .await
+            .unwrap()
+            .iter()
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(order, vec![c, a, b]);
+        let audits = oxplow_db::SqliteCommandAuditStore::new(services.db.clone())
+            .list_recent(10)
             .await
             .unwrap();
-        let body = text_payload(r);
-        assert!(
-            !body.contains(&format!("\"id\":{}", id.value())),
-            "soft-deleted item should not appear in backlog: {body}",
-        );
+        let reorders: Vec<_> = audits
+            .iter()
+            .filter(|r| r.command == "work_item.reorder")
+            .collect();
+        assert_eq!(reorders.len(), 2, "{audits:?}");
+        assert!(reorders.iter().all(|r| {
+            r.actor_kind == oxplow_domain::events::schema::ActorKind::Agent
+                && r.thread_id == Some(thread.id)
+                && r.error.is_none()
+        }));
+        // An anonymous connection may not write.
+        let err = server
+            .reorder_tasks(rmcp::model::Extensions::new(), Parameters(params()))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("thread identity"), "{err}");
     }
 
     #[tokio::test]

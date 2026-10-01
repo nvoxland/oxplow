@@ -881,28 +881,6 @@ impl TaskService {
         }
     }
 
-    /// Rewrite sort_index across the items in `thread` (or backlog if
-    /// `thread` is None) according to the supplied order. Items not
-    /// included keep their existing sort_index.
-    pub async fn reorder(
-        &self,
-        thread: Option<&ThreadId>,
-        order: &[TaskId],
-    ) -> Result<(), TaskServiceError> {
-        let now = Timestamp::now();
-        for (idx, id) in order.iter().enumerate() {
-            let mut item = self.load(*id).await?;
-            // Only reorder items in the right scope.
-            if item.thread_id.as_ref() != thread {
-                continue;
-            }
-            item.sort_index = idx as i64;
-            item.updated_at = now;
-            self.store.update(&item).await?;
-        }
-        Ok(())
-    }
-
     /// Move a task to a different thread (or to the backlog with
     /// `dest = None`). Reallocates sort_index at the destination tail.
     pub async fn move_to(
@@ -1389,11 +1367,6 @@ impl TaskService {
             .filter(|i| !is_epic(i, &all))
             .collect();
         Ok(ReadWorkOptionsResult::Standalone { items: standalone })
-    }
-
-    pub async fn soft_delete(&self, id: TaskId) -> Result<(), TaskServiceError> {
-        self.store.soft_delete(id).await?;
-        Ok(())
     }
 
     pub(crate) async fn load(&self, id: TaskId) -> Result<Task, TaskServiceError> {
@@ -3070,46 +3043,6 @@ mod tests {
         let bl = svc.list_backlog().await.unwrap();
         assert_eq!(bl.len(), 1);
         assert_eq!(bl[0].id, it.id);
-    }
-
-    #[tokio::test]
-    async fn reorder_rewrites_indices() {
-        let (svc, tid) = fixture().await;
-        let a = svc
-            .create(
-                Some(tid),
-                CreateTaskInput {
-                    title: "a".into(),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        let b = svc
-            .create(
-                Some(tid),
-                CreateTaskInput {
-                    title: "b".into(),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        let c = svc
-            .create(
-                Some(tid),
-                CreateTaskInput {
-                    title: "c".into(),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        // c, a, b
-        svc.reorder(Some(&tid), &[c.id, a.id, b.id]).await.unwrap();
-        let list = svc.list_for_thread(&tid).await.unwrap();
-        let order: Vec<_> = list.iter().map(|i| i.id).collect();
-        assert_eq!(order, vec![c.id, a.id, b.id]);
     }
 
     // ---- read_task_options edge cases ----

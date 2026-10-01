@@ -115,7 +115,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("create_task"),
     agent("update_task"),
     agent("upsert_task"),
-    agent("delete_task"),
     agent("reorder_tasks"),
     both("add_thread_note"),
     both("list_thread_notes"),

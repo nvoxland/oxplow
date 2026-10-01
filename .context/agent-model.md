@@ -1116,7 +1116,9 @@ intermediate `ready` step.
 
 - `get_batch_context`, `list_batch_work`,
   `list_ready_work`, `read_task_options`, `create_task`, `update_task`,
-  `get_task`, `delete_task`, `reorder_tasks`,
+  `get_task`, `reorder_tasks` (one `work_item.reorder` per item, run as
+  the agent; there is no `delete_task` — `work_item.delete` is
+  destructive, and an agent never confirms one: cancel or archive instead),
   `list_recent_file_changes` (links and task comments are
   `run_command work_item.link` / `work_item.comment`),
   `dispatch_task`, `file_epic_with_children`, `complete_task`,

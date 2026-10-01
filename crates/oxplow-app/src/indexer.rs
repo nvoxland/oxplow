@@ -493,7 +493,7 @@ mod tests {
         svc.event_pump.run_once().await.unwrap();
         assert!(found("flange").await, "re-indexed on work_item.edited");
 
-        svc.tasks.soft_delete(task.id).await.unwrap();
+        svc.task_store.soft_delete(task.id).await.unwrap();
         svc.event_pump.run_once().await.unwrap();
         assert!(!found("flange").await, "removed on work_item.deleted");
     }
