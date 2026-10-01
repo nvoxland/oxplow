@@ -393,6 +393,7 @@ mod tests {
             may_claim: true,
             confirmed: true,
             may_write: None,
+            depth: 0,
         };
         let input = json!({ "key": "metricRetentionDays", "value": 30 });
         let first = handler(&ctx, input.clone()).unwrap();

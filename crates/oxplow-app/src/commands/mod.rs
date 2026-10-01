@@ -116,7 +116,16 @@ pub struct TxCtx<'a> {
     /// person, the system, or a command the gate doesn't apply to. A
     /// composite applies it to each child it runs.
     pub may_write: Option<bool>,
+    /// How many composites this run is inside: 0 for the bus's own call,
+    /// one more for each `run_nested` level. Past [`MAX_NESTING`] a
+    /// composition is refused rather than recursing until the stack
+    /// overflows (a command that composes itself).
+    pub depth: usize,
 }
+
+/// The deepest a composite may nest (`command.sequence` and extension
+/// commands composing one another).
+pub const MAX_NESTING: usize = 8;
 
 impl TxCtx<'_> {
     /// Refuse the run when it opened an effort (`opened`) and the actor
@@ -473,6 +482,7 @@ impl CommandBus {
                             may_claim,
                             confirmed,
                             may_write: gate_answer,
+                            depth: 0,
                         };
                         let out = match handler(&ctx, input_c.clone()) {
                             Ok(out) => out,
@@ -708,6 +718,7 @@ impl CommandBus {
                     may_claim,
                     confirmed: true,
                     may_write,
+                    depth: 0,
                 };
                 match handler(&ctx, input.clone()) {
                     Ok(out) => Ok(out.result),
@@ -823,6 +834,16 @@ impl CommandBus {
         parent: &CommandSpec,
         calls: &[CommandCall],
     ) -> Result<NestedOutcome, CommandError> {
+        if ctx.depth >= MAX_NESTING {
+            return Err(CommandError::Invalid {
+                field: None,
+                message: format!(
+                    "`{}` is nested more than {MAX_NESTING} composites deep — does a command \
+                     compose itself?",
+                    parent.name
+                ),
+            });
+        }
         let resolved: Vec<Arc<Command>> = {
             let registry = self.commands.read();
             calls
@@ -892,6 +913,15 @@ impl CommandBus {
                 }),
             });
         }
+        let inner = TxCtx {
+            conn: ctx.conn,
+            actor: ctx.actor,
+            events: ctx.events.clone(),
+            may_claim: ctx.may_claim,
+            confirmed: ctx.confirmed,
+            may_write: ctx.may_write,
+            depth: ctx.depth + 1,
+        };
         let mut children = Vec::with_capacity(calls.len());
         let mut events = Vec::new();
         let mut afters: Vec<Box<dyn FnOnce() + Send + Sync>> = Vec::new();
@@ -899,7 +929,7 @@ impl CommandBus {
             let Handler::Tx(handler) = &command.handler else {
                 unreachable!("checked above");
             };
-            let mut out = handler(ctx, call.input.clone())?;
+            let mut out = handler(&inner, call.input.clone())?;
             if let Some(after) = out.after_commit.take() {
                 afters.push(after);
             }
@@ -971,6 +1001,7 @@ impl CommandBus {
                             may_claim: false,
                             confirmed: false,
                             may_write: None,
+                            depth: 0,
                         };
                         handler(&ctx, input.clone()).map_err(|err| {
                             *failed_c.lock() = Some(err);

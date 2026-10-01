@@ -1113,6 +1113,37 @@ mod tests {
         }
     }
 
+    /// A command that composes itself is refused at the nesting limit,
+    /// not run until the stack overflows; nothing it composed is kept.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_self_composing_command_stops_at_the_nesting_limit() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        with_finish(
+            &fx,
+            "def transform(x):\n    r = x[\"input\"][\"ref\"]\n    return {\"commands\": [\n        {\"name\": \"work_item.update\", \"input\": {\"ref\": r, \"title\": \"again\"}},\n        {\"name\": \"my_review.finish\", \"input\": {\"ref\": r}},\n    ]}\n",
+        )
+        .await;
+        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let before = task(&fx).await.title;
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "my_review.finish",
+                json!({ "ref": r }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, oxplow_domain::CommandError::Invalid { message, .. }
+                if message.contains("nested")),
+            "{err}"
+        );
+        assert_eq!(task(&fx).await.title, before, "nothing kept");
+    }
+
     /// The script runs inside the bus's write transaction, so a runaway
     /// one is given up on after `COMMAND_SCRIPT_BUDGET`, not the
     /// collectors' two minutes.

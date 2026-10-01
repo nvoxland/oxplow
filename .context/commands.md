@@ -124,7 +124,10 @@ agent policy (with the parent's `may_write`) and its `confirm` apply, so
 a composite never widens what its children allow; a child that asks
 makes the parent ask (`Preview { command: <parent>, destructive }`)
 unless the run was confirmed. Then every handler runs on the parent's
-`TxCtx`. The parent has the **one audit row** and `command.executed`
+`TxCtx` one level deeper (`TxCtx.depth`); a composite more than
+`MAX_NESTING` (8) deep is `Invalid` ("does a command compose itself?")
+instead of recursing until the stack overflows, and the whole run rolls
+back. The parent has the **one audit row** and `command.executed`
 (children are not audited separately — a child row would be an
 independently undoable unit fighting the parent's inverse); its
 `result` is `{ result, children: [{ name, input, result, inverse? }] }`;
