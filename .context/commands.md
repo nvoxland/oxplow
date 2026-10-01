@@ -83,7 +83,9 @@ run. The original row is claimed **with** the inverse run
 — marked `undone_by` inside the run's transaction for a `Tx` inverse,
 or claimed (`undone_by = 0`, pending) before an `External` inverse and
 released if it fails — so two concurrent undos can't both apply it
-(tsk437 review).
+(tsk437 review). The one that loses answers `Invalid` ("audit row N was
+already undone", `lost_race`) and leaves **no audit row**: it didn't
+fail, it was beaten to it. An approval's lost race is the same.
 
 **Agent rules follow the agent.** An `Actor::Lens { on_behalf_of }`
 whose chain ends at an agent (`Actor::is_agent_driven`) gets the agent
@@ -179,7 +181,9 @@ system is `Denied`), and a proposal is decided once (`Invalid` after):
   claims the row first (approved, no audit row: `claim_tx`), names its
   audit row when recorded (`finish_claim_tx`) and releases the claim if
   it fails (`release_claim_tx`) — the same pattern as an `External`
-  undo's claim. A run that fails leaves the proposal pending.
+  undo's claim. A run that fails leaves the proposal pending; a
+  concurrent approval that loses answers `Invalid` ("proposal:N was
+  already decided") with no audit row.
 - **`CommandBus::decline(actor, id)`** marks it declined and logs
   `command.declined@1`; nothing runs, no audit row.
 

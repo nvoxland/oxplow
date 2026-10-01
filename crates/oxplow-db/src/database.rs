@@ -778,6 +778,43 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
+    /// A rehearsal keeps nothing it wrote, and absorbs a busy blip like
+    /// a real transaction.
+    #[tokio::test]
+    async fn rehearse_rolls_back_and_retries_busy() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+
+        let db = Database::in_memory();
+        let calls = Arc::new(AtomicU32::new(0));
+        let seen = calls.clone();
+        let out = db
+            .rehearse(move |tx| {
+                if seen.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Err(oxplow_domain::DomainError::Busy("locked".into()));
+                }
+                tx.execute("CREATE TABLE rehearsed (x INTEGER)", [])
+                    .map_err(map_sql_err)?;
+                tx.execute("INSERT INTO rehearsed VALUES (1)", [])
+                    .map_err(map_sql_err)?;
+                Ok(7)
+            })
+            .await
+            .unwrap();
+        assert_eq!(out, 7);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let kept: i64 = db
+            .conn()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'rehearsed'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, 0, "rolled back");
+    }
+
     #[test]
     fn in_memory_db_runs_migrations() {
         let db = Database::in_memory();

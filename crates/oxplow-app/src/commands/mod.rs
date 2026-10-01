@@ -500,6 +500,10 @@ impl CommandBus {
                 // `CommandError` rides out through this slot.
                 let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
                 let failed_c = failed.clone();
+                // An undo or approval that lost a race: not a failed run,
+                // so it leaves no audit row.
+                let lost: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
+                let lost_c = lost.clone();
                 let ran = self
                     .db
                     .transaction(move |tx| {
@@ -539,28 +543,41 @@ impl CommandBus {
                             &out,
                             executed_id,
                         )?;
-                        match origin {
-                            RunOrigin::Call => {}
-                            // Fails (and rolls the whole run back) when the
-                            // row was undone meanwhile…
+                        // Fails (and rolls the whole run back) when the row
+                        // was undone, or the proposal decided, meanwhile.
+                        let marked = match origin {
+                            RunOrigin::Call => Ok(()),
                             RunOrigin::Undo(original) => {
-                                mark_undone_tx(tx, original, recorded.audit_id)?;
+                                mark_undone_tx(tx, original, recorded.audit_id)
                             }
-                            // …or the proposal was decided meanwhile.
                             RunOrigin::Approval(id) => {
-                                proposal_store::approve_tx(tx, id, recorded.audit_id)?;
-                                log_approved_tx(tx, &schemas, &actor_c, &spec_c, id, &recorded)?;
+                                proposal_store::approve_tx(tx, id, recorded.audit_id).map(|_| ())
                             }
+                        };
+                        if let Err(e) = marked {
+                            let e = lost_race(origin, e)?;
+                            *lost_c.lock() = Some(e);
+                            return Err(oxplow_domain::DomainError::Invariant(
+                                "decided meanwhile; rolled back".into(),
+                            ));
+                        }
+                        if let RunOrigin::Approval(id) = origin {
+                            log_approved_tx(tx, &schemas, &actor_c, &spec_c, id, &recorded)?;
                         }
                         Ok((out, recorded))
                     })
                     .await;
                 match ran {
                     Ok((out, recorded)) => Ok(finish(out, recorded)),
-                    Err(db_err) => Err(failed
-                        .lock()
-                        .take()
-                        .unwrap_or_else(|| CommandError::from(db_err))),
+                    Err(db_err) => {
+                        if let Some(e) = lost.lock().take() {
+                            return Err(e);
+                        }
+                        Err(failed
+                            .lock()
+                            .take()
+                            .unwrap_or_else(|| CommandError::from(db_err)))
+                    }
                 }
             }
             Handler::External(handler) => {
@@ -624,16 +641,6 @@ impl CommandBus {
             RunOrigin::Undo(audit_id),
         )
         .await
-        .map_err(|e| match e {
-            // The row was undone by a concurrent undo between our read and
-            // our claim: say so, as the up-front check would have.
-            CommandError::Failed { message } if message.contains("already undone") => {
-                CommandError::Failed {
-                    message: format!("audit row {audit_id} was already undone"),
-                }
-            }
-            other => other,
-        })
     }
 
     /// A run that needs a confirmation it doesn't have. A person (or the
@@ -1191,12 +1198,12 @@ impl CommandBus {
                 .db
                 .transaction(move |tx| mark_undone_tx(tx, audit_id, UNDO_PENDING))
                 .await
-                .map_err(CommandError::from),
+                .map_err(|e| lost_race(origin, e).unwrap_or_else(CommandError::from)),
             RunOrigin::Approval(id) => self
                 .db
                 .transaction(move |tx| proposal_store::claim_tx(tx, id))
                 .await
-                .map_err(CommandError::from),
+                .map_err(|e| lost_race(origin, e).unwrap_or_else(CommandError::from)),
         }
     }
 
@@ -1228,6 +1235,29 @@ impl CommandBus {
             tracing::error!(?origin, error = %e, "releasing a claim failed");
         }
     }
+}
+
+/// Marking an undo or an approval failed with `e`: when the row was
+/// undone, or the proposal decided, by a concurrent run (an `Invariant` /
+/// `Invalid` from the store), the `Invalid` this run answers — not a failed
+/// run, so it is never audited; anything else (storage) passes through.
+fn lost_race(
+    origin: RunOrigin,
+    e: oxplow_domain::DomainError,
+) -> Result<CommandError, oxplow_domain::DomainError> {
+    use oxplow_domain::DomainError as D;
+    if !matches!(e, D::Invariant(_) | D::Invalid(_)) {
+        return Err(e);
+    }
+    let message = match origin {
+        RunOrigin::Undo(audit_id) => format!("audit row {audit_id} was already undone"),
+        RunOrigin::Approval(id) => format!("proposal:{id} was already decided"),
+        RunOrigin::Call => return Err(e),
+    };
+    Ok(CommandError::Invalid {
+        field: None,
+        message,
+    })
 }
 
 /// `undone_by` while an `External` undo is running (audit ids start at 1).
@@ -1357,7 +1387,8 @@ fn undoable(row: &CommandAudit) -> Result<CommandCall, CommandError> {
         });
     }
     if let Some(by) = row.undone_by {
-        return Err(CommandError::Failed {
+        return Err(CommandError::Invalid {
+            field: None,
             message: format!("audit row {} was already undone by {by}", row.id),
         });
     }
@@ -2480,6 +2511,107 @@ mod tests {
         assert_eq!(children[1]["name"], "kv.danger");
         assert_eq!(kv_value(&db, "a").await, None);
         assert!(audits(&db).await.is_empty());
+        // Approving runs the whole composite as the person, once.
+        let out = bus.approve(&Actor::Human, rows[0].id).await.unwrap();
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
+        assert_eq!(kv_value(&db, "b").await.as_deref(), Some("2"));
+        let p = proposal(&db, rows[0].id).await;
+        assert_eq!(p.decision, oxplow_db::ProposalDecision::Approved);
+        assert_eq!(p.audit_id, out.audit_id);
+        assert_eq!(audits(&db).await.len(), 1, "one row for the composite");
+    }
+
+    /// Two people approve one proposal at once: it runs once; the other
+    /// approval lost the race — `Invalid`, and no audit row of its own.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn concurrent_approvals_run_it_once() {
+        let (db, bus) = confirming_bus();
+        let bus = Arc::new(bus);
+        let id = propose(&bus, "a", "1").await;
+        let (b1, b2) = (bus.clone(), bus.clone());
+        let (r1, r2) = tokio::join!(
+            tokio::spawn(async move { b1.approve(&Actor::Human, id).await }),
+            tokio::spawn(async move { b2.approve(&Actor::Human, id).await }),
+        );
+        let results = [r1.unwrap(), r2.unwrap()];
+        assert_eq!(
+            results.iter().filter(|r| r.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
+        let lost = results.into_iter().find_map(Result::err).unwrap();
+        assert!(
+            matches!(&lost, CommandError::Invalid { message, .. } if message.contains(&format!("proposal:{id}"))),
+            "{lost:?}"
+        );
+        assert_eq!(audits(&db).await.len(), 1, "only the run that won");
+        let approved = logged(&bus)
+            .await
+            .into_iter()
+            .filter(|e| e.envelope.event_type == "command.approved")
+            .count();
+        assert_eq!(approved, 1);
+    }
+
+    /// An `External` approval whose run fails releases its claim: the
+    /// proposal is pending again and can be approved later.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failed_external_approval_leaves_the_proposal_pending() {
+        let (db, bus) = bus();
+        let mut spec = kv_spec("kv.remote", Invokers::ALL, Confirm::Always);
+        spec.atomicity = Atomicity::External;
+        bus.register(
+            Command::new(
+                spec,
+                Handler::External(Arc::new(|_actor, _input| {
+                    Box::pin(async move {
+                        Err(CommandError::Failed {
+                            message: "the remote said no".into(),
+                        })
+                    })
+                })),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        bus.run(&agent(), "kv.remote", json!({"k": "a", "v": "1"}), false)
+            .await
+            .unwrap_err();
+        let id = pending(&db).await.remove(0).id;
+        let err = bus.approve(&Actor::Human, id).await.unwrap_err();
+        assert!(err.to_string().contains("the remote said no"), "{err}");
+        let p = proposal(&db, id).await;
+        assert_eq!(p.decision, oxplow_db::ProposalDecision::Pending);
+        assert_eq!(p.audit_id, None);
+    }
+
+    /// A dry run is rolled back with everything it would have caused: its
+    /// `after_commit` never runs.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_dry_run_never_runs_after_commit() {
+        let (db, bus) = bus();
+        let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let fired_c = fired.clone();
+        bus.register(
+            Command::new(
+                kv_spec("kv.set", Invokers::ALL, Confirm::Always),
+                Handler::Tx(Arc::new(move |_ctx: &TxCtx<'_>, input| {
+                    let fired = fired_c.clone();
+                    Ok(HandlerOutput {
+                        result: input,
+                        after_commit: Some(Box::new(move || {
+                            fired.store(true, std::sync::atomic::Ordering::SeqCst)
+                        })),
+                        ..HandlerOutput::default()
+                    })
+                })),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        propose(&bus, "a", "1").await;
+        assert_eq!(pending(&db).await.len(), 1);
+        assert!(!fired.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[tokio::test(flavor = "multi_thread")]

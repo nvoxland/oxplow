@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { decideProposal, querySql } from "./api.js";
+import { recordOpError } from "./components/opErrorsStore.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
 import { valueText } from "./pages/settingsModel.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
@@ -99,8 +100,10 @@ export function useProposals(): Proposal[] {
         setProposals(r.proposals);
         setReads(r.reads);
       })
-      .catch(() => {
-        // The rail and Settings stay as they were; the next change retries.
+      .catch((e: unknown) => {
+        // The rail and Settings keep what they showed; the next change
+        // retries. The person learns the list may be stale.
+        recordOpError({ label: "Read pending proposals", message: e instanceof Error ? e.message : String(e) });
       });
   }, []);
   useEffect(load, [load]);

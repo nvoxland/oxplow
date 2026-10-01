@@ -411,6 +411,71 @@ mod tests {
         );
     }
 
+    /// An `External` approval claims the proposal before it runs, then
+    /// finishes the claim with its audit row — or releases it when the
+    /// run failed, so it is pending again. A claimed proposal can't be
+    /// claimed or declined twice.
+    #[tokio::test]
+    async fn an_approval_claims_then_finishes_or_releases() {
+        let db = seeded().await;
+        let store = SqliteProposalStore::new(db.clone());
+        let id = db
+            .transaction(|tx| insert_tx(tx, &config_set("zones", json!([]))))
+            .await
+            .unwrap()
+            .id;
+        db.transaction(move |tx| claim_tx(tx, id)).await.unwrap();
+        let claimed = store.get(id).await.unwrap().unwrap();
+        assert_eq!(claimed.decision, ProposalDecision::Approved);
+        assert_eq!(claimed.audit_id, None);
+        assert!(db.transaction(move |tx| claim_tx(tx, id)).await.is_err());
+        assert!(db.transaction(move |tx| decline_tx(tx, id)).await.is_err());
+
+        db.transaction(move |tx| release_claim_tx(tx, id))
+            .await
+            .unwrap();
+        let released = store.get(id).await.unwrap().unwrap();
+        assert_eq!(released.decision, ProposalDecision::Pending);
+        assert_eq!(released.decided_at, None);
+
+        db.transaction(move |tx| claim_tx(tx, id)).await.unwrap();
+        let audit = db
+            .transaction(|tx| {
+                crate::command_audit_store::insert_tx(
+                    tx,
+                    &crate::NewCommandAudit {
+                        command: "config.set".into(),
+                        actor_kind: ActorKind::Human,
+                        actor_id: None,
+                        thread_id: None,
+                        input: json!({}),
+                        outcome: oxplow_domain::events::schema::CommandOutcome::Ok,
+                        error: None,
+                        result: None,
+                        inverse: None,
+                    },
+                )
+            })
+            .await
+            .unwrap();
+        db.transaction(move |tx| finish_claim_tx(tx, id, audit))
+            .await
+            .unwrap();
+        assert_eq!(store.get(id).await.unwrap().unwrap().audit_id, Some(audit));
+        // Finished: neither finished again nor released.
+        assert!(db
+            .transaction(move |tx| finish_claim_tx(tx, id, audit))
+            .await
+            .is_err());
+        db.transaction(move |tx| release_claim_tx(tx, id))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.get(id).await.unwrap().unwrap().decision,
+            ProposalDecision::Approved
+        );
+    }
+
     #[tokio::test]
     async fn a_proposal_is_decided_once() {
         let db = seeded().await;
