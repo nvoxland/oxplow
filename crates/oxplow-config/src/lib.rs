@@ -1238,6 +1238,17 @@ pub struct ConfigEntry {
     pub set: bool,
 }
 
+/// `v` as a YAML value, by way of JSON text. The one bridge from a config
+/// type to YAML: serde_json's `arbitrary_precision` makes a number inside
+/// a `serde_json::Value` a private struct when anything but serde_json
+/// serializes it (`serde_yaml::to_value` writes
+/// `{$serde_json::private::Number: '5'}` into the file), and some config
+/// types hold a `Value` (an extension instance's `config`).
+pub(crate) fn to_yaml<T: serde::Serialize>(v: &T) -> serde_yaml::Value {
+    let text = serde_json::to_string(v).expect("config values serialize as json");
+    serde_yaml::from_str(&text).expect("json text is yaml")
+}
+
 /// Every key the project file can hold, with the value `config` gives it —
 /// the file's, or the default — and whether that differs from the default
 /// (P6.H1: the effective-config view shows both). `render_project_config`
@@ -1249,7 +1260,7 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
     };
     put(
         "agents",
-        serde_yaml::to_value(&config.agents).expect("agents serialize"),
+        to_yaml(&config.agents),
         config.agents != vec![AgentKind::default()],
     );
     put(
@@ -1288,7 +1299,7 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
     );
     put(
         "generated",
-        serde_yaml::to_value(&config.generated).expect("generated paths serialize"),
+        to_yaml(&config.generated),
         !config.generated.exclude.is_empty() || !config.generated.include.is_empty(),
     );
     put(
@@ -1327,16 +1338,10 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
             .map(|s| {
                 let mut m = serde_yaml::Mapping::new();
                 m.insert("languageId".into(), s.language_id.clone().into());
-                m.insert(
-                    "extensions".into(),
-                    serde_yaml::to_value(&s.extensions).expect("extensions serialize"),
-                );
+                m.insert("extensions".into(), to_yaml(&s.extensions));
                 m.insert("command".into(), s.command.clone().into());
                 if !s.args.is_empty() {
-                    m.insert(
-                        "args".into(),
-                        serde_yaml::to_value(&s.args).expect("args serialize"),
-                    );
+                    m.insert("args".into(), to_yaml(&s.args));
                 }
                 serde_yaml::Value::Mapping(m)
             })
@@ -1371,15 +1376,12 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
             col.insert("reports".into(), serde_yaml::Value::Sequence(reports));
         }
         if !c.test_run_patterns.is_empty() {
-            col.insert(
-                "testRunPatterns".into(),
-                serde_yaml::to_value(&c.test_run_patterns).expect("patterns serialize"),
-            );
+            col.insert("testRunPatterns".into(), to_yaml(&c.test_run_patterns));
         }
         if !c.analysis_run_patterns.is_empty() {
             col.insert(
                 "analysisRunPatterns".into(),
-                serde_yaml::to_value(&c.analysis_run_patterns).expect("patterns serialize"),
+                to_yaml(&c.analysis_run_patterns),
             );
         }
         if let Some(v) = &c.agent_hint {
@@ -1393,10 +1395,7 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
                     let mut m = serde_yaml::Mapping::new();
                     m.insert("name".into(), p.name.clone().into());
                     m.insert("kind".into(), p.kind.clone().into());
-                    m.insert(
-                        "formats".into(),
-                        serde_yaml::to_value(&p.formats).expect("formats serialize"),
-                    );
+                    m.insert("formats".into(), to_yaml(&p.formats));
                     m.insert("runtime".into(), p.runtime.clone().into());
                     if let Some(input) = &p.input {
                         m.insert("input".into(), input.clone().into());
@@ -1405,10 +1404,7 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
                         m.insert("entryFile".into(), entry_file.clone().into());
                     }
                     if !p.args.is_empty() {
-                        m.insert(
-                            "args".into(),
-                            serde_yaml::to_value(&p.args).expect("args serialize"),
-                        );
+                        m.insert("args".into(), to_yaml(&p.args));
                     }
                     serde_yaml::Value::Mapping(m)
                 })
@@ -1444,32 +1440,25 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         ),
         !config.dimensions.is_empty(),
     );
-    put(
-        "zones",
-        serde_yaml::to_value(&config.zones).expect("zones serialize"),
-        !config.zones.is_empty(),
-    );
+    put("zones", to_yaml(&config.zones), !config.zones.is_empty());
     put(
         "agentModels",
-        serde_yaml::to_value(&config.agent_models).expect("agent models serialize"),
+        to_yaml(&config.agent_models),
         !config.agent_models.is_empty(),
     );
     put(
         "acpAgents",
-        serde_yaml::to_value(&config.acp_agents).expect("acp agents serialize"),
+        to_yaml(&config.acp_agents),
         !config.acp_agents.is_empty(),
     );
     put(
         "extensionInstances",
-        serde_yaml::to_value(&config.extension_instances).expect("extension instances serialize"),
+        to_yaml(&config.extension_instances),
         !config.extension_instances.is_empty(),
     );
     {
         let mut ext = serde_yaml::Mapping::new();
-        ext.insert(
-            "disabled".into(),
-            serde_yaml::to_value(&config.extensions_disabled).expect("disabled serialize"),
-        );
+        ext.insert("disabled".into(), to_yaml(&config.extensions_disabled));
         put(
             "extensions",
             serde_yaml::Value::Mapping(ext),
@@ -1478,10 +1467,7 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
     }
     {
         let mut ai = serde_yaml::Mapping::new();
-        ai.insert(
-            "roles".into(),
-            serde_yaml::to_value(&config.ai_roles).expect("ai roles serialize"),
-        );
+        ai.insert("roles".into(), to_yaml(&config.ai_roles));
         put(
             "ai",
             serde_yaml::Value::Mapping(ai),
@@ -1602,10 +1588,7 @@ fn minimal_yaml<T: Serialize>(entry: &T) -> serde_yaml::Value {
             other => Some(other),
         }
     }
-    serde_yaml::to_value(entry)
-        .ok()
-        .and_then(prune)
-        .unwrap_or_else(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()))
+    prune(to_yaml(entry)).unwrap_or_else(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()))
 }
 
 /// Serialize one [`DimensionEntry`] to a YAML mapping, omitting unset fields.
@@ -3246,6 +3229,33 @@ mod global_config_dir_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An instance's config is a `serde_json::Value`, and serde_json's
+    /// `arbitrary_precision` makes a number a private struct when it's
+    /// serialized by anything but serde_json — straight into
+    /// `project.yaml` as `{$serde_json::private::Number: '5'}`. Every
+    /// entry goes through JSON text, so the file holds the number.
+    #[test]
+    fn rendered_config_holds_plain_numbers_from_json_values() {
+        let mut config = default_config("demo".into());
+        config.extension_instances.insert(
+            "acme/github".into(),
+            ExtensionInstanceConfig {
+                enabled: true,
+                config: serde_json::json!({ "pollMinutes": 5, "ratio": 0.5 }),
+            },
+        );
+        let doc = render_project_config(&config, "demo");
+        let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
+        assert!(yaml.contains("pollMinutes: 5\n"), "{yaml}");
+        assert!(yaml.contains("ratio: 0.5\n"), "{yaml}");
+        assert!(!yaml.contains("serde_json"), "{yaml}");
+        let back = parse_project_config(serde_yaml::from_str(&yaml).unwrap(), "demo").unwrap();
+        assert_eq!(
+            back.extension_instances["acme/github"].config,
+            serde_json::json!({ "pollMinutes": 5, "ratio": 0.5 })
+        );
+    }
 
     /// A scaffold's entries render as a `project.yaml` snippet that loads
     /// back to the same entries (tsk391): the agent pastes it in.

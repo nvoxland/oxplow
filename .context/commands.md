@@ -121,7 +121,13 @@ gives each key its value — the file's, or the default's — and whether the
 file sets it; `render_project_config` is the set ones, and a test holds
 the entries to exactly the schema's keys. The single-agent `agent` key is
 gone: `agents` is the one key (an old file's `agent:` is refused as an
-unknown field).
+unknown field). Every entry's YAML comes from `oxplow_config::to_yaml`,
+the one bridge from a config type to YAML, by way of JSON text: serde_json's
+`arbitrary_precision` makes a number inside a `serde_json::Value` (an
+extension instance's `config`) a private struct under `serde_yaml::to_value`,
+which once wrote `{$serde_json::private::Number: '5'}` into the committed
+file (P6 review, tsk599); `keys.rs`'s `yaml_to_json` is the same bridge
+the other way.
 
 **Settings is a view** (`crates/oxplow-app/src/effective_config.rs`, UI
 RPC `effective_config`): one `EffectiveSetting { key, doc, value, origin,

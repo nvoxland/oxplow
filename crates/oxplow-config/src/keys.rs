@@ -103,15 +103,11 @@ pub fn key_value(config: &OxplowConfig, project_dir: &std::path::Path, key: &str
 /// YAML → JSON through text. Serializing a `serde_json::Value` directly
 /// into another format breaks when a dependency turns on serde_json's
 /// `arbitrary_precision` (numbers become a private map); JSON text is
-/// valid YAML, so the text is the safe bridge both ways.
+/// valid YAML, so the text is the safe bridge both ways (the other way is
+/// `crate::to_yaml`).
 fn yaml_to_json(v: &serde_yaml::Value) -> Value {
     let text = serde_json::to_string(v).expect("yaml value serializes as json");
     serde_json::from_str(&text).expect("json text parses")
-}
-
-fn json_to_yaml(v: &Value) -> Result<serde_yaml::Value, ConfigError> {
-    let text = serde_json::to_string(v).expect("json value serializes");
-    Ok(serde_yaml::from_str(&text)?)
 }
 
 /// `config` with `key` set to `value` (or removed when `None`), taken
@@ -132,7 +128,10 @@ pub fn with_key(
     let mut doc = render_project_config(config, &fallback);
     match value {
         Some(v) => {
-            doc.insert(serde_yaml::Value::String(key.to_string()), json_to_yaml(v)?);
+            doc.insert(
+                serde_yaml::Value::String(key.to_string()),
+                crate::to_yaml(v),
+            );
         }
         None => {
             doc.remove(serde_yaml::Value::String(key.to_string()));
