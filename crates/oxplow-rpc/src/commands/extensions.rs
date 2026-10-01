@@ -144,6 +144,54 @@ pub async fn submit_lens_form(
     .await?)
 }
 
+/// A custom component's frame reads one of its declared lenses (P6b.D2):
+/// the person is looking at lens `id`; `asset` names the lens to run.
+pub async fn run_component_query(
+    svc: &Services,
+    id: String,
+    asset: String,
+    params: Option<BTreeMap<String, SqlCell>>,
+    stream_id: Option<String>,
+) -> Result<LensRun, IpcError> {
+    let root = root(svc, stream_id.as_deref()).await;
+    let ctx = context(svc, stream_id.as_deref()).await;
+    Ok(oxplow_app::lens_actions::run_component_query(
+        svc,
+        &root,
+        &id,
+        &asset,
+        params.unwrap_or_default(),
+        &ctx,
+    )
+    .await?)
+}
+
+/// A custom component's frame invokes one of its declared commands, as the
+/// lens acting for the person (`NEEDS_CONFIRMATION`: the host asks them,
+/// never the frame).
+pub async fn invoke_component_command(
+    svc: &Services,
+    id: String,
+    command: String,
+    input: oxplow_domain::Json,
+    stream_id: Option<String>,
+    confirmed: bool,
+) -> Result<oxplow_domain::CommandOutcome, IpcError> {
+    let root = root(svc, stream_id.as_deref()).await;
+    Ok(oxplow_app::lens_actions::invoke_component_command(
+        svc,
+        &root,
+        oxplow_app::lens_actions::ComponentInvoke {
+            lens_id: id,
+            command,
+            input: input.0,
+            on_behalf_of: oxplow_domain::Actor::Human,
+            confirmed,
+        },
+    )
+    .await?)
+}
+
 /// A person presses one of a lens's actions: its command runs as the
 /// lens, acting for them (`NEEDS_CONFIRMATION` asks them first). A row
 /// action takes the row it was pressed on.

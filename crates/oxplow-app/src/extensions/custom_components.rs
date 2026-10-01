@@ -327,8 +327,16 @@ mod tests {
                 "",
                 "asset `x/nope` isn't in this extension's lenses/",
             ),
-            ("{ id: c, bundle: components/burndown, assets: [\"Not A Lens\"] }", "", "isn't a lens id"),
-            ("{ id: c, bundle: components/burndown, commands: [Nope] }", "", "isn't a command name"),
+            (
+                "{ id: c, bundle: components/burndown, assets: [\"Not A Lens\"] }",
+                "",
+                "isn't a lens id",
+            ),
+            (
+                "{ id: c, bundle: components/burndown, commands: [Nope] }",
+                "",
+                "isn't a command name",
+            ),
         ] {
             let d = tempfile::tempdir().unwrap();
             let base = d.path().join("oxplow/extensions/x");

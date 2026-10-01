@@ -229,6 +229,123 @@ pub async fn submit_form(
         .await
 }
 
+/// The component a `custom` lens renders, from its extension.
+fn component_of(
+    svc: &crate::Services,
+    lens_root: &Path,
+    lens_id: &str,
+) -> Result<extensions::custom_components::CustomComponent, CommandError> {
+    let lens = svc
+        .extension_catalog
+        .find_lens(lens_root, lens_id)
+        .map_err(CommandError::from)?;
+    let component = match (&lens.viz, &lens.custom) {
+        (extensions::LensViz::Custom, Some(c)) => c.component.clone().unwrap_or_default(),
+        _ => {
+            return Err(CommandError::Invalid {
+                field: Some("/lens".into()),
+                message: format!("`{lens_id}` isn't a custom component lens"),
+            })
+        }
+    };
+    let ext = svc
+        .extension_catalog
+        .named(lens_root, &lens.extension)
+        .map_err(CommandError::from)?;
+    ext.custom_components
+        .into_iter()
+        .find(|c| c.id == component)
+        .ok_or_else(|| CommandError::Invalid {
+            field: Some("/lens".into()),
+            message: format!("`{lens_id}`'s component `{component}` isn't loaded"),
+        })
+}
+
+/// A custom component reads one of its declared lenses (`assets`; a bare
+/// slug is its extension's) — never SQL: the frame names a lens, the
+/// lens's own query runs, read-only and parameterised, like any lens run.
+pub async fn run_component_query(
+    svc: &crate::Services,
+    lens_root: &Path,
+    lens_id: &str,
+    asset: &str,
+    params: BTreeMap<String, SqlCell>,
+    ctx: &extensions::LensContext,
+) -> Result<extensions::LensRun, CommandError> {
+    let component = component_of(svc, lens_root, lens_id)?;
+    let asset = if asset.contains('/') {
+        asset.to_string()
+    } else {
+        format!("{}/{asset}", component.extension)
+    };
+    if !component.assets.contains(&asset) {
+        return Err(CommandError::Invalid {
+            field: Some("/asset".into()),
+            message: format!(
+                "`{asset}` isn't one of component `{}`'s assets ({})",
+                component.id,
+                component.assets.join(", ")
+            ),
+        });
+    }
+    extensions::run_lens(
+        &svc.sql,
+        &svc.extension_catalog,
+        lens_root,
+        &asset,
+        params,
+        ctx,
+    )
+    .await
+    .map_err(CommandError::from)
+}
+
+/// A custom component invokes one of its declared commands.
+pub struct ComponentInvoke {
+    /// The `custom` lens whose frame asked.
+    pub lens_id: String,
+    pub command: String,
+    /// Sent as is: a component's input is literal (no placeholders).
+    pub input: Value,
+    /// Who is looking at the frame.
+    pub on_behalf_of: Actor,
+    /// The person confirmed this call, in the host (never in the frame).
+    pub confirmed: bool,
+}
+
+/// Run `call`'s command as the lens acting for its viewer, so every
+/// policy applies as if they ran it — a component can offer an action but
+/// never grant a power — when the component declares it.
+pub async fn invoke_component_command(
+    svc: &crate::Services,
+    lens_root: &Path,
+    call: ComponentInvoke,
+) -> Result<CommandOutcome, CommandError> {
+    let component = component_of(svc, lens_root, &call.lens_id)?;
+    if !component.commands.contains(&call.command) {
+        return Err(CommandError::Invalid {
+            field: Some("/command".into()),
+            message: format!(
+                "`{}` isn't one of component `{}`'s commands ({})",
+                call.command,
+                component.id,
+                component.commands.join(", ")
+            ),
+        });
+    }
+    svc.commands
+        .run(
+            &Actor::Lens {
+                lens_id: call.lens_id,
+                on_behalf_of: Box::new(call.on_behalf_of),
+            },
+            &call.command,
+            call.input,
+            call.confirmed,
+        )
+        .await
+}
+
 /// `input` with its placeholders bound: a string that is exactly
 /// `{{param.x}}` / `{{row.x}}` becomes that value (typed), one that
 /// contains them has them spliced in as text. The values are data — they
@@ -513,5 +630,93 @@ actions:
         .await
         .unwrap_err();
         assert!(err.to_string().contains("isn't a form"), "{err}");
+    }
+
+    /// P6b.D2: a private extension with a component (`board`) that may
+    /// query `acme/tasks` and invoke `work_item.transition`.
+    async fn component_fixture() -> (crate::test_fixtures::EffortFixture, std::path::PathBuf) {
+        let (fx, root) = fixture().await;
+        let ext = root.join("oxplow/extensions/acme");
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, assets: [tasks], commands: [work_item.transition] }\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(ext.join("components/board")).unwrap();
+        std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
+        std::fs::write(
+            ext.join("lenses/view.yaml"),
+            "title: View\nquery: SELECT 1 AS n\nviz: custom\ncustom: { component: board }\n",
+        )
+        .unwrap();
+        (fx, root)
+    }
+
+    #[tokio::test]
+    async fn a_component_queries_only_its_declared_lenses() {
+        let (fx, root) = component_fixture().await;
+        let ctx = extensions::LensContext::default();
+        let run = run_component_query(&fx.svc, &root, "acme/view", "tasks", BTreeMap::new(), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(run.lens.id, "acme/tasks");
+        let err = run_component_query(
+            &fx.svc,
+            &root,
+            "acme/view",
+            "acme/view",
+            BTreeMap::new(),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { message, .. } if message.contains("isn't one of component `board`'s assets (acme/tasks)")),
+            "{err:?}"
+        );
+        let err = run_component_query(&fx.svc, &root, "acme/tasks", "tasks", BTreeMap::new(), &ctx)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("isn't a custom component lens"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_component_invokes_only_its_declared_commands_as_the_lens() {
+        let (fx, root) = component_fixture().await;
+        let invoke = |command: &str| ComponentInvoke {
+            lens_id: "acme/view".into(),
+            command: command.into(),
+            input: serde_json::json!({ "ref": oxplow_domain::refs::build::work_item_ref(fx.task), "to": "done" }),
+            on_behalf_of: Actor::Human,
+            confirmed: false,
+        };
+        let err = invoke_component_command(&fx.svc, &root, invoke("config.set"))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("isn't one of component `board`'s commands"),
+            "{err}"
+        );
+        let out = invoke_component_command(&fx.svc, &root, invoke("work_item.transition"))
+            .await
+            .unwrap();
+        let audit = fx
+            .svc
+            .commands
+            .audit_store()
+            .get(out.audit_id.unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            audit.actor_kind,
+            oxplow_domain::events::schema::ActorKind::Lens
+        );
+        assert_eq!(audit.actor_id.as_deref(), Some("acme/view"));
+        assert_eq!(state(&fx.svc, fx.task).await, "done");
     }
 }

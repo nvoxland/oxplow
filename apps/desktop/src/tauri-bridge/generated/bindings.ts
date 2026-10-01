@@ -310,6 +310,16 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	runComponentQuery: (id: string, asset: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<LensRun_Serialize, IpcError>(__TAURI_INVOKE("run_component_query", { id, asset, params, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	invokeComponentCommand: (id: string, command: string, input: unknown, streamId: string | null, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("invoke_component_command", { id, command, input, streamId, confirmed })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	validateExtension: (name: string, streamId: string | null) => typedError<CheckReport_Serialize, IpcError>(__TAURI_INVOKE("validate_extension", { name, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

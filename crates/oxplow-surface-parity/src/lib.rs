@@ -180,6 +180,10 @@ pub const MANIFEST: &[Capability] = &[
     // A form lens: agents run the command itself.
     ui("lens_form"),
     ui("submit_lens_form"),
+    // A custom component's bridged calls, from its sandboxed frame through
+    // the host (P6b.D2).
+    ui("run_component_query"),
+    ui("invoke_component_command"),
     both("validate_extension"),
     both("review_extension"),
     both("install_extension"),

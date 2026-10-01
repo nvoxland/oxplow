@@ -174,6 +174,11 @@ system is `Denied`), and a proposal is decided once (`Invalid` after):
 - **`CommandBus::decline(actor, id)`** marks it declined and logs
   `command.declined@1`; nothing runs, no audit row.
 
+A custom component's frame invokes a command through UI RPC
+`invoke_component_command` — as the lens acting for the person, only a
+command its component declares ([extensions.md](./extensions.md),
+"Custom components").
+
 UI RPC **`decide_proposal { proposal, approve }`** (`ui` in surface
 parity; desktop `decideProposal`) returns the approving run's outcome, or
 `null` for a decline. A proposal's dry run is a snapshot at proposal

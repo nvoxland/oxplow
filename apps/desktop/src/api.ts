@@ -661,6 +661,29 @@ export async function submitLensForm(
   return unwrap(await commands.submitLensForm(id, input, params, streamId, confirmed));
 }
 
+/** A custom component's frame reads one of its declared lenses, while the
+ *  person looks at lens `id` (P6b.D2). */
+export async function runComponentQuery(
+  id: string,
+  asset: string,
+  params: Record<string, SqlCell>,
+  streamId: string | null,
+): Promise<LensRun> {
+  return unwrap(await commands.runComponentQuery(id, asset, params, streamId));
+}
+
+/** A custom component's frame invokes one of its declared commands, as the
+ *  lens acting for the person; `confirmed` only after the host asked. */
+export async function invokeComponentCommand(
+  id: string,
+  command: string,
+  input: unknown,
+  streamId: string | null,
+  confirmed: boolean,
+): Promise<CommandOutcome> {
+  return unwrap(await commands.invokeComponentCommand(id, command, input as never, streamId, confirmed));
+}
+
 /** What the person can ask: every capability's questions and the stream's
  *  enabled extensions' prompts (the catalog; contextual suggestions). */
 export async function promptCatalog(streamId: string | null): Promise<CatalogPrompt[]> {

@@ -830,6 +830,19 @@ warns when a custom lens also fills a kit role block (`chart`, `tree`,
 `timeline`, `steps`, `hunks`) — the kit may already render it; that is
 the honest extent of a "this reimplements the kit" lint.
 
+**The bridged calls** (P6b.D2, `lens_actions.rs`; the frame reaches them
+only through the host): `run_component_query { id, asset, params,
+stream_id }` runs `asset` — a lens id, a bare slug meaning the
+component's extension — when it's one of the component's `assets`
+(`Invalid` naming them otherwise), through `run_lens`: the lens's own
+read-only, parameterised query, never SQL from the frame.
+`invoke_component_command { id, command, input, stream_id, confirmed }`
+runs `command` when it's one of the component's `commands`, as
+`Actor::Lens { lens_id: id, on_behalf_of: Human }`, so every policy
+applies as if the person ran it; the input is literal (no placeholders);
+a command that asks comes back `NEEDS_CONFIRMATION` and the **host**
+asks, never the frame. Both are UI RPCs (`ui` in surface parity).
+
 ## Decorators (experimental)
 
 `ui.decorators` (a private extension only, P6b.C5;
