@@ -18,7 +18,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::manifest_v2::{at, key_line, line_under};
+use super::manifest_v2::{at, entry_line, key_line};
 
 /// The most a bundle may hold.
 pub const MAX_BUNDLE_BYTES: u64 = 5 * 1024 * 1024;
@@ -158,7 +158,7 @@ pub fn parse_custom_components(
                 continue;
             }
         };
-        let line = line_under(manifest, "custom_components", &format!("id: {}", c.id)).or(block);
+        let line = entry_line(manifest, "custom_components", "id", &c.id).or(block);
         let bundle = c
             .bundle
             .clone()

@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::manifest_v2::{at, key_line, line_under};
+use super::manifest_v2::{at, entry_line, key_line, line_under};
 use super::placeholders;
 
 /// Where a command shows.
@@ -114,7 +114,7 @@ pub fn parse_ui_commands(
                 continue;
             }
         };
-        let line = line_under(manifest, "ui", &format!("command: {}", entry.command)).or(block);
+        let line = entry_line(manifest, "ui", "command", &entry.command).or(block);
         let input = entry.input.unwrap_or_else(|| json!({ "ref": "{{ref}}" }));
         let problem = if let Err(e) = oxplow_domain::CommandSpec::validate_name(&entry.command) {
             Some(e.to_string())

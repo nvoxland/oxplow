@@ -1006,7 +1006,9 @@ reconciler's `register_namespace` refuses it all-or-nothing under one
 lock (reported as the extension's problem). Two enabled extensions
 mapping to one namespace are both refused at load
 (`refuse_shared_namespaces`, after disabling applies). Each entry is
-checked at load, its error at its line: the name, `effect`, `confirm`,
+checked at load, its error at its line (`entry_line`: the line whose
+`name:` is exactly that name — `a` never lands on `abc`; ids, lenses,
+models and `ui.commands` entries find their lines the same way): the name, `effect`, `confirm`,
 the schema compiles, `input` is one read, and the entry is a file in the
 extension that parses and defines `transform` (`check_starlark`), and
 it declares at most `MAX_EXAMPLES` (10) examples. The
@@ -1045,7 +1047,9 @@ extensions of the **primary worktree** (one bus, like providers — a
 command authored in another stream registers once merged), one
 namespace at a time, all-or-nothing; reconciled at boot, on
 `ConfigChanged` (enabling or disabling) and on a `WorkspaceChanged` under
-`oxplow/extensions/` (`spawn_reconciler`); a namespace something else
+`oxplow/extensions/` **in the primary stream** (`reconciles`, the
+predicate `spawn_reconciler` applies; another stream's edits wait for
+the merge); a namespace something else
 already holds (a provider) is refused and kept as the extension's
 `problem`. A launcher `{ command }` entry may name one.
 

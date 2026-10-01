@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::manifest_v2::{at, key_line, line_under};
+use super::manifest_v2::{at, entry_line, key_line, line_under};
 
 /// Where a decoration shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -90,7 +90,7 @@ pub fn parse_decorators(
                 continue;
             }
         };
-        let line = line_under(manifest, "ui", &format!("model: {}", d.model)).or(block);
+        let line = entry_line(manifest, "ui", "model", &d.model).or(block);
         let model = models.iter().find(|m| m.decl.name == d.model);
         let has = |col: &str| model.is_some_and(|m| m.decl.columns.iter().any(|c| c.name == col));
         let wanted: Vec<&str> = ["ref", d.label.as_str()]

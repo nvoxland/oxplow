@@ -418,6 +418,40 @@ pub fn line_under(text: &str, key: &str, needle: &str) -> Option<usize> {
         .map(|(i, _)| i + 1)
 }
 
+/// The 1-based line, inside top-level `block`, of the entry whose `key`
+/// is exactly `value` (`key: value`, `key: "value"`, `{ key: value, … }`)
+/// — not one whose value merely starts with it.
+pub fn entry_line(text: &str, block: &str, key: &str, value: &str) -> Option<usize> {
+    let start = key_line(text, block)?;
+    let pattern = format!("{key}:");
+    let names_it = |line: &str| {
+        line.match_indices(&pattern).any(|(at, _)| {
+            let before = line[..at].chars().next_back();
+            if !before.is_none_or(|c| matches!(c, ' ' | '{' | ',' | '-')) {
+                return false;
+            }
+            let rest = line[at + pattern.len()..].trim_start();
+            let (quote, rest) = match rest.chars().next() {
+                Some(q @ ('"' | '\'')) => (Some(q), &rest[1..]),
+                _ => (None, rest),
+            };
+            let Some(after) = rest.strip_prefix(value) else {
+                return false;
+            };
+            match quote {
+                Some(q) => after.starts_with(q),
+                None => after.is_empty() || after.starts_with([' ', ',', '}', '#']),
+            }
+        })
+    };
+    text.lines()
+        .enumerate()
+        .skip(start)
+        .take_while(|(_, l)| l.starts_with(' ') || l.starts_with('-') || l.trim().is_empty())
+        .find(|(_, l)| names_it(l))
+        .map(|(i, _)| i + 1)
+}
+
 /// The line of a kind's key: a top-level key, or `ui.<key>` under `ui:`.
 pub fn kind_line(text: &str, kind: &str) -> Option<usize> {
     match kind.strip_prefix("ui.") {
@@ -717,5 +751,17 @@ mod tests {
         assert_eq!(line_under(text, "slot_mounts", "lens: y"), Some(5));
         assert_eq!(line_under(text, "slot_mounts", "advisories"), None);
         assert_eq!(key_line(text, "nope"), None);
+    }
+
+    /// An entry's line is the one whose `key:` is exactly that value, in
+    /// flow or block style, bare or quoted — `name: a` isn't `name: abc`.
+    #[test]
+    fn an_entry_line_matches_its_value_exactly() {
+        let text = "manifest: 2\ncommands:\n  - name: abc\n    summary: s\n  - name: a\n  - { name: \"b\", x: 1 }\nother: 1\n";
+        assert_eq!(entry_line(text, "commands", "name", "a"), Some(5));
+        assert_eq!(entry_line(text, "commands", "name", "abc"), Some(3));
+        assert_eq!(entry_line(text, "commands", "name", "b"), Some(6));
+        assert_eq!(entry_line(text, "commands", "name", "ab"), None);
+        assert_eq!(entry_line(text, "commands", "summary", "s"), Some(4));
     }
 }

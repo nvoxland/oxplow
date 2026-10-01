@@ -24,7 +24,7 @@ use oxplow_domain::{CommandCall, CommandEffect, CommandSpec, Confirm, InputValid
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::extensions::manifest_v2::{at, key_line, line_under};
+use crate::extensions::manifest_v2::{at, entry_line, key_line};
 use crate::extensions::{CommandSchemas, Extension};
 
 /// The most rows a command's `input` query hands its script.
@@ -144,8 +144,7 @@ pub fn parse_commands(
                 continue;
             }
         };
-        let line =
-            line_under(manifest, "commands", &format!("name: {}", entry.name)).or(block_line);
+        let line = entry_line(manifest, "commands", "name", &entry.name).or(block_line);
         match command_of(&namespace, entry, read) {
             Ok(c) if out.iter().any(|o| o.name == c.name) => errors.push(at(
                 file,
@@ -546,16 +545,17 @@ impl ExtensionCommands {
 /// files: once at boot, then on every config change (enabling or
 /// disabling an extension) and every change under `oxplow/extensions/`.
 pub fn spawn_reconciler(state: std::sync::Arc<crate::Services>) {
-    use crate::events::OxplowEvent;
+    use oxplow_domain::stores::StreamStore as _;
     let mut rx = state.events.subscribe();
     tokio::spawn(async move {
         state.extension_commands.reconcile().await;
+        let Ok(Some(primary)) = state.stream_store.primary().await else {
+            tracing::warn!("no primary stream; extension commands follow config changes only");
+            return;
+        };
         loop {
             match rx.recv().await {
-                Ok(OxplowEvent::ConfigChanged) => state.extension_commands.reconcile().await,
-                Ok(OxplowEvent::WorkspaceChanged { path, .. })
-                    if path.starts_with(crate::extensions::EXTENSIONS_DIR) =>
-                {
+                Ok(event) if reconciles(&event, primary.id) => {
                     state.extension_commands.reconcile().await
                 }
                 Ok(_) => continue,
@@ -566,6 +566,25 @@ pub fn spawn_reconciler(state: std::sync::Arc<crate::Services>) {
             }
         }
     });
+}
+
+/// Whether `event` can change the registered extension commands: a
+/// config change (enabling or disabling an extension), or a file under
+/// `oxplow/extensions/` in the primary worktree, where they run from.
+pub fn reconciles(event: &crate::events::OxplowEvent, primary: oxplow_domain::StreamId) -> bool {
+    use crate::events::OxplowEvent;
+    match event {
+        OxplowEvent::ConfigChanged => true,
+        OxplowEvent::WorkspaceChanged {
+            stream_id, path, ..
+        } => {
+            *stream_id == primary
+                && path
+                    .strip_prefix(crate::extensions::EXTENSIONS_DIR)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        }
+        _ => false,
+    }
 }
 
 /// Check `ext`'s commands (`check_extension`): with the running oxplow's
@@ -856,6 +875,68 @@ mod tests {
         let ext = project(d.path(), "a-b");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.commands.len(), 1);
+    }
+
+    /// Only a change under `oxplow/extensions/` in the primary worktree
+    /// (where extension commands run from) reconciles.
+    #[test]
+    fn the_reconciler_listens_to_the_primary_extensions_folder() {
+        use crate::events::{OxplowEvent, WorkspaceChangeKind};
+        let primary = oxplow_domain::StreamId::new(1);
+        let changed = |stream: i64, path: &str| OxplowEvent::WorkspaceChanged {
+            stream_id: oxplow_domain::StreamId::new(stream),
+            change_kind: WorkspaceChangeKind::Updated,
+            path: path.into(),
+        };
+        assert!(reconciles(
+            &changed(1, "oxplow/extensions/x/handlers/a.star"),
+            primary
+        ));
+        assert!(reconciles(&OxplowEvent::ConfigChanged, primary));
+        assert!(!reconciles(
+            &changed(2, "oxplow/extensions/x/handlers/a.star"),
+            primary
+        ));
+        assert!(!reconciles(
+            &changed(1, "oxplow/extensions-old/x.yaml"),
+            primary
+        ));
+        assert!(!reconciles(&changed(1, "oxplow/extensions"), primary));
+        assert!(!reconciles(&changed(1, "src/main.rs"), primary));
+    }
+
+    /// A changed script re-registers its command with the new script.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_changed_script_reregisters_its_command() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        with_finish(
+            &fx,
+            "def transform(x):\n    return {\"commands\": [], \"result\": 1}\n",
+        )
+        .await;
+        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let run = || async {
+            fx.svc
+                .commands
+                .run(
+                    &oxplow_domain::Actor::Human,
+                    "my_review.finish",
+                    json!({ "ref": r }),
+                    false,
+                )
+                .await
+                .unwrap()
+                .result["result"]
+                .clone()
+        };
+        assert_eq!(run().await, json!(1));
+        // A longer script: the catalog's fingerprint sees the new size.
+        with_finish(
+            &fx,
+            "def transform(x):\n    return {\"commands\": [], \"result\": 22222}\n",
+        )
+        .await;
+        assert_eq!(run().await, json!(22222));
     }
 
     /// Checked against the running registry, an extension whose command

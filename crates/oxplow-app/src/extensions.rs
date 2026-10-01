@@ -21,7 +21,7 @@ pub mod decorators;
 pub mod manifest_v2;
 pub mod migrate_v1;
 pub mod ui_commands;
-use manifest_v2::{at, key_line, line_under, ManifestV2};
+use manifest_v2::{at, entry_line, key_line, line_under, ManifestV2};
 pub use manifest_v2::{
     Intent, IntentExample, IntentPrompt, LauncherEntry, LauncherTarget, Sharing,
 };
@@ -1552,7 +1552,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         {
             ext.errors.push(at(
                 &file,
-                line_under(&manifest, "custom_components", &format!("id: {}", c.id)),
+                entry_line(&manifest, "custom_components", "id", &c.id),
                 format!(
                     "custom component `{}`: asset `{a}` isn't in this extension's lenses/",
                     c.id
@@ -1590,7 +1590,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             }
             _ => vec![],
         };
-        let mount_line = line_under(&manifest, "ui", &format!("lens: {}", s.lens));
+        let mount_line = entry_line(&manifest, "ui", "lens", &s.lens);
         let renamed = RENAMED_SLOTS.iter().find(|(old, _)| *old == s.slot);
         if let Some((old, new)) = renamed {
             ext.errors.push(at(
