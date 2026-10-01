@@ -237,6 +237,42 @@ pub type WriteGate =
 /// What a run is, beyond the call itself: the undo of an audited run, or
 /// the approval of a proposal. Either is marked in the run's own
 /// transaction (a `Tx` handler) or claimed before it (an `External` one).
+impl crate::extensions::RunningCommands for CommandBus {
+    fn input_schema(&self, name: &str) -> Option<Value> {
+        CommandBus::input_schema(self, name)
+    }
+
+    fn namespace_owner(&self, namespace: &str) -> Option<String> {
+        CommandBus::namespace_owner(self, namespace)
+    }
+}
+
+/// The registered commands by name, and who holds each namespace
+/// registered whole (`register_namespace`); a namespace with commands but
+/// no owner is oxplow's.
+#[derive(Default)]
+struct Registry {
+    commands: BTreeMap<String, Arc<Command>>,
+    owners: BTreeMap<String, String>,
+}
+
+impl Registry {
+    fn owner(&self, namespace: &str) -> Option<String> {
+        if let Some(owner) = self.owners.get(namespace) {
+            return Some(owner.clone());
+        }
+        let prefix = format!("{namespace}.");
+        self.commands
+            .keys()
+            .any(|n| n.starts_with(&prefix))
+            .then(|| "oxplow".to_string())
+    }
+
+    fn get(&self, name: &str) -> Option<&Arc<Command>> {
+        self.commands.get(name)
+    }
+}
+
 /// Step 3's answers for a run, as its `TxCtx` carries them: may it claim
 /// the worktree, and may the agent's thread write (`None` when the gate
 /// doesn't apply).
@@ -260,7 +296,7 @@ pub struct CommandBus {
     proposals: SqliteProposalStore,
     policy: Arc<AgentPolicy>,
     pump: Arc<EventPump>,
-    commands: RwLock<BTreeMap<String, Arc<Command>>>,
+    commands: RwLock<Registry>,
     write_gate: Option<WriteGate>,
 }
 
@@ -278,7 +314,7 @@ impl CommandBus {
             log,
             policy,
             pump,
-            commands: RwLock::new(BTreeMap::new()),
+            commands: RwLock::new(Registry::default()),
             write_gate: None,
         }
     }
@@ -293,37 +329,83 @@ impl CommandBus {
     /// Register a command. A second command of the same name is refused:
     /// two handlers for one name is a bug, not an override.
     pub fn register(&self, command: Command) -> Result<(), CommandError> {
-        let mut commands = self.commands.write();
-        if commands.contains_key(&command.spec.name) {
+        let mut registry = self.commands.write();
+        let namespace = command.spec.name.split('.').next().unwrap_or_default();
+        if let Some(owner) = registry.owners.get(namespace) {
+            return Err(CommandError::Invalid {
+                field: Some("/name".into()),
+                message: format!("the command namespace `{namespace}` is {owner}'s"),
+            });
+        }
+        if registry.commands.contains_key(&command.spec.name) {
             return Err(CommandError::Invalid {
                 field: Some("/name".into()),
                 message: format!("command `{}` is already registered", command.spec.name),
             });
         }
-        commands.insert(command.spec.name.clone(), Arc::new(command));
+        registry
+            .commands
+            .insert(command.spec.name.clone(), Arc::new(command));
         Ok(())
     }
 
-    /// Remove every command under `namespace.` (a provider instance that
-    /// stopped); returns their names.
+    /// Register `commands` as the whole of `namespace`, held by `owner`
+    /// (`extension:<name>`, `provider:<instance>`) — all of them or none,
+    /// under one lock: refused when the namespace is taken (by another
+    /// owner, or by oxplow's own commands) or a command isn't under it.
+    pub fn register_namespace(
+        &self,
+        namespace: &str,
+        owner: &str,
+        commands: Vec<Command>,
+    ) -> Result<(), CommandError> {
+        let mut registry = self.commands.write();
+        if let Some(held) = registry.owner(namespace) {
+            return Err(CommandError::Invalid {
+                field: None,
+                message: format!("the command namespace `{namespace}` is already {held}'s"),
+            });
+        }
+        let prefix = format!("{namespace}.");
+        if let Some(stray) = commands.iter().find(|c| !c.spec.name.starts_with(&prefix)) {
+            return Err(CommandError::Invalid {
+                field: Some("/name".into()),
+                message: format!("`{}` isn't under `{namespace}`", stray.spec.name),
+            });
+        }
+        registry
+            .owners
+            .insert(namespace.to_string(), owner.to_string());
+        for command in commands {
+            registry
+                .commands
+                .insert(command.spec.name.clone(), Arc::new(command));
+        }
+        Ok(())
+    }
+
+    /// Remove `namespace` and every command under it (an extension
+    /// disabled, a provider instance stopped); returns their names.
     pub fn unregister_namespace(&self, namespace: &str) -> Vec<String> {
         let prefix = format!("{namespace}.");
-        let mut commands = self.commands.write();
-        let names: Vec<String> = commands
+        let mut registry = self.commands.write();
+        registry.owners.remove(namespace);
+        let names: Vec<String> = registry
+            .commands
             .keys()
             .filter(|n| n.starts_with(&prefix))
             .cloned()
             .collect();
         for n in &names {
-            commands.remove(n);
+            registry.commands.remove(n);
         }
         names
     }
 
-    /// Whether any command is registered under `namespace.`.
-    pub fn has_namespace(&self, namespace: &str) -> bool {
-        let prefix = format!("{namespace}.");
-        self.commands.read().keys().any(|n| n.starts_with(&prefix))
+    /// Who holds `namespace`: its registered owner, `oxplow` for core
+    /// commands, `None` when nothing is under it.
+    pub fn namespace_owner(&self, namespace: &str) -> Option<String> {
+        self.commands.read().owner(namespace)
     }
 
     /// The event types the log accepts.
@@ -343,6 +425,7 @@ impl CommandBus {
     pub fn list(&self, actor: &Actor) -> Vec<CommandSpec> {
         self.commands
             .read()
+            .commands
             .values()
             .filter(|c| c.spec.invokers.allows(actor.invoker()))
             .map(|c| c.spec.clone())
@@ -354,7 +437,7 @@ impl CommandBus {
     }
 
     /// A registered command's input schema: what an extension's launcher
-    /// command entry is checked against (`extensions::CommandSchemas`).
+    /// command entry is checked against (`extensions::RunningCommands`).
     pub fn input_schema(&self, name: &str) -> Option<Value> {
         self.commands
             .read()
@@ -374,6 +457,7 @@ impl CommandBus {
         let mut names: Vec<String> = self
             .commands
             .read()
+            .commands
             .values()
             .filter(|c| matches!(c.handler, Handler::External(_)))
             .map(|c| c.spec.name.clone())
@@ -2031,6 +2115,46 @@ mod tests {
         assert!(matches!(err, CommandError::Denied { .. }), "{err}");
         assert!(pending(&db).await.is_empty());
         assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
+    }
+
+    /// A namespace is registered whole or not at all, by one owner; core
+    /// commands' namespaces are oxplow's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_namespace_registers_whole_under_one_owner() {
+        let (_db, bus) = bus();
+        bus.register(
+            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(bus.namespace_owner("kv").as_deref(), Some("oxplow"));
+        assert_eq!(bus.namespace_owner("ext"), None);
+        let cmd = |name: &str| {
+            Command::new(kv_spec(name, Invokers::ALL, Confirm::Never), kv_set()).unwrap()
+        };
+
+        // One command outside the namespace: nothing is registered.
+        let err = bus
+            .register_namespace("ext", "extension:x", vec![cmd("ext.a"), cmd("other.b")])
+            .unwrap_err();
+        assert!(err.to_string().contains("other.b"), "{err}");
+        assert_eq!(bus.namespace_owner("ext"), None);
+        assert!(bus.input_schema("ext.a").is_none());
+
+        bus.register_namespace("ext", "extension:x", vec![cmd("ext.a"), cmd("ext.b")])
+            .unwrap();
+        assert_eq!(bus.namespace_owner("ext").as_deref(), Some("extension:x"));
+        // Taken: by another owner, and by a core namespace.
+        let err = bus
+            .register_namespace("ext", "provider:ext", vec![cmd("ext.c")])
+            .unwrap_err();
+        assert!(err.to_string().contains("extension:x"), "{err}");
+        let err = bus
+            .register_namespace("kv", "extension:kv", vec![cmd("kv.other")])
+            .unwrap_err();
+        assert!(err.to_string().contains("oxplow"), "{err}");
+
+        assert_eq!(bus.unregister_namespace("ext").len(), 2);
+        assert_eq!(bus.namespace_owner("ext"), None);
     }
 
     // ---- P6b.A1: the bus composes ----

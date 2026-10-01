@@ -189,8 +189,10 @@ nothing; a start that merely failed (it may come up) registers and
 counts as a failure, and its next call restarts it after a backoff that
 doubles from `MachineEnv.provider_backoff` (1 s in the app, 0 in
 `Services::in_memory`) up to 60 s. `stop(instance)` removes both and
-kills the process. An id already used as a command namespace or
-provider is refused. **A provider emits only its capability's event
+kills the process. Its commands register whole as the namespace's
+owner (`register_namespace(id, "provider:<instance>", …)`, all or
+none); an id whose namespace is already held (`namespace_owner`) or
+that is already a provider is refused. **A provider emits only its capability's event
 types** (`spec::allowed_event_types`: `work_items` → `work_item.recorded@1`;
 tsk548): declaring any other type — another core one such as
 `provider.enabled`, which would clear another instance's disable — is

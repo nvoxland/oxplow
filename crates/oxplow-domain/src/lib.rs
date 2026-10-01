@@ -29,7 +29,7 @@ pub mod work_items;
 pub use agent::AgentKind;
 pub use commands::{
     Actor, Atomicity, CommandCall, CommandEffect, CommandError, CommandOutcome, CommandSpec,
-    Confirm, InputValidator, Invoker, Invokers, Lifecycle, Preview, RESERVED_COMMAND_NAMESPACES,
+    Confirm, InputValidator, Invoker, Invokers, Lifecycle, Preview,
 };
 pub use comment::{
     Comment, CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread,

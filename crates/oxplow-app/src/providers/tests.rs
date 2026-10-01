@@ -156,7 +156,7 @@ async fn an_unapproved_provider_is_refused_and_registers_nothing() {
         .await
         .unwrap_err();
     assert_eq!(refused, HostError::Unapproved(INSTANCE.into()));
-    assert!(!fx.svc.commands.has_namespace("fake"));
+    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
     assert!(fx.svc.work_items.get("fake").is_err());
     assert_eq!(
         fx.svc.providers.health(INSTANCE).unwrap().state,
@@ -172,9 +172,9 @@ async fn edited_declarations_need_approving_again() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
-    assert!(fx.svc.commands.has_namespace("fake"));
+    assert!(fx.svc.commands.namespace_owner("fake").is_some());
     assert!(providers.stop(INSTANCE).await);
-    assert!(!fx.svc.commands.has_namespace("fake"));
+    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
 
     // A widened declaration is a new version: shown unapproved, refused.
     let project = fx.svc.layout.project_dir.clone();
@@ -206,7 +206,7 @@ async fn a_provider_must_answer_with_its_approved_declarations() {
         matches!(&err, HostError::DeclarationsChanged { detail, .. } if detail.contains("/commands")),
         "{err}"
     );
-    assert!(!fx.svc.commands.has_namespace("fake"));
+    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
     // Not what was approved: off, and logged, until a person looks.
     assert!(matches!(
         fx.svc.providers.health(INSTANCE).unwrap().state,
@@ -235,7 +235,7 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
         "{refused:?}"
     );
     assert!(fx.svc.config.read().unwrap().extension_instances.is_empty());
-    assert!(!fx.svc.commands.has_namespace("fake"));
+    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
 
     // Configured, it enables: written to the project's config and running.
     let view = providers
@@ -244,7 +244,7 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
         .unwrap();
     assert_eq!(view.health.state, InstanceState::Ready);
     assert!(view.enabled);
-    assert!(fx.svc.commands.has_namespace("fake"));
+    assert!(fx.svc.commands.namespace_owner("fake").is_some());
     let written =
         std::fs::read_to_string(oxplow_config::config_path(&fx.svc.layout.project_dir)).unwrap();
     assert!(written.contains("extensionInstances"), "{written}");
@@ -256,7 +256,7 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
         .await
         .unwrap();
     assert_eq!(view.health.state, InstanceState::Off);
-    assert!(!fx.svc.commands.has_namespace("fake"));
+    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
 }
 
 /// P5.D4's red: three failures in a row disable the instance, logged
@@ -288,7 +288,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         panic!("{health:?}");
     };
     assert!(reason.contains("3 failures in a row"), "{reason}");
-    assert!(!fx.svc.commands.has_namespace("fake"));
+    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
     let disabled = logged(&fx, "provider.disabled").await;
     assert_eq!(disabled.len(), 1);
     assert_eq!(disabled[0]["instance"], INSTANCE);
@@ -337,7 +337,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         "{}",
         enabled.result
     );
-    assert!(fx.svc.commands.has_namespace("fake"));
+    assert!(fx.svc.commands.namespace_owner("fake").is_some());
 }
 
 #[tokio::test]
@@ -779,7 +779,7 @@ async fn a_disable_while_starting_keeps_the_instance_off() {
         .disable(INSTANCE, "a person turned it off".into())
         .await;
     let _ = starting.await.unwrap();
-    assert!(!fx.svc.commands.has_namespace("fake"));
+    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
     assert!(providers.get(INSTANCE).await.is_none());
     assert!(matches!(
         providers.health(INSTANCE).unwrap().state,
@@ -802,7 +802,7 @@ async fn an_unreadable_disable_record_keeps_the_instance_off() {
         .await
         .unwrap();
     fx.svc.providers.reconcile().await;
-    assert!(!fx.svc.commands.has_namespace("fake"));
+    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
     let health = fx.svc.providers.health(INSTANCE).unwrap();
     assert!(
         matches!(&health.state, InstanceState::Failing { errors } if errors[0].contains("disabled")),
@@ -818,7 +818,7 @@ async fn approving_updated_declarations_restarts_the_instance() {
     let (fx, _ext) = approved("").await;
     configure(&fx, true, json!({ "team": "core" }));
     fx.svc.providers.reconcile().await;
-    assert!(fx.svc.commands.has_namespace("fake"));
+    assert!(fx.svc.commands.namespace_owner("fake").is_some());
 
     // The provider updates: new behaviour and new declarations, approved.
     let project = fx.svc.layout.project_dir.clone();
@@ -864,7 +864,7 @@ async fn a_failed_enable_writes_no_config() {
         .await;
     assert!(err.is_err(), "{err:?}");
     assert!(fx.svc.config.read().unwrap().extension_instances.is_empty());
-    assert!(!fx.svc.commands.has_namespace("fake"));
+    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
 }
 
 /// tsk569: a capability verb is called by `work_item.*` (which a person

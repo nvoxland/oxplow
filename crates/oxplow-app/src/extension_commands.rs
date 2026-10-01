@@ -20,10 +20,7 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_domain::{
-    CommandCall, CommandEffect, CommandSpec, Confirm, InputValidator, Invokers,
-    RESERVED_COMMAND_NAMESPACES,
-};
+use oxplow_domain::{CommandCall, CommandEffect, CommandSpec, Confirm, InputValidator, Invokers};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -131,19 +128,6 @@ pub fn parse_commands(
 ) -> (Vec<ExtensionCommand>, Vec<String>) {
     let block_line = key_line(manifest, "commands");
     let namespace = command_namespace(extension);
-    if RESERVED_COMMAND_NAMESPACES.contains(&namespace.as_str()) {
-        return (
-            Vec::new(),
-            vec![at(
-                file,
-                block_line,
-                format!(
-                    "the command namespace `{namespace}` is oxplow's (an extension's commands \
-                     register under its name with `-` → `_`); rename the extension"
-                ),
-            )],
-        );
-    }
     let Some(items) = value.as_sequence() else {
         return (
             Vec::new(),
@@ -540,21 +524,21 @@ impl ExtensionCommands {
         extension: &str,
         commands: &[ExtensionCommand],
     ) -> Result<(), String> {
-        if self.bus.has_namespace(ns) {
-            return Err(format!(
-                "the command namespace `{ns}` is already taken (by a provider, or another \
-                 extension); rename the extension"
-            ));
-        }
-        for decl in commands {
-            let done =
-                extension_command(&self.bus, extension, decl).and_then(|c| self.bus.register(c));
-            if let Err(e) = done {
-                self.bus.unregister_namespace(ns);
-                return Err(format!("`{}`: {e}", decl.name));
-            }
-        }
-        Ok(())
+        let built = commands
+            .iter()
+            .map(|decl| {
+                extension_command(&self.bus, extension, decl)
+                    .map_err(|e| format!("`{}`: {e}", decl.name))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.bus
+            .register_namespace(ns, &format!("extension:{extension}"), built)
+            .map_err(|e| match e {
+                oxplow_domain::CommandError::Invalid { message, .. } => {
+                    format!("{message}; rename the extension")
+                }
+                other => other.to_string(),
+            })
     }
 }
 
@@ -584,17 +568,29 @@ pub fn spawn_reconciler(state: std::sync::Arc<crate::Services>) {
     });
 }
 
-/// Check `ext`'s commands against the running oxplow (`check_extension`):
-/// each `input` query compiles under the models' authorizer (a raw table
-/// or a write is an error), then every example is dry-run — the `input`
+/// Check `ext`'s commands (`check_extension`): with the running oxplow's
+/// registry, its namespace is free (or already its own); each `input`
+/// query compiles under the models' authorizer (a raw table or a write is
+/// an error); then every example is dry-run — the `input`
 /// query's rows, the script in the sandbox, and what it composes against
 /// the registry (each command exists, its input fits, and the names are
 /// `expect_commands`, in order).
-pub async fn check_commands(
+pub async fn check_extension_commands(
     layer: &crate::sql_gateway::SqlGateway,
     ext: &mut Extension,
     commands: Option<CommandSchemas<'_>>,
 ) {
+    if let (Some(registry), false) = (commands, ext.commands.is_empty()) {
+        let ns = command_namespace(&ext.name);
+        let mine = format!("extension:{}", ext.name);
+        if let Some(owner) = registry.namespace_owner(&ns).filter(|o| *o != mine) {
+            ext.errors.push(format!(
+                "{}/extension.yaml: the command namespace `{ns}` is {owner}'s (an extension's \
+                 commands register under its name with `-` → `_`); rename the extension",
+                ext.path
+            ));
+        }
+    }
     for cmd in ext.commands.clone() {
         if let Some(sql) = &cmd.input {
             if let Err(e) = layer.check(sql).await {
@@ -662,7 +658,7 @@ async fn check_example(
             other => other.to_string(),
         })?;
     for call in &calls {
-        let Some(schema) = schema_of(&call.name) else {
+        let Some(schema) = schema_of.input_schema(&call.name) else {
             return Err(format!("no command `{}`", call.name));
         };
         InputValidator::compile(&schema)
@@ -833,17 +829,12 @@ mod tests {
         }
     }
 
-    /// A namespace core uses is refused; two enabled extensions that map
-    /// to one namespace are both refused; a disabled one doesn't count.
+    /// Two enabled extensions that map to one namespace are both refused;
+    /// a disabled one doesn't count.
     #[test]
     fn a_namespace_is_one_extensions() {
         let d = tempfile::tempdir().unwrap();
         let files = [("handlers/finish_review.star", HANDLER)];
-        write_ext(d.path(), "vcs", GOOD, &files);
-        let errs = project(d.path(), "vcs").errors.join("\n");
-        assert!(errs.contains("namespace `vcs` is oxplow's"), "{errs}");
-        assert!(project(d.path(), "vcs").commands.is_empty());
-
         write_ext(d.path(), "a-b", GOOD, &files);
         write_ext(d.path(), "a_b", GOOD, &files);
         for name in ["a-b", "a_b"] {
@@ -867,19 +858,46 @@ mod tests {
         assert_eq!(ext.commands.len(), 1);
     }
 
-    /// Every core command's namespace is reserved, so no extension can
-    /// register beside it.
-    #[tokio::test]
-    async fn every_core_namespace_is_reserved() {
+    /// Checked against the running registry, an extension whose command
+    /// namespace something else holds (oxplow's own `vcs.*`) is an error;
+    /// its own registered namespace is not.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_namespace_the_registry_holds_is_a_check_error() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        for spec in fx.svc.commands.list(&oxplow_domain::Actor::Human) {
-            let ns = spec.name.split('.').next().unwrap();
-            assert!(
-                RESERVED_COMMAND_NAMESPACES.contains(&ns),
-                "`{}`: add `{ns}` to RESERVED_COMMAND_NAMESPACES",
-                spec.name
-            );
-        }
+        let root = fx._dir.path();
+        let files = [("handlers/finish_review.star", HANDLER)];
+        write_ext(root, "vcs", GOOD, &files);
+        let v = crate::extensions::validate_extension(
+            &fx.svc.sql,
+            &fx.svc.extension_catalog,
+            root,
+            "vcs",
+            Some(fx.svc.commands.as_ref()),
+        )
+        .await
+        .unwrap();
+        let errs = v.errors.join("\n");
+        assert!(
+            errs.contains("the command namespace `vcs` is oxplow's"),
+            "{errs}"
+        );
+
+        write_ext(root, "mine", GOOD, &files);
+        fx.svc.extension_commands.reconcile().await;
+        assert_eq!(
+            fx.svc.commands.namespace_owner("mine").as_deref(),
+            Some("extension:mine")
+        );
+        let v = crate::extensions::validate_extension(
+            &fx.svc.sql,
+            &fx.svc.extension_catalog,
+            root,
+            "mine",
+            Some(fx.svc.commands.as_ref()),
+        )
+        .await
+        .unwrap();
+        assert!(!v.errors.join("\n").contains("namespace"), "{:?}", v.errors);
     }
 
     /// `check_extension` runs each example's script and checks what it
@@ -1259,8 +1277,10 @@ mod tests {
 
         // A namespace someone else holds (a provider's) is refused whole.
         std::fs::remove_file(fx._dir.path().join(".oxplow/project.yaml")).unwrap();
-        bus.register(
-            crate::commands::Command::new(
+        bus.register_namespace(
+            "my_review",
+            "provider:held",
+            vec![crate::commands::Command::new(
                 oxplow_domain::CommandSpec {
                     name: "my_review.held".into(),
                     summary: "A provider's.".into(),
@@ -1276,7 +1296,7 @@ mod tests {
                     Ok(crate::commands::HandlerOutput::default())
                 })),
             )
-            .unwrap(),
+            .unwrap()],
         )
         .unwrap();
         fx.svc.extension_commands.reconcile().await;
@@ -1286,7 +1306,7 @@ mod tests {
             fx.svc
                 .extension_commands
                 .problem("my-review")
-                .is_some_and(|p| p.contains("`my_review` is already taken")),
+                .is_some_and(|p| p == "the command namespace `my_review` is already provider:held's; rename the extension"),
             "{:?}",
             fx.svc.extension_commands.problem("my-review")
         );

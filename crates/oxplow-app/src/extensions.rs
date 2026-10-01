@@ -2238,10 +2238,28 @@ pub async fn validate_extension(
     Ok(ext)
 }
 
-/// A command's input schema by name (`CommandBus::spec`): what a launcher
-/// entry's command is checked against. `None` where there's no running
-/// app to ask (the CLI).
-pub type CommandSchemas<'a> = &'a (dyn Fn(&str) -> Option<serde_json::Value> + Sync);
+/// What a check asks the running oxplow's command registry (the
+/// `CommandBus`): a command's input schema by name — what a launcher,
+/// `ui.commands` or example command is checked against — and who holds a
+/// command namespace. A plain schema closure is one with no namespaces.
+/// `None` where there's no running app to ask (the CLI).
+pub trait RunningCommands: Sync {
+    fn input_schema(&self, name: &str) -> Option<serde_json::Value>;
+    /// Who holds `namespace` (`oxplow`, `extension:<name>`,
+    /// `provider:<instance>`), `None` when it's free.
+    fn namespace_owner(&self, _namespace: &str) -> Option<String> {
+        None
+    }
+}
+
+impl<F: Fn(&str) -> Option<serde_json::Value> + Sync> RunningCommands for F {
+    fn input_schema(&self, name: &str) -> Option<serde_json::Value> {
+        self(name)
+    }
+}
+
+/// The registry a check is given.
+pub type CommandSchemas<'a> = &'a dyn RunningCommands;
 
 /// A command an extension names — a launcher entry's or a `ui.commands`
 /// entry's — is registered and its input fits. A command in one of the
@@ -2280,7 +2298,9 @@ pub fn check_commands(ext: &mut Extension, root: &Path, commands: Option<Command
         return;
     };
     for (what, command, input) in entries {
-        let schema = schema_of(&command).or_else(|| provider_command_schema(ext, root, &command));
+        let schema = schema_of
+            .input_schema(&command)
+            .or_else(|| provider_command_schema(ext, root, &command));
         match schema {
             None => ext.errors.push(format!(
                 "{}/extension.yaml: {what}: no command `{command}` — name a registered one",
@@ -2312,7 +2332,7 @@ fn check_components(ext: &mut Extension, commands: Option<CommandSchemas<'_>>) {
             .flat_map(|c| {
                 c.commands
                     .iter()
-                    .filter(|n| schema_of(n).is_none())
+                    .filter(|n| schema_of.input_schema(n).is_none())
                     .map(|n| (c.id.clone(), n.clone()))
             })
             .collect();
@@ -2380,7 +2400,7 @@ async fn check_extension(
 ) {
     check_commands(ext, root, commands);
     check_components(ext, commands);
-    crate::extension_commands::check_commands(layer, ext, commands).await;
+    crate::extension_commands::check_extension_commands(layer, ext, commands).await;
     // Its models, beside the other enabled extensions' (a ref() may name
     // theirs): compiled as temp views, published nowhere (P4.9).
     if !ext.models.is_empty() {
@@ -3606,9 +3626,17 @@ empty: No tasks.
         let repo = published_repo("Count");
         let url = repo.path().to_string_lossy().to_string();
         let sl = layer().await;
-        let first = review_extension(&sl, &cat(), project.path(), &url, None, None, &|_| None)
-            .await
-            .unwrap();
+        let first = review_extension(
+            &sl,
+            &cat(),
+            project.path(),
+            &url,
+            None,
+            None,
+            &|_: &str| -> Option<serde_json::Value> { None },
+        )
+        .await
+        .unwrap();
         assert!(first
             .effects
             .lenses
@@ -3621,9 +3649,11 @@ empty: No tasks.
             "title: Count\nquery: SELECT 2 AS n\nviz: number\n",
         );
         git(repo.path(), &["commit", "-qam", "two"]);
-        let update = review_update(&sl, &cat(), project.path(), "shared", &|_| None)
-            .await
-            .unwrap();
+        let update = review_update(&sl, &cat(), project.path(), "shared", &|_: &str| -> Option<
+            serde_json::Value,
+        > { None })
+        .await
+        .unwrap();
         let count = update
             .effects
             .lenses
@@ -3657,9 +3687,17 @@ empty: No tasks.
         let url = repo.path().to_string_lossy().to_string();
         let sl = layer().await;
 
-        let review = review_extension(&sl, &cat(), project.path(), &url, None, None, &|_| None)
-            .await
-            .unwrap();
+        let review = review_extension(
+            &sl,
+            &cat(),
+            project.path(),
+            &url,
+            None,
+            None,
+            &|_: &str| -> Option<serde_json::Value> { None },
+        )
+        .await
+        .unwrap();
         assert_eq!(review.extension.name, "shared");
         assert_eq!(review.sha, head(repo.path()));
         let source = &review.extension.sources[0];

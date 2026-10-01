@@ -13,23 +13,6 @@ use crate::events::validate_type_name;
 use crate::ids::{StreamId, ThreadId};
 use crate::{DomainError, EventId};
 
-/// Command namespaces core uses: an extension's `commands:` may not
-/// register under one (its namespace is its name with `-` → `_`). A test
-/// in oxplow-app keeps this in step with the registered commands.
-pub const RESERVED_COMMAND_NAMESPACES: &[&str] = &[
-    "command",
-    "config",
-    "effort",
-    "git",
-    "knowledge",
-    "lens",
-    "metric",
-    "provider",
-    "source",
-    "vcs",
-    "work_item",
-];
-
 /// Which surfaces may invoke a command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
 pub struct Invokers {

@@ -996,10 +996,15 @@ commands:
 
 `transform` returns `{ commands: [{ name, input }], result? }`
 (`composed`). The **namespace** is the extension's name with `-` → `_`
-(`command_namespace`); a namespace core uses
-(`RESERVED_COMMAND_NAMESPACES` in `oxplow-domain`, kept in step with the
-registered commands by `every_core_namespace_is_reserved`) is an error,
-and two enabled extensions mapping to one namespace are both refused
+(`command_namespace`). Who holds a namespace is the bus's to say
+(`CommandBus::namespace_owner`: `oxplow` for core commands,
+`extension:<name>` / `provider:<instance>` for one registered whole with
+`register_namespace`) — there is no hand-kept list: checked against the
+running registry (`RunningCommands`, which the bus implements), a
+namespace something else holds is an error, and at run time the
+reconciler's `register_namespace` refuses it all-or-nothing under one
+lock (reported as the extension's problem). Two enabled extensions
+mapping to one namespace are both refused at load
 (`refuse_shared_namespaces`, after disabling applies). Each entry is
 checked at load, its error at its line: the name, `effect`, `confirm`,
 the schema compiles, `input` is one read, and the entry is a file in the

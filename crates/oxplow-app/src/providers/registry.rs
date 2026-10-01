@@ -704,11 +704,14 @@ impl ProviderRegistry {
             return Err(refuse(format!("`{name}` is already running")));
         }
         let epoch = self.disable_epoch(&name);
-        if bus.has_namespace(&spec.id) || self.work_items.get(&spec.id).is_ok() {
+        if let Some(owner) = bus.namespace_owner(&spec.id) {
             return Err(refuse(format!(
-                "`{}` is already a command namespace or a provider",
+                "the command namespace `{}` is already {owner}'s",
                 spec.id
             )));
+        }
+        if self.work_items.get(&spec.id).is_ok() {
+            return Err(refuse(format!("`{}` is already a provider", spec.id)));
         }
         let instance = match self.instance(ext, spec, config).await {
             Ok(i) => i,
@@ -815,12 +818,12 @@ impl ProviderRegistry {
     /// in its registry; all or nothing.
     fn register(&self, bus: &Arc<CommandBus>, instance: &Arc<Instance>) -> Result<(), String> {
         let id = &instance.spec.id;
-        for command in commands(instance)? {
-            if let Err(e) = bus.register(command) {
-                bus.unregister_namespace(id);
-                return Err(e.to_string());
-            }
-        }
+        bus.register_namespace(
+            id,
+            &format!("provider:{}", instance.name),
+            commands(instance)?,
+        )
+        .map_err(|e| e.to_string())?;
         if instance.spec.capability == spec::WORK_ITEMS {
             match super::work_items::ExternalWorkItems::new(bus, instance) {
                 Ok(provider) => self.work_items.register(Arc::new(provider)),
