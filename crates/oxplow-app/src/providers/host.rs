@@ -267,32 +267,9 @@ pub fn serve_incoming(peer: Peer, mut incoming: tokio::sync::mpsc::UnboundedRece
 pub fn first_difference(approved: &InitializeResult, live: &InitializeResult) -> String {
     let a = serde_json::to_value(approved).unwrap_or_default();
     let b = serde_json::to_value(live).unwrap_or_default();
-    fn walk(path: &str, a: &serde_json::Value, b: &serde_json::Value) -> Option<String> {
-        use serde_json::Value;
-        match (a, b) {
-            (Value::Object(x), Value::Object(y)) => {
-                let keys: std::collections::BTreeSet<&String> = x.keys().chain(y.keys()).collect();
-                keys.into_iter().find_map(|k| {
-                    walk(
-                        &format!("{path}/{k}"),
-                        x.get(k).unwrap_or(&Value::Null),
-                        y.get(k).unwrap_or(&Value::Null),
-                    )
-                })
-            }
-            (Value::Array(x), Value::Array(y)) if x.len() == y.len() => x
-                .iter()
-                .zip(y)
-                .enumerate()
-                .find_map(|(i, (p, q))| walk(&format!("{path}/{i}"), p, q)),
-            _ if a == b => None,
-            _ => Some(format!(
-                "at `{}`: approved {a}, running {b}",
-                if path.is_empty() { "/" } else { path }
-            )),
-        }
-    }
-    walk("", &a, &b).unwrap_or_else(|| "they differ".into())
+    crate::extension_effects::json_difference(&a, &b)
+        .map(|(path, a, b)| format!("at `{path}`: approved {a}, running {b}"))
+        .unwrap_or_else(|| "they differ".into())
 }
 
 /// A verified copy of an approved provider's extension folder: what a

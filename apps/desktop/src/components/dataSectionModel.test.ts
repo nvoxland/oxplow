@@ -111,10 +111,10 @@ test("a provider's declaration diff reads as lines", () => {
     ],
     featuresBefore: null,
     featuresAfter: { comments: true },
+    firstDifference: null,
   };
   expect(providerEffectLines(first)).toEqual([
-    "First approval: everything is new.",
-    "Reaches api.example.com · reads token",
+    "Added — runs bin/p · reaches api.example.com · reads token",
     "Commands: create, delete (destructive)",
   ]);
   const changed: ProviderEffect = {
@@ -129,6 +129,6 @@ test("a provider's declaration diff reads as lines", () => {
   };
   expect(providerEffectLines(changed)).toEqual(["Now reaches api.example.com (was none)", "Command `archive` added (destructive)"]);
   expect(providerEffectLines({ ...changed, change: "unchanged", before: grants(["api.example.com"]), commands: [] })).toEqual([
-    "Nothing changed since it was enabled.",
+    "Nothing changed since it was last approved.",
   ]);
 });

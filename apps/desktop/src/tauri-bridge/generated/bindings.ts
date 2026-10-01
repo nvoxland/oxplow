@@ -1851,6 +1851,8 @@ export type ConfigEffect = {
 	before: unknown | null,
 	after: unknown | null,
 	changedKeys: string[],
+	// The first difference outside `properties` (`required`, …).
+	otherChange: string | null,
 };
 
 // Where a setting's value comes from.
@@ -4149,6 +4151,12 @@ export type ProviderEffect = {
 	commands: CommandChange[],
 	featuresBefore: unknown | null,
 	featuresAfter: unknown | null,
+	/**
+	 *  For a changed provider, where its spec and declarations first
+	 *  differ — what a person reads when no grant, command or feature
+	 *  line shows the change.
+	 */
+	firstDifference: string | null,
 };
 
 // An instance as Settings → Integrations shows it.

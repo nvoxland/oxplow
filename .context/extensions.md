@@ -785,10 +785,20 @@ with a `Change` (`added`, `removed`, `changed`, `unchanged`):
   credentials, env) before and after and the views it fills
   (`collectors_diff`);
 - `providers` — grants, each declared command by name (`CommandChange`)
-  and the capability's features before and after (`providers_diff`, over
-  each spec and its checked-in declarations);
+  and the capability's features before and after, plus where spec and
+  declarations first differ (`first_difference`, so a change no grant,
+  command or feature shows still reads as something) (`providers_diff`,
+  over each spec and its checked-in declarations);
 - `config` — the instance config schema, with the property keys added,
-  removed or changed (`config_diff`).
+  removed or changed and the first change outside `properties`
+  (`other_change`: `required`, …) (`config_diff`).
+
+`extension_effects::json_difference` is the one "where do two JSON
+values first differ" walk (the provider host's `first_difference` uses
+it too). The desktop renders a provider's changes once
+(`components/providerEffectText.ts`, `providerChanges`): the Extensions
+review prefixes each phrase with `Provider <id>:`, the Data section's
+approval row capitalizes them.
 
 The report is built from the two loaded versions: **it never runs a
 collector or a provider** — consent forbids running a version nobody

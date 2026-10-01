@@ -129,9 +129,11 @@ provider's row loads `provider_declaration_effects { instance }`
 disk against the last approved copy's — `host::last_approved`, the
 intact `copies/<ext>/<id>/<hash>` a start last ran, so a changed spec
 that stopped the instance, or a restart, still shows what changed — or
-"first approval: everything is new" when it never ran; read, never run) and lists its hosts,
-credentials, commands added, removed or changed (destructive ones
-marked) and features (`providerEffectLines`). Its Approve stays disabled
+everything it declares when it never ran; read, never run) and lists
+its hosts, credentials, commands added, removed or changed (destructive
+ones marked), features, or — when none of those shows the change — where
+the declarations first differ (`providerEffectLines` over the shared
+`providerChanges`). Its Approve stays disabled
 until that diff has loaded (`canApprove`), on top of the reviewed
 `version` round trip.
 

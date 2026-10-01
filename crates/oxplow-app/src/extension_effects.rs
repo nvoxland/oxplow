@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use oxplow_db::models::{contract_change, extension_view, ModelSource};
 use oxplow_provider_protocol::model::InitializeResult;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::extension_sources::SourceSpec;
 use crate::providers::ProviderSpec;
@@ -112,6 +112,10 @@ pub struct ProviderEffect {
     pub features_before: Option<Value>,
     #[specta(type = Option<oxplow_domain::Json>)]
     pub features_after: Option<Value>,
+    /// For a changed provider, where its spec and declarations first
+    /// differ — what a person reads when no grant, command or feature
+    /// line shows the change.
+    pub first_difference: Option<String>,
 }
 
 /// The instance config schema (`config:`), by property.
@@ -123,6 +127,8 @@ pub struct ConfigEffect {
     #[specta(type = Option<oxplow_domain::Json>)]
     pub after: Option<Value>,
     pub changed_keys: Vec<String>,
+    /// The first difference outside `properties` (`required`, …).
+    pub other_change: Option<String>,
 }
 
 /// Everything installing or updating an extension would change.
@@ -303,16 +309,22 @@ pub fn providers_diff(
                 })
                 .collect();
             let declared = |p: &DeclaredProvider| {
-                (
-                    serde_json::to_value(&p.0).unwrap_or(Value::Null),
-                    p.1.as_ref()
+                json!({
+                    "spec": serde_json::to_value(&p.0).unwrap_or(Value::Null),
+                    "declarations": p.1.as_ref()
                         .map(|d| serde_json::to_value(d).unwrap_or(Value::Null)),
-                )
+                })
+            };
+            let (db, da) = (b.map(declared), a.map(declared));
+            let first_difference = match (&db, &da) {
+                (Some(x), Some(y)) => described_difference(x, y),
+                _ => None,
             };
             ProviderEffect {
                 id,
                 capability: a.or(b).map(|p| p.0.capability.clone()).unwrap_or_default(),
-                change: change_of(b.map(declared).as_ref(), a.map(declared).as_ref()),
+                change: change_of(db.as_ref(), da.as_ref()),
+                first_difference,
                 before: b.map(|p| provider_grants(&p.0)),
                 after: a.map(|p| provider_grants(&p.0)),
                 commands,
@@ -336,6 +348,14 @@ pub fn config_diff(before: Option<&Value>, after: Option<&Value>) -> Option<Conf
             .unwrap_or_default()
     };
     let (pb, pa) = (props(before), props(after));
+    let rest = |v: Option<&Value>| -> Value {
+        let mut v = v.cloned().unwrap_or(Value::Null);
+        if let Some(o) = v.as_object_mut() {
+            o.remove("properties");
+        }
+        v
+    };
+    let other_change = described_difference(&rest(before), &rest(after));
     let changed_keys = pb
         .keys()
         .chain(pa.keys())
@@ -348,7 +368,49 @@ pub fn config_diff(before: Option<&Value>, after: Option<&Value>) -> Option<Conf
         before: before.cloned(),
         after: after.cloned(),
         changed_keys,
+        other_change,
     })
+}
+
+/// Where `b` first differs from `a`: its JSON pointer and the two values
+/// there (objects by key, equal-length arrays by index; anything else is
+/// compared whole). `None` when they're equal.
+pub fn json_difference(a: &Value, b: &Value) -> Option<(String, Value, Value)> {
+    fn walk(path: &str, a: &Value, b: &Value) -> Option<(String, Value, Value)> {
+        match (a, b) {
+            (Value::Object(x), Value::Object(y)) => {
+                let keys: BTreeSet<&String> = x.keys().chain(y.keys()).collect();
+                keys.into_iter().find_map(|k| {
+                    walk(
+                        &format!("{path}/{k}"),
+                        x.get(k).unwrap_or(&Value::Null),
+                        y.get(k).unwrap_or(&Value::Null),
+                    )
+                })
+            }
+            (Value::Array(x), Value::Array(y)) if x.len() == y.len() => x
+                .iter()
+                .zip(y)
+                .enumerate()
+                .find_map(|(i, (p, q))| walk(&format!("{path}/{i}"), p, q)),
+            _ if a == b => None,
+            _ => Some((
+                if path.is_empty() {
+                    "/".into()
+                } else {
+                    path.to_string()
+                },
+                a.clone(),
+                b.clone(),
+            )),
+        }
+    }
+    walk("", a, b)
+}
+
+/// [`json_difference`] for a person: "`/path` was X, now Y".
+fn described_difference(before: &Value, after: &Value) -> Option<String> {
+    json_difference(before, after).map(|(path, b, a)| format!("`{path}` was {b}, now {a}"))
 }
 
 /// A loaded extension and how to read its files (the installed one from
@@ -640,6 +702,48 @@ mod tests {
             first[0].change,
             Change::Added,
             "a first approval: everything is new"
+        );
+    }
+
+    /// A provider whose change no grant, command or feature shows still
+    /// says where its declarations first differ.
+    #[test]
+    fn a_provider_change_names_its_first_difference() {
+        let before = provider("fake", &[], true, &["create"]);
+        let mut after = before.clone();
+        after.1.as_mut().unwrap().capabilities[0].capability = "work_items_v2".into();
+        let effect = providers_diff(std::slice::from_ref(&before), &[after]).remove(0);
+        assert_eq!(effect.change, Change::Changed);
+        assert!(effect
+            .commands
+            .iter()
+            .all(|c| c.change == Change::Unchanged));
+        let first = effect.first_difference.unwrap();
+        assert!(
+            first.contains("/declarations/capabilities/0/capability"),
+            "{first}"
+        );
+        assert!(first.contains("work_items_v2"), "{first}");
+        let same =
+            providers_diff(std::slice::from_ref(&before), std::slice::from_ref(&before)).remove(0);
+        assert_eq!(same.first_difference, None);
+    }
+
+    /// A schema change outside `properties` (what's required, say) is a
+    /// change too.
+    #[test]
+    fn config_diff_reports_a_change_beyond_properties() {
+        let before = json!({ "properties": { "team": { "type": "string" } } });
+        let after = json!({ "properties": { "team": { "type": "string" } }, "required": ["team"] });
+        let c = config_diff(Some(&before), Some(&after)).unwrap();
+        assert!(c.changed_keys.is_empty());
+        let other = c.other_change.unwrap();
+        assert!(other.contains("/required"), "{other}");
+        assert_eq!(
+            config_diff(Some(&before), Some(&before))
+                .unwrap()
+                .other_change,
+            None
         );
     }
 
