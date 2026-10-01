@@ -1,7 +1,36 @@
 import { expect, test } from "bun:test";
 
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import { boardColumns, itemsFromResult, workItemsQuery, type WorkItem } from "./workItems.js";
+import { boardColumns, effortDetailsFromResult, itemsFromResult, workItemsQuery, type WorkItem } from "./workItems.js";
+
+// A task's activity is one read over the models: `v_effort` joined to
+// `v_effort_file` (one row per effort and file; an effort with no files
+// still appears), newest effort first.
+test("effort rows join to their files: one detail per effort, counts by change kind", () => {
+  const res = {
+    columns: ["id", "work_item", "started_at", "ended_at", "start_snapshot_id", "end_snapshot_id", "summary", "path", "change_kind"],
+    rows: [
+      [7, "work_item:oxplow:tsk4", "t2", null, 10, null, null, "src/a.rs", "updated"],
+      [7, "work_item:oxplow:tsk4", "t2", null, 10, null, null, "src/b.rs", "created"],
+      [7, "work_item:oxplow:tsk4", "t2", null, 10, null, null, "old.rs", "deleted"],
+      [5, "work_item:oxplow:tsk4", "t0", "t1", 8, 9, "did it", null, null],
+    ],
+    truncated: false,
+    reads: { models: ["v_effort", "v_effort_file"], tables: [], measures: [] },
+    freshness: {},
+  } as unknown as SqlQueryResult;
+  const details = effortDetailsFromResult(res);
+  expect(details.map((d) => d.effort.id)).toEqual(["eff7", "eff5"]);
+  expect(details[0]).toEqual({
+    effort: { id: "eff7", work_item: "work_item:oxplow:tsk4", started_at: "t2", ended_at: null, start_snapshot_id: "10", end_snapshot_id: null, summary: null },
+    start_snapshot: null,
+    end_snapshot: null,
+    changed_paths: ["src/a.rs", "src/b.rs", "old.rs"],
+    counts: { created: 1, updated: 1, deleted: 1 },
+  });
+  expect(details[1]?.changed_paths).toEqual([]);
+  expect(details[1]?.effort.summary).toBe("did it");
+});
 
 const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({

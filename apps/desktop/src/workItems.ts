@@ -5,7 +5,7 @@
  * returns what it read (`reads`) so a page re-runs with
  * `useRerunOnChange`. Writes are `work_item.*` commands.
  */
-import { listEffortFiles, querySql, runCommand, type EffortDetail, type SqlCell, type TaskEffort } from "./api.js";
+import { querySql, runCommand, type EffortDetail, type SqlCell } from "./api.js";
 import { NO_READS } from "./lens/lensRerun.js";
 import { taskIdOf, threadIdOf, threadRowId } from "./modelIds.js";
 import type { Followup, Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
@@ -307,38 +307,58 @@ export async function readTasksById(ids: string[]): Promise<{ tasks: Task[]; rea
   return readTasks(`t.id IN (${numbers.map((_, i) => `?${i + 1}`).join(", ")})`, numbers);
 }
 
-/** A task's efforts, newest first (`v_effort`). */
-async function readTaskEffortRows(taskId: string): Promise<{ efforts: TaskEffort[]; reads: Reads }> {
-  const res = await querySql(
-    `SELECT id, work_item, started_at, ended_at, start_snapshot_id, end_snapshot_id, summary
-       FROM v_effort WHERE work_item = ?1 ORDER BY started_at DESC`,
-    [`work_item:oxplow:${taskId}`],
-    1000,
-  );
-  const efforts = res.rows.map(([id, workItem, started, ended, start, end, summary]) => ({
-    id: `eff${Number(id)}`,
-    work_item: String(workItem),
-    started_at: String(started),
-    ended_at: text(ended),
-    start_snapshot_id: start === null ? null : String(start),
-    end_snapshot_id: end === null ? null : String(end),
-    summary: text(summary),
-  }));
-  return { efforts, reads: res.reads };
+/** `v_effort` rows joined to their `v_effort_file` rows (one row per
+ *  effort and file; an effort with no files has one row with a null
+ *  path), in effort order, as the task page's activity. */
+export function effortDetailsFromResult(result: SqlQueryResult): EffortDetail[] {
+  const col = (name: string) => result.columns.indexOf(name);
+  const details: EffortDetail[] = [];
+  let current: EffortDetail | null = null;
+  for (const row of result.rows) {
+    const at = (name: string) => row[col(name)];
+    const id = `eff${Number(at("id"))}`;
+    if (!current || current.effort.id !== id) {
+      const snapshot = (name: string) => (at(name) === null ? null : String(at(name)));
+      current = {
+        effort: {
+          id,
+          work_item: String(at("work_item")),
+          started_at: String(at("started_at")),
+          ended_at: text(at("ended_at")),
+          start_snapshot_id: snapshot("start_snapshot_id"),
+          end_snapshot_id: snapshot("end_snapshot_id"),
+          summary: text(at("summary")),
+        },
+        start_snapshot: null,
+        end_snapshot: null,
+        changed_paths: [],
+        counts: { created: 0, updated: 0, deleted: 0 },
+      };
+      details.push(current);
+    }
+    const path = text(at("path"));
+    if (path === null) continue;
+    current.changed_paths.push(path);
+    const kind = text(at("change_kind")) as keyof EffortDetail["counts"] | null;
+    if (kind && kind in current.counts) current.counts[kind]++;
+  }
+  return details;
 }
 
-/** A task's efforts with the files each changed (`v_effort` plus the
- *  effort's files), newest first — the task page's activity. */
+/** A task's efforts with the files each changed, newest first — one read
+ *  over `v_effort` and `v_effort_file`. */
 export async function readTaskEfforts(taskId: string): Promise<{ efforts: EffortDetail[]; reads: Reads }> {
-  const { efforts: rows, reads } = await readTaskEffortRows(taskId);
-  const files = await Promise.all(rows.map((e) => listEffortFiles(e.id).catch(() => [])));
-  const efforts = rows.map((effort, i) => {
-    const changed = files[i] ?? [];
-    const counts = { created: 0, updated: 0, deleted: 0 };
-    for (const f of changed) counts[f.change]++;
-    return { effort, start_snapshot: null, end_snapshot: null, changed_paths: changed.map((f) => f.path), counts };
-  });
-  return { efforts, reads };
+  const res = await querySql(
+    `SELECT e.id, e.work_item, e.started_at, e.ended_at, e.start_snapshot_id, e.end_snapshot_id, e.summary,
+            f.path, f.change_kind
+       FROM v_effort e
+       LEFT JOIN v_effort_file f ON f.effort_id = e.id
+      WHERE e.work_item = ?1
+      ORDER BY e.started_at DESC, e.id DESC, f.path`,
+    [`work_item:oxplow:${taskId}`],
+    10_000,
+  );
+  return { efforts: effortDetailsFromResult(res), reads: res.reads };
 }
 
 // ---- writes (work_item.* commands) ----

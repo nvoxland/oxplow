@@ -559,8 +559,10 @@ Read API: `listEffortsForTask(itemId)`, `listOpenEfforts()`,
 efforts that touched `path` via `effort_file`, joined to the
 owning task's title/status, newest-first by `ended_at` — drives
 the local-blame overlay described in `.context/editor-and-monaco.md`).
-The task page reads a task's efforts from `v_effort`
-(`workItems.readTaskEfforts`) with each one's changed files.
+The task page reads a task's efforts and each one's changed files in one
+read over the models — `v_effort` left-joined to `v_effort_file`
+(`workItems.readTaskEfforts` → `effortDetailsFromResult`), not an RPC
+per effort.
 
 `list_changed_paths_for_effort` returns a **claimed/unclaimed split**
 (`EffortChangedPaths { claimed, unclaimed }`) rather than a flat list:
