@@ -234,6 +234,12 @@ fn command_of(
         .ok_or_else(|| at_name(format!("entry `{}` isn't a file in the extension", f.entry)))?;
     oxplow_collect_plugin::runtime::check_starlark(&script)
         .map_err(|e| at_name(format!("entry `{}` {e}", f.entry)))?;
+    if f.examples.len() > MAX_EXAMPLES {
+        return Err(at_name(format!(
+            "declares {} examples; a command has at most {MAX_EXAMPLES} examples",
+            f.examples.len()
+        )));
+    }
     Ok(ExtensionCommand {
         name,
         summary: f.summary,
@@ -348,19 +354,31 @@ pub fn input_params(input: &Value) -> Vec<(String, oxplow_db::SqlCell)> {
         .unwrap_or_default()
 }
 
-/// Run a command's script over `{ input, rows }` in the sandbox (5 s; no
-/// host: no files, no `ai_*`). Blocks: the handler calls it inside the
-/// bus's transaction (off the async runtime already).
+/// How long a command's script may run. It runs inside the bus's write
+/// transaction, holding the write lock, so this is far tighter than a
+/// collector's runaway catch: composing a few commands is milliseconds.
+/// (A timeout detaches the worker rather than stopping it — see
+/// `run_sandboxed` — but the transaction is released.)
+pub const COMMAND_SCRIPT_BUDGET: oxplow_collect_plugin::SandboxBudget =
+    oxplow_collect_plugin::SandboxBudget::with_timeout(std::time::Duration::from_secs(5));
+
+/// The most examples one command may declare: `check_extension` runs
+/// each one's script.
+pub const MAX_EXAMPLES: usize = 10;
+
+/// Run a command's script over `{ input, rows }` in the sandbox
+/// ([`COMMAND_SCRIPT_BUDGET`]; no host: no files, no `ai_*`). Blocks: the
+/// handler calls it inside the bus's transaction (off the async runtime
+/// already).
 pub fn run_script_blocking(
     script: String,
     input: Value,
     rows: Vec<Value>,
 ) -> Result<Value, String> {
     use oxplow_collect_plugin::runtime::{run_sandboxed, run_starlark};
-    run_sandboxed(
-        &oxplow_collect_plugin::SandboxBudget::default(),
-        move || run_starlark(&script, &json!({ "input": input, "rows": rows })),
-    )
+    run_sandboxed(&COMMAND_SCRIPT_BUDGET, move || {
+        run_starlark(&script, &json!({ "input": input, "rows": rows }))
+    })
     .map_err(|e| e.to_string())
 }
 
@@ -783,6 +801,11 @@ mod tests {
                 vec![("handlers/h.star", HANDLER)],
                 "entry_point",
             ),
+            (
+                entry("a", "    examples:\n      - { name: e0 }\n      - { name: e1 }\n      - { name: e2 }\n      - { name: e3 }\n      - { name: e4 }\n      - { name: e5 }\n      - { name: e6 }\n      - { name: e7 }\n      - { name: e8 }\n      - { name: e9 }\n      - { name: e10 }\n"),
+                vec![("handlers/h.star", HANDLER)],
+                "at most 10 examples",
+            ),
         ] {
             let d = tempfile::tempdir().unwrap();
             write_ext(d.path(), "x", &block, &files);
@@ -1088,6 +1111,42 @@ mod tests {
             assert!(err.to_string().contains(says), "{script}: {err}");
             assert_eq!(task(&fx).await.status, oxplow_domain::TaskStatus::InProgress);
         }
+    }
+
+    /// The script runs inside the bus's write transaction, so a runaway
+    /// one is given up on after `COMMAND_SCRIPT_BUDGET`, not the
+    /// collectors' two minutes.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_runaway_script_is_given_up_on_within_the_budget() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        with_finish(
+            &fx,
+            "def transform(x):\n    n = 0\n    for i in range(400000000):\n        n += i\n    return {\"commands\": []}\n",
+        )
+        .await;
+        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let started = std::time::Instant::now();
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "my_review.finish",
+                json!({ "ref": r }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            started.elapsed() < COMMAND_SCRIPT_BUDGET.timeout + std::time::Duration::from_secs(3),
+            "{:?}: {err}",
+            started.elapsed()
+        );
+        assert!(err.to_string().contains("time"), "{err}");
+        assert_eq!(
+            task(&fx).await.status,
+            oxplow_domain::TaskStatus::InProgress
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

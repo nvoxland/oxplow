@@ -85,12 +85,14 @@ impl Default for SandboxBudget {
 }
 
 impl SandboxBudget {
-    /// A budget with a custom timeout (used by tests to exercise overrun).
-    pub fn with_timeout(timeout: Duration) -> Self {
-        SandboxBudget {
-            timeout,
-            ceiling: CEILING.max(timeout),
-        }
+    /// A budget with a custom timeout.
+    pub const fn with_timeout(timeout: Duration) -> Self {
+        let ceiling = if timeout.as_nanos() > CEILING.as_nanos() {
+            timeout
+        } else {
+            CEILING
+        };
+        SandboxBudget { timeout, ceiling }
     }
 
     /// This budget with a custom ceiling.

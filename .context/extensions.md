@@ -979,12 +979,15 @@ and two enabled extensions mapping to one namespace are both refused
 (`refuse_shared_namespaces`, after disabling applies). Each entry is
 checked at load, its error at its line: the name, `effect`, `confirm`,
 the schema compiles, `input` is one read, and the entry is a file in the
-extension that parses and defines `transform` (`check_starlark`). The
+extension that parses and defines `transform` (`check_starlark`), and
+it declares at most `MAX_EXAMPLES` (10) examples. The
 script's text is kept on the `ExtensionCommand` (not serialized).
 `check_extension` (Settings → Extensions, `oxplow plugin check` with a
 running oxplow) dry-runs each example: the `input` query's rows (bound
 from the example's fields, capped at `INPUT_ROW_CAP`), the script in the
-sandbox (`run_script`: 5 s, no files, no `ai_*`), and what it composes
+sandbox (`run_script` under `COMMAND_SCRIPT_BUDGET` — 5 s, not the
+collectors' 120 s runaway catch, because at run time the script holds
+the bus's write transaction; no files, no `ai_*`), and what it composes
 against the registry — every command exists, its input fits, the names
 are `expect_commands` in order. Without a registry it warns that the
 examples weren't checked.
