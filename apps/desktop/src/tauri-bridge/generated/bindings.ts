@@ -788,6 +788,22 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	decideProposal: (proposal: number, approve: boolean) => typedError<{
+	result: unknown,
+	// The `command_audit` row; `None` for a `Read` command.
+	audit_id: number | null,
+	// The `command.executed` event; `None` for a `Read` command.
+	event_id: EventId | null,
+	/**
+	 *  Present when the command is undoable: `commands.undo(audit_id)`
+	 *  runs it.
+	 */
+	inverse: CommandCall | null,
+} | null, IpcError>(__TAURI_INVOKE("decide_proposal", { proposal, approve })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listWorkspaceEntries: (streamId: string | null, relativePath: string) => typedError<WorkspaceEntry[], IpcError>(__TAURI_INVOKE("list_workspace_entries", { streamId, relativePath })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

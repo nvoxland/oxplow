@@ -56,6 +56,26 @@ pub async fn undo_command(
     Ok(outcome)
 }
 
+/// A person decides proposal `proposal` (an agent's run that needed their
+/// confirmation): approving runs it as them — confirmed, audited to them,
+/// the outcome returned — declining records the decision and runs nothing
+/// (`None`).
+pub async fn decide_proposal(
+    svc: &Services,
+    proposal: i64,
+    approve: bool,
+) -> Result<Option<CommandOutcome>, IpcError> {
+    if !approve {
+        svc.commands.decline(&Actor::Human, proposal).await?;
+        return Ok(None);
+    }
+    let outcome = svc.commands.approve(&Actor::Human, proposal).await?;
+    if outcome.audit_id.is_some() {
+        svc.tasks.settle_lifecycle().await;
+    }
+    Ok(Some(outcome))
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -110,5 +130,74 @@ mod tests {
         assert!(undone["audit_id"].is_number(), "{undone}");
         let file = std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap();
         assert!(!file.contains("Be brief."), "{file}");
+    }
+
+    /// P6b.A3: an agent's change to a person-only key waits as a proposal;
+    /// the person approves it over IPC (it runs as them) or declines it.
+    #[tokio::test]
+    async fn a_person_decides_an_agents_proposal() {
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let (svc, dir) = services();
+        let stream = svc.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = svc
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let agent = oxplow_domain::Actor::Agent {
+            thread_id: Some(thread.id),
+            stream_id: Some(stream.id),
+        };
+        let propose = |value: &'static str| {
+            let (svc, agent) = (svc.clone(), agent.clone());
+            async move {
+                let err = svc
+                    .commands
+                    .run(
+                        &agent,
+                        "config.set",
+                        json!({ "key": "agentPromptAppend", "value": value }),
+                        false,
+                    )
+                    .await
+                    .unwrap_err();
+                let oxplow_domain::CommandError::Proposed { proposal, .. } = err else {
+                    panic!("{err:?}");
+                };
+                proposal
+                    .strip_prefix("proposal:")
+                    .unwrap()
+                    .parse::<i64>()
+                    .unwrap()
+            }
+        };
+        let decide = |id: i64, approve: bool| {
+            let svc = svc.clone();
+            async move {
+                crate::dispatch(
+                    "decide_proposal",
+                    json!({ "proposal": id, "approve": approve }),
+                    &svc,
+                )
+                .await
+            }
+        };
+        let file =
+            || std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap_or_default();
+
+        let declined = propose("No.").await;
+        assert_eq!(decide(declined, false).await.unwrap(), json!(null));
+        assert!(!file().contains("No."), "{}", file());
+
+        let approved = propose("Be brief.").await;
+        let out = decide(approved, true).await.unwrap();
+        assert!(out["audit_id"].is_number(), "{out}");
+        assert!(file().contains("Be brief."), "{}", file());
+        // Decided once.
+        let err = decide(approved, false).await.unwrap_err();
+        assert_eq!(err.code, "INVALID", "{}", err.message);
     }
 }

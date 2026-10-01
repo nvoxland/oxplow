@@ -312,7 +312,7 @@ actions:
   - { id: finish, label: Finish, command: work_item.transition, input: { ref: "{{param.item}}", to: done } }
   - { id: finish-row, label: Finish, command: work_item.transition, row: true, input: { ref: "work_item:oxplow:tsk{{row.id}}", to: done } }
   - { id: commit, label: Commit, command: vcs.commit, input: { stream: str1, message: "x" } }
-  - { id: agents, label: Agents, command: config.set, input: { key: agents, value: [] } }
+  - { id: prompt, label: Prompt, command: config.set, input: { key: agentPromptAppend, value: be brief } }
 "#,
         )
         .unwrap();
@@ -430,17 +430,14 @@ actions:
         let err = run_lens_action(
             &fx.svc,
             &root,
-            call("agents", BTreeMap::new(), None, agent, true),
+            call("prompt", BTreeMap::new(), None, agent, true),
             &extensions::LensContext::default(),
         )
         .await
         .unwrap_err();
         assert!(
-            matches!(
-                err,
-                CommandError::NeedsConfirmation { .. } | CommandError::Denied { .. }
-            ),
-            "an agent's lens can't set a human-only key: {err:?}"
+            matches!(err, CommandError::Proposed { .. }),
+            "an agent's lens can't set a human-only key, only propose it: {err:?}"
         );
     }
 

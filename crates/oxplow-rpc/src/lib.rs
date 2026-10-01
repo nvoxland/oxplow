@@ -245,6 +245,7 @@ macro_rules! oxplow_command_table {
                 get_command => $crate::commands::bus::get_command { name: String } -> ::oxplow_domain::CommandSpec,
                 run_command => $crate::commands::bus::run_command { name: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 undo_command => $crate::commands::bus::undo_command { audit_id: i64, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
+                decide_proposal => $crate::commands::bus::decide_proposal { proposal: i64, approve: bool } -> Option<::oxplow_domain::CommandOutcome>,
                 // followup
                 list_followups => $crate::commands::followup::list_followups { thread_id: ::oxplow_domain::ThreadId } -> Vec<::oxplow_app::Followup>,
                 add_followup => $crate::commands::followup::add_followup { thread_id: ::oxplow_domain::ThreadId, body: String } -> ::oxplow_app::Followup,

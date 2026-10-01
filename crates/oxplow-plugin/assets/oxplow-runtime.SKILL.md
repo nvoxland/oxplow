@@ -272,10 +272,12 @@ is validated, policy-checked, audited to your thread and logged as
   (`config.set { key: "zones", value: [{ match, zone, color? }] }`;
   `list_zones` shows what the table matches). Keys that run a program or
   pick the model (`agents`, `lsp`, `collection`, `ai`, `acpAgents`,
-  `agentModels`, `extensions`) need the person's confirmation — the
-  refusal tells you what to ask them to run.
+  `agentModels`, `extensions`, `agentPromptAppend`, …) need the person's
+  confirmation — your run is kept as a proposal for them.
 - Task status: `transition_tasks` (= `work_item.transition` per id).
 
-Invalid input names the failing field; a denial says why. If a run
-returns "needs a person's confirmation", tell the user the exact command
-and input rather than looking for another way to make the change.
+Invalid input names the failing field; a denial says why. A run that
+needs a person's confirmation returns `{ proposal, message }`: it is
+recorded as `proposal:N` and waits in the person's Approvals panel (and on
+the setting's row in Settings). Tell the person what you proposed and why;
+don't run it again or look for another way to make the change.

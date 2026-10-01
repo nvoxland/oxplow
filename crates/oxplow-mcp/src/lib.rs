@@ -4166,8 +4166,10 @@ impl OxplowMcp {
     #[tool(
         description = "Run a command by name with its input (see `list_commands`). Returns \
                        `{ result, audit_id, event_id, inverse? }`. Invalid input names the \
-                       failing field; a denied command says why; a command that needs a \
-                       person's confirmation is not run — tell the person what to run. \
+                       failing field; a denied command says why. A command that needs a \
+                       person's confirmation is not run: it is recorded as a proposal and \
+                       this returns `{ proposal, message }` — tell the person it waits in \
+                       Approvals, and don't run it again. \
                        Requires the connection's thread identity: an anonymous connection may \
                        not write."
     )]
@@ -5387,12 +5389,23 @@ impl OxplowMcp {
         params: RunCommandParams,
     ) -> Result<CallToolResult, McpError> {
         let actor = self.verified_actor(caller).await?;
-        let outcome = self
+        let outcome = match self
             .services
             .commands
             .run(&actor, &params.name, params.input, false)
             .await
-            .map_err(command_error)?;
+        {
+            Ok(outcome) => outcome,
+            // Kept for a person: the agent's request is recorded and needs
+            // nothing more from it.
+            Err(oxplow_domain::CommandError::Proposed { proposal, preview }) => {
+                return json_result(&serde_json::json!({
+                    "proposal": proposal,
+                    "message": proposed_message(&preview.command, &proposal),
+                }));
+            }
+            Err(err) => return Err(command_error(err)),
+        };
         // A write may have opened or closed an effort (`effort.open`,
         // `work_item.transition`): let its snapshot pin land before the
         // agent's next step.
@@ -5483,8 +5496,19 @@ fn command_error(err: oxplow_domain::CommandError) -> McpError {
             ),
             None,
         ),
+        E::Proposed { proposal, preview } => {
+            McpError::invalid_params(proposed_message(&preview.command, proposal), None)
+        }
         E::Failed { .. } | E::Busy { .. } => internal(err.to_string()),
     }
+}
+
+/// What an agent is told when its run waits for a person (`proposal:N`).
+fn proposed_message(command: &str, proposal: &str) -> String {
+    format!(
+        "`{command}` needs a person's approval; it is recorded as {proposal} and waits in \
+         Approvals (and on the setting's row in Settings). Tell the person; don't run it again."
+    )
 }
 
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpError> {
@@ -6631,8 +6655,10 @@ mod tests {
         assert_eq!(executed.envelope.source, format!("agent:{}", thread.id));
         assert_eq!(executed.envelope.anchors.thread_id, Some(thread.id));
         assert_eq!(executed.envelope.payload["command"], "config.set");
-        // A human-only key is not the agent's to set.
-        let err = server
+        // A human-only key is not the agent's to set: the run is kept as a
+        // proposal for a person, and the agent is told so — a success,
+        // since the request is recorded and needs nothing more from it.
+        let out = server
             .run_command_as(
                 &McpCaller {
                     thread_id: Some(thread.id),
@@ -6640,12 +6666,29 @@ mod tests {
                 },
                 RunCommandParams {
                     name: "config.set".into(),
-                    input: serde_json::json!({"key": "ai", "value": {"roles": {}}}),
+                    input: serde_json::json!({"key": "agentPromptAppend", "value": "be brief"}),
                 },
             )
             .await
-            .unwrap_err();
-        assert!(err.to_string().contains("confirmation"), "{err}");
+            .unwrap();
+        let text = out.content[0].as_text().unwrap().text.clone();
+        let proposed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let proposal = proposed["proposal"].as_str().unwrap().to_string();
+        assert!(proposal.starts_with("proposal:"), "{proposed}");
+        let message = proposed["message"].as_str().unwrap();
+        assert!(message.contains(&proposal), "{message}");
+        assert!(message.contains("Approvals"), "{message}");
+        assert!(message.contains("don't run it again"), "{message}");
+        let pending = services
+            .commands
+            .proposal_store()
+            .list_pending()
+            .await
+            .unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].dry_run.as_ref().unwrap()["after"], "be brief");
+        let yaml = std::fs::read_to_string(proj.path().join(".oxplow/project.yaml")).unwrap();
+        assert!(!yaml.contains("be brief"), "nothing written: {yaml}");
     }
 
     #[tokio::test]

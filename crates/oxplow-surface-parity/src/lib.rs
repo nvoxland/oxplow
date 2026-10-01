@@ -150,6 +150,8 @@ pub const MANIFEST: &[Capability] = &[
     // with list_commands.
     ui("get_command"),
     ui("undo_command"),
+    // Approving or declining an agent's proposal is a person's (P6b).
+    ui("decide_proposal"),
     // ---- the event log's dead-letter queue ----
     both("list_dead_letters"),
     // A person decides a dead letter's fate (V93): agents can list them.

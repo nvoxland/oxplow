@@ -531,25 +531,31 @@ mod tests {
         );
     }
 
+    /// A human-only key is a person's: an agent's change waits as a
+    /// proposal (with what it would change), nothing written, until a
+    /// person approves it; a person's own change asks first.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_human_only_key_needs_a_persons_confirmation() {
         let (dir, target, bus) = setup(None).await_ready();
+        seed_agent_thread(&bus).await;
         let value = json!({"roles": {"main": {"provider": "anthropic", "model": "claude"}}});
         let err = bus
             .run(&agent(), SET, json!({"key": "ai", "value": value}), true)
             .await
             .unwrap_err();
-        assert!(
-            matches!(err, CommandError::NeedsConfirmation { .. }),
-            "{err:?}"
-        );
+        assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
         assert!(
             !file(&dir).contains("ai"),
             "nothing written: {}",
             file(&dir)
         );
         assert!(target.config.read().unwrap().ai_roles.is_empty());
-        // The person confirms.
+        let proposal = bus.proposal_store().list_pending().await.unwrap().remove(0);
+        assert_eq!(proposal.key, "config:ai");
+        let dry_run = proposal.dry_run.unwrap();
+        assert_eq!(dry_run["before"], Value::Null);
+        assert_eq!(dry_run["after"]["roles"]["main"]["model"], "claude");
+        // A person's own change asks first.
         let err = bus
             .run(
                 &Actor::Human,
@@ -560,19 +566,31 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::NeedsConfirmation { .. }));
-        bus.run(
-            &Actor::Human,
-            SET,
-            json!({"key": "ai", "value": value}),
-            true,
-        )
-        .await
-        .unwrap();
+        // Approving the agent's proposal is the person's confirmation.
+        bus.approve(&Actor::Human, proposal.id).await.unwrap();
         assert_eq!(
             target.config.read().unwrap().ai_roles["main"].model,
             "claude"
         );
         assert!(file(&dir).contains("anthropic"));
+    }
+
+    /// The agent's thread (and its stream), which a proposal names.
+    async fn seed_agent_thread(bus: &CommandBus) {
+        bus.db
+            .transaction(|tx| {
+                tx.execute_batch(
+                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
+                                          worktree_path, created_at, updated_at)
+                       VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/tmp/x',
+                               '2026-01-01', '2026-01-01');
+                     INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                       VALUES (1, 1, 'T', 'active', '2026-01-01', '2026-01-01');",
+                )
+                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]

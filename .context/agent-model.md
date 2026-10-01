@@ -153,8 +153,11 @@ Project configuration is changed through the `config.*` commands on the
 command bus ([commands.md](./commands.md)) — an agent sets `zones`,
 `metricRetentionDays`, `generated`, … with `config.set`, while the keys
 that run a program or pick the model (`agents`, `lsp`, `collection`,
-`ai`, `acpAgents`, `agentModels`, `extensions`) need a person's
-confirmation. `set_zones` is gone; `zones` is just a key.
+`ai`, `acpAgents`, `agentModels`, `extensions`, `agentPromptAppend`, …)
+need a person's confirmation: the agent's `config.set` is kept as a
+proposal (`proposal:N`, with the before/after) that the person approves
+or declines, and `run_command` tells the agent so ([commands.md](./commands.md),
+"Proposals"). `set_zones` is gone; `zones` is just a key.
 
 `.oxplow/project.yaml` lists enabled agents as `agents: [...]`; the first entry
 is the default for newly-created threads, and each thread persists its

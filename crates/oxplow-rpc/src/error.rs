@@ -56,8 +56,9 @@ impl IpcError {
 
 /// A command-bus refusal keeps its meaning over IPC: unknown → not
 /// found, invalid input → `INVALID`, a policy refusal → `DENIED`, a needed
-/// confirmation → `NEEDS_CONFIRMATION` (the UI asks the person), a handler
-/// failure → `INTERNAL`.
+/// confirmation → `NEEDS_CONFIRMATION` (the UI asks the person), an
+/// agent-driven run kept for a person → `PROPOSED`, a handler failure →
+/// `INTERNAL`.
 impl From<oxplow_domain::CommandError> for IpcError {
     fn from(value: oxplow_domain::CommandError) -> Self {
         use oxplow_domain::CommandError as E;
@@ -67,6 +68,7 @@ impl From<oxplow_domain::CommandError> for IpcError {
             E::Invalid { .. } => "INVALID",
             E::Denied { .. } => "DENIED",
             E::NeedsConfirmation { .. } => "NEEDS_CONFIRMATION",
+            E::Proposed { .. } => "PROPOSED",
             E::Failed { .. } => "INTERNAL",
             E::Busy { .. } => "BUSY",
         };

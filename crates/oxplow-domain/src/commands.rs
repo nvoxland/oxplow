@@ -293,6 +293,13 @@ pub enum CommandError {
     /// A person has to confirm first. Nothing was written. Boxed so the
     /// error stays small on the hot `Result` paths.
     NeedsConfirmation { preview: Box<Preview> },
+    /// An agent's run needed a person's confirmation, so it was kept as a
+    /// proposal (`proposal:<id>`) for a person to approve or decline.
+    /// Nothing ran; nothing else was written.
+    Proposed {
+        proposal: String,
+        preview: Box<Preview>,
+    },
     /// The handler failed.
     Failed { message: String },
     /// The database stayed busy through the run's retries; nothing was
@@ -316,6 +323,11 @@ impl std::fmt::Display for CommandError {
             CommandError::NeedsConfirmation { preview } => {
                 write!(f, "`{}` needs confirmation", preview.command)
             }
+            CommandError::Proposed { proposal, preview } => write!(
+                f,
+                "`{}` needs a person's approval; it is recorded as {proposal}",
+                preview.command
+            ),
             CommandError::Failed { message } => write!(f, "command failed: {message}"),
             CommandError::Busy { message } => {
                 write!(f, "database busy, nothing written: {message}")

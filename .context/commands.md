@@ -46,14 +46,17 @@ A command is a typed operation named `<capability|plugin>.<verb>`
    run opened an effort the actor may not claim. Filing and editing
    tasks isn't a claim on the worktree; moving one to `in_progress` is.
 4. **Confirmation** — when `confirm` requires it and the call isn't
-   `confirmed`, `NeedsConfirmation { preview }` and **nothing is written,
-   not even an audit row**. An agent's `confirmed` is ignored: it gets
-   the preview and asks the person, who runs the command. The answer
+   `confirmed`, **nothing runs and no audit row is written**: a person
+   (or the system) gets `NeedsConfirmation { preview }`; an
+   agent-driven run (an agent, or a lens acting for one — whose
+   `confirmed` is ignored) is kept as a **proposal** and gets `Proposed
+   { proposal, preview }` (see "Proposals", P6b.A3). The answer
    rides into the handler as `TxCtx::confirmed` (and step 3's gate as
    `TxCtx::may_write`): a handler that learns only while running that a
    confirmation is needed — a composite whose child asks — raises
    `NeedsConfirmation` itself, and the bus treats it as this step would
-   (rolled back, nothing audited, the preview returned) (P6b.A1).
+   (rolled back, nothing audited; a person asked, an agent's run
+   proposed) (P6b.A1).
 5. **Run and record in one transaction**: the handler, a `command_audit`
    row (`crates/oxplow-db/src/command_audit_store.rs`: actor, input,
    outcome, the handler's `result` — V114, so a run's answer, such as a
@@ -133,6 +136,50 @@ so `undo` needs nothing new, and a child whose inverse asks makes the
 undo ask. A child's `Busy` propagates and the bus retries the whole
 parent (handlers are pure).
 
+## Proposals: an agent's run that needs a person (P6b.A3)
+
+A run an agent can't confirm is kept for a person instead of being
+refused (`CommandBus::unconfirmed`):
+
+1. **Dry run** — a `Tx` handler runs with `confirmed: true` in a write
+   transaction that is always rolled back (`Database::rehearse`); its
+   `result` is what it would have done (`config.set`: `{ key, before,
+   after }`; a composite: its `children`). Its events and `after_commit`
+   are dropped, so nothing reaches a file. An `External` handler never
+   runs: its proposal has no dry run. A dry run that fails is the run's
+   failure (audited like one), not a proposal.
+2. **Kept** — one transaction inserts the `command_proposal` row
+   ([data-model.md](./data-model.md); `proposal_key` supersedes a pending
+   proposal for the same config key or the same command and input) and
+   logs `command.proposed@1 { proposal, command, actor_kind, actor_id?,
+   destructive }` with the actor's anchors.
+3. **`Proposed { proposal: "proposal:N", preview }`** — IPC code
+   `PROPOSED`; MCP `run_command` turns it into a *successful* result `{
+   proposal, message }` (`proposed_message`: it waits in Approvals and
+   on the setting's row; tell the person; don't run it again). Other MCP
+   tools that run a command report the same message as an error.
+
+**Deciding** is a person's only (`Actor::Human`; an agent, a lens or the
+system is `Denied`), and a proposal is decided once (`Invalid` after):
+
+- **`CommandBus::approve(actor, id)`** runs the proposal's command as the
+  person, confirmed, through the whole pipeline (`RunOrigin::Approval`).
+  A `Tx` run marks the row approved with its `audit_id` and logs
+  `command.approved@1 { proposal, command, audit_id }` (caused by its
+  `command.executed`) in the run's own transaction; an `External` run
+  claims the row first (approved, no audit row: `claim_tx`), names its
+  audit row when recorded (`finish_claim_tx`) and releases the claim if
+  it fails (`release_claim_tx`) — the same pattern as an `External`
+  undo's claim. A run that fails leaves the proposal pending.
+- **`CommandBus::decline(actor, id)`** marks it declined and logs
+  `command.declined@1`; nothing runs, no audit row.
+
+UI RPC **`decide_proposal { proposal, approve }`** (`ui` in surface
+parity; desktop `decideProposal`) returns the approving run's outcome, or
+`null` for a decline. A proposal's dry run is a snapshot at proposal
+time; the approval re-runs for real and the audit row records what
+happened.
+
 ## `config.*` and the key registry
 
 `.oxplow/project.yaml`'s vocabulary is one registry,
@@ -171,7 +218,8 @@ dimension from the global manifests (`global`) and enabled extensions
 (`extension`). `SettingsPage` lists them grouped and searchable
 (`pages/settingsModel.ts`), each with **Ask the Agent to Change This**
 (a prompt naming the key, its doc and its value, inserted, never sent) —
-a person-only key's `config.set` asks the person to confirm. Direct
+a person-only key's `config.set` by the agent becomes a proposal the
+person approves. Direct
 controls remain only for person-only settings (agents, AI, language
 servers, extensions, integrations, programs); `set_snapshot_retention_days`
 and `set_snapshot_max_file_bytes` went with their editors. The view
@@ -287,15 +335,17 @@ disabled while a field has a problem; model in `schemaFormModel.ts`).
 P6.B2.
 
 `CommandError` → `McpError` mapping lives in `command_error` (oxplow-mcp):
-invalid/denied/unknown are the caller's to fix, `NeedsConfirmation` tells
-the agent to ask the person, `Failed` is internal.
+invalid/denied/unknown are the caller's to fix, `Proposed` says the run
+waits for a person (`run_command` returns it as a success instead),
+`Failed` is internal.
 
 ## Exposure to agents (MCP)
 
 Agents reach every command through two generic tools — `list_commands`
 (the specs the calling agent may run, with `input_schema`, `summary`,
 `confirm`, `undoable`) and `run_command { name, input }` (the outcome:
-`result`, `audit_id`, `event_id`, `inverse?`). Extensions never add MCP
+`result`, `audit_id`, `event_id`, `inverse?` — or, for a run that needs
+a person's confirmation, `{ proposal, message }`). Extensions never add MCP
 tools. `transition_tasks` is `run_command("work_item.transition")` per
 id.
 

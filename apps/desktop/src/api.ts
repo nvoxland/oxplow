@@ -1722,6 +1722,12 @@ export async function undoCommand(auditId: number, confirmed = false): Promise<C
   return unwrap(await commands.undoCommand(auditId, confirmed));
 }
 
+/** Approve (it runs as the person; its outcome) or decline (`null`) an
+ *  agent's proposal `proposal:<id>`. */
+export async function decideProposal(id: number, approve: boolean): Promise<CommandOutcome | null> {
+  return unwrap(await commands.decideProposal(id, approve));
+}
+
 /** Turn metrics on or off in this project (the `metric.enable` command). */
 export async function enableMetrics(keys: string[], enabled: boolean): Promise<void> {
   unwrap(await commands.enableMetrics(keys, enabled));

@@ -411,6 +411,29 @@ impl Database {
         F: Fn(&rusqlite::Transaction<'_>) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
         R: Send + 'static,
     {
+        self.write_transaction(f, true).await
+    }
+
+    /// [`Self::transaction`], always rolled back: what `f` would do, with
+    /// the write lock and the busy retry of a real run, and nothing kept.
+    /// A command's dry run (a proposal's preview) runs its handler here.
+    pub async fn rehearse<R, F>(&self, f: F) -> Result<R, oxplow_domain::DomainError>
+    where
+        F: Fn(&rusqlite::Transaction<'_>) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
+        R: Send + 'static,
+    {
+        self.write_transaction(f, false).await
+    }
+
+    async fn write_transaction<R, F>(
+        &self,
+        f: F,
+        commit: bool,
+    ) -> Result<R, oxplow_domain::DomainError>
+    where
+        F: Fn(&rusqlite::Transaction<'_>) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
+        R: Send + 'static,
+    {
         const MAX_ATTEMPTS: u32 = 3;
         const BACKOFF: [std::time::Duration; 2] = [
             std::time::Duration::from_millis(50),
@@ -434,7 +457,11 @@ impl Database {
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                     .map_err(map_sql_err)?;
                 let outcome = f(&tx).and_then(|value| {
-                    tx.commit().map_err(map_sql_err)?;
+                    if commit {
+                        tx.commit().map_err(map_sql_err)?;
+                    } else {
+                        tx.rollback().map_err(map_sql_err)?;
+                    }
                     Ok(value)
                 });
                 match outcome {

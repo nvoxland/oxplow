@@ -242,6 +242,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::run_command,
             commands::generated::get_command,
             commands::generated::undo_command,
+            commands::generated::decide_proposal,
             // log
             // workspace
             commands::generated::list_workspace_entries,

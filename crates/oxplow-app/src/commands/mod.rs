@@ -30,10 +30,16 @@ use std::sync::Arc;
 
 use oxplow_db::command_audit_store::{insert_tx, mark_undone_tx, set_event_id_tx, NewCommandAudit};
 use oxplow_db::event_log_store::append_tx;
-use oxplow_db::{CommandAudit, Database, SqliteCommandAuditStore, SqliteEventLogStore};
-use oxplow_domain::events::schema::{
-    CommandExecuted, CommandExecutedV1, CommandOutcome as Outcome,
+use oxplow_db::proposal_store::{self, NewProposal};
+use oxplow_db::{
+    CommandAudit, Database, ProposalDecision, SqliteCommandAuditStore, SqliteEventLogStore,
+    SqliteProposalStore,
 };
+use oxplow_domain::events::schema::{
+    CommandApproved, CommandApprovedV1, CommandDeclined, CommandDeclinedV1, CommandExecuted,
+    CommandExecutedV1, CommandOutcome as Outcome, CommandProposed, CommandProposedV1,
+};
+use oxplow_domain::refs::build::{command_ref, proposal_ref};
 use oxplow_domain::{
     Actor, Atomicity, CommandCall, CommandError, CommandOutcome, CommandSpec, Envelope,
     InputValidator, Preview,
@@ -197,10 +203,21 @@ impl Command {
 pub type WriteGate =
     Arc<dyn Fn(oxplow_domain::ThreadId) -> futures::future::BoxFuture<'static, bool> + Send + Sync>;
 
+/// What a run is, beyond the call itself: the undo of an audited run, or
+/// the approval of a proposal. Either is marked in the run's own
+/// transaction (a `Tx` handler) or claimed before it (an `External` one).
+#[derive(Debug, Clone, Copy)]
+enum RunOrigin {
+    Call,
+    Undo(i64),
+    Approval(i64),
+}
+
 pub struct CommandBus {
     db: Database,
     log: SqliteEventLogStore,
     audit: SqliteCommandAuditStore,
+    proposals: SqliteProposalStore,
     policy: Arc<AgentPolicy>,
     pump: Arc<EventPump>,
     commands: RwLock<BTreeMap<String, Arc<Command>>>,
@@ -216,6 +233,7 @@ impl CommandBus {
     ) -> Self {
         Self {
             audit: SqliteCommandAuditStore::new(db.clone()),
+            proposals: SqliteProposalStore::new(db.clone()),
             db,
             log,
             policy,
@@ -277,6 +295,10 @@ impl CommandBus {
         &self.audit
     }
 
+    pub fn proposal_store(&self) -> &SqliteProposalStore {
+        &self.proposals
+    }
+
     /// The specs `actor` may invoke, by name.
     pub fn list(&self, actor: &Actor) -> Vec<CommandSpec> {
         self.commands
@@ -330,20 +352,22 @@ impl CommandBus {
         input: Value,
         confirmed: bool,
     ) -> Result<CommandOutcome, CommandError> {
-        self.run_inner(actor, name, input, confirmed, None).await
+        self.run_inner(actor, name, input, confirmed, RunOrigin::Call)
+            .await
     }
 
-    /// [`Self::run`], optionally as the undo of audit row `undo_of`: the
-    /// row is claimed as undone in the same transaction as the run (a
-    /// `Tx` handler) or before it (an `External` one, released if the run
-    /// fails), so two undos of one row can't both apply the inverse.
+    /// [`Self::run`] as `origin`: the undo of an audit row, or a person's
+    /// approval of a proposal. The row is marked (undone; approved) in the
+    /// same transaction as the run (a `Tx` handler) or claimed before it
+    /// (an `External` one, released if the run fails), so two undos of one
+    /// row — or two approvals of one proposal — can't both run.
     async fn run_inner(
         &self,
         actor: &Actor,
         name: &str,
         input: Value,
         confirmed: bool,
-        undo_of: Option<i64>,
+        origin: RunOrigin,
     ) -> Result<CommandOutcome, CommandError> {
         let command =
             self.commands
@@ -402,18 +426,20 @@ impl CommandBus {
                 return Err(err);
             }
         }
-        // 4. A person confirms; an agent never can. Nothing is written.
+        // 4. A person confirms; an agent never can. Nothing is written: a
+        // person is asked, an agent's run is kept as a proposal.
         let confirmed = confirmed && !actor.is_agent_driven();
         let confirm = command.confirm(&input);
         if confirm.required() && !confirmed {
-            return Err(CommandError::NeedsConfirmation {
-                preview: Box::new(Preview {
-                    command: spec.name.clone(),
-                    summary: spec.summary.clone(),
-                    input,
-                    destructive: matches!(confirm, oxplow_domain::Confirm::Destructive),
-                }),
-            });
+            let preview = Preview {
+                command: spec.name.clone(),
+                summary: spec.summary.clone(),
+                input: input.clone(),
+                destructive: matches!(confirm, oxplow_domain::Confirm::Destructive),
+            };
+            return Err(self
+                .unconfirmed(actor, &command, input, preview, may_claim, gate_answer)
+                .await);
         }
         // 5a. A read runs without a record: no audit row, no event.
         if spec.effect == oxplow_domain::CommandEffect::Read {
@@ -470,10 +496,18 @@ impl CommandBus {
                             &out,
                             executed_id,
                         )?;
-                        if let Some(original) = undo_of {
+                        match origin {
+                            RunOrigin::Call => {}
                             // Fails (and rolls the whole run back) when the
-                            // row was undone meanwhile.
-                            mark_undone_tx(tx, original, recorded.audit_id)?;
+                            // row was undone meanwhile…
+                            RunOrigin::Undo(original) => {
+                                mark_undone_tx(tx, original, recorded.audit_id)?;
+                            }
+                            // …or the proposal was decided meanwhile.
+                            RunOrigin::Approval(id) => {
+                                proposal_store::approve_tx(tx, id, recorded.audit_id)?;
+                                log_approved_tx(tx, &schemas, &actor_c, &spec_c, id, &recorded)?;
+                            }
                         }
                         Ok((out, recorded))
                     })
@@ -487,17 +521,11 @@ impl CommandBus {
                 }
             }
             Handler::External(handler) => {
-                if let Some(original) = undo_of {
-                    self.claim_undo(original).await?;
-                }
+                self.claim(origin).await?;
                 match handler(actor.clone(), input.clone()).await {
-                    Ok(out) => Ok(self
-                        .record_external(actor, spec, &input, out, undo_of)
-                        .await),
+                    Ok(out) => Ok(self.record_external(actor, spec, &input, out, origin).await),
                     Err(err) => {
-                        if let Some(original) = undo_of {
-                            self.release_undo(original).await;
-                        }
+                        self.release(origin).await;
                         Err(err)
                     }
                 }
@@ -510,8 +538,10 @@ impl CommandBus {
             }
             // A confirmation a handler raised while running (a composite
             // whose child asks) is step 4's answer, late: rolled back,
-            // nothing audited, the preview returned.
-            Err(err @ CommandError::NeedsConfirmation { .. }) => Err(err),
+            // nothing audited — a person is asked, an agent's run proposed.
+            Err(CommandError::NeedsConfirmation { preview }) => Err(self
+                .unconfirmed(actor, &command, input, *preview, may_claim, gate_answer)
+                .await),
             Err(err) => {
                 // A handler's refusal (a claim the actor may not take) is a
                 // denial, not an error.
@@ -548,7 +578,7 @@ impl CommandBus {
             &inverse.name,
             inverse.input.clone(),
             confirmed,
-            Some(audit_id),
+            RunOrigin::Undo(audit_id),
         )
         .await
         .map_err(|e| match e {
@@ -561,6 +591,220 @@ impl CommandBus {
             }
             other => other,
         })
+    }
+
+    /// A run that needs a confirmation it doesn't have. A person (or the
+    /// system) is asked: `NeedsConfirmation`. An agent's run is kept for a
+    /// person instead: dry-run (a `Tx` handler, confirmed, in a rolled-back
+    /// transaction — what it would have done; an `External` one never
+    /// runs), then the proposal and `command.proposed` in one transaction,
+    /// and `Proposed`. A dry run that fails is the run's failure, audited
+    /// like one. No audit row for a proposal: nothing ran.
+    async fn unconfirmed(
+        &self,
+        actor: &Actor,
+        command: &Arc<Command>,
+        input: Value,
+        preview: Preview,
+        may_claim: bool,
+        may_write: Option<bool>,
+    ) -> CommandError {
+        if !actor.is_agent_driven() {
+            return CommandError::NeedsConfirmation {
+                preview: Box::new(preview),
+            };
+        }
+        let spec = &command.spec;
+        let dry_run = match &command.handler {
+            Handler::Tx(handler) => match self
+                .dry_run(handler.clone(), actor, &input, may_claim, may_write)
+                .await
+            {
+                Ok(result) => Some(result),
+                Err(err) => {
+                    let recorded = match err {
+                        CommandError::Denied { .. } => Outcome::Denied,
+                        _ => Outcome::Error,
+                    };
+                    self.audit_only(actor, spec, &input, recorded, Some(err.to_string()))
+                        .await;
+                    return err;
+                }
+            },
+            Handler::External(_) => None,
+        };
+        let row = NewProposal {
+            command: spec.name.clone(),
+            input,
+            actor_kind: actor.kind(),
+            actor_id: actor.id(),
+            thread_id: actor.thread_id(),
+            stream_id: actor.anchors().stream_id,
+            preview: serde_json::to_value(&preview).expect("a preview serializes"),
+            dry_run,
+        };
+        let (actor_c, schemas, destructive) = (
+            actor.clone(),
+            self.log.schemas().clone(),
+            preview.destructive,
+        );
+        let stored = self
+            .db
+            .transaction(move |tx| {
+                let id = proposal_store::insert_tx(tx, &row)?;
+                let proposed = Envelope::typed::<CommandProposed>(
+                    actor_c.source(),
+                    &CommandProposedV1 {
+                        proposal: proposal_ref(id),
+                        command: row.command.clone(),
+                        actor_kind: actor_c.kind(),
+                        actor_id: actor_c.id(),
+                        destructive,
+                    },
+                )
+                .with_anchors(actor_c.anchors())
+                .with_subject([proposal_ref(id), command_ref(&row.command)]);
+                append_tx(tx, &schemas, &proposed)?;
+                Ok(id)
+            })
+            .await;
+        match stored {
+            Ok(id) => {
+                self.pump.wake();
+                CommandError::Proposed {
+                    proposal: proposal_ref(id),
+                    preview: Box::new(preview),
+                }
+            }
+            Err(e) => CommandError::from(e),
+        }
+    }
+
+    /// A `Tx` handler's result, run confirmed in a transaction that is
+    /// rolled back: what it would do now. Its events and `after_commit`
+    /// are dropped with it.
+    async fn dry_run(
+        &self,
+        handler: Arc<TxHandler>,
+        actor: &Actor,
+        input: &Value,
+        may_claim: bool,
+        may_write: Option<bool>,
+    ) -> Result<Value, CommandError> {
+        let (actor, input) = (actor.clone(), input.clone());
+        let schemas = self.log.schemas().clone();
+        let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
+        let failed_c = failed.clone();
+        self.db
+            .rehearse(move |tx| {
+                let ctx = TxCtx {
+                    conn: tx,
+                    actor: &actor,
+                    events: oxplow_db::EventCtx {
+                        schemas: &schemas,
+                        source: actor.source(),
+                        cause: None,
+                    },
+                    may_claim,
+                    confirmed: true,
+                    may_write,
+                };
+                match handler(&ctx, input.clone()) {
+                    Ok(out) => Ok(out.result),
+                    Err(CommandError::Busy { message }) => {
+                        Err(oxplow_domain::DomainError::Busy(message))
+                    }
+                    Err(err) => {
+                        *failed_c.lock() = Some(err);
+                        Err(oxplow_domain::DomainError::Invariant(
+                            "dry run failed".into(),
+                        ))
+                    }
+                }
+            })
+            .await
+            .map_err(|db_err| {
+                failed
+                    .lock()
+                    .take()
+                    .unwrap_or_else(|| CommandError::from(db_err))
+            })
+    }
+
+    /// A person approves proposal `id`: its command runs as them,
+    /// confirmed, through the whole pipeline, and the proposal is marked
+    /// approved with the run's audit row (and `command.approved` logged) in
+    /// the run's own transaction. A run that fails leaves it pending.
+    /// Approving is a person's only.
+    pub async fn approve(&self, actor: &Actor, id: i64) -> Result<CommandOutcome, CommandError> {
+        let proposal = self.pending_proposal(actor, id).await?;
+        self.run_inner(
+            actor,
+            &proposal.command,
+            proposal.input,
+            true,
+            RunOrigin::Approval(id),
+        )
+        .await
+    }
+
+    /// A person declines proposal `id`: the decision and
+    /// `command.declined`, nothing run. A person's only.
+    pub async fn decline(&self, actor: &Actor, id: i64) -> Result<(), CommandError> {
+        self.pending_proposal(actor, id).await?;
+        let (actor_c, schemas) = (actor.clone(), self.log.schemas().clone());
+        self.db
+            .transaction(move |tx| {
+                let declined = proposal_store::decline_tx(tx, id)?;
+                let event = Envelope::typed::<CommandDeclined>(
+                    actor_c.source(),
+                    &CommandDeclinedV1 {
+                        proposal: proposal_ref(id),
+                        command: declined.command.clone(),
+                    },
+                )
+                .with_subject([proposal_ref(id), command_ref(&declined.command)]);
+                append_tx(tx, &schemas, &event)?;
+                Ok(())
+            })
+            .await?;
+        self.pump.wake();
+        Ok(())
+    }
+
+    /// Proposal `id`, when `actor` is a person and it still waits.
+    async fn pending_proposal(
+        &self,
+        actor: &Actor,
+        id: i64,
+    ) -> Result<oxplow_db::Proposal, CommandError> {
+        if !matches!(actor, Actor::Human) {
+            return Err(CommandError::Denied {
+                reason: "only a person approves or declines a proposal".into(),
+            });
+        }
+        let proposal = self
+            .proposals
+            .get(id)
+            .await?
+            .ok_or_else(|| CommandError::Invalid {
+                field: Some("/proposal".into()),
+                message: format!("{} does not exist", proposal_ref(id)),
+            })?;
+        if proposal.decision != ProposalDecision::Pending {
+            return Err(CommandError::Invalid {
+                field: Some("/proposal".into()),
+                message: format!(
+                    "{} is already {}",
+                    proposal_ref(id),
+                    serde_json::to_value(proposal.decision)
+                        .ok()
+                        .and_then(|v| v.as_str().map(str::to_string))
+                        .unwrap_or_default()
+                ),
+            });
+        }
+        Ok(proposal)
     }
 
     /// Run `calls` as one: the children of a composite (`command.sequence`,
@@ -793,7 +1037,7 @@ impl CommandBus {
         spec: &CommandSpec,
         input: &Value,
         mut out: HandlerOutput,
-        undo_of: Option<i64>,
+        origin: RunOrigin,
     ) -> CommandOutcome {
         let (actor_c, spec_c, input_c) = (actor.clone(), spec.clone(), input.clone());
         let schemas = self.log.schemas().clone();
@@ -815,8 +1059,15 @@ impl CommandBus {
                     &shadow,
                     oxplow_domain::EventId::generate(),
                 )?;
-                if let Some(original) = undo_of {
-                    finish_undo_claim_tx(tx, original, recorded.audit_id)?;
+                match origin {
+                    RunOrigin::Call => {}
+                    RunOrigin::Undo(original) => {
+                        finish_undo_claim_tx(tx, original, recorded.audit_id)?;
+                    }
+                    RunOrigin::Approval(id) => {
+                        proposal_store::finish_claim_tx(tx, id, recorded.audit_id)?;
+                        log_approved_tx(tx, &schemas, &actor_c, &spec_c, id, &recorded)?;
+                    }
                 }
                 Ok(recorded)
             })
@@ -842,31 +1093,52 @@ impl CommandBus {
         }
     }
 
-    /// Mark `audit_id` as being undone (`undone_by = UNDO_PENDING`) before
-    /// running an `External` inverse. Fails when it's already undone or
-    /// being undone.
-    async fn claim_undo(&self, audit_id: i64) -> Result<(), CommandError> {
-        self.db
-            .transaction(move |tx| mark_undone_tx(tx, audit_id, UNDO_PENDING))
-            .await
-            .map_err(CommandError::from)
+    /// Before an `External` run with an origin: mark the audit row as
+    /// being undone (`undone_by = UNDO_PENDING`), or the proposal as being
+    /// approved (approved, no audit row yet). Fails when it's already
+    /// undone or decided, or being so.
+    async fn claim(&self, origin: RunOrigin) -> Result<(), CommandError> {
+        match origin {
+            RunOrigin::Call => Ok(()),
+            RunOrigin::Undo(audit_id) => self
+                .db
+                .transaction(move |tx| mark_undone_tx(tx, audit_id, UNDO_PENDING))
+                .await
+                .map_err(CommandError::from),
+            RunOrigin::Approval(id) => self
+                .db
+                .transaction(move |tx| proposal_store::claim_tx(tx, id))
+                .await
+                .map_err(CommandError::from),
+        }
     }
 
-    /// The inverse failed: the row is undoable again.
-    async fn release_undo(&self, audit_id: i64) {
-        if let Err(e) = self
-            .db
-            .transaction(move |tx| {
-                tx.execute(
-                    "UPDATE command_audit SET undone_by = NULL WHERE id = ?1 AND undone_by = ?2",
-                    rusqlite::params![audit_id, UNDO_PENDING],
-                )
-                .map(|_| ())
-                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
-            })
-            .await
-        {
-            tracing::error!(audit_id, error = %e, "releasing an undo claim failed");
+    /// The `External` run failed: the row is undoable again, the proposal
+    /// pending again.
+    async fn release(&self, origin: RunOrigin) {
+        let released = match origin {
+            RunOrigin::Call => return,
+            RunOrigin::Undo(audit_id) => {
+                self.db
+                    .transaction(move |tx| {
+                        tx.execute(
+                            "UPDATE command_audit SET undone_by = NULL
+                              WHERE id = ?1 AND undone_by = ?2",
+                            rusqlite::params![audit_id, UNDO_PENDING],
+                        )
+                        .map(|_| ())
+                        .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+                    })
+                    .await
+            }
+            RunOrigin::Approval(id) => {
+                self.db
+                    .transaction(move |tx| proposal_store::release_claim_tx(tx, id))
+                    .await
+            }
+        };
+        if let Err(e) = released {
+            tracing::error!(?origin, error = %e, "releasing a claim failed");
         }
     }
 }
@@ -948,7 +1220,7 @@ fn record_tx(
         },
     )
     .with_anchors(actor.anchors())
-    .with_subject([oxplow_domain::refs::build::command_ref(&spec.name)]);
+    .with_subject([command_ref(&spec.name)]);
     executed.id = executed_id;
     append_tx(tx, schemas, &executed)?;
     // A handler's own events carry the actor's thread and stream unless
@@ -965,6 +1237,29 @@ fn record_tx(
         audit_id,
         event_id: executed.id,
     })
+}
+
+/// `command.approved` for proposal `id`, caused by the approving run.
+fn log_approved_tx(
+    tx: &rusqlite::Connection,
+    schemas: &oxplow_domain::EventSchemaRegistry,
+    actor: &Actor,
+    spec: &CommandSpec,
+    id: i64,
+    recorded: &Recorded,
+) -> Result<(), oxplow_domain::DomainError> {
+    let approved = Envelope::typed::<CommandApproved>(
+        actor.source(),
+        &CommandApprovedV1 {
+            proposal: proposal_ref(id),
+            command: spec.name.clone(),
+            audit_id: recorded.audit_id,
+        },
+    )
+    .with_subject([proposal_ref(id), command_ref(&spec.name)])
+    .with_cause(recorded.event_id.clone());
+    append_tx(tx, schemas, &approved)?;
+    Ok(())
 }
 
 /// The inverse of an audited run, if it can still be applied.
@@ -987,7 +1282,7 @@ fn undoable(row: &CommandAudit) -> Result<CommandCall, CommandError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV1};
+    use oxplow_domain::events::schema::{ActorKind, ConfigChanged, ConfigChangedV1};
     use oxplow_domain::{
         CommandEffect, Confirm, EventSchemaRegistry, Invokers, Lifecycle, ThreadId,
     };
@@ -1000,8 +1295,18 @@ mod tests {
         let bus = CommandBus::new(db.clone(), log, Arc::new(AgentPolicy::default()), pump);
         db.clone()
             .transaction(|tx| {
-                tx.execute_batch("CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
-                    .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+                // The table the kv commands write, and the thread `agent()`
+                // runs in (a proposal names it).
+                tx.execute_batch(
+                    "CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+                     INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
+                                          worktree_path, created_at, updated_at)
+                       VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/tmp/x',
+                               '2026-01-01', '2026-01-01');
+                     INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                       VALUES (7, 1, 'T', 'active', '2026-01-01', '2026-01-01');",
+                )
+                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
             })
             .now_or_never_ok();
         (db, bus)
@@ -1389,15 +1694,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
-        // An agent: `confirmed` is ignored; nothing is written.
+        // An agent: `confirmed` is ignored; nothing is written — the run
+        // waits as a proposal for a person.
         let err = bus
             .run(&agent(), "kv.set", json!({"k": "b", "v": "2"}), true)
             .await
             .unwrap_err();
-        assert!(
-            matches!(err, CommandError::NeedsConfirmation { .. }),
-            "{err:?}"
-        );
+        assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
         assert_eq!(kv_value(&db, "b").await, None);
     }
 
@@ -1480,7 +1783,7 @@ mod tests {
     }
 
     /// A lens acting for an agent is held to the agent rules: it can't
-    /// confirm, and the agent policy applies.
+    /// confirm (its run is proposed), and the agent policy applies.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_lens_acting_for_an_agent_is_treated_as_the_agent() {
         let (_db, bus) = bus();
@@ -1496,10 +1799,7 @@ mod tests {
             .run(&lens, "kv.set", json!({"k": "a", "v": "1"}), true)
             .await
             .unwrap_err();
-        assert!(
-            matches!(err, CommandError::NeedsConfirmation { .. }),
-            "{err:?}"
-        );
+        assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
         let for_person = Actor::Lens {
             lens_id: "acme/x".into(),
             on_behalf_of: Box::new(Actor::Human),
@@ -1881,5 +2181,251 @@ mod tests {
             .await
             .unwrap();
         assert!(out.inverse.is_none());
+    }
+
+    // P6b.A3: a run an agent needs a person to confirm is kept as a
+    // proposal; a person approves (it runs as them) or declines it.
+
+    async fn pending(db: &Database) -> Vec<oxplow_db::Proposal> {
+        oxplow_db::SqliteProposalStore::new(db.clone())
+            .list_pending()
+            .await
+            .unwrap()
+    }
+
+    async fn proposal(db: &Database, id: i64) -> oxplow_db::Proposal {
+        oxplow_db::SqliteProposalStore::new(db.clone())
+            .get(id)
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    async fn logged(bus: &CommandBus) -> Vec<oxplow_domain::events::StoredEvent> {
+        bus.log_for_tests().read_after(0, 100).await.unwrap()
+    }
+
+    fn confirming_bus() -> (Database, CommandBus) {
+        let (db, bus) = bus();
+        bus.register(
+            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Always), kv_set()).unwrap(),
+        )
+        .unwrap();
+        (db, bus)
+    }
+
+    /// Propose `kv.set k=v` as the agent; the proposal's id.
+    async fn propose(bus: &CommandBus, k: &str, v: &str) -> i64 {
+        let err = bus
+            .run(&agent(), "kv.set", json!({ "k": k, "v": v }), false)
+            .await
+            .unwrap_err();
+        let CommandError::Proposed { proposal, .. } = err else {
+            panic!("{err:?}");
+        };
+        proposal
+            .strip_prefix("proposal:")
+            .and_then(|id| id.parse().ok())
+            .unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_agents_run_that_needs_confirmation_becomes_a_proposal() {
+        let (db, bus) = confirming_bus();
+        let err = bus
+            .run(&agent(), "kv.set", json!({"k": "a", "v": "1"}), true)
+            .await
+            .unwrap_err();
+        let CommandError::Proposed { proposal, preview } = err else {
+            panic!("{err:?}");
+        };
+        assert_eq!(preview.command, "kv.set");
+        let rows = pending(&db).await;
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(proposal, format!("proposal:{}", row.id));
+        assert_eq!(row.command, "kv.set");
+        assert_eq!(row.actor_kind, ActorKind::Agent);
+        assert_eq!(row.thread_id, Some(ThreadId::new(7)));
+        assert_eq!(
+            row.dry_run,
+            Some(json!({"k": "a", "v": "1"})),
+            "what it would have done"
+        );
+        assert_eq!(kv_value(&db, "a").await, None, "the dry run rolled back");
+        assert!(audits(&db).await.is_empty(), "a proposal is not a run");
+        let events = logged(&bus).await;
+        assert_eq!(
+            events
+                .iter()
+                .map(|e| e.envelope.event_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["command.proposed"],
+            "only the proposal is logged"
+        );
+        assert_eq!(events[0].envelope.payload["proposal"], proposal);
+        assert_eq!(events[0].envelope.payload["destructive"], false);
+        assert!(events[0].envelope.subject.contains(&proposal));
+        // A dry run that fails is the run's failure, not a proposal.
+        let err = bus
+            .run(&agent(), "kv.set", json!({"k": "a", "v": "boom"}), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Failed { .. }), "{err:?}");
+        assert_eq!(pending(&db).await.len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_composite_an_agent_runs_is_proposed_with_its_children() {
+        let (db, bus) = composing_bus();
+        let err = bus
+            .run(
+                &agent(),
+                "command.sequence",
+                calls(&[("kv.set", "a", "1"), ("kv.danger", "b", "2")]),
+                false,
+            )
+            .await
+            .unwrap_err();
+        let CommandError::Proposed { preview, .. } = err else {
+            panic!("{err:?}");
+        };
+        assert!(preview.destructive);
+        let rows = pending(&db).await;
+        let children = rows[0].dry_run.as_ref().unwrap()["children"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[1]["name"], "kv.danger");
+        assert_eq!(kv_value(&db, "a").await, None);
+        assert!(audits(&db).await.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn approving_runs_it_as_the_person_and_marks_the_proposal_with_the_run() {
+        let (db, bus) = confirming_bus();
+        let id = propose(&bus, "a", "1").await;
+        let out = bus.approve(&Actor::Human, id).await.unwrap();
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
+        let audit = out.audit_id.unwrap();
+        let rows = audits(&db).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, audit);
+        assert_eq!(rows[0].actor_kind, ActorKind::Human, "it ran as the person");
+        let p = proposal(&db, id).await;
+        assert_eq!(p.decision, oxplow_db::ProposalDecision::Approved);
+        assert_eq!(p.audit_id, Some(audit));
+        let approved = logged(&bus)
+            .await
+            .into_iter()
+            .find(|e| e.envelope.event_type == "command.approved")
+            .expect("approval logged");
+        assert_eq!(approved.envelope.payload["audit_id"], audit);
+        assert_eq!(approved.envelope.cause, out.event_id, "caused by the run");
+        // A proposal is decided once.
+        let err = bus.approve(&Actor::Human, id).await.unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { message, .. } if message.contains("already approved")),
+            "{err:?}"
+        );
+        assert_eq!(audits(&db).await.len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_approval_whose_run_fails_leaves_the_proposal_pending() {
+        let (db, bus) = confirming_bus();
+        let id = propose(&bus, "a", "1").await;
+        // The world moved: the key now exists and the table refuses it.
+        db.transaction(|tx| {
+            tx.execute_batch(
+                "CREATE TRIGGER kv_locked BEFORE INSERT ON kv BEGIN SELECT RAISE(ABORT, 'locked'); END;",
+            )
+            .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+        })
+        .await
+        .unwrap();
+        bus.approve(&Actor::Human, id).await.unwrap_err();
+        let p = proposal(&db, id).await;
+        assert_eq!(p.decision, oxplow_db::ProposalDecision::Pending);
+        assert_eq!(p.audit_id, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_external_command_is_proposed_without_a_dry_run_and_approved_after_it_runs() {
+        let (db, bus) = bus();
+        let mut spec = kv_spec("kv.remote", Invokers::ALL, Confirm::Always);
+        spec.atomicity = Atomicity::External;
+        bus.register(
+            Command::new(
+                spec,
+                Handler::External(Arc::new(|_actor, input| {
+                    Box::pin(async move {
+                        Ok(HandlerOutput {
+                            result: input,
+                            ..HandlerOutput::default()
+                        })
+                    })
+                })),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let err = bus
+            .run(&agent(), "kv.remote", json!({"k": "a", "v": "1"}), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
+        let row = pending(&db).await.remove(0);
+        assert_eq!(row.dry_run, None, "an External handler is never dry-run");
+        let out = bus.approve(&Actor::Human, row.id).await.unwrap();
+        let p = proposal(&db, row.id).await;
+        assert_eq!(p.decision, oxplow_db::ProposalDecision::Approved);
+        assert_eq!(p.audit_id, out.audit_id);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn declining_writes_only_the_decision() {
+        let (db, bus) = confirming_bus();
+        let id = propose(&bus, "a", "1").await;
+        bus.decline(&Actor::Human, id).await.unwrap();
+        assert_eq!(kv_value(&db, "a").await, None);
+        assert!(audits(&db).await.is_empty());
+        assert_eq!(
+            proposal(&db, id).await.decision,
+            oxplow_db::ProposalDecision::Declined
+        );
+        let declined = logged(&bus)
+            .await
+            .into_iter()
+            .find(|e| e.envelope.event_type == "command.declined")
+            .expect("decline logged");
+        assert_eq!(
+            declined.envelope.payload["proposal"],
+            format!("proposal:{id}")
+        );
+        let err = bus.approve(&Actor::Human, id).await.unwrap_err();
+        assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn only_a_person_decides_a_proposal() {
+        let (db, bus) = confirming_bus();
+        let id = propose(&bus, "a", "1").await;
+        let lens_for_agent = Actor::Lens {
+            lens_id: "acme/x".into(),
+            on_behalf_of: Box::new(agent()),
+        };
+        for actor in [agent(), lens_for_agent, Actor::System] {
+            let err = bus.approve(&actor, id).await.unwrap_err();
+            assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+            let err = bus.decline(&actor, id).await.unwrap_err();
+            assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+        }
+        assert_eq!(
+            proposal(&db, id).await.decision,
+            oxplow_db::ProposalDecision::Pending
+        );
+        assert_eq!(kv_value(&db, "a").await, None);
     }
 }

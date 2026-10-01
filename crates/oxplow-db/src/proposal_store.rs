@@ -164,6 +164,41 @@ pub fn approve_tx(conn: &Connection, id: i64, audit_id: i64) -> Result<Proposal,
     decide_tx(conn, id, ProposalDecision::Approved, Some(audit_id))
 }
 
+/// Before an `External` approval runs: mark it approved with no audit row
+/// yet, so a second approval can't run it too. [`finish_claim_tx`] names
+/// the run; [`release_claim_tx`] undoes the claim when the run fails.
+pub fn claim_tx(conn: &Connection, id: i64) -> Result<(), DomainError> {
+    decide_tx(conn, id, ProposalDecision::Approved, None).map(|_| ())
+}
+
+/// The claimed approval ran, audited as `audit_id`.
+pub fn finish_claim_tx(conn: &Connection, id: i64, audit_id: i64) -> Result<(), DomainError> {
+    let n = conn
+        .execute(
+            "UPDATE command_proposal SET audit_id = ?2
+              WHERE id = ?1 AND decision = 'approved' AND audit_id IS NULL",
+            params![id, audit_id],
+        )
+        .map_err(map_sql_err)?;
+    if n == 0 {
+        return Err(DomainError::Invariant(format!(
+            "proposal:{id} is not claimed for approval"
+        )));
+    }
+    Ok(())
+}
+
+/// The claimed approval's run failed: it is pending again.
+pub fn release_claim_tx(conn: &Connection, id: i64) -> Result<(), DomainError> {
+    conn.execute(
+        "UPDATE command_proposal SET decision = 'pending', decided_at = NULL
+          WHERE id = ?1 AND decision = 'approved' AND audit_id IS NULL",
+        params![id],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
+}
+
 /// A person declined it; nothing ran.
 pub fn decline_tx(conn: &Connection, id: i64) -> Result<Proposal, DomainError> {
     decide_tx(conn, id, ProposalDecision::Declined, None)
