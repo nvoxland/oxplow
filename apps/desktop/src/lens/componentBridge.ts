@@ -16,6 +16,8 @@
 /// A command that asks is confirmed by the person in the host, never in
 /// the frame.
 import { needsConfirmation } from "../ipc-error.js";
+import { refFromTabId } from "../tabs/pageRefs.js";
+import type { TabRef } from "../tabs/tabState.js";
 import type { CommandOutcome, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 export type BridgeRequest =
@@ -88,10 +90,20 @@ export interface BridgeDeps {
   query(asset: string, params: Record<string, SqlCell>): Promise<LensRun>;
   /** Run a declared command as the lens for the person. */
   invoke(command: string, input: unknown, confirmed: boolean): Promise<CommandOutcome>;
-  navigate(ref: string): void;
+  /** Open `ref`'s page; false when it isn't one a component may open
+   *  (`componentNavigationTarget`). */
+  navigate(ref: string): boolean;
   /** Ask the person, in the host, to confirm `command`. */
   confirm(command: string): Promise<boolean>;
   onReady(): void;
+}
+
+/** The page a component's `navigate` opens: an oxplow page for `ref`,
+ *  never an outside URL (the frame has no network, and an external-url
+ *  tab would carry whatever it put in the URL out). */
+export function componentNavigationTarget(ref: string): TabRef | null {
+  const tab = refFromTabId(ref);
+  return tab && tab.kind !== "external-url" ? tab : null;
 }
 
 /** What a run shows the frame: an `update` repeats none of it. */
@@ -138,8 +150,8 @@ export function createBridgeHost(
         }
         return;
       case "navigate":
-        deps.navigate(r.ref);
-        reply(r.id, null);
+        if (deps.navigate(r.ref)) reply(r.id, null);
+        else fail(r.id, "INVALID", "A component may open oxplow's pages only.");
     }
   };
   port.onmessage = (e: MessageEvent) => {

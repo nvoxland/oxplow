@@ -234,7 +234,7 @@ function render(run) {
 // Elsewhere:
 //   await call({ method: "query", asset: "open-tasks", params: {} })
 //   await call({ method: "invoke", command: "work_item.transition", input: { ref, to: "done" } })
-//   await call({ method: "navigate", ref: "work_item:oxplow:tsk42" })
+//   await call({ method: "navigate", ref: "work_item:oxplow:tsk42" })  // oxplow pages only
 ```
 
 `init` also carries `props`, the theme's CSS variables (`tokens`) and

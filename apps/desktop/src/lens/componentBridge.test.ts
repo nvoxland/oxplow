@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
-import { componentBundleUrl, createBridgeHost, kitCss, parseFrameMessage, tokensFromStyle } from "./componentBridge.js";
+import { componentBundleUrl, componentNavigationTarget, createBridgeHost, kitCss, parseFrameMessage, tokensFromStyle } from "./componentBridge.js";
 
 // P6b.D4: a custom component talks to the host over a MessageChannel —
 // three requests (query, invoke, navigate) and a `ready`; everything else
@@ -71,7 +71,10 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
       if (!confirmed) throw new IpcCallError("needs confirmation", "NEEDS_CONFIRMATION");
       return { result: null, audit_id: 1, event_id: null, inverse: null };
     },
-    navigate: (ref) => calls.push(["navigate", ref]),
+    navigate: (ref) => {
+      calls.push(["navigate", ref]);
+      return true;
+    },
     confirm: async () => true,
     onReady: () => calls.push(["ready"]),
     ...deps,
@@ -143,5 +146,20 @@ test("ready is heard once; an update posts only a result the frame hasn't seen",
   host.update({ ...next });
   await h.settle();
   expect(h.received).toEqual([{ type: "update", run: next }]);
+  h.channel.port1.close();
+});
+
+// A component reaches no network, so it may not open an outside URL by
+// navigating the host: only app pages, and a refused navigate is answered.
+test("a component navigates to app pages only", async () => {
+  expect(componentNavigationTarget("work_item:oxplow:tsk1")?.kind).toBe("work_item");
+  expect(componentNavigationTarget("page:external-url?url=https%3A%2F%2Fevil.example%2F%3Fd%3D1")).toBeNull();
+  expect(componentNavigationTarget("not a ref")).toBeNull();
+  const h = harness({ navigate: (ref) => componentNavigationTarget(ref) !== null });
+  h.send({ id: "n2", method: "navigate", ref: "page:external-url?url=https%3A%2F%2Fevil.example%2F" });
+  await h.settle();
+  expect(h.received).toEqual([
+    { id: "n2", ok: false, error: { code: "INVALID", message: "A component may open oxplow's pages only." } },
+  ]);
   h.channel.port1.close();
 });

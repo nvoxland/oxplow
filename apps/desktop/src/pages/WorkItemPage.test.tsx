@@ -8,6 +8,7 @@ const realApi = await import("../api.js");
 const realQuerySql = realApi.querySql;
 const realRunCommand = realApi.runCommand;
 let features: Record<string, boolean> = {};
+let parent: string | null = "work_item:fake:W-0";
 const ran: Array<[string, unknown]> = [];
 const lensRuns: Array<[string, unknown]> = [];
 mock.module("../api.js", () => ({
@@ -25,7 +26,7 @@ mock.module("../api.js", () => ({
     if (sql.includes("FROM v_work_item w")) {
       return {
         columns: ["ref", "provider", "title", "body", "state", "native_state", "parent_ref", "created_at", "updated_at", "task_id", "thread_id", "status", "priority", "sort_index", "author", "completed_at", "note_count"],
-        rows: [["work_item:fake:W-1", "fake", "Their bug", "It breaks.", "todo", "Backlog", "work_item:fake:W-0", "t", "t", null, null, null, null, null, null, null, 0]],
+        rows: [["work_item:fake:W-1", "fake", "Their bug", "It breaks.", "todo", "Backlog", parent, "t", "t", null, null, null, null, null, null, null, 0]],
         truncated: false,
         reads: { models: ["v_work_item"], tables: [], measures: [] },
         freshness: {},
@@ -62,6 +63,7 @@ const { WorkItemPage } = await import("./WorkItemPage.js");
 const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
 
 afterEach(() => {
+  parent = "work_item:fake:W-0";
   ran.length = 0;
   lensRuns.length = 0;
   cleanup();
@@ -132,4 +134,12 @@ test("Move To runs the provider's transition; the item's slots get its ref", asy
       ]),
     ),
   );
+});
+
+test("a provider with hierarchy shows no Parent for an item without one", async () => {
+  features = { hierarchy: true };
+  parent = null;
+  const view = page();
+  await waitFor(() => expect(view.getByTestId("work-item-page").textContent).toContain("Their bug"));
+  expect(view.queryByTestId("work-item-parent")).toBeNull();
 });

@@ -1732,6 +1732,59 @@ mod tests {
             .unwrap();
     }
 
+    /// A composite carries step 3's answer to its children: a thread that
+    /// may not write can't write through `command.sequence` either.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_thread_that_may_not_write_cant_write_through_a_composite() {
+        let (db, bus) = bus();
+        let bus = Arc::new(bus.with_write_gate(Arc::new(|thread| {
+            Box::pin(async move { thread != ThreadId::new(7) })
+        })));
+        bus.register(
+            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
+        )
+        .unwrap();
+        // A `Record` composite isn't gated itself (it may only record), so
+        // what refuses the run is its `Write` child seeing the answer.
+        let mut spec = kv_spec("kv.compose", Invokers::ALL, Confirm::Never);
+        spec.effect = CommandEffect::Record;
+        spec.input_schema = json!({ "type": "object" });
+        let parent = spec.clone();
+        let weak = Arc::downgrade(&bus);
+        bus.register(
+            Command::new(
+                spec,
+                Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+                    let calls: Vec<CommandCall> =
+                        serde_json::from_value(input["calls"].clone()).unwrap();
+                    let nested = weak.upgrade().unwrap().run_nested(ctx, &parent, &calls)?;
+                    Ok(HandlerOutput {
+                        result: json!(null),
+                        inverse: nested.inverse,
+                        events: nested.events,
+                        after_commit: nested.after_commit,
+                    })
+                })),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let calls = json!({ "calls": [{ "name": "kv.set", "input": { "k": "a", "v": "1" } }] });
+        let err = bus
+            .run(&agent(), "kv.compose", calls.clone(), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+        assert_eq!(kv_value(&db, "a").await, None);
+        // A thread that may write gets through the same composite.
+        let other = Actor::Agent {
+            thread_id: Some(ThreadId::new(8)),
+            stream_id: None,
+        };
+        bus.run(&other, "kv.compose", calls, false).await.unwrap();
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn a_tx_command_writes_its_state_audit_and_events_together() {
         let (db, bus) = bus();

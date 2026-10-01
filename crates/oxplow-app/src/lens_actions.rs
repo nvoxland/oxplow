@@ -724,4 +724,35 @@ actions:
         assert_eq!(audit.actor_id.as_deref(), Some("acme/view"));
         assert_eq!(state(&fx.svc, fx.task).await, "done");
     }
+
+    /// The frame's input is checked like anyone's: an array or a scalar
+    /// where the command takes an object is `Invalid`, and nothing runs.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_component_invoke_with_a_non_object_input_is_invalid() {
+        let (fx, root) = component_fixture().await;
+        for input in [
+            serde_json::json!([1, 2]),
+            serde_json::json!("done"),
+            serde_json::json!(7),
+        ] {
+            let err = invoke_component_command(
+                &fx.svc,
+                &root,
+                ComponentInvoke {
+                    lens_id: "acme/view".into(),
+                    command: "work_item.transition".into(),
+                    input: input.clone(),
+                    on_behalf_of: Actor::Human,
+                    confirmed: false,
+                },
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                matches!(err, CommandError::Invalid { .. }),
+                "{input}: {err:?}"
+            );
+        }
+        assert_ne!(state(&fx.svc, fx.task).await, "done");
+    }
 }

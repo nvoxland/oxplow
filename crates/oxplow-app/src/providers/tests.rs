@@ -838,6 +838,49 @@ async fn approving_updated_declarations_restarts_the_instance() {
         InstanceState::Ready
     );
     assert!(logged(&fx, "provider.disabled").await.is_empty());
+    // The restarted instance republished its capability row, with the
+    // features it declares now.
+    let row = oxplow_db::SqliteCapabilityStore::new(fx.svc.db.clone())
+        .list()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.provider == "fake")
+        .expect("republished");
+    assert_eq!(row.features, running.declared.capabilities[0].features);
+}
+
+/// Declarations on disk that don't parse fail the extension's load, so
+/// the provider isn't there to compare: `NotFound`, never an empty diff,
+/// and the load error names the file.
+#[tokio::test]
+async fn declaration_effects_of_unreadable_declarations_is_an_error() {
+    let (fx, _ext) = approved("").await;
+    std::fs::write(
+        fx.svc
+            .layout
+            .project_dir
+            .join("oxplow/extensions/tracker/provider.json"),
+        "{ not json",
+    )
+    .unwrap();
+    let err = fx
+        .svc
+        .providers
+        .declaration_effects(INSTANCE)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, oxplow_domain::DomainError::NotFound),
+        "{err:?}"
+    );
+    let errors = crate::extensions::load_extensions(&fx.svc.layout.project_dir)
+        .into_iter()
+        .find(|e| e.name == EXT)
+        .unwrap()
+        .errors
+        .join("\n");
+    assert!(errors.contains("provider.json"), "{errors}");
 }
 
 /// tsk569: enabling from Settings writes nothing when the enable itself

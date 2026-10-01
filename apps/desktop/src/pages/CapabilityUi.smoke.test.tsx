@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 
 // P6b.C6: the shell is complete with every enhancement off — no
@@ -16,10 +16,14 @@ const ok = <T,>(data: T) => ({ status: "ok" as const, data });
 const reads = { models: ["v_work_item"], tables: [], measures: [] };
 const WORK_ITEM_COLUMNS = ["ref", "provider", "title", "body", "state", "native_state", "parent_ref", "created_at", "updated_at", "task_id", "thread_id", "status", "priority", "sort_index", "author", "completed_at", "note_count"];
 let extensions: unknown[] = [];
+let extensionLoads = 0;
 const lensRuns: Array<[string, unknown]> = [];
 
 const answers: Record<string, (...args: unknown[]) => Promise<unknown>> = {
-  listExtensions: async () => ok(extensions),
+  listExtensions: async () => {
+    extensionLoads++;
+    return ok(extensions);
+  },
   runLens: async (...args) => {
     lensRuns.push([String(args[0]), args[1]]);
     return ok({ lens: { id: args[0], title: "Mounted", columns: [], viz: "table", actions: [] }, params: args[1], result: { columns: [], rows: [], truncated: false, reads }, alert: null });
@@ -80,34 +84,25 @@ const { GitHistoryPage } = await import("./GitHistoryPage.js");
 
 afterEach(() => {
   extensions = [];
+  extensionLoads = 0;
   lensRuns.length = 0;
   cleanup();
 });
 
 const STREAM = { id: "str1", kind: "primary", title: "Main", branch: "main" } as never;
-const SLOTS = [
-  "effort.review.details",
-  "work_item.detail.body",
-  "work_item.detail.sidebar",
-  "thread.plan.header",
-  "vcs.commit.details",
-  "vcs.status.header",
-  "vcs.status.details",
-  "vcs.history.sidebar",
-  "settings.section",
-];
-
 /** `page` inside a navigation context for `ref`, as `App` mounts pages. */
 function mount(ref: string, page: ReactElement) {
   const nav = { goBack() {}, goForward() {}, canGoBack: false, canGoForward: false, ask: { ref, streamId: "str1" } };
   return render(<PageNavigationContext.Provider value={nav as never}>{page}</PageNavigationContext.Provider>);
 }
 
-/** Nothing an extension or a provider flag adds is on the page. */
+/** Nothing an extension or a provider flag adds is on the page — checked
+ *  once the page's extensions load has answered (and rendered). */
 async function expectPlain(view: ReturnType<typeof render>) {
-  await new Promise((r) => setTimeout(r, 40));
-  const html = view.container.innerHTML;
-  for (const slot of SLOTS) expect(html).not.toContain(`data-testid="${slot}-`);
+  await waitFor(() => expect(extensionLoads).toBeGreaterThan(0));
+  await act(async () => {});
+  // Any slot mount, whatever its slot (`LensSlots` marks each one).
+  expect(view.container.querySelector("[data-slot]")).toBeNull();
   expect(view.queryByTestId("page-nav-commands")).toBeNull();
   expect(view.container.querySelector('[title^="from "]')).toBeNull();
 }

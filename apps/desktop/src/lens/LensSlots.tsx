@@ -86,7 +86,7 @@ export function LensSlots({
         {runs
           .filter(({ run }) => run && run.result.rows.length > 0)
           .map(({ id, run }) => (
-            <div key={id} data-testid={`${slot}-${id}`} style={stripStyle}>
+            <div key={id} data-testid={`${slot}-${id}`} data-slot={slot} style={stripStyle}>
               <span style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>{run!.lens.title}</span>
               <LensResultView run={run!} onOpenPage={onOpenPage} streamId={streamId} maxRows={3} compact />
             </div>
@@ -97,7 +97,7 @@ export function LensSlots({
   return (
     <>
       {runs.map(({ id, params: lensParams, run, error }) => (
-        <section key={id} data-testid={`${slot}-${id}`}>
+        <section key={id} data-testid={`${slot}-${id}`} data-slot={slot}>
           <h2 style={h2Style} className={h2ClassName}>
             <RouteLink
               to={lensRef(id, lensParams)}

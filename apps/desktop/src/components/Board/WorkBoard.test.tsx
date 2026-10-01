@@ -10,8 +10,10 @@ const realApi = await import("../../api.js");
 const realQuerySql = realApi.querySql;
 const realRunCommand = realApi.runCommand;
 const ran: Array<[string, unknown]> = [];
+let extensions: unknown[] = [];
 mock.module("../../api.js", () => ({
   ...realApi,
+  listExtensions: async () => extensions,
   querySql: async (sql: string, ...rest: unknown[]) => {
     if (!sql.includes("FROM v_work_item w")) return (realQuerySql as (...a: unknown[]) => unknown)(sql, ...rest);
     return {
@@ -35,6 +37,7 @@ mock.module("../../api.js", () => ({
 const { WorkBoard } = await import("./WorkBoard.js");
 
 afterEach(() => {
+  extensions = [];
   ran.length = 0;
   cleanup();
 });
@@ -72,4 +75,33 @@ test("another provider's card links to its page and moves through its provider",
   const dataTransfer = { getData: (k: string) => data.get(k) ?? "", types: [WORK_ITEM_DRAG_MIME], dropEffect: "move" };
   fireEvent.drop(view.getByTestId("board-column-done"), { dataTransfer });
   await waitFor(() => expect(ran).toEqual([["fake.transition", { ref: "work_item:fake:W-1", to: "done" }]]));
+});
+
+// P6b.C4: an extension's `ui.commands` about work items join a card's
+// right-click menu, bound to that card's ref, and run as the person.
+test("a card's menu offers the extensions' commands for its item", async () => {
+  extensions = [
+    {
+      name: "tracker",
+      enabled: true,
+      ui: {
+        slots: [],
+        commands: [
+          { id: "tracker/0", extension: "tracker", command: "fake.comment", label: "Comment in Fake", about: "work_item", placement: ["context"], input: { ref: "{{ref}}" }, group: "fake" },
+          { id: "tracker/1", extension: "tracker", command: "fake.only_menu", label: "Nav only", about: "work_item", placement: ["menu"], input: { ref: "{{ref}}" }, group: "fake" },
+        ],
+        decorators: [],
+      },
+    },
+  ];
+  const view = render(<WorkBoard scope="all" onOpenPage={() => {}} />);
+  await waitFor(() => view.getByText("Their bug"));
+  await new Promise((r) => setTimeout(r, 0));
+  fireEvent.contextMenu(view.getByText("Their bug"));
+  fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ui-commands-fake")));
+  const item = await waitFor(() => view.getByTestId("menu-item-ui-command-tracker/0"));
+  expect(item.textContent).toContain("Comment in Fake");
+  expect(view.queryByTestId("menu-item-ui-command-tracker/1")).toBeNull();
+  fireEvent.click(item);
+  await waitFor(() => expect(ran).toEqual([["fake.comment", { ref: "work_item:fake:W-1" }]]));
 });

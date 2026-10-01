@@ -367,7 +367,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `extensions.rs` names each slot and the params it **offers**; a
     mounted lens gets the ones it declares and must declare at least one,
     or the mount is an error. Loaded as `Extension.ui.slots`.
-  - `src/lens/LensSlots.tsx` renders a slot: every mounted lens, run with
+  - `src/lens/LensSlots.tsx` renders a slot (each mount marked
+    `data-slot="<slot>"`, which the "every enhancement off" smoke test
+    looks for): every mounted lens, run with
     the slot params it declares (`slotRuns`), re-run on data events.
     DiffViewPage offers `effort_id` and `change_id`; TaskPage and
     WorkItemPage `ref` and `task_id` (body and sidebar); PlanPane
@@ -947,7 +949,10 @@ of a `MessageChannel` (to `"*"`: the frame's origin is opaque; the port
 goes to that frame alone) and listens on the other end only. Frame
 messages (`parseFrameMessage`): `ready`, `{ id, method: query, asset,
 params }` (params SqlCell values only), `{ id, method: invoke, command,
-input }`, `{ id, method: navigate, ref }`; replies `{ id, ok, result |
+input }`, `{ id, method: navigate, ref }` (an oxplow page only:
+`componentNavigationTarget` refuses an external-url ref with `INVALID`,
+since an outside tab would carry whatever the frame put in its URL out);
+replies `{ id, ok, result |
 error: { code, message } }`; a re-run sends `update { run }` — only
 when its params or result differ from what the frame last got
 (`createBridgeHost` takes the run `init` carried); a second `ready` is

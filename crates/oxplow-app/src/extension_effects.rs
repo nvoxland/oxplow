@@ -854,6 +854,47 @@ mod tests {
         assert!(fresh.lenses.iter().all(|l| l.change == Change::Added));
     }
 
+    /// A candidate that declares a provider: its grants, commands and
+    /// features come from the files it brings (read through the version),
+    /// and none of it runs.
+    #[tokio::test]
+    async fn a_candidate_declaring_a_provider_shows_what_it_would_add() {
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let d = tempfile::tempdir().unwrap();
+        write(
+            d.path(),
+            "oxplow/extensions/x/extension.yaml",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n",
+        );
+        write(d.path(), "oxplow/extensions/x/bin/p", "#!/bin/sh\nexit 1\n");
+        let declared = serde_json::to_string(&oxplow_provider_fake::declarations()).unwrap();
+        write(d.path(), "oxplow/extensions/x/provider.json", &declared);
+        let ext = crate::extensions::load_extensions(d.path())
+            .into_iter()
+            .find(|e| e.name == "x")
+            .unwrap();
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        let root = d.path().join("oxplow/extensions/x");
+        let read = move |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
+        let runs = crate::extensions::LensRuns::new();
+        let report = effects(
+            &layer,
+            None,
+            Version {
+                extension: &ext,
+                read: &read,
+                lenses: &runs,
+            },
+        )
+        .await;
+        let p = &report.providers[0];
+        assert_eq!((p.id.as_str(), p.change), ("fake", Change::Added));
+        assert_eq!(p.after.as_ref().unwrap().hosts, vec!["api.example.com"]);
+        assert!(!p.commands.is_empty());
+        assert!(p.commands.iter().all(|c| c.change == Change::Added));
+        assert!(p.features_after.is_some());
+    }
+
     #[tokio::test]
     async fn downstream_models_come_from_the_lineage() {
         let fx = crate::test_fixtures::services_with_effort().await;

@@ -324,6 +324,21 @@ mod tests {
             ),
             ("{ id: c, bundle: empty }", "empty", "has no `index.html`"),
             ("{ id: c, bundle: linked }", "symlink", "holds a symlink"),
+            (
+                "{ id: c, bundle: \".\" }",
+                "",
+                "must be a folder inside the extension",
+            ),
+            (
+                "{ id: c, bundle: aliased }",
+                "linked-folder",
+                "holds a symlink",
+            ),
+            (
+                "{ id: c, bundle: dirindex }",
+                "index-dir",
+                "has no `index.html`",
+            ),
             ("{ id: c, bundle: big }", "big", "the most is 256 files"),
             (
                 "{ id: c, bundle: components/burndown, assets: [nope] }",
@@ -359,6 +374,15 @@ mod tests {
                     write(d.path(), "oxplow/extensions/x/linked/index.html", "x");
                     std::os::unix::fs::symlink("/etc/hosts", base.join("linked/hosts")).unwrap();
                 }
+                "linked-folder" => {
+                    write(d.path(), "oxplow/extensions/x/real/index.html", "x");
+                    std::os::unix::fs::symlink(base.join("real"), base.join("aliased")).unwrap();
+                }
+                "index-dir" => write(
+                    d.path(),
+                    "oxplow/extensions/x/dirindex/index.html/a.js",
+                    "x",
+                ),
                 "big" => {
                     write(d.path(), "oxplow/extensions/x/big/index.html", "x");
                     for i in 0..256 {

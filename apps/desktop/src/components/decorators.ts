@@ -22,6 +22,10 @@ export function decoratorsFor(extensions: Extension[], placement: DecoratorPlace
 /** The query for `decorator` over the refs of its kind; `null` when none
  *  of `refs` is. Column names are identifiers (checked at load). */
 export function decorationQuery(decorator: UiDecorator, refs: string[]): { sql: string; params: SqlCell[] } | null {
+  // Named in the SQL as is: plain identifiers only (the loader checks the
+  // same; this is where the SQL is built).
+  const names = [decorator.view, decorator.label, ...(decorator.color ? [decorator.color] : [])];
+  if (!names.every((n) => IDENTIFIER.test(n))) return null;
   const mine = refs.filter((r) => parseRef(r)?.kind === decorator.kind);
   if (mine.length === 0) return null;
   const color = decorator.color ? `, "${decorator.color}" AS color` : "";
@@ -31,6 +35,8 @@ export function decorationQuery(decorator: UiDecorator, refs: string[]): { sql: 
     params: mine,
   };
 }
+
+const IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
 
 export function decorationsFromResult(result: SqlQueryResult, extension: string): Decoration[] {
   const at = (row: SqlCell[], name: string) => {

@@ -11,11 +11,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { invokeComponentCommand, recordUsage, runComponentQuery } from "../api.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
-import { refFromTabId } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
-import { componentBundleUrl, createBridgeHost, kitCss, tokensFromStyle } from "./componentBridge.js";
+import { componentBundleUrl, componentNavigationTarget, createBridgeHost, kitCss, tokensFromStyle } from "./componentBridge.js";
 
 export function CustomComponentViz({
   run,
@@ -131,8 +130,9 @@ function ComponentFrame({
         invoke: (command, input, confirmed) =>
           invokeComponentCommand(runRef.current.lens.id, command, input, streamId, confirmed),
         navigate: (ref) => {
-          const tab = refFromTabId(ref);
+          const tab = componentNavigationTarget(ref);
           if (tab) onOpenPage?.(tab);
+          return tab !== null;
         },
         confirm: (command) => new Promise<boolean>((answer) => setAsking({ command, answer })),
         onReady: () => {
