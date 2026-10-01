@@ -8,9 +8,11 @@
 //! it serves is the extension's own files — never project data, which the
 //! frame reaches only through the host's bridged calls. It is outside the
 //! permissive CORS layer, so a web page can't read a bundle with `fetch`.
-//! Only a declared component of an enabled, non-bundled extension, only a
-//! plain file inside its bundle folder; every 200 carries a CSP that lets
-//! the bundle load its own files and nothing else — no network, no forms.
+//! Only a loopback `Host` (DNS rebinding: a page whose name resolves to
+//! 127.0.0.1 would otherwise read bundles same-origin), only a declared
+//! component of an enabled, non-bundled extension, only a plain file
+//! inside its bundle folder; every 200 carries a CSP that lets the bundle
+//! load its own files and nothing else — no network, no forms.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -30,8 +32,8 @@ pub const MAX_FILE_BYTES: u64 = MAX_BUNDLE_BYTES;
 /// (`http://<host>/components/<ext>/<component>/`), named beside `'self'`
 /// because a sandboxed frame's origin is opaque; nothing may connect,
 /// submit or rebase anywhere.
-pub fn bundle_csp(source: Option<&str>) -> String {
-    let own = source.map(|s| format!(" {s}")).unwrap_or_default();
+pub fn bundle_csp(source: &str) -> String {
+    let own = format!(" {source}");
     format!(
         "default-src 'none'; script-src 'self'{own}; style-src 'self' 'unsafe-inline'{own}; \
          img-src 'self' data: blob:{own}; font-src 'self' data:{own}; connect-src 'none'; \
@@ -92,6 +94,18 @@ pub fn safe_bundle_path(bundle_root: &Path, rel: &str) -> Option<PathBuf> {
     resolved.starts_with(&root).then_some(resolved)
 }
 
+/// The request's `Host` when it names this machine's loopback —
+/// `127.0.0.1`, `localhost` or `[::1]`, with an optional numeric port.
+pub fn loopback_host(headers: &HeaderMap) -> Option<&str> {
+    let host = headers.get(header::HOST)?.to_str().ok()?;
+    let (name, port) = match host.rsplit_once(':') {
+        Some((name, port)) if !name.ends_with(':') => (name, Some(port)),
+        _ => (host, None),
+    };
+    let port_ok = port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    (port_ok && matches!(name, "127.0.0.1" | "localhost" | "[::1]")).then_some(host)
+}
+
 #[derive(serde::Deserialize)]
 pub struct StreamQuery {
     stream_id: Option<String>,
@@ -102,12 +116,16 @@ pub struct StreamQuery {
 pub async fn component_root(
     AxumPath((ext, component)): AxumPath<(String, String)>,
     Query(q): Query<StreamQuery>,
-) -> Redirect {
+    headers: HeaderMap,
+) -> Response {
+    if loopback_host(&headers).is_none() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     let query = q
         .stream_id
         .map(|s| format!("?stream_id={s}"))
         .unwrap_or_default();
-    Redirect::permanent(&format!("/components/{ext}/{component}/{query}"))
+    Redirect::permanent(&format!("/components/{ext}/{component}/{query}")).into_response()
 }
 
 /// `/components/{ext}/{component}/` — the bundle's `index.html`.
@@ -138,6 +156,9 @@ async fn serve(
     Query(q): Query<StreamQuery>,
     headers: HeaderMap,
 ) -> Response {
+    let Some(host) = loopback_host(&headers) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
     let svc = &state.ctx.services;
     let root = svc.worktrees.resolve(q.stream_id.as_deref()).await;
     let Ok(extension) = svc.extension_catalog.named(&root, &ext) else {
@@ -165,14 +186,7 @@ async fn serve(
     let Ok(bytes) = tokio::fs::read(&file).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let source = headers
-        .get(header::HOST)
-        .and_then(|h| h.to_str().ok())
-        .filter(|h| {
-            h.chars()
-                .all(|c| c.is_ascii_alphanumeric() || ".-:[]".contains(c))
-        })
-        .map(|host| format!("http://{host}/components/{ext}/{component}/"));
+    let source = format!("http://{host}/components/{ext}/{component}/");
     let mut response = bytes.into_response();
     let h = response.headers_mut();
     let set = |h: &mut HeaderMap, name: header::HeaderName, value: &str| {
@@ -181,11 +195,7 @@ async fn serve(
         }
     };
     set(h, header::CONTENT_TYPE, content_type_for(&file));
-    set(
-        h,
-        header::CONTENT_SECURITY_POLICY,
-        &bundle_csp(source.as_deref()),
-    );
+    set(h, header::CONTENT_SECURITY_POLICY, &bundle_csp(&source));
     set(h, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
     set(h, header::CACHE_CONTROL, "no-store");
     set(h, header::REFERRER_POLICY, "no-referrer");
@@ -220,6 +230,38 @@ mod tests {
         ] {
             assert!(safe_bundle_path(&root, bad).is_none(), "{bad}");
         }
+    }
+
+    #[test]
+    fn only_a_loopback_host_is_served() {
+        let host = |h: &str| {
+            let mut m = HeaderMap::new();
+            m.insert(header::HOST, HeaderValue::from_str(h).unwrap());
+            loopback_host(&m).map(str::to_string)
+        };
+        for ok in [
+            "127.0.0.1",
+            "127.0.0.1:7420",
+            "localhost:1",
+            "[::1]",
+            "[::1]:7420",
+        ] {
+            assert_eq!(host(ok).as_deref(), Some(ok), "{ok}");
+        }
+        for bad in [
+            "evil.example",
+            "evil.example:7420",
+            "127.0.0.1.evil.example",
+            "localhost.evil.example:7420",
+            "127.0.0.1:",
+            "127.0.0.1:80x",
+            "::1",
+            "[::1",
+            "",
+        ] {
+            assert_eq!(host(bad), None, "{bad}");
+        }
+        assert_eq!(loopback_host(&HeaderMap::new()), None, "no Host");
     }
 
     #[test]

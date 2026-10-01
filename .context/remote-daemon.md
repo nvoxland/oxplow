@@ -162,7 +162,11 @@ extension's declared component bundle for the sandboxed frame a
 carry it — and needn't: it serves the extension's own files, never
 project data (the frame reaches that only through the host's bridged
 RPCs). It is mounted **outside the permissive CORS layer**, so a web
-page can't read a bundle with `fetch`. 404 for a missing, disabled or
+page can't read a bundle with `fetch`, and it answers only a loopback
+`Host` (`127.0.0.1`, `localhost` or `[::1]`, optional port —
+`loopback_host`): without that, DNS rebinding (a page whose name flips
+to 127.0.0.1) would read bundles same-origin; the CSP's bundle-folder
+source is built from that validated `Host`. 404 for a foreign `Host`, a missing, disabled or
 bundled extension, an undeclared component, or anything but a plain file
 inside the bundle (`safe_bundle_path`: no `..`, `.`, empty, backslash or
 NUL segment, no absolute path, no symlink or directory, and resolved

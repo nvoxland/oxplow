@@ -441,7 +441,7 @@ mod tests {
             assert_eq!(h["referrer-policy"], "no-referrer");
             assert_eq!(
                 h["content-security-policy"].to_str().unwrap(),
-                components::bundle_csp(Some(&format!("{base}/components/x/c/")))
+                components::bundle_csp(&format!("{base}/components/x/c/"))
             );
             assert!(
                 h.get("access-control-allow-origin").is_none(),
@@ -487,6 +487,58 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), 404, "a disabled extension's");
+    }
+
+    /// DNS rebinding: a page whose name now resolves to 127.0.0.1 reaches
+    /// the daemon with its own `Host`; only a loopback `Host` is served.
+    #[tokio::test]
+    async fn component_bundles_answer_only_a_loopback_host() {
+        let (svc, dir) = services();
+        let ext = dir.path().join("oxplow/extensions/x");
+        std::fs::create_dir_all(ext.join("components/c")).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: x\nintent:\n  purpose: p\ncustom_components:\n  - { id: c }\n",
+        )
+        .unwrap();
+        std::fs::write(ext.join("components/c/index.html"), "hi").unwrap();
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
+            .await
+            .unwrap();
+        let port = daemon.bind_addr.port();
+        let bare = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let get = |path: &'static str, host: String| {
+            bare.get(format!("http://{}{path}", daemon.bind_addr))
+                .header("host", host)
+                .send()
+        };
+        for host in [
+            format!("127.0.0.1:{port}"),
+            format!("localhost:{port}"),
+            "localhost".to_string(),
+        ] {
+            let resp = get("/components/x/c/", host.clone()).await.unwrap();
+            assert_eq!(resp.status(), 200, "{host}");
+            assert_eq!(
+                resp.headers()["content-security-policy"].to_str().unwrap(),
+                components::bundle_csp(&format!("http://{host}/components/x/c/")),
+            );
+        }
+        for host in [
+            format!("evil.example:{port}"),
+            "evil.example".to_string(),
+            format!("127.0.0.1.evil.example:{port}"),
+            format!("localhost.evil.example:{port}"),
+            String::new(),
+        ] {
+            for path in ["/components/x/c/", "/components/x/c"] {
+                let resp = get(path, host.clone()).await.unwrap();
+                assert_eq!(resp.status(), 404, "{host} {path}");
+            }
+        }
     }
 
     #[tokio::test]
