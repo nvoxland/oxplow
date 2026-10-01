@@ -8,7 +8,8 @@
 import { querySql, runCommand, type EffortDetail, type SqlCell } from "./api.js";
 import { NO_READS } from "./lens/lensRerun.js";
 import { taskIdOf, taskRowId, threadIdOf, threadRowId } from "./modelIds.js";
-import type { Followup, Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
+import { personCommands } from "./personCommands.js";
+import type { Followup, Reads, SqlQueryResult, WorkItemsFeatures } from "./tauri-bridge/generated/bindings.js";
 import { commands } from "./tauri-bridge/index.js";
 
 /** An oxplow task's status (`v_task.status`). */
@@ -168,15 +169,18 @@ export async function readWorkItem(ref: string): Promise<{ item: WorkItem | null
 
 /** The provider segment of a work item ref (`work_item:<provider>:<id>`). */
 export function providerOf(ref: string): string | null {
-  const m = /^work_item:([a-z][a-z0-9_-]*):/.exec(ref);
+  // A provider id is lowercase snake_case (`providers::spec`).
+  const m = /^work_item:([a-z][a-z0-9_]*):/.exec(ref);
   return m ? m[1]! : null;
 }
 
 /** The command that does `verb` to `ref`'s item: oxplow's `work_item.*`,
- *  another provider's `<provider>.<verb>`. */
+ *  another provider's `<provider>.<verb>`. A string that isn't a work
+ *  item ref names none. */
 export function workItemCommand(ref: string, verb: "transition" | "comment" | "link"): string {
   const provider = providerOf(ref);
-  return provider === null || provider === "oxplow" ? `work_item.${verb}` : `${provider}.${verb}`;
+  if (provider === null) throw new Error(`\`${ref}\` isn't a work item ref`);
+  return provider === "oxplow" ? `work_item.${verb}` : `${provider}.${verb}`;
 }
 
 /** A list of work items, with what it read. */
@@ -208,22 +212,31 @@ export function statusFor(state: CanonicalState): TaskStatus {
 /** Move an item to a canonical state through its provider: oxplow's
  *  `work_item.transition` (with oxplow's status), another provider's
  *  `<provider>.transition` (with the canonical state). */
-export async function transitionWorkItem(ref: string, state: CanonicalState): Promise<void> {
+export function transitionWorkItem(ref: string, state: CanonicalState): Promise<boolean> {
   const command = workItemCommand(ref, "transition");
-  await runCommand(command, { ref, to: command === "work_item.transition" ? statusFor(state) : state });
+  return personCommands.run(`Move to ${STATE_LABEL[state]}`, command, {
+    ref,
+    to: command === "work_item.transition" ? statusFor(state) : state,
+  });
 }
+
+/** A canonical state as a person reads it. */
+export const STATE_LABEL: Record<CanonicalState, string> = {
+  todo: "To Do",
+  in_progress: "In Progress",
+  blocked: "Blocked",
+  done: "Done",
+  canceled: "Canceled",
+};
 
 // ---- what each provider can do (v_capability_provider, P6b) ----
 
-/** A work-items provider's feature flags, as the provider declares them. */
-export interface WorkItemsFeatures {
-  /** Items nest (a parent ref). */
-  hierarchy: boolean;
-  comments: boolean;
-  links: boolean;
-  /** Moving an item to in_progress opens its effort itself. */
-  inProgressOpensEffort: boolean;
-}
+/** A work-items provider's feature flags, as the provider declares them
+ *  (the Rust `WorkItemsFeatures`). */
+export type { WorkItemsFeatures };
+
+/** No feature declared. */
+export const NO_FEATURES: WorkItemsFeatures = { hierarchy: false, comments: false, links: false, in_progress_opens_effort: false };
 
 /** One capability's provider, with its flags as declared. */
 export interface CapabilityProvider {
@@ -273,7 +286,7 @@ export function featuresFor(providers: CapabilityProvider[], provider: string): 
     hierarchy: f.hierarchy === true,
     comments: f.comments === true,
     links: f.links === true,
-    inProgressOpensEffort: f.in_progress_opens_effort === true,
+    in_progress_opens_effort: f.in_progress_opens_effort === true,
   };
 }
 

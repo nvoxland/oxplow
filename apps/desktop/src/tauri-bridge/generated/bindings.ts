@@ -4974,6 +4974,19 @@ export type VisitedPage = {
 	visit_count: number,
 };
 
+// What a provider supports beyond create, update and transition.
+export type WorkItemsFeatures = {
+	// Items nest (a parent ref).
+	hierarchy: boolean,
+	comments: boolean,
+	links: boolean,
+	/**
+	 *  Moving an item to `in_progress` opens its effort itself (oxplow's
+	 *  tasks do), so `effort.open` must not open a second.
+	 */
+	in_progress_opens_effort: boolean,
+};
+
 /**
  *  fs-watch classification mirrored onto the wire so the renderer can
  *  distinguish create / modify / delete / rename without re-stating

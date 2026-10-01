@@ -87,6 +87,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<OxplowEvent>()
         .typ::<oxplow_app::acp::session::AcpEvent>()
         .typ::<oxplow_domain::vcs::OpOutcome>()
+        // A provider's work-item flags (`v_capability_provider.features`).
+        .typ::<oxplow_domain::work_items::WorkItemsFeatures>()
         // `source.sync`'s result, read through `run_command`.
         .typ::<oxplow_app::source_runner::SourceRunReport>()
         .commands(collect_commands![

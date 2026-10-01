@@ -75,8 +75,12 @@ items as cards in one column per canonical state (archived tasks left
 out). Drag a card to a column, or right-click → Move To, to transition
 it through its provider (`transitionWorkItem`: oxplow's
 `work_item.transition` with oxplow's status, another provider's
-`<provider>.transition` with the canonical state — `workItemCommand`).
-Every card opens its item's page (`workItemTabRef`).
+`<provider>.transition` with the canonical state — `workItemCommand`,
+which refuses a string that isn't a `work_item:<provider>:<id>` ref, the
+provider a lowercase snake_case id as in Rust). Like Comment… and Link…
+it runs through `personCommands` (one person path: its confirmation and
+its error reporting). Every card opens its item's page
+(`workItemTabRef`).
 
 **Another provider's item has a page of its own** (P6b.C3,
 `pages/WorkItemPage.tsx`; oxplow's tasks keep `TaskPage`):
@@ -138,7 +142,8 @@ work-items provider's features as `ExternalWorkItems` reads them) and
 removed when it stops. `active` is P7's hook for choosing a capability's
 active provider; every row is `1` today. The desktop reads it with
 `readCapabilityProviders(capability)` (`workItems.ts`, with `reads`) and
-`featuresFor(providers, provider)`, which turns every flag a provider
+`featuresFor(providers, provider)` → `WorkItemsFeatures` (the Rust type,
+exported through the bindings), which turns every flag a provider
 doesn't declare — or a provider that isn't listed — off.
 
 ## Conformance

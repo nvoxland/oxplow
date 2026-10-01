@@ -54,7 +54,9 @@ pub enum Transition {
 }
 
 /// What a provider supports beyond create, update and transition.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type,
+)]
 pub struct WorkItemsFeatures {
     /// Items nest (a parent ref).
     pub hierarchy: bool,

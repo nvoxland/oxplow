@@ -16,6 +16,7 @@ import {
   CANONICAL_STATES,
   boardColumns,
   readWorkItems,
+  STATE_LABEL,
   transitionWorkItem,
   type CanonicalState,
   type WorkItem,
@@ -27,13 +28,6 @@ import { uiCommandMenuItems, uiCommandsAbout } from "../uiCommands.js";
 import { useUiCommands } from "../useUiCommands.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 
-const LABEL: Record<CanonicalState, string> = {
-  todo: "To Do",
-  in_progress: "In Progress",
-  blocked: "Blocked",
-  done: "Done",
-  canceled: "Canceled",
-};
 
 export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenPage?(ref: TabRef): void }) {
   const [items, setItems] = useState<WorkItem[]>([]);
@@ -54,10 +48,7 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
   useEffect(() => void refresh(), [refresh]);
   useRerunOnChange(reads, () => void refresh());
 
-  const move = (ref: string, state: CanonicalState) =>
-    transitionWorkItem(ref, state).catch((e: unknown) =>
-      recordOpError({ label: `Move to ${LABEL[state]}`, message: e instanceof Error ? e.message : String(e) }),
-    );
+  const move = (ref: string, state: CanonicalState) => void transitionWorkItem(ref, state);
 
   return (
     <div data-testid="work-board" style={boardStyle}>
@@ -83,7 +74,7 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
           }}
         >
           <h3 style={headStyle}>
-            {LABEL[col.state]} <span style={countStyle}>{col.items.length}</span>
+            {STATE_LABEL[col.state]} <span style={countStyle}>{col.items.length}</span>
           </h3>
           {col.items.map((item) => {
             return (
@@ -101,7 +92,7 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
                   ctxMenu.open(e, [
                     ...CANONICAL_STATES.filter((s) => s !== item.state).map((s) => ({
                       id: `board-move-${s}`,
-                      label: `Move to ${LABEL[s]}`,
+                      label: `Move to ${STATE_LABEL[s]}`,
                       enabled: true,
                       run: () => void move(item.ref, s),
                     })),

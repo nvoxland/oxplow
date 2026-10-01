@@ -18,28 +18,21 @@ import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import {
   CANONICAL_STATES,
   featuresFor,
+  NO_FEATURES,
   readCapabilityProviders,
+  STATE_LABEL,
   readWorkItem,
   transitionWorkItem,
   workItemCommand,
-  type CanonicalState,
   type WorkItem,
   type WorkItemsFeatures,
 } from "../workItems.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 
-const LABEL: Record<CanonicalState, string> = {
-  todo: "To Do",
-  in_progress: "In Progress",
-  blocked: "Blocked",
-  done: "Done",
-  canceled: "Canceled",
-};
 
 /** What Link… proposes; the provider names its own link types. */
 const DEFAULT_LINK_TYPE = "relates_to";
 
-const NO_FEATURES: WorkItemsFeatures = { hierarchy: false, comments: false, links: false, inProgressOpensEffort: false };
 
 /**
  * Another provider's work item (P6b.C3; oxplow's own open as `TaskPage`):
@@ -112,7 +105,7 @@ export function WorkItemPage({
       <div>
         <div style={labelStyle}>State</div>
         <div>
-          {LABEL[item.state]} <span style={mutedInline}>({item.nativeState})</span>
+          {STATE_LABEL[item.state]} <span style={mutedInline}>({item.nativeState})</span>
         </div>
       </div>
       {features.hierarchy && item.parentRef ? (
@@ -132,13 +125,9 @@ export function WorkItemPage({
               type="button"
               data-testid={`work-item-move-${s}`}
               style={buttonStyle}
-              onClick={() =>
-                void transitionWorkItem(item.ref, s).catch((e: unknown) =>
-                  recordOpError({ label: `Move to ${LABEL[s]}`, message: e instanceof Error ? e.message : String(e) }),
-                )
-              }
+              onClick={() => void transitionWorkItem(item.ref, s)}
             >
-              {LABEL[s]}
+              {STATE_LABEL[s]}
             </button>
           ))}
         </div>
