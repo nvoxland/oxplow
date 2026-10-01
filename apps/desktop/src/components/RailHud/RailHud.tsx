@@ -22,7 +22,7 @@ import {
   showPanel,
   toggleCollapsed,
 } from "../Panels/panelLayout.js";
-import { usePanelRuns } from "../Panels/usePanelRuns.js";
+import { panelParams, usePanelRuns } from "../Panels/usePanelRuns.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import { recordOpError } from "../opErrorsStore.js";
 import {
@@ -417,7 +417,9 @@ export function RailHud({
   function renderSection(id: RailSectionId): ReactNode {
     switch (id) {
       case "core:alerts":
-        return <AlertsSection key={id} panels={extPanels} streamId={streamId ?? null} onOpenPage={onOpenPage} />;
+        return (
+          <AlertsSection key={id} panels={extPanels} streamId={streamId ?? null} threadId={threadId} onOpenPage={onOpenPage} />
+        );
       case "core:uncommitted":
         return <UncommittedSection key={id} summary={uncommitted ?? null} onOpenPage={onOpenPage} />;
       case "core:comments":
@@ -440,7 +442,7 @@ export function RailHud({
       default: {
         const panel = extPanels.find((p) => extensionPanelId(p) === id);
         return panel ? (
-          <ExtensionPanelSection key={id} panel={panel} streamId={streamId ?? null} onOpenPage={onOpenPage} />
+          <ExtensionPanelSection key={id} panel={panel} streamId={streamId ?? null} threadId={threadId} onOpenPage={onOpenPage} />
         ) : null;
       }
     }
@@ -1169,10 +1171,12 @@ function UncommittedSection({
 function AlertsSection({
   panels,
   streamId,
+  threadId,
   onOpenPage,
 }: {
   panels: ExtensionPanel[];
   streamId: string | null;
+  threadId: string | null;
   onOpenPage(ref: TabRef): void;
 }) {
   const [alerts, setAlerts] = useState<{ id: string; title: string; message: string }[]>([]);
@@ -1183,11 +1187,14 @@ function AlertsSection({
   );
   const refresh = useCallback(async () => {
     const runs = await Promise.all(
-      badges.map(async (p) => ({ id: p.badge, run: await runLens(p.badge, {}, streamId).catch(() => null) })),
+      badges.map(async (p) => ({
+        id: p.badge,
+        run: await runLens(p.badge, panelParams(p.scope, streamId, threadId), streamId).catch(() => null),
+      })),
     );
     setAlerts(firingAlerts(runs));
     setReads(unionReads(runs.map(({ run }) => run?.result.reads)));
-  }, [badges, streamId]);
+  }, [badges, streamId, threadId]);
   useEffect(() => void refresh(), [refresh]);
   useRerunOnChange(reads, () => void refresh());
 
@@ -1217,13 +1224,15 @@ function AlertsSection({
 function ExtensionPanelSection({
   panel,
   streamId,
+  threadId,
   onOpenPage,
 }: {
   panel: ExtensionPanel;
   streamId: string | null;
+  threadId: string | null;
   onOpenPage(ref: TabRef): void;
 }) {
-  const runs = usePanelRuns(panel, streamId);
+  const runs = usePanelRuns(panel, streamId, threadId);
   return (
     <RailSection
       id={extensionPanelId(panel)}

@@ -167,7 +167,9 @@ core's (`core:alerts`, `core:uncommitted`, `core:comments`, `core:work`,
 `core:bookmarks`) and every enabled extension's `panels:`
 (`ext:<extension>/<id>`, rendered by `ExtensionPanelSection`: the body
 lens compact, the badge lens's alert count in the header via
-`usePanelRuns`). **Alerts** lists every firing badge.
+`usePanelRuns`, which binds the panel's scope — `stream_id` / `thread_id`
+as row ids, from `panelParams` — for the stream and thread the rail shows,
+and re-runs when either changes). **Alerts** lists every firing badge.
 
 The person's layout — order (drag the ⠿ handle), collapsed (the chevron),
 hidden (right-click a header → Hide Panel; **+ Add Panel** at the bottom

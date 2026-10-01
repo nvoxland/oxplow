@@ -130,7 +130,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     left nav (`Extension.panels`, `ExtensionPanel`; checked at load in
     `parse_panels`: a kebab-case id, lenses that exist, a badge with an
     `alert`, and a `stream` / `thread` scope's lenses declaring
-    `stream_id` / `thread_id`). The body renders compact; the badge's
+    `stream_id` / `thread_id`). The nav binds those itself
+    (`usePanelRuns`'s `panelParams`: the stream's and thread's row ids
+    for the stream and thread it's shown for, re-run when they change)
+    rather than leaving the backend to infer the thread from the
+    selection. The body renders compact; the badge's
     alert count shows on the panel, and the core **Alerts** panel lists
     every firing badge. The `rail` slot is gone: a rail mount is a load
     error naming `panels:`. oxplow-review's Waiting on You is a panel
