@@ -843,6 +843,31 @@ applies as if the person ran it; the input is literal (no placeholders);
 a command that asks comes back `NEEDS_CONFIRMATION` and the **host**
 asks, never the frame. Both are UI RPCs (`ui` in surface parity).
 
+**The host** (P6b.D4, `lens/CustomComponentViz.tsx` +
+`lens/componentBridge.ts`): `<iframe sandbox="allow-scripts"
+referrerPolicy="no-referrer">` at `componentBundleUrl` (the daemon's
+`/components/…` route; with no daemon base — `remoteBaseUrl()` null —
+the lens shows its table), under a **custom** badge. On the frame's first
+`load` the host posts `init { run, props, tokens, kitCss }` with one end
+of a `MessageChannel` (to `"*"`: the frame's origin is opaque; the port
+goes to that frame alone) and listens on the other end only. Frame
+messages (`parseFrameMessage`): `ready`, `{ id, method: query, asset,
+params }` (params SqlCell values only), `{ id, method: invoke, command,
+input }`, `{ id, method: navigate, ref }`; replies `{ id, ok, result |
+error: { code, message } }`; a re-run sends `update { run }`
+(`createBridgeHost`). An invoke that asks shows the host's
+`CommandConfirm`; confirming re-runs it confirmed, declining answers
+`CANCELLED`. No `ready` within 3 s, or a second `load` (the frame
+navigated itself), tears it down and shows the table. `ready` records
+`usage { kind: "custom_component", key: <ext>/<id> }` — the evidence a
+kind needs to be promoted. `tokens` are the root's CSS custom properties
+(`tokensFromStyle`) and `kitCss` is them plus a body baseline; there is no
+kit stylesheet to share yet. No gesture check on invoke: the frame's
+clicks don't reliably activate the host across webviews, and the real
+bounds are the declared list, the person's policy and the host's
+confirmation. The protocol and a reference `index.html` are in
+`docs/guide/lenses.md`; there's no served client library yet.
+
 ## Decorators (experimental)
 
 `ui.decorators` (a private extension only, P6b.C5;

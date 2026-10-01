@@ -171,6 +171,78 @@ Problems show under Settings → Extensions. Agents check their work with
 - The agent can see what you're looking at: `get_open_page` returns the lens
   with the exact rows on your screen.
 
+## Custom components (experimental)
+
+When none of the built-in views fit, a private extension can ship its own
+web component and a `viz: custom` lens that renders it. It runs in a
+sandboxed frame: scripts only, no network, no storage, no access to the
+app. It can only ask for the lenses and commands it declares.
+
+```yaml
+# extension.yaml (sharing: private)
+custom_components:
+  - id: burndown
+    assets: [open-tasks]                # lenses it may query
+    commands: [work_item.transition]    # commands it may run
+```
+
+```yaml
+# lenses/burndown.yaml
+title: Burndown
+query: SELECT day, remaining FROM v_my_ext_burndown
+viz: custom
+custom: { component: burndown, props: { color: accent } }
+```
+
+The bundle lives in `components/burndown/` and needs an `index.html`.
+oxplow hands it a `MessagePort` in an `init` message; everything goes
+over that port:
+
+```html
+<!doctype html>
+<div id="out"></div>
+<script src="app.js"></script>
+```
+
+```js
+// app.js
+let port, next = 0;
+const pending = new Map();
+const call = (msg) => new Promise((resolve, reject) => {
+  const id = String(next++);
+  pending.set(id, { resolve, reject });
+  port.postMessage({ id, ...msg });
+});
+window.addEventListener("message", (e) => {
+  if (e.data?.type !== "init") return;
+  port = e.ports[0];
+  port.onmessage = ({ data }) => {
+    if (data.type === "update") return render(data.run);
+    const p = pending.get(data.id);
+    pending.delete(data.id);
+    data.ok ? p.resolve(data.result) : p.reject(data.error);
+  };
+  render(e.data.run);              // the lens's own rows
+  port.postMessage({ type: "ready" });
+});
+function render(run) {
+  document.getElementById("out").textContent = `${run.result.rows.length} days`;
+}
+// Elsewhere:
+//   await call({ method: "query", asset: "open-tasks", params: {} })
+//   await call({ method: "invoke", command: "work_item.transition", input: { ref, to: "done" } })
+//   await call({ method: "navigate", ref: "work_item:oxplow:tsk42" })
+```
+
+`init` also carries `props`, the theme's CSS variables (`tokens`) and
+`kitCss`, a small stylesheet built from them. If the component doesn't
+say `ready` within 3 seconds, or navigates itself somewhere else, oxplow
+shows the lens's table instead. Agents always read the table.
+
+A command that needs confirmation is confirmed by you in oxplow, not
+inside the frame. There's no client library yet; the snippet above is
+the whole protocol.
+
 ## Sharing
 
 - **Your team:** `oxplow/extensions/` is ordinary project files. Commit it.

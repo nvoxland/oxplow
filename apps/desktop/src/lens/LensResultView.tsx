@@ -40,6 +40,7 @@ import { useUiCommands } from "../components/useUiCommands.js";
 import { safeColor } from "../components/decorators.js";
 import { useDecorations } from "../components/useDecorations.js";
 import { RefBadge } from "../components/RefBadge.js";
+import { CustomComponentViz } from "./CustomComponentViz.js";
 import { personCommands } from "../personCommands.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
@@ -333,6 +334,15 @@ function LensViz({
       return <HunksViz rows={hunkRows(lens, result)} streamId={streamId} rowMenu={rowMenu} />;
     case "list":
       return <ListViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} />;
+    case "custom":
+      return (
+        <CustomComponentViz
+          run={{ ...run, result }}
+          streamId={streamId}
+          onOpenPage={onOpenPage}
+          fallback={<TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} />}
+        />
+      );
     case "table":
     default:
       return <TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} />;

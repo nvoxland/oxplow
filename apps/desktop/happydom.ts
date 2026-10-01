@@ -5,4 +5,6 @@
 // DOM they don't use.
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-GlobalRegistrator.register();
+// A frame's page is never fetched: tests render frames (a custom
+// component's) without a server behind them.
+GlobalRegistrator.register({ settings: { disableIframePageLoading: true } });

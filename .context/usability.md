@@ -131,6 +131,14 @@ Things I keep forgetting. Read this before adding any UI.
   `page-nav-command-<id>`, `menu-item-ui-commands-<group>`,
   `menu-item-ui-command-<id>`.
 
+## A custom component is marked
+
+- A `viz: custom` lens (an extension's own web component, sandboxed)
+  renders under a small **custom** badge, so the person knows the view
+  isn't oxplow's. Its confirmations appear in oxplow (`CommandConfirm`
+  below the frame), never inside the frame. When it can't start, a muted
+  line says so and the lens's table shows.
+
 ## Decorations are additive
 
 - An extension's decorator adds a chip to a page's header (after the
