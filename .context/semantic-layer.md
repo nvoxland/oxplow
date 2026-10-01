@@ -645,8 +645,12 @@ entities from data already in the semantic layer:
     synced yet. Run source `ext/id`…" in place of SQLite's bare "no such
     table".
 - **Scheduling.** A background loop (`spawn_scheduler`, started from boot)
-  runs approved `every` sources once they're due (`due_sources`, which is
-  pure and tested). Unapproved sources never run unattended.
+  calls `run_due_sources` once a minute: every approved `every` source
+  that's due (`due_sources`, which is pure and tested) runs as the
+  `source.sync` command with `Actor::System` — the one way a source runs,
+  so a scheduled run is audited and logs `command.executed` like one from
+  the UI (tested: `the_scheduler_runs_source_sync_through_the_bus`).
+  Unapproved sources never run unattended: the command refuses them.
 - **Schema.** A synced entity is a model its extension owns: its
   description is its doc plus the joins it documents (`relations`), and
   its contract is its declared columns with their docs, refreshed when the

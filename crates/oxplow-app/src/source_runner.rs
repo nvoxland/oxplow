@@ -230,24 +230,39 @@ pub fn due_sources(listings: &[SourceListing], now_ms: i64) -> Vec<(String, Stri
         .collect()
 }
 
-/// Background loop: once a minute, run every due source (see
-/// [`due_sources`]) from the primary worktree, emitting `SourceSynced`
-/// after each run. Unapproved sources never run here.
+/// Run every due source (see [`due_sources`]) from the primary worktree,
+/// each as the `source.sync` command run by the system — the one way a
+/// source runs, so a scheduled run is audited and logs `command.executed`
+/// like one from the UI, a lens action or MCP. Unapproved sources never
+/// run here: the command refuses them. Returns what it ran; a failed run
+/// is logged and the rest still run.
+pub async fn run_due_sources(state: &crate::Services) -> Vec<(String, String)> {
+    let root = state.worktrees.resolve(None).await;
+    let Ok(listings) = list_sources(&Sources::of(state, &root)).await else {
+        return vec![];
+    };
+    let now = oxplow_domain::Timestamp::now().unix_ms();
+    let due = due_sources(&listings, now);
+    for (extension, source_id) in &due {
+        let input = serde_json::json!({ "extension": extension, "source": source_id });
+        if let Err(e) = state
+            .commands
+            .run(&oxplow_domain::Actor::System, SYNC, input, false)
+            .await
+        {
+            tracing::warn!(%extension, %source_id, error = ?e, "scheduled source run failed");
+        }
+    }
+    due
+}
+
+/// Background loop: once a minute, [`run_due_sources`].
 pub fn spawn_scheduler(state: std::sync::Arc<crate::Services>) {
     tokio::spawn(async move {
         // Stay out of boot's way.
         tokio::time::sleep(Duration::from_secs(30)).await;
         loop {
-            let root = state.worktrees.resolve(None).await;
-            let listings = list_sources(&Sources::of(&state, &root)).await;
-            if let Ok(listings) = listings {
-                let now = oxplow_domain::Timestamp::now().unix_ms();
-                for (extension, source_id) in due_sources(&listings, now) {
-                    if let Err(e) = state.source_runner.sync(&extension, &source_id).await {
-                        tracing::warn!(%extension, %source_id, error = ?e, "scheduled source run failed");
-                    }
-                }
-            }
+            run_due_sources(&state).await;
             tokio::time::sleep(Duration::from_secs(60)).await;
         }
     });
@@ -1597,6 +1612,44 @@ mod tests {
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(p, body).unwrap();
         }
+    }
+
+    /// A scheduled run is the `source.sync` command like every other run
+    /// (the UI's, a lens action's, MCP's), so it's audited as the system's
+    /// and logs `command.executed` — one mechanism, not a second path
+    /// around the bus.
+    #[tokio::test]
+    async fn the_scheduler_runs_source_sync_through_the_bus() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        extension(
+            &root,
+            "work",
+            "name: work\nsources:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    schedule: every 10m\n    input: \"SELECT id, title FROM v_task\"\n    entities:\n      - { name: hot, key: id, columns: { id: int, title: text } }\n",
+            &[(
+                "hot.star",
+                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"id\": r[\"id\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
+            )],
+        );
+        let ran = run_due_sources(&fx.svc).await;
+        assert_eq!(ran, vec![("work".to_string(), "star".to_string())]);
+        let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
+            .list_recent(10)
+            .await
+            .unwrap();
+        let sync = audits
+            .iter()
+            .find(|a| a.command == SYNC)
+            .expect("the scheduled run is audited");
+        assert_eq!(
+            sync.actor_kind,
+            oxplow_domain::events::schema::ActorKind::System
+        );
+        assert!(sync.error.is_none(), "{:?}", sync.error);
+        // It ran: the source's state says so, and it isn't due again.
+        let listings = list_sources(&Sources::of(&fx.svc, &root)).await.unwrap();
+        assert_eq!(listings[0].state.as_ref().unwrap().status, "ok");
+        assert!(run_due_sources(&fx.svc).await.is_empty());
     }
 
     #[tokio::test]
