@@ -1,3 +1,4 @@
+import { InlineConfirm } from "../InlineConfirm.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Pencil } from "lucide-react";
@@ -291,22 +292,28 @@ export function TaskDetailRail({
             </button>
           ) : null}
           {onDelete ? (
-            <button
-              type="button"
-              onClick={onDelete}
-              style={{
-                textAlign: "left",
-                padding: "6px 10px",
-                borderRadius: 4,
-                border: "1px solid var(--border-subtle)",
-                background: "var(--surface-card)",
-                color: "var(--severity-critical)",
-                cursor: "pointer",
-                fontSize: "var(--text-xs)",
-              }}
-            >
-              Delete
-            </button>
+            // Asks inline: the first press arms it, Confirm deletes.
+            <InlineConfirm onConfirm={onDelete} confirmLabel="Delete Task" testIdPrefix="task-rail-delete">
+              {(arm) => (
+                <button
+                  type="button"
+                  data-testid="task-rail-delete-trigger"
+                  onClick={arm}
+                  style={{
+                    textAlign: "left",
+                    padding: "6px 10px",
+                    borderRadius: 4,
+                    border: "1px solid var(--border-subtle)",
+                    background: "var(--surface-card)",
+                    color: "var(--severity-critical)",
+                    cursor: "pointer",
+                    fontSize: "var(--text-xs)",
+                  }}
+                >
+                  Delete
+                </button>
+              )}
+            </InlineConfirm>
           ) : null}
         </div>
       ) : null}

@@ -54,7 +54,12 @@ Things I keep forgetting. Read this before adding any UI.
   target-path entry) instead. `window.confirm` / `window.alert` block
   the renderer; prefer `InlineConfirm` for destructive actions on a
   row/button and `showToast({ message, onUndo })` for fire-and-undo
-  destructives that aren't tied to a specific row.
+  destructives that aren't tied to a specific row. A destructive command run
+  from a menu (which closes, leaving nowhere to ask inline) goes through
+  `personCommands.run`: its `NeedsConfirmation` shows the shared
+  `CommandConfirm` (`PersonCommandConfirm`, mounted once in `App`). The
+  task page's and wiki page's rail Delete use `InlineConfirm`; the wiki
+  pane's right-click Delete uses `personCommands`.
 - **Async-op failures don't `alert`.** Push a record into
   `opErrorsStore` (`recordOpError({ label, command?, stderr?, stdout?,
   exitCode?, message? })`). Errors surface in two places, both global

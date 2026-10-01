@@ -172,13 +172,8 @@ export function TaskPage({
     );
   }
 
-  const requestDelete = onDelete
-    ? () => {
-        if (window.confirm(`Delete task "${item.title}"? This can't be undone.`)) {
-          onDelete(item.id);
-        }
-      }
-    : undefined;
+  // The rail's Delete asks inline before it calls this.
+  const requestDelete = onDelete ? () => onDelete(item.id) : undefined;
   const rail = (
     <TaskDetailRail
       item={item}

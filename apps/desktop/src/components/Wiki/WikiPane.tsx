@@ -13,13 +13,13 @@ import {
   type WikiPageSummary,
 } from "../../knowledge.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
+import { personCommands } from "../../personCommands.js";
 import type { Reads } from "../../tauri-bridge/generated/bindings.js";
 import { logUi } from "../../logger.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
 import { ContextMenu } from "../ContextMenu.js";
-import { deleteWikiPage } from "../../api.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { wikiPageRef } from "../../tabs/pageRefs.js";
 import { wikiRowTooltip } from "./wikiRowLabel.js";
@@ -178,10 +178,9 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
             if (!streamId) return;
             const slug = contextMenu.slug;
             setContextMenu(null);
-            if (!window.confirm(`Delete wiki page "${slug}"? The file will be removed.`)) return;
-            try { await deleteWikiPage(slug, true); } catch (error) {
-              logUi("error", "deleteWikiPage failed", { error: String(error) });
-            }
+            // A menu has nowhere to ask inline: the destructive command
+            // asks through the shared confirmation (`personCommands`).
+            await personCommands.run(`Delete "${slug}"`, "knowledge.delete_page", { slug });
           },
         },
       ]

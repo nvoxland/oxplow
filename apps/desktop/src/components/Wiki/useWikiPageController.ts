@@ -113,8 +113,9 @@ export function useWikiPageController(slug: string, onClosed: () => void): WikiP
     }
   }, [slug]);
 
+  // The page's Delete asks inline first; that is the confirmation the
+  // destructive `knowledge.delete_page` asks for.
   const remove = useCallback(async () => {
-    if (!window.confirm(`Delete wiki page "${slug}"? The file will be removed.`)) return;
     try {
       await deleteWikiPage(slug, true);
       onClosed();

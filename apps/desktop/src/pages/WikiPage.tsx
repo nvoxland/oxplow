@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { InlineConfirm } from "../components/InlineConfirm.js";
 import type { Stream } from "../tauri-bridge/index.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import type { WikiRefFreshness } from "../knowledge.js";
@@ -237,7 +238,10 @@ function WikiPageRail({
         {notFound ? (
           <RailButton onClick={() => void create()} variant="primary">Create page</RailButton>
         ) : loadError ? null : (
-          <RailButton onClick={() => void remove()} variant="danger">Delete</RailButton>
+          // Asks inline: the first press arms it, Confirm deletes.
+          <InlineConfirm onConfirm={() => void remove()} confirmLabel="Delete Page" testIdPrefix="wiki-rail-delete">
+            {(arm) => <RailButton onClick={arm} variant="danger">Delete</RailButton>}
+          </InlineConfirm>
         )}
       </div>
     </div>
