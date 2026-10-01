@@ -125,9 +125,11 @@ included.
 
 **The approval shows what it changes** (P6b.E3): an unapproved
 provider's row loads `provider_declaration_effects { instance }`
-(`ProviderRegistry::declaration_effects`: the declarations on disk
-against the running instance's, or "first approval: everything is new"
-when it isn't running — read, never run) and lists its hosts,
+(`ProviderRegistry::declaration_effects`: the spec and declarations on
+disk against the last approved copy's — `host::last_approved`, the
+intact `copies/<ext>/<id>/<hash>` a start last ran, so a changed spec
+that stopped the instance, or a restart, still shows what changed — or
+"first approval: everything is new" when it never ran; read, never run) and lists its hosts,
 credentials, commands added, removed or changed (destructive ones
 marked) and features (`providerEffectLines`). Its Approve stays disabled
 until that diff has loaded (`canApprove`), on top of the reviewed

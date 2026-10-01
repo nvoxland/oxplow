@@ -500,6 +500,45 @@ async fn declaration_effects_compare_the_files_with_what_runs() {
         .all(|c| c.change == crate::extension_effects::Change::Unchanged));
 }
 
+/// R7: the baseline is the last approved copy, not the running instance —
+/// a changed spec stops the instance (and a restart starts none), and the
+/// re-approval must still show what changed.
+#[tokio::test]
+async fn declaration_effects_compare_against_the_last_approved_copy() {
+    let (fx, ext) = approved("").await;
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    let project = fx.svc.layout.project_dir.clone();
+    let manifest = project.join("oxplow/extensions/tracker/extension.yaml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(
+        &manifest,
+        text.replace(
+            "    entry: bin/provider\n",
+            "    entry: bin/provider\n    network: [api.example.com]\n",
+        ),
+    )
+    .unwrap();
+    fx.svc.providers.stop(INSTANCE).await;
+    assert!(fx.svc.providers.get(INSTANCE).await.is_none());
+    let effect = fx
+        .svc
+        .providers
+        .declaration_effects(INSTANCE)
+        .await
+        .unwrap();
+    assert_eq!(effect.change, crate::extension_effects::Change::Changed);
+    assert_eq!(effect.before.unwrap().hosts, Vec::<String>::new());
+    assert_eq!(effect.after.unwrap().hosts, vec!["api.example.com"]);
+    assert!(effect
+        .commands
+        .iter()
+        .all(|c| c.change == crate::extension_effects::Change::Unchanged));
+}
+
 /// tsk546: a provider's args are hashed where it runs (its extension
 /// folder), and an arg reaching outside the folder is refused, so no file
 /// it runs escapes the approval.

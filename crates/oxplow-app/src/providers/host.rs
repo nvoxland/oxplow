@@ -363,6 +363,38 @@ pub fn approved_copy(
     Ok(ApprovedCopy { ext_dir, declared })
 }
 
+/// The copy of `spec` a start last ran (`copies/<ext>/<id>/<hash>`, kept
+/// until a newer approved copy replaces it), when it is still intact: its
+/// spec and declarations, read from the copy — what the person approved
+/// last, whether or not an instance runs now. `None` before it first ran.
+pub fn last_approved(
+    copies: &Path,
+    ext: &crate::extensions::Extension,
+    spec: &ProviderSpec,
+) -> Option<(ProviderSpec, InitializeResult)> {
+    let rel = ext.path.trim_end_matches('/');
+    let entries = std::fs::read_dir(copies.join(&ext.name).join(&spec.id)).ok()?;
+    entries.flatten().find_map(|entry| {
+        let hash = entry.file_name().into_string().ok()?;
+        if hash.starts_with('.') {
+            return None;
+        }
+        let root = entry.path();
+        let copied = crate::extensions::load_project_extension(&root, &ext.name);
+        let copied_spec = copied.providers.iter().find(|p| p.id == spec.id)?;
+        let program = crate::exec_consent::provider_program(&copied, copied_spec);
+        if program.hash(&root).ok()? != hash {
+            return None;
+        }
+        let dir = root.join(rel);
+        let declared = super::spec::read_declarations(copied_spec, &|f| {
+            std::fs::read_to_string(dir.join(f)).ok()
+        })
+        .ok()?;
+        Some((copied_spec.clone(), declared))
+    })
+}
+
 /// Copy the regular files and directories under `from` to `to`
 /// (permissions kept); a symlink is refused, as the approval refuses it.
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {

@@ -1077,6 +1077,13 @@ fn parse_block<T: serde::de::DeserializeOwned>(
         .transpose()
 }
 
+/// Project extension `name` alone, from `root/oxplow/extensions/<name>`
+/// — a tree laid out like a project, e.g. a provider's approved copy.
+pub fn load_project_extension(root: &Path, name: &str) -> Extension {
+    let rel = format!("{EXTENSIONS_DIR}/{name}");
+    load_one(&Disk(root.join(&rel)), name, &rel, "project")
+}
+
 /// A file inside extension `name` (bundled or in `oxplow/extensions/`),
 /// e.g. a gauge's script. `None` when there's no such extension or file.
 pub fn read_extension_file(root: &Path, name: &str, rel: &str) -> Option<String> {

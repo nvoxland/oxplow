@@ -467,10 +467,11 @@ impl ProviderRegistry {
         crate::config_service::read_config(&self.deps.config).extension_instances
     }
 
-    /// What approving `instance` as it is on disk would change against the
-    /// declarations it runs with now (P6b.E3): its grants, each declared
-    /// command and its features. Not running, everything is new. Reads
-    /// files; runs nothing.
+    /// What approving `instance` as it is on disk would change against
+    /// what was approved last — the approved copy a start last ran
+    /// (`host::last_approved`), whether or not it runs now (P6b.E3): its
+    /// grants, each declared command and its features. Never run,
+    /// everything is new. Reads files; runs nothing.
     pub async fn declaration_effects(
         &self,
         instance: &str,
@@ -480,12 +481,15 @@ impl ProviderRegistry {
         let on_disk =
             spec::read_declarations(&spec, &|rel| std::fs::read_to_string(dir.join(rel)).ok())
                 .map_err(DomainError::Invalid)?;
-        let running = self
-            .get(instance)
-            .await
-            .map(|i| (i.spec.clone(), Some(i.declared.clone())));
+        let (copies, ext_c, spec_c) = (self.deps.copies.clone(), ext.clone(), spec.clone());
+        let approved = tokio::task::spawn_blocking(move || {
+            host::last_approved(&copies, &ext_c, &spec_c)
+                .map(|(spec, declared)| (spec, Some(declared)))
+        })
+        .await
+        .map_err(|e| DomainError::Invariant(format!("reading the approved copy: {e}")))?;
         crate::extension_effects::providers_diff(
-            &running.into_iter().collect::<Vec<_>>(),
+            &approved.into_iter().collect::<Vec<_>>(),
             &[(spec, Some(on_disk))],
         )
         .into_iter()
