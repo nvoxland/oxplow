@@ -3605,6 +3605,11 @@ export type ModelDecl = {
 export type ModelEffect = {
 	view: string,
 	change: Change,
+	/**
+	 *  For a changed model, the parts that differ, in order: `query`,
+	 *  `columns`, `description`, `tests`, `version`, `deprecated`.
+	 */
+	changed: string[],
 	beforeColumns: string[],
 	afterColumns: string[],
 	// The first difference in its contract (columns, types, docs).

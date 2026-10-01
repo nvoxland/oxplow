@@ -65,6 +65,9 @@ pub struct LensEffect {
 pub struct ModelEffect {
     pub view: String,
     pub change: Change,
+    /// For a changed model, the parts that differ, in order: `query`,
+    /// `columns`, `description`, `tests`, `version`, `deprecated`.
+    pub changed: Vec<String>,
     pub before_columns: Vec<String>,
     pub after_columns: Vec<String>,
     /// The first difference in its contract (columns, types, docs).
@@ -163,11 +166,25 @@ pub fn models_diff(
     pair_by(before, after, |m| m.decl.name.clone())
         .into_iter()
         .map(|(name, b, a)| {
-            let same = |x: &ModelSource, y: &ModelSource| x.decl == y.decl && x.sql == y.sql;
+            let changed: Vec<String> = match (b, a) {
+                (Some(x), Some(y)) => [
+                    ("query", x.sql != y.sql),
+                    ("columns", x.decl.columns != y.decl.columns),
+                    ("description", x.decl.description != y.decl.description),
+                    ("tests", x.decl.tests != y.decl.tests),
+                    ("version", x.decl.version != y.decl.version),
+                    ("deprecated", x.decl.deprecated != y.decl.deprecated),
+                ]
+                .into_iter()
+                .filter(|(_, differs)| *differs)
+                .map(|(part, _)| part.to_string())
+                .collect(),
+                _ => Vec::new(),
+            };
             let change = match (b, a) {
                 (None, _) => Change::Added,
                 (_, None) => Change::Removed,
-                (Some(x), Some(y)) if same(x, y) => Change::Unchanged,
+                _ if changed.is_empty() => Change::Unchanged,
                 _ => Change::Changed,
             };
             let contract_change = match (b, a) {
@@ -179,6 +196,7 @@ pub fn models_diff(
             ModelEffect {
                 view: extension_view(extension, &name),
                 change,
+                changed,
                 before_columns: cols(b),
                 after_columns: cols(a),
                 contract_change,
@@ -522,6 +540,29 @@ mod tests {
         assert_eq!(out["v_my_ext_gone"].before_columns, vec!["a"]);
         assert_eq!(out["v_my_ext_new"].change, Change::Added);
         assert_eq!(out["v_my_ext_new"].after_columns, vec!["b"]);
+        assert_eq!(out["v_my_ext_sql_only"].changed, vec!["query"]);
+        assert_eq!(out["v_my_ext_retyped"].changed, vec!["columns"]);
+        assert!(out["v_my_ext_kept"].changed.is_empty());
+    }
+
+    /// A change outside the query and the columns still says what moved.
+    #[test]
+    fn models_diff_names_each_part_that_changed() {
+        let base = model("m", &[("a", "TEXT")], "SELECT 1");
+        let mut tests = base.clone();
+        tests.decl.tests = serde_json::from_value(json!([{ "not_null": "a" }])).unwrap();
+        let mut described = base.clone();
+        described.decl.description = "new words".into();
+        described.decl.version = 2;
+        for (after, want) in [
+            (tests, vec!["tests"]),
+            (described, vec!["description", "version"]),
+        ] {
+            let out = models_diff("x", std::slice::from_ref(&base), &[after]);
+            assert_eq!(out[0].change, Change::Changed);
+            assert_eq!(out[0].contract_change, None);
+            assert_eq!(out[0].changed, want);
+        }
     }
 
     fn source(id: &str, hosts: &[&str]) -> SourceSpec {

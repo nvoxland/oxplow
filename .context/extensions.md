@@ -775,9 +775,12 @@ it declares (P6b.E; `extension_effects.rs`). `EffectReport` holds, each
 with a `Change` (`added`, `removed`, `changed`, `unchanged`):
 
 - `lenses` — each lens's rendered text before and after (`LensEffect`);
-- `models` — each view, its columns before and after, the first
-  contract difference (`contract_change`; a SQL-only change keeps the
-  contract) and its `downstream` readers (`models_diff`);
+- `models` — each view, the parts that differ (`changed`: `query`,
+  `columns`, `description`, `tests`, `version`, `deprecated`), its
+  columns before and after, the first contract difference
+  (`contract_change`; a SQL-only change keeps the contract) and its
+  `downstream` readers (`models_diff`); the review names the parts
+  ("its description and tests changed") when the contract held;
 - `collectors` — each collector's `Grants` (entry, runtime, hosts,
   credentials, env) before and after and the views it fills
   (`collectors_diff`);

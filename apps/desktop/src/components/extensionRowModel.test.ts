@@ -217,8 +217,9 @@ describe("reviewModel", () => {
           { id: "shared/bad", change: "added", before: null, after: null, error: "no such table" },
         ],
         models: [
-          { view: "v_shared_x", change: "changed", beforeColumns: ["a"], afterColumns: ["a", "y"], contractChange: "column `y` added", downstream: ["v_b_y"] },
-          { view: "v_shared_z", change: "changed", beforeColumns: ["a"], afterColumns: ["a"], contractChange: null, downstream: [] },
+          { view: "v_shared_x", change: "changed", changed: ["columns"], beforeColumns: ["a"], afterColumns: ["a", "y"], contractChange: "column `y` added", downstream: ["v_b_y"] },
+          { view: "v_shared_z", change: "changed", changed: ["query"], beforeColumns: ["a"], afterColumns: ["a"], contractChange: null, downstream: [] },
+          { view: "v_shared_t", change: "changed", changed: ["description", "tests"], beforeColumns: ["a"], afterColumns: ["a"], contractChange: null, downstream: [] },
         ],
         collectors: [{ id: "gh", change: "changed", before: grants([]), after: grants(["api.example.com"]), entities: [] }],
         providers: [
@@ -244,6 +245,7 @@ describe("reviewModel", () => {
       "Provider fake: command `delete` added (destructive)",
       "Model v_shared_x: column `y` added; read by v_b_y",
       "Model v_shared_z: its query changed (same columns)",
+      "Model v_shared_t: its description and tests changed (same columns)",
       "Lens shared/count: changed",
       "Lens shared/new: added",
       "Lens shared/bad: added; its query fails: no such table",

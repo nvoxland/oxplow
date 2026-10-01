@@ -174,8 +174,7 @@ export function effectLines(report: EffectReport): string[] {
   }
   for (const m of report.models) {
     if (m.change === "unchanged") continue;
-    const what =
-      m.change === "changed" ? (m.contractChange ?? "its query changed (same columns)") : m.change;
+    const what = m.change === "changed" ? (m.contractChange ?? `its ${listed(m.changed)} changed (same columns)`) : m.change;
     const downstream = m.downstream.length > 0 ? `; read by ${m.downstream.join(", ")}` : "";
     out.push(`Model ${m.view}: ${what}${downstream}`);
   }
@@ -232,4 +231,9 @@ export function reviewModel(review: ExtensionReview): ReviewModel {
       .map((l) => ({ id: l.id, before: l.before!, after: l.after! })),
     canInstall: ext.errors.length === 0,
   };
+}
+
+/** `a`, `a and b`, `a, b and c`. */
+function listed(parts: string[]): string {
+  return parts.length <= 1 ? (parts[0] ?? "definition") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
