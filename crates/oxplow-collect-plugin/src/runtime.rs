@@ -491,6 +491,22 @@ fn helper_anyhow(e: crate::HelperError) -> anyhow::Error {
     anyhow::anyhow!(e.to_string())
 }
 
+/// Whether `script` parses as Starlark and defines `transform` — what a
+/// loader checks before anything runs it. A message saying what's wrong.
+pub fn check_starlark(script: &str) -> Result<(), String> {
+    use starlark::syntax::{AstModule, Dialect};
+    AstModule::parse("plugin.star", script.to_string(), &Dialect::Standard)
+        .map_err(|e| format!("doesn't parse: {e}"))?;
+    let defines = script
+        .lines()
+        .any(|l| l.trim_start() == l && l.starts_with("def transform("));
+    if defines {
+        Ok(())
+    } else {
+        Err("must define `transform` (`def transform(x):`) at the top level".into())
+    }
+}
+
 /// Run a Starlark plugin against `input`. The plugin must define
 /// `def transform(input): … return <object>`; the host appends a call that
 /// JSON-encodes the result, so the return value crosses back as JSON. The

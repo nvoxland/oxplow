@@ -902,6 +902,9 @@ pub struct Extension {
     /// Launcher entries for what isn't a lens: a page, a command, a
     /// prompt (P6.D1; valid ones — invalid ones are in `errors`).
     pub launcher: Vec<LauncherEntry>,
+    /// Commands it registers on the bus, each a Starlark script composing
+    /// core commands (P6b; valid ones — invalid ones are in `errors`).
+    pub commands: Vec<crate::extension_commands::ExtensionCommand>,
 }
 
 /// Provenance of an installed extension, kept in its `source.yaml`.
@@ -992,9 +995,12 @@ pub fn load_extensions(root: &Path) -> Vec<Extension> {
         ext.lenses.retain(|l| !bad.contains(&l.id));
     }
     let disabled = oxplow_config::disabled_extensions(root);
-    out.into_iter()
+    let mut out: Vec<Extension> = out
+        .into_iter()
         .map(|e| apply_disabled(e, &disabled))
-        .collect()
+        .collect();
+    crate::extension_commands::refuse_shared_namespaces(&mut out);
+    out
 }
 
 /// A `measures:` / `metrics:` / `gauges:` block as typed entries.
@@ -1094,6 +1100,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         launcher: Vec::new(),
         panels: Vec::new(),
         pages: Vec::new(),
+        commands: Vec::new(),
     }
 }
 
@@ -1183,6 +1190,14 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     .into_iter()
                     .map(|e| at(&file, key_line(&manifest, "providers"), e)),
             );
+        }
+        if let Some(v) = &m.commands {
+            let (commands, errors) =
+                crate::extension_commands::parse_commands(name, v, &file, &manifest, &|rel| {
+                    files.read(rel)
+                });
+            ext.commands = commands;
+            ext.errors.extend(errors);
         }
         for v in m.advisories.clone() {
             match serde_yaml::from_value::<AdvisoryFile>(v).map(|a| Advisory {
@@ -1803,6 +1818,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.launcher.clear();
         ext.panels.clear();
         ext.pages.clear();
+        ext.commands.clear();
     }
     ext
 }
@@ -2102,6 +2118,7 @@ async fn check_extension(
     commands: Option<CommandSchemas<'_>>,
 ) {
     check_launcher_commands(ext, commands);
+    crate::extension_commands::check_examples(layer, ext, commands).await;
     // Its models, beside the other enabled extensions' (a ref() may name
     // theirs): compiled as temp views, published nowhere (P4.9).
     if !ext.models.is_empty() {

@@ -1670,6 +1670,16 @@ export type CommandCall = {
  */
 export type CommandEffect = "read" | "write" | "record";
 
+/**
+ *  An example run of a command: its input, and the commands its script
+ *  should compose, in order (checked by `oxplow plugin check` / Settings).
+ */
+export type CommandExample = {
+	name: string,
+	input: unknown,
+	expectCommands: string[],
+};
+
 // A completed run.
 export type CommandOutcome = {
 	result: unknown,
@@ -2165,6 +2175,28 @@ export type EventId = string;
 // A loaded extension and anything wrong with it.
 export type Extension = Extension_Serialize | Extension_Deserialize;
 
+/**
+ *  A command an extension declares (valid ones; invalid ones are in the
+ *  extension's `errors`).
+ */
+export type ExtensionCommand = {
+	// Its name on the bus: `<namespace>.<name>`.
+	name: string,
+	summary: string,
+	inputSchema: unknown,
+	// The script, relative to the extension folder.
+	entry: string,
+	/**
+	 *  A read-only SQL query whose rows the script gets (`:field` binds
+	 *  the input's top-level fields).
+	 */
+	input: string | null,
+	confirm: Confirm,
+	effect: CommandEffect,
+	invokers: Invokers,
+	examples: CommandExample[],
+};
+
 // One instance of an extension's provider (`extensionInstances`).
 export type ExtensionInstanceConfig = {
 	// Run it (once this machine approved the provider).
@@ -2348,6 +2380,11 @@ export type Extension_Deserialize = {
 	 *  prompt (P6.D1; valid ones — invalid ones are in `errors`).
 	 */
 	launcher: LauncherEntry[],
+	/**
+	 *  Commands it registers on the bus, each a Starlark script composing
+	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
+	 */
+	commands: ExtensionCommand[],
 };
 
 // A loaded extension and anything wrong with it.
@@ -2433,6 +2470,11 @@ export type Extension_Serialize = {
 	 *  prompt (P6.D1; valid ones — invalid ones are in `errors`).
 	 */
 	launcher: LauncherEntry[],
+	/**
+	 *  Commands it registers on the bus, each a Starlark script composing
+	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
+	 */
+	commands: ExtensionCommand[],
 };
 
 export type FileSnapshot = {

@@ -273,7 +273,8 @@ pub struct ManifestV2 {
     /// that produce entities. Parsed by `extension_sources`.
     #[serde(default)]
     pub collectors: Option<Value>,
-    /// Starlark command handlers (§7). Parsed as data in P1.
+    /// Commands whose handler is a Starlark script composing core commands
+    /// (§7, P6b). Parsed by `extension_commands`.
     #[serde(default)]
     pub commands: Option<Value>,
     /// Pages and left-nav panels (§11.3). Parsed as data in P1.

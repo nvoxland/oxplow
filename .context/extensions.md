@@ -519,7 +519,8 @@ launcher:            # entries for non-lens targets; a lens uses its own launche
   - { label: …, category: Code, target: { prompt: … } }          # a one-line prompt, put in the agent's input
 models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name> (semantic-layer.md "Extension models")
 pages: …  panels: …  # running (P6.G1/G2): see "Panels" and "Pages"
-commands: …  config: …   # parsed as data; runtimes land in later phases (P6b)
+commands:  [...]   # Starlark scripts composing core commands (see "Commands")
+config: …          # parsed as data
 # experimental kinds — a PRIVATE extension only
 providers: [...]    # external providers over the provider protocol (providers.md); the others below are parsed as data only
 effects: … event_types: … ref_kinds: … custom_components: … decorators: … replacements: …
@@ -740,6 +741,45 @@ the page is plain.
 | `settings` | Settings: a section per mounting extension, titled with its name, before AI (tsk330; `SettingsSlotSections`, `slotRuns(…, extension)`). No params |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
+
+## Commands
+
+An extension's `commands:` (a stable kind, P6b; `extension_commands.rs`)
+are commands on the bus whose handler is a Starlark script that
+**composes core commands** — no I/O of its own:
+
+```yaml
+commands:
+  - name: finish_review                # [a-z][a-z0-9_]*; registered as <namespace>.finish_review
+    summary: Mark the task done and leave a note.
+    input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }
+    entry: handlers/finish_review.star # defines transform(x), x = { input, rows }
+    input: "SELECT ref, status FROM v_task WHERE ref = :ref"   # optional; one read; :fields of the input
+    confirm: never                     # never (default) | always | destructive; children only add
+    effect: write                      # write (default) | record; `read` is refused (a lens reads)
+    invokers: { human: true, agent: true, lens: true }   # default: all
+    examples:
+      - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [work_item.transition] }
+```
+
+`transform` returns `{ commands: [{ name, input }], result? }`
+(`composed`). The **namespace** is the extension's name with `-` → `_`
+(`command_namespace`); a namespace core uses
+(`RESERVED_COMMAND_NAMESPACES` in `oxplow-domain`, kept in step with the
+registered commands by `every_core_namespace_is_reserved`) is an error,
+and two enabled extensions mapping to one namespace are both refused
+(`refuse_shared_namespaces`, after disabling applies). Each entry is
+checked at load, its error at its line: the name, `effect`, `confirm`,
+the schema compiles, `input` is one read, and the entry is a file in the
+extension that parses and defines `transform` (`check_starlark`). The
+script's text is kept on the `ExtensionCommand` (not serialized).
+`check_extension` (Settings → Extensions, `oxplow plugin check` with a
+running oxplow) dry-runs each example: the `input` query's rows (bound
+from the example's fields, capped at `INPUT_ROW_CAP`), the script in the
+sandbox (`run_script`: 5 s, no files, no `ai_*`), and what it composes
+against the registry — every command exists, its input fits, the names
+are `expect_commands` in order. Without a registry it warns that the
+examples weren't checked.
 
 ## Contributing metrics (current)
 
