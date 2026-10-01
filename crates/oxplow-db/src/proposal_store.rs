@@ -99,15 +99,16 @@ pub fn proposal_key(command: &str, input: &Value) -> String {
 
 /// Store a pending proposal; its id. Pending proposals with the same key
 /// are marked superseded by it.
-pub fn insert_tx(conn: &Connection, row: &NewProposal) -> Result<i64, DomainError> {
+pub fn insert_tx(conn: &Connection, row: &NewProposal) -> Result<Inserted, DomainError> {
     let key = proposal_key(&row.command, &row.input);
+    let now = ts_to_string(Timestamp::now());
     conn.execute(
         "INSERT INTO command_proposal
            (created_at, command, input_json, actor_kind, actor_id, thread_id, stream_id, key,
             preview_json, dry_run_json, decision)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending')",
         params![
-            ts_to_string(Timestamp::now()),
+            now,
             row.command,
             row.input.to_string(),
             actor_kind_str(row.actor_kind),
@@ -121,14 +122,29 @@ pub fn insert_tx(conn: &Connection, row: &NewProposal) -> Result<i64, DomainErro
     )
     .map_err(map_sql_err)?;
     let id = conn.last_insert_rowid();
-    conn.execute(
-        "UPDATE command_proposal
-            SET decision = 'superseded', decided_at = ?3, superseded_by = ?1
-          WHERE key = ?2 AND decision = 'pending' AND id <> ?1",
-        params![id, key, ts_to_string(Timestamp::now())],
-    )
-    .map_err(map_sql_err)?;
-    Ok(id)
+    let mut stmt = conn
+        .prepare(
+            "UPDATE command_proposal
+                SET decision = 'superseded', decided_at = ?3, superseded_by = ?1
+              WHERE key = ?2 AND decision = 'pending' AND id <> ?1
+              RETURNING id",
+        )
+        .map_err(map_sql_err)?;
+    let mut superseded = stmt
+        .query_map(params![id, key, now], |r| r.get::<_, i64>(0))
+        .map_err(map_sql_err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(map_sql_err)?;
+    superseded.sort_unstable();
+    Ok(Inserted { id, superseded })
+}
+
+/// A proposal just stored, and the pending ones with its key that it
+/// replaced (marked `superseded`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Inserted {
+    pub id: i64,
+    pub superseded: Vec<i64>,
 }
 
 /// Mark a pending proposal `decision`; the row as it now is. Deciding a
@@ -337,7 +353,8 @@ mod tests {
         let id = db
             .transaction(|tx| insert_tx(tx, &config_set("agentPromptAppend", json!("hi"))))
             .await
-            .unwrap();
+            .unwrap()
+            .id;
         let p = store.get(id).await.unwrap().unwrap();
         assert_eq!(p.command, "config.set");
         assert_eq!(p.input["value"], "hi");
@@ -365,7 +382,9 @@ mod tests {
                 let old = insert_tx(tx, &config_set("zones", json!([])))?;
                 let other = insert_tx(tx, &config_set("agentPromptAppend", json!("x")))?;
                 let new = insert_tx(tx, &config_set("zones", json!(["a"])))?;
-                Ok((old, other, new))
+                assert!(old.superseded.is_empty() && other.superseded.is_empty());
+                assert_eq!(new.superseded, vec![old.id], "it names what it replaced");
+                Ok((old.id, other.id, new.id))
             })
             .await
             .unwrap();
@@ -400,7 +419,7 @@ mod tests {
             .transaction(|tx| {
                 let a = insert_tx(tx, &config_set("zones", json!([])))?;
                 let d = insert_tx(tx, &config_set("agentPromptAppend", json!("x")))?;
-                Ok((a, d))
+                Ok((a.id, d.id))
             })
             .await
             .unwrap();

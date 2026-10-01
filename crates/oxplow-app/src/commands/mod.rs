@@ -702,29 +702,36 @@ impl CommandBus {
         let stored = self
             .db
             .transaction(move |tx| {
-                let id = proposal_store::insert_tx(tx, &row)?;
+                let inserted = proposal_store::insert_tx(tx, &row)?;
+                let supersedes: Vec<String> = inserted
+                    .superseded
+                    .iter()
+                    .map(|id| proposal_ref(*id))
+                    .collect();
                 let proposed = Envelope::typed::<CommandProposed>(
                     actor_c.source(),
                     &CommandProposedV1 {
-                        proposal: proposal_ref(id),
+                        proposal: proposal_ref(inserted.id),
                         command: row.command.clone(),
                         actor_kind: actor_c.kind(),
                         actor_id: actor_c.id(),
                         destructive,
+                        supersedes: supersedes.clone(),
                     },
                 )
                 .with_anchors(actor_c.anchors())
-                .with_subject([proposal_ref(id), command_ref(&row.command)]);
+                .with_subject([proposal_ref(inserted.id), command_ref(&row.command)]);
                 append_tx(tx, &schemas, &proposed)?;
-                Ok(id)
+                Ok((inserted.id, supersedes))
             })
             .await;
         match stored {
-            Ok(id) => {
+            Ok((id, supersedes)) => {
                 self.pump.wake();
                 CommandError::Proposed {
                     proposal: proposal_ref(id),
                     preview: Box::new(preview),
+                    supersedes,
                 }
             }
             Err(e) => CommandError::from(e),
@@ -2368,6 +2375,37 @@ mod tests {
             .unwrap()
     }
 
+    /// A newer proposal of the same call replaces the pending one, and
+    /// says so: in its event and in the answer the agent gets.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_proposal_that_replaces_another_names_it() {
+        let (_db, bus) = confirming_bus();
+        let first = propose(&bus, "a", "1").await;
+        let err = bus
+            .run(&agent(), "kv.set", json!({ "k": "a", "v": "1" }), false)
+            .await
+            .unwrap_err();
+        let CommandError::Proposed { supersedes, .. } = &err else {
+            panic!("{err:?}");
+        };
+        assert_eq!(supersedes, &vec![format!("proposal:{first}")]);
+        assert!(
+            err.to_string()
+                .contains(&format!("replaces proposal:{first}")),
+            "{err}"
+        );
+        let proposed: Vec<_> = logged(&bus)
+            .await
+            .into_iter()
+            .filter(|e| e.envelope.event_type == "command.proposed")
+            .collect();
+        assert_eq!(proposed[0].envelope.payload.get("supersedes"), None);
+        assert_eq!(
+            proposed[1].envelope.payload["supersedes"],
+            json!([format!("proposal:{first}")])
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn an_agents_run_that_needs_confirmation_becomes_a_proposal() {
         let (db, bus) = confirming_bus();
@@ -2375,7 +2413,10 @@ mod tests {
             .run(&agent(), "kv.set", json!({"k": "a", "v": "1"}), true)
             .await
             .unwrap_err();
-        let CommandError::Proposed { proposal, preview } = err else {
+        let CommandError::Proposed {
+            proposal, preview, ..
+        } = err
+        else {
             panic!("{err:?}");
         };
         assert_eq!(preview.command, "kv.set");

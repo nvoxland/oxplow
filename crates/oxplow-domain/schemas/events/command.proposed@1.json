@@ -35,6 +35,13 @@
     "proposal": {
       "description": "`proposal:<id>`.",
       "type": "string"
+    },
+    "supersedes": {
+      "description": "The pending proposals of the same call (`proposal:<id>`) this one\nreplaced — marked superseded in the same transaction.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     }
   },
   "required": [

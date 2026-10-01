@@ -3,5 +3,6 @@
   "command": "config.set",
   "actor_kind": "agent",
   "actor_id": "thr3",
-  "destructive": false
+  "destructive": false,
+  "supersedes": ["proposal:9"]
 }

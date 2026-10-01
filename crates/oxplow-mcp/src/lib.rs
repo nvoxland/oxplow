@@ -5398,10 +5398,14 @@ impl OxplowMcp {
             Ok(outcome) => outcome,
             // Kept for a person: the agent's request is recorded and needs
             // nothing more from it.
-            Err(oxplow_domain::CommandError::Proposed { proposal, preview }) => {
+            Err(oxplow_domain::CommandError::Proposed {
+                proposal,
+                preview,
+                supersedes,
+            }) => {
                 return json_result(&serde_json::json!({
                     "proposal": proposal,
-                    "message": proposed_message(&preview.command, &proposal),
+                    "message": proposed_message(&preview.command, &proposal, &supersedes),
                 }));
             }
             Err(err) => return Err(command_error(err)),
@@ -5496,18 +5500,32 @@ fn command_error(err: oxplow_domain::CommandError) -> McpError {
             ),
             None,
         ),
-        E::Proposed { proposal, preview } => {
-            McpError::invalid_params(proposed_message(&preview.command, proposal), None)
-        }
+        E::Proposed {
+            proposal,
+            preview,
+            supersedes,
+        } => McpError::invalid_params(
+            proposed_message(&preview.command, proposal, supersedes),
+            None,
+        ),
         E::Failed { .. } | E::Busy { .. } => internal(err.to_string()),
     }
 }
 
 /// What an agent is told when its run waits for a person (`proposal:N`).
-fn proposed_message(command: &str, proposal: &str) -> String {
+fn proposed_message(command: &str, proposal: &str, supersedes: &[String]) -> String {
+    let replaces = if supersedes.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " It replaces {}, which no longer waits.",
+            supersedes.join(", ")
+        )
+    };
     format!(
         "`{command}` needs a person's approval; it is recorded as {proposal} and waits in \
-         Approvals (and on the setting's row in Settings). Tell the person; don't run it again."
+         Approvals (and on the setting's row in Settings).{replaces} Tell the person; don't run \
+         it again."
     )
 }
 

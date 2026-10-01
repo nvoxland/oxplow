@@ -156,13 +156,16 @@ refused (`CommandBus::unconfirmed`):
    failure (audited like one), not a proposal.
 2. **Kept** — one transaction inserts the `command_proposal` row
    ([data-model.md](./data-model.md); `proposal_key` supersedes a pending
-   proposal for the same config key or the same command and input) and
+   proposal for the same config key or the same command and input —
+   whichever thread proposed it — and `insert_tx` returns which) and
    logs `command.proposed@1 { proposal, command, actor_kind, actor_id?,
-   destructive }` with the actor's anchors.
-3. **`Proposed { proposal: "proposal:N", preview }`** — IPC code
-   `PROPOSED`; MCP `run_command` turns it into a *successful* result `{
-   proposal, message }` (`proposed_message`: it waits in Approvals and
-   on the setting's row; tell the person; don't run it again). Other MCP
+   destructive, supersedes? }` with the actor's anchors, `supersedes`
+   naming the replaced proposals so the replacement is never silent.
+3. **`Proposed { proposal: "proposal:N", preview, supersedes }`** — IPC
+   code `PROPOSED`; MCP `run_command` turns it into a *successful*
+   result `{ proposal, message }` (`proposed_message`: it waits in
+   Approvals and on the setting's row; "It replaces proposal:M" when it
+   did; tell the person; don't run it again). Other MCP
    tools that run a command report the same message as an error.
 
 **Deciding** is a person's only (`Actor::Human`; an agent, a lens or the

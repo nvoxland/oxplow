@@ -316,6 +316,8 @@ pub enum CommandError {
     Proposed {
         proposal: String,
         preview: Box<Preview>,
+        /// The pending proposals of the same call it replaced.
+        supersedes: Vec<String>,
     },
     /// The handler failed.
     Failed { message: String },
@@ -340,11 +342,21 @@ impl std::fmt::Display for CommandError {
             CommandError::NeedsConfirmation { preview } => {
                 write!(f, "`{}` needs confirmation", preview.command)
             }
-            CommandError::Proposed { proposal, preview } => write!(
-                f,
-                "`{}` needs a person's approval; it is recorded as {proposal}",
-                preview.command
-            ),
+            CommandError::Proposed {
+                proposal,
+                preview,
+                supersedes,
+            } => {
+                write!(
+                    f,
+                    "`{}` needs a person's approval; it is recorded as {proposal}",
+                    preview.command
+                )?;
+                if !supersedes.is_empty() {
+                    write!(f, " (replaces {})", supersedes.join(", "))?;
+                }
+                Ok(())
+            }
             CommandError::Failed { message } => write!(f, "command failed: {message}"),
             CommandError::Busy { message } => {
                 write!(f, "database busy, nothing written: {message}")

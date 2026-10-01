@@ -408,6 +408,10 @@ pub struct CommandProposedV1 {
     pub actor_id: Option<String>,
     /// Whether the command is destructive.
     pub destructive: bool,
+    /// The pending proposals of the same call (`proposal:<id>`) this one
+    /// replaced — marked superseded in the same transaction.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supersedes: Vec<String>,
 }
 
 pub struct CommandProposed;
