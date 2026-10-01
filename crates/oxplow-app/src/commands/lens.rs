@@ -570,6 +570,27 @@ pub async fn run_answer(
     svc: &crate::Services,
     id: i64,
 ) -> Result<extensions::LensRun, DomainError> {
+    Ok(answer_run(svc, id).await?.0)
+}
+
+/// Answer `id`'s run and its text rendering — what an agent reads back
+/// from `show_lens` — resolved in the answer's own thread's worktree and
+/// lens context, the same ones the run used.
+pub async fn text_answer(
+    svc: &crate::Services,
+    id: i64,
+) -> Result<(extensions::LensRun, String), DomainError> {
+    let (run, root, ctx) = answer_run(svc, id).await?;
+    let text = crate::lens_text::text_of(svc, &root, &run, &ctx).await?;
+    Ok((run, text))
+}
+
+/// The one resolution of an answer: its thread's worktree and lens
+/// context, and the run in them.
+async fn answer_run(
+    svc: &crate::Services,
+    id: i64,
+) -> Result<(extensions::LensRun, PathBuf, LensContext), DomainError> {
     let answer = svc
         .thread_answer_store
         .get(id)
@@ -593,16 +614,18 @@ pub async fn run_answer(
             .collect(),
         _ => BTreeMap::new(),
     };
-    match answer.shows {
+    let run = match answer.shows {
         AnswerShows::Lens(lens) => {
-            extensions::run_lens(&svc.sql, &svc.extension_catalog, &root, &lens, params, &ctx).await
+            extensions::run_lens(&svc.sql, &svc.extension_catalog, &root, &lens, params, &ctx)
+                .await?
         }
         AnswerShows::Spec(value) => {
             let spec: LensSpec = serde_json::from_value(value)
                 .map_err(|e| DomainError::Storage(format!("answer {id}'s spec: {e}")))?;
-            extensions::run_spec(&svc.sql, &format!("answer/{id}"), &spec, params, &ctx).await
+            extensions::run_spec(&svc.sql, &format!("answer/{id}"), &spec, params, &ctx).await?
         }
-    }
+    };
+    Ok((run, root, ctx))
 }
 
 #[cfg(test)]
@@ -663,6 +686,14 @@ mod tests {
         assert_eq!(run.lens.id, format!("answer/{id}"));
         assert_eq!(run.result.columns, vec!["title", "id"]);
         assert!(!run.result.rows.is_empty());
+        // Its text rendering comes from the same run, in the answer's own
+        // worktree and context — one resolution, not the caller's.
+        let (texted, text) = text_answer(&fx.svc, id).await.unwrap();
+        assert_eq!(texted.result, run.result);
+        assert!(
+            text.contains("Busy Tasks") || text.contains("title"),
+            "{text}"
+        );
     }
 
     /// An agent shows answers in its own thread only: naming another one

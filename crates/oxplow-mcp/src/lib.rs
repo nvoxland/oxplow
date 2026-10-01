@@ -1820,13 +1820,7 @@ impl OxplowMcp {
             .strip_prefix("answer:")
             .and_then(|n| n.parse().ok())
             .ok_or_else(|| internal("lens.show returned no answer"))?;
-        let run = oxplow_app::commands::lens::run_answer(&self.services, id)
-            .await
-            .map_err(domain_err)?;
-        let stream = self.stream_or_callers(&caller, None).await;
-        let root = self.services.worktrees.resolve(stream.as_deref()).await;
-        let ctx = self.lens_context(stream.as_deref(), None).await?;
-        let text = oxplow_app::lens_text::text_of(&self.services, &root, &run, &ctx)
+        let (run, text) = oxplow_app::commands::lens::text_answer(&self.services, id)
             .await
             .map_err(domain_err)?;
         json_result(&serde_json::json!({ "answer": answer, "title": run.lens.title, "text": text }))
