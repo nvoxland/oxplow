@@ -163,10 +163,20 @@ fn show(target: LensTarget) -> Command {
     let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: ShowInput = parse(input)?;
         let thread: i64 = match input.thread.as_deref() {
-            Some(raw) => raw
-                .parse::<ThreadId>()
-                .map_err(|e| invalid("/thread", e.to_string()))?
-                .value(),
+            Some(raw) => {
+                let named = raw
+                    .parse::<ThreadId>()
+                    .map_err(|e| invalid("/thread", e.to_string()))?;
+                // An agent shows answers in its own thread only; a person
+                // may name any.
+                if ctx.actor.is_agent_driven() && ctx.actor.thread_id() != Some(named) {
+                    return Err(invalid(
+                        "/thread",
+                        format!("an agent shows answers in its own thread, not `{raw}`"),
+                    ));
+                }
+                named.value()
+            }
             None => ctx
                 .actor
                 .thread_id()
@@ -653,6 +663,41 @@ mod tests {
         assert_eq!(run.lens.id, format!("answer/{id}"));
         assert_eq!(run.result.columns, vec!["title", "id"]);
         assert!(!run.result.rows.is_empty());
+    }
+
+    /// An agent shows answers in its own thread only: naming another one
+    /// is refused, and nothing is stored there. A person may name any.
+    #[tokio::test]
+    async fn an_agent_shows_only_in_its_own_thread() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let other = format!("thr{}", fx.thread.value() + 1000);
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                SHOW,
+                json!({ "spec": spec(), "thread": other }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/thread" && message.contains("its own thread")),
+            "{err:?}"
+        );
+        // Naming its own thread is fine.
+        fx.svc
+            .commands
+            .run(
+                &agent(&fx),
+                SHOW,
+                json!({ "spec": spec(), "thread": fx.thread.to_string() }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(events_of(&fx, "lens.shown").await.len(), 1);
     }
 
     /// Agent SQL gets exactly `query_sql`'s rights: a raw table, a write
