@@ -28,6 +28,8 @@
 
 use std::net::SocketAddr;
 
+pub mod components;
+
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -269,10 +271,27 @@ pub fn router(state: DaemonState) -> Router {
             state.clone(),
             require_token,
         ));
+    // Custom component bundles (P6b.D3): ungated — a sandboxed frame can't
+    // carry the token — and outside the CORS layer, so a page can't read
+    // them with `fetch`.
+    let components = Router::new()
+        .route(
+            "/components/{ext}/{component}",
+            get(components::component_root),
+        )
+        .route(
+            "/components/{ext}/{component}/",
+            get(components::component_index),
+        )
+        .route(
+            "/components/{ext}/{component}/{*path}",
+            get(components::component_file),
+        );
     Router::new()
         .route("/health", get(health))
         .merge(guarded)
         .layer(tower_http::cors::CorsLayer::permissive())
+        .merge(components)
         .with_state(state)
 }
 
@@ -386,6 +405,88 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(health.status(), 200);
+    }
+
+    /// P6b.D3: a private extension's declared component bundle is served
+    /// without the token, with a CSP that lets it load only its own files;
+    /// anything else is a 404.
+    #[tokio::test]
+    async fn component_bundles_are_served_with_their_csp_and_nothing_else() {
+        let (svc, dir) = services();
+        let ext = dir.path().join("oxplow/extensions/x");
+        std::fs::create_dir_all(ext.join("components/c/assets")).unwrap();
+        std::fs::create_dir_all(ext.join("lenses")).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: x\nintent:\n  purpose: p\ncustom_components:\n  - { id: c }\n",
+        )
+        .unwrap();
+        std::fs::write(ext.join("components/c/index.html"), "<!doctype html>hi").unwrap();
+        std::fs::write(ext.join("components/c/assets/app.js"), "1").unwrap();
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
+            .await
+            .unwrap();
+        let base = format!("http://{}", daemon.bind_addr);
+        let bare = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        for path in ["/components/x/c/", "/components/x/c/index.html"] {
+            let resp = bare.get(format!("{base}{path}")).send().await.unwrap();
+            assert_eq!(resp.status(), 200, "{path}");
+            let h = resp.headers();
+            assert_eq!(h["content-type"], "text/html; charset=utf-8");
+            assert_eq!(h["cache-control"], "no-store");
+            assert_eq!(h["x-content-type-options"], "nosniff");
+            assert_eq!(h["referrer-policy"], "no-referrer");
+            assert_eq!(
+                h["content-security-policy"].to_str().unwrap(),
+                components::bundle_csp(Some(&format!("{base}/components/x/c/")))
+            );
+            assert!(
+                h.get("access-control-allow-origin").is_none(),
+                "outside CORS"
+            );
+            assert_eq!(resp.text().await.unwrap(), "<!doctype html>hi");
+        }
+        let js = bare
+            .get(format!("{base}/components/x/c/assets/app.js"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            js.headers()["content-type"],
+            "text/javascript; charset=utf-8"
+        );
+        let folder = bare
+            .get(format!("{base}/components/x/c"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(folder.status(), 308);
+        assert_eq!(folder.headers()["location"], "/components/x/c/");
+        for path in [
+            "/components/x/nope/",
+            "/components/nope/c/",
+            "/components/oxplow-review/c/",
+            "/components/x/c/%2e%2e/%2e%2e/extension.yaml",
+            "/components/x/c/assets",
+        ] {
+            let resp = bare.get(format!("{base}{path}")).send().await.unwrap();
+            assert_eq!(resp.status(), 404, "{path}");
+        }
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            "extensions:\n  disabled: [x]\n",
+        )
+        .unwrap();
+        let resp = bare
+            .get(format!("{base}/components/x/c/"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 404, "a disabled extension's");
     }
 
     #[tokio::test]

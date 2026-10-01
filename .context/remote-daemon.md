@@ -152,6 +152,30 @@ token**; only the person's renderer holds it.
 - **Headless dev:** start the daemon, read its `ui token:` line, and run
   vite with `VITE_OXPLOW_REMOTE=… VITE_OXPLOW_REMOTE_TOKEN=…`.
 
+**Ungated: `/health` and custom component bundles** (P6b.D3,
+`oxplow-daemon/src/components.rs`). `GET
+/components/{ext}/{component}/{*path}` (`?stream_id=` picks the
+worktree; the bare folder URL redirects to the trailing-slash form so a
+bundle's relative URLs resolve inside it) serves a private, enabled
+extension's declared component bundle for the sandboxed frame a
+`viz: custom` lens renders. It can't take the token — a frame can't
+carry it — and needn't: it serves the extension's own files, never
+project data (the frame reaches that only through the host's bridged
+RPCs). It is mounted **outside the permissive CORS layer**, so a web
+page can't read a bundle with `fetch`. 404 for a missing, disabled or
+bundled extension, an undeclared component, or anything but a plain file
+inside the bundle (`safe_bundle_path`: no `..`, `.`, empty, backslash or
+NUL segment, no absolute path, no symlink or directory, and resolved
+inside the bundle); 413 past the size cap. Every 200 has `Content-Type`
+from a small table (`content_type_for`), `X-Content-Type-Options:
+nosniff`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer` and
+a CSP that lets the bundle load only its own files — `default-src
+'none'`, scripts, styles, images and fonts from `'self'` and the bundle
+folder's URL (a sandboxed frame's origin is opaque), `connect-src
+'none'`, `form-action 'none'`, `base-uri 'none'` (`bundle_csp`). The
+main window's CSP (`tauri.conf.json`) has `frame-src http://127.0.0.1:*`
+for it, pinned by `tauriCsp.test.ts`.
+
 ## Dispatch context
 
 `dispatch` takes an `RpcContext { services, plugin_runtime }`
