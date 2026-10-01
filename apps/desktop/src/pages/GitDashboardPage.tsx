@@ -1,3 +1,4 @@
+import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MergeReadiness, OpOutcome, RemoteBranchEntry, RevisionInfo, Stream, StatusCounts } from "../api.js";
 import {
@@ -661,7 +662,12 @@ function RecentCommitsCard({
       }
     >
       {log.commits.length === 0 ? (
-        <div style={muted}>No commits yet.</div>
+        <EmptyState
+          compact
+          title="No commits yet"
+          text="Commits on this branch show up here as they're made."
+          prompts={["What's uncommitted right now, and what should go in the first commit?"]}
+        />
       ) : (
         <CommitGraphTable
           commits={log.commits}

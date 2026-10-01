@@ -154,9 +154,11 @@ export function CommentsInboxPage({
             text="Select text in a wiki page, file, task or the agent's output and add one; the agent can answer them."
           />
         ) : groups.length === 0 ? (
-          <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
-            No unresolved comments.{resolvedOptions.length > 0 ? " Use the filter above to show resolved ones." : ""}
-          </div>
+          <EmptyState
+            testId="comments-none-unresolved"
+            title="No unresolved comments"
+            text={resolvedOptions.length > 0 ? "Use the filter above to show resolved ones." : "Every comment here is resolved."}
+          />
         ) : (
           groups.map((g) => (
             <section key={`${g.kind}:${g.id}`} style={{ display: "flex", flexDirection: "column", gap: 6 }}>

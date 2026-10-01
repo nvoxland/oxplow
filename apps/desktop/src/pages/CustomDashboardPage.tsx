@@ -1,3 +1,4 @@
+import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -350,31 +351,26 @@ export function CustomDashboardPage({
         </div>
 
         {items.length === 0 ? (
-          <div
-            data-testid="dashboard-empty"
-            style={{
-              border: "1px dashed var(--border-subtle)",
-              borderRadius: 6,
-              padding: 32,
-              textAlign: "center",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 12,
-            }}
-          >
-            <div style={{ opacity: 0.7 }}>No tiles yet. Add a metric to get started.</div>
-            <div style={{ fontSize: 12, opacity: 0.5 }}>Right-click anywhere here, or use “+ Add metric”.</div>
-            <button
-              type="button"
-              onClick={(e) => {
-                const r = e.currentTarget.getBoundingClientRect();
-                setPickerAt({ x: r.left, y: r.bottom + 4 });
-              }}
-              style={buttonStyle}
+          <div style={{ border: "1px dashed var(--border-subtle)", borderRadius: 6, padding: "12px 24px" }}>
+            <EmptyState
+              testId="dashboard-empty"
+              title="No tiles yet"
+              text="Right-click anywhere here, or use + Add metric; the agent can pin a chart or a lens too."
+              prompts={["Pin a chart of this project's test coverage over time to this dashboard"]}
             >
-              + Add metric
-            </button>
+              <div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setPickerAt({ x: r.left, y: r.bottom + 4 });
+                  }}
+                  style={buttonStyle}
+                >
+                  + Add metric
+                </button>
+              </div>
+            </EmptyState>
           </div>
         ) : (
           <div

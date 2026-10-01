@@ -1,3 +1,4 @@
+import { EmptyState } from "../Prompts/EmptyState.js";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -774,11 +775,11 @@ export function ProjectPanel({
         {vcsEnabled && statusSummary ? <GitSummary summary={statusSummary} /> : null}
         {error ? <div style={{ color: "#ff6b6b" }}>{error}</div> : null}
         {rootEntries.length === 0 && !loadingDirs[""] ? (
-          <div style={{ color: "var(--muted)" }}>No files loaded yet.</div>
+          <EmptyState compact title="No files yet" text="The project's files show up here once the workspace is indexed." />
         ) : (
           <>
             {effectiveChangedOnly && scopedPaths !== null && scopedPaths.length === 0 ? (
-              <div style={{ color: "var(--muted)" }}>No changes in this scope.</div>
+              <EmptyState compact title="No changes in this scope" text="Turn off Changed only to see every file." />
             ) : null}
             <TreeEntries
               parentPath=""

@@ -24,7 +24,7 @@ export function EmptyState({
   testId?: string;
 }) {
   return (
-    <div data-testid={testId} style={compact ? compactStyle : boxStyle}>
+    <div data-testid={testId} data-empty-state="" style={compact ? compactStyle : boxStyle}>
       <div style={compact ? undefined : { fontWeight: 600 }}>{title}</div>
       {text ? <div style={{ color: "var(--text-secondary)" }}>{text}</div> : null}
       {children}

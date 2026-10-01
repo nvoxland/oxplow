@@ -1,3 +1,4 @@
+import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatMetricValue, formatMetricValueExact } from "../components/format";
 
@@ -317,18 +318,20 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
         {loading ? (
           <div style={{ opacity: 0.6 }}>Loading…</div>
         ) : rows.length === 0 ? (
-          <div style={{ opacity: 0.6, lineHeight: 1.6 }}>
-            No metrics recorded yet. Run tests, coverage, or static analysis —
-            oxplow records them into the substrate automatically. For a custom
-            metric, ask your agent (the <code>/oxplow:new-metric</code> skill).
-          </div>
+          <EmptyState
+            testId="recorded-empty"
+            title="No metrics recorded yet"
+            text="Run tests, coverage or static analysis and oxplow records them here automatically."
+            prompts={["Add a metric that tracks how many TODO comments this project has"]}
+          />
         ) : sections.length === 0 ? (
           // The Show mode + search can empty the list even though metrics exist,
           // which the "nothing recorded yet" state above doesn't cover.
-          <div data-testid="recorded-no-match" style={{ opacity: 0.6, lineHeight: 1.6 }}>
-            No metrics match.
-            {showMode === "enabled" ? " Try Show: All to include metrics this project hasn't enabled." : ""}
-          </div>
+          <EmptyState
+            testId="recorded-no-match"
+            title="No metrics match"
+            text={showMode === "enabled" ? "Try Show: All to include metrics this project hasn't enabled." : "Clear the search to see them all."}
+          />
         ) : (
           // A section only exists when it has rows — `buildMetricSections` groups
           // what it's given, so filtering a category empty removes its heading too.

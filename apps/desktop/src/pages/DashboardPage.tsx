@@ -1,3 +1,4 @@
+import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { PageVisitApi, Stream, TopVisitedRowApi } from "../api.js";
@@ -49,12 +50,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       </h2>
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{children}</div>
     </section>
-  );
-}
-
-function EmptyHint({ children }: { children: ReactNode }) {
-  return (
-    <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)", fontStyle: "italic" }}>{children}</div>
   );
 }
 
@@ -158,7 +153,7 @@ function VisitsBrowser({
       </div>
       {mode === "recent" ? (
         recent.length === 0 ? (
-          <EmptyHint>No visits recorded yet.</EmptyHint>
+          <EmptyState compact title="No visits yet" text="Pages you open show up here, most recent first." />
         ) : (
           <LinkList>
             {recent.map((r) => (
@@ -175,7 +170,7 @@ function VisitsBrowser({
           </LinkList>
         )
       ) : top.length === 0 ? (
-        <EmptyHint>No visits recorded yet.</EmptyHint>
+        <EmptyState compact title="No visits yet" text="The pages you open most over the last 30 days show up here." />
       ) : (
         <LinkList>
           {top.map((r) => (
@@ -263,7 +258,7 @@ function BookmarksManager({
 
   return (
     <Section title="Bookmarks">
-      {bookmarks.length === 0 ? <EmptyHint>No bookmarks yet — star a page to pin it here.</EmptyHint> : null}
+      {bookmarks.length === 0 ? <EmptyState compact title="No bookmarks yet" text="Star a page to pin it here." /> : null}
       <LinkList>
       {bookmarks.map((b) => (
         <li

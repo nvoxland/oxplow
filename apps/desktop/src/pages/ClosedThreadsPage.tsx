@@ -1,3 +1,4 @@
+import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { useCallback, useEffect, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import type { Stream, Thread } from "../tauri-bridge/index.js";
@@ -81,8 +82,12 @@ export function ClosedThreadsPage({ stream, onAfterReopen }: ClosedThreadsPagePr
       {loading && rows.length === 0 ? (
         <div style={{ color: "var(--muted)", padding: 16 }}>Loading…</div>
       ) : rows.length === 0 ? (
-        <div style={{ color: "var(--muted)", padding: 16 }}>
-          No closed threads. Threads you close from the rail's kebab menu show up here.
+        <div style={{ padding: "0 16px" }}>
+          <EmptyState
+            testId="closed-threads-empty"
+            title="No closed threads"
+            text="Threads you close from the rail's kebab menu show up here, with the work they finished."
+          />
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 12 }}>

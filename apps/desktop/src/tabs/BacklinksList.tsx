@@ -1,3 +1,4 @@
+import { EmptyState } from "../components/Prompts/EmptyState.js";
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
 import type { BacklinkEntry } from "./backlinkTypes.js";
@@ -123,9 +124,12 @@ export function BacklinksList({
   const totalEntries = entries.length + snapshotEntries.length + commitEntries.length;
   if (totalEntries === 0) {
     return (
-      <div data-testid="backlinks-list-empty" style={{ color: "var(--text-secondary)", fontStyle: "italic" }}>
-        No backlinks yet.
-      </div>
+      <EmptyState
+        compact
+        testId="backlinks-list-empty"
+        title="No backlinks yet"
+        text="Pages, tasks and notes that link here show up as they're written."
+      />
     );
   }
   return (

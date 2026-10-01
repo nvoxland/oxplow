@@ -541,7 +541,10 @@ declaring *what it is* and mounting the generic layer.
   person can hand the agent. Each prompt is an Ask — it fills the agent's
   input and never sends. `compact` is the one-line form (rail sections,
   the ACP transcript). Don't offer prompts for what an agent can't do
-  (AI providers, keys, consent): say who does it instead.
+  (AI providers, keys, consent): say who does it instead. Its root
+  carries `data-empty-state`, which is how a test tells an `EmptyState`
+  from plain copy (`components/Prompts/emptyStates.test.tsx` mounts the
+  surfaces that mount cheaply); there is no second empty-copy helper.
 
 ## Feedback
 
