@@ -97,7 +97,7 @@ query: |
   FROM v_task
   WHERE status = 'blocked' AND stream_id = :stream_id
   ORDER BY updated_at DESC
-viz: table                      # table | list | number | markdown | bar | line | treemap | grid
+viz: table                      # table | list | number | markdown | bar | line | treemap | grid | custom
 columns:                        # optional; controls headers, order and links
   - { key: title, label: Task, link: { kind: task, from: id } }
   - { key: status }
@@ -124,6 +124,11 @@ empty: Nothing is waiting on you.
     lens's first column link.
   - `grid` stacks other lenses: `children: [slug, other-ext/slug]`. Each
     child gets the params it declares from this lens's params.
+  - `custom` (experimental, private extensions only) renders one of the
+    extension's `custom_components` in a sandboxed frame: `custom: {
+    component: <id>, props: { … } }`. It still needs a `query` — its rows
+    are what the component gets and what an agent reads (as a table).
+    Reach for it only when no built-in viz fits.
 - **`link.kind`** makes cells clickable:
   - `task` takes a task id (a bare `v_task.id` number works).
   - `file` takes a repo-relative path; add `line: <column>` to open at a
@@ -152,10 +157,45 @@ empty: Nothing is waiting on you.
   - `effort.review.details` (an effort's diff) → `effort_id`, `change_id`;
   - `vcs.commit.details` (a commit page) and `vcs.status.details` (the
     working tree) → `change_id` (the `v_change*` analysis);
-  - `work_item.detail.body` (a work item's page) → `ref`, `task_id`;
+  - `vcs.status.header` (a strip above the uncommitted changes) and
+    `vcs.history.sidebar` (beside Git History) → `stream_id`;
+  - `work_item.detail.body` and `work_item.detail.sidebar` (a work item's
+    page, any provider's) → `ref`, `task_id` (null for an item that isn't
+    an oxplow task);
   - `thread.plan.header` (the Work panel, compact) → `thread_id`;
   - `settings.section` → no params; Settings shows a section named after
     the extension with its mounted lenses (its status or setup views).
+
+  The old names (`task-detail`, `commit`, …) are errors naming the new
+  one.
+- **`ui.commands`** put a command in core menus for a ref:
+  `ui: { commands: [{ command, label, about, placement?, input? }] }`.
+  `about` is a ref kind (`work_item`, `commit`, …); `placement` is `menu`
+  (the page's nav bar) and/or `context` (a row's right-click); `input`
+  defaults to `{ ref: "{{ref}}" }` (`"{{ref.id}}"` binds the id alone).
+  It runs as the person who picks it. Use it for a provider's own
+  commands (`fake.comment`) or a core one with a fixed input.
+- **`ui.decorators`** (experimental, private only) add a label to refs:
+  `{ model, kind, placement: ref-chip | row-badge, label, color? }` — the
+  model (this extension's) needs a `ref` column plus the `label` (and
+  `color`) columns; a chip shows on that ref's page, a badge after a
+  linked cell in lens rows.
+- **`commands:`** register commands of your own, as
+  `<extension name with - → _>.<name>`: `{ name, summary, input_schema,
+  entry: handlers/x.star, input?: "SELECT … WHERE ref = :ref", confirm?,
+  effect?, invokers?, examples? }`. The Starlark `transform(x)` gets `{
+  input, rows }` and returns `{ commands: [{ name, input }], result? }`;
+  those core commands run as the caller in one transaction (each one's
+  own policy and confirmation apply; one undo). It does no I/O, has 5 s,
+  and `examples` (at most 10) are dry-run by `check`.
+- **`custom_components:`** (experimental, private only) are web bundles a
+  `viz: custom` lens renders: `{ id, title?, bundle?: components/<id>,
+  assets: [lens ids], commands: [names] }`. The bundle (an `index.html`
+  and its files, at most 256 files / 5 MiB) runs sandboxed — no network,
+  no storage, no token — and reaches oxplow only by asking the host to
+  run one of its `assets` lenses, invoke one of its `commands` (the
+  person confirms in the host) or navigate. See `docs/guide/lenses.md`
+  for the protocol.
 - **Pages** give a lens a place of its own: `pages: [{ id, title, icon?,
   category, lens }]` opens it full-page at `page:ext.<extension>.<id>` and
   lists it in the launcher under `category` (Work, Code, Git, Activity,

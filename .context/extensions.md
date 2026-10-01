@@ -22,8 +22,9 @@ the bundled `oxplow-analytics` example extension.
 >     mechanics and decisions are in
 >     [semantic-layer.md](./semantic-layer.md) → "User and extension
 >     sources", and a tested example is in `examples/extensions/github/`.
->   - **slots** (`effort.review.details`, `commit`, `uncommitted`, `work_item.detail.body`,
->     `thread`), **advisories**, per-project **disabling**, and the
+>   - **slots** (now `effort.review.details`, `vcs.commit.details`,
+>     `vcs.status.details`, `work_item.detail.body`, `thread.plan.header`),
+>     **advisories**, per-project **disabling**, and the
 >     **`oxplow-analytics` extraction** (tsk280): every analytics page and
 >     widget is now a lens in that bundled extension, and core works with
 >     it disabled (checked headless, 2026-09-27).
@@ -60,7 +61,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
 - **Reading.** Everything is read from the **stream's worktree**, through
   `Services.extension_catalog` (`crates/oxplow-app/src/extension_catalog.rs`):
   a per-root cache behind a stat-only fingerprint of `oxplow/extensions/**`
-  and `.oxplow/project.yaml`, so a hit costs ~60 µs instead of the ~3 ms
+  (every file in the folder — a custom component's bundle too, so its
+  file cap keeps that walk small) and `.oxplow/project.yaml`, so a hit costs ~60 µs instead of the ~3 ms
   parse and an edit still shows up on the very next call (see
   [performance.md](./performance.md)). `find_lens`, `run_lens`,
   `validate_extension`, `list_data_entities` and the advisory/metric/source
@@ -367,9 +369,13 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     or the mount is an error. Loaded as `Extension.ui.slots`.
   - `src/lens/LensSlots.tsx` renders a slot: every mounted lens, run with
     the slot params it declares (`slotRuns`), re-run on data events.
-    DiffViewPage offers `effort_id` and `change_id`, TaskPage `task_id`,
-    PlanPane `thread_id` (the compact `strip` variant, which hides lenses
-    with no rows), GitCommitPage and UncommittedChangesPage `change_id`.
+    DiffViewPage offers `effort_id` and `change_id`; TaskPage and
+    WorkItemPage `ref` and `task_id` (body and sidebar); PlanPane
+    `thread_id` (the compact `strip` variant, which hides lenses with no
+    rows); GitCommitPage and UncommittedChangesPage `change_id`, plus
+    UncommittedChangesPage's strip and GitHistoryPage's side column
+    `stream_id` (a side column only when something mounts there —
+    `useSlotMounted`).
     Numeric ids come from `numericRowId` (`tsk42` → 42).
   - **Latest request wins** (`src/request-guard.ts`, tsk370). LensSlots,
     LensPage and ExploreDataPage `begin()` each fetch and apply its result
@@ -711,8 +717,10 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   binding.
 - `viz`: `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`,
   `grid` (child lenses, `children`), `tree`, `timeline`, `detail`,
-  `steps`, `hunks` or `form` (`form: { command, defaults? }`; no `query`
-  needed). Each component names the columns it draws from in
+  `steps`, `hunks`, `form` (`form: { command, defaults? }`; no `query`
+  needed) or — experimental, private only — `custom` (`custom: {
+  component, props? }`, one of the extension's `custom_components`; see
+  "Custom components"). Each component names the columns it draws from in
   its own block: `chart` (`x`, `y`, `series`, `label`, `size`, `group`),
   `tree` (`id`, `parent`, `label`), `timeline` (`at`, `label`, `ref`),
   `steps` (`label`, `status`), `hunks` (`path`, `from`, `to` — two
@@ -1304,10 +1312,10 @@ What moves out of core, and what it becomes:
 |---|---|
 | Planning / Review / Quality dashboards | `grid` lenses (**done**: `planning`, `review`, `quality`) |
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
-| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` grid in the `effort.review.details` / `commit` / `uncommitted` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
+| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` grid in the `effort.review.details` / `vcs.commit.details` / `vcs.status.details` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
 | Gauges (`oxplow/gauges/*.star`, idiom `.star`) | extensions can declare gauges now (tsk311); the built-in catalog stays core as the opt-in standard library |
 | Gauge-threshold nudges | **done:** the `threshold-crossed` advisory (with `coverage-target` and `metric-deltas`) |
-| Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread` slot) |
+| Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
 
@@ -1355,7 +1363,7 @@ available to every extension:
 - `bar`, `line`, `treemap` and `grid` viz, with `chart` and `children`.
 - `commit` and `metric` link kinds; `file` links with `line`; `task`
   links accept a bare `v_task.id`.
-- `work_item.detail.body` and `thread` slots, with slot params checked at load.
+- `work_item.detail.body` and `thread.plan.header` slots, with slot params checked at load.
 - Lens `launcher.category` and `hidden`.
 - Lens `actions:` as commands (P6.B1; the tsk329 registry retired).
 - Disabling extensions per project.

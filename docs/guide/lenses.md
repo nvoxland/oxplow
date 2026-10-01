@@ -36,7 +36,7 @@ params:
 query: |
   SELECT id, title, updated_at FROM v_task
   WHERE status = 'blocked' AND stream_id = :stream_id
-viz: table            # table | list | number | markdown | bar | line | treemap | grid
+viz: table            # table | list | number | markdown | bar | line | treemap | grid | custom
 columns:
   - { key: title, label: Task, link: { kind: task, from: id } }
   - { key: updated_at, label: Updated }

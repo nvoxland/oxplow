@@ -1706,8 +1706,17 @@ NULL when it can't be dry-run), and `decision` — `pending`, `approved`
 `proposal_key(command, input)` is `config:<key>` for `config.set` /
 `config.unset`, else the command and its input with keys sorted;
 `insert_tx` marks pending rows with the same key `superseded` (with
-`superseded_by`). `approve_tx` / `decline_tx` decide a pending row once —
-a decided one is `Invalid`, a missing one `NotFound`. No expiry. Written
+`superseded_by`) and returns which (`Inserted { id, superseded }`, for
+`command.proposed@1.supersedes`). `approve_tx` / `decline_tx` decide a
+pending row once — a decided one is `Invalid`, a missing one `NotFound`.
+An `External` command's approval is the claim trio instead: `claim_tx`
+marks it approved with no `audit_id` before the run, `finish_claim_tx`
+names the run's audit row, and `release_claim_tx` makes it pending again
+when the run failed. `dry_run_json` is the `Tx` handler's `result` run
+confirmed and rolled back: `config.set` / `config.unset` give `{ key,
+before, after, changed }`, a composite `{ result, children: [{ name,
+input, result, inverse? }] }`, any other command its own result. No
+expiry. Written
 inside the bus's transactions; read as `v_command_proposal` (ref
 `proposal:<id>`). Events `command.proposed@1`, `command.approved@1`,
 `command.declined@1`.

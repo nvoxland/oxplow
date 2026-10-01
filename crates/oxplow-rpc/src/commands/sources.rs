@@ -75,9 +75,8 @@ async fn shared_extensions(svc: &Services) -> Vec<oxplow_app::extensions::Extens
     svc.extension_catalog.get(&root).to_vec()
 }
 
-/// Approve one of the project's programs as it is now. UI only: consent to
 /// What approving provider `instance` as it is on disk would change
-/// against what it runs with now (P6b.E3) — what Settings → Data shows
+/// against what was approved last (P6b.E3) — what Settings → Data shows
 /// before its Approve.
 pub async fn provider_declaration_effects(
     svc: &Services,
@@ -86,6 +85,7 @@ pub async fn provider_declaration_effects(
     Ok(svc.providers.declaration_effects(&instance).await?)
 }
 
+/// Approve one of the project's programs as it is now. UI only: consent to
 /// run a program from the repo is a person's (tsk331).
 pub async fn approve_project_program(
     svc: &Services,

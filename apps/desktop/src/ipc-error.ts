@@ -28,6 +28,7 @@ export function ipcErrorMessage(err: unknown): string {
 }
 
 /** The `code` of a command's error payload (`NEEDS_CONFIRMATION`,
+ *  `PROPOSED` — an agent-driven run kept for a person's approval —
  *  `INVALID`, `DENIED`, …), or null for a string payload. */
 export function ipcErrorCode(err: unknown): string | null {
   if (err && typeof err === "object") {

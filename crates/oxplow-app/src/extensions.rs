@@ -3643,10 +3643,6 @@ empty: No tasks.
         run_git(repo, &["rev-parse", "HEAD"]).unwrap()
     }
 
-    /// Before anything lands in the repo a person sees what the extension
-    /// declares (sources with their programs, hosts and credentials) and
-    /// what's wrong with it; install then takes exactly the commit they
-    /// reviewed (tsk378).
     /// P6b.E2: an update is reviewed against the installed version — a
     /// changed lens shows its text before and after.
     #[tokio::test]
@@ -3715,6 +3711,10 @@ empty: No tasks.
         assert_eq!(broken.effects, None);
     }
 
+    /// Before anything lands in the repo a person sees what the extension
+    /// declares (sources with their programs, hosts and credentials) and
+    /// what's wrong with it; install then takes exactly the commit they
+    /// reviewed (tsk378).
     #[tokio::test]
     async fn review_shows_what_an_extension_declares_before_install() {
         let project = tempfile::tempdir().unwrap();

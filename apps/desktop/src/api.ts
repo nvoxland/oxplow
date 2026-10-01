@@ -843,15 +843,15 @@ export async function listProjectPrograms(): Promise<ProjectProgram[]> {
   return unwrap(await commands.listProjectPrograms());
 }
 
-/// A person approves one of the project's programs (Settings → Data).
-/// `version` is the listing's, the one the person reviewed; a program that
-/// changed since is refused.
 /** What approving provider `instance` as it is on disk would change
- *  against what it runs with now (P6b.E3). */
+ *  against what was approved last (P6b.E3). */
 export async function providerDeclarationEffects(instance: string): Promise<ProviderEffect> {
   return unwrap(await commands.providerDeclarationEffects(instance));
 }
 
+/// A person approves one of the project's programs (Settings → Data).
+/// `version` is the listing's, the one the person reviewed; a program that
+/// changed since is refused.
 export async function approveProjectProgram(
   kind: ProgramKind,
   name: string,
