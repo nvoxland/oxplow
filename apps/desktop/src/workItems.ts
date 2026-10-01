@@ -167,22 +167,6 @@ export async function readWorkItem(ref: string): Promise<{ item: WorkItem | null
   return { item: itemsFromResult(res)[0] ?? null, reads: res.reads };
 }
 
-/** The provider segment of a work item ref (`work_item:<provider>:<id>`). */
-export function providerOf(ref: string): string | null {
-  // A provider id is lowercase snake_case (`providers::spec`).
-  const m = /^work_item:([a-z][a-z0-9_]*):/.exec(ref);
-  return m ? m[1]! : null;
-}
-
-/** The command that does `verb` to `ref`'s item: oxplow's `work_item.*`,
- *  another provider's `<provider>.<verb>`. A string that isn't a work
- *  item ref names none. */
-export function workItemCommand(ref: string, verb: "transition" | "comment" | "link"): string {
-  const provider = providerOf(ref);
-  if (provider === null) throw new Error(`\`${ref}\` isn't a work item ref`);
-  return provider === "oxplow" ? `work_item.${verb}` : `${provider}.${verb}`;
-}
-
 /** A list of work items, with what it read. */
 export async function readWorkItems(opts: {
   scope: WorkItemScope;
@@ -204,20 +188,11 @@ export function boardColumns(items: WorkItem[]): BoardColumn[] {
   return CANONICAL_STATES.map((state) => ({ state, items: items.filter((i) => i.state === state) }));
 }
 
-/** oxplow's status for a canonical state (`todo` is `ready`). */
-export function statusFor(state: CanonicalState): TaskStatus {
-  return state === "todo" ? "ready" : state;
-}
-
-/** Move an item to a canonical state through its provider: oxplow's
- *  `work_item.transition` (with oxplow's status), another provider's
- *  `<provider>.transition` (with the canonical state). */
+/** Move an item to a canonical state: `work_item.transition`, which the
+ *  bus dispatches to the item's provider (one write path for every
+ *  provider). */
 export function transitionWorkItem(ref: string, state: CanonicalState): Promise<boolean> {
-  const command = workItemCommand(ref, "transition");
-  return personCommands.run(`Move to ${STATE_LABEL[state]}`, command, {
-    ref,
-    to: command === "work_item.transition" ? statusFor(state) : state,
-  });
+  return personCommands.run(`Move to ${STATE_LABEL[state]}`, "work_item.transition", { ref, to: state });
 }
 
 /** A canonical state as a person reads it. */
@@ -236,7 +211,7 @@ export const STATE_LABEL: Record<CanonicalState, string> = {
 export type { WorkItemsFeatures };
 
 /** No feature declared. */
-export const NO_FEATURES: WorkItemsFeatures = { hierarchy: false, comments: false, links: false, in_progress_opens_effort: false };
+export const NO_FEATURES: WorkItemsFeatures = { hierarchy: false, comments: false, links: false, delete: false, in_progress_opens_effort: false };
 
 /** One capability's provider, with its flags as declared. */
 export interface CapabilityProvider {
@@ -286,6 +261,7 @@ export function featuresFor(providers: CapabilityProvider[], provider: string): 
     hierarchy: f.hierarchy === true,
     comments: f.comments === true,
     links: f.links === true,
+    delete: f.delete === true,
     in_progress_opens_effort: f.in_progress_opens_effort === true,
   };
 }
@@ -457,13 +433,18 @@ export async function createTask(
   threadId: string | null,
   input: { title: string; description?: string; parentId?: string | null; status?: TaskStatus; priority?: TaskPriority },
 ): Promise<string> {
-  const out = await runCommand("work_item.create", {
-    title: input.title,
-    ...(input.description ? { description: input.description } : {}),
-    ...(input.parentId ? { parent_ref: taskRef(input.parentId) } : {}),
-    ...(input.status ? { status: input.status } : {}),
-    ...(input.priority ? { priority: input.priority } : {}),
+  const native = {
     ...(threadId ? { thread: threadId } : {}),
+    ...(input.priority ? { priority: input.priority } : {}),
+  };
+  const out = await runCommand("work_item.create", {
+    provider: "oxplow",
+    title: input.title,
+    ...(input.description ? { body: input.description } : {}),
+    ...(input.parentId ? { parent_ref: taskRef(input.parentId) } : {}),
+    // oxplow's status is its native state (the canonical one follows).
+    ...(input.status ? { native_state: input.status } : {}),
+    ...(Object.keys(native).length > 0 ? { native } : {}),
   });
   return String((out.result as { ref?: unknown } | null)?.ref ?? "");
 }
@@ -476,10 +457,10 @@ export async function updateTask(
   await runCommand("work_item.update", {
     ref: taskRef(id),
     ...(changes.title !== undefined ? { title: changes.title } : {}),
-    ...(changes.description !== undefined ? { description: changes.description } : {}),
+    ...(changes.description !== undefined ? { body: changes.description } : {}),
     ...(changes.parentId !== undefined ? { parent_ref: changes.parentId === null ? "" : taskRef(changes.parentId) } : {}),
-    ...(changes.status !== undefined ? { status: changes.status } : {}),
-    ...(changes.priority !== undefined ? { priority: changes.priority } : {}),
+    ...(changes.status !== undefined ? { native_state: changes.status } : {}),
+    ...(changes.priority !== undefined ? { native: { priority: changes.priority } } : {}),
   });
 }
 

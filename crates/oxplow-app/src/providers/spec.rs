@@ -35,8 +35,9 @@ pub fn allowed_event_types(capability: &str) -> &'static [(&'static str, u32)] {
     }
 }
 
-/// The commands a work-items provider must declare (`link` and `comment`
-/// too when its features say so): what `ExternalWorkItems` calls.
+/// The verbs a work-items provider must declare (`link`, `comment` and
+/// `delete` too when its features say so): what the dispatching
+/// `work_item.*` commands call through `ExternalWorkItems`.
 pub const WORK_ITEMS_COMMANDS: &[&str] = &["create", "update", "transition"];
 
 /// One declared provider.
@@ -184,23 +185,35 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
         if features.comments {
             needed.push("comment");
         }
+        if features.delete {
+            needed.push("delete");
+        }
         if features.in_progress_opens_effort {
             return Err(format!(
                 "provider `{id}`: only oxplow's own tasks open efforts on in_progress"
             ));
         }
         for name in needed {
-            let Some(command) = declared.commands.iter().find(|c| c.name == name) else {
+            if !declared.commands.iter().any(|c| c.name == name) {
                 return Err(format!(
-                    "provider `{id}` implements work_items but declares no `{name}` command"
+                    "provider `{id}` implements work_items but declares no `{name}` verb"
                 ));
-            };
-            // `work_item.*` calls it, and that is what a person confirms;
-            // a verb confirming on its own could never run.
-            if command.confirm == "always" {
+            }
+        }
+        // `work_item.<verb>` runs it, and that command's spec — not the
+        // verb's — is what is confirmed and gated: a verb records an item
+        // and never asks on its own.
+        for command in declared
+            .commands
+            .iter()
+            .filter(|c| oxplow_domain::work_items::VERBS.contains(&c.name.as_str()))
+        {
+            if command.confirm != "never" || command.effect != "record" {
                 return Err(format!(
-                    "provider `{id}` command `{name}`: a work_items verb can't be `confirm: \
-                     always` (the `work_item.*` command calling it is what a person confirms)"
+                    "provider `{id}` verb `{}`: a work_items verb is `confirm: never` and \
+                     `effect: record` (the `work_item.{}` command calling it is what a person \
+                     confirms)",
+                    command.name, command.name
                 ));
             }
         }

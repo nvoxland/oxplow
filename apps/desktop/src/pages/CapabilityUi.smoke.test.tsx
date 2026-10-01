@@ -113,6 +113,7 @@ test("another provider's item, with every flag off, is its core content and no m
   expect(view.queryByTestId("work-item-comment-open")).toBeNull();
   expect(view.queryByTestId("work-item-link-open")).toBeNull();
   expect(view.queryByTestId("work-item-parent")).toBeNull();
+  expect(view.queryByTestId("work-item-delete-trigger")).toBeNull();
   expect(view.getByTestId("work-item-move-done")).toBeTruthy();
   await expectPlain(view);
 });

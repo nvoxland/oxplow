@@ -1,14 +1,49 @@
-//! Task writes made on someone's behalf (MCP, RPC). A status change is
-//! always the `work_item.transition` command, run as the actor — so it is
-//! audited, logs `work_item.transitioned` caused by `command.executed`,
-//! and opens or closes the effort in the same transaction. Other fields
-//! are plain row writes. (P2.6.3, tsk455; `.context/commands.md`.)
+//! Task writes made on someone's behalf (MCP, RPC): oxplow's tasks
+//! through the `work_item.*` commands (the one write surface,
+//! `.context/commands.md`), run as the actor — so each is audited, logs
+//! its events caused by `command.executed`, and opens or closes the
+//! effort in the same transaction. The callers speak oxplow's task shape
+//! (a status, a priority, a thread); this module builds the commands'
+//! `v_work_item`-shaped inputs from it (a status is oxplow's
+//! `native_state` — a transition names its canonical state too; thread
+//! and priority ride under `native`).
+//! (P2.6.3, tsk455, P7.A1.)
 
 use oxplow_domain::refs::build::work_item_ref;
 use oxplow_domain::stores::TaskStore as _;
 use oxplow_domain::{Actor, CommandError, Task, TaskId, TaskStatus};
+use serde_json::json;
 
+use crate::commands::work_item::{self, state_pair, WorkItemCreateInput, WorkItemUpdateInput};
 use crate::Services;
+
+/// The `state` / `native_state` pair for moving `id` to `to` (an
+/// `archived` task stays done or canceled as it was).
+async fn pair_for(
+    svc: &Services,
+    id: TaskId,
+    to: TaskStatus,
+) -> Result<(oxplow_domain::work_items::CanonicalState, String), CommandError> {
+    let completed = match to {
+        TaskStatus::Archived => svc
+            .task_store
+            .get(id)
+            .await?
+            .is_some_and(|t| t.completed_at.is_some()),
+        _ => false,
+    };
+    Ok(state_pair(to, completed))
+}
+
+fn status_name(status: TaskStatus) -> String {
+    state_pair(status, false).1
+}
+
+fn task_of(result: serde_json::Value, command: &str) -> Result<Task, CommandError> {
+    serde_json::from_value(result).map_err(|e| CommandError::Failed {
+        message: format!("{command} result: {e}"),
+    })
+}
 
 /// Move `id` to `to` as `actor`, then settle the pump so the effort's
 /// snapshot pin is in place for whatever the caller reads next.
@@ -18,26 +53,18 @@ pub async fn set_status(
     id: TaskId,
     to: TaskStatus,
 ) -> Result<Task, CommandError> {
+    let (state, native_state) = pair_for(svc, id, to).await?;
     let outcome = svc
-        .commands
-        .run(
-            actor,
-            crate::commands::work_item::NAME,
-            serde_json::json!({ "ref": work_item_ref(id), "to": to }),
-            // Not pre-confirmed: a transition that ever needs a person's
-            // confirmation comes back as NEEDS_CONFIRMATION.
-            false,
-        )
+        .work_items_client()
+        .transition(actor, &work_item_ref(id), state, Some(&native_state))
         .await?;
     svc.tasks.settle_lifecycle().await;
-    serde_json::from_value(outcome.result).map_err(|e| CommandError::Failed {
-        message: format!("work_item.transition result: {e}"),
-    })
+    task_of(outcome.result, work_item::NAME)
 }
 
-/// File a task as `actor` (`work_item.create`): audited, and filed
-/// straight into `in_progress` it opens the effort in the same run —
-/// then settles the pump so the effort's start snapshot is pinned.
+/// File a task as `actor` (`work_item.create` on oxplow): audited, and
+/// filed straight into `in_progress` it opens the effort in the same run
+/// — then settles the pump so the effort's start snapshot is pinned.
 pub async fn create(
     svc: &Services,
     actor: &Actor,
@@ -45,19 +72,28 @@ pub async fn create(
     input: crate::task_service::CreateTaskInput,
 ) -> Result<Task, CommandError> {
     let moves_status = input.status.is_some_and(|s| s != TaskStatus::Ready);
-    let args = crate::commands::work_item::WorkItemCreateInput {
+    let mut native = json!({});
+    if let Some(t) = thread {
+        native["thread"] = t.to_string().into();
+    }
+    if let Some(p) = input.priority {
+        native["priority"] = serde_json::to_value(p).expect("priority serializes");
+    }
+    let args = WorkItemCreateInput {
+        provider: Some(crate::work_items::PROVIDER.into()),
         title: input.title,
-        description: input.description,
+        body: input.description,
         parent_ref: input.parent_id.map(work_item_ref),
-        status: input.status,
-        priority: input.priority,
-        thread: thread.map(|t| t.to_string()),
+        state: None,
+        // oxplow's status is its native state (the canonical one follows).
+        native_state: input.status.map(status_name),
+        native: Some(native),
     };
     let outcome = svc
         .commands
         .run(
             actor,
-            crate::commands::work_item::CREATE,
+            work_item::CREATE,
             serde_json::to_value(args).expect("input serializes"),
             false,
         )
@@ -65,9 +101,7 @@ pub async fn create(
     if moves_status {
         svc.tasks.settle_lifecycle().await;
     }
-    serde_json::from_value(outcome.result).map_err(|e| CommandError::Failed {
-        message: format!("work_item.create result: {e}"),
-    })
+    task_of(outcome.result, work_item::CREATE)
 }
 
 /// Edit `id`'s fields and move its status, as `actor`, in one audited
@@ -79,32 +113,23 @@ pub async fn update(
     id: TaskId,
     changes: crate::task_service::UpdateTaskChanges,
 ) -> Result<Task, CommandError> {
-    let input = crate::commands::work_item::WorkItemUpdateInput {
+    let input = WorkItemUpdateInput {
         item_ref: work_item_ref(id),
         title: changes.title,
-        description: changes.description,
-        priority: changes.priority,
+        body: changes.description,
         parent_ref: changes
             .parent_id
             .map(|p| p.map(work_item_ref).unwrap_or_default()),
-        status: changes.status,
+        state: None,
+        native_state: changes.status.map(status_name),
+        native: changes.priority.map(|p| json!({ "priority": p })),
     };
-    let moves_status = input.status.is_some();
-    let outcome = svc
-        .commands
-        .run(
-            actor,
-            crate::commands::work_item::UPDATE,
-            serde_json::to_value(input).expect("input serializes"),
-            false,
-        )
-        .await?;
+    let moves_status = input.native_state.is_some();
+    let outcome = svc.work_items_client().update(actor, input).await?;
     if moves_status {
         svc.tasks.settle_lifecycle().await;
     }
-    serde_json::from_value(outcome.result).map_err(|e| CommandError::Failed {
-        message: format!("work_item.update result: {e}"),
-    })
+    task_of(outcome.result, work_item::UPDATE)
 }
 
 /// Insert (id 0) or edit a task. A new row goes through the create path

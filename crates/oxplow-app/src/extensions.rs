@@ -2382,7 +2382,8 @@ fn check_components(ext: &mut Extension, commands: Option<CommandSchemas<'_>>) {
 }
 
 /// `command`'s input schema from the declarations of one of `ext`'s own
-/// providers, when the command is in its namespace.
+/// providers, when the command is in its namespace — one of its own
+/// commands, not its capability's verbs (those run as `work_item.<verb>`).
 fn provider_command_schema(
     ext: &Extension,
     root: &Path,
@@ -2390,6 +2391,11 @@ fn provider_command_schema(
 ) -> Option<serde_json::Value> {
     let (namespace, verb) = command.split_once('.')?;
     let spec = ext.providers.iter().find(|p| p.id == namespace)?;
+    if spec.capability == crate::providers::spec::WORK_ITEMS
+        && oxplow_domain::work_items::VERBS.contains(&verb)
+    {
+        return None;
+    }
     let declared = crate::providers::spec::read_declarations(spec, &|rel| {
         read_extension_file(root, &ext.name, rel)
     })

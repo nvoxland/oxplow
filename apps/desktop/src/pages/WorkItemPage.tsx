@@ -1,6 +1,8 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { runCommand } from "../api.js";
+import { InlineConfirm } from "../components/InlineConfirm.js";
 import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { LensSlots } from "../lens/LensSlots.js";
@@ -23,7 +25,6 @@ import {
   STATE_LABEL,
   readWorkItem,
   transitionWorkItem,
-  workItemCommand,
   type WorkItem,
   type WorkItemsFeatures,
 } from "../workItems.js";
@@ -38,7 +39,9 @@ const DEFAULT_LINK_TYPE = "relates_to";
  * Another provider's work item (P6b.C3; oxplow's own open as `TaskPage`):
  * its title, state and body from `v_work_item`, Move To through the
  * provider, and — only where the provider declares the feature
- * (`v_capability_provider`) — its parent, Comment… and Link…. Extensions
+ * (`v_capability_provider`) — its parent, Comment…, Link… and Delete; every
+ * write is a `work_item.*` command, which the bus dispatches to the item's
+ * provider. Extensions
  * mount lenses in the `work_item.detail.body` and `.sidebar` slots with
  * `{ ref, task_id: null }`.
  */
@@ -80,10 +83,19 @@ export function WorkItemPage({
   const outboundEntries = usePageOutbound(graphRef);
   const [prompt, setPrompt] = useState<"comment" | "link" | null>(null);
   const [busy, setBusy] = useState(false);
+  // The inline confirm is the person's confirmation of the destructive run.
+  const remove = async () => {
+    if (!item) return;
+    try {
+      await runCommand("work_item.delete", { ref: item.ref }, true);
+    } catch (e) {
+      recordOpError({ label: "Delete", message: e instanceof Error ? e.message : String(e) });
+    }
+  };
   const run = async (label: string, verb: "comment" | "link", input: Record<string, unknown>) => {
     if (!item) return;
     setBusy(true);
-    const ran = await personCommands.run(label, workItemCommand(item.ref, verb), { ref: item.ref, ...input });
+    const ran = await personCommands.run(label, `work_item.${verb}`, { ref: item.ref, ...input });
     setBusy(false);
     if (ran) setPrompt(null);
   };
@@ -132,6 +144,11 @@ export function WorkItemPage({
           ))}
         </div>
       </div>
+      {features.delete ? (
+        <div>
+          <InlineConfirm triggerLabel="Delete" confirmLabel="Delete" testIdPrefix="work-item-delete" triggerStyle={buttonStyle} onConfirm={() => void remove()} />
+        </div>
+      ) : null}
       <LensSlots slot="work_item.detail.sidebar" params={slotParams} streamId={streamId} onOpenPage={onOpenPage} />
     </div>
   );

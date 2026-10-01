@@ -1,29 +1,28 @@
-//! An external provider's work items: [`ExternalWorkItems`] maps the
-//! capability's calls onto the provider's declared commands, run through
-//! the bus as `<id>.<verb>` — audited and policy-checked like oxplow's
-//! own — and the events they return are logged, so the
-//! `work_items.project` consumer projects the provider's items into
-//! `work_item`.
+//! An external provider's work items (P7.A1): [`ExternalWorkItems`] is
+//! the [`ExternalVerbs`] the `work_item.*` commands dispatch to for an
+//! enabled instance's items. Its verbs are not commands of their own —
+//! `work_item.<verb>` is the one write surface, audited once — so each
+//! call checks the input against the verb's declared `input_schema`,
+//! invokes the process, and returns the events it recorded (only types it
+//! declares; a `work_item.recorded` only for its own items).
 //!
 //! The verbs and their inputs are the work-items contract every provider
-//! implements: `create { title, body, parent_ref? }`, `update { ref,
-//! title?, body?, parent_ref? }` (`""` detaches), `transition { ref, to }`
-//! (a canonical state or a native one), `link { ref, target, link_type }`
-//! and `comment { ref, body }`.
+//! implements — the `v_work_item` columns: `create { title, body?,
+//! parent_ref?, state?, native_state?, native? }`, `update { ref, title?,
+//! body?, parent_ref? ("" detaches), state?, native_state?, native? }`,
+//! `transition { ref, to, native_state? }`, `link { ref, target,
+//! link_type }`, `comment { ref, body }` and `delete { ref }`.
 
-use std::sync::{Arc, Weak};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use oxplow_domain::work_items::{
-    provider_of, NewWorkItem, Transition, WorkItemPatch, WorkItemsError, WorkItemsFeatures,
-    WorkItemsProvider,
-};
-use oxplow_domain::Actor;
-use serde_json::{json, Value};
+use oxplow_domain::work_items::{ExternalVerbs, VerbOutcome, WorkItemsFeatures, WorkItemsProvider};
+use oxplow_domain::{Actor, CommandCall, CommandError, InputValidator};
+use serde_json::Value;
 
 use super::registry::Instance;
 use super::spec;
-use crate::commands::CommandBus;
 
 /// A provider's declared work-items features.
 pub fn features_of(features: &Value) -> Result<WorkItemsFeatures, String> {
@@ -31,154 +30,77 @@ pub fn features_of(features: &Value) -> Result<WorkItemsFeatures, String> {
 }
 
 pub struct ExternalWorkItems {
-    id: String,
-    features: WorkItemsFeatures,
-    bus: Weak<CommandBus>,
+    instance: Arc<Instance>,
+    /// Each declared verb's compiled input schema.
+    inputs: BTreeMap<String, InputValidator>,
 }
 
 impl ExternalWorkItems {
-    pub fn new(bus: &Arc<CommandBus>, instance: &Instance) -> Result<Self, String> {
+    /// The capability provider over a started instance: its id, its
+    /// declared features, and its verbs.
+    pub fn provider(instance: &Arc<Instance>) -> Result<WorkItemsProvider, String> {
         let decl = instance
             .declared
             .capabilities
             .iter()
             .find(|c| c.capability == spec::WORK_ITEMS)
             .ok_or("it doesn't declare the work_items capability")?;
-        Ok(Self {
+        let features = features_of(&decl.features)?;
+        let inputs = instance
+            .declared
+            .commands
+            .iter()
+            .filter(|c| oxplow_domain::work_items::VERBS.contains(&c.name.as_str()))
+            .map(|c| {
+                InputValidator::compile(&c.input_schema)
+                    .map(|v| (c.name.clone(), v))
+                    .map_err(|e| format!("verb `{}`: {e}", c.name))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(WorkItemsProvider {
             id: instance.spec.id.clone(),
-            features: features_of(&decl.features)?,
-            bus: Arc::downgrade(bus),
+            features,
+            external: Some(Arc::new(ExternalWorkItems {
+                instance: instance.clone(),
+                inputs,
+            })),
         })
-    }
-
-    /// Refuse another provider's ref, naming this one.
-    fn own(&self, item_ref: &str) -> Result<(), WorkItemsError> {
-        let owner = provider_of(item_ref)?;
-        if owner != self.id {
-            return Err(WorkItemsError::Failed(format!(
-                "`{item_ref}` belongs to provider `{owner}`, not `{}`",
-                self.id
-            )));
-        }
-        Ok(())
-    }
-
-    fn unsupported(&self, feature: &str) -> WorkItemsError {
-        WorkItemsError::Unsupported {
-            provider: self.id.clone(),
-            feature: feature.into(),
-        }
-    }
-
-    async fn run(&self, actor: &Actor, verb: &str, input: Value) -> Result<Value, WorkItemsError> {
-        let bus = self
-            .bus
-            .upgrade()
-            .ok_or_else(|| WorkItemsError::Failed("the command bus is gone".into()))?;
-        bus.run(actor, &format!("{}.{verb}", self.id), input, false)
-            .await
-            .map(|outcome| outcome.result)
-            .map_err(|e| WorkItemsError::Failed(e.to_string()))
     }
 }
 
 #[async_trait]
-impl WorkItemsProvider for ExternalWorkItems {
-    fn provider(&self) -> &str {
-        &self.id
-    }
-
-    fn features(&self) -> WorkItemsFeatures {
-        self.features
-    }
-
-    async fn create(&self, actor: &Actor, item: NewWorkItem) -> Result<String, WorkItemsError> {
-        let mut input = json!({ "title": item.title, "body": item.body });
-        if let Some(parent) = item.parent_ref {
-            if !self.features.hierarchy {
-                return Err(self.unsupported("hierarchy"));
-            }
-            self.own(&parent)?;
-            input["parent_ref"] = parent.into();
-        }
-        let result = self.run(actor, "create", input).await?;
-        result["ref"]
-            .as_str()
-            .map(str::to_string)
-            .ok_or_else(|| WorkItemsError::Failed(format!("{}.create returned no ref", self.id)))
-    }
-
-    async fn update(
+impl ExternalVerbs for ExternalWorkItems {
+    async fn invoke(
         &self,
         actor: &Actor,
-        item_ref: &str,
-        patch: WorkItemPatch,
-    ) -> Result<(), WorkItemsError> {
-        self.own(item_ref)?;
-        let mut input = json!({ "ref": item_ref });
-        if let Some(title) = patch.title {
-            input["title"] = title.into();
-        }
-        if let Some(body) = patch.body {
-            input["body"] = body.into();
-        }
-        if let Some(parent) = patch.parent_ref {
-            if !self.features.hierarchy {
-                return Err(self.unsupported("hierarchy"));
-            }
-            input["parent_ref"] = parent.unwrap_or_default().into();
-        }
-        self.run(actor, "update", input).await.map(|_| ())
-    }
-
-    async fn transition(
-        &self,
-        actor: &Actor,
-        item_ref: &str,
-        to: Transition,
-    ) -> Result<(), WorkItemsError> {
-        self.own(item_ref)?;
-        let to = match to {
-            Transition::Canonical(state) => state.as_str().to_string(),
-            Transition::Native(native) => native,
-        };
-        self.run(actor, "transition", json!({ "ref": item_ref, "to": to }))
-            .await
-            .map(|_| ())
-    }
-
-    async fn link(
-        &self,
-        actor: &Actor,
-        from: &str,
-        to: &str,
-        link_type: &str,
-    ) -> Result<(), WorkItemsError> {
-        if !self.features.links {
-            return Err(self.unsupported("links"));
-        }
-        self.own(from)?;
-        self.run(
-            actor,
-            "link",
-            json!({ "ref": from, "target": to, "link_type": link_type }),
-        )
-        .await
-        .map(|_| ())
-    }
-
-    async fn comment(
-        &self,
-        actor: &Actor,
-        item_ref: &str,
-        body: &str,
-    ) -> Result<(), WorkItemsError> {
-        if !self.features.comments {
-            return Err(self.unsupported("comments"));
-        }
-        self.own(item_ref)?;
-        self.run(actor, "comment", json!({ "ref": item_ref, "body": body }))
-            .await
-            .map(|_| ())
+        verb: &str,
+        input: Value,
+    ) -> Result<VerbOutcome, CommandError> {
+        let id = &self.instance.spec.id;
+        let validator = self.inputs.get(verb).ok_or_else(|| CommandError::Invalid {
+            field: None,
+            message: format!("{id} work items don't support `{verb}`"),
+        })?;
+        validator.check(&input).map_err(|e| match e {
+            CommandError::Invalid { field, message } => CommandError::Invalid {
+                field,
+                message: format!("{id} `{verb}`: {message}"),
+            },
+            other => other,
+        })?;
+        let out = self.instance.invoke(verb, input).await?;
+        let events = out
+            .events
+            .into_iter()
+            .map(|d| self.instance.envelope(actor, d))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(VerbOutcome {
+            result: out.result,
+            events,
+            inverse: out.inverse.map(|c| CommandCall {
+                name: c.command,
+                input: c.input,
+            }),
+        })
     }
 }

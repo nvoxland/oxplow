@@ -585,7 +585,7 @@ actions:
         let (fx, root) = fixture().await;
         std::fs::write(
             root.join("oxplow/extensions/acme/lenses/new-task.yaml"),
-            "title: New Task\nviz: form\nparams: [{ name: body, default: from the form }]\nform: { command: work_item.create, defaults: { description: '{{param.body}}' } }\n",
+            "title: New Task\nviz: form\nparams: [{ name: body, default: from the form }]\nform: { command: work_item.create, defaults: { body: '{{param.body}}' } }\n",
         )
         .unwrap();
         let out = submit_form(

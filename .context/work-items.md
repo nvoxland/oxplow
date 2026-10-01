@@ -3,7 +3,9 @@
 Tasks, issues, tickets — whatever a provider tracks — behind one
 capability (P5.C, `target-architecture.md` §6). oxplow's own tasks are the
 built-in provider, `oxplow`; an issue tracker is another provider (P5.D
-brings external ones). Reads are SQL; writes go through a provider.
+brings external ones). Reads are SQL; writes are the `work_item.*`
+commands — **one write surface for every provider** (P7.A1), which the
+bus dispatches to the item's provider.
 
 ## The model
 
@@ -73,14 +75,13 @@ with them (P6 review, tsk609).
 The **Board** (`page:board`, `components/Board/WorkBoard.tsx`) shows
 items as cards in one column per canonical state (archived tasks left
 out). Drag a card to a column, or right-click → Move To, to transition
-it through its provider (`transitionWorkItem`: oxplow's
-`work_item.transition` with oxplow's status, another provider's
-`<provider>.transition` with the canonical state — `workItemCommand`,
-which refuses a string that isn't a `work_item:<provider>:<id>` ref, the
-provider a lowercase snake_case id as in Rust). Like Comment… and Link…
-it runs through `personCommands` (one person path: its confirmation and
-its error reporting). Every card opens its item's page
-(`workItemTabRef`).
+it (`transitionWorkItem`: `work_item.transition { ref, to: <canonical
+state> }` for any provider — the bus dispatches it). Like Comment… and
+Link… it runs through `personCommands` (one person path: its
+confirmation and its error reporting). Every card opens its item's page
+(`workItemTabRef`). The oxplow task writes (`createTask`, `updateTask`)
+send a status as oxplow's `native_state` and thread / priority under
+`native`.
 
 **Another provider's item has a page of its own** (P6b.C3,
 `pages/WorkItemPage.tsx`; oxplow's tasks keep `TaskPage`):
@@ -90,8 +91,10 @@ payload. It reads the item (`readWorkItem`) and the provider's features
 (canonical and native), body and Move To; its Parent only with
 `hierarchy`, **Comment…** only with `comments` and **Link…** only with
 `links`, each an `InlinePromptStrip` run through `personCommands` as
-`<provider>.comment` / `<provider>.link` (the strip keeps its text until
-the run succeeds — `personCommands.run` returns whether it ran). Link…'s
+`work_item.comment` / `work_item.link` (the strip keeps its text until
+the run succeeds — `personCommands.run` returns whether it ran), and a
+rail **Delete** only with `delete` (an `InlineConfirm`, which is the
+person's confirmation of the destructive `work_item.delete`). Link…'s
 link type is free text (default `relates_to`): the provider names its
 own types, so oxplow's enum isn't offered as a list. The tab is titled
 with the item's title (`usePageTitle`), and the page has backlinks and
@@ -106,30 +109,67 @@ item).
 
 `oxplow_domain::work_items`:
 
-- **`WorkItemsProvider`** (async): `provider()` (the ref segment),
-  `features()`, `create`, `update`, `transition(ref, Canonical(state) |
-  Native(string))`, `link`, `comment`.
-- **`WorkItemsFeatures`**: `hierarchy`, `comments`, `links`,
+- **`WorkItemsProvider`** (a struct): `id` (the ref segment),
+  `features`, and `external: Option<Arc<dyn ExternalVerbs>>` — `None`
+  for oxplow's own (its verbs are the `work_item.*` commands' `Tx`
+  cores), the provider's verbs for an external one.
+- **`ExternalVerbs::invoke(actor, verb, input) -> VerbOutcome { result,
+  events, inverse? }`**: a provider outside the bus's transaction; its
+  inverse is named by its **verb**.
+- **`WorkItemsFeatures`**: `hierarchy`, `comments`, `links`, `delete`,
   `in_progress_opens_effort` (moving an item to `in_progress` opens its
   effort itself).
 - **`WorkItemsRegistry`** (`Services.work_items`): providers by name;
   `for_ref` picks one by the ref's provider segment, and an unknown one
-  is refused naming the registered providers.
+  is refused naming the registered providers; `active()` /
+  `set_active()` name the provider a `create` without one files on
+  (oxplow until set; A2 sets it from config).
+- **`VERBS`**: `create`, `update`, `transition`, `link`, `comment`,
+  `delete` — the capability's verbs.
 
-**`OxplowWorkItems`** implements the trait over the bus: each call runs a
-`work_item.*` command as the given actor (one write path; audited and
-policy-checked), filing new items on the actor's thread. It holds the bus
-weakly — the bus's commands hold the registry the provider sits in.
-Canonical `todo` is oxplow's `ready`; native states are oxplow's statuses
-(`archived` included).
+**One write surface: the dispatching `work_item.*`** (P7.A1;
+`commands/work_item.rs`). Each verb is a `Dispatch` command
+([commands.md](./commands.md) "Tx, External and Dispatch"): the bus
+routes by the item's provider — the ref's segment, or for `create` the
+named (else active) provider — to oxplow's `Tx` core in the bus's
+transaction, or to the provider's `ExternalVerbs` through its process,
+with **one audit row** `work_item.<verb>` either way. The route also
+refuses, before anything runs: an unregistered provider (`/ref`, naming
+the registered), a parent or link target of another provider
+(`/parent_ref`, `/target`), and a feature the provider doesn't declare.
+An external run hands the provider the input less `provider` and renames
+its inverse to `work_item.<verb>`, so an undo dispatches again.
+`reorder` and `move` stay oxplow's own `Tx` (they place a task in
+oxplow's lists). A Rust client, **`work_items::WorkItems`**
+(`Services::work_items_client()`), types the calls; `task_writes` and the
+conformance suite use it.
 
-The `work_item.*` commands ([commands.md](./commands.md)) are the oxplow
-provider's: they take canonical refs (`ref`, `parent_ref`, `target`) and
-refuse another provider's; `work_item.comment` and `work_item.link`
-refuse a deleted task (tsk572). Dispatching them across providers by ref is
-decided with a real second provider (P7). `effort.open` asks the ref's
-provider's features: refused when it declares `in_progress_opens_effort`,
-open to an unregistered provider's item.
+**The contract is the `v_work_item` columns**, one shape for every
+provider (a provider's verb receives the same input, less `provider`):
+
+- `create { provider?, title, body?, parent_ref?, state?, native_state?,
+  native? }` — no `provider` files on the active one, which must be
+  running (never a silent fallback);
+- `update { ref, title?, body?, parent_ref? ("" detaches), state?,
+  native_state?, native? }`;
+- `transition { ref, to, native_state? }` — `to` canonical; a
+  `native_state` must map to it;
+- `link { ref, target, link_type }` (the provider names its link types),
+  `comment { ref, body }`, `delete { ref }` (Destructive; only with
+  `features.delete`).
+
+oxplow's mapping: its status is its `native_state` (`ready` is `todo`;
+`archived` rides on `done` or `canceled` — archiving as `done` a task that
+wasn't completed passes through `done` first, so the row reads as
+asked); `native` holds `{ thread?, priority? }` (`deny_unknown_fields`;
+`thread` only on `create` — a task changes lists with `work_item.move`).
+A `native_state` alone (no `state`) is a valid update or create: that is
+how the task writes send a status. A person's link (no thread of their
+own) belongs to the linked task's thread, else the target's.
+`work_item.comment` and `work_item.link` refuse a deleted task (tsk572).
+`effort.open` asks the ref's provider's features: refused when it
+declares `in_progress_opens_effort`, open to an unregistered provider's
+item.
 
 **Features reach the UI as a model** (P6b.C2): `v_capability_provider`
 (`capability`, `provider`, `extension`, `features` JSON, `active`) lists
@@ -156,32 +196,38 @@ and asserts each page's core content and the absence of every slot
 section, the Commands menu, decorations and feature-gated actions; then,
 with one extension, that the P6b mounts receive their params.
 
-`oxplow_app::work_items_conformance::suite(provider, probe, actor)` —
-plain functions returning `Finding`s — is what every provider must do:
-create lands a `todo` row; every canonical state round-trips (and
-`in_progress` opens exactly one effort iff the provider says so); a
-parent resolves with `hierarchy` and is refused without it; links and
-comments follow their features; a foreign ref is refused naming this
-provider; every write logged an event naming the item (the provider's own kinds:
-oxplow's `work_item.created` / `transitioned` / `linked` /
-`commented`, an external provider's `work_item.recorded`). A `WorkItemsProbe` reads back what
-the host recorded (`ServicesProbe` over the database). It runs in-tree
-against oxplow's provider (`oxplow_tasks_are_a_conforming_provider`) and
-against an external one through the host over the fake provider
+`oxplow_app::work_items_conformance::suite(items, provider, features,
+native, probe, actor)` — plain functions returning `Finding`s, writing
+through the `WorkItems` client (so it exercises the dispatching commands
+a person and an agent run) — is what every provider must do: create
+lands a `todo` row; an update changes only what it names; every
+canonical state round-trips, and moving again to the native state the
+row reports lands there (`in_progress` opens exactly one effort iff the
+provider says so); a parent resolves with `hierarchy` and is refused
+without it; links and comments follow their features; every write that
+changed the item logged an event naming it (oxplow's
+`work_item.created` / `edited` / `transitioned` / `linked` /
+`commented`, an external provider's `work_item.recorded`); and delete
+follows its feature, cleaning up what the suite filed when the provider
+can. `native` is the provider's own fields for the items it files
+(oxplow's test passes the actor's thread, so `in_progress` claims). A
+`WorkItemsProbe` reads back what the host recorded (`ServicesProbe` over
+the database). It runs in-tree against oxplow's provider
+(`oxplow_tasks_are_a_conforming_provider`) and against an external one
+through the host over the fake provider
 (`the_work_items_suite_passes_through_the_host_over_the_fake`, P5.D3);
 the kit (P5.D5) runs it against any provider. The probe runs the pump
 once per settle, so the projection has landed before each read.
 
 ## External providers
 
-`ExternalWorkItems` ([providers.md](./providers.md)) is the capability
-over an enabled provider instance: each call runs the provider's
-`<id>.create` / `update` / `transition` / `link` / `comment` command
-through the bus (inputs: `create { title, body, parent_ref? }`,
-`update { ref, title?, body?, parent_ref? }`, `transition { ref, to }`
-with a canonical or native state, `link { ref, target, link_type }`,
-`comment { ref, body }`), refuses another provider's ref naming its own,
-and refuses an unsupported feature before calling. The provider's
-`work_item.recorded` events reach `work_item` through the projection. Undo and
-delete aren't on the trait, so they aren't in the suite: undo is the
-bus's (its tests), delete is oxplow's own (the model's agreement test).
+`ExternalWorkItems` ([providers.md](./providers.md)) is the
+`ExternalVerbs` of an enabled provider instance: each verb's input is
+checked against the schema the provider declared for it (its `native`
+fields included) before the process is called, and the
+`work_item.recorded` events it returns reach `work_item` through the
+projection. The verbs aren't commands of their own: `<id>.transition`
+doesn't exist on the bus; the provider's **other** declared commands
+(the fake's `estimate`) do, as `<id>.<name>`. An external write can land
+at the tracker while the reply times out — the run then reports failure
+though the item changed; the sync (P7.A3) restates it.

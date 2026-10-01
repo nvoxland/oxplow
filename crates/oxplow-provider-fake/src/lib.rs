@@ -7,10 +7,13 @@
 //! `Backlog` / `Doing` / `Stuck` / `Shipped` / `Dropped` for the canonical
 //! `todo` / `in_progress` / `blocked` / `done` / `canceled`. Its config
 //! needs a `team` (a string); a clean `check` returns the handle
-//! `fake:<team>`. Commands: `create`, `update`, `transition`, `link`,
-//! `comment` — each returns `work_item.recorded` events (the item as it
-//! now stands). Collector `work_items` streams every item after the
-//! cursor as `$/record`, then `$/state { cursor }`.
+//! `fake:<team>`. The work-items verbs `create`, `update`, `transition`
+//! (undoable: its inverse moves the item back), `link`, `comment` and
+//! `delete`, over the contract's inputs (`state` / `native_state`, the
+//! fake's `native.points`), plus one command of its own, `estimate` —
+//! each returns `work_item.recorded` events (the item as it now stands).
+//! Collector `work_items` streams every item after the cursor as
+//! `$/record`, then `$/state { cursor }`.
 //!
 //! **Hooks**, from `OXPLOW_FAKE_HOOKS` at start or a `fake/hooks { hooks }`
 //! notification later (comma-separated):
@@ -114,10 +117,21 @@ pub fn bad_declarations() -> InitializeResult {
 /// What the fake declares — the checked-in declarations a host approves.
 pub fn declarations() -> InitializeResult {
     let string = json!({ "type": "string" });
+    let state = json!({ "type": "string",
+                        "enum": ["todo", "in_progress", "blocked", "done", "canceled"] });
+    let native = json!({ "type": "object", "additionalProperties": false,
+                         "properties": { "points": { "type": "integer" } } });
     let recorded_schema = EventSchemaRegistry::core()
         .schema(WorkItemRecorded::TYPE, WorkItemRecorded::V)
         .cloned()
         .unwrap_or(Value::Null);
+    let mut transition = command(
+        "transition",
+        "Move a work item to a canonical state, optionally naming a fake state.",
+        json!({ "type": "object", "required": ["ref", "to"], "additionalProperties": false,
+                "properties": { "ref": string, "to": state, "native_state": string } }),
+    );
+    transition.undoable = true;
     InitializeResult {
         protocol_version: PROTOCOL_VERSION.into(),
         provider: Party {
@@ -127,7 +141,7 @@ pub fn declarations() -> InitializeResult {
         capabilities: vec![CapabilityDecl {
             capability: "work_items".into(),
             features: json!({
-                "hierarchy": true, "comments": true, "links": true,
+                "hierarchy": true, "comments": true, "links": true, "delete": true,
                 "in_progress_opens_effort": false
             }),
         }],
@@ -135,32 +149,46 @@ pub fn declarations() -> InitializeResult {
             command(
                 "create",
                 "Create a work item.",
-                json!({ "type": "object", "required": ["title"],
-                        "properties": { "title": string, "body": string, "parent_ref": string } }),
+                json!({ "type": "object", "required": ["title"], "additionalProperties": false,
+                        "properties": { "title": string, "body": string, "parent_ref": string,
+                                        "state": state, "native_state": string,
+                                        "native": native } }),
             ),
             command(
                 "update",
-                "Edit a work item's title, body or parent.",
-                json!({ "type": "object", "required": ["ref"],
-                        "properties": { "ref": string, "title": string, "body": string, "parent_ref": string } }),
+                "Edit a work item's title, body, parent, state or points.",
+                json!({ "type": "object", "required": ["ref"], "additionalProperties": false,
+                        "properties": { "ref": string, "title": string, "body": string,
+                                        "parent_ref": string, "state": state,
+                                        "native_state": string, "native": native } }),
             ),
-            command(
-                "transition",
-                "Move a work item to a canonical or native state.",
-                json!({ "type": "object", "required": ["ref", "to"],
-                        "properties": { "ref": string, "to": string } }),
-            ),
+            transition,
             command(
                 "link",
                 "Link one work item to another.",
                 json!({ "type": "object", "required": ["ref", "target", "link_type"],
+                        "additionalProperties": false,
                         "properties": { "ref": string, "target": string, "link_type": string } }),
             ),
             command(
                 "comment",
                 "Comment on a work item.",
                 json!({ "type": "object", "required": ["ref", "body"],
+                        "additionalProperties": false,
                         "properties": { "ref": string, "body": string } }),
+            ),
+            command(
+                "delete",
+                "Delete a work item.",
+                json!({ "type": "object", "required": ["ref"], "additionalProperties": false,
+                        "properties": { "ref": string } }),
+            ),
+            command(
+                "estimate",
+                "Set a work item's points (a fake-only command).",
+                json!({ "type": "object", "required": ["ref", "points"],
+                        "additionalProperties": false,
+                        "properties": { "ref": string, "points": { "type": "integer" } } }),
             ),
         ],
         event_types: vec![EventTypeDecl {
@@ -437,8 +465,49 @@ fn recorded(record: &WorkItemRecord) -> EventDraft {
     }
 }
 
+/// The canonical state `input` asks for (`field` and `native_state`),
+/// checked against each other: a fake state must map to the canonical
+/// one. `None` when neither is given.
+fn requested_state(input: &Value, field: &str) -> Result<Option<CanonicalState>, ProtocolError> {
+    let canonical = match input.get(field).and_then(Value::as_str) {
+        None => None,
+        Some(raw) => Some(
+            serde_json::from_value::<CanonicalState>(Value::String(raw.into())).map_err(|_| {
+                ProtocolError::InvalidInput {
+                    field: format!("/{field}"),
+                    message: format!("`{raw}` isn't a canonical state"),
+                }
+            })?,
+        ),
+    };
+    let native = match input.get("native_state").and_then(Value::as_str) {
+        None => None,
+        Some(raw) => Some(
+            canonical_of(raw).ok_or_else(|| ProtocolError::InvalidInput {
+                field: "/native_state".into(),
+                message: format!("`{raw}` isn't a fake state"),
+            })?,
+        ),
+    };
+    match (canonical, native) {
+        (Some(c), Some(n)) if c != n => Err(ProtocolError::InvalidInput {
+            field: "/native_state".into(),
+            message: format!("`{}` is {}, not {}", native_of(n), n.as_str(), c.as_str()),
+        }),
+        (c, n) => Ok(c.or(n)),
+    }
+}
+
+fn points_of(input: &Value) -> Option<i64> {
+    input
+        .get("native")
+        .and_then(|n| n.get("points"))
+        .and_then(Value::as_i64)
+}
+
 async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, ProtocolError> {
     let mut w = world.lock().await;
+    let mut inverse = None;
     let (result, events) = match command {
         "create" => {
             let title = str_field(&input, "title")?;
@@ -455,8 +524,13 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                     });
                 }
             }
+            let state = requested_state(&input, "state")?.unwrap_or(CanonicalState::Todo);
             let n = w.next;
             w.next += 1;
+            let mut native = json!({ "team": "fake" });
+            if let Some(points) = points_of(&input) {
+                native["points"] = points.into();
+            }
             let record = WorkItemRecord {
                 item_ref: format!("work_item:fake:W-{n}"),
                 title,
@@ -465,9 +539,9 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .into(),
-                state: CanonicalState::Todo,
-                native_state: native_of(CanonicalState::Todo).into(),
-                native: json!({ "team": "fake" }),
+                state,
+                native_state: native_of(state).into(),
+                native,
                 parent_ref,
                 deleted: false,
             };
@@ -483,7 +557,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
             );
             (result, events)
         }
-        "update" | "transition" | "link" | "comment" => {
+        "update" | "transition" | "link" | "comment" | "delete" | "estimate" => {
             let item_ref = str_field(&input, "ref")?;
             let n = number_of(&item_ref)?;
             let item = w
@@ -504,16 +578,29 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                     if let Some(p) = input.get("parent_ref").and_then(Value::as_str) {
                         item.record.parent_ref = (!p.is_empty()).then(|| p.to_string());
                     }
+                    if let Some(state) = requested_state(&input, "state")? {
+                        item.record.state = state;
+                        item.record.native_state = native_of(state).into();
+                    }
+                    if let Some(points) = points_of(&input) {
+                        item.record.native["points"] = points.into();
+                    }
                 }
                 "transition" => {
-                    let to = str_field(&input, "to")?;
-                    let state = serde_json::from_value::<CanonicalState>(Value::String(to.clone()))
-                        .ok()
-                        .or_else(|| canonical_of(&to))
-                        .ok_or_else(|| ProtocolError::InvalidInput {
+                    let state = requested_state(&input, "to")?.ok_or_else(|| {
+                        ProtocolError::InvalidInput {
                             field: "/to".into(),
-                            message: format!("`{to}` is neither a canonical nor a fake state"),
-                        })?;
+                            message: "required".into(),
+                        }
+                    })?;
+                    inverse = Some(CommandCall {
+                        command: "transition".into(),
+                        input: json!({
+                            "ref": item_ref,
+                            "to": item.record.state.as_str(),
+                            "native_state": item.record.native_state,
+                        }),
+                    });
                     item.record.state = state;
                     item.record.native_state = native_of(state).into();
                 }
@@ -523,9 +610,22 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                         str_field(&input, "link_type")?,
                     ));
                 }
-                _ => item.comments.push(str_field(&input, "body")?),
+                "comment" => item.comments.push(str_field(&input, "body")?),
+                "estimate" => {
+                    let points = input.get("points").and_then(Value::as_i64).ok_or_else(|| {
+                        ProtocolError::InvalidInput {
+                            field: "/points".into(),
+                            message: "required".into(),
+                        }
+                    })?;
+                    item.record.native["points"] = points.into();
+                }
+                _ => item.record.deleted = true,
             }
             let events = vec![recorded(&item.record)];
+            if command == "delete" {
+                w.items.remove(&n);
+            }
             (json!({ "ref": item_ref }), events)
         }
         other => {
@@ -538,7 +638,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
     Ok(serde_json::to_value(InvokeResult {
         result,
         events,
-        inverse: None,
+        inverse,
     })
     .expect("invoke result serializes"))
 }

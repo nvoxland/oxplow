@@ -5,7 +5,7 @@
 //! ```yaml
 //! ui:
 //!   commands:
-//!     - { command: fake.comment, label: "Comment in Fake…", about: work_item, placement: [menu, context] }
+//!     - { command: fake.estimate, label: "Estimate in Fake…", about: work_item, placement: [menu, context] }
 //!     - { command: work_item.transition, label: Move to Done, about: work_item, input: { ref: "{{ref}}", to: done } }
 //! ```
 //!
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn commands_group_by_provider_and_default_to_the_ref() {
         let (cmds, errors) = parse(
-            "    - { command: fake.comment, label: Comment in Fake…, about: work_item }\n    - { command: work_item.transition, label: Done, about: work_item, placement: [context], input: { ref: \"{{ref}}\", to: done } }\n",
+            "    - { command: fake.estimate, label: Estimate in Fake…, about: work_item }\n    - { command: work_item.transition, label: Done, about: work_item, placement: [context], input: { ref: \"{{ref}}\", to: done } }\n",
             &["fake"],
         );
         assert!(errors.is_empty(), "{errors:?}");

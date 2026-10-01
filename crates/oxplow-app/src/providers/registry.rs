@@ -5,10 +5,12 @@
 //! project's `extensionInstances` (`{ enabled, config }`, a person's key).
 //! [`ProviderRegistry::reconcile`] makes the running set match it — at
 //! boot and on every config change. Starting an instance checks consent,
-//! spawns, handshakes and `check`s its config; only then are its declared
-//! commands registered on the bus as `<id>.<name>` (`Atomicity::External`)
-//! and its capability's provider (`ExternalWorkItems`) in the capability's
-//! registry. Every restart goes through consent again.
+//! spawns, handshakes and `check`s its config; only then is its
+//! capability's provider (`ExternalWorkItems`) registered in the
+//! capability's registry — its verbs run as the dispatching
+//! `work_item.<verb>` — and its other declared commands on the bus as
+//! `<id>.<name>` (`Atomicity::External`), under the namespace `<id>` it
+//! then holds. Every restart goes through consent again.
 //!
 //! Health is per machine: [`InstanceHealth`]. A start or call that fails
 //! (not a refused input) counts; [`FAILURES_TO_DISABLE`] in a row stop the
@@ -354,7 +356,11 @@ impl Instance {
 
     /// A returned event as the envelope the bus logs: a type it declared,
     /// and (for a work-item record) an item of its own.
-    fn envelope(&self, actor: &Actor, draft: EventDraft) -> Result<Envelope, CommandError> {
+    pub(crate) fn envelope(
+        &self,
+        actor: &Actor,
+        draft: EventDraft,
+    ) -> Result<Envelope, CommandError> {
         let failed = |message: String| CommandError::Failed { message };
         if !self
             .declared
@@ -789,7 +795,7 @@ impl ProviderRegistry {
         let capability = &instance.spec.capability;
         let features = match self.work_items.get(&instance.spec.id) {
             Ok(p) if capability == spec::WORK_ITEMS => {
-                serde_json::to_value(p.features()).unwrap_or(Value::Null)
+                serde_json::to_value(p.features).unwrap_or(Value::Null)
             }
             _ => instance
                 .declared
@@ -825,8 +831,8 @@ impl ProviderRegistry {
         )
         .map_err(|e| e.to_string())?;
         if instance.spec.capability == spec::WORK_ITEMS {
-            match super::work_items::ExternalWorkItems::new(bus, instance) {
-                Ok(provider) => self.work_items.register(Arc::new(provider)),
+            match super::work_items::ExternalWorkItems::provider(instance) {
+                Ok(provider) => self.work_items.register(provider),
                 Err(e) => {
                     bus.unregister_namespace(id);
                     return Err(e);
@@ -1232,13 +1238,21 @@ pub fn enable_command(registry: &Arc<ProviderRegistry>) -> Command {
     .expect("provider.enable is a valid command")
 }
 
-/// The instance's declared commands, as bus commands.
+/// The instance's declared commands, as bus commands — less its
+/// capability's verbs, which run as `work_item.<verb>` (one write surface,
+/// dispatched by ref), never as `<id>.<verb>`.
 fn commands(instance: &Arc<Instance>) -> Result<Vec<Command>, String> {
     let id = instance.spec.id.clone();
+    let verbs: &[&str] = if instance.spec.capability == spec::WORK_ITEMS {
+        &oxplow_domain::work_items::VERBS
+    } else {
+        &[]
+    };
     instance
         .declared
         .commands
         .iter()
+        .filter(|decl| !verbs.contains(&decl.name.as_str()))
         .map(|decl| {
             let spec = CommandSpec {
                 name: format!("{id}.{}", decl.name),

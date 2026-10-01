@@ -1388,10 +1388,13 @@ export type AppVersion = {
  *  Whether the handler runs inside the bus's transaction (with the audit
  *  row and `command.executed`), or outside it, against a system the bus
  *  doesn't own — a VCS, a provider process, a gauge script — and is
- *  audited after it returns (`External`). A test lists the `External`
- *  commands, so each one is a reviewed choice.
+ *  audited after it returns (`External`). A `Dispatch` command decides
+ *  per input (the `work_item.*` verbs: oxplow's own items in the
+ *  transaction, another provider's through its process) and then runs
+ *  exactly as one or the other. A test lists the `External` and the
+ *  `Dispatch` commands, so each one is a reviewed choice.
  */
-export type Atomicity = "tx" | "external";
+export type Atomicity = "tx" | "external" | "dispatch";
 
 /**
  *  Result of `attach_or_create` — the session id plus a base64
@@ -4976,6 +4979,8 @@ export type WorkItemsFeatures = {
 	hierarchy: boolean,
 	comments: boolean,
 	links: boolean,
+	// Items can be deleted (`work_item.delete`).
+	delete?: boolean,
 	/**
 	 *  Moving an item to `in_progress` opens its effort itself (oxplow's
 	 *  tasks do), so `effort.open` must not open a second.

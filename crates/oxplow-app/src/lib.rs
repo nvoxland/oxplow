@@ -610,6 +610,12 @@ pub struct Services {
 }
 
 impl Services {
+    /// The `work_item.*` commands, typed (`work_items::WorkItems`): the
+    /// one write surface for every provider's items.
+    pub fn work_items_client(&self) -> work_items::WorkItems {
+        work_items::WorkItems::new(self.commands.clone())
+    }
+
     /// The tree a thread works in: its stream's worktree (a sibling
     /// directory for a worktree stream), else the project dir. What its
     /// tool paths are relative to (tsk350 policy, tsk386 claims).
@@ -1017,7 +1023,7 @@ impl Services {
         // The work-items providers (`.context/work-items.md`); oxplow's
         // own, over this bus.
         let work_items = oxplow_domain::work_items::WorkItemsRegistry::new();
-        work_items.register(Arc::new(work_items::OxplowWorkItems::new(&commands)));
+        work_items.register(work_items::oxplow_provider());
         for command in commands::vcs::commands(commands::vcs::VcsTarget {
             vcs: vcs.clone(),
             git: vcs::GitProvider,
@@ -1494,6 +1500,27 @@ mod tests {
                 "vcs.rename_branch",
                 "vcs.resolve_conflict",
                 "vcs.stage",
+            ]
+        );
+    }
+
+    /// P7.A1: every `Dispatch` command — one that decides per input
+    /// whether it runs in the transaction or through a provider's process
+    /// — is listed here on purpose, like the `External` ones.
+    #[tokio::test]
+    async fn the_dispatch_commands_are_the_reviewed_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let services = Services::in_memory(dir.path()).unwrap();
+        assert_eq!(
+            services.commands.dispatch_commands(),
+            [
+                "work_item.comment",
+                "work_item.create",
+                "work_item.delete",
+                "work_item.link",
+                "work_item.transition",
+                "work_item.update",
             ]
         );
     }

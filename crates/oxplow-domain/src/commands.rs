@@ -78,13 +78,17 @@ pub enum Lifecycle {
 /// Whether the handler runs inside the bus's transaction (with the audit
 /// row and `command.executed`), or outside it, against a system the bus
 /// doesn't own — a VCS, a provider process, a gauge script — and is
-/// audited after it returns (`External`). A test lists the `External`
-/// commands, so each one is a reviewed choice.
+/// audited after it returns (`External`). A `Dispatch` command decides
+/// per input (the `work_item.*` verbs: oxplow's own items in the
+/// transaction, another provider's through its process) and then runs
+/// exactly as one or the other. A test lists the `External` and the
+/// `Dispatch` commands, so each one is a reviewed choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Atomicity {
     Tx,
     External,
+    Dispatch,
 }
 
 /// Whether a command changes anything, and who may. A `Read` runs

@@ -173,8 +173,8 @@ empty: Nothing is waiting on you.
   `about` is a ref kind (`work_item`, `commit`, …); `placement` is `menu`
   (the page's nav bar) and/or `context` (a row's right-click); `input`
   defaults to `{ ref: "{{ref}}" }` (`"{{ref.id}}"` binds the id alone).
-  It runs as the person who picks it. Use it for a provider's own
-  commands (`fake.comment`) or a core one with a fixed input.
+  It runs as the person who picks it. Use it for a provider's
+  own commands (`fake.estimate`; its capability verbs run as `work_item.<verb>`) or a core one with a fixed input.
 - **`ui.decorators`** (experimental, private only) add a label to refs:
   `{ model, kind, placement: ref-chip | row-badge, label, color? }` — the
   model (this extension's) needs a `ref` column plus the `label` (and

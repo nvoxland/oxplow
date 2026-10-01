@@ -154,10 +154,16 @@ The work done on an item is its **efforts** (`v_effort`: `id`,
 an effort touched are **`v_effort_file`** (`effort_id`, `path`,
 `change_kind`).
 
-Change oxplow's own with `run_command` and the item's canonical ref:
-`work_item.transition { ref, to }` (a status: `done`, `blocked`, …),
-`work_item.update { ref, … }`, `work_item.link { ref, target, link_type }`
-(`blocks`, `relates_to`, …) and `work_item.comment { ref, body }`. The
+Change any provider's items with `run_command` and the item's canonical
+ref — the same commands for oxplow's tasks and another tracker's issues
+(oxplow sends them to the item's provider):
+`work_item.transition { ref, to, native_state? }` (`to` is a canonical
+state: `todo`, `in_progress`, `blocked`, `done`, `canceled`; oxplow's
+`archived` is `{ to: done, native_state: archived }`),
+`work_item.update { ref, title?, body?, parent_ref?, state?, native? }`,
+`work_item.link { ref, target, link_type }` (`blocks`, `relates_to`, …)
+and `work_item.comment { ref, body }`; `work_item.create { provider?,
+title, body?, … }` files on the active provider unless you name one. The
 task tools above remain the usual way to file and close your own work.
 
 ## Decisions and claims

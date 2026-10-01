@@ -64,9 +64,9 @@ test("dropping a card on a column, or its menu's Move To, transitions it", async
   await waitFor(() => expect(ran[1]).toEqual(["work_item.transition", { ref: "work_item:oxplow:tsk2", to: "done" }]));
 });
 
-// P6b.C3: every provider's card opens its page and moves through its own
-// provider (`<provider>.transition` with the canonical state).
-test("another provider's card links to its page and moves through its provider", async () => {
+// P6b.C3, P7.A1: every provider's card opens its page and moves through
+// `work_item.transition` with the canonical state — the bus dispatches it.
+test("another provider's card links to its page and moves through work_item.transition", async () => {
   const opened: string[] = [];
   const view = render(<WorkBoard scope="all" onOpenPage={(ref) => opened.push(ref.id)} />);
   fireEvent.click(await waitFor(() => view.getByText("Their bug")));
@@ -74,7 +74,7 @@ test("another provider's card links to its page and moves through its provider",
   const data = new Map<string, string>([[WORK_ITEM_DRAG_MIME, "work_item:fake:W-1"]]);
   const dataTransfer = { getData: (k: string) => data.get(k) ?? "", types: [WORK_ITEM_DRAG_MIME], dropEffect: "move" };
   fireEvent.drop(view.getByTestId("board-column-done"), { dataTransfer });
-  await waitFor(() => expect(ran).toEqual([["fake.transition", { ref: "work_item:fake:W-1", to: "done" }]]));
+  await waitFor(() => expect(ran).toEqual([["work_item.transition", { ref: "work_item:fake:W-1", to: "done" }]]));
 });
 
 // P6b.C4: an extension's `ui.commands` about work items join a card's
@@ -87,7 +87,7 @@ test("a card's menu offers the extensions' commands for its item", async () => {
       ui: {
         slots: [],
         commands: [
-          { id: "tracker/0", extension: "tracker", command: "fake.comment", label: "Comment in Fake", about: "work_item", placement: ["context"], input: { ref: "{{ref}}" }, group: "fake" },
+          { id: "tracker/0", extension: "tracker", command: "fake.estimate", label: "Estimate in Fake", about: "work_item", placement: ["context"], input: { ref: "{{ref}}" }, group: "fake" },
           { id: "tracker/1", extension: "tracker", command: "fake.only_menu", label: "Nav only", about: "work_item", placement: ["menu"], input: { ref: "{{ref}}" }, group: "fake" },
         ],
         decorators: [],
@@ -100,8 +100,8 @@ test("a card's menu offers the extensions' commands for its item", async () => {
   fireEvent.contextMenu(view.getByText("Their bug"));
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ui-commands-fake")));
   const item = await waitFor(() => view.getByTestId("menu-item-ui-command-tracker/0"));
-  expect(item.textContent).toContain("Comment in Fake");
+  expect(item.textContent).toContain("Estimate in Fake");
   expect(view.queryByTestId("menu-item-ui-command-tracker/1")).toBeNull();
   fireEvent.click(item);
-  await waitFor(() => expect(ran).toEqual([["fake.comment", { ref: "work_item:fake:W-1" }]]));
+  await waitFor(() => expect(ran).toEqual([["fake.estimate", { ref: "work_item:fake:W-1" }]]));
 });

@@ -1,9 +1,10 @@
-//! The work-items capability (P5.C2, `.context/work-items.md`): tasks,
-//! issues, tickets — whatever a provider tracks — behind one interface.
-//! oxplow's own tasks are one provider (`oxplow`); an issue tracker is
-//! another. Reads are SQL over `v_work_item`; writes go through a
-//! provider, which a [`WorkItemsRegistry`] picks by the ref's provider
-//! segment (`work_item:<provider>:<id>`).
+//! The work-items capability (P5.C2, P7.A1; `.context/work-items.md`):
+//! tasks, issues, tickets — whatever a provider tracks — behind one
+//! interface. oxplow's own tasks are one provider (`oxplow`); an issue
+//! tracker is another. Reads are SQL over `v_work_item`; writes are the
+//! `work_item.*` commands, which the bus dispatches by the ref's provider
+//! segment (`work_item:<provider>:<id>`): oxplow's in its transaction,
+//! another provider's through its [`ExternalVerbs`].
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -11,8 +12,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-use crate::Actor;
+use crate::{Actor, CommandCall, CommandError, Envelope};
 
 /// The states every provider maps its own to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -45,13 +47,16 @@ impl CanonicalState {
     }
 }
 
-/// Where to move an item: a canonical state, or one of the provider's own.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Transition {
-    Canonical(CanonicalState),
-    Native(String),
-}
+/// The capability's verbs: the `work_item.<verb>` commands every provider
+/// answers (`reorder` and `move` are oxplow's lists, not the capability's).
+pub const VERBS: [&str; 6] = [
+    "create",
+    "update",
+    "transition",
+    "link",
+    "comment",
+    "delete",
+];
 
 /// What a provider supports beyond create, update and transition.
 #[derive(
@@ -62,32 +67,12 @@ pub struct WorkItemsFeatures {
     pub hierarchy: bool,
     pub comments: bool,
     pub links: bool,
+    /// Items can be deleted (`work_item.delete`).
+    #[serde(default)]
+    pub delete: bool,
     /// Moving an item to `in_progress` opens its effort itself (oxplow's
     /// tasks do), so `effort.open` must not open a second.
     pub in_progress_opens_effort: bool,
-}
-
-/// A new item.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct NewWorkItem {
-    pub title: String,
-    #[serde(default)]
-    pub body: String,
-    /// Refused unless the provider has `hierarchy`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_ref: Option<String>,
-}
-
-/// Fields to change; absent ones are left alone.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct WorkItemPatch {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body: Option<String>,
-    /// `Some(None)` detaches from the parent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_ref: Option<Option<String>>,
 }
 
 /// An item as its provider now has it — what `v_work_item` holds, and
@@ -124,8 +109,6 @@ pub enum WorkItemsError {
     },
     #[error("{provider} work items don't support {feature}")]
     Unsupported { provider: String, feature: String },
-    #[error("{0}")]
-    Failed(String),
 }
 
 /// The provider segment of `work_item:<provider>:<id>`.
@@ -138,46 +121,69 @@ pub fn provider_of(item_ref: &str) -> Result<&str, WorkItemsError> {
         .ok_or_else(|| WorkItemsError::NotARef(item_ref.to_string()))
 }
 
-/// One source of work items.
+/// What one of a provider's verbs did, as the bus records it: the
+/// handler's `result`, the events to log (the provider's
+/// `work_item.recorded`), and the inverse — named by its **verb**
+/// (`transition`), which the dispatching command turns back into
+/// `work_item.<verb>` so an undo dispatches again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerbOutcome {
+    pub result: Value,
+    pub events: Vec<Envelope>,
+    pub inverse: Option<CommandCall>,
+}
+
+/// A provider outside the bus's transaction: its verbs run against its
+/// own system (a process, a tracker) and are recorded after they return.
+/// `input` is the `work_item.<verb>` input, less the host-side
+/// `provider`; the implementation checks it against what the provider
+/// declared and refuses anything else before calling.
 #[async_trait]
-pub trait WorkItemsProvider: Send + Sync {
-    /// The ref's provider segment (`oxplow`, `linear`).
-    fn provider(&self) -> &str;
-    fn features(&self) -> WorkItemsFeatures;
-    /// The new item's ref.
-    async fn create(&self, actor: &Actor, item: NewWorkItem) -> Result<String, WorkItemsError>;
-    async fn update(
+pub trait ExternalVerbs: Send + Sync {
+    async fn invoke(
         &self,
         actor: &Actor,
-        item_ref: &str,
-        patch: WorkItemPatch,
-    ) -> Result<(), WorkItemsError>;
-    async fn transition(
-        &self,
-        actor: &Actor,
-        item_ref: &str,
-        to: Transition,
-    ) -> Result<(), WorkItemsError>;
-    /// A typed link (`blocks`, `relates_to`, …) from one item to another.
-    async fn link(
-        &self,
-        actor: &Actor,
-        from: &str,
-        to: &str,
-        link_type: &str,
-    ) -> Result<(), WorkItemsError>;
-    async fn comment(
-        &self,
-        actor: &Actor,
-        item_ref: &str,
-        body: &str,
-    ) -> Result<(), WorkItemsError>;
+        verb: &str,
+        input: Value,
+    ) -> Result<VerbOutcome, CommandError>;
+}
+
+/// One source of work items: its ref segment (`oxplow`, `linear`), what
+/// it supports, and — for a provider outside the bus's transaction — the
+/// verbs the dispatching commands call. `None` is oxplow's own: its verbs
+/// are the commands' `Tx` cores.
+#[derive(Clone)]
+pub struct WorkItemsProvider {
+    pub id: String,
+    pub features: WorkItemsFeatures,
+    pub external: Option<Arc<dyn ExternalVerbs>>,
+}
+
+impl std::fmt::Debug for WorkItemsProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkItemsProvider")
+            .field("id", &self.id)
+            .field("features", &self.features)
+            .field("external", &self.external.is_some())
+            .finish()
+    }
+}
+
+/// oxplow's own provider name: `work_item:oxplow:tsk<n>`.
+pub const OXPLOW: &str = "oxplow";
+
+#[derive(Default)]
+struct Providers {
+    by_id: BTreeMap<String, WorkItemsProvider>,
+    /// The provider a `create` with no `provider` files on; oxplow until
+    /// the config names another (`activeProviders`).
+    active: Option<String>,
 }
 
 /// The registered providers, by name. Cloning shares them.
 #[derive(Clone, Default)]
 pub struct WorkItemsRegistry {
-    providers: Arc<std::sync::RwLock<BTreeMap<String, Arc<dyn WorkItemsProvider>>>>,
+    providers: Arc<std::sync::RwLock<Providers>>,
 }
 
 impl WorkItemsRegistry {
@@ -185,11 +191,12 @@ impl WorkItemsRegistry {
         Self::default()
     }
 
-    pub fn register(&self, provider: Arc<dyn WorkItemsProvider>) {
+    pub fn register(&self, provider: WorkItemsProvider) {
         self.providers
             .write()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(provider.provider().to_string(), provider);
+            .by_id
+            .insert(provider.id.clone(), provider);
     }
 
     /// Remove a provider (an instance that stopped).
@@ -197,6 +204,7 @@ impl WorkItemsRegistry {
         self.providers
             .write()
             .unwrap_or_else(|e| e.into_inner())
+            .by_id
             .remove(provider);
     }
 
@@ -205,15 +213,17 @@ impl WorkItemsRegistry {
         self.providers
             .read()
             .unwrap_or_else(|e| e.into_inner())
+            .by_id
             .keys()
             .cloned()
             .collect()
     }
 
-    pub fn get(&self, provider: &str) -> Result<Arc<dyn WorkItemsProvider>, WorkItemsError> {
+    pub fn get(&self, provider: &str) -> Result<WorkItemsProvider, WorkItemsError> {
         self.providers
             .read()
             .unwrap_or_else(|e| e.into_inner())
+            .by_id
             .get(provider)
             .cloned()
             .ok_or_else(|| WorkItemsError::UnknownProvider {
@@ -223,8 +233,27 @@ impl WorkItemsRegistry {
     }
 
     /// The provider `item_ref` belongs to.
-    pub fn for_ref(&self, item_ref: &str) -> Result<Arc<dyn WorkItemsProvider>, WorkItemsError> {
+    pub fn for_ref(&self, item_ref: &str) -> Result<WorkItemsProvider, WorkItemsError> {
         self.get(provider_of(item_ref)?)
+    }
+
+    /// The provider a `create` with no `provider` files on. Whether it is
+    /// running is the caller's to check (`get`): an active provider that
+    /// isn't is a failure naming it, never a silent fallback.
+    pub fn active(&self) -> String {
+        self.providers
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .active
+            .clone()
+            .unwrap_or_else(|| OXPLOW.to_string())
+    }
+
+    pub fn set_active(&self, provider: &str) {
+        self.providers
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .active = Some(provider.to_string());
     }
 }
 
@@ -232,48 +261,21 @@ impl WorkItemsRegistry {
 mod tests {
     use super::*;
 
-    struct Named(&'static str);
-
-    #[async_trait]
-    impl WorkItemsProvider for Named {
-        fn provider(&self) -> &str {
-            self.0
-        }
-        fn features(&self) -> WorkItemsFeatures {
-            WorkItemsFeatures::default()
-        }
-        async fn create(&self, _: &Actor, _: NewWorkItem) -> Result<String, WorkItemsError> {
-            Ok(String::new())
-        }
-        async fn update(&self, _: &Actor, _: &str, _: WorkItemPatch) -> Result<(), WorkItemsError> {
-            Ok(())
-        }
-        async fn transition(
-            &self,
-            _: &Actor,
-            _: &str,
-            _: Transition,
-        ) -> Result<(), WorkItemsError> {
-            Ok(())
-        }
-        async fn link(&self, _: &Actor, _: &str, _: &str, _: &str) -> Result<(), WorkItemsError> {
-            Ok(())
-        }
-        async fn comment(&self, _: &Actor, _: &str, _: &str) -> Result<(), WorkItemsError> {
-            Ok(())
+    fn named(id: &str) -> WorkItemsProvider {
+        WorkItemsProvider {
+            id: id.into(),
+            features: WorkItemsFeatures::default(),
+            external: None,
         }
     }
 
     #[test]
     fn a_ref_finds_its_provider_and_a_foreign_one_names_the_registered() {
         let registry = WorkItemsRegistry::new();
-        registry.register(Arc::new(Named("oxplow")));
-        registry.register(Arc::new(Named("fake")));
+        registry.register(named("oxplow"));
+        registry.register(named("fake"));
         assert_eq!(
-            registry
-                .for_ref("work_item:oxplow:tsk1")
-                .unwrap()
-                .provider(),
+            registry.for_ref("work_item:oxplow:tsk1").unwrap().id,
             "oxplow"
         );
         let err = registry.for_ref("work_item:linear:ENG-12").err().unwrap();
@@ -289,6 +291,19 @@ mod tests {
             provider_of("work_item::x"),
             Err(WorkItemsError::NotARef(_))
         ));
+    }
+
+    /// The active provider is oxplow until set; setting it doesn't check
+    /// that it runs — a `create` on a missing active provider must fail
+    /// naming it, which `get` does.
+    #[test]
+    fn the_active_provider_defaults_to_oxplow_and_is_not_a_fallback() {
+        let registry = WorkItemsRegistry::new();
+        registry.register(named("oxplow"));
+        assert_eq!(registry.active(), "oxplow");
+        registry.set_active("linear");
+        assert_eq!(registry.active(), "linear");
+        assert!(registry.get(&registry.active()).is_err());
     }
 
     #[test]
@@ -310,5 +325,17 @@ mod tests {
             serde_json::from_value::<WorkItemRecord>(json).unwrap(),
             record
         );
+    }
+
+    /// A provider that declares no `delete` reads as `false` (older
+    /// declarations have no such flag).
+    #[test]
+    fn features_default_delete_to_false() {
+        let f: WorkItemsFeatures = serde_json::from_value(serde_json::json!({
+            "hierarchy": true, "comments": false, "links": false,
+            "in_progress_opens_effort": false
+        }))
+        .unwrap();
+        assert!(!f.delete);
     }
 }

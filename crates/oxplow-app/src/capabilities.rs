@@ -26,8 +26,8 @@ pub async fn publish_core(svc: &crate::Services) -> Result<(), DomainError> {
         .map_err(|e| DomainError::Invariant(format!("oxplow's work items provider: {e}")))?;
     let mut rows = vec![row(
         "work_items",
-        work_items.provider(),
-        serde_json::to_value(work_items.features()).unwrap_or(Value::Null),
+        &work_items.id,
+        serde_json::to_value(work_items.features).unwrap_or(Value::Null),
     )];
     rows.push(row(
         "vcs",

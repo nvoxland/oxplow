@@ -61,11 +61,12 @@ stub generation for provider authors.
 A scripted **work-items** provider, lib + bin (the `oxplow-acp-fake`
 pattern), that the host's tests and the conformance kit drive over real
 stdio. `declarations()` is its `InitializeResult`: the `work_items`
-capability (hierarchy, comments and links; not
-`in_progress_opens_effort`), the commands `create` / `update` /
-`transition` / `link` / `comment` (effect `record`, no confirmation —
-a verb declared `confirm: always` is refused, since the `work_item.*`
-command calling it is what a person confirms; tsk569), the
+capability (hierarchy, comments, links and delete; not
+`in_progress_opens_effort`), the work-items verbs `create` / `update` /
+`transition` (undoable: its inverse moves the item back) / `link` /
+`comment` / `delete` over the contract's inputs (`state` /
+`native_state`, its `native.points`; `additionalProperties: false`), one
+command of its own, `estimate { ref, points }`, the
 `work_item.recorded@1` event type with the core schema, a `work_items`
 collector over the `work_item` entity, and a config schema requiring
 `team`. `check` returns handle `fake:<team>` or a `/team` problem. Items
@@ -109,8 +110,10 @@ capability; an entry or declarations path outside the folder (or the
 manifest, or under `lenses/`); a bad host pattern; and declarations that
 don't parse, speak another protocol version, lack the named capability,
 or — for `work_items` — lack `create` / `update` / `transition` (and
-`link` / `comment` when its features say so), or claim
-`in_progress_opens_effort` (only oxplow's tasks do).
+`link` / `comment` / `delete` when its features say so), declare a verb
+that isn't `confirm: never` and `effect: record` (the `work_item.<verb>`
+command running it is what a person confirms and what is gated; tsk569,
+P7.A1), or claim `in_progress_opens_effort` (only oxplow's tasks do).
 
 **Consent precedes execution** (`exec_consent`, `ProgramKind::Provider`,
 key `provider:<ext>/<id>`): the approval hash covers every file in the
@@ -180,10 +183,15 @@ credentials, health). The config object is the provider's
 instances matching the config: `reconcile()` runs at boot and on every
 `ConfigChanged` (`spawn_reconciler`), starting enabled instances and
 stopping the rest (a config or spec change restarts one). `enable(ext,
-spec, config)` starts an instance and only then registers its declared
-commands on the bus as `<id>.<name>` (`External`, `Experimental`, all
-invokers; confirm / effect / undoable as declared) and its capability
-provider (`ExternalWorkItems`) in `Services.work_items`. A refusal —
+spec, config)` starts an instance and only then registers its capability
+provider (`ExternalWorkItems::provider`: id, declared features, and the
+`ExternalVerbs` the dispatching `work_item.*` commands call — each verb's
+input checked against its declared schema first) in
+`Services.work_items`, and its **other** declared commands on the bus as
+`<id>.<name>` (`External`, `Experimental`, all invokers; confirm /
+effect / undoable as declared). Its capability's verbs are never
+commands of their own: `work_item.<verb>` is the one write surface
+(P7.A1). A refusal —
 unapproved, unconfigured, a handshake that doesn't match — registers
 nothing; a start that merely failed (it may come up) registers and
 counts as a failure, and its next call restarts it after a backoff that
@@ -199,7 +207,8 @@ tsk548): declaring any other type — another core one such as
 refused when the manifest loads, and the declared schema must equal
 core's (checked at enable). Its own types are P7. A command's run
 invokes the process and hands the bus its result, its inverse (as
-`<id>.<command>`) and its events — refused if a type isn't declared, a
+`<id>.<command>`, or for a verb `work_item.<verb>`) and its events —
+refused if a type isn't declared, a
 `work_item.recorded` names another provider's item, or a subject isn't
 one of its own refs (`check_subject`: `work_item:<id>:…` or
 `plugin:<ext>`).
@@ -268,11 +277,17 @@ written) and a configured one enables, writes `extensionInstances` and
 disables again; `fail-next:3` disables it after three failures with the
 reason logged, keeps it off across a reconcile, refuses an agent's
 `provider.enable` and comes back on a person's; and the work-items
-conformance suite passes through `ExternalWorkItems` over the fake.
+conformance suite passes through the dispatching `work_item.*` over the
+fake; `work_item.*` writes the fake's items through its process with one
+audit row (and undo dispatches again), its verbs aren't on the bus but
+`fake.estimate` is; a verb's input is checked against its declared schema
+and a parent or link target of another provider is refused.
 
 **Its commands can appear in core menus**: the extension's
-`ui.commands` may name `<provider>.<verb>`, grouped under the provider
-and checked against its declarations ([extensions.md](./extensions.md)).
+`ui.commands` may name the provider's own `<provider>.<name>` commands
+(not its capability's verbs — those are `work_item.<verb>`), grouped
+under the provider and checked against its declarations
+([extensions.md](./extensions.md)).
 
 **Its features are published** while it runs: `admit` writes the
 instance's `capability_provider` row (`v_capability_provider`) and

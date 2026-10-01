@@ -178,7 +178,7 @@ test("orderedTaskIds follows the server's order, ties by creation time", () => {
   expect(orderedTaskIds(work)).toEqual(["tsk1", "tsk2", "tsk3"]);
 });
 
-import { capabilityProvidersFromResult, featuresFor, providerOf, workItemCommand } from "./workItems.js";
+import { capabilityProvidersFromResult, featuresFor } from "./workItems.js";
 
 // P6b.C2: a provider's flags come from v_capability_provider; a provider
 // the model doesn't list (or a flag it doesn't declare) is off.
@@ -186,26 +186,16 @@ test("capability providers read with their features; an unknown provider has non
   const providers = capabilityProvidersFromResult({
     columns: ["capability", "provider", "extension", "features", "active"],
     rows: [
-      ["work_items", "oxplow", null, '{"hierarchy":true,"comments":true,"links":true,"in_progress_opens_effort":true}', 1],
+      ["work_items", "oxplow", null, '{"hierarchy":true,"comments":true,"links":true,"delete":true,"in_progress_opens_effort":true}', 1],
       ["work_items", "fake", "tracker", '{"comments":true}', 1],
     ],
     truncated: false,
     reads: { models: ["v_capability_provider"], tables: [], measures: [] },
     freshness: {},
   } as unknown as SqlQueryResult);
-  expect(featuresFor(providers, "oxplow")).toEqual({ hierarchy: true, comments: true, links: true, in_progress_opens_effort: true });
-  expect(featuresFor(providers, "fake")).toEqual({ hierarchy: false, comments: true, links: false, in_progress_opens_effort: false });
-  expect(featuresFor(providers, "linear")).toEqual({ hierarchy: false, comments: false, links: false, in_progress_opens_effort: false });
+  expect(featuresFor(providers, "oxplow")).toEqual({ hierarchy: true, comments: true, links: true, delete: true, in_progress_opens_effort: true });
+  expect(featuresFor(providers, "fake")).toEqual({ hierarchy: false, comments: true, links: false, delete: false, in_progress_opens_effort: false });
+  expect(featuresFor(providers, "linear")).toEqual({ hierarchy: false, comments: false, links: false, delete: false, in_progress_opens_effort: false });
   expect(providers.find((p) => p.provider === "fake")?.extension).toBe("tracker");
 });
 
-// R22: a provider id is lowercase snake_case, as the Rust grammar has it;
-// a string that isn't a work item ref names no command.
-test("a work item ref's provider follows the id grammar; a non-ref has no command", () => {
-  expect(providerOf("work_item:fake_tracker:W-1")).toBe("fake_tracker");
-  expect(providerOf("work_item:fake-tracker:W-1")).toBeNull();
-  expect(providerOf("task:tsk1")).toBeNull();
-  expect(workItemCommand("work_item:oxplow:tsk1", "transition")).toBe("work_item.transition");
-  expect(workItemCommand("work_item:fake:W-1", "comment")).toBe("fake.comment");
-  expect(() => workItemCommand("tsk1", "transition")).toThrow("isn't a work item ref");
-});

@@ -1,173 +1,176 @@
 //! The work-items capability in the app (`.context/work-items.md`):
 //!
-//! - [`OxplowWorkItems`], the built-in provider — oxplow's own tasks —
-//!   which writes through the `work_item.*` bus commands, the one write
-//!   path for tasks;
+//! - [`oxplow_provider`], the built-in provider — oxplow's own tasks —
+//!   whose verbs are the `work_item.*` commands' `Tx` cores;
+//! - [`WorkItems`], a typed client over the `work_item.*` commands: the
+//!   one write surface for every provider (the conformance suite and
+//!   `task_writes` use it);
 //! - [`WorkItemsProjection`], the pump consumer (`work_items.project`)
 //!   that upserts another provider's items into `work_item` from its
 //!   `work_item.recorded` events. oxplow's own rows never take this path:
 //!   the task cores write them with the task.
 
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
-use async_trait::async_trait;
 use oxplow_domain::events::schema::{EventType, WorkItemRecorded, WorkItemRecordedV1};
 use oxplow_domain::work_items::{
-    provider_of, CanonicalState, NewWorkItem, Transition, WorkItemPatch, WorkItemsError,
-    WorkItemsFeatures, WorkItemsProvider,
+    provider_of, CanonicalState, WorkItemsFeatures, WorkItemsProvider,
 };
-use oxplow_domain::{Actor, CommandError, DomainError, StoredEvent, TaskStatus};
+use oxplow_domain::{Actor, CommandError, CommandOutcome, DomainError, StoredEvent};
 use serde_json::{json, Value};
 
 use crate::commands::{work_item, CommandBus};
 use crate::event_pump::EventConsumer;
 
 /// oxplow's own provider name: `work_item:oxplow:tsk<n>`.
-pub const PROVIDER: &str = "oxplow";
+pub const PROVIDER: &str = oxplow_domain::work_items::OXPLOW;
 
-/// oxplow's status for a canonical state.
-pub fn native_status(state: CanonicalState) -> TaskStatus {
-    match state {
-        CanonicalState::Todo => TaskStatus::Ready,
-        CanonicalState::InProgress => TaskStatus::InProgress,
-        CanonicalState::Blocked => TaskStatus::Blocked,
-        CanonicalState::Done => TaskStatus::Done,
-        CanonicalState::Canceled => TaskStatus::Canceled,
-    }
-}
-
-/// oxplow's tasks as a [`WorkItemsProvider`]: each call is a `work_item.*`
-/// command run as the given actor, so it is audited and policy-checked
-/// like any other write. Holds the bus weakly — the bus's commands hold
-/// the registry this provider sits in.
-pub struct OxplowWorkItems {
-    bus: Weak<CommandBus>,
-}
-
-impl OxplowWorkItems {
-    pub fn new(bus: &Arc<CommandBus>) -> Self {
-        Self {
-            bus: Arc::downgrade(bus),
-        }
-    }
-
-    async fn run(&self, actor: &Actor, name: &str, input: Value) -> Result<Value, WorkItemsError> {
-        let bus = self
-            .bus
-            .upgrade()
-            .ok_or_else(|| WorkItemsError::Failed("the command bus is gone".into()))?;
-        bus.run(actor, name, input, false)
-            .await
-            .map(|outcome| outcome.result)
-            .map_err(|e: CommandError| WorkItemsError::Failed(e.to_string()))
-    }
-}
-
-#[async_trait]
-impl WorkItemsProvider for OxplowWorkItems {
-    fn provider(&self) -> &str {
-        PROVIDER
-    }
-
-    fn features(&self) -> WorkItemsFeatures {
-        WorkItemsFeatures {
+/// oxplow's tasks as a work-items provider: every feature, and its
+/// effort follows its status. No external verbs — the `work_item.*`
+/// commands run its cores in the bus's transaction.
+pub fn oxplow_provider() -> WorkItemsProvider {
+    WorkItemsProvider {
+        id: PROVIDER.into(),
+        features: WorkItemsFeatures {
             hierarchy: true,
             comments: true,
             links: true,
+            delete: true,
             in_progress_opens_effort: true,
-        }
+        },
+        external: None,
+    }
+}
+
+/// A new item, as `work_item.create` takes it.
+#[derive(Debug, Clone, Default)]
+pub struct NewItem {
+    /// `None`: the active provider.
+    pub provider: Option<String>,
+    pub title: String,
+    pub body: String,
+    pub parent_ref: Option<String>,
+    pub state: Option<CanonicalState>,
+    pub native_state: Option<String>,
+    pub native: Option<Value>,
+}
+
+/// The `work_item.*` commands, typed: each call is one run through the
+/// bus as `actor` — dispatched to the item's provider, audited and
+/// policy-checked like any other.
+#[derive(Clone)]
+pub struct WorkItems {
+    bus: Arc<CommandBus>,
+}
+
+impl WorkItems {
+    pub fn new(bus: Arc<CommandBus>) -> Self {
+        Self { bus }
     }
 
-    async fn create(&self, actor: &Actor, item: NewWorkItem) -> Result<String, WorkItemsError> {
-        let result = self
-            .run(
-                actor,
-                work_item::CREATE,
-                // Filed on the actor's thread (the backlog for a person).
-                json!({
-                    "title": item.title,
-                    "description": item.body,
-                    "parent_ref": item.parent_ref,
-                    "thread": actor.thread_id().map(|t| t.to_string()),
-                }),
-            )
-            .await?;
-        result["ref"]
+    async fn run(
+        &self,
+        actor: &Actor,
+        name: &str,
+        input: Value,
+    ) -> Result<CommandOutcome, CommandError> {
+        self.bus.run(actor, name, input, false).await
+    }
+
+    /// File an item; its ref.
+    pub async fn create(&self, actor: &Actor, item: NewItem) -> Result<String, CommandError> {
+        let input = serde_json::to_value(work_item::WorkItemCreateInput {
+            provider: item.provider,
+            title: item.title,
+            body: (!item.body.is_empty()).then_some(item.body),
+            parent_ref: item.parent_ref,
+            state: item.state,
+            native_state: item.native_state,
+            native: item.native,
+        })
+        .expect("input serializes");
+        let out = self.run(actor, work_item::CREATE, input).await?;
+        out.result["ref"]
             .as_str()
             .map(str::to_string)
-            .ok_or_else(|| WorkItemsError::Failed("work_item.create returned no ref".into()))
+            .ok_or_else(|| CommandError::Failed {
+                message: "work_item.create returned no ref".into(),
+            })
     }
 
-    async fn update(
+    pub async fn update(
+        &self,
+        actor: &Actor,
+        input: work_item::WorkItemUpdateInput,
+    ) -> Result<CommandOutcome, CommandError> {
+        let input = serde_json::to_value(input).expect("input serializes");
+        self.run(actor, work_item::UPDATE, input).await
+    }
+
+    pub async fn transition(
         &self,
         actor: &Actor,
         item_ref: &str,
-        patch: WorkItemPatch,
-    ) -> Result<(), WorkItemsError> {
-        let mut input = json!({ "ref": item_ref });
-        if let Some(title) = patch.title {
-            input["title"] = title.into();
+        to: CanonicalState,
+        native_state: Option<&str>,
+    ) -> Result<CommandOutcome, CommandError> {
+        let mut input = json!({ "ref": item_ref, "to": to });
+        if let Some(n) = native_state {
+            input["native_state"] = n.into();
         }
-        if let Some(body) = patch.body {
-            input["description"] = body.into();
-        }
-        if let Some(parent) = patch.parent_ref {
-            input["parent_ref"] = parent.unwrap_or_default().into();
-        }
-        self.run(actor, work_item::UPDATE, input).await.map(|_| ())
+        self.run(actor, work_item::NAME, input).await
     }
 
-    async fn transition(
-        &self,
-        actor: &Actor,
-        item_ref: &str,
-        to: Transition,
-    ) -> Result<(), WorkItemsError> {
-        let to = match to {
-            Transition::Canonical(state) => native_status(state),
-            Transition::Native(raw) => {
-                serde_json::from_value(Value::String(raw.clone())).map_err(|_| {
-                    WorkItemsError::Failed(format!(
-                        "`{raw}` isn't an oxplow status (ready, in_progress, blocked, done, \
-                         canceled, archived)"
-                    ))
-                })?
-            }
-        };
-        self.run(actor, work_item::NAME, json!({ "ref": item_ref, "to": to }))
-            .await
-            .map(|_| ())
-    }
-
-    async fn link(
+    pub async fn link(
         &self,
         actor: &Actor,
         from: &str,
         to: &str,
         link_type: &str,
-    ) -> Result<(), WorkItemsError> {
+    ) -> Result<CommandOutcome, CommandError> {
         self.run(
             actor,
             work_item::LINK,
             json!({ "ref": from, "target": to, "link_type": link_type }),
         )
         .await
-        .map(|_| ())
     }
 
-    async fn comment(
+    pub async fn comment(
         &self,
         actor: &Actor,
         item_ref: &str,
         body: &str,
-    ) -> Result<(), WorkItemsError> {
+    ) -> Result<CommandOutcome, CommandError> {
         self.run(
             actor,
             work_item::COMMENT,
             json!({ "ref": item_ref, "body": body }),
         )
         .await
-        .map(|_| ())
+    }
+
+    /// Destructive: `confirmed` is the person's confirmation (an agent's
+    /// is ignored — its run is proposed).
+    pub async fn delete(
+        &self,
+        actor: &Actor,
+        item_ref: &str,
+        confirmed: bool,
+    ) -> Result<CommandOutcome, CommandError> {
+        self.bus
+            .run(
+                actor,
+                work_item::DELETE,
+                json!({ "ref": item_ref }),
+                confirmed,
+            )
+            .await
+    }
+
+    /// The undo of a run (its audit row).
+    pub async fn undo(&self, actor: &Actor, audit_id: i64) -> Result<CommandOutcome, CommandError> {
+        self.bus.undo(actor, audit_id, false).await
     }
 }
 
@@ -233,7 +236,6 @@ impl EventConsumer for WorkItemsProjection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::events::schema::EventType;
     use oxplow_domain::work_items::WorkItemRecord;
     use oxplow_domain::Envelope;
 

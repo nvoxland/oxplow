@@ -846,7 +846,7 @@ in core menus, **for a ref**:
 ```yaml
 ui:
   commands:
-    - { command: fake.comment, label: "Comment in Fake…", about: work_item, placement: [menu, context] }
+    - { command: fake.estimate, label: "Estimate in Fake…", about: work_item, placement: [menu, context] }
     - { command: work_item.transition, label: Move to Done, about: work_item, input: { ref: "{{ref}}", to: done } }
 ```
 

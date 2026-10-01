@@ -11,7 +11,7 @@ use super::*;
 use crate::exec_consent::{self, ProgramKind};
 use crate::extensions::Extension;
 use crate::test_fixtures::{services_with_effort, EffortFixture};
-use crate::work_items_conformance::{suite, ServicesProbe};
+use crate::work_items_conformance::{suite, ServicesProbe, WorkItemsProbe as _};
 
 const EXT: &str = "tracker";
 
@@ -279,7 +279,12 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         let failed = fx
             .svc
             .commands
-            .run(&Actor::Human, "fake.create", json!({ "title": "x" }), false)
+            .run(
+                &Actor::Human,
+                "work_item.create",
+                json!({ "provider": "fake", "title": "x" }),
+                false,
+            )
             .await;
         assert!(failed.is_err());
     }
@@ -353,19 +358,25 @@ async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
         thread_id: Some(ThreadId::new(fx.thread.value())),
         stream_id: None,
     };
-    let findings = suite(&*provider, &ServicesProbe(&fx.svc), &actor).await;
+    let findings = suite(
+        &fx.svc.work_items_client(),
+        &provider.id,
+        provider.features,
+        None,
+        &ServicesProbe(&fx.svc),
+        &actor,
+    )
+    .await;
     assert_eq!(findings, vec![]);
 
-    // Its commands are on the bus, External, and audited as run; its
-    // health counts the calls.
-    let spec = fx.svc.commands.spec("fake.create").unwrap();
-    assert_eq!(spec.atomicity, oxplow_domain::Atomicity::External);
+    // Its writes are `work_item.*` runs, audited once each; its health
+    // counts the calls.
     let audited = fx
         .svc
         .db
         .read(|c| {
             c.query_row(
-                "SELECT count(*) FROM command_audit WHERE command = 'fake.transition' AND outcome = 'ok'",
+                "SELECT count(*) FROM command_audit WHERE command = 'work_item.transition' AND outcome = 'ok'",
                 [],
                 |r| r.get::<_, i64>(0),
             )
@@ -377,6 +388,181 @@ async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
     let health = fx.svc.providers.health(INSTANCE).unwrap();
     assert_eq!(health.state, InstanceState::Ready);
     assert!(health.mean_invoke_ms.is_some() && health.last_ok_at.is_some());
+}
+
+/// P7.A1: `work_item.*` is the one write surface — another provider's
+/// item moves through its process as `work_item.transition`, one audit
+/// row, its `work_item.recorded` caused by the run. The provider's verbs
+/// aren't commands of their own; its extra command is.
+#[tokio::test]
+async fn work_item_commands_write_another_providers_items_through_its_process() {
+    let (fx, ext) = approved("").await;
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    assert!(fx.svc.commands.spec("fake.transition").is_none());
+    assert!(fx.svc.commands.spec("fake.create").is_none());
+    let estimate = fx
+        .svc
+        .commands
+        .spec("fake.estimate")
+        .expect("its own command");
+    assert_eq!(estimate.atomicity, oxplow_domain::Atomicity::External);
+    assert_eq!(
+        fx.svc.commands.namespace_owner("fake").as_deref(),
+        Some("provider:tracker/fake")
+    );
+
+    let items = fx.svc.work_items_client();
+    let item = items
+        .create(
+            &Actor::Human,
+            crate::work_items::NewItem {
+                provider: Some("fake".into()),
+                title: "theirs".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(item, "work_item:fake:W-1");
+    let moved = items
+        .transition(
+            &Actor::Human,
+            &item,
+            oxplow_domain::work_items::CanonicalState::Done,
+            None,
+        )
+        .await
+        .unwrap();
+    let executed = moved.event_id.clone().unwrap();
+    let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
+    let caused: Vec<&str> = events
+        .iter()
+        .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
+        .map(|e| e.envelope.event_type.as_str())
+        .collect();
+    assert_eq!(caused, vec!["work_item.recorded"]);
+    let commands: Vec<String> = fx
+        .svc
+        .commands
+        .audit_store()
+        .list_recent(10)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.command)
+        .collect();
+    assert_eq!(commands, vec!["work_item.transition", "work_item.create"]);
+
+    // Undo dispatches again: the provider's inverse is renamed to
+    // `work_item.transition` and moves the item back.
+    assert_eq!(moved.inverse.as_ref().unwrap().name, "work_item.transition");
+    items
+        .undo(&Actor::Human, moved.audit_id.unwrap())
+        .await
+        .unwrap();
+    fx.svc.event_pump.run_once().await.unwrap();
+    let state = ServicesProbe(&fx.svc).record(&item).await.unwrap().state;
+    assert_eq!(state, oxplow_domain::work_items::CanonicalState::Todo);
+}
+
+/// P7.A1: a provider's verb input is checked against what it declares
+/// (its `native` fields included) before the process is called; another
+/// provider's parent or link target is refused at its field; an agent's
+/// external run that needs a person is proposed with no dry run.
+#[tokio::test]
+async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
+    let (fx, ext) = approved("").await;
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    let run = |input: serde_json::Value, name: &'static str| {
+        let svc = fx.svc.clone();
+        async move { svc.commands.run(&Actor::Human, name, input, false).await }
+    };
+    let err = run(
+        json!({ "provider": "fake", "title": "x", "native": { "points": "many" } }),
+        "work_item.create",
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(&err, oxplow_domain::CommandError::Invalid { field: Some(f), .. } if f == "/native/points"),
+        "{err:?}"
+    );
+    let ours = crate::work_items::PROVIDER;
+    let task = oxplow_domain::refs::build::work_item_ref(fx.task);
+    let err = run(
+        json!({ "provider": "fake", "title": "x", "parent_ref": task }),
+        "work_item.create",
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(&err, oxplow_domain::CommandError::Invalid { field: Some(f), message }
+            if f == "/parent_ref" && message.contains(ours)),
+        "{err:?}"
+    );
+    let item = run(
+        json!({ "provider": "fake", "title": "x" }),
+        "work_item.create",
+    )
+    .await
+    .unwrap()
+    .result["ref"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let err = run(
+        json!({ "ref": item, "target": task, "link_type": "relates_to" }),
+        "work_item.link",
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(&err, oxplow_domain::CommandError::Invalid { field: Some(f), .. } if f == "/target"),
+        "{err:?}"
+    );
+    let err = run(
+        json!({ "ref": item, "to": "done", "native_state": "Doing" }),
+        "work_item.transition",
+    )
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("native_state"), "{err}");
+
+    // Delete is destructive: an agent's run is proposed, never dry-run
+    // through the process.
+    let agent = Actor::Agent {
+        thread_id: Some(ThreadId::new(fx.thread.value())),
+        stream_id: None,
+    };
+    let err = fx
+        .svc
+        .commands
+        .run(&agent, "work_item.delete", json!({ "ref": item }), false)
+        .await
+        .unwrap_err();
+    let oxplow_domain::CommandError::Proposed { proposal, .. } = err else {
+        panic!("{err:?}");
+    };
+    let id: i64 = proposal.strip_prefix("proposal:").unwrap().parse().unwrap();
+    let kept = fx
+        .svc
+        .commands
+        .proposal_store()
+        .get(id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept.dry_run, None);
+    fx.svc.event_pump.run_once().await.unwrap();
+    assert!(ServicesProbe(&fx.svc).record(&item).await.is_some());
 }
 
 /// P6b.C2: a running instance's capability and features are a model row
@@ -399,7 +585,7 @@ async fn a_running_instance_publishes_its_features() {
         .expect("published");
     assert_eq!(fake.capability, "work_items");
     assert_eq!(fake.extension.as_deref(), Some("tracker"));
-    let declared = fx.svc.work_items.get("fake").unwrap().features();
+    let declared = fx.svc.work_items.get("fake").unwrap().features;
     assert_eq!(fake.features, serde_json::to_value(declared).unwrap());
     assert!(fx.svc.providers.stop(INSTANCE).await);
     assert!(store
@@ -412,7 +598,8 @@ async fn a_running_instance_publishes_its_features() {
 
 /// P6b.C4: an extension's `ui.commands` name registered commands — or,
 /// for its own provider (not on the bus until its instance runs), commands
-/// its declarations list — and their input must fit.
+/// its declarations list that aren't its capability's verbs — and their
+/// input must fit.
 #[tokio::test]
 async fn ui_commands_are_checked_against_the_registry_or_the_providers_declarations() {
     let fx = services_with_effort().await;
@@ -423,12 +610,12 @@ async fn ui_commands_are_checked_against_the_registry_or_the_providers_declarati
     std::fs::write(
         &manifest,
         format!(
-            "{base}ui:\n  commands:\n    - {{ command: fake.comment, label: Comment, about: work_item, input: {{ ref: \"{{{{ref}}}}\", body: hi }} }}\n    - {{ command: fake.nope, label: Nope, about: work_item }}\n    - {{ command: work_item.transition, label: Done, about: work_item, input: {{ ref: \"{{{{ref}}}}\", to: done }} }}\n    - {{ command: work_item.transition, label: Bad, about: work_item, input: {{ ref: \"{{{{ref}}}}\" }} }}\n"
+            "{base}ui:\n  commands:\n    - {{ command: fake.estimate, label: Estimate, about: work_item, input: {{ ref: \"{{{{ref}}}}\", points: 3 }} }}\n    - {{ command: fake.comment, label: Comment, about: work_item, input: {{ ref: \"{{{{ref}}}}\", body: hi }} }}\n    - {{ command: fake.nope, label: Nope, about: work_item }}\n    - {{ command: work_item.transition, label: Done, about: work_item, input: {{ ref: \"{{{{ref}}}}\", to: done }} }}\n    - {{ command: work_item.transition, label: Bad, about: work_item, input: {{ ref: \"{{{{ref}}}}\" }} }}\n"
         ),
     )
     .unwrap();
     let ext = extension(&root);
-    assert_eq!(ext.ui.commands.len(), 4);
+    assert_eq!(ext.ui.commands.len(), 5);
     assert_eq!(ext.ui.commands[0].group, "fake");
     let schema = |name: &str| fx.svc.commands.input_schema(name);
     let v = crate::extensions::validate_extension(
@@ -442,8 +629,14 @@ async fn ui_commands_are_checked_against_the_registry_or_the_providers_declarati
     .unwrap();
     let errs = v.errors.join("\n");
     assert!(
-        !errs.contains("`Comment`"),
+        !errs.contains("`Estimate`"),
         "the provider declares it: {errs}"
+    );
+    // A capability verb isn't a command of its own: `work_item.comment`
+    // is (P7.A1).
+    assert!(
+        errs.contains("`ui.commands` `Comment`: no command `fake.comment`"),
+        "{errs}"
     );
     assert!(!errs.contains("`Done`"), "{errs}");
     assert!(
@@ -748,9 +941,12 @@ async fn a_hung_invoke_times_out_and_counts() {
         .unwrap();
     let ran = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        fx.svc
-            .commands
-            .run(&Actor::Human, "fake.create", json!({ "title": "x" }), false),
+        fx.svc.commands.run(
+            &Actor::Human,
+            "work_item.create",
+            json!({ "provider": "fake", "title": "x" }),
+            false,
+        ),
     )
     .await
     .expect("the call returns once it times out");
@@ -910,12 +1106,13 @@ async fn a_failed_enable_writes_no_config() {
     assert!(!fx.svc.commands.namespace_owner("fake").is_some());
 }
 
-/// tsk569: a capability verb is called by `work_item.*` (which a person
-/// confirms), never confirmed on its own: declaring it `confirm: always`
-/// is refused.
+/// tsk569, P7.A1: a capability verb is run by `work_item.<verb>` (whose
+/// spec is what a person confirms), never on its own: it is
+/// `confirm: never` and `effect: record`; a provider declaring `delete`
+/// must declare the verb.
 #[test]
-fn a_capability_verb_cannot_ask_for_confirmation() {
-    let (spec, mut declared) = {
+fn a_capability_verb_is_record_and_never_confirms() {
+    let (spec, declared) = {
         let dir = tempfile::tempdir().unwrap();
         write_extension(dir.path(), "");
         (
@@ -924,16 +1121,29 @@ fn a_capability_verb_cannot_ask_for_confirmation() {
         )
     };
     spec::check_declarations(&spec, &declared).unwrap();
-    for c in declared
-        .commands
-        .iter_mut()
-        .filter(|c| c.name == "transition")
-    {
+    for (field, value) in [("confirm", "always"), ("effect", "write")] {
+        let mut changed = declared.clone();
+        for c in changed
+            .commands
+            .iter_mut()
+            .filter(|c| c.name == "transition")
+        {
+            match field {
+                "confirm" => c.confirm = value.into(),
+                _ => c.effect = value.into(),
+            }
+        }
+        let err = spec::check_declarations(&spec, &changed).unwrap_err();
+        assert!(err.contains("transition") && err.contains(field), "{err}");
+    }
+    // The extra command isn't a verb: it may ask.
+    let mut asking = declared.clone();
+    for c in asking.commands.iter_mut().filter(|c| c.name == "estimate") {
         c.confirm = "always".into();
     }
-    let err = spec::check_declarations(&spec, &declared).unwrap_err();
-    assert!(
-        err.contains("transition") && err.contains("confirm"),
-        "{err}"
-    );
+    spec::check_declarations(&spec, &asking).unwrap();
+    let mut no_delete = declared;
+    no_delete.commands.retain(|c| c.name != "delete");
+    let err = spec::check_declarations(&spec, &no_delete).unwrap_err();
+    assert!(err.contains("`delete`"), "{err}");
 }

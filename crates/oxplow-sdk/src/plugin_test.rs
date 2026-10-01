@@ -520,7 +520,10 @@ async fn suite(
             providers::spec::WORK_ITEMS => {
                 let provider = svc.work_items.get(&spec.id).map_err(|e| e.to_string())?;
                 oxplow_app::work_items_conformance::suite(
-                    &*provider,
+                    &svc.work_items_client(),
+                    &provider.id,
+                    provider.features,
+                    None,
                     &oxplow_app::work_items_conformance::ServicesProbe(&svc),
                     &Actor::Human,
                 )

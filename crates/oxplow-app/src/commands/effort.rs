@@ -140,7 +140,7 @@ fn opens_its_own_effort(
         return Ok(());
     };
     match registry.get(provider) {
-        Ok(p) if p.features().in_progress_opens_effort => Err(invalid(
+        Ok(p) if p.features.in_progress_opens_effort => Err(invalid(
             field,
             format!(
                 "`{work_item}`'s effort opens and closes with its status ({provider} items \

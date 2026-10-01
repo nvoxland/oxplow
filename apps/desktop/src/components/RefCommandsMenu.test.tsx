@@ -16,7 +16,7 @@ mock.module("../api.js", () => ({
       ui: {
         slots: [],
         commands: [
-          { id: "tracker/0", extension: "tracker", group: "fake", command: "fake.comment", label: "Comment in Fake…", about: "work_item", placement: ["menu"], input: { ref: "{{ref}}", body: "+1" } },
+          { id: "tracker/0", extension: "tracker", group: "fake", command: "fake.estimate", label: "Estimate in Fake…", about: "work_item", placement: ["menu"], input: { ref: "{{ref}}", points: 3 } },
           { id: "tracker/1", extension: "tracker", group: "tracker", command: "tracker.sync", label: "Sync", about: "commit", placement: ["menu"], input: { sha: "{{ref.id}}" } },
         ],
         decorators: [],
@@ -39,7 +39,7 @@ test("a page's ref gets its kind's commands, run as the person with the ref boun
   expect(view.getByTestId("page-nav-commands-menu").textContent).toContain("fake");
   expect(view.queryByTestId("page-nav-command-tracker/1")).toBeNull();
   fireEvent.click(view.getByTestId("page-nav-command-tracker/0"));
-  await waitFor(() => expect(ran).toEqual([["fake.comment", { ref: "work_item:fake:W-1", body: "+1" }]]));
+  await waitFor(() => expect(ran).toEqual([["fake.estimate", { ref: "work_item:fake:W-1", points: 3 }]]));
 });
 
 test("no commands for the page's kind, no menu", async () => {
