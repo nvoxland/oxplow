@@ -396,7 +396,7 @@ fn share_lens(
     if source.sharing == extensions::Sharing::Shared {
         return Err(invalid("/lens", format!("`{id}` is shared already")));
     }
-    let dir = root.join(extensions::EXTENSIONS_DIR).join(to);
+    let dir = extensions::writable_extension_dir(root, to).map_err(domain)?;
     let manifest = dir.join("extension.yaml");
     let created = !manifest.exists();
     if !created {
@@ -440,10 +440,15 @@ fn share_lens(
         }
         std::fs::write(&file, &text)
     };
+    // Only what this call wrote: the lens file, the manifest it scaffolded,
+    // and the directories left empty by removing them (`remove_dir` is not
+    // recursive, so anything that was there before stays).
     let undo = || {
         let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_dir(dir.join("lenses"));
         if created {
-            let _ = std::fs::remove_dir_all(&dir);
+            let _ = std::fs::remove_file(&manifest);
+            let _ = std::fs::remove_dir(&dir);
         }
     };
     write().map_err(|e| CommandError::from(DomainError::Storage(format!("write {to}: {e}"))))?;
@@ -734,5 +739,59 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+    }
+
+    /// The target is an extension name, checked the way `save_lens` checks
+    /// one; and a failed share removes only what it wrote — never a
+    /// directory that was there before.
+    #[tokio::test]
+    async fn share_checks_the_target_name_and_removes_only_what_it_wrote() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        let mine = root.join("oxplow/extensions/mine");
+        std::fs::create_dir_all(mine.join("lenses")).unwrap();
+        std::fs::write(
+            mine.join("extension.yaml"),
+            "manifest: 2\nname: mine\nintent:\n  purpose: mine\n",
+        )
+        .unwrap();
+        std::fs::write(
+            mine.join("lenses/raw.yaml"),
+            "title: Raw\nquery: SELECT id FROM task\n",
+        )
+        .unwrap();
+        let share = |to: &str| {
+            let svc = fx.svc.clone();
+            let to = to.to_string();
+            async move {
+                svc.commands
+                    .run(
+                        &Actor::Human,
+                        SHARE,
+                        json!({ "lens": "mine/raw", "extension": to }),
+                        false,
+                    )
+                    .await
+            }
+        };
+        let err = share("../../src").await.unwrap_err();
+        assert!(err.to_string().contains("extension name"), "{err}");
+        assert!(!root.join("oxplow/src").exists());
+        let err = share("oxplow-analytics").await.unwrap_err();
+        assert!(err.to_string().contains("bundled"), "{err}");
+
+        // A directory that isn't an extension yet, holding someone's files.
+        let scratch = root.join("oxplow/extensions/scratch");
+        std::fs::create_dir_all(&scratch).unwrap();
+        std::fs::write(scratch.join("notes.txt"), "keep me").unwrap();
+        let err = share("scratch").await.unwrap_err();
+        assert!(err.to_string().contains("shared checks"), "{err}");
+        assert!(
+            scratch.join("notes.txt").exists(),
+            "a failed share deleted a pre-existing file"
+        );
+        assert!(!scratch.join("extension.yaml").exists());
+        assert!(!scratch.join("lenses").exists());
+        assert!(mine.join("lenses/raw.yaml").exists());
     }
 }

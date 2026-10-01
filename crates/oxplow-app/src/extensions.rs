@@ -10,7 +10,7 @@
 //! loads.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use oxplow_db::{SqlCell, SqlQueryResult};
 use oxplow_domain::DomainError;
@@ -2622,6 +2622,31 @@ pub struct LensOrigin<'a> {
 /// extension (a private v2 manifest whose intent is `origin`) if needed.
 /// Refuses a spec with a problem, overwriting a lens, and bundled or
 /// git-installed extensions (their files are replaced on update).
+/// The directory of extension `name` under `root`, if oxplow may write
+/// lens files into it: a valid name, not a bundled (read-only) extension,
+/// not an installed one (its files are replaced on update). The one check
+/// every writer of an extension's files — `save_lens`, `lens.share` —
+/// runs first, so a path or a reserved name never reaches the filesystem.
+pub fn writable_extension_dir(root: &Path, name: &str) -> Result<PathBuf, DomainError> {
+    if !is_valid_name(name) {
+        return Err(DomainError::Invalid(format!(
+            "extension name `{name}` must be lowercase letters, digits and single dashes"
+        )));
+    }
+    if crate::bundled_extensions::is_reserved(name) {
+        return Err(DomainError::Invalid(format!(
+            "`{name}` is a bundled extension (read-only); save to another extension"
+        )));
+    }
+    let dir = root.join(EXTENSIONS_DIR).join(name);
+    if dir.join(SOURCE_FILE).exists() {
+        return Err(DomainError::Invalid(format!(
+            "`{name}` is an installed extension (its files are replaced on update); save to another extension"
+        )));
+    }
+    Ok(dir)
+}
+
 pub fn save_lens(
     root: &Path,
     extension: &str,
@@ -2631,25 +2656,10 @@ pub fn save_lens(
 ) -> Result<Lens, DomainError> {
     let invalid = |m: String| DomainError::Invalid(m);
     let storage = |e: std::io::Error| DomainError::Storage(format!("save lens: {e}"));
-    if !is_valid_name(extension) {
-        return Err(invalid(format!(
-            "extension name `{extension}` must be lowercase letters, digits and single dashes"
-        )));
-    }
+    let dir = writable_extension_dir(root, extension)?;
     if !is_valid_name(slug) {
         return Err(invalid(format!(
             "lens slug `{slug}` must be lowercase letters, digits and single dashes"
-        )));
-    }
-    if crate::bundled_extensions::is_reserved(extension) {
-        return Err(invalid(format!(
-            "`{extension}` is a bundled extension (read-only); save to another extension"
-        )));
-    }
-    let dir = root.join(EXTENSIONS_DIR).join(extension);
-    if dir.join(SOURCE_FILE).exists() {
-        return Err(invalid(format!(
-            "`{extension}` is an installed extension (its files are replaced on update); save to another extension"
         )));
     }
     if let Some(problem) = spec_problem(spec) {

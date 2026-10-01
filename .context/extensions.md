@@ -298,7 +298,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       **`lens.share`** (a person's only) moves a lens into a shared
       extension, created with `sharing: shared` and `engine`
       (`ManifestScaffold.shared`), and refuses one that doesn't load or
-      reads beyond models.
+      reads beyond models. The target goes through
+      `extensions::writable_extension_dir` first — the one check every
+      writer of an extension's files runs (a valid name, not bundled, not
+      installed), so a path or reserved name never reaches the
+      filesystem — and a refused share removes only the files it wrote
+      (never a directory that was there before).
     - **UI** (P6.C2, `components/Answers/`): a terminal thread's
       `AgentPage` shows the **Answers strip** above the terminal — the
       thread's answers from `v_thread_answer` (`threadAnswers.ts`,
