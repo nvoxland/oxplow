@@ -2046,7 +2046,7 @@ pub async fn validate_extension(
 pub type CommandSchemas<'a> = &'a (dyn Fn(&str) -> Option<serde_json::Value> + Sync);
 
 /// A launcher command entry names a registered command whose input fits.
-fn check_launcher_commands(ext: &mut Extension, commands: Option<CommandSchemas<'_>>) {
+pub fn check_launcher_commands(ext: &mut Extension, commands: Option<CommandSchemas<'_>>) {
     let entries: Vec<(String, String, serde_json::Value)> = ext
         .launcher
         .iter()
@@ -2063,7 +2063,8 @@ fn check_launcher_commands(ext: &mut Extension, commands: Option<CommandSchemas<
     let Some(schema_of) = commands else {
         ext.warnings.push(format!(
             "{}/extension.yaml: launcher commands weren't checked (no running oxplow to ask \
-             which commands exist) — use validate_extension",
+             which commands exist) — check the extension from inside oxplow (Settings → \
+             Extensions)",
             ext.path
         ));
         return;

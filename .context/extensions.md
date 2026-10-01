@@ -919,7 +919,10 @@ tool list stable no matter how many extensions are installed.
   `review_extension`, with `CommandBus::input_schema` as
   `CommandSchemas`) checks that a command is registered and its input
   fits. `oxplow plugin check` has no running app to ask, so it says the
-  commands weren't checked. The launcher (`components/extensionLauncher.ts`)
+  commands weren't checked and where to check them (Settings →
+  Extensions) — with or without a project database
+  (`check_launcher_commands` runs on both of `oxplow_sdk::check`'s
+  branches). The launcher (`components/extensionLauncher.ts`)
   merges ref entries into the page directory and lists the others as
   actions under their category.
 - **Lens actions (current, P6.B1):** `actions:` are commands, run by an

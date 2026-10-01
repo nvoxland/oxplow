@@ -317,7 +317,12 @@ pub async fn check(
 ) -> Result<CheckReport, SdkError> {
     let extension = match layer {
         Some(layer) => extensions::validate_extension(layer, catalog, root, name, commands).await,
-        None => catalog.named(root, name),
+        // No layer for a dry run, but launcher commands need none: check
+        // them against the registry, or report them unchecked.
+        None => catalog.named(root, name).map(|mut ext| {
+            extensions::check_launcher_commands(&mut ext, commands);
+            ext
+        }),
     }
     .map_err(|e| match e {
         DomainError::NotFound => SdkError::NotFound(name.to_string()),
@@ -503,6 +508,54 @@ mod tests {
             check(dir.path(), "nope", &ExtensionCatalog::new(), None, None).await,
             Err(SdkError::NotFound(_))
         ));
+    }
+
+    /// Launcher command entries are checked whether or not a project
+    /// database is open: against the registry when one is given, and
+    /// otherwise reported unchecked — with where to check them.
+    #[tokio::test]
+    async fn launcher_commands_are_checked_without_a_database() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{ name: a }]\nlauncher:\n  - { label: New Bug, category: Work, target: { command: work_item.create, input: { title: 7 } } }\n",
+        );
+        let unchecked = check(dir.path(), "acme", &ExtensionCatalog::new(), None, None)
+            .await
+            .unwrap();
+        assert!(
+            unchecked
+                .warnings
+                .iter()
+                .any(|w| w.contains("launcher commands weren't checked") && w.contains("Settings")),
+            "{:?}",
+            unchecked.warnings
+        );
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": { "title": { "type": "string" } },
+            "required": ["title"]
+        });
+        let schemas = move |name: &str| (name == "work_item.create").then(|| schema.clone());
+        let checked = check(
+            dir.path(),
+            "acme",
+            &ExtensionCatalog::new(),
+            None,
+            Some(&schemas),
+        )
+        .await
+        .unwrap();
+        assert!(!checked.ok);
+        assert!(
+            checked
+                .errors
+                .iter()
+                .any(|e| e.contains("the input doesn't fit")),
+            "{:?}",
+            checked.errors
+        );
     }
 
     #[test]
