@@ -138,6 +138,14 @@ doesn't declare — or a provider that isn't listed — off.
 
 ## Conformance
 
+**The UI with every enhancement off** (P6b.C6):
+`apps/desktop/src/pages/CapabilityUi.smoke.test.tsx` renders
+`WorkItemPage` (another provider's item, every flag false), the Board,
+the commit page, uncommitted changes and history with no extensions,
+and asserts each page's core content and the absence of every slot
+section, the Commands menu, decorations and feature-gated actions; then,
+with one extension, that the P6b mounts receive their params.
+
 `oxplow_app::work_items_conformance::suite(provider, probe, actor)` —
 plain functions returning `Finding`s — is what every provider must do:
 create lands a `todo` row; every canonical state round-trips (and

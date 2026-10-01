@@ -726,8 +726,11 @@ pub const SLOTS: &[(&str, &[&str])] = &[
     // A thread's plan, as a compact strip.
     ("thread.plan.header", &["thread_id"]),
     ("vcs.commit.details", &["change_id"]),
-    // Uncommitted changes.
+    // Uncommitted changes: a strip above them, and below the files.
+    ("vcs.status.header", &["stream_id"]),
     ("vcs.status.details", &["change_id"]),
+    // Git history's side column.
+    ("vcs.history.sidebar", &["stream_id"]),
     // Settings: a section per extension with the lenses it mounts (its
     // own status or configuration views). No params.
     ("settings.section", &[]),

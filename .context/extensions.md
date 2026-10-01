@@ -747,7 +747,10 @@ manifest still using top-level `slot_mounts:` / `decorators:` /
 | `work_item.detail.sidebar` | TaskPage / WorkItemPage, in the side rail | `ref`, `task_id` |
 | `thread.plan.header` | PlanPane (compact strip) | `thread_id` |
 | `vcs.commit.details` | GitCommitPage | `change_id` |
+| `vcs.status.header` | UncommittedChangesPage, a strip above everything | `stream_id` |
 | `vcs.status.details` | UncommittedChangesPage | `change_id` |
+| `vcs.history.sidebar` | GitHistoryPage, a side column shown only when something mounts there (`useSlotMounted`) | `stream_id` |
+| (`diff.file.header`, a file diff's header strip, was planned and cut: the diff pane is Monaco's, with no region for a lens; it waits for a page that needs it) | | |
 | `settings.section` | Settings: a section per mounting extension, titled with its name, before AI (tsk330; `SettingsSlotSections`, `slotRuns(…, extension)`) | none |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.

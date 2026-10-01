@@ -12,7 +12,7 @@ const realApi = await import("../api.js");
 mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: async () =>
-    [{ name: "acme", enabled: true, pages: [{ id: "open-prs", title: "Open Pull Requests", icon: null, category: "Work", lens: "acme/prs" }] }] as unknown as Extension[],
+    [{ name: "acme", enabled: true, ui: { slots: [], commands: [], decorators: [] }, pages: [{ id: "open-prs", title: "Open Pull Requests", icon: null, category: "Work", lens: "acme/prs" }] }] as unknown as Extension[],
   runLens: async (): Promise<LensRun> =>
     ({
       lens: { id: "acme/prs", title: "PRs (lens)", viz: "table", params: [], columns: [], actions: [], children: [] },

@@ -16,6 +16,7 @@ mock.module("../api.js", () => ({
     {
       name: "x",
       enabled: true,
+      ui: { slots: [], commands: [], decorators: [] },
       lenses: [],
       pages: [],
       panels: [],

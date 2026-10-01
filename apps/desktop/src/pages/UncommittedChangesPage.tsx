@@ -1,4 +1,5 @@
 import { LensSlots } from "../lens/LensSlots.js";
+import { numericRowId } from "../lens/lensModel.js";
 import { useChange } from "../lens/useChange.js";
 import { useCallback, useState } from "react";
 import type { DiffEntry, Stream } from "../api.js";
@@ -84,6 +85,13 @@ export function UncommittedChangesPage({
     <Page testId="page-uncommitted-changes" title="Uncommitted Changes">
       <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 16, overflow: "auto" }}>
         {changed.error ? <div style={errorBanner}>{changed.error}</div> : null}
+        <LensSlots
+          slot="vcs.status.header"
+          params={numericRowId(streamId) === null ? null : { stream_id: numericRowId(streamId) }}
+          streamId={streamId}
+          onOpenPage={(ref) => onOpenPage(ref)}
+          variant="strip"
+        />
 
         {fileCount > 0 ? (
           <section data-testid="uncommitted-commit-form" style={card}>
