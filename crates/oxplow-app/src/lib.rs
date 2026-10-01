@@ -54,6 +54,7 @@ pub mod events;
 pub mod exec_consent;
 pub mod extension_catalog;
 pub mod extension_commands;
+pub mod extension_effects;
 pub mod extension_models;
 pub mod extension_sources;
 pub mod extensions;

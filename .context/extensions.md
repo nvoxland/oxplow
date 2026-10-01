@@ -755,6 +755,29 @@ manifest still using top-level `slot_mounts:` / `decorators:` /
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
 
+## Reviewing by effect
+
+An extension is reviewed by what it would **change**, not only by what
+it declares (P6b.E; `extension_effects.rs`). `EffectReport` holds, each
+with a `Change` (`added`, `removed`, `changed`, `unchanged`):
+
+- `lenses` — each lens's rendered text before and after (`LensEffect`);
+- `models` — each view, its columns before and after, the first
+  contract difference (`contract_change`; a SQL-only change keeps the
+  contract) and its `downstream` readers (`models_diff`);
+- `collectors` — each collector's `Grants` (entry, runtime, hosts,
+  credentials, env) before and after and the views it fills
+  (`collectors_diff`);
+- `providers` — grants, each declared command by name (`CommandChange`)
+  and the capability's features before and after (`providers_diff`, over
+  each spec and its checked-in declarations);
+- `config` — the instance config schema, with the property keys added,
+  removed or changed (`config_diff`).
+
+The report is built from the two loaded versions: **it never runs a
+collector or a provider** — consent forbids running a version nobody
+approved.
+
 ## Commands in core menus (`ui.commands`)
 
 `ui.commands` (stable, P6b.C4; `extensions/ui_commands.rs`) puts a

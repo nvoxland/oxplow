@@ -752,7 +752,7 @@ fn show(cols: &[(String, String)]) -> String {
 }
 
 /// The first difference between two contracts, in words.
-fn contract_change(before: &[ColumnDecl], after: &[ColumnDecl]) -> String {
+pub fn contract_change(before: &[ColumnDecl], after: &[ColumnDecl]) -> String {
     for (i, a) in after.iter().enumerate() {
         match before.get(i) {
             None => return format!("column `{}` added", a.name),
