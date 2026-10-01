@@ -1005,6 +1005,10 @@ impl Services {
                 })
             }),
         );
+        // Composition (P6b.A1): several Tx commands as one run.
+        commands
+            .register(commands::compose::sequence_command(&commands))
+            .expect("command.sequence registers");
         // The work-items providers (`.context/work-items.md`); oxplow's
         // own, over this bus.
         let work_items = oxplow_domain::work_items::WorkItemsRegistry::new();

@@ -15,6 +15,7 @@
 //! [`CommandBus::external_commands`] is pinned by a test, so every
 //! `External` command is a reviewed choice, not a shortcut.
 
+pub mod compose;
 pub mod config_commands;
 pub mod effort;
 pub mod lens;
@@ -39,6 +40,7 @@ use oxplow_domain::{
 };
 use oxplow_runtime::policy::PolicyDecision;
 use parking_lot::RwLock;
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::agent_policy::AgentPolicy;
@@ -65,6 +67,26 @@ pub struct HandlerOutput {
     pub after_commit: Option<Box<dyn FnOnce() + Send + Sync>>,
 }
 
+/// One child of a composite run (`CommandBus::run_nested`): what ran,
+/// with what, what it returned and how it undoes.
+#[derive(Debug, Clone, Serialize)]
+pub struct NestedChild {
+    pub name: String,
+    pub input: Value,
+    pub result: Value,
+    pub inverse: Option<CommandCall>,
+}
+
+/// What a composite's children produced, for the parent's `HandlerOutput`.
+pub struct NestedOutcome {
+    pub children: Vec<NestedChild>,
+    /// The children's inverses reversed, as a `command.sequence`; `None`
+    /// when a child has none.
+    pub inverse: Option<CommandCall>,
+    pub events: Vec<Envelope>,
+    pub after_commit: Option<Box<dyn FnOnce() + Send + Sync>>,
+}
+
 /// What a `Tx` handler runs with: the run's transaction, the actor, and
 /// the context its store cores log events through — the actor's `source`,
 /// caused by this run's `command.executed` (whose id is fixed before the
@@ -78,6 +100,16 @@ pub struct TxCtx<'a> {
     /// an agent thread that isn't its stream's writer; a `Record`
     /// handler checks it with [`TxCtx::claim`].
     pub may_claim: bool,
+    /// Step 4's answer: a person confirmed this call. A handler that
+    /// learns only while running that a confirmation is needed — a
+    /// composite whose child asks (`CommandBus::run_nested`) — checks it
+    /// and raises `NeedsConfirmation`, which the bus treats as step 4
+    /// would: rolled back, nothing audited.
+    pub confirmed: bool,
+    /// Step 3's gate: whether the agent's thread may write; `None` for a
+    /// person, the system, or a command the gate doesn't apply to. A
+    /// composite applies it to each child it runs.
+    pub may_write: Option<bool>,
 }
 
 impl TxCtx<'_> {
@@ -347,6 +379,7 @@ impl CommandBus {
         // A `Record` command isn't refused here; its handler refuses a
         // claim (see `TxCtx::may_claim`).
         let mut may_claim = true;
+        let mut gate_answer: Option<bool> = None;
         if let Some(thread_id) = actor.agent_thread() {
             use oxplow_domain::CommandEffect;
             let may_write = match (spec.effect, &thread_id, &self.write_gate) {
@@ -355,6 +388,7 @@ impl CommandBus {
                 }
                 _ => None,
             };
+            gate_answer = may_write;
             if spec.effect == CommandEffect::Record {
                 may_claim = may_write != Some(false);
             }
@@ -411,6 +445,8 @@ impl CommandBus {
                                 cause: Some(executed_id.clone()),
                             },
                             may_claim,
+                            confirmed,
+                            may_write: gate_answer,
                         };
                         let out = match handler(&ctx, input_c.clone()) {
                             Ok(out) => out,
@@ -472,6 +508,10 @@ impl CommandBus {
                 self.pump.wake();
                 Ok(done)
             }
+            // A confirmation a handler raised while running (a composite
+            // whose child asks) is step 4's answer, late: rolled back,
+            // nothing audited, the preview returned.
+            Err(err @ CommandError::NeedsConfirmation { .. }) => Err(err),
             Err(err) => {
                 // A handler's refusal (a claim the actor may not take) is a
                 // denial, not an error.
@@ -523,6 +563,140 @@ impl CommandBus {
         })
     }
 
+    /// Run `calls` as one: the children of a composite (`command.sequence`,
+    /// an extension's command) inside the parent's transaction and audit
+    /// row (P6b.A1). First a pass that writes nothing — every call must
+    /// name a `Tx` command (an `External` one can't join the transaction),
+    /// its input must fit, and its own `invokers`, the agent policy and
+    /// its `confirm` apply, so a composite never widens what its children
+    /// allow; a child that asks makes the parent ask, unless the run was
+    /// confirmed — then every handler runs on `ctx`. The children's events
+    /// ride out on the parent's; the inverse is the children's inverses,
+    /// reversed, as a `command.sequence`, or none when a child has none.
+    pub fn run_nested(
+        &self,
+        ctx: &TxCtx<'_>,
+        parent: &CommandSpec,
+        calls: &[CommandCall],
+    ) -> Result<NestedOutcome, CommandError> {
+        let resolved: Vec<Arc<Command>> = {
+            let registry = self.commands.read();
+            calls
+                .iter()
+                .map(|call| {
+                    registry
+                        .get(&call.name)
+                        .cloned()
+                        .ok_or_else(|| CommandError::Unknown {
+                            name: call.name.clone(),
+                        })
+                })
+                .collect::<Result<_, _>>()?
+        };
+        let mut asks = false;
+        let mut destructive = false;
+        for (i, (call, command)) in calls.iter().zip(&resolved).enumerate() {
+            let spec = &command.spec;
+            if matches!(command.handler, Handler::External(_)) {
+                return Err(CommandError::Invalid {
+                    field: Some(format!("/calls/{i}/name")),
+                    message: format!(
+                        "`{}` is External; a sequence composes Tx commands only",
+                        spec.name
+                    ),
+                });
+            }
+            command.validator.check(&call.input).map_err(|e| match e {
+                CommandError::Invalid { field, message } => CommandError::Invalid {
+                    field: Some(format!("/calls/{i}/input{}", field.unwrap_or_default())),
+                    message,
+                },
+                other => other,
+            })?;
+            if !spec.invokers.allows(ctx.actor.invoker()) {
+                return Err(CommandError::Denied {
+                    reason: format!(
+                        "`{}` is not open to {:?} callers",
+                        spec.name,
+                        ctx.actor.invoker()
+                    ),
+                });
+            }
+            if let Some(thread_id) = ctx.actor.agent_thread() {
+                let gated = ctx
+                    .may_write
+                    .filter(|_| spec.effect == oxplow_domain::CommandEffect::Write);
+                if let PolicyDecision::Deny { reason, .. } =
+                    self.policy.check_command(thread_id.as_ref(), spec, gated)
+                {
+                    return Err(CommandError::Denied { reason });
+                }
+            }
+            let confirm = command.confirm(&call.input);
+            if confirm.required() {
+                asks = true;
+                destructive |= matches!(confirm, oxplow_domain::Confirm::Destructive);
+            }
+        }
+        if asks && !ctx.confirmed {
+            return Err(CommandError::NeedsConfirmation {
+                preview: Box::new(Preview {
+                    command: parent.name.clone(),
+                    summary: parent.summary.clone(),
+                    input: serde_json::json!({ "calls": calls }),
+                    destructive,
+                }),
+            });
+        }
+        let mut children = Vec::with_capacity(calls.len());
+        let mut events = Vec::new();
+        let mut afters: Vec<Box<dyn FnOnce() + Send + Sync>> = Vec::new();
+        for (call, command) in calls.iter().zip(&resolved) {
+            let Handler::Tx(handler) = &command.handler else {
+                unreachable!("checked above");
+            };
+            let mut out = handler(ctx, call.input.clone())?;
+            if let Some(after) = out.after_commit.take() {
+                afters.push(after);
+            }
+            events.extend(out.events);
+            children.push(NestedChild {
+                name: call.name.clone(),
+                input: call.input.clone(),
+                result: out.result,
+                inverse: if command.spec.undoable {
+                    out.inverse
+                } else {
+                    None
+                },
+            });
+        }
+        let inverse = children
+            .iter()
+            .map(|c| c.inverse.clone())
+            .rev()
+            .collect::<Option<Vec<_>>>()
+            .map(|calls| CommandCall {
+                name: compose::SEQUENCE.into(),
+                input: serde_json::json!({ "calls": calls }),
+            });
+        let after_commit: Option<Box<dyn FnOnce() + Send + Sync>> = if afters.is_empty() {
+            None
+        } else {
+            Some(Box::new(move || {
+                for after in afters {
+                    after();
+                }
+            }))
+        };
+        Ok(NestedOutcome {
+            children,
+            inverse,
+            events,
+            after_commit,
+        })
+    }
+
     /// Step 5 for a `Read` command: the handler on a plain connection,
     /// nothing recorded. A `Read` must not write (it isn't audited).
     async fn run_read(
@@ -551,6 +725,8 @@ impl CommandBus {
                                 cause: None,
                             },
                             may_claim: false,
+                            confirmed: false,
+                            may_write: None,
                         };
                         handler(&ctx, input.clone()).map_err(|err| {
                             *failed_c.lock() = Some(err);
@@ -958,7 +1134,7 @@ mod tests {
         }))
     }
 
-    async fn kv(db: &Database, k: &str) -> Option<String> {
+    async fn kv_value(db: &Database, k: &str) -> Option<String> {
         let k = k.to_string();
         db.read(move |tx| {
             Ok(tx
@@ -989,7 +1165,7 @@ mod tests {
         bus.run(&agent(), "kv.sneaky", json!({"k": "a", "v": "1"}), false)
             .await
             .unwrap();
-        assert_eq!(kv(&db, "a").await, None);
+        assert_eq!(kv_value(&db, "a").await, None);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1035,7 +1211,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-        assert_eq!(kv(&db, "a").await, None);
+        assert_eq!(kv_value(&db, "a").await, None);
         // Another thread may; a person is never gated.
         let other = Actor::Agent {
             thread_id: Some(ThreadId::new(8)),
@@ -1061,7 +1237,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.result, json!({"k": "a", "v": "1"}));
-        assert_eq!(kv(&db, "a").await.as_deref(), Some("1"));
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
         let audit = bus
             .audit_store()
             .get(out.audit_id.unwrap())
@@ -1110,7 +1286,11 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Failed { .. }), "{err:?}");
-        assert_eq!(kv(&db, "a").await, None, "the handler's write rolled back");
+        assert_eq!(
+            kv_value(&db, "a").await,
+            None,
+            "the handler's write rolled back"
+        );
         assert!(bus.log.read_after(0, 10).await.unwrap().is_empty());
         let recent = bus.audit_store().list_recent(5).await.unwrap();
         assert_eq!(recent.len(), 1);
@@ -1174,7 +1354,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-        assert_eq!(kv(&db, "a").await, None);
+        assert_eq!(kv_value(&db, "a").await, None);
         let recent = bus.audit_store().list_recent(5).await.unwrap();
         assert_eq!(recent.len(), 2);
         assert!(recent.iter().all(|r| r.outcome == Outcome::Denied));
@@ -1200,7 +1380,7 @@ mod tests {
         };
         assert_eq!(preview.command, "kv.set");
         assert!(!preview.destructive);
-        assert_eq!(kv(&db, "a").await, None);
+        assert_eq!(kv_value(&db, "a").await, None);
         assert!(
             bus.audit_store().list_recent(5).await.unwrap().is_empty(),
             "nothing audited"
@@ -1208,7 +1388,7 @@ mod tests {
         bus.run(&Actor::Human, "kv.set", json!({"k": "a", "v": "1"}), true)
             .await
             .unwrap();
-        assert_eq!(kv(&db, "a").await.as_deref(), Some("1"));
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
         // An agent: `confirmed` is ignored; nothing is written.
         let err = bus
             .run(&agent(), "kv.set", json!({"k": "b", "v": "2"}), true)
@@ -1218,7 +1398,7 @@ mod tests {
             matches!(err, CommandError::NeedsConfirmation { .. }),
             "{err:?}"
         );
-        assert_eq!(kv(&db, "b").await, None);
+        assert_eq!(kv_value(&db, "b").await, None);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1235,12 +1415,12 @@ mod tests {
             .run(&Actor::Human, "kv.set", json!({"k": "a", "v": "2"}), false)
             .await
             .unwrap();
-        assert_eq!(kv(&db, "a").await.as_deref(), Some("2"));
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("2"));
         let undo = bus
             .undo(&Actor::Human, second.audit_id.unwrap(), false)
             .await
             .unwrap();
-        assert_eq!(kv(&db, "a").await.as_deref(), Some("1"));
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
         let row = bus
             .audit_store()
             .get(second.audit_id.unwrap())
@@ -1287,7 +1467,7 @@ mod tests {
             1,
             "{results:?}"
         );
-        assert_eq!(kv(&db, "a").await.as_deref(), Some("1"));
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
         let ok_runs = bus
             .audit_store()
             .list_recent(20)
@@ -1376,7 +1556,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.audit_id, None);
-        assert_eq!(kv(&db, "e").await.as_deref(), Some("1"));
+        assert_eq!(kv_value(&db, "e").await.as_deref(), Some("1"));
         let rows = bus.audit_store().list_recent(10).await.unwrap();
         assert!(rows.iter().all(|r| r.outcome != Outcome::Error), "{rows:?}");
     }
@@ -1398,5 +1578,308 @@ mod tests {
             )
             .is_err());
         assert!(bus.external_commands().is_empty());
+    }
+
+    // ---- P6b.A1: the bus composes ----
+
+    /// A handler that only writes when the run was confirmed: it sees
+    /// step 4's answer in `ctx.confirmed`. A refusal it raises itself is
+    /// a confirmation, not an error — rolled back, nothing audited.
+    fn kv_set_if_confirmed() -> Handler {
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            if !ctx.confirmed {
+                return Err(CommandError::NeedsConfirmation {
+                    preview: Box::new(Preview {
+                        command: "kv.careful".into(),
+                        summary: "asks".into(),
+                        input: input.clone(),
+                        destructive: false,
+                    }),
+                });
+            }
+            ctx.conn
+                .execute(
+                    "INSERT INTO kv (k, v) VALUES (?1, ?2)",
+                    [input["k"].as_str().unwrap(), input["v"].as_str().unwrap()],
+                )
+                .map_err(|e| CommandError::Failed {
+                    message: e.to_string(),
+                })?;
+            Ok(HandlerOutput::default())
+        }))
+    }
+
+    async fn audits(db: &Database) -> Vec<CommandAudit> {
+        SqliteCommandAuditStore::new(db.clone())
+            .list_recent(50)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_tx_handler_sees_whether_the_run_was_confirmed() {
+        let (db, bus) = bus();
+        bus.register(
+            Command::new(
+                kv_spec("kv.careful", Invokers::ALL, Confirm::Never),
+                kv_set_if_confirmed(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let err = bus
+            .run(
+                &Actor::Human,
+                "kv.careful",
+                json!({"k": "a", "v": "1"}),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CommandError::NeedsConfirmation { .. }),
+            "{err:?}"
+        );
+        assert_eq!(kv_value(&db, "a").await, None);
+        assert!(
+            audits(&db).await.is_empty(),
+            "a confirmation is not an error"
+        );
+        bus.run(
+            &Actor::Human,
+            "kv.careful",
+            json!({"k": "a", "v": "1"}),
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
+    }
+
+    /// `command.sequence` composes Tx commands in one run: each child's
+    /// own invokers, policy and confirmation apply; the children share the
+    /// parent's transaction and audit row; the inverse is the children's
+    /// inverses, reversed.
+    fn composing_bus() -> (Database, Arc<CommandBus>) {
+        let (db, bus) = bus();
+        let bus = Arc::new(bus);
+        bus.register(
+            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
+        )
+        .unwrap();
+        bus.register(
+            Command::new(
+                kv_spec("kv.secret", Invokers::HUMAN_ONLY, Confirm::Never),
+                kv_set(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        bus.register(
+            Command::new(
+                kv_spec("kv.danger", Invokers::ALL, Confirm::Destructive),
+                kv_set(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mut plain = kv_spec("kv.plain", Invokers::ALL, Confirm::Never);
+        plain.undoable = false;
+        bus.register(Command::new(plain, kv_set()).unwrap())
+            .unwrap();
+        let mut ext = kv_spec("kv.external", Invokers::ALL, Confirm::Never);
+        ext.atomicity = Atomicity::External;
+        bus.register(
+            Command::new(
+                ext,
+                Handler::External(Arc::new(|_actor, input| {
+                    Box::pin(async move {
+                        Ok(HandlerOutput {
+                            result: input,
+                            ..HandlerOutput::default()
+                        })
+                    })
+                })),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        bus.register(super::compose::sequence_command(&bus))
+            .unwrap();
+        (db, bus)
+    }
+
+    fn calls(items: &[(&str, &str, &str)]) -> Value {
+        json!({ "calls": items.iter().map(|(n, k, v)| json!({ "name": n, "input": { "k": k, "v": v } })).collect::<Vec<_>>() })
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_nested_run_applies_each_childs_own_checks() {
+        let (db, bus) = composing_bus();
+        let agent = Actor::Agent {
+            thread_id: Some(oxplow_domain::ThreadId::new(7)),
+            stream_id: None,
+        };
+        let err = bus
+            .run(
+                &agent,
+                "command.sequence",
+                calls(&[("kv.set", "a", "1"), ("kv.secret", "b", "2")]),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+        assert_eq!(
+            kv_value(&db, "a").await,
+            None,
+            "nothing ran: the pre-pass refused first"
+        );
+
+        let err = bus
+            .run(
+                &Actor::Human,
+                "command.sequence",
+                json!({ "calls": [{ "name": "kv.set", "input": { "k": "a", "v": "1" } }, { "name": "kv.set", "input": { "k": "b" } }] }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f.starts_with("/calls/1/input")),
+            "{err:?}"
+        );
+        assert_eq!(kv_value(&db, "a").await, None);
+
+        let err = bus
+            .run(
+                &Actor::Human,
+                "command.sequence",
+                json!({ "calls": [{ "name": "kv.set", "input": { "k": "a", "v": "1" } }, { "name": "kv.external", "input": { "k": "b", "v": "2" } }] }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { message, .. } if message.contains("composes Tx commands only")),
+            "{err:?}"
+        );
+        assert_eq!(kv_value(&db, "a").await, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_nested_run_asks_when_any_child_asks() {
+        let (db, bus) = composing_bus();
+        let input = calls(&[("kv.set", "a", "1"), ("kv.danger", "b", "2")]);
+        let err = bus
+            .run(&Actor::Human, "command.sequence", input.clone(), false)
+            .await
+            .unwrap_err();
+        match err {
+            CommandError::NeedsConfirmation { preview } => {
+                assert!(preview.destructive);
+                assert_eq!(preview.command, "command.sequence");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            kv_value(&db, "a").await,
+            None,
+            "nothing written before the answer"
+        );
+        assert!(
+            audits(&db).await.is_empty(),
+            "no audit row for a confirmation"
+        );
+        bus.run(&Actor::Human, "command.sequence", input, true)
+            .await
+            .unwrap();
+        assert_eq!(kv_value(&db, "b").await.as_deref(), Some("2"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_nested_run_is_one_transaction_with_one_audit_row() {
+        let (db, bus) = composing_bus();
+        let err = bus
+            .run(
+                &Actor::Human,
+                "command.sequence",
+                calls(&[("kv.set", "a", "1"), ("kv.set", "b", "half")]),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Failed { .. }), "{err:?}");
+        assert_eq!(
+            kv_value(&db, "a").await,
+            None,
+            "the first child rolled back with the second"
+        );
+
+        let out = bus
+            .run(
+                &Actor::Human,
+                "command.sequence",
+                calls(&[("kv.set", "a", "1"), ("kv.set", "b", "2")]),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["children"].as_array().unwrap().len(), 2);
+        assert_eq!(out.result["children"][1]["result"]["v"], "2");
+        let rows: Vec<_> = audits(&db)
+            .await
+            .into_iter()
+            .filter(|a| a.outcome == Outcome::Ok)
+            .collect();
+        assert_eq!(
+            rows.len(),
+            1,
+            "one audit row for the parent, none for the children"
+        );
+        assert_eq!(rows[0].command, "command.sequence");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_nested_runs_inverse_is_the_reversed_children_and_undoes() {
+        let (db, bus) = composing_bus();
+        bus.run(&Actor::Human, "kv.set", json!({"k": "a", "v": "0"}), false)
+            .await
+            .unwrap();
+        let out = bus
+            .run(
+                &Actor::Human,
+                "command.sequence",
+                calls(&[("kv.set", "a", "1"), ("kv.set", "b", "2")]),
+                false,
+            )
+            .await
+            .unwrap();
+        let inverse = out.inverse.clone().expect("undoable");
+        assert_eq!(inverse.name, "command.sequence");
+        assert_eq!(
+            inverse.input["calls"],
+            json!([
+                { "name": "kv.set", "input": { "k": "b", "v": "" } },
+                { "name": "kv.set", "input": { "k": "a", "v": "0" } }
+            ])
+        );
+        bus.undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("0"));
+        assert_eq!(kv_value(&db, "b").await.as_deref(), Some(""));
+
+        // A child that isn't undoable makes the parent not undoable.
+        let out = bus
+            .run(
+                &Actor::Human,
+                "command.sequence",
+                calls(&[("kv.set", "c", "3"), ("kv.plain", "d", "4")]),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(out.inverse.is_none());
     }
 }

@@ -48,7 +48,12 @@ A command is a typed operation named `<capability|plugin>.<verb>`
 4. **Confirmation** — when `confirm` requires it and the call isn't
    `confirmed`, `NeedsConfirmation { preview }` and **nothing is written,
    not even an audit row**. An agent's `confirmed` is ignored: it gets
-   the preview and asks the person, who runs the command.
+   the preview and asks the person, who runs the command. The answer
+   rides into the handler as `TxCtx::confirmed` (and step 3's gate as
+   `TxCtx::may_write`): a handler that learns only while running that a
+   confirmation is needed — a composite whose child asks — raises
+   `NeedsConfirmation` itself, and the bus treats it as this step would
+   (rolled back, nothing audited, the preview returned) (P6b.A1).
 5. **Run and record in one transaction**: the handler, a `command_audit`
    row (`crates/oxplow-db/src/command_audit_store.rs`: actor, input,
    outcome, the handler's `result` — V114, so a run's answer, such as a
@@ -100,6 +105,33 @@ model: the handler validates and computes before/after; `after_commit`
 re-applies the key to the config as it is then, writes project.yaml and
 swaps memory under one lock, so concurrent sets of different keys both
 survive.
+
+## Composition: `command.sequence` and `run_nested` (P6b.A1)
+
+A composite runs several `Tx` commands as **one run**:
+`CommandBus::run_nested(ctx, parent_spec, calls)` (`commands/mod.rs`) is
+the one mechanism, and `command.sequence { calls: [{ name, input }] }`
+(`commands/compose.rs`) is the core command whose handler is exactly
+that; an extension's own command (P6b.B2) is "run the script to get
+`calls`, then `run_nested`". It first makes a pass that writes nothing:
+every call must name a `Tx` command (an `External` one can't join the
+transaction — "composes Tx commands only"), its input must fit (a problem
+is reported at `/calls/<i>/input/…`), and its **own** `invokers`, the
+agent policy (with the parent's `may_write`) and its `confirm` apply, so
+a composite never widens what its children allow; a child that asks
+makes the parent ask (`Preview { command: <parent>, destructive }`)
+unless the run was confirmed. Then every handler runs on the parent's
+`TxCtx`. The parent has the **one audit row** and `command.executed`
+(children are not audited separately — a child row would be an
+independently undoable unit fighting the parent's inverse); its
+`result` is `{ result, children: [{ name, input, result, inverse? }] }`;
+the children's events ride out on the parent's `HandlerOutput.events`,
+so they are caused by the parent's `command.executed`; their
+`after_commit`s chain in order. The inverse is the children's inverses,
+**reversed**, as a `command.sequence` — or none when a child has none —
+so `undo` needs nothing new, and a child whose inverse asks makes the
+undo ask. A child's `Busy` propagates and the bus retries the whole
+parent (handlers are pure).
 
 ## `config.*` and the key registry
 
@@ -181,6 +213,7 @@ is a second command of the same name.
 
 | Command | Handler | Notes |
 |---|---|---|
+| `command.sequence { calls: [{ name, input }] }` | `Tx` (`commands/compose.rs`, P6b.A1) | all invokers, `Write`, `Confirm::Never` — the children decide; undoable as the reversed children. Runs each call through `CommandBus::run_nested`: each child's own invokers, policy and confirmation; one audit row for the parent with the children in `result`; the one composition mechanism (an extension's command runs on it). See "Composition" |
 | `work_item.transition { ref, to }` | `Tx` over `oxplow_db::task_store::set_status_tx` (`commands/work_item.rs`, P2.6.3) | all invokers; undoable (inverse restores the prior status). The row, the effort open/close, `work_item.transitioned` and `effort.*` commit with the audit, all caused by `command.executed`; the effort's snapshot pin is the effort-lifecycle pump consumer's. |
 | `work_item.create { title, description?, parent_ref?, status?, priority?, thread? }` | `Tx` over `task_store::insert_logged_tx` (`commands/work_item.rs`, tsk463) | all invokers; not undoable (that would be deleting a task). The row at the end of its list (`next_sort_index_tx`), `work_item.created@1 { work_item, status, effort? }`, and — filed `in_progress` on a thread — the effort, all caused by the run; an agent's task is authored `agent`. Absent `thread` files onto the backlog. The result is the task plus its `ref`. |
 | `work_item.update { ref, title?, description?, priority?, parent_ref?, status? }` | `Tx` over `task_store::update_with_status_tx` (`commands/work_item.rs`) | all invokers; undoable (the inverse restores exactly the fields and status given). Fields and status commit together: `work_item.edited@1 { work_item, fields }` for the fields, then the status move with everything `work_item.transition` implies. A refused run writes nothing. |
