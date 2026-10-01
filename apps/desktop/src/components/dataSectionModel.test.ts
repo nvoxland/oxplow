@@ -93,6 +93,7 @@ test("a provider's approve waits for its declaration diff", () => {
   expect(canApprove(provider, undefined)).toBe(false);
   expect(canApprove(provider, "loading")).toBe(false);
   expect(canApprove(provider, { change: "added" } as ProviderEffect)).toBe(true);
+  expect(canApprove(provider, { error: "no provider.json" })).toBe(false);
   const gauge = { kind: "gauge", name: "g", program: "p", args: [], env: [], approved: false } as never;
   expect(canApprove(gauge, undefined)).toBe(true);
 });

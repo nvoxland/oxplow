@@ -21,10 +21,18 @@ import {
   subscribeOxplowEvents,
   type SourceListing,
 } from "../api.js";
-import type { ProjectProgram, ProviderEffect } from "../tauri-bridge/generated/bindings.js";
+import type { ProjectProgram } from "../tauri-bridge/generated/bindings.js";
 import { indexRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import { canApprove, entityRows, entitySummary, programRow, providerEffectLines, type EntityRowModel } from "./dataSectionModel.js";
+import {
+  canApprove,
+  entityRows,
+  entitySummary,
+  programRow,
+  providerEffectLines,
+  type EntityRowModel,
+  type ProviderEffectState,
+} from "./dataSectionModel.js";
 import { sourceRowModel } from "./extensionRowModel.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
@@ -36,7 +44,7 @@ export function DataSection() {
   const [programs, setPrograms] = useState<ProjectProgram[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   // What approving each unapproved provider would change, by instance.
-  const [effects, setEffects] = useState<Record<string, ProviderEffect | "loading">>({});
+  const [effects, setEffects] = useState<Record<string, ProviderEffectState>>({});
 
   const refresh = useCallback(async () => {
     try {
@@ -62,21 +70,30 @@ export function DataSection() {
     });
   }, [refresh]);
 
+  // The unapproved providers, by name and the version on disk: their
+  // diffs reload only when one of those changes, not on every refresh.
+  const pendingKey = programs
+    .filter((p) => p.kind === "provider" && !p.approved)
+    .map((p) => `${p.name}\u0000${p.version ?? ""}`)
+    .sort()
+    .join("\n");
   useEffect(() => {
     let live = true;
-    const pending = programs.filter((p) => p.kind === "provider" && !p.approved);
-    setEffects(Object.fromEntries(pending.map((p) => [p.name, "loading" as const])));
-    for (const p of pending) {
-      void providerDeclarationEffects(p.name)
+    const pending = pendingKey === "" ? [] : pendingKey.split("\n").map((k) => k.split("\u0000")[0]!);
+    setEffects(Object.fromEntries(pending.map((name) => [name, "loading" as const])));
+    for (const name of pending) {
+      void providerDeclarationEffects(name)
         .then((e) => {
-          if (live) setEffects((prev) => ({ ...prev, [p.name]: e }));
+          if (live) setEffects((prev) => ({ ...prev, [name]: e }));
         })
-        .catch((e: unknown) => recordOpError({ label: `Compare ${p.name}'s declarations`, message: String(e) }));
+        .catch((e: unknown) => {
+          if (live) setEffects((prev) => ({ ...prev, [name]: { error: e instanceof Error ? e.message : String(e) } }));
+        });
     }
     return () => {
       live = false;
     };
-  }, [programs]);
+  }, [pendingKey]);
 
   async function run(l: SourceListing) {
     const key = `${l.extension}/${l.spec.id}`;
@@ -196,6 +213,8 @@ export function DataSection() {
         programs.map((p) => {
           const m = programRow(p);
           const effect = p.kind === "provider" && !p.approved ? effects[p.name] : undefined;
+          const failed = effect !== undefined && effect !== "loading" && "error" in effect ? effect.error : null;
+          const diff = effect !== undefined && effect !== "loading" && !("error" in effect) ? effect : null;
           return (
             <div key={m.key} data-testid={`program-row-${m.key}`} style={rowStyle}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -207,7 +226,7 @@ export function DataSection() {
                   <button
                     type="button"
                     data-testid={`program-approve-${m.key}`}
-                    title={m.approveTitle}
+                    title={failed !== null ? "We couldn't compare what approving would change; fix the error first" : m.approveTitle}
                     disabled={busy !== null || !canApprove(p, effect)}
                     onClick={() => void approve(p)}
                   >
@@ -217,9 +236,13 @@ export function DataSection() {
               </div>
               {effect === "loading" ? (
                 <div style={mutedStyle}>Comparing its declarations…</div>
-              ) : effect ? (
+              ) : failed !== null ? (
+                <div data-testid={`program-effects-error-${m.key}`} style={errorStyle}>
+                  Couldn&apos;t compare its declarations: {failed}
+                </div>
+              ) : diff ? (
                 <ul data-testid={`program-effects-${m.key}`} style={{ margin: "4px 0 0", paddingLeft: 18, ...mutedStyle }}>
-                  {providerEffectLines(effect).map((line, i) => (
+                  {providerEffectLines(diff).map((line, i) => (
                     <li key={i}>{line}</li>
                   ))}
                 </ul>

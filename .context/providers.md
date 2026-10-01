@@ -135,7 +135,10 @@ ones marked), features, or — when none of those shows the change — where
 the declarations first differ (`providerEffectLines` over the shared
 `providerChanges`). Its Approve stays disabled
 until that diff has loaded (`canApprove`), on top of the reviewed
-`version` round trip.
+`version` round trip; a diff that fails to load is shown on the row
+("Couldn't compare its declarations: …") and Approve stays disabled with
+that reason. The diffs reload only when the set of unapproved providers
+or their on-disk `version` changes.
 
 **What runs is a verified copy** (`host::approved_copy`, tsk547). Each
 start copies the extension folder into `<oxplow home>/provider-copies/

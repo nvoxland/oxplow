@@ -107,6 +107,9 @@ export function providerEffectLines(e: ProviderEffect): string[] {
 
 /** A provider's Approve waits until its declaration diff has loaded: a
  *  person approves what they saw change. Other programs approve as listed. */
-export function canApprove(p: ProjectProgram, effects: ProviderEffect | "loading" | undefined): boolean {
-  return p.kind !== "provider" || (effects !== undefined && effects !== "loading");
+export function canApprove(p: ProjectProgram, effects: ProviderEffectState | undefined): boolean {
+  return p.kind !== "provider" || (effects !== undefined && effects !== "loading" && !("error" in effects));
 }
+
+/** A provider's declaration diff as the Data section holds it. */
+export type ProviderEffectState = ProviderEffect | "loading" | { error: string };
