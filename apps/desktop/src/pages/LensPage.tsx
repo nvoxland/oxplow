@@ -20,6 +20,9 @@ export interface LensPageProps {
   /** Param values the tab opened with (from its id), e.g. a slot's
    *  `{ effort_id }`; the params form edits on top of them. */
   initialParams?: Record<string, SqlCell>;
+  /** The page's name as its host knows it (an extension page's manifest
+   *  title); the lens's own title otherwise. */
+  title?: string;
   stream: Stream | null;
   onOpenPage(ref: TabRef): void;
 }
@@ -30,7 +33,7 @@ export interface LensPageProps {
  * Re-runs when oxplow data changes, so it stays live. Params are edited
  * in the right rail (Enter applies). See `.context/extensions.md`.
  */
-export function LensPage({ lensId, initialParams, stream, onOpenPage }: LensPageProps) {
+export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOpenPage }: LensPageProps) {
   const streamId = stream?.id ?? null;
   const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +68,7 @@ export function LensPage({ lensId, initialParams, stream, onOpenPage }: LensPage
   useRerunOnChange(run?.result.reads ?? NO_READS, () => void refresh());
 
   const lens = run?.lens ?? null;
-  const title = lens?.title ?? lensId;
+  const title = pageTitle ?? lens?.title ?? lensId;
   usePageTitle(title);
 
   // Publish this lens's live params so an agent asking "what am I looking

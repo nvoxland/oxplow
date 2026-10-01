@@ -58,5 +58,5 @@ export function ExtensionPageView({
       </Page>
     );
   }
-  return <LensPage lensId={found.lens} stream={stream} onOpenPage={onOpenPage} />;
+  return <LensPage lensId={found.lens} title={found.title} stream={stream} onOpenPage={onOpenPage} />;
 }
