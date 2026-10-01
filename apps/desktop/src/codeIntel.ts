@@ -96,28 +96,38 @@ export function symbolsFromResult(result: SqlQueryResult): SymbolRow[] {
   }));
 }
 
-/** A stream's symbols — one file's (`path`), or every file's matching
- *  `filter` (a name substring) — in file order. */
-export async function readSymbols(
+/** The `v_symbol` read for a stream: one file's (`path`), or every
+ *  file's whose name contains `filter` — a substring, so LIKE's `%`, `_`
+ *  and `\` in it are escaped — in file order. */
+export function symbolsQuery(
   streamRowId: number,
   opts: { path?: string | null; filter?: string },
-): Promise<{ symbols: SymbolRow[]; reads: Reads }> {
+): { sql: string; params: SqlCell[] } {
   const where = ["stream_id = ?1"];
   const params: SqlCell[] = [streamRowId];
   if (opts.path) {
     params.push(opts.path);
     where.push(`path = ?${params.length}`);
   }
-  if (opts.filter?.trim()) {
-    params.push(`%${opts.filter.trim()}%`);
-    where.push(`name LIKE ?${params.length}`);
+  const filter = opts.filter?.trim();
+  if (filter) {
+    params.push(`%${filter.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+    where.push(`name LIKE ?${params.length} ESCAPE '\\'`);
   }
-  const res = await querySql(
-    `SELECT ref, path, name, kind, container, line, col FROM v_symbol
+  return {
+    sql: `SELECT ref, path, name, kind, container, line, col FROM v_symbol
       WHERE ${where.join(" AND ")} ORDER BY path, line, col`,
     params,
-    5_000,
-  );
+  };
+}
+
+/** A stream's symbols (`symbolsQuery`), and what the read read. */
+export async function readSymbols(
+  streamRowId: number,
+  opts: { path?: string | null; filter?: string },
+): Promise<{ symbols: SymbolRow[]; reads: Reads }> {
+  const q = symbolsQuery(streamRowId, opts);
+  const res = await querySql(q.sql, q.params, 5_000);
   return { symbols: symbolsFromResult(res), reads: res.reads };
 }
 

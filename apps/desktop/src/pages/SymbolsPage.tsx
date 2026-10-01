@@ -26,12 +26,18 @@ export function SymbolsPage({
   const [symbols, setSymbols] = useState<SymbolRow[]>([]);
   const [reads, setReads] = useState<Reads>(NO_READS);
   const [filter, setFilter] = useState("");
+  // The query follows the filter once typing pauses, not per keystroke.
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(filter), FILTER_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [filter]);
   const refresh = useCallback(async () => {
-    const out = await readSymbols(streamRowId(streamId), { path, filter }).catch(() => null);
+    const out = await readSymbols(streamRowId(streamId), { path, filter: query }).catch(() => null);
     if (!out) return;
     setSymbols(out.symbols);
     setReads(out.reads);
-  }, [streamId, path, filter]);
+  }, [streamId, path, query]);
   useEffect(() => void refresh(), [refresh]);
   useRerunOnChange(reads, () => void refresh());
 
@@ -119,3 +125,5 @@ const itemStyle: CSSProperties = {
   fontFamily: "var(--font-mono)",
 };
 const kindStyle: CSSProperties = { color: "var(--text-secondary)", fontSize: "var(--text-xs)", fontFamily: "inherit" };
+
+const FILTER_DEBOUNCE_MS = 200;

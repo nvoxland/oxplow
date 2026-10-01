@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import { diagnosticsFromResult, problemsByFile, symbolLocation, symbolsFromResult, symbolTree } from "./codeIntel.js";
+import { diagnosticsFromResult, problemsByFile, symbolLocation, symbolsFromResult, symbolsQuery, symbolTree } from "./codeIntel.js";
 import { refFromTabId, symbolRef } from "./tabs/pageRefs.js";
 
 const result = (columns: string[], rows: SqlQueryResult["rows"]): SqlQueryResult =>
@@ -51,4 +51,13 @@ test("a symbol: ref is a page kind of its own, resolved to its file's line", () 
   expect(ref?.kind).toBe("symbol");
   expect(symbolLocation(result(["path", "line", "col"], [["src/a.rs", 3, 5]]))).toEqual({ path: "src/a.rs", line: 3, col: 5 });
   expect(symbolLocation(result(["path", "line", "col"], []))).toBeNull();
+});
+
+// A name filter is a substring, not a pattern: `%` and `_` in it match
+// themselves (escaped, with `ESCAPE '\'`).
+test("the symbol filter escapes LIKE's wildcards", () => {
+  const q = symbolsQuery(2, { filter: " a_b%c\\d " });
+  expect(q.sql).toContain("name LIKE ?2 ESCAPE '\\'");
+  expect(q.params).toEqual([2, "%a\\_b\\%c\\\\d%"]);
+  expect(symbolsQuery(2, { path: "src/a.rs" }).params).toEqual([2, "src/a.rs"]);
 });

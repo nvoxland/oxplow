@@ -184,7 +184,9 @@ The desktop reads code intelligence from the models (`apps/desktop/src/codeIntel
   It re-reads when `v_diagnostic` changes.
 - **Symbols** (`page:symbols[?path=]`, `SymbolsPage.tsx`) — `v_symbol`
   nested under each symbol's `container` (`symbolTree`): one file's
-  outline, or every file's symbols matching a name filter. A symbol opens
+  outline, or every file's symbols matching a name filter (a substring:
+  `symbolsQuery` escapes LIKE's wildcards; the read follows typing after a
+  200 ms pause). A symbol opens
   its file at its name's line.
 - **`symbol:` refs** (a wikilink, an Ask, an answer) open the same way:
   `openSymbol` looks the ref up in `v_symbol`; a symbol that's gone (its
