@@ -35,11 +35,11 @@ test("frame messages parse into the three requests and ready; anything else is r
   }
 });
 
-test("the bundle URL encodes its segments and the stream", () => {
+test("the bundle URL carries the stream as its first segment, so relative URLs stay in its worktree", () => {
   expect(componentBundleUrl("http://127.0.0.1:7420", "my ext", "burn/down", "str 2")).toBe(
-    "http://127.0.0.1:7420/components/my%20ext/burn%2Fdown/?stream_id=str%202",
+    "http://127.0.0.1:7420/components/str%202/my%20ext/burn%2Fdown/",
   );
-  expect(componentBundleUrl("http://127.0.0.1:7420", "x", "c", null)).toBe("http://127.0.0.1:7420/components/x/c/");
+  expect(componentBundleUrl("http://127.0.0.1:7420", "x", "c", null)).toBe("http://127.0.0.1:7420/components/primary/x/c/");
 });
 
 test("theme tokens come from the root's custom properties", () => {

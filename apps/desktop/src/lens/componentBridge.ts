@@ -52,10 +52,12 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
   }
 }
 
-/** Where the daemon serves a component's bundle (its folder URL). */
+/** Where the daemon serves a component's bundle (its folder URL). The
+ *  stream is a path segment (`primary` outside any stream), so the
+ *  bundle's relative URLs resolve in the same worktree. */
 export function componentBundleUrl(base: string, extension: string, component: string, streamId: string | null): string {
-  const url = `${base}/components/${encodeURIComponent(extension)}/${encodeURIComponent(component)}/`;
-  return streamId ? `${url}?stream_id=${encodeURIComponent(streamId)}` : url;
+  const segments = [streamId ?? "primary", extension, component].map(encodeURIComponent);
+  return `${base}/components/${segments.join("/")}/`;
 }
 
 /** The theme's tokens: the root's custom properties (`--text-primary`). */

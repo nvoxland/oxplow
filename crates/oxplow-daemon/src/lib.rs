@@ -276,15 +276,15 @@ pub fn router(state: DaemonState) -> Router {
     // them with `fetch`.
     let components = Router::new()
         .route(
-            "/components/{ext}/{component}",
+            "/components/{stream}/{ext}/{component}",
             get(components::component_root),
         )
         .route(
-            "/components/{ext}/{component}/",
+            "/components/{stream}/{ext}/{component}/",
             get(components::component_index),
         )
         .route(
-            "/components/{ext}/{component}/{*path}",
+            "/components/{stream}/{ext}/{component}/{*path}",
             get(components::component_file),
         );
     Router::new()
@@ -313,6 +313,7 @@ pub async fn run_server(addr: SocketAddr, state: DaemonState) -> std::io::Result
 mod tests {
     use super::*;
     use oxplow_app::Services;
+    use oxplow_domain::stores::StreamStore as _;
     use std::process::Command;
     use std::sync::Arc;
 
@@ -431,7 +432,10 @@ mod tests {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap();
-        for path in ["/components/x/c/", "/components/x/c/index.html"] {
+        for path in [
+            "/components/primary/x/c/",
+            "/components/primary/x/c/index.html",
+        ] {
             let resp = bare.get(format!("{base}{path}")).send().await.unwrap();
             assert_eq!(resp.status(), 200, "{path}");
             let h = resp.headers();
@@ -441,7 +445,7 @@ mod tests {
             assert_eq!(h["referrer-policy"], "no-referrer");
             assert_eq!(
                 h["content-security-policy"].to_str().unwrap(),
-                components::bundle_csp(&format!("{base}/components/x/c/"))
+                components::bundle_csp(&format!("{base}/components/primary/x/c/"))
             );
             assert!(
                 h.get("access-control-allow-origin").is_none(),
@@ -450,7 +454,7 @@ mod tests {
             assert_eq!(resp.text().await.unwrap(), "<!doctype html>hi");
         }
         let js = bare
-            .get(format!("{base}/components/x/c/assets/app.js"))
+            .get(format!("{base}/components/primary/x/c/assets/app.js"))
             .send()
             .await
             .unwrap();
@@ -459,18 +463,21 @@ mod tests {
             "text/javascript; charset=utf-8"
         );
         let folder = bare
-            .get(format!("{base}/components/x/c"))
+            .get(format!("{base}/components/primary/x/c"))
             .send()
             .await
             .unwrap();
         assert_eq!(folder.status(), 308);
-        assert_eq!(folder.headers()["location"], "/components/x/c/");
+        assert_eq!(folder.headers()["location"], "/components/primary/x/c/");
         for path in [
-            "/components/x/nope/",
-            "/components/nope/c/",
-            "/components/oxplow-review/c/",
-            "/components/x/c/%2e%2e/%2e%2e/extension.yaml",
-            "/components/x/c/assets",
+            "/components/primary/x/nope/",
+            "/components/primary/nope/c/",
+            "/components/primary/oxplow-review/c/",
+            "/components/primary/x/c/%2e%2e/%2e%2e/extension.yaml",
+            "/components/primary/x/c/assets",
+            "/components/str99/x/c/",
+            "/components/nonsense/x/c/",
+            "/components/x/c/",
         ] {
             let resp = bare.get(format!("{base}{path}")).send().await.unwrap();
             assert_eq!(resp.status(), 404, "{path}");
@@ -482,7 +489,7 @@ mod tests {
         )
         .unwrap();
         let resp = bare
-            .get(format!("{base}/components/x/c/"))
+            .get(format!("{base}/components/primary/x/c/"))
             .send()
             .await
             .unwrap();
@@ -520,11 +527,11 @@ mod tests {
             format!("localhost:{port}"),
             "localhost".to_string(),
         ] {
-            let resp = get("/components/x/c/", host.clone()).await.unwrap();
+            let resp = get("/components/primary/x/c/", host.clone()).await.unwrap();
             assert_eq!(resp.status(), 200, "{host}");
             assert_eq!(
                 resp.headers()["content-security-policy"].to_str().unwrap(),
-                components::bundle_csp(&format!("http://{host}/components/x/c/")),
+                components::bundle_csp(&format!("http://{host}/components/primary/x/c/")),
             );
         }
         for host in [
@@ -534,11 +541,73 @@ mod tests {
             format!("localhost.evil.example:{port}"),
             String::new(),
         ] {
-            for path in ["/components/x/c/", "/components/x/c"] {
+            for path in ["/components/primary/x/c/", "/components/primary/x/c"] {
                 let resp = get(path, host.clone()).await.unwrap();
                 assert_eq!(resp.status(), 404, "{host} {path}");
             }
         }
+    }
+
+    /// The stream is part of the bundle's path, so the bundle's relative
+    /// URLs stay in its worktree; the folder redirect keeps the raw path.
+    #[tokio::test]
+    async fn a_streams_bundle_is_served_from_its_worktree() {
+        let (svc, dir) = services();
+        let wt = tempfile::tempdir().unwrap();
+        for (root, js) in [(dir.path(), "primary"), (wt.path(), "stream")] {
+            let ext = root.join("oxplow/extensions/x");
+            std::fs::create_dir_all(ext.join("components/c")).unwrap();
+            std::fs::write(
+                ext.join("extension.yaml"),
+                "manifest: 2\nname: x\nintent:\n  purpose: p\ncustom_components:\n  - { id: c }\n",
+            )
+            .unwrap();
+            std::fs::write(ext.join("components/c/index.html"), "hi").unwrap();
+            std::fs::write(ext.join("components/c/app.js"), js).unwrap();
+        }
+        let ts = oxplow_domain::Timestamp::from_unix_ms(1_700_000_000_000);
+        svc.stream_store
+            .upsert(&oxplow_domain::Stream {
+                id: oxplow_domain::StreamId::new(2),
+                kind: oxplow_domain::StreamKind::Worktree,
+                title: "w".into(),
+                branch: "w".into(),
+                branch_ref: "refs/heads/w".into(),
+                branch_source: "main".into(),
+                worktree_path: wt.path().to_string_lossy().into(),
+                working_pane: String::new(),
+                talking_pane: String::new(),
+                working_session_id: String::new(),
+                talking_session_id: String::new(),
+                custom_prompt: None,
+                created_at: ts,
+                updated_at: ts,
+                archived_at: None,
+            })
+            .await
+            .unwrap();
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
+            .await
+            .unwrap();
+        let base = format!("http://{}", daemon.bind_addr);
+        let bare = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let text = |path: &'static str| {
+            let url = format!("{base}{path}");
+            let bare = bare.clone();
+            async move { bare.get(url).send().await.unwrap().text().await.unwrap() }
+        };
+        assert_eq!(text("/components/str2/x/c/app.js").await, "stream");
+        assert_eq!(text("/components/primary/x/c/app.js").await, "primary");
+        let folder = bare
+            .get(format!("{base}/components/str2/x/c%3Fq"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(folder.status(), 308);
+        assert_eq!(folder.headers()["location"], "/components/str2/x/c%3Fq/");
     }
 
     #[tokio::test]

@@ -4537,6 +4537,7 @@ dependencies = [
  "futures",
  "oxplow-app",
  "oxplow-control-plane",
+ "oxplow-domain",
  "oxplow-rpc",
  "reqwest",
  "serde",

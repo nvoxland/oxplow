@@ -23,7 +23,7 @@ test("the component's frame is scripts-only, at its bundle, marked custom", () =
   );
   const frame = view.getByTestId("custom-component-frame");
   expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
-  expect(frame.getAttribute("src")).toBe("http://127.0.0.1:9/components/x/burndown/?stream_id=str1");
+  expect(frame.getAttribute("src")).toBe("http://127.0.0.1:9/components/str1/x/burndown/");
   expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
   expect(view.getByTestId("custom-component-badge").textContent).toBe("custom");
   expect(view.queryByTestId("the-table")).toBeNull();

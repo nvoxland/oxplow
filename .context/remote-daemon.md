@@ -154,9 +154,11 @@ token**; only the person's renderer holds it.
 
 **Ungated: `/health` and custom component bundles** (P6b.D3,
 `oxplow-daemon/src/components.rs`). `GET
-/components/{ext}/{component}/{*path}` (`?stream_id=` picks the
-worktree; the bare folder URL redirects to the trailing-slash form so a
-bundle's relative URLs resolve inside it) serves a private, enabled
+/components/{stream}/{ext}/{component}/{*path}` (the stream id, or
+`primary` outside any stream, is a path segment — not a query — so the
+bundle's relative URLs stay in the same worktree; an unknown stream is a
+404; the bare folder URL redirects to the raw path plus `/`, so its
+relative URLs resolve inside it) serves a private, enabled
 extension's declared component bundle for the sandboxed frame a
 `viz: custom` lens renders. It can't take the token — a frame can't
 carry it — and needn't: it serves the extension's own files, never

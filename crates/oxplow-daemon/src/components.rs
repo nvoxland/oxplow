@@ -1,4 +1,4 @@
-//! `GET /components/{ext}/{component}/{*path}` (P6b.D3): a private
+//! `GET /components/{stream}/{ext}/{component}/{*path}` (P6b.D3): a private
 //! extension's custom component bundle, for the sandboxed frame a
 //! `viz: custom` lens renders (`.context/extensions.md`, "Custom
 //! components"). The daemon serves it because the shell holds no project
@@ -17,8 +17,8 @@
 use std::path::{Component, Path, PathBuf};
 
 use axum::{
-    extract::{Path as AxumPath, Query, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    extract::{Path as AxumPath, State},
+    http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
     response::{IntoResponse, Redirect, Response},
 };
 use oxplow_app::extensions::custom_components::MAX_BUNDLE_BYTES;
@@ -110,61 +110,59 @@ pub fn loopback_host(headers: &HeaderMap) -> Option<&str> {
     (port_ok && matches!(name, "127.0.0.1" | "localhost" | "[::1]")).then_some(host)
 }
 
-#[derive(serde::Deserialize)]
-pub struct StreamQuery {
-    stream_id: Option<String>,
-}
-
-/// `/components/{ext}/{component}`: the folder form, so the bundle's
-/// relative URLs resolve inside it.
-pub async fn component_root(
-    AxumPath((ext, component)): AxumPath<(String, String)>,
-    Query(q): Query<StreamQuery>,
-    headers: HeaderMap,
-) -> Response {
+/// `/components/{stream}/{ext}/{component}`: the folder form, so the
+/// bundle's relative URLs resolve inside it. The redirect appends `/` to
+/// the raw request path — decoded segments are never re-formatted.
+pub async fn component_root(uri: Uri, headers: HeaderMap) -> Response {
     if loopback_host(&headers).is_none() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let query = q
-        .stream_id
-        .map(|s| format!("?stream_id={s}"))
-        .unwrap_or_default();
-    Redirect::permanent(&format!("/components/{ext}/{component}/{query}")).into_response()
+    Redirect::permanent(&format!("{}/", uri.path())).into_response()
 }
 
-/// `/components/{ext}/{component}/` — the bundle's `index.html`.
+/// `/components/{stream}/{ext}/{component}/` — the bundle's `index.html`.
 pub async fn component_index(
     state: State<DaemonState>,
-    AxumPath((ext, component)): AxumPath<(String, String)>,
-    q: Query<StreamQuery>,
+    AxumPath((stream, ext, component)): AxumPath<(String, String, String)>,
     headers: HeaderMap,
 ) -> Response {
-    serve(state, ext, component, String::new(), q, headers).await
+    serve(state, stream, ext, component, String::new(), headers).await
 }
 
-/// `/components/{ext}/{component}/{*path}` — one of the bundle's files.
+/// `/components/{stream}/{ext}/{component}/{*path}` — one of the bundle's
+/// files.
 pub async fn component_file(
     state: State<DaemonState>,
-    AxumPath((ext, component, path)): AxumPath<(String, String, String)>,
-    q: Query<StreamQuery>,
+    AxumPath((stream, ext, component, path)): AxumPath<(String, String, String, String)>,
     headers: HeaderMap,
 ) -> Response {
-    serve(state, ext, component, path, q, headers).await
+    serve(state, stream, ext, component, path, headers).await
 }
+
+/// The path segment naming the primary worktree, for a lens shown outside
+/// any stream.
+pub const PRIMARY: &str = "primary";
 
 async fn serve(
     State(state): State<DaemonState>,
+    stream: String,
     ext: String,
     component: String,
     path: String,
-    Query(q): Query<StreamQuery>,
     headers: HeaderMap,
 ) -> Response {
     let Some(host) = loopback_host(&headers) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let svc = &state.ctx.services;
-    let root = svc.worktrees.resolve(q.stream_id.as_deref()).await;
+    let root = if stream == PRIMARY {
+        svc.worktrees.project_dir().to_path_buf()
+    } else {
+        match svc.worktrees.resolve_strict(Some(&stream)).await {
+            Ok(root) => root,
+            Err(_) => return StatusCode::NOT_FOUND.into_response(),
+        }
+    };
     let Ok(extension) = svc.extension_catalog.named(&root, &ext) else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -190,7 +188,7 @@ async fn serve(
     let Ok(bytes) = tokio::fs::read(&file).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let source = format!("http://{host}/components/{ext}/{component}/");
+    let source = format!("http://{host}/components/{stream}/{ext}/{component}/");
     let mut response = bytes.into_response();
     let h = response.headers_mut();
     let set = |h: &mut HeaderMap, name: header::HeaderName, value: &str| {
