@@ -2,11 +2,13 @@ import type { CSSProperties } from "react";
 import { useState } from "react";
 
 import { summarizeProposal, type Proposal } from "../../proposals.js";
+import { InlineConfirm } from "../InlineConfirm.js";
 
 /** One agent proposal with Approve and Decline (P6b.A4). Approving *is*
- *  the confirmation: it runs the command as the person, no further ask.
- *  A destructive one is tinted. A failed decision shows next to the
- *  buttons; the list re-reads itself when the proposal is decided. */
+ *  the confirmation: it runs the command as the person — except that a
+ *  destructive one is tinted and its Approve asks inline first
+ *  (`InlineConfirm`). A failed decision shows next to the buttons; the
+ *  list re-reads itself when the proposal is decided. */
 export function ProposalCard({
   proposal,
   compact,
@@ -62,15 +64,26 @@ export function ProposalCard({
         </ol>
       ) : null}
       <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center" }}>
-        <button
-          type="button"
-          data-testid={`proposal-approve-${id}`}
-          disabled={busy}
-          onClick={() => void run(true)}
-          style={primaryButtonStyle}
-        >
-          Approve
-        </button>
+        {s.destructive ? (
+          <InlineConfirm
+            triggerLabel="Approve"
+            confirmLabel="Approve — it's destructive"
+            testIdPrefix={`proposal-approve-${id}`}
+            disabled={busy}
+            triggerStyle={primaryButtonStyle}
+            onConfirm={() => void run(true)}
+          />
+        ) : (
+          <button
+            type="button"
+            data-testid={`proposal-approve-${id}`}
+            disabled={busy}
+            onClick={() => void run(true)}
+            style={primaryButtonStyle}
+          >
+            Approve
+          </button>
+        )}
         <button
           type="button"
           data-testid={`proposal-decline-${id}`}

@@ -43,6 +43,24 @@ test("a card shows what the agent proposed and decides it", async () => {
   await waitFor(() => expect(decided).toEqual([[7, true], [7, false]]));
 });
 
+// A destructive proposal asks inline (InlineConfirm) before Approve runs it.
+test("approving a destructive proposal asks first", async () => {
+  const decided: [number, boolean][] = [];
+  const view = render(
+    <ProposalCard
+      proposal={{ ...proposal, preview: { ...proposal.preview, destructive: true } }}
+      onDecide={async (p, approve) => {
+        decided.push([p.id, approve]);
+      }}
+    />,
+  );
+  fireEvent.click(view.getByTestId("proposal-approve-7-trigger"));
+  await new Promise((r) => setTimeout(r, 20));
+  expect(decided).toEqual([]);
+  fireEvent.click(view.getByTestId("proposal-approve-7-confirm"));
+  await waitFor(() => expect(decided).toEqual([[7, true]]));
+});
+
 // A decision that fails says so next to the buttons.
 test("a failed decision shows its error on the card", async () => {
   const view = render(
