@@ -253,8 +253,10 @@ export function bucketThreadWork(threadId: string, tasks: Task[], followups: Fol
 
 /** Every task of a thread's work, in list order (`sort_index`). */
 export function orderedTaskIds(work: ThreadWorkState): string[] {
+  // The server's list order (`ORDER BY sort_index, created_at`), whatever
+  // bucket each task sits in — ties never fall to bucket order.
   return [...work.epics, ...work.items, ...work.waiting, ...work.inProgress, ...work.done]
-    .sort((a, b) => a.sort_index - b.sort_index)
+    .sort((a, b) => a.sort_index - b.sort_index || a.created_at.localeCompare(b.created_at))
     .map((t) => t.id);
 }
 

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import { boardColumns, effortDetailsFromResult, itemsFromResult, workItemsQuery, type WorkItem } from "./workItems.js";
+import { boardColumns, effortDetailsFromResult, itemsFromResult, orderedTaskIds, workItemsQuery, type WorkItem } from "./workItems.js";
 
 // A task's activity is one read over the models: `v_effort` joined to
 // `v_effort_file` (one row per effort and file; an effort with no files
@@ -157,4 +157,23 @@ test("recently finished: done tasks and touched pages, newest first, after the c
     5,
   );
   expect(out.map((e) => e.title)).toEqual(["New", "Notes"]);
+});
+
+// A drag's "before" order is the server's list order — sort_index, then
+// created_at — whatever bucket each task sits in, so equal indices can't
+// make a drag pick the wrong moved item.
+test("orderedTaskIds follows the server's order, ties by creation time", () => {
+  const t = (id: string, status: string, sort_index: number, created_at: string) =>
+    ({ id, status, sort_index, created_at, parent_id: null }) as never;
+  const work = {
+    threadId: "thr1",
+    epics: [],
+    items: [t("tsk3", "ready", 0, "2026-01-03")],
+    waiting: [],
+    inProgress: [t("tsk1", "in_progress", 0, "2026-01-01")],
+    done: [t("tsk2", "done", 0, "2026-01-02")],
+    followups: [],
+    reads: { models: [], tables: [], measures: [] },
+  };
+  expect(orderedTaskIds(work)).toEqual(["tsk1", "tsk2", "tsk3"]);
 });
