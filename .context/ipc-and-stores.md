@@ -701,8 +701,9 @@ log** — the `search.index` pump consumer on `work_item.created` / `edited` /
 crash; on any of them the task's rows are removed in every stream and it is
 re-indexed where it lives now, so a moved or deleted task leaves no stale
 row, tsk508) — and notes, comments and wiki pages from the in-memory
-**EventBus** (`WorkNotesChanged`, `CommentsChanged`, `WikiPagesChanged`) until
-those capabilities log events (P5). It upserts/removes the affected rows.
+**EventBus** (`WorkNotesChanged`, `CommentsChanged`) until those capabilities
+log events (P5); wiki pages come from the event log's
+`knowledge.page.written` / `deleted`. It upserts/removes the affected rows.
 Every task field edit logs `work_item.edited` (the store's raw `update` goes
 through `update_with_status_tx`), and a move to another thread logs
 `work_item.edited{fields: [thread]}` (`move_task`), so the log sees them

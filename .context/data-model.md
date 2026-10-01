@@ -1821,9 +1821,10 @@ enforces identity, treating global rows' `NULL` stream as `''`).
 - The store is a **derived cache**, never a source of truth. It is written
   exclusively by the `Indexer` service (`crates/oxplow-app/src/indexer.rs`),
   which backfills at boot, indexes tasks and snapshot files from the event log
-  (the `search.index` pump consumer, P3.10) and notes / comments / wiki from
-  the in-memory bus (`WorkNotesChanged` / `CommentsChanged` /
-  `WikiPagesChanged`). `purge_stream` is called when a stream is archived/deleted.
+  (the `search.index` pump consumer, P3.10), wiki pages from the event
+  log's `knowledge.page.written` / `deleted`, and notes / comments from
+  the in-memory bus (`WorkNotesChanged` / `CommentsChanged`).
+  `purge_stream` is called when a stream is archived/deleted.
 - `sanitize_query` turns arbitrary user input into a safe MATCH expression
   (each token double-quoted + `*` prefix), so junk input can't throw FTS5
   syntax errors. Exposed as the `search` IPC command + MCP tool.

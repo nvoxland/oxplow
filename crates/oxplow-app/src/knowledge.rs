@@ -33,7 +33,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::commands::{Command, Handler, HandlerOutput, TxCtx};
-use crate::events::{EventBus, OxplowEvent};
 use crate::link_check::{check_links_in, LinkWorld};
 use crate::wiki_pages::{
     extract_title, parse_refs, path_under_any_dir, strip_body_version_literals, wiki_pages_dir,
@@ -505,14 +504,6 @@ impl crate::event_pump::EventConsumer for WikiAttribution {
 pub struct KnowledgeTarget {
     pub project_dir: PathBuf,
     pub vcs: Arc<dyn Vcs>,
-    pub events: EventBus,
-}
-
-impl KnowledgeTarget {
-    fn changed(&self, slug: &str) -> impl FnOnce() + Send + Sync + 'static {
-        let (events, slug) = (self.events.clone(), slug.to_string());
-        move || events.emit(OxplowEvent::WikiPagesChanged { slug })
-    }
 }
 
 fn invalid(field: &str, message: impl Into<String>) -> CommandError {
@@ -734,7 +725,7 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
             result: serde_json::to_value(&written).expect("Written serializes"),
             inverse: None,
             events: Vec::new(),
-            after_commit: Some(Box::new(t.changed(slug))),
+            after_commit: None,
         })
     }));
 
@@ -743,7 +734,6 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
         let input: SlugInput = parse(input)?;
         let slug = slug_of(&input.slug)?;
         let path = page_path(&t.project_dir, slug);
-        let announce = t.changed(slug);
         let existed =
             delete_page_tx(ctx.conn, &ctx.events, ctx.actor.anchors(), slug).map_err(domain)?;
         if !existed && !path.exists() {
@@ -762,7 +752,7 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
             result: json!({ "page": page_ref(slug) }),
             inverse: None,
             events: Vec::new(),
-            after_commit: Some(Box::new(announce)),
+            after_commit: None,
         })
     }));
 
@@ -799,7 +789,7 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
             result: serde_json::to_value(&written).expect("Written serializes"),
             inverse: None,
             events: Vec::new(),
-            after_commit: Some(Box::new(t.changed(slug))),
+            after_commit: None,
         })
     }));
 
@@ -840,7 +830,7 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
             result,
             inverse: None,
             events: Vec::new(),
-            after_commit: Some(Box::new(t.changed(slug))),
+            after_commit: None,
         })
     }));
 

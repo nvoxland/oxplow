@@ -294,7 +294,6 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         let wiki_db = state.db.clone();
         let wiki_schemas = state.event_schemas.clone();
         let wiki_dir = state.layout.project_dir.clone();
-        let wiki_events = event_bus.clone();
         let bts = state.background_tasks.clone();
         let task = bts.start(StartInput {
             kind: BackgroundTaskKind::NotesResync,
@@ -308,7 +307,6 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
                 wiki_db,
                 wiki_schemas,
                 wiki_store,
-                wiki_events,
             )
             .await
             {

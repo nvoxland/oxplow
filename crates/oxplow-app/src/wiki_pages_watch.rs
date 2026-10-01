@@ -14,7 +14,6 @@ use oxplow_domain::EventSchemaRegistry;
 use oxplow_fs_watch::FsWatcher;
 use tracing::{info, warn};
 
-use crate::events::{EventBus, OxplowEvent};
 use crate::wiki_pages;
 
 /// Spawn a wiki-page watcher. Holding the returned struct keeps the
@@ -33,7 +32,6 @@ impl WikiPagesWatcher {
         db: Database,
         schemas: Arc<EventSchemaRegistry>,
         store: Arc<SqliteWikiPageStore>,
-        events: EventBus,
     ) -> Option<Self> {
         let dir = wiki_pages::wiki_pages_dir(&project_dir);
         std::fs::create_dir_all(&dir).ok();
@@ -74,12 +72,12 @@ impl WikiPagesWatcher {
                         let Some(slug) = evt.path.file_stem().and_then(|s| s.to_str()) else {
                             continue;
                         };
-                        match wiki_pages::sync_page(&db, &schemas, &project_dir, slug).await {
-                            Ok(true) => events.emit(OxplowEvent::WikiPagesChanged {
-                                slug: slug.to_string(),
-                            }),
-                            Ok(false) => {}
-                            Err(err) => warn!(slug, ?err, "wiki page resync failed"),
+                        // The row write is the announcement: the UI re-reads on
+                        // its `modelsChanged`.
+                        if let Err(err) =
+                            wiki_pages::sync_page(&db, &schemas, &project_dir, slug).await
+                        {
+                            warn!(slug, ?err, "wiki page resync failed");
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -100,13 +98,11 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use crate::events::EventBus;
-
-    /// Touching `.oxplow/wiki/<slug>.md` makes the watcher emit
-    /// `WikiPagesChanged { slug }` carrying exactly that file's stem,
-    /// so subscribers can filter by their own slug.
+    /// Touching `.oxplow/wiki/<slug>.md` makes the watcher restate that
+    /// page's row (title and body from the file) — the row write is the
+    /// announcement the UI re-reads on; there is no wiki event of its own.
     #[tokio::test]
-    async fn watcher_emits_slug_on_file_change() {
+    async fn watcher_restates_the_row_on_file_change() {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path().to_path_buf();
         let wiki_dir = crate::wiki_pages::wiki_pages_dir(&project);
@@ -115,10 +111,8 @@ mod tests {
         let db = oxplow_db::Database::in_memory();
         let store = Arc::new(oxplow_db::SqliteWikiPageStore::new(db.clone()));
         let schemas = Arc::new(EventSchemaRegistry::core());
-        let events = EventBus::new();
-        let mut rx = events.subscribe();
 
-        let _watcher = WikiPagesWatcher::spawn(project.clone(), db, schemas, store, events)
+        let _watcher = WikiPagesWatcher::spawn(project.clone(), db, schemas, store.clone())
             .await
             .expect("watcher to spawn");
 
@@ -129,21 +123,17 @@ mod tests {
         std::fs::write(wiki_dir.join("hello-world.md"), "# Hello\nbody\n").unwrap();
 
         // 250ms debounce + scheduling slack.
-        let evt = tokio::time::timeout(Duration::from_secs(3), async {
+        let row = tokio::time::timeout(Duration::from_secs(3), async {
             loop {
-                match rx.recv().await {
-                    Ok(OxplowEvent::WikiPagesChanged { slug }) => return slug,
-                    Ok(_) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        panic!("event bus closed before WikiPagesChanged");
-                    }
+                if let Some(row) = store.body("hello-world").await.unwrap() {
+                    return row;
                 }
+                tokio::time::sleep(Duration::from_millis(25)).await;
             }
         })
         .await
-        .expect("WikiPagesChanged event within 3s");
+        .expect("the page's row within 3s");
 
-        assert_eq!(evt, "hello-world");
+        assert_eq!(row, ("Hello".to_string(), "# Hello\nbody\n".to_string()));
     }
 }

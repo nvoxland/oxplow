@@ -1387,10 +1387,11 @@ now. **Writes are commands** — `run_command knowledge.write_page` /
 `delete_page` / `link` / `resync` ([knowledge.md](./knowledge.md)); the
 write guard refuses an agent's Write/Edit into `.oxplow/wiki/`.
 
-The watcher emits `OxplowEvent::WikiPagesChanged { slug }` after
-each successful resync. The slug is the file stem of the touched
+The watcher restates the page's row after each successful resync; the
+UI re-reads on the `modelsChanged` that produces (there is no wiki event
+of its own). The slug is the file stem of the touched
 `.oxplow/wiki/<slug>.md`, and the `FsWatcher` debounce is 250 ms so
-bursts (editor swap-saves, batched writes) coalesce into one event.
+bursts (editor swap-saves, batched writes) coalesce into one resync.
 Renderer subscribers — `WikiPageTab` in particular — filter by their
 own slug and skip refreshes for unrelated wiki edits; coarse
 consumers (rail HUD, title cache) ignore the slug and refetch as

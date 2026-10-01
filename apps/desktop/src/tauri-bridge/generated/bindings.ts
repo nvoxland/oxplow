@@ -3598,13 +3598,6 @@ export type OxplowEvent =
  *  page's comments + the Comments inbox.
  */
 { kind: "commentsChanged"; streamId: StreamId; targetKind: string; targetId: string } | 
-/**
- *  A wiki page's backing file changed on disk (creation, body
- *  update, deletion). `slug` is the file stem — subscribers
- *  (e.g. `WikiPageTab`) filter by their own slug so an unrelated
- *  edit doesn't trigger a refresh.
- */
-{ kind: "wikiPagesChanged"; slug: string } | 
 // Followups for a thread.
 { kind: "followupsChanged"; threadId: ThreadId } | 
 // Background task progress.

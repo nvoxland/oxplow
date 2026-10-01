@@ -1080,7 +1080,6 @@ impl Services {
         for command in knowledge::commands(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),
-            events: event_bus.clone(),
         }) {
             commands
                 .register(command)

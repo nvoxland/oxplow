@@ -40,7 +40,8 @@ written — by an agent (`run_command`), by the desktop editor, and by
    converges them. The search index reads the body from the file, which
    is therefore already the committed one when the pump sees the event;
 
-and once committed announces `WikiPagesChanged`. `@version` literals in links are stripped from the
+(the UI re-reads on the `modelsChanged` the row write produces; there is
+no wiki event of its own). `@version` literals in links are stripped from the
 body: a version is the edge's pin, not the prose's. `title` sets the
 body's `# ` heading.
 
