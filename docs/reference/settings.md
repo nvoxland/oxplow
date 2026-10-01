@@ -102,15 +102,8 @@ agents does not rewrite existing threads. This allows Claude and Codex
 threads to run concurrently while preserving their independent
 sessions and history.
 
-Older configurations may contain the singular key:
-
-```yaml
-agent: codex
-```
-
-Oxplow still reads it as a one-entry enabled-agent list for migration.
-Use `agents` for new configuration; specifying both `agent` and
-`agents` is an error.
+The singular `agent:` key is not accepted: a file that has it is
+refused as having an unknown key. Use `agents`.
 
 The selected CLI must be installed, authenticated, and available on
 `PATH`. See [Agents](../guide/agents.md) for thread selection, runtime

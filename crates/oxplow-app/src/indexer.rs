@@ -7,8 +7,8 @@
 //! crash, on `work_item.created/edited/transitioned/deleted`,
 //! `knowledge.page.written/deleted` and `snapshot.taken`), and notes and
 //! comments from the **in-memory bus** until those capabilities log events. One uniform mechanism for both DB-resident content
-//! (tasks, comments, notes) and disk-derived content (wiki bodies, file
-//! contents — file handling lives alongside in the snapshot-event handler).
+//! (tasks, comments, notes, wiki bodies — `wiki_page.body`) and file
+//! contents (handled alongside in the snapshot-event handler).
 //!
 //! Coarse events drive *upserts* of the affected scope; deletes are handled
 //! precisely where the signal allows (a wiki file gone from disk, a file

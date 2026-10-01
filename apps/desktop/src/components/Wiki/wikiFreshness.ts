@@ -1,6 +1,6 @@
 /// The single freshness derivation for a wiki page. Every widget that
 /// talks about a page's freshness (header chip, rail badge, referenced-
-/// files footer) must derive from the same `list_wiki_freshness` rows
+/// files footer) must derive from the same `v_knowledge_ref` rows (`readWikiFreshness`)
 /// through this function — two widgets computing freshness from
 /// different sources is how the header said "3 stale refs" while the
 /// rail said "fresh" (the rail used to read vestigial fields that the

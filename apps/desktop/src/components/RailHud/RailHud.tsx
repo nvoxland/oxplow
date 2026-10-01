@@ -77,8 +77,9 @@ export interface RailHudProps {
 //
 // Every content block in the rail renders through `RailSection`: a header
 // with a drag handle, an expand/collapse chevron, the title, an optional
-// count badge, and an optional header action. Per-section expanded state
-// and the section order both persist in localStorage. The Search box is
+// count badge, and an optional header action. The person's layout —
+// order, hidden, collapsed — persists per project in `panel_layout`
+// (`get/set_panel_layout`). The Search box is
 // pinned at the top and is not part of this set.
 
 // A panel id: core's (`core:work`, …) or an extension's (`ext:<ext>/<id>`).

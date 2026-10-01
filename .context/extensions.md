@@ -513,10 +513,13 @@ collectors:  [...]   # v1 `sources`: exec / starlark / jaq programs → entities
 slot_mounts:         # v1 `slots`: mount lenses into core pages
   - { slot: effort-review, lens: change-review }
 advisories:  [...]   # see "Advisories"
-launcher:            # entries for non-lens targets (a page, a command); a lens uses its own launcher: block
-  - { label: …, category: Data, target: page:… }
+launcher:            # entries for non-lens targets; a lens uses its own launcher: block
+  - { label: …, category: Data, target: { ref: page:… } }        # a page (a ref of a kind that opens as one)
+  - { label: …, category: Work, target: { command: …, input: { … } } }   # a command, run as the person
+  - { label: …, category: Code, target: { prompt: … } }          # a one-line prompt, put in the agent's input
 models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name> (semantic-layer.md "Extension models")
-commands: …  pages: …  panels: …  config: …   # parsed as data; runtimes land in later phases
+pages: …  panels: …  # running (P6.G1/G2): see "Panels" and "Pages"
+commands: …  config: …   # parsed as data; runtimes land in later phases (P6b)
 # experimental kinds — a PRIVATE extension only
 providers: [...]    # external providers over the provider protocol (providers.md); the others below are parsed as data only
 effects: … event_types: … ref_kinds: … custom_components: … decorators: … replacements: …
@@ -945,8 +948,9 @@ tool list stable no matter how many extensions are installed.
 - `list_extensions`, `list_sources`, `run_source(extension, source_id)`
   (never approves).
 - **Worktree streams: preview, don't run (tsk377).** Source data is
-  project-wide (one `ext__<ext>__<entity>` table), so `run_source` /
-  `sync_source` always run the **primary** worktree's copy. An agent
+  project-wide (one `ext__<ext>__<entity>` table), so a run (the
+  `source.sync` command over `SourceRunner::sync`, from any caller)
+  always runs the **primary** worktree's copy. An agent
   writing a source in a worktree stream checks it with MCP
   `preview_source(extension, source_id, stream_id)`: `source_runner::
   preview_source` runs that worktree's version through the same

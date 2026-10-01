@@ -37,8 +37,9 @@ written — by an agent (`run_command`), by the desktop editor, and by
    **inside the run**: the file is the page, so a file that can't be
    written fails the run and nothing is recorded (tsk562). Were the
    commit to fail after it, the file is ahead of the row and the watcher
-   converges them. The search index reads the body from the file, which
-   is therefore already the committed one when the pump sees the event;
+   converges them. The search index reads the body from the row
+   (`wiki_page.body`, written in the same transaction), so it is the
+   committed one when the pump sees the event;
 
 (the UI re-reads on the `modelsChanged` the row write produces; there is
 no wiki event of its own). `@version` literals in links are stripped from the

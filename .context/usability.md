@@ -721,7 +721,7 @@ no caller may bypass the bus to write to the terminal.
   same gesture: it puts `[oxplow ref <ref>] ` in the agent's input for
   the person to finish the question, and never sends. It's on:
   - the page nav bar (`page-nav-ask`), for any page whose tab id is a
-    canonical ref (`PageNavigationContext.askRef`);
+    canonical ref (`PageNavigationContext.ask`: `{ ref, streamId }`);
   - a lens row's right-click menu (`rowAsk`: the first ref the row links
     to, else the row as a lens mention);
   - an editor selection and a diff's right-side selection

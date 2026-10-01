@@ -33,7 +33,7 @@ interface Props {
   stream: Stream;
   slug: string;
   controller: WikiPageController;
-  /** Per-ref freshness rows from `list_wiki_freshness` — the page's one
+  /** Per-ref freshness rows from `v_knowledge_ref` (`readWikiFreshness`) — the page's one
    *  freshness source (fetched by WikiPage, shared with the header chip
    *  and rail badge). Drives the referenced-files footer. */
   freshnessRows?: WikiRefFreshness[];
@@ -207,7 +207,7 @@ function ReferencedFilesFooter({
 }
 
 /// Renders the freshness level derived from the page's
-/// `list_wiki_freshness` rows (`summarizeWikiFreshness`) — the same
+/// `v_knowledge_ref` rows (`summarizeWikiFreshness`) — the same
 /// source the header chip counts, so the two can't disagree.
 export function FreshnessBadge({ summary }: { summary: WikiFreshnessSummary }) {
   const title =

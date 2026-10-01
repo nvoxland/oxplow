@@ -77,15 +77,30 @@ children: [visits, tokens-by-day]
 
 `launcher: { category: Activity }` files a lens under that launcher
 heading; `hidden: true` leaves it out (for lenses only a slot shows).
-`actions:` adds buttons above the result, from a fixed set:
+`actions:` runs commands. Each action names a command and its input,
+and becomes a button above the result, or, with `row: true`, an item in
+each row's menu (right-click, or Menu key / Shift+F10 on a row):
 
-- `copy` copies the result, a markdown lens's text or the table as
-  markdown;
-- `add-to-context` hands the lens to your agent;
-- `run-source` syncs a source, for example
-  `{ action: run-source, source: github/prs, label: Sync PRs }`.
+```yaml
+actions:
+  - id: finish
+    label: Finish
+    command: work_item.transition
+    input: { ref: "{{row.ref}}", to: done }
+    row: true
+  - id: sync
+    label: Sync PRs
+    command: source.sync
+    input: { extension: github, source: prs }
+```
 
-A lens button never approves a source. The first run of a source that
+`{{param.x}}` and `{{row.col}}` fill the input from the lens's params or
+the row. A command that asks for confirmation asks you before it runs.
+An action runs as the lens acting for you, so it can't do anything you
+couldn't. Copy and Add to Agent Context are on every lens; you don't
+declare them.
+
+A lens action never approves a source. The first run of a source that
 executes a program is still approved in Settings → Data.
 
 ### Alerts
@@ -98,13 +113,14 @@ alert: { min_rows: 1, label: Waiting on you }   # any rows at all
 alert: { column: pct, below: 80, label: Coverage low }   # the first row's value
 ```
 
-Mount it in the `rail` slot and it shows under **Alerts** in the rail
-while it fires; click it to open the lens. Agents see the same alert
-state when they run the lens.
+Make it a panel's badge and the panel shows the alert's count in the
+left nav while it fires; the **Alerts** panel lists every firing badge,
+and clicking one opens the lens. Agents see the same alert state when
+they run the lens.
 
 ```yaml
-slots:
-  - { slot: rail, lens: waiting-on-me }
+panels:
+  - { id: waiting, title: Waiting on You, scope: project, body: waiting-on-me, badge: waiting-on-me }
 ```
 
 ### Showing a lens on a core page

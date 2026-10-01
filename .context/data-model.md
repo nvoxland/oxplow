@@ -941,9 +941,10 @@ collector at each snapshot (`ref` `symbol:<path>/<name>@snap:<id>`,
 
 ### `wiki_page` — `WikiPageStore` (`crates/oxplow-db/src/wiki_page_store.rs`)
 
-The per-project wiki's pages. **Bodies live on disk** at
-`.oxplow/wiki/<slug>.md` (not committed — a personal knowledge base);
-the row holds what's derived from the body: `slug`, `title`,
+The per-project wiki's pages. The file is the page: it lives at
+`.oxplow/wiki/<slug>.md` (not committed — a personal knowledge base),
+and the row — written with the file in one run — holds its text and
+what's derived from it: `slug`, `title`,
 `body_path`, `body_excerpt`, `body_size_bytes`, the parsed
 `file_refs_json` / `dir_refs_json` (`[[dir:…]]`) /
 `related_notes_json`, `created_at`, `updated_at`, and `body_hash` (V116:
@@ -1394,7 +1395,7 @@ system writer; a bus command will pass its actor's source and its
 V93 also dropped `task_event` (a per-task audit table nothing had written
 since V1) and wiped `page_visit` (its rows carried pre-canonical tab ids).
 
-### `wiki_page_thread_update` — wiki-note thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/wiki_page_store.rs`)
+### `wiki_page_thread_update` — wiki-note thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/wiki_page_thread_updates.rs`)
 
 Per-thread attribution side table for wiki page edits. Notes themselves
 are global (one body per slug, shared across all threads/streams), but
@@ -1673,6 +1674,17 @@ Store methods: `record`, `list_for_effort`, `totals_for_effort`,
 reads `v_token_usage` through oxplow-analytics lenses (`task-tokens`,
 `thread-tokens`, `usage`); mutations emit `AgentTokenUsageChanged {
 thread_id, effort_id }`, which re-runs them.
+
+### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)
+
+V126 (P6.G1). The person's left-nav layout in this project: one row per
+panel they've placed (`panel` — a core id like `core:alerts` or
+`ext:<extension>/<id>` — `position`, `hidden`, `collapsed`). Local state,
+never the repo. `get` returns the placements in order; `set` replaces
+them all in one transaction. A panel the table doesn't name shows
+expanded after the ones it does, and a named panel that no longer exists
+is dropped (`components/Panels/panelLayout.ts` `resolveLayout`). UI-only
+RPCs `get_panel_layout` / `set_panel_layout`.
 
 ### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 

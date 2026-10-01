@@ -1,8 +1,6 @@
-//! Wiki-note metadata + FTS5-backed body search.
-//!
-//! Note body lives on disk at `.oxplow/wiki/<slug>.md`. This store
-//! holds the metadata row + an FTS5 search index synced from
-//! the on-disk body via `resync`.
+//! The `wiki_page` row: a page's text (`body`) and what's derived from it,
+//! written with its `.oxplow/wiki/<slug>.md` file in one run (P6.E2).
+//! Search is the site index (`search_store`), which reads the row.
 
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -72,7 +70,7 @@ pub fn upsert_tx(
     Ok(())
 }
 
-/// Delete `slug`'s row and FTS mirror; whether there was a row.
+/// Delete `slug`'s row; whether there was one.
 pub fn delete_tx(conn: &rusqlite::Connection, slug: &str) -> Result<bool, DomainError> {
     let rows = conn
         .execute("DELETE FROM wiki_page WHERE slug = ?1", params![slug])

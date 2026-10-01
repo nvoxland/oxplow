@@ -793,7 +793,7 @@
     - { unique: id }
 - name: wiki_page
   version: 1
-  description: "Wiki pages (project knowledge). The full body is on disk; this has the excerpt."
+  description: "Wiki pages (project knowledge): the row written with each page's file, with its excerpt (the full text is v_knowledge_body)."
   columns:
     - { name: "slug", type: "TEXT", doc: "Page slug (link with [[slug]])." }
     - { name: "title", type: "TEXT", doc: "Page title." }
@@ -823,7 +823,7 @@
     - { sql: "SELECT t.id FROM v_task t WHERE NOT EXISTS (SELECT 1 FROM v_work_item w WHERE w.ref = 'work_item:oxplow:tsk' || t.id) UNION ALL SELECT w.ref FROM v_work_item w WHERE w.provider = 'oxplow' AND NOT EXISTS (SELECT 1 FROM v_task t WHERE 'work_item:oxplow:tsk' || t.id = w.ref)" }
 - name: knowledge_page
   version: 1
-  description: "Knowledge pages (the wiki, P5.C4): one row per page with what it links to and how many of its file refs have drifted since they were pinned. Bodies are `.oxplow/wiki/<slug>.md`; search them with the `search` tool."
+  description: "Knowledge pages (the wiki, P5.C4): one row per page with what it links to and how many of its file refs have drifted since they were pinned. A page's full text is `v_knowledge_body`; search them with the `search` tool."
   columns:
     - { name: "ref", type: "TEXT", doc: "`wiki:<slug>`." }
     - { name: "provider", type: "TEXT", doc: "The knowledge provider (`oxplow`)." }
