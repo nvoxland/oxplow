@@ -78,7 +78,7 @@ pub fn put_text_tx(
 }
 
 /// `v` with every object's keys in sorted order.
-fn canonical(v: &serde_json::Value) -> serde_json::Value {
+pub(crate) fn canonical(v: &serde_json::Value) -> serde_json::Value {
     match v {
         serde_json::Value::Object(map) => {
             let mut keys: Vec<&String> = map.keys().collect();

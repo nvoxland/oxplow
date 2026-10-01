@@ -1686,6 +1686,23 @@ expanded after the ones it does, and a named panel that no longer exists
 is dropped (`components/Panels/panelLayout.ts` `resolveLayout`). UI-only
 RPCs `get_panel_layout` / `set_panel_layout`.
 
+### `command_proposal` — `SqliteProposalStore` (`crates/oxplow-db/src/proposal_store.rs`)
+
+V127 (P6b.A2). A command an agent ran that needs a person's confirmation,
+kept until a person decides: the command and input, who proposed it
+(`actor_kind`, `actor_id`, `thread_id`, `stream_id`), the confirmation
+`preview_json`, `dry_run_json` (what it would have done when proposed;
+NULL when it can't be dry-run), and `decision` — `pending`, `approved`
+(with the approving run's `audit_id`), `declined` or `superseded`.
+`proposal_key(command, input)` is `config:<key>` for `config.set` /
+`config.unset`, else the command and its input with keys sorted;
+`insert_tx` marks pending rows with the same key `superseded` (with
+`superseded_by`). `approve_tx` / `decline_tx` decide a pending row once —
+a decided one is `Invalid`, a missing one `NotFound`. No expiry. Written
+inside the bus's transactions; read as `v_command_proposal` (ref
+`proposal:<id>`). Events `command.proposed@1`, `command.approved@1`,
+`command.declined@1`.
+
 ### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
 Append-only event log of in-app page navigations. One row per visit

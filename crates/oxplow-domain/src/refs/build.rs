@@ -19,6 +19,11 @@ pub fn thread_ref(id: ThreadId) -> String {
     format!("thread:{id}")
 }
 
+/// A command waiting for a person's decision (`command_proposal.id`).
+pub fn proposal_ref(id: i64) -> String {
+    format!("proposal:{id}")
+}
+
 /// An agent's answer in a thread (`thread_answer.id`).
 pub fn answer_ref(id: i64) -> String {
     format!("answer:{id}")
@@ -151,6 +156,7 @@ mod tests {
             command_ref("config.set"),
             config_ref("metricRetentionDays"),
             work_item_ref(TaskId::new(42)),
+            proposal_ref(12),
         ] {
             let parsed = CanonicalRef::parse(&r).unwrap_or_else(|e| panic!("{r}: {}", e.reason()));
             reg.validate(&parsed).unwrap_or_else(|e| panic!("{r}: {e}"));
@@ -158,6 +164,7 @@ mod tests {
         assert_eq!(stream_ref(StreamId::new(1)), "stream:str1");
         assert_eq!(turn_ref(AgentTurnId::new(7)), "turn:trn7");
         assert_eq!(work_item_ref(TaskId::new(42)), "work_item:oxplow:tsk42");
+        assert_eq!(proposal_ref(12), "proposal:12");
     }
 
     #[test]

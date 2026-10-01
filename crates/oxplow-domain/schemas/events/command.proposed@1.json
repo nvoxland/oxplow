@@ -1,0 +1,48 @@
+{
+  "$defs": {
+    "ActorKind": {
+      "description": "Who ran a command (`.context/target-architecture.md` §7).",
+      "enum": [
+        "human",
+        "agent",
+        "lens",
+        "system"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`command.proposed@1`: an agent ran a command that needs a person's\nconfirmation; it is kept as a proposal until a person decides (P6b).",
+  "properties": {
+    "actor_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actor_kind": {
+      "$ref": "#/$defs/ActorKind"
+    },
+    "command": {
+      "description": "The command's name (`config.set`).",
+      "type": "string"
+    },
+    "destructive": {
+      "description": "Whether the command is destructive.",
+      "type": "boolean"
+    },
+    "proposal": {
+      "description": "`proposal:<id>`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "proposal",
+    "command",
+    "actor_kind",
+    "destructive"
+  ],
+  "title": "CommandProposedV1",
+  "type": "object"
+}

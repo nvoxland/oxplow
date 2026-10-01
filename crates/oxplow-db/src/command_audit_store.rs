@@ -13,7 +13,7 @@ use oxplow_domain::{CommandCall, DomainError, EventId, ThreadId, Timestamp};
 use crate::database::{map_sql_err, Database};
 use crate::database::{string_to_ts, ts_to_string};
 
-fn actor_kind_str(k: ActorKind) -> &'static str {
+pub(crate) fn actor_kind_str(k: ActorKind) -> &'static str {
     match k {
         ActorKind::Human => "human",
         ActorKind::Agent => "agent",
@@ -22,7 +22,7 @@ fn actor_kind_str(k: ActorKind) -> &'static str {
     }
 }
 
-fn parse_actor_kind(s: &str) -> Result<ActorKind, DomainError> {
+pub(crate) fn parse_actor_kind(s: &str) -> Result<ActorKind, DomainError> {
     Ok(match s {
         "human" => ActorKind::Human,
         "agent" => ActorKind::Agent,

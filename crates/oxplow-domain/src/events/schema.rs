@@ -150,6 +150,12 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<LensShown>().expect("core type registers");
         r.register::<LensKept>().expect("core type registers");
+        r.register::<CommandProposed>()
+            .expect("core type registers");
+        r.register::<CommandApproved>()
+            .expect("core type registers");
+        r.register::<CommandDeclined>()
+            .expect("core type registers");
         r
     }
 
@@ -386,6 +392,64 @@ impl EventType for CommandExecuted {
     const TYPE: &'static str = "command.executed";
     const V: u32 = 1;
     type Payload = CommandExecutedV1;
+}
+
+/// `command.proposed@1`: an agent ran a command that needs a person's
+/// confirmation; it is kept as a proposal until a person decides (P6b).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommandProposedV1 {
+    /// `proposal:<id>`.
+    pub proposal: String,
+    /// The command's name (`config.set`).
+    pub command: String,
+    pub actor_kind: ActorKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_id: Option<String>,
+    /// Whether the command is destructive.
+    pub destructive: bool,
+}
+
+pub struct CommandProposed;
+impl EventType for CommandProposed {
+    const TYPE: &'static str = "command.proposed";
+    const V: u32 = 1;
+    type Payload = CommandProposedV1;
+}
+
+/// `command.approved@1`: a person approved a proposal and the command ran
+/// as them, audited as `audit_id`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommandApprovedV1 {
+    /// `proposal:<id>`.
+    pub proposal: String,
+    pub command: String,
+    /// The approving run's `command_audit` row.
+    pub audit_id: i64,
+}
+
+pub struct CommandApproved;
+impl EventType for CommandApproved {
+    const TYPE: &'static str = "command.approved";
+    const V: u32 = 1;
+    type Payload = CommandApprovedV1;
+}
+
+/// `command.declined@1`: a person declined a proposal; nothing ran.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommandDeclinedV1 {
+    /// `proposal:<id>`.
+    pub proposal: String,
+    pub command: String,
+}
+
+pub struct CommandDeclined;
+impl EventType for CommandDeclined {
+    const TYPE: &'static str = "command.declined";
+    const V: u32 = 1;
+    type Payload = CommandDeclinedV1;
 }
 
 /// `config.changed@1`: one project config key changed.
@@ -1183,7 +1247,10 @@ mod tests {
                 ("agent.turn.ended", 2),
                 ("agent.turn.started", 1),
                 ("code.diagnostics.changed", 1),
+                ("command.approved", 1),
+                ("command.declined", 1),
                 ("command.executed", 1),
+                ("command.proposed", 1),
                 ("config.changed", 1),
                 ("effect.result", 1),
                 ("effort.closed", 1),

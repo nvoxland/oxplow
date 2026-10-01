@@ -70,7 +70,9 @@ A `page` id is a shell route (`page:settings`) or an extension's page
 two shapes, so a `.` appears only in `ext.<extension>.<page>`.
 `answer` (a lens an agent showed on a thread, `answer:12`, P6.C1) is
 registered with a numeric id; `build::answer_ref` and `build::lens_ref`
-(`lens:<extension>/<slug>`) build them.
+(`lens:<extension>/<slug>`) build them. `proposal` (a command waiting for
+a person's decision, `proposal:12`, P6b) has a numeric id too;
+`build::proposal_ref` builds it.
 
 ## Building refs in Rust (built, P2.4b)
 

@@ -41,9 +41,13 @@ fn the_core_kinds_are_registered_and_validate_ids() {
         "finding",
         "task_note",
         "run",
+        "proposal",
     ] {
         assert!(reg.get(k).is_some(), "core kind {k} missing");
     }
+    // A pending command waiting for a person (`command_proposal.id`, P6b).
+    assert!(reg.validate(&canon("proposal:12")).is_ok());
+    assert!(reg.validate(&canon("proposal:x")).is_err());
     // The id regex applies: a commit is hex, a work item is <provider>:<id>.
     assert!(reg.validate(&canon("commit:4c44d495")).is_ok());
     assert!(reg.validate(&canon("commit:not-hex!")).is_err());

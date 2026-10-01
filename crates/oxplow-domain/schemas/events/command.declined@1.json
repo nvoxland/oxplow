@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`command.declined@1`: a person declined a proposal; nothing ran.",
+  "properties": {
+    "command": {
+      "type": "string"
+    },
+    "proposal": {
+      "description": "`proposal:<id>`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "proposal",
+    "command"
+  ],
+  "title": "CommandDeclinedV1",
+  "type": "object"
+}

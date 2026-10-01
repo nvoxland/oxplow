@@ -734,6 +734,30 @@
   tests:
     - { not_null: id }
     - { unique: id }
+- name: command_proposal
+  version: 1
+  description: "Commands an agent ran that need a person's confirmation (P6b): each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Approvals panel lists the pending ones."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Proposal id." }
+    - { name: "ref", type: "TEXT", doc: "`proposal:<id>`." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "command", type: "TEXT", doc: "The command (`config.set`, `work_item.delete`)." }
+    - { name: "input", type: "TEXT", doc: "Its input (JSON)." }
+    - { name: "actor_kind", type: "TEXT", doc: "Who proposed it: `agent` or `lens`." }
+    - { name: "actor_id", type: "TEXT", doc: "The proposing thread (`thr3`) or lens, when known." }
+    - { name: "thread_id", type: "INTEGER", doc: "The thread it was proposed in (v_thread.id), if any." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream it was proposed in, if any." }
+    - { name: "key", type: "TEXT", doc: "What it supersedes on: `config:<key>` for a config change, else the command and its input." }
+    - { name: "preview", type: "TEXT", doc: "The confirmation preview (JSON: command, summary, input, destructive)." }
+    - { name: "dry_run", type: "TEXT", doc: "What it would have done when proposed (JSON: a config key's before/after, a composite's children); NULL when it can't be dry-run." }
+    - { name: "decision", type: "TEXT", doc: "`pending`, `approved`, `declined` or `superseded`." }
+    - { name: "decided_at", type: "TEXT", doc: "When it was decided or superseded." }
+    - { name: "audit_id", type: "INTEGER", doc: "The approving run's command audit row." }
+    - { name: "superseded_by", type: "INTEGER", doc: "The proposal that replaced it." }
+  tests:
+    - { not_null: id }
+    - { unique: ref }
+    - { accepted_values: { column: decision, values: [pending, approved, declined, superseded] } }
 - name: thread_answer
   version: 1
   description: "An agent's answers in a thread (P6.C1): what `show_lens` showed the person — an existing lens with its params, or the answer's own lens spec — and, once kept, the lens it became."
