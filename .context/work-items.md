@@ -85,9 +85,14 @@ payload. It reads the item (`readWorkItem`) and the provider's features
 (`readCapabilityProviders` → `featuresFor`) and shows title, state
 (canonical and native), body and Move To; its Parent only with
 `hierarchy`, **Comment…** only with `comments` and **Link…** only with
-`links`, each run through `personCommands` as `<provider>.comment` /
-`<provider>.link` (the field keeps its text until the run succeeds —
-`personCommands.run` returns whether it ran). Comments on another
+`links`, each an `InlinePromptStrip` run through `personCommands` as
+`<provider>.comment` / `<provider>.link` (the strip keeps its text until
+the run succeeds — `personCommands.run` returns whether it ran). Link…'s
+link type is free text (default `relates_to`): the provider names its
+own types, so oxplow's enum isn't offered as a list. The tab is titled
+with the item's title (`usePageTitle`), and the page has backlinks and
+outbound like `TaskPage` (`canonicalIdForTarget` maps the ref to the
+graph's `<provider>:<id>`). Comments on another
 provider's item are write-only here: `v_comment` is oxplow's store. Both
 pages mount the `work_item.detail.body` and `work_item.detail.sidebar`
 slots with `{ ref, task_id }` (`task_id` null for another provider's

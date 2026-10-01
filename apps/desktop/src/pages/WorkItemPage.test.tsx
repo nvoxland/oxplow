@@ -59,6 +59,7 @@ mock.module("../api.js", () => ({
   },
 }));
 const { WorkItemPage } = await import("./WorkItemPage.js");
+const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
 
 afterEach(() => {
   ran.length = 0;
@@ -81,14 +82,41 @@ test("a provider without comments, links or hierarchy offers none of them", asyn
 test("comments, links and a parent show when the provider declares them; Comment runs its command", async () => {
   features = { comments: true, links: true, hierarchy: true };
   const view = page();
-  fireEvent.click(await waitFor(() => view.getByTestId("work-item-comment-open")));
+  const open = await waitFor(() => view.getByTestId("work-item-comment-open"));
   expect(view.getByTestId("work-item-link-open")).toBeTruthy();
   expect(view.getByTestId("work-item-parent").textContent).toContain("work_item:fake:W-0");
-  fireEvent.change(view.getByTestId("work-item-comment-input"), { target: { value: "Seen it too." } });
-  fireEvent.click(view.getByTestId("work-item-comment-submit"));
+  fireEvent.click(open);
+  fireEvent.change(view.getByTestId("work-item-comment-body"), { target: { value: "Seen it too." } });
+  fireEvent.keyDown(view.getByTestId("work-item-comment-body"), { key: "Enter", metaKey: true });
   await waitFor(() =>
     expect(ran).toEqual([["fake.comment", { ref: "work_item:fake:W-1", body: "Seen it too." }]]),
   );
+  await waitFor(() => expect(view.queryByTestId("work-item-comment-body")).toBeNull());
+});
+
+test("Link… takes any link type the provider names, not oxplow's list", async () => {
+  features = { links: true };
+  const view = page();
+  fireEvent.click(await waitFor(() => view.getByTestId("work-item-link-open")));
+  expect((view.getByTestId("work-item-link-link_type") as HTMLInputElement).value).toBe("relates_to");
+  fireEvent.change(view.getByTestId("work-item-link-link_type"), { target: { value: "caused_by" } });
+  fireEvent.change(view.getByTestId("work-item-link-target"), { target: { value: "work_item:fake:W-9" } });
+  fireEvent.click(view.getByTestId("work-item-link-submit"));
+  await waitFor(() =>
+    expect(ran).toEqual([["fake.link", { ref: "work_item:fake:W-1", target: "work_item:fake:W-9", link_type: "caused_by" }]]),
+  );
+});
+
+test("the tab is titled with the item's title", async () => {
+  features = {};
+  const titles: string[] = [];
+  const nav = { goBack() {}, goForward() {}, canGoBack: false, canGoForward: false, setTitle: (t: string) => titles.push(t) };
+  render(
+    <PageNavigationContext.Provider value={nav as never}>
+      <WorkItemPage workItemRef="work_item:fake:W-1" streamId={null} onOpenPage={() => {}} />
+    </PageNavigationContext.Provider>,
+  );
+  await waitFor(() => expect(titles).toContain("Their bug"));
 });
 
 test("Move To runs the provider's transition; the item's slots get its ref", async () => {

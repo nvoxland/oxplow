@@ -1,5 +1,6 @@
 import { EmptyState } from "../Prompts/EmptyState.js";
 import type { CSSProperties } from "react";
+import { InlinePromptStrip } from "../InlinePromptStrip.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   diffRevisions,
@@ -749,12 +750,12 @@ export function ProjectPanel({
       {pendingPrompt ? (
         <InlinePromptStrip
           message={pendingPrompt.message}
-          initialValue={pendingPrompt.initialValue}
+          fields={[{ key: "value", initialValue: pendingPrompt.initialValue }]}
           confirmLabel={pendingPrompt.confirmLabel}
-          onSubmit={(value) => {
+          onSubmit={({ value }) => {
             const { run } = pendingPrompt;
             setPendingPrompt(null);
-            void run(value);
+            void run(value!);
           }}
           onCancel={() => setPendingPrompt(null)}
         />
@@ -1499,79 +1500,6 @@ const filterStatusBarStyle: CSSProperties = {
 };
 
 /**
- * Inline prompt strip — replaces the modal PromptDialog for new-file /
- * new-folder / rename flows. Renders just under the Files header.
- * Submit on Enter; Escape (or Cancel) reverts.
- */
-function InlinePromptStrip({
-  message,
-  initialValue,
-  confirmLabel,
-  onSubmit,
-  onCancel,
-}: {
-  message: string;
-  initialValue: string;
-  confirmLabel: string;
-  onSubmit(value: string): void;
-  onCancel(): void;
-}) {
-  const [value, setValue] = useState(initialValue);
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { inputRef.current?.select(); }, []);
-  const trimmed = value.trim();
-  return (
-    <form
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-        padding: "8px 12px",
-        borderBottom: "1px solid var(--border)",
-        background: "var(--bg-2)",
-      }}
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (trimmed.length === 0) return;
-        onSubmit(trimmed);
-      }}
-    >
-      <div style={{ color: "var(--muted)", fontSize: 11 }}>{message}</div>
-      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-        <input
-          ref={inputRef}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.preventDefault();
-              onCancel();
-            }
-          }}
-          autoFocus
-          style={{
-            flex: 1,
-            background: "var(--bg)",
-            color: "var(--fg)",
-            border: "1px solid var(--border)",
-            borderRadius: 4,
-            padding: "4px 6px",
-            fontFamily: "inherit",
-            fontSize: "var(--text-xs)",
-          }}
-        />
-        <button type="button" onClick={onCancel} style={{ ...miniInlineButton }}>
-          Cancel
-        </button>
-        <button type="submit" disabled={trimmed.length === 0} style={{ ...miniInlinePrimary, opacity: trimmed.length === 0 ? 0.5 : 1 }}>
-          {confirmLabel}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-/**
  * Inline-confirm strip for non-row-anchored destructives (delete-file
  * triggered from a context-menu, git-rollback). Replaces the
  * ConfirmDialog modal. The confirm button auto-focuses; Escape cancels.
@@ -1622,12 +1550,3 @@ const miniInlineButton: CSSProperties = {
   cursor: "pointer",
 };
 
-const miniInlinePrimary: CSSProperties = {
-  background: "var(--accent)",
-  color: "#fff",
-  border: "1px solid var(--accent)",
-  borderRadius: 4,
-  padding: "4px 10px",
-  fontSize: 11,
-  cursor: "pointer",
-};

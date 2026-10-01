@@ -1,14 +1,18 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { LensSlots } from "../lens/LensSlots.js";
 import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
 import { personCommands } from "../personCommands.js";
+import { BacklinksList } from "../tabs/BacklinksList.js";
 import { Page } from "../tabs/Page.js";
+import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import { RouteLink } from "../tabs/RouteLink.js";
 import { workItemTabRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
+import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import {
   CANONICAL_STATES,
@@ -31,8 +35,8 @@ const LABEL: Record<CanonicalState, string> = {
   canceled: "Canceled",
 };
 
-/** Link types a work item link may name. */
-const LINK_TYPES = ["relates_to", "blocks", "duplicates", "supersedes", "discovered_from", "replies_to"];
+/** What Link… proposes; the provider names its own link types. */
+const DEFAULT_LINK_TYPE = "relates_to";
 
 const NO_FEATURES: WorkItemsFeatures = { hierarchy: false, comments: false, links: false, inProgressOpensEffort: false };
 
@@ -72,6 +76,19 @@ export function WorkItemPage({
   useEffect(() => void refresh(), [refresh]);
   useRerunOnChange(reads, () => void refresh());
   const slotParams = useMemo(() => ({ ref: workItemRef, task_id: null }), [workItemRef]);
+  usePageTitle(item?.title ?? null);
+  const graphRef = useMemo(() => workItemTabRef(workItemRef), [workItemRef]);
+  const backlinkEntries = useBacklinks(graphRef);
+  const outboundEntries = usePageOutbound(graphRef);
+  const [prompt, setPrompt] = useState<"comment" | "link" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (label: string, verb: "comment" | "link", input: Record<string, unknown>) => {
+    if (!item) return;
+    setBusy(true);
+    const ran = await personCommands.run(label, workItemCommand(item.ref, verb), { ref: item.ref, ...input });
+    setBusy(false);
+    if (ran) setPrompt(null);
+  };
 
   if (!item) {
     return (
@@ -125,155 +142,67 @@ export function WorkItemPage({
     </div>
   );
 
+  const backlinks = {
+    count: backlinkEntries.length,
+    body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />,
+  };
+  const outbound =
+    outboundEntries.length > 0
+      ? { count: outboundEntries.length, body: <BacklinksList entries={outboundEntries} onOpenPage={onOpenPage} /> }
+      : undefined;
+
   return (
-    <Page testId="work-item-page" title={item.title} kind="work_item" layout="details" rightRail={rail}>
+    <Page
+      testId="work-item-page"
+      title={item.title}
+      kind="work_item"
+      layout="details"
+      rightRail={rail}
+      backlinks={backlinks}
+      outbound={outbound}
+    >
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         {item.body ? <MarkdownView body={item.body} /> : <div style={mutedStyle}>No description.</div>}
-        <div style={{ display: "flex", gap: 12 }}>
-          {features.comments ? (
-            <InlineCommand
-              testId="work-item-comment"
-              label="Comment…"
-              placeholder="A comment for the provider"
-              multiline
-              run={(text) =>
-                personCommands.run("Comment", workItemCommand(item.ref, "comment"), { ref: item.ref, body: text })
-              }
-            />
-          ) : null}
-          {features.links ? (
-            <LinkForm
-              run={(target, linkType) =>
-                personCommands.run("Link", workItemCommand(item.ref, "link"), {
-                  ref: item.ref,
-                  target,
-                  link_type: linkType,
-                })
-              }
-            />
-          ) : null}
-        </div>
+        {prompt === "comment" ? (
+          <InlinePromptStrip
+            testId="work-item-comment"
+            message={`A comment on this item, sent to ${item.provider}. Cmd/Ctrl+Enter sends it.`}
+            fields={[{ key: "body", placeholder: "A comment for the provider", multiline: true }]}
+            confirmLabel="Comment"
+            busy={busy}
+            onSubmit={({ body }) => void run("Comment", "comment", { body })}
+            onCancel={() => setPrompt(null)}
+          />
+        ) : prompt === "link" ? (
+          <InlinePromptStrip
+            testId="work-item-link"
+            message={`Link this item to another, as ${item.provider} names the link.`}
+            fields={[
+              { key: "link_type", initialValue: DEFAULT_LINK_TYPE, placeholder: "link type" },
+              { key: "target", placeholder: "work_item:<provider>:<id>" },
+            ]}
+            confirmLabel="Link"
+            busy={busy}
+            onSubmit={({ link_type, target }) => void run("Link", "link", { target, link_type })}
+            onCancel={() => setPrompt(null)}
+          />
+        ) : (
+          <div style={{ display: "flex", gap: 12 }}>
+            {features.comments ? (
+              <button type="button" data-testid="work-item-comment-open" style={buttonStyle} onClick={() => setPrompt("comment")}>
+                Comment…
+              </button>
+            ) : null}
+            {features.links ? (
+              <button type="button" data-testid="work-item-link-open" style={buttonStyle} onClick={() => setPrompt("link")}>
+                Link…
+              </button>
+            ) : null}
+          </div>
+        )}
         <LensSlots slot="work_item.detail.body" params={slotParams} streamId={streamId} onOpenPage={onOpenPage} />
       </div>
     </Page>
-  );
-}
-
-/** A button that opens an inline field; Cmd/Ctrl+Enter (or the submit
- *  button) runs it, Escape closes it. The text stays until it ran. */
-function InlineCommand({
-  testId,
-  label,
-  placeholder,
-  multiline,
-  run,
-}: {
-  testId: string;
-  label: string;
-  placeholder: string;
-  multiline?: boolean;
-  run(text: string): Promise<boolean>;
-}) {
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  if (!open) {
-    return (
-      <button type="button" data-testid={`${testId}-open`} style={buttonStyle} onClick={() => setOpen(true)}>
-        {label}
-      </button>
-    );
-  }
-  const submit = async () => {
-    if (!text.trim()) return;
-    setBusy(true);
-    const ran = await run(text.trim());
-    setBusy(false);
-    if (ran) {
-      setText("");
-      setOpen(false);
-    }
-  };
-  return (
-    <form
-      style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}
-      onSubmit={(e) => {
-        e.preventDefault();
-        void submit();
-      }}
-    >
-      {multiline ? (
-        <textarea
-          data-testid={`${testId}-input`}
-          autoFocus
-          value={text}
-          placeholder={placeholder}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setOpen(false);
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit();
-          }}
-          style={inputStyle}
-          rows={3}
-        />
-      ) : null}
-      <div style={{ display: "flex", gap: 6 }}>
-        <button type="submit" data-testid={`${testId}-submit`} disabled={busy || !text.trim()} style={buttonStyle}>
-          {label.replace("…", "")}
-        </button>
-        <button type="button" style={buttonStyle} onClick={() => setOpen(false)}>
-          Cancel
-        </button>
-      </div>
-    </form>
-  );
-}
-
-/** Link… : the target ref and the link type; Enter submits. */
-function LinkForm({ run }: { run(target: string, linkType: string): Promise<boolean> }) {
-  const [open, setOpen] = useState(false);
-  const [target, setTarget] = useState("");
-  const [linkType, setLinkType] = useState(LINK_TYPES[0]!);
-  if (!open) {
-    return (
-      <button type="button" data-testid="work-item-link-open" style={buttonStyle} onClick={() => setOpen(true)}>
-        Link…
-      </button>
-    );
-  }
-  return (
-    <form
-      style={{ display: "flex", gap: 6, alignItems: "center" }}
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!target.trim()) return;
-        void run(target.trim(), linkType).then((ran) => {
-          if (ran) setOpen(false);
-        });
-      }}
-    >
-      <select data-testid="work-item-link-type" value={linkType} onChange={(e) => setLinkType(e.target.value)} style={inputStyle}>
-        {LINK_TYPES.map((t) => (
-          <option key={t} value={t}>
-            {t.replace(/_/g, " ")}
-          </option>
-        ))}
-      </select>
-      <input
-        data-testid="work-item-link-target"
-        autoFocus
-        value={target}
-        placeholder="work_item:<provider>:<id>"
-        onChange={(e) => setTarget(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") setOpen(false);
-        }}
-        style={inputStyle}
-      />
-      <button type="submit" disabled={!target.trim()} style={buttonStyle}>
-        Link
-      </button>
-    </form>
   );
 }
 
@@ -296,13 +225,4 @@ const buttonStyle: CSSProperties = {
   background: "transparent",
   color: "var(--text-primary)",
   cursor: "pointer",
-};
-const inputStyle: CSSProperties = {
-  fontSize: "var(--text-sm)",
-  padding: "4px 6px",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 4,
-  background: "var(--surface-input, var(--surface-card))",
-  color: "var(--text-primary)",
-  fontFamily: "inherit",
 };

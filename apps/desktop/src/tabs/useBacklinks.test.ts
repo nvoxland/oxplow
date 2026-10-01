@@ -8,6 +8,7 @@ import {
   gitCommitRef,
   taskRef,
   wikiPageRef,
+  workItemTabRef,
 } from "./pageRefs.js";
 
 describe("canonicalIdForTarget", () => {
@@ -16,6 +17,10 @@ describe("canonicalIdForTarget", () => {
     // `work_item` / `oxplow:tsk42` (.context/refs.md).
     const ref = taskRef("tsk42");
     expect(canonicalIdForTarget(ref)).toBe("oxplow:tsk42");
+  });
+
+  test("another provider's work item is its ref's id, as the graph stores it", () => {
+    expect(canonicalIdForTarget(workItemTabRef("work_item:fake:W-1"))).toBe("fake:W-1");
   });
 
   test("wikiPageRef returns slug", () => {

@@ -101,8 +101,10 @@ export function canonicalIdForTarget(ref: TabRef): string | null {
       return p?.slug ?? null;
     }
     case "work_item": {
-      const p = ref.payload as { itemId?: string } | null;
-      return p?.itemId ? `${OXPLOW_PROVIDER}${p.itemId}` : null;
+      // An oxplow task's page carries its id; another provider's, its ref.
+      const p = ref.payload as { itemId?: string; ref?: string } | null;
+      if (p?.itemId) return `${OXPLOW_PROVIDER}${p.itemId}`;
+      return p?.ref?.startsWith("work_item:") ? p.ref.slice("work_item:".length) : null;
     }
     case "file": {
       const p = ref.payload as { path?: string } | null;

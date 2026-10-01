@@ -33,8 +33,10 @@ Things I keep forgetting. Read this before adding any UI.
 - **Tiny prompt strips render inline at the top of the owning
   panel** for "+ New file" / "+ New folder" / Rename flows where the
   trigger comes from a row's right-click menu rather than a row that
-  already shows the editable value. See `InlinePromptStrip` in
-  `ProjectPanel.tsx`. Same Enter-submits / Escape-cancels contract;
+  already shows the editable value. See `InlinePromptStrip`
+  (`components/InlinePromptStrip.tsx`: one or more fields, a field may be
+  `multiline` — Cmd/Ctrl+Enter submits there; the owner dismisses it, so
+  a failed run keeps what was typed). Same Enter-submits / Escape-cancels contract;
   the strip is dismissed by the panel's local `pendingPrompt` state.
 - **Form-shaped flows that warrant a focused workspace use a page tab
   or a slideover, not a centered modal.** The "+ New" flows ship as
