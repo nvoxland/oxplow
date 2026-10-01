@@ -3799,6 +3799,12 @@ export type OxplowConfig = {
 	 */
 	extensionInstances: { [key in string]: ExtensionInstanceConfig },
 	/**
+	 *  Each swappable capability's active provider
+	 *  (`activeProviders: { work_items: linear }`); a capability absent
+	 *  here keeps oxplow's own.
+	 */
+	activeProviders: { [key in string]: string },
+	/**
 	 *  This project's AI role assignments (`ai: { roles: … }`), layered
 	 *  over the user-global `ai.yaml`. Keyed by role name (one of
 	 *  [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.

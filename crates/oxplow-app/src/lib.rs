@@ -1024,6 +1024,12 @@ impl Services {
         // own, over this bus.
         let work_items = oxplow_domain::work_items::WorkItemsRegistry::new();
         work_items.register(work_items::oxplow_provider());
+        // The default for a `create` without a provider, from the start:
+        // a `create` before the first reconcile mustn't file elsewhere.
+        work_items.set_active(&capabilities::active_provider(
+            &config_service::read_config(&config_arc),
+            "work_items",
+        ));
         for command in commands::vcs::commands(commands::vcs::VcsTarget {
             vcs: vcs.clone(),
             git: vcs::GitProvider,

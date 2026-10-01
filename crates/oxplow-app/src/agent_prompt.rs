@@ -240,6 +240,7 @@ mod tests {
             agent_models: Default::default(),
             acp_agents: Vec::new(),
             extension_instances: Default::default(),
+            active_providers: Default::default(),
             ai_roles: Default::default(),
             extensions_disabled: Vec::new(),
         }

@@ -1428,6 +1428,64 @@ mod tests {
         }
     }
 
+    /// P7.A2: a `create` that names no provider files on the active one
+    /// — oxplow's by default — and when the active provider isn't
+    /// running it fails naming it: never a silent fallback to oxplow.
+    #[tokio::test]
+    async fn a_create_without_a_provider_files_on_the_active_one() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let filed = fx
+            .svc
+            .commands
+            .run(&Actor::Human, CREATE, json!({ "title": "here" }), false)
+            .await
+            .unwrap();
+        assert!(filed.result["ref"]
+            .as_str()
+            .unwrap()
+            .starts_with("work_item:oxplow:"));
+        fx.svc
+            .config
+            .write()
+            .unwrap()
+            .active_providers
+            .insert("work_items".into(), "linear".into());
+        let config = crate::config_service::read_config(&fx.svc.config);
+        crate::capabilities::apply_active(&config, &fx.svc.work_items, &fx.svc.db)
+            .await
+            .unwrap();
+        let before = list_order(&fx, None).await.len();
+        let err = fx
+            .svc
+            .commands
+            .run(&Actor::Human, CREATE, json!({ "title": "where?" }), false)
+            .await
+            .unwrap_err();
+        match err {
+            CommandError::Invalid { field, message } => {
+                assert_eq!(field.as_deref(), Some("/provider"));
+                assert!(
+                    message.contains("active work-items provider isn't running")
+                        && message.contains("linear"),
+                    "{message}"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(list_order(&fx, None).await.len(), before, "nothing filed");
+        // Naming oxplow still files there.
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                CREATE,
+                json!({ "provider": "oxplow", "title": "named" }),
+                false,
+            )
+            .await
+            .unwrap();
+    }
+
     /// A link made by a person (no thread of their own) belongs to the
     /// linked task's thread; two backlog tasks can't be linked that way.
     #[tokio::test]

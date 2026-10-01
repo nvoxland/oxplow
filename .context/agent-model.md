@@ -756,7 +756,12 @@ transaction as a task filed or moved `in_progress`
 (`work_item.create` / `work_item.update` / `work_item.transition`), or
 through `run_command effort.open {work_item}` for another provider's work
 item (a Linear/GitHub issue); an `in_progress` row alone isn't a claim
-(recovery gives it an effort at boot). The deny text names both doors.
+(recovery gives it an effort at boot). The deny text names both doors —
+and, when the project's active work-items provider isn't oxplow
+(`activeProviders`, P7.A2), opens by saying the work items live there
+and how to file one (`run_command work_item.create`, which files on it,
+then `effort.open` on its ref): `PolicyFacts.active_work_items`, from
+`Services.work_items.active()`.
 **A `ready`-status filing call does NOT satisfy the guard** — `ready` is
 backlog ("noticed for later"), only an open effort is a commitment to
 ship now. The check (`stream_has_open_effort` in

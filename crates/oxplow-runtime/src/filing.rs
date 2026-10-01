@@ -36,6 +36,9 @@ pub struct FilingEnforcementContext<'a> {
     /// Absolute path being written, when the tool input carries one.
     pub file_path: Option<&'a str>,
     pub git_operation_in_progress: bool,
+    /// The project's active work-items provider (`oxplow` unless
+    /// `activeProviders` names another); `None` reads as oxplow.
+    pub active_work_items: Option<&'a str>,
 }
 
 /// Returns true when the path is under `~/.claude/plans/<slug>.md`.
@@ -64,6 +67,7 @@ pub fn build_filing_enforcement_pre_tool_deny(
         ctx.has_open_effort,
         ctx.file_path,
         ctx.git_operation_in_progress,
+        ctx.active_work_items.unwrap_or(OXPLOW),
     )
     .map(|reason| FilingEnforcementDeny {
         hook_specific_output: super::write_guard::HookSpecificOutput {
@@ -85,6 +89,7 @@ pub fn filing_reason(
     has_open_effort: bool,
     file_path: Option<&str>,
     git_operation_in_progress: bool,
+    active_work_items: &str,
 ) -> Option<String> {
     if !thread.status.is_writer()
         || has_open_effort
@@ -93,11 +98,22 @@ pub fn filing_reason(
     {
         return None;
     }
-    Some(build_filing_enforcement_pre_tool_reason(label))
+    Some(build_filing_enforcement_pre_tool_reason(
+        label,
+        active_work_items,
+    ))
 }
 
-pub fn build_filing_enforcement_pre_tool_reason(tool_name: &str) -> String {
-    [
+/// oxplow's own work-items provider.
+const OXPLOW: &str = "oxplow";
+
+/// The reason, naming the project's active work-items provider when it
+/// isn't oxplow's own: new work belongs on it (P7.A2).
+pub fn build_filing_enforcement_pre_tool_reason(
+    tool_name: &str,
+    active_work_items: &str,
+) -> String {
+    let mut lines = vec![
         format!("BLOCKED: {tool_name} requires open, tracked work in this stream before edits can land."),
         String::new(),
         "No effort is open in this stream. An effort opens when a task goes `in_progress` — `ready`-status rows don't count: `ready` is backlog, `in_progress` is the actual claim. The Work panel needs to honestly reflect what's shipping while it ships, not after.".into(),
@@ -109,8 +125,17 @@ pub fn build_filing_enforcement_pre_tool_reason(tool_name: &str) -> String {
         format!("  • Work tracked outside oxplow (a Linear/GitHub issue) → `mcp__oxplow__run_command` `effort.open` with `{{\"work_item\": \"work_item:<provider>:<id>\"}}`, then re-run {tool_name}; `effort.close` when done."),
         String::new(),
         "Do not file a placeholder \"untracked work\" item — describe the real change you're about to make.".into(),
-    ]
-    .join("\n")
+    ];
+    if active_work_items != OXPLOW {
+        lines.splice(
+            2..2,
+            [
+                format!("This project's work items live on `{active_work_items}` (its active provider). File a new concern there — `mcp__oxplow__run_command` `work_item.create` with `{{\"title\": …}}` files on `{active_work_items}` — then `effort.open` on the ref it returns, and re-run {tool_name}; `effort.close` when done. The task tools below file oxplow tasks."),
+                String::new(),
+            ],
+        );
+    }
+    lines.join("\n")
 }
 
 #[cfg(test)]
@@ -231,6 +256,21 @@ mod tests {
         assert!(
             result.is_some(),
             "non-plans paths under .claude should still be subject to filing enforcement"
+        );
+    }
+
+    /// P7.A2: with another active work-items provider, the directive
+    /// says where new work belongs and how to file it there.
+    #[test]
+    fn the_directive_names_another_active_provider() {
+        let oxplow = build_filing_enforcement_pre_tool_reason("Edit", "oxplow");
+        assert!(!oxplow.contains("active provider"), "{oxplow}");
+        let linear = build_filing_enforcement_pre_tool_reason("Edit", "linear");
+        assert!(
+            linear.contains("work items live on `linear` (its active provider)")
+                && linear.contains("`work_item.create`")
+                && linear.contains("effort.open"),
+            "{linear}"
         );
     }
 }

@@ -22,8 +22,9 @@ pub struct CapabilityProvider {
     pub extension: Option<String>,
     /// The capability's feature flags as the provider declares them.
     pub features: Value,
-    /// Whether it's the capability's active provider (P7 chooses; every
-    /// provider is active today).
+    /// Whether it's the capability's active provider: the one the
+    /// project's `activeProviders` names (oxplow's own when it names
+    /// none). A capability nobody can swap has one, always active.
     pub active: bool,
 }
 
@@ -41,6 +42,21 @@ pub fn upsert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), Doma
             row.features.to_string(),
             row.active
         ],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
+}
+
+/// Mark `provider` as `capability`'s active provider and every other row
+/// of it inactive.
+pub fn set_active_tx(
+    conn: &Connection,
+    capability: &str,
+    provider: &str,
+) -> Result<(), DomainError> {
+    conn.execute(
+        "UPDATE capability_provider SET active = (provider = ?2) WHERE capability = ?1",
+        params![capability, provider],
     )
     .map_err(map_sql_err)?;
     Ok(())
@@ -106,6 +122,13 @@ impl SqliteCapabilityStore {
                     .map_err(map_sql_err)?;
                 rows.iter().try_for_each(|r| upsert_tx(tx, r))
             })
+            .await
+    }
+
+    pub async fn set_active(&self, capability: &str, provider: &str) -> Result<(), DomainError> {
+        let (c, p) = (capability.to_string(), provider.to_string());
+        self.db
+            .transaction(move |tx| set_active_tx(tx, &c, &p))
             .await
     }
 

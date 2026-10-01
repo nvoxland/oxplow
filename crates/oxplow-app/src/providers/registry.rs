@@ -626,6 +626,13 @@ impl ProviderRegistry {
             }
             let _ = self.enable(&ext, &spec, cfg.config).await;
         }
+        // The config may name another active provider (P7.A2).
+        let config = crate::config_service::read_config(&self.deps.config);
+        if let Err(e) =
+            crate::capabilities::apply_active(&config, &self.work_items, &self.deps.db).await
+        {
+            tracing::warn!(error = %e, "restating the active providers failed");
+        }
     }
 
     /// Why `instance` is automatically disabled on this machine: its last
@@ -805,12 +812,13 @@ impl ProviderRegistry {
                 .map(|c| c.features.clone())
                 .unwrap_or(Value::Null),
         };
+        let config = crate::config_service::read_config(&self.deps.config);
         let row = oxplow_db::CapabilityProvider {
             capability: capability.clone(),
             provider: instance.spec.id.clone(),
             extension: Some(instance.ext.name.clone()),
             features,
-            active: true,
+            active: crate::capabilities::is_active(&config, capability, &instance.spec.id),
         };
         if let Err(e) = oxplow_db::SqliteCapabilityStore::new(self.deps.db.clone())
             .upsert(row)

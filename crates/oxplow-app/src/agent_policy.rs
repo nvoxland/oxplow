@@ -140,6 +140,7 @@ impl AgentPolicy {
         } else {
             (false, false)
         };
+        let active_work_items = svc.work_items.active();
         decide_tool(
             intent,
             &PolicyFacts {
@@ -149,6 +150,7 @@ impl AgentPolicy {
                 project_dir,
                 has_open_effort,
                 git_operation_in_progress,
+                active_work_items: &active_work_items,
             },
         )
     }

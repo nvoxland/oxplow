@@ -123,7 +123,7 @@ item).
   `for_ref` picks one by the ref's provider segment, and an unknown one
   is refused naming the registered providers; `active()` /
   `set_active()` name the provider a `create` without one files on
-  (oxplow until set; A2 sets it from config).
+  (from `activeProviders`; see below).
 - **`VERBS`**: `create`, `update`, `transition`, `link`, `comment`,
   `delete` — the capability's verbs.
 
@@ -179,8 +179,18 @@ never a manifest. Core's (`work_items/oxplow`, `vcs/git`,
 which also drops a previous run's external rows); an external provider's
 row is written while its instance runs (`ProviderRegistry::publish`, a
 work-items provider's features as `ExternalWorkItems` reads them) and
-removed when it stops. `active` is P7's hook for choosing a capability's
-active provider; every row is `1` today. The desktop reads it with
+removed when it stops. **`active`** is the capability's active provider
+(P7.A2): the project's `activeProviders` (`{ work_items: <id> }`, a
+person-only config key — an agent's change is a proposal; Settings →
+Integrations offers it as "Active for work items", oxplow's own being the
+key unset), oxplow's own when it names none; a capability nobody can swap
+(`vcs`, `knowledge`) has its one provider active. `capabilities::is_active`
+is the one rule the rows follow (`publish_core`, `ProviderRegistry::
+publish`), and `capabilities::apply_active` restates it — the registry's
+`active()` and the column — at boot and on every reconcile (each config
+change). A `work_item.create` naming no `provider` files on the active
+one; one that isn't running is `Invalid` at `/provider` ("the active
+work-items provider isn't running: …"), never a fallback to oxplow. The desktop reads it with
 `readCapabilityProviders(capability)` (`workItems.ts`, with `reads`) and
 `featuresFor(providers, provider)` → `WorkItemsFeatures` (the Rust type,
 exported through the bindings), which turns every flag a provider

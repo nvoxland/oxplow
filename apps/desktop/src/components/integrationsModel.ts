@@ -57,3 +57,30 @@ export function integrationRow(v: ProviderInstanceView): IntegrationRowModel {
     problem: ["missing", "unapproved", "unconfigured", "failing", "disabled"].includes(s.state),
   };
 }
+
+/** A provider the project's work items can be filed on (P7.A2). */
+export interface WorkItemsChoice {
+  provider: string;
+  label: string;
+  /** Running on this machine: new items can be filed on it now. */
+  running: boolean;
+}
+
+/** oxplow's own tasks, then every declared work-items provider. */
+export function workItemsChoices(views: ProviderInstanceView[]): WorkItemsChoice[] {
+  const choices: WorkItemsChoice[] = [{ provider: "oxplow", label: "oxplow's tasks", running: true }];
+  for (const v of views) {
+    if (v.capability !== "work_items" || choices.some((c) => c.provider === v.provider)) continue;
+    choices.push({ provider: v.provider, label: `${v.provider} (${v.instance})`, running: v.health.state.state === "ready" });
+  }
+  return choices;
+}
+
+/** What to say about the active provider when filing on it can't work:
+ *  nothing when it can. Never a fallback — a `create` fails naming it. */
+export function activeProviderProblem(choices: WorkItemsChoice[], active: string): string | null {
+  const choice = choices.find((c) => c.provider === active);
+  if (!choice) return `No enabled extension declares \`${active}\`: new work items can't be filed until one does, or choose another.`;
+  if (!choice.running) return `\`${active}\` isn't running on this machine: new work items can't be filed until it is.`;
+  return null;
+}

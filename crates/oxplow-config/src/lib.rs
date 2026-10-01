@@ -838,6 +838,11 @@ pub struct OxplowConfig {
     /// (`extensionInstances: { "<ext>/<id>": { enabled, config } }`).
     #[serde(rename = "extensionInstances")]
     pub extension_instances: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
+    /// Each swappable capability's active provider
+    /// (`activeProviders: { work_items: linear }`); a capability absent
+    /// here keeps oxplow's own.
+    #[serde(rename = "activeProviders")]
+    pub active_providers: std::collections::BTreeMap<String, String>,
     /// This project's AI role assignments (`ai: { roles: … }`), layered
     /// over the user-global `ai.yaml`. Keyed by role name (one of
     /// [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
@@ -1034,6 +1039,9 @@ struct RawConfig {
     /// Instances of extension providers, by `<extension>/<provider id>`: `{ enabled, config }` (the provider's instance config). Enabling one runs its program once this machine approved it.
     #[serde(rename = "extensionInstances", default)]
     extension_instances: Option<std::collections::BTreeMap<String, ExtensionInstanceConfig>>,
+    /// Each capability's active provider, by provider id: `{ work_items: linear }`. New work items file there; absent, oxplow's own. A provider that isn't running is a failure, never a fallback.
+    #[serde(rename = "activeProviders", default)]
+    active_providers: Option<std::collections::BTreeMap<String, String>>,
     /// AI role assignments `{ roles: { <role>: { provider, model } } }`, layered over the user's ai.yaml.
     #[serde(default)]
     ai: Option<RawAiBlock>,
@@ -1456,6 +1464,11 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         to_yaml(&config.extension_instances),
         !config.extension_instances.is_empty(),
     );
+    put(
+        "activeProviders",
+        to_yaml(&config.active_providers),
+        !config.active_providers.is_empty(),
+    );
     {
         let mut ext = serde_yaml::Mapping::new();
         ext.insert("disabled".into(), to_yaml(&config.extensions_disabled));
@@ -1628,6 +1641,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         agent_models: Default::default(),
         acp_agents: Vec::new(),
         extension_instances: std::collections::BTreeMap::new(),
+        active_providers: std::collections::BTreeMap::new(),
         ai_roles: Default::default(),
         extensions_disabled: Vec::new(),
     }
@@ -1667,6 +1681,40 @@ fn validate_extension_instances(
         if !instance.config.is_object() {
             return Err(ConfigError::Invalid(format!(
                 "extensionInstances.{key}.config must be an object"
+            )));
+        }
+    }
+    Ok(raw)
+}
+
+/// The capabilities whose active provider a project may choose
+/// (`activeProviders`).
+pub const SWAPPABLE_CAPABILITIES: &[&str] = &["work_items"];
+
+/// Validate `activeProviders:`: a swappable capability each, naming a
+/// provider id (lowercase snake_case, as `providers:` ids are).
+fn validate_active_providers(
+    raw: std::collections::BTreeMap<String, String>,
+) -> Result<std::collections::BTreeMap<String, String>, ConfigError> {
+    for (capability, provider) in &raw {
+        if !SWAPPABLE_CAPABILITIES.contains(&capability.as_str()) {
+            return Err(ConfigError::Invalid(format!(
+                "activeProviders: `{capability}` isn't a capability whose provider can be chosen \
+                 ({})",
+                SWAPPABLE_CAPABILITIES.join(", ")
+            )));
+        }
+        let id_like = provider
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase())
+            && provider
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        if !id_like {
+            return Err(ConfigError::Invalid(format!(
+                "activeProviders.{capability}: `{provider}` isn't a provider id (lowercase \
+                 snake_case)"
             )));
         }
     }
@@ -1839,6 +1887,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
     let acp_agents = validate_acp_agents(raw.acp_agents.unwrap_or_default())?;
     let extension_instances =
         validate_extension_instances(raw.extension_instances.unwrap_or_default())?;
+    let active_providers = validate_active_providers(raw.active_providers.unwrap_or_default())?;
 
     let lsp_servers = match raw.lsp.and_then(|l| l.servers) {
         Some(servers) => {
@@ -1904,6 +1953,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         agent_models,
         acp_agents,
         extension_instances,
+        active_providers,
         ai_roles: validate_ai_roles(raw.ai)?,
         extensions_disabled: raw.extensions.map(|b| b.disabled).unwrap_or_default(),
     })
@@ -3235,6 +3285,30 @@ mod tests {
     /// serialized by anything but serde_json — straight into
     /// `project.yaml` as `{$serde_json::private::Number: '5'}`. Every
     /// entry goes through JSON text, so the file holds the number.
+    /// P7.A2: `activeProviders` names one provider per swappable
+    /// capability, round-trips through the file, and refuses another
+    /// capability or a malformed id.
+    #[test]
+    fn active_providers_name_one_provider_per_capability() {
+        let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
+        let config = parse("activeProviders: { work_items: linear }\n").unwrap();
+        assert_eq!(config.active_providers["work_items"], "linear");
+        let doc = render_project_config(&config, "demo");
+        let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
+        assert!(
+            yaml.contains("activeProviders:\n  work_items: linear"),
+            "{yaml}"
+        );
+        let err = parse("activeProviders: { vcs: jj }\n").unwrap_err();
+        assert!(err.to_string().contains("work_items"), "{err}");
+        let err = parse("activeProviders: { work_items: Linear-App }\n").unwrap_err();
+        assert!(err.to_string().contains("provider id"), "{err}");
+        assert!(parse("agents: [claude]\n")
+            .unwrap()
+            .active_providers
+            .is_empty());
+    }
+
     #[test]
     fn rendered_config_holds_plain_numbers_from_json_values() {
         let mut config = default_config("demo".into());

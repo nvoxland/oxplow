@@ -68,6 +68,10 @@ pub struct PolicyFacts<'a> {
     pub has_open_effort: bool,
     /// A merge / rebase / cherry-pick / revert is underway.
     pub git_operation_in_progress: bool,
+    /// The project's active work-items provider (`oxplow` unless
+    /// `activeProviders` names another): where the filing directive sends
+    /// new work.
+    pub active_work_items: &'a str,
 }
 
 /// An absolute path outside the project: not oxplow's concern (it can't
@@ -164,6 +168,7 @@ pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDe
         project_dir: &project,
         has_open_effort: facts.has_open_effort,
         git_operation_in_progress: facts.git_operation_in_progress,
+        active_work_items: facts.active_work_items,
     };
     let intent = &ToolIntent {
         label: intent.label,
@@ -220,6 +225,7 @@ pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDe
             facts.has_open_effort,
             *t,
             facts.git_operation_in_progress,
+            facts.active_work_items,
         ) {
             return PolicyDecision::Deny {
                 layer: DenyLayer::Filing,
@@ -278,6 +284,7 @@ mod tests {
                 project_dir: Path::new("/proj"),
                 has_open_effort: claim,
                 git_operation_in_progress: false,
+                active_work_items: "oxplow",
             },
         )
     }
@@ -399,6 +406,7 @@ mod tests {
             project_dir: Path::new("/proj"),
             has_open_effort: false,
             git_operation_in_progress: true,
+            active_work_items: "oxplow",
         };
         assert_eq!(decide_tool(&intent, &facts), PolicyDecision::Allow);
     }
@@ -421,6 +429,7 @@ mod tests {
                 project_dir: Path::new("/proj"),
                 has_open_effort: claim,
                 git_operation_in_progress: false,
+                active_work_items: "oxplow",
             },
         )
     }
@@ -509,6 +518,7 @@ mod tests {
                     project_dir: &root,
                     has_open_effort: true,
                     git_operation_in_progress: false,
+                    active_work_items: "oxplow",
                 },
             );
             assert_eq!(layer(&d), Some(DenyLayer::WriteGuard), "{p}");
