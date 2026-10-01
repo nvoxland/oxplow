@@ -147,6 +147,26 @@ pub fn launcher_entries(
     (entries, errors)
 }
 
+/// The ref kinds that open as a page — what a launcher `{ ref }` may name.
+/// Mirrors the UI's `pageKindOf` (`apps/desktop/src/tabs/pageRefs.ts`):
+/// a kind the registry knows but no page renders (`thread`, `answer`, …)
+/// would validate here and then vanish from the launcher, so the manifest
+/// check says so instead.
+const PAGE_KINDS: &[&str] = &[
+    "page",
+    "file",
+    "dir",
+    "wiki",
+    "work_item",
+    "commit",
+    "metric",
+    "lens",
+    "snapshot",
+    "effort",
+    "turn",
+    "symbol",
+];
+
 /// A prompt an extension offers is inserted into the agent's input, never
 /// sent — and the terminal treats a pasted line break as Enter, so a
 /// multi-line prompt would send itself. One line, or this says why not.
@@ -170,8 +190,18 @@ fn launcher_target(v: &Value) -> Result<LauncherTarget, String> {
     match (form("ref"), form("command"), form("prompt")) {
         (true, false, false) if keys.len() == 1 => {
             let r = key("ref").and_then(|v| v.as_str()).unwrap_or_default();
-            oxplow_domain::refs::grammar::CanonicalRef::parse(r)
+            let parsed = oxplow_domain::refs::grammar::CanonicalRef::parse(r)
                 .map_err(|_| format!("`{r}` is not a canonical ref (`<kind>:<id>`)"))?;
+            oxplow_domain::refs::kind::core_kinds()
+                .validate(&parsed)
+                .map_err(|e| format!("`{r}`: {e}"))?;
+            if !PAGE_KINDS.contains(&parsed.kind.as_str()) {
+                return Err(format!(
+                    "`{r}`: a `{}` doesn't open as a page; a launcher entry opens one of {}",
+                    parsed.kind,
+                    PAGE_KINDS.join(", ")
+                ));
+            }
             Ok(LauncherTarget::Ref {
                 r#ref: r.to_string(),
             })

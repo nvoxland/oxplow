@@ -896,7 +896,10 @@ tool list stable no matter how many extensions are installed.
     `EmptyState`'s prompts (usability.md → "Empty states").
 - **Launcher entries (current, P6.D1):** the manifest's `launcher:` lists
   what isn't a lens, each `{ label, category, target }`, where `target` is
-  exactly one of `{ ref }` (a canonical ref, opened as a page),
+  exactly one of `{ ref }` (a canonical ref the kind registry validates —
+  known kind, well-formed id — of a kind that opens as a page,
+  `manifest_v2::PAGE_KINDS`, which mirrors the UI's `pageKindOf`; anything
+  else is a load error rather than an entry the launcher drops silently),
   `{ command, input? }` (run as the person, asking first when the command
   asks — `personCommands.ts` + `PersonCommandConfirm`, mounted once in
   `App`) or `{ prompt }` (put in the agent's input, never sent; one line,

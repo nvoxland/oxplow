@@ -629,6 +629,9 @@ export function pageKindOf(tabId: string): PageKind | null {
   if (canonical.kind === "page") {
     return routeNameOf(tabId) ?? (extPageOf(splitParams(tabId.slice("page:".length)).head) ? "ext-page" : null);
   }
+  // The kinds that open as a page. The manifest check mirrors this list
+  // (`manifest_v2::PAGE_KINDS`) so a launcher `{ ref }` of any other kind
+  // is a load error, not an entry the launcher drops; change both.
   const entity: readonly string[] = [
     "file",
     "dir",

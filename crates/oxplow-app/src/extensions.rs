@@ -4778,6 +4778,11 @@ empty: No tasks.
 
         for (entry, want) in [
             ("{ ref: 'not a ref' }", "not a canonical ref"),
+            // Grammar isn't enough: the kind must be registered and the id
+            // well-formed, or the launcher would drop the entry silently.
+            ("{ ref: 'bogus:thing' }", "unknown kind `bogus`"),
+            ("{ ref: 'commit:not-hex' }", "not a valid `commit` id"),
+            ("{ ref: 'thread:thr1' }", "doesn't open as a page"),
             ("{ command: Not-A-Name }", "`Not-A-Name`"),
             ("{ command: a.b, input: [1] }", "`input` must be a map"),
             ("{ prompt: '  ' }", "an empty prompt"),
