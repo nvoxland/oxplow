@@ -23,7 +23,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use oxplow_db::{Database, SqliteWikiPageStore, WikiPage};
+use oxplow_db::{Database, SqliteWikiPageStore};
 use oxplow_domain::{DomainError, EventSchemaRegistry, Timestamp};
 
 /// One file reference parsed out of a wikilink: the path and an optional
@@ -392,47 +392,6 @@ pub async fn scan_and_sync_all(
         }
     }
     Ok(report)
-}
-
-/// Return all notes whose `file_refs` contains `path`. The query is
-/// over the JSON column — fine for the small sizes notes typically
-/// have. If this becomes hot, swap for an inverted-index table.
-pub async fn backlinks_for_file(
-    store: &SqliteWikiPageStore,
-    path: &str,
-) -> Result<Vec<WikiPage>, DomainError> {
-    let all = store.list().await?;
-    Ok(all
-        .into_iter()
-        .filter(|n| n.file_refs.iter().any(|r| r == path))
-        .collect())
-}
-
-/// Return all notes whose `dir_refs` contains `path` (the path is the
-/// directory form *without* the trailing slash, matching how
-/// [`parse_refs`] stores it).
-pub async fn backlinks_for_dir(
-    store: &SqliteWikiPageStore,
-    path: &str,
-) -> Result<Vec<WikiPage>, DomainError> {
-    let needle = path.trim_end_matches('/');
-    let all = store.list().await?;
-    Ok(all
-        .into_iter()
-        .filter(|n| n.dir_refs.iter().any(|r| r == needle))
-        .collect())
-}
-
-/// Return all notes whose `related_notes` contains `slug`.
-pub async fn backlinks_for_note(
-    store: &SqliteWikiPageStore,
-    slug: &str,
-) -> Result<Vec<WikiPage>, DomainError> {
-    let all = store.list().await?;
-    Ok(all
-        .into_iter()
-        .filter(|n| n.related_notes.iter().any(|r| r == slug))
-        .collect())
 }
 
 pub fn wiki_pages_dir(project_dir: &Path) -> PathBuf {

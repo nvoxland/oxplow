@@ -878,22 +878,6 @@ impl SqliteTaskStore {
             })
             .await
     }
-
-    pub async fn list_recently_done(&self, limit: usize) -> Result<Vec<Task>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let sql = format!(
-                    "{} WHERE t.status = 'done' AND t.deleted_at IS NULL \
-                       AND t.completed_at IS NOT NULL \
-                     ORDER BY t.completed_at DESC LIMIT ?1",
-                    SELECT_BASE
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![limit as i64], row_to_task)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
 }
 
 #[async_trait]

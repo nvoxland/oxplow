@@ -599,7 +599,7 @@ mod tests {
             rows(svc.clone(), task.id.to_string()).await,
             vec![Some(stream.id.to_string())]
         );
-        svc.tasks.move_to(task.id, None).await.unwrap();
+        svc.task_store.move_task(task.id, None).await.unwrap();
         svc.event_pump.run_once().await.unwrap();
         assert_eq!(rows(svc.clone(), task.id.to_string()).await, vec![None]);
     }

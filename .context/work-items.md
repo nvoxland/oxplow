@@ -42,7 +42,7 @@ There are two writers, one schema:
 `sort_index`, priority, author, note count), scoped to a thread, the
 backlog or everything, in list order; each read returns its `reads` so a
 page re-runs with `useRerunOnChange`. Writes are `work_item.*` commands
-(`transitionWorkItem`, `reorderWorkItem`, `moveWorkItem`). `modelIds.ts`
+(`transitionWorkItem`; the task pages reorder and move through `reorderTasks` / `moveTask`). `modelIds.ts`
 converts the models' integer ids to the UI's `thr3` / `tsk42`.
 
 It is also the **only** way the UI reads and writes oxplow's tasks

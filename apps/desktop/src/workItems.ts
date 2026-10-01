@@ -7,7 +7,7 @@
  */
 import { querySql, runCommand, type EffortDetail, type SqlCell } from "./api.js";
 import { NO_READS } from "./lens/lensRerun.js";
-import { taskIdOf, threadIdOf, threadRowId } from "./modelIds.js";
+import { taskIdOf, taskRowId, threadIdOf, threadRowId } from "./modelIds.js";
 import type { Followup, Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 import { commands } from "./tauri-bridge/index.js";
 
@@ -191,20 +191,6 @@ export async function transitionWorkItem(ref: string, state: CanonicalState): Pr
   await runCommand("work_item.transition", { ref, to: statusFor(state) });
 }
 
-/** Put an item before or after another in its list (`work_item.reorder`). */
-export async function reorderWorkItem(ref: string, place: { before: string } | { after: string } | "end"): Promise<void> {
-  await runCommand("work_item.reorder", place === "end" ? { ref } : { ref, ...place });
-}
-
-/** Take an item to a thread's list or the backlog (`work_item.move`). */
-export async function moveWorkItem(
-  ref: string,
-  to: { thread: string } | "backlog",
-  place: { before: string } | { after: string } | "end" = "end",
-): Promise<void> {
-  await runCommand("work_item.move", place === "end" ? { ref, to } : { ref, to, ...place });
-}
-
 // ---- oxplow's tasks (v_task) ----
 //
 // Every read returns what it read (`reads`); a consumer re-runs it through
@@ -296,14 +282,14 @@ export async function readBacklog(): Promise<BacklogState> {
 
 /** One live task, or null. */
 export async function readTask(id: string): Promise<{ task: Task | null; reads: Reads }> {
-  const { tasks, reads } = await readTasks("t.id = ?1", [Number(id.replace(/^tsk/, ""))]);
+  const { tasks, reads } = await readTasks("t.id = ?1", [taskRowId(id)]);
   return { task: tasks[0] ?? null, reads };
 }
 
 /** Several tasks' titles and statuses, in one read. */
 export async function readTasksById(ids: string[]): Promise<{ tasks: Task[]; reads: Reads }> {
   if (ids.length === 0) return { tasks: [], reads: NO_READS };
-  const numbers = ids.map((id) => Number(id.replace(/^tsk/, ""))).filter((n) => Number.isFinite(n));
+  const numbers = ids.map(taskRowId).filter((n) => Number.isFinite(n));
   return readTasks(`t.id IN (${numbers.map((_, i) => `?${i + 1}`).join(", ")})`, numbers);
 }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { deleteWikiPage, writeWikiPage, type Stream } from "../../api.js";
+import { deleteWikiPage, writeWikiPage } from "../../api.js";
 import { readWikiPage, type WikiPageSummary } from "../../knowledge.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import type { Reads } from "../../tauri-bridge/generated/bindings.js";
@@ -23,7 +23,7 @@ export interface WikiPageController {
   remove(): Promise<void>;
 }
 
-export function useWikiPageController(stream: Stream, slug: string, onClosed: () => void): WikiPageController {
+export function useWikiPageController(slug: string, onClosed: () => void): WikiPageController {
   const [summary, setSummary] = useState<WikiPageSummary | null>(null);
   const [body, setBody] = useState<string>("");
   const [editing, setEditing] = useState(false);
@@ -94,7 +94,7 @@ export function useWikiPageController(stream: Stream, slug: string, onClosed: ()
         message: String(error),
       });
     }
-  }, [stream.id, slug, draft]);
+  }, [slug, draft]);
 
   const create = useCallback(async () => {
     const seed = `# ${slug}\n\n`;
@@ -111,7 +111,7 @@ export function useWikiPageController(stream: Stream, slug: string, onClosed: ()
         message: String(error),
       });
     }
-  }, [stream.id, slug]);
+  }, [slug]);
 
   const remove = useCallback(async () => {
     if (!window.confirm(`Delete wiki page "${slug}"? The file will be removed.`)) return;
@@ -124,7 +124,7 @@ export function useWikiPageController(stream: Stream, slug: string, onClosed: ()
         message: String(error),
       });
     }
-  }, [stream.id, slug, onClosed]);
+  }, [slug, onClosed]);
 
   return {
     summary,

@@ -881,21 +881,6 @@ impl TaskService {
         }
     }
 
-    /// Move a task to a different thread (or to the backlog with
-    /// `dest = None`). Reallocates sort_index at the destination tail.
-    pub async fn move_to(
-        &self,
-        id: TaskId,
-        dest: Option<ThreadId>,
-    ) -> Result<Task, TaskServiceError> {
-        // The task's claim moves with it (the store closes the old
-        // thread's effort and opens one on the new thread); settle so the
-        // new effort's start snapshot is pinned.
-        let moved = self.store.move_task(id, dest).await?;
-        self.settle_lifecycle().await;
-        Ok(moved)
-    }
-
     pub async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, TaskServiceError> {
         Ok(self.store.list_for_thread(thread).await?)
     }
@@ -3023,26 +3008,6 @@ mod tests {
             .await
             .unwrap();
         assert!(reopened.completed_at.is_none());
-    }
-
-    #[tokio::test]
-    async fn move_to_backlog_clears_thread_id_and_resorts() {
-        let (svc, tid) = fixture().await;
-        let it = svc
-            .create(
-                Some(tid),
-                CreateTaskInput {
-                    title: "x".into(),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        let moved = svc.move_to(it.id, None).await.unwrap();
-        assert!(moved.thread_id.is_none());
-        let bl = svc.list_backlog().await.unwrap();
-        assert_eq!(bl.len(), 1);
-        assert_eq!(bl[0].id, it.id);
     }
 
     // ---- read_task_options edge cases ----

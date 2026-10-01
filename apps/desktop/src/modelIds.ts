@@ -16,6 +16,11 @@ export function taskIdOf(row: number): string {
   return `tsk${row}`;
 }
 
+/** A task id (`tsk42`) as its row id in the models. */
+export function taskRowId(taskId: string): number {
+  return Number(taskId.replace(/^tsk/, ""));
+}
+
 /** A stream id (`str2`) as its row id in the models. */
 export function streamRowId(streamId: string): number {
   return Number(streamId.replace(/^str/, ""));

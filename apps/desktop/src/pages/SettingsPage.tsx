@@ -415,16 +415,6 @@ function Hint({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Field({ label, hint, input }: { label: string; hint?: string; input: React.ReactNode }) {
-  return (
-    <label style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, fontSize: "var(--text-sm)" }}>
-      <span style={{ minWidth: 180, color: "var(--text-primary)" }}>{label}</span>
-      {input}
-      {hint ? <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{hint}</span> : null}
-    </label>
-  );
-}
-
 const textareaStyle: CSSProperties = {
   width: "100%",
   background: "var(--surface-card)",

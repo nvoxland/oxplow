@@ -1898,12 +1898,6 @@ export async function filesAt(streamId: string, revision: Revision): Promise<str
   return unwrap(await commands.filesAt(streamId || null, revision));
 }
 
-export async function getEffortFiles(effortId: string): Promise<SnapshotSummary | null> {
-  return unwrap(
-    await commands.getEffortFiles(effortId),
-  ) as unknown as SnapshotSummary | null;
-}
-
 /** One agent turn by id (`trn<N>`) — its start and end snapshots, for
  *  the turn page's diff. `null` when the id is unknown. */
 export async function getAgentTurn(
@@ -1929,8 +1923,7 @@ export async function getEffort(effortId: string): Promise<OverlappingEffort | n
 
 /** Per-effort touched_files list — the canonical authorship list
  *  (LLM-declared via `complete_task` + any subsequent `amend_effort`
- *  corrections). Distinct from getEffortFiles, which had a misleading
- *  return-type annotation; this is the well-typed wrapper. */
+ *  corrections).  */
 export async function listEffortFiles(
   effortId: string,
 ): Promise<Array<{ path: string; change: "created" | "updated" | "deleted" }>> {

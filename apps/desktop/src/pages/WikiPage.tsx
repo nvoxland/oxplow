@@ -107,7 +107,7 @@ function WikiPageBody({
   outbound: { count: number; body: React.ReactNode } | undefined;
   nav: ReturnType<typeof useOptionalPageNavigation>;
 }) {
-  const controller = useWikiPageController(stream, slug, onClosed);
+  const controller = useWikiPageController(slug, onClosed);
   usePageTitle(controller.summary?.title ?? slug);
   const [scrollHost, setScrollHost] = useState<HTMLElement | null>(null);
   // The ONE freshness fetch for the page — header chip, rail badge, and
