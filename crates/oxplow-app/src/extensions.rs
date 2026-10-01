@@ -2176,6 +2176,23 @@ pub async fn run_lens_spec(
     execute(layer, lens, BTreeMap::new(), &LensContext::default()).await
 }
 
+/// Each of an extension's lenses run once with default params, by slug: a
+/// failure is its message. What `check_extension` checks and what the
+/// effect report renders — one run feeds both.
+pub type LensRuns = BTreeMap<String, Result<LensRun, String>>;
+
+/// [`LensRuns`] for `ext`.
+pub async fn run_lenses(layer: &crate::sql_gateway::SqlGateway, ext: &Extension) -> LensRuns {
+    let mut out = LensRuns::new();
+    for lens in &ext.lenses {
+        let run = run_lens_spec(layer, lens.clone())
+            .await
+            .map_err(|e| e.to_string().replacen("invalid value: ", "", 1));
+        out.insert(lens.slug.clone(), run);
+    }
+    out
+}
+
 async fn execute(
     layer: &crate::sql_gateway::SqlGateway,
     lens: Lens,
@@ -2397,7 +2414,7 @@ async fn check_extension(
     root: &Path,
     ext: &mut Extension,
     commands: Option<CommandSchemas<'_>>,
-) {
+) -> LensRuns {
     check_commands(ext, root, commands);
     check_components(ext, commands);
     crate::extension_commands::check_extension_commands(layer, ext, commands).await;
@@ -2455,14 +2472,11 @@ async fn check_extension(
             }
         }
     }
+    let runs = run_lenses(layer, ext).await;
     for lens in ext.lenses.clone() {
         let id = lens.id.clone();
-        match execute(layer, lens, BTreeMap::new(), &LensContext::default()).await {
-            Err(e) => ext.errors.push(explain_unsynced(
-                catalog,
-                root,
-                &e.to_string().replacen("invalid value: ", "", 1),
-            )),
+        match &runs[&lens.slug] {
+            Err(e) => ext.errors.push(explain_unsynced(catalog, root, e)),
             Ok(run) => {
                 let cols = &run.result.columns;
                 for (block, k) in run.lens.role_columns() {
@@ -2505,6 +2519,7 @@ async fn check_extension(
             }
         }
     }
+    runs
 }
 
 /// What installing an extension from git would bring in, for a person to
@@ -2524,8 +2539,9 @@ pub struct ExtensionReview {
     pub sha: String,
     pub problems: Vec<String>,
     /// What installing it would change, against the installed version
-    /// when it replaces one (P6b.E2).
-    pub effects: crate::extension_effects::EffectReport,
+    /// when it replaces one (P6b.E2); `None` when the candidate doesn't
+    /// load (its `problems` say why).
+    pub effects: Option<crate::extension_effects::EffectReport>,
 }
 
 /// Clone an extension and report what it declares, installing nothing.
@@ -2552,7 +2568,7 @@ pub async fn review_extension(
     };
     let mut extension = fetched.load();
     let load_errors = extension.errors.len();
-    check_extension(layer, catalog, root, &mut extension, Some(commands)).await;
+    let runs_after = check_extension(layer, catalog, root, &mut extension, Some(commands)).await;
     let problems = extension.errors.split_off(load_errors);
     let installed: Option<Extension> = replacing.and_then(|name| {
         catalog
@@ -2564,20 +2580,33 @@ pub async fn review_extension(
     let read_installed = |rel: &str| read_extension_file(root, &extension.name, rel);
     let clone = Disk(fetched.clone.clone());
     let read_candidate = |rel: &str| clone.read(rel);
-    let effects = crate::extension_effects::effects(
-        layer,
-        installed
-            .as_ref()
-            .map(|e| crate::extension_effects::Version {
-                extension: e,
-                read: &read_installed,
-            }),
-        crate::extension_effects::Version {
-            extension: &extension,
-            read: &read_candidate,
-        },
-    )
-    .await;
+    // A candidate that doesn't load has nothing reliable to compare.
+    let effects = if load_errors > 0 {
+        None
+    } else {
+        let runs_before = match &installed {
+            Some(e) => run_lenses(layer, e).await,
+            None => LensRuns::new(),
+        };
+        Some(
+            crate::extension_effects::effects(
+                layer,
+                installed
+                    .as_ref()
+                    .map(|e| crate::extension_effects::Version {
+                        extension: e,
+                        read: &read_installed,
+                        lenses: &runs_before,
+                    }),
+                crate::extension_effects::Version {
+                    extension: &extension,
+                    read: &read_candidate,
+                    lenses: &runs_after,
+                },
+            )
+            .await,
+        )
+    };
     Ok(ExtensionReview {
         extension,
         git: git_url.to_string(),
@@ -3639,6 +3668,8 @@ empty: No tasks.
         .unwrap();
         assert!(first
             .effects
+            .as_ref()
+            .unwrap()
             .lenses
             .iter()
             .all(|l| l.change == crate::extension_effects::Change::Added));
@@ -3656,6 +3687,8 @@ empty: No tasks.
         .unwrap();
         let count = update
             .effects
+            .as_ref()
+            .unwrap()
             .lenses
             .iter()
             .find(|l| l.id == "shared/count")
@@ -3665,6 +3698,21 @@ empty: No tasks.
             (count.before.as_deref(), count.after.as_deref()),
             (Some("1"), Some("2"))
         );
+        // A candidate that doesn't load has no effects to show: its
+        // problems say why.
+        write(
+            repo.path(),
+            "extension.yaml",
+            "manifest: 2\nname: shared\nbogus_kind: 1\n",
+        );
+        git(repo.path(), &["commit", "-qam", "broken"]);
+        let broken = review_update(&sl, &cat(), project.path(), "shared", &|_: &str| -> Option<
+            serde_json::Value,
+        > { None })
+        .await
+        .unwrap();
+        assert!(!broken.extension.errors.is_empty());
+        assert_eq!(broken.effects, None);
     }
 
     #[tokio::test]

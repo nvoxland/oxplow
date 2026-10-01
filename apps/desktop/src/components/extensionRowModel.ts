@@ -200,8 +200,9 @@ export function reviewModel(review: ExtensionReview): ReviewModel {
     declares,
     errors: ext.errors,
     problems: review.problems,
-    effects: effectLines(review.effects),
-    lensDiffs: review.effects.lenses
+    // No report when the candidate doesn't load; its errors say why.
+    effects: review.effects ? effectLines(review.effects) : [],
+    lensDiffs: (review.effects?.lenses ?? [])
       .filter((l) => l.change === "changed" && l.before !== null && l.after !== null)
       .map((l) => ({ id: l.id, before: l.before!, after: l.after! })),
     canInstall: ext.errors.length === 0,

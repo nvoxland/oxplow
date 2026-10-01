@@ -805,16 +805,21 @@ collector or a provider** — consent forbids running a version nobody
 approved.
 
 `extension_effects::effects(layer, before, after)` (P6b.E2) builds it:
-each lens is rendered (`run_lens_spec`: default params, no viewer
-context; `lens_text::render`, a grid's children rendering empty) against
-the models **as published now** — a lens over a model the candidate
-changes or adds renders against today's model, or fails (its `error`) —
-and each model's `downstream` is its direct readers from
-`v_model_lineage` (`downstream_of`), outside the extension itself; a
-provider's declarations are read from each version's files.
+each version carries its lenses **already run once**
+(`extensions::run_lenses` → `LensRuns`: default params, no viewer
+context) — for the candidate, the very runs `check_extension` checked,
+so a review runs each lens once — and each is rendered from its run
+(`lens_text::render`, a grid's children rendering empty) against the
+models **as published now** — a lens over a model the candidate changes
+or adds renders against today's model, or fails (its `error`). Each
+model's `downstream` is its direct readers from `v_model_lineage`
+(`downstream_of`) other than this extension's own views, by exact name;
+a provider's declarations are read from each version's files.
 `review_extension` fills `ExtensionReview.effects`, with the installed
 version as `before` when it replaces one (`review_update`), else none
-(everything is `added`). Settings → Extensions shows it (`effectLines`:
+(everything is `added`); a candidate that doesn't load gets **no**
+report (`effects: None` — its errors say why, and it can't be
+installed). Settings → Extensions shows it (`effectLines`:
 collectors' and providers' grants first — "now reaches x (was y)", a
 provider command added (destructive) — then models with their readers,
 lenses, the config keys) and each changed lens's text before and after,

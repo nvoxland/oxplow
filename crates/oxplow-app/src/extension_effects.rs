@@ -418,24 +418,23 @@ fn described_difference(before: &Value, after: &Value) -> Option<String> {
 pub struct Version<'a> {
     pub extension: &'a crate::extensions::Extension,
     pub read: &'a (dyn Fn(&str) -> Option<String> + Sync),
+    /// Its lenses, already run once (`extensions::run_lenses`).
+    pub lenses: &'a crate::extensions::LensRuns,
 }
 
 /// Each lens's rendered text, by slug: what `lens_text` gives an agent,
-/// with default params; a grid renders its children empty. A query that
-/// fails is the lens's error.
-async fn lens_texts(
-    layer: &crate::sql_gateway::SqlGateway,
-    ext: &crate::extensions::Extension,
-) -> BTreeMap<String, Result<String, String>> {
-    let mut out = BTreeMap::new();
-    for lens in &ext.lenses {
-        let text = crate::extensions::run_lens_spec(layer, lens.clone())
-            .await
-            .map(|run| crate::lens_text::render(&run, &Default::default()))
-            .map_err(|e| e.to_string().replacen("invalid value: ", "", 1));
-        out.insert(lens.slug.clone(), text);
-    }
-    out
+/// from the run the version's check already made; a grid renders its
+/// children empty. A query that failed is the lens's error.
+fn lens_texts(runs: &crate::extensions::LensRuns) -> BTreeMap<String, Result<String, String>> {
+    runs.iter()
+        .map(|(slug, run)| {
+            let text = run
+                .as_ref()
+                .map(|run| crate::lens_text::render(run, &Default::default()))
+                .map_err(Clone::clone);
+            (slug.clone(), text)
+        })
+        .collect()
 }
 
 /// The views that read `view` directly (`v_model_lineage`).
@@ -468,11 +467,11 @@ pub async fn effects(
     after: Version<'_>,
 ) -> EffectReport {
     let name = &after.extension.name;
-    let texts_before = match &before {
-        Some(b) => lens_texts(layer, b.extension).await,
-        None => BTreeMap::new(),
-    };
-    let texts_after = lens_texts(layer, after.extension).await;
+    let texts_before = before
+        .as_ref()
+        .map(|b| lens_texts(b.lenses))
+        .unwrap_or_default();
+    let texts_after = lens_texts(after.lenses);
     let slugs: BTreeSet<&String> = texts_before.keys().chain(texts_after.keys()).collect();
     let lenses = slugs
         .into_iter()
@@ -500,11 +499,14 @@ pub async fn effects(
         before.as_ref().map_or(&empty, |b| &b.extension.models),
         &after.extension.models,
     );
+    // Readers outside this extension: its own views, by exact name (a
+    // prefix would also drop another extension's `v_<name>_<…>` views).
+    let own: BTreeSet<String> = models.iter().map(|m| m.view.clone()).collect();
     for m in &mut models {
         m.downstream = downstream_of(layer, &m.view)
             .await
             .into_iter()
-            .filter(|v| !v.starts_with(&oxplow_db::models::extension_view(name, "")))
+            .filter(|v| !own.contains(v))
             .collect();
     }
     let no_sources: Vec<SourceSpec> = Vec::new();
@@ -804,15 +806,21 @@ mod tests {
             ),
         ]);
         let none = |_: &str| None;
+        let (runs_before, runs_after) = (
+            crate::extensions::run_lenses(&layer, &before).await,
+            crate::extensions::run_lenses(&layer, &after).await,
+        );
         let report = effects(
             &layer,
             Some(Version {
                 extension: &before,
                 read: &none,
+                lenses: &runs_before,
             }),
             Version {
                 extension: &after,
                 read: &none,
+                lenses: &runs_after,
             },
         )
         .await;
@@ -839,6 +847,7 @@ mod tests {
             Version {
                 extension: &after,
                 read: &none,
+                lenses: &runs_after,
             },
         )
         .await;

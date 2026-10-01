@@ -2349,9 +2349,10 @@ export type ExtensionReview_Deserialize = {
 	problems: string[],
 	/**
 	 *  What installing it would change, against the installed version
-	 *  when it replaces one (P6b.E2).
+	 *  when it replaces one (P6b.E2); `None` when the candidate doesn't
+	 *  load (its `problems` say why).
 	 */
-	effects: EffectReport,
+	effects: EffectReport | null,
 };
 
 /**
@@ -2372,9 +2373,10 @@ export type ExtensionReview_Serialize = {
 	problems: string[],
 	/**
 	 *  What installing it would change, against the installed version
-	 *  when it replaces one (P6b.E2).
+	 *  when it replaces one (P6b.E2); `None` when the candidate doesn't
+	 *  load (its `problems` say why).
 	 */
-	effects: EffectReport,
+	effects: EffectReport | null,
 };
 
 // Provenance of an installed extension, kept in its `source.yaml`.

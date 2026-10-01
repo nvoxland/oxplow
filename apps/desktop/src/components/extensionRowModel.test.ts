@@ -198,7 +198,10 @@ describe("reviewModel", () => {
   });
 
   test("load errors block the install; dry-run problems don't", () => {
-    expect(reviewModel(review({ errors: ["extension.yaml: unknown field `bogus`"] })).canInstall).toBe(false);
+    const broken = reviewModel({ ...review({ errors: ["extension.yaml: unknown field `bogus`"] }), effects: null });
+    expect(broken.canInstall).toBe(false);
+    expect(broken.effects).toEqual([]);
+    expect(broken.lensDiffs).toEqual([]);
     const m = reviewModel(review({}, ["lens shared/x: column `y` isn't in the query result"]));
     expect(m.canInstall).toBe(true);
     expect(m.problems).toHaveLength(1);
