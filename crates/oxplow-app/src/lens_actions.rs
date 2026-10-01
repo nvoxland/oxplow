@@ -257,35 +257,20 @@ pub fn bind_input(
         SqlCell::Bool(b) => b.to_string(),
     };
     Ok(match input {
-        Value::String(s) => {
-            let t = s.trim();
-            let whole = t
-                .strip_prefix("{{")
-                .and_then(|r| r.strip_suffix("}}"))
-                .filter(|inner| !inner.contains("{{"))
-                .and_then(|inner| inner.trim().split_once('.'));
-            match whole {
-                Some((scope, name)) => {
-                    serde_json::to_value(lookup(scope, name)?).unwrap_or(Value::Null)
+        Value::String(s) => match crate::extensions::whole_placeholder(s) {
+            Some(p) => serde_json::to_value(lookup(&p.scope, &p.name)?).unwrap_or(Value::Null),
+            None => {
+                let mut out = String::with_capacity(s.len());
+                let mut at = 0;
+                for p in crate::extensions::placeholders(s) {
+                    out.push_str(&s[at..p.start]);
+                    out.push_str(&text(&lookup(&p.scope, &p.name)?));
+                    at = p.end;
                 }
-                None => {
-                    let mut out = String::with_capacity(s.len());
-                    let mut rest = s.as_str();
-                    while let Some(start) = rest.find("{{") {
-                        let Some(end) = rest[start..].find("}}") else {
-                            break;
-                        };
-                        out.push_str(&rest[..start]);
-                        let inner = rest[start + 2..start + end].trim();
-                        let (scope, name) = inner.split_once('.').unwrap_or((inner, ""));
-                        out.push_str(&text(&lookup(scope, name)?));
-                        rest = &rest[start + end + 2..];
-                    }
-                    out.push_str(rest);
-                    Value::String(out)
-                }
+                out.push_str(&s[at..]);
+                Value::String(out)
             }
-        }
+        },
         Value::Array(items) => Value::Array(
             items
                 .iter()

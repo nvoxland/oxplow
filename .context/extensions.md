@@ -150,6 +150,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       `{{param.<name>}}` or `{{row.<column>}}` becomes that value, typed
       (a number stays a number); a string containing them has them spliced
       in as text. The values go into the command's input, never into SQL.
+      One tokenizer reads them (`extensions::placeholders` /
+      `whole_placeholder`), for load-time validation and run-time binding
+      alike, so the two can't disagree.
       At load, a `{{param.x}}` must name a declared param and `{{row.x}}`
       needs `row: true`; `validate_extension` checks `{{row.x}}` against
       the result's columns; the command name must be well-formed. The old

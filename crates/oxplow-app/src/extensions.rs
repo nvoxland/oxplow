@@ -496,32 +496,67 @@ pub struct LensAction {
     pub row: bool,
 }
 
+/// One `{{scope.name}}` placeholder in a string: its scope and name
+/// (trimmed; `name` is empty without a `.`) and its byte span, from the
+/// opening `{{` to just past the closing `}}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placeholder {
+    pub scope: String,
+    pub name: String,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// The placeholders in `s`, in order — the one tokenizer for lens action
+/// templates: load-time validation (`action_templates`) and run-time
+/// binding (`lens_actions::bind_input`) both read it. A `{{` without a
+/// closing `}}` ends the scan.
+pub fn placeholders(s: &str) -> Vec<Placeholder> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(open) = s[at..].find("{{") {
+        let start = at + open;
+        let Some(close) = s[start..].find("}}") else {
+            break;
+        };
+        let end = start + close + 2;
+        let inner = s[start + 2..start + close].trim();
+        let (scope, name) = inner.split_once('.').unwrap_or((inner, ""));
+        out.push(Placeholder {
+            scope: scope.to_string(),
+            name: name.to_string(),
+            start,
+            end,
+        });
+        at = end;
+    }
+    out
+}
+
+/// The placeholder `s` is exactly (ignoring surrounding whitespace) — a
+/// value bound typed rather than spliced into text.
+pub fn whole_placeholder(s: &str) -> Option<Placeholder> {
+    let t = s.trim();
+    match placeholders(t).as_slice() {
+        [only] if only.start == 0 && only.end == t.len() => Some(only.clone()),
+        _ => None,
+    }
+}
+
 /// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
 /// `(scope, name)`, in order.
 pub fn action_templates(input: &serde_json::Value) -> Vec<(String, String)> {
-    let mut out = Vec::new();
     fn walk(v: &serde_json::Value, out: &mut Vec<(String, String)>) {
         match v {
             serde_json::Value::String(s) => {
-                let mut rest = s.as_str();
-                while let Some(start) = rest.find("{{") {
-                    let Some(end) = rest[start..].find("}}") else {
-                        break;
-                    };
-                    let inner = rest[start + 2..start + end].trim();
-                    if let Some((scope, name)) = inner.split_once('.') {
-                        out.push((scope.to_string(), name.to_string()));
-                    } else {
-                        out.push((inner.to_string(), String::new()));
-                    }
-                    rest = &rest[start + end + 2..];
-                }
+                out.extend(placeholders(s).into_iter().map(|p| (p.scope, p.name)));
             }
             serde_json::Value::Array(items) => items.iter().for_each(|i| walk(i, out)),
             serde_json::Value::Object(map) => map.values().for_each(|i| walk(i, out)),
             _ => {}
         }
     }
+    let mut out = Vec::new();
     walk(input, &mut out);
     out
 }
@@ -2792,6 +2827,36 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// One tokenizer for `{{scope.name}}` placeholders: load-time
+    /// validation (`action_templates`) and run-time binding
+    /// (`lens_actions::bind_input`) both read it, so they can't disagree —
+    /// on spans, on a string that is exactly one placeholder (bound typed),
+    /// or on a stray `{{`.
+    #[test]
+    fn placeholders_are_one_tokenizer() {
+        let ps = placeholders("Fix {{row.title}} in {{ param.stream_id }}");
+        assert_eq!(
+            ps.iter()
+                .map(|p| (p.scope.as_str(), p.name.as_str(), p.start, p.end))
+                .collect::<Vec<_>>(),
+            vec![("row", "title", 4, 17), ("param", "stream_id", 21, 42)]
+        );
+        assert_eq!(
+            whole_placeholder("  {{row.id}} ").map(|p| (p.scope, p.name)),
+            Some(("row".to_string(), "id".to_string()))
+        );
+        assert!(whole_placeholder("{{row.a}} {{row.b}}").is_none());
+        assert!(whole_placeholder("x {{row.a}}").is_none());
+        // A stray opener is part of the next placeholder's text, for both.
+        let nested = placeholders("{{{{row.a}}");
+        assert_eq!(nested.len(), 1);
+        assert_eq!(nested[0].scope, "{{row");
+        assert_eq!(
+            action_templates(&serde_json::json!({ "t": "{{{{row.a}}" })),
+            vec![("{{row".to_string(), "a".to_string())]
+        );
+    }
     use super::*;
     use oxplow_db::Database;
     use std::fs;
