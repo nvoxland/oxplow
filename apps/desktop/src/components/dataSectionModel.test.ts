@@ -82,3 +82,53 @@ test("programRow shows a provider with the secrets and hosts it gets", () => {
   expect(m.status).toBe("Not approved: it won't run");
   expect(m.approveTitle).toContain("every file in oxplow/extensions/tracker");
 });
+
+import { canApprove, providerEffectLines } from "./dataSectionModel.js";
+import type { ProviderEffect } from "../tauri-bridge/generated/bindings.js";
+
+// P6b.E3: a provider's Approve waits for what approving would change; the
+// change reads as lines — everything new at first, then what differs.
+test("a provider's approve waits for its declaration diff", () => {
+  const provider = { kind: "provider", name: "tracker/fake", program: "p", args: [], env: [], approved: false } as never;
+  expect(canApprove(provider, undefined)).toBe(false);
+  expect(canApprove(provider, "loading")).toBe(false);
+  expect(canApprove(provider, { change: "added" } as ProviderEffect)).toBe(true);
+  const gauge = { kind: "gauge", name: "g", program: "p", args: [], env: [], approved: false } as never;
+  expect(canApprove(gauge, undefined)).toBe(true);
+});
+
+test("a provider's declaration diff reads as lines", () => {
+  const grants = (hosts: string[]) => ({ entry: "bin/p", runtime: "exec", args: [], hosts, credentials: ["token"], env: [] });
+  const first: ProviderEffect = {
+    id: "fake",
+    capability: "work_items",
+    change: "added",
+    before: null,
+    after: grants(["api.example.com"]),
+    commands: [
+      { name: "create", change: "added", before: null, after: { confirm: "never" } },
+      { name: "delete", change: "added", before: null, after: { confirm: "destructive" } },
+    ],
+    featuresBefore: null,
+    featuresAfter: { comments: true },
+  };
+  expect(providerEffectLines(first)).toEqual([
+    "First approval: everything is new.",
+    "Reaches api.example.com · reads token",
+    "Commands: create, delete (destructive)",
+  ]);
+  const changed: ProviderEffect = {
+    ...first,
+    change: "changed",
+    before: grants([]),
+    commands: [
+      { name: "create", change: "unchanged", before: {}, after: {} },
+      { name: "archive", change: "added", before: null, after: { confirm: "destructive" } },
+    ],
+    featuresBefore: { comments: true },
+  };
+  expect(providerEffectLines(changed)).toEqual(["Now reaches api.example.com (was none)", "Command `archive` added (destructive)"]);
+  expect(providerEffectLines({ ...changed, change: "unchanged", before: grants(["api.example.com"]), commands: [] })).toEqual([
+    "Nothing changed since it was enabled.",
+  ]);
+});

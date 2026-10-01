@@ -456,6 +456,50 @@ async fn ui_commands_are_checked_against_the_registry_or_the_providers_declarati
     );
 }
 
+/// P6b.E3: what approving a provider's declarations would change: all new
+/// before it runs; against the running declarations after an edit.
+#[tokio::test]
+async fn declaration_effects_compare_the_files_with_what_runs() {
+    let (fx, ext) = approved("").await;
+    let first = fx
+        .svc
+        .providers
+        .declaration_effects(INSTANCE)
+        .await
+        .unwrap();
+    assert_eq!(first.change, crate::extension_effects::Change::Added);
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    let path = fx
+        .svc
+        .layout
+        .project_dir
+        .join("oxplow/extensions/tracker/provider.json");
+    let mut declared = oxplow_provider_fake::declarations();
+    let mut extra = declared.commands[0].clone();
+    extra.name = "archive".into();
+    extra.confirm = "destructive".into();
+    declared.commands.push(extra);
+    std::fs::write(&path, serde_json::to_string_pretty(&declared).unwrap()).unwrap();
+    let after = fx
+        .svc
+        .providers
+        .declaration_effects(INSTANCE)
+        .await
+        .unwrap();
+    assert_eq!(after.change, crate::extension_effects::Change::Changed);
+    let archive = after.commands.iter().find(|c| c.name == "archive").unwrap();
+    assert_eq!(archive.change, crate::extension_effects::Change::Added);
+    assert!(after
+        .commands
+        .iter()
+        .filter(|c| c.name != "archive")
+        .all(|c| c.change == crate::extension_effects::Change::Unchanged));
+}
+
 /// tsk546: a provider's args are hashed where it runs (its extension
 /// folder), and an arg reaching outside the folder is refused, so no file
 /// it runs escapes the approval.

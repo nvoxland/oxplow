@@ -300,6 +300,7 @@ macro_rules! oxplow_command_table {
                 approve_source => $crate::commands::sources::approve_source { extension: String, source_id: String, version: String } -> (),
                 set_source_credential => $crate::commands::sources::set_source_credential { extension: String, name: String, value: Option<String> } -> (),
                 list_project_programs => $crate::commands::sources::list_project_programs {} -> Vec<::oxplow_app::exec_consent::ProjectProgram>,
+                provider_declaration_effects => $crate::commands::sources::provider_declaration_effects { instance: String } -> ::oxplow_app::extension_effects::ProviderEffect,
                 approve_project_program => $crate::commands::sources::approve_project_program { kind: ::oxplow_app::exec_consent::ProgramKind, name: String, version: String } -> Vec<::oxplow_app::exec_consent::ProjectProgram>,
                 // providers (Settings → Integrations)
                 list_provider_instances => $crate::commands::providers::list_provider_instances {} -> Vec<::oxplow_app::providers::ProviderInstanceView>,

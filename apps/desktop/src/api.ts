@@ -1,5 +1,5 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
-import type { OpOutcome, Reads, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
+import type { OpOutcome, ProviderEffect, Reads, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
 import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
 export { onRemoteReconnect, triggerRemoteResync };
@@ -846,6 +846,12 @@ export async function listProjectPrograms(): Promise<ProjectProgram[]> {
 /// A person approves one of the project's programs (Settings → Data).
 /// `version` is the listing's, the one the person reviewed; a program that
 /// changed since is refused.
+/** What approving provider `instance` as it is on disk would change
+ *  against what it runs with now (P6b.E3). */
+export async function providerDeclarationEffects(instance: string): Promise<ProviderEffect> {
+  return unwrap(await commands.providerDeclarationEffects(instance));
+}
+
 export async function approveProjectProgram(
   kind: ProgramKind,
   name: string,

@@ -206,6 +206,8 @@ pub const MANIFEST: &[Capability] = &[
     // agent learns an unapproved one from the run's error.
     ui("list_project_programs"),
     ui("approve_project_program"),
+    // What a provider's approval would change, shown before Approve (P6b.E3).
+    ui("provider_declaration_effects"),
     // Enabling a provider instance runs a program: a person's (P5.D4).
     ui("list_provider_instances"),
     ui("check_provider_instance"),

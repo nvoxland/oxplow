@@ -467,6 +467,32 @@ impl ProviderRegistry {
         crate::config_service::read_config(&self.deps.config).extension_instances
     }
 
+    /// What approving `instance` as it is on disk would change against the
+    /// declarations it runs with now (P6b.E3): its grants, each declared
+    /// command and its features. Not running, everything is new. Reads
+    /// files; runs nothing.
+    pub async fn declaration_effects(
+        &self,
+        instance: &str,
+    ) -> Result<crate::extension_effects::ProviderEffect, DomainError> {
+        let (ext, spec) = self.find(instance).ok_or(DomainError::NotFound)?;
+        let dir = host::ext_dir(&self.deps.project_dir, &ext);
+        let on_disk =
+            spec::read_declarations(&spec, &|rel| std::fs::read_to_string(dir.join(rel)).ok())
+                .map_err(DomainError::Invalid)?;
+        let running = self
+            .get(instance)
+            .await
+            .map(|i| (i.spec.clone(), Some(i.declared.clone())));
+        crate::extension_effects::providers_diff(
+            &running.into_iter().collect::<Vec<_>>(),
+            &[(spec, Some(on_disk))],
+        )
+        .into_iter()
+        .next()
+        .ok_or(DomainError::NotFound)
+    }
+
     /// Every declared provider and every configured instance, with health.
     pub fn list(&self) -> Vec<ProviderInstanceView> {
         let configured = self.instances_config();

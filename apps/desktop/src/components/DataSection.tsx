@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   approveProjectProgram,
   listDataEntities,
+  providerDeclarationEffects,
   listProjectPrograms,
   listSources,
   approveSource,
@@ -20,10 +21,10 @@ import {
   subscribeOxplowEvents,
   type SourceListing,
 } from "../api.js";
-import type { ProjectProgram } from "../tauri-bridge/generated/bindings.js";
+import type { ProjectProgram, ProviderEffect } from "../tauri-bridge/generated/bindings.js";
 import { indexRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import { entityRows, entitySummary, programRow, type EntityRowModel } from "./dataSectionModel.js";
+import { canApprove, entityRows, entitySummary, programRow, providerEffectLines, type EntityRowModel } from "./dataSectionModel.js";
 import { sourceRowModel } from "./extensionRowModel.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
@@ -34,6 +35,8 @@ export function DataSection() {
   const [sources, setSources] = useState<SourceListing[]>([]);
   const [programs, setPrograms] = useState<ProjectProgram[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  // What approving each unapproved provider would change, by instance.
+  const [effects, setEffects] = useState<Record<string, ProviderEffect | "loading">>({});
 
   const refresh = useCallback(async () => {
     try {
@@ -58,6 +61,22 @@ export function DataSection() {
       if (event.kind === "sourceSynced") void refresh();
     });
   }, [refresh]);
+
+  useEffect(() => {
+    let live = true;
+    const pending = programs.filter((p) => p.kind === "provider" && !p.approved);
+    setEffects(Object.fromEntries(pending.map((p) => [p.name, "loading" as const])));
+    for (const p of pending) {
+      void providerDeclarationEffects(p.name)
+        .then((e) => {
+          if (live) setEffects((prev) => ({ ...prev, [p.name]: e }));
+        })
+        .catch((e: unknown) => recordOpError({ label: `Compare ${p.name}'s declarations`, message: String(e) }));
+    }
+    return () => {
+      live = false;
+    };
+  }, [programs]);
 
   async function run(l: SourceListing) {
     const key = `${l.extension}/${l.spec.id}`;
@@ -176,6 +195,7 @@ export function DataSection() {
       ) : (
         programs.map((p) => {
           const m = programRow(p);
+          const effect = p.kind === "provider" && !p.approved ? effects[p.name] : undefined;
           return (
             <div key={m.key} data-testid={`program-row-${m.key}`} style={rowStyle}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -188,13 +208,22 @@ export function DataSection() {
                     type="button"
                     data-testid={`program-approve-${m.key}`}
                     title={m.approveTitle}
-                    disabled={busy !== null}
+                    disabled={busy !== null || !canApprove(p, effect)}
                     onClick={() => void approve(p)}
                   >
                     {busy === m.key ? "Approving…" : "Approve"}
                   </button>
                 )}
               </div>
+              {effect === "loading" ? (
+                <div style={mutedStyle}>Comparing its declarations…</div>
+              ) : effect ? (
+                <ul data-testid={`program-effects-${m.key}`} style={{ margin: "4px 0 0", paddingLeft: 18, ...mutedStyle }}>
+                  {providerEffectLines(effect).map((line, i) => (
+                    <li key={i}>{line}</li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           );
         })

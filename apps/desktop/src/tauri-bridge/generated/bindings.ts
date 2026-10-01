@@ -380,6 +380,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	providerDeclarationEffects: (instance: string) => typedError<ProviderEffect, IpcError>(__TAURI_INVOKE("provider_declaration_effects", { instance })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listProviderInstances: () => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("list_provider_instances")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

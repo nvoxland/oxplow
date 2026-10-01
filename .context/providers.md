@@ -123,6 +123,16 @@ shown unapproved in Settings → Data → Programs (with its grants listed)
 until a person approves it again. Every start re-checks it, restarts
 included.
 
+**The approval shows what it changes** (P6b.E3): an unapproved
+provider's row loads `provider_declaration_effects { instance }`
+(`ProviderRegistry::declaration_effects`: the declarations on disk
+against the running instance's, or "first approval: everything is new"
+when it isn't running — read, never run) and lists its hosts,
+credentials, commands added, removed or changed (destructive ones
+marked) and features (`providerEffectLines`). Its Approve stays disabled
+until that diff has loaded (`canApprove`), on top of the reviewed
+`version` round trip.
+
 **What runs is a verified copy** (`host::approved_copy`, tsk547). Each
 start copies the extension folder into `<oxplow home>/provider-copies/
 <project>/<ext>/<id>/<hash>/` (in-memory services: under the state

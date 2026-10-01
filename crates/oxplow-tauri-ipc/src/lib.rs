@@ -161,6 +161,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::set_source_credential,
             commands::generated::list_project_programs,
             commands::generated::approve_project_program,
+            commands::generated::provider_declaration_effects,
             commands::generated::list_provider_instances,
             commands::generated::check_provider_instance,
             commands::generated::set_provider_instance,

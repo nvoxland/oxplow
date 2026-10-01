@@ -1,7 +1,7 @@
 /// Pure view model for Settings → Data (DataSection.tsx): what data the
 /// semantic layer holds, who provides it, and how much. See
 /// `.context/semantic-layer.md`.
-import type { DataEntity, ProjectProgram } from "../tauri-bridge/generated/bindings.js";
+import type { DataEntity, ProjectProgram, ProviderEffect } from "../tauri-bridge/generated/bindings.js";
 
 export interface EntityRowModel {
   name: string;
@@ -94,4 +94,42 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
     approved: p.approved,
     approveTitle: `Runs ${command} from this project's config on this machine. Approve only if you trust this repo; a changed program or arguments need approval again.`,
   };
+}
+
+/** What approving a provider would change, as lines (P6b.E3): at a first
+ *  approval everything it declares, then only what differs from the
+ *  declarations it runs with. */
+export function providerEffectLines(e: ProviderEffect): string[] {
+  const list = (xs: string[]) => (xs.length > 0 ? xs.join(", ") : "none");
+  const destructive = (c: { after: unknown }) =>
+    (c.after as { confirm?: string } | null)?.confirm === "destructive" ? " (destructive)" : "";
+  if (e.change === "added") {
+    const g = e.after;
+    return [
+      "First approval: everything is new.",
+      ...(g ? [`Reaches ${list(g.hosts)} · reads ${list(g.credentials)}`] : []),
+      `Commands: ${list(e.commands.map((c) => `${c.name}${destructive(c)}`))}`,
+    ];
+  }
+  const out: string[] = [];
+  const [b, a] = [e.before, e.after];
+  if (b && a) {
+    if (list(b.hosts) !== list(a.hosts)) out.push(`Now reaches ${list(a.hosts)} (was ${list(b.hosts)})`);
+    if (list(b.credentials) !== list(a.credentials)) out.push(`Now reads ${list(a.credentials)} (was ${list(b.credentials)})`);
+    if (list(b.env) !== list(a.env)) out.push(`Now reads env ${list(a.env)} (was ${list(b.env)})`);
+    if (b.entry !== a.entry || list(b.args) !== list(a.args)) out.push(`Now runs ${[a.entry, ...a.args].join(" ")}`);
+  }
+  for (const c of e.commands.filter((c) => c.change !== "unchanged")) {
+    out.push(`Command \`${c.name}\` ${c.change}${c.change === "removed" ? "" : destructive(c)}`);
+  }
+  if (JSON.stringify(e.featuresBefore) !== JSON.stringify(e.featuresAfter)) {
+    out.push(`Features now ${JSON.stringify(e.featuresAfter)} (were ${JSON.stringify(e.featuresBefore)})`);
+  }
+  return out.length > 0 ? out : ["Nothing changed since it was enabled."];
+}
+
+/** A provider's Approve waits until its declaration diff has loaded: a
+ *  person approves what they saw change. Other programs approve as listed. */
+export function canApprove(p: ProjectProgram, effects: ProviderEffect | "loading" | undefined): boolean {
+  return p.kind !== "provider" || (effects !== undefined && effects !== "loading");
 }

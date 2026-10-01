@@ -76,6 +76,16 @@ async fn shared_extensions(svc: &Services) -> Vec<oxplow_app::extensions::Extens
 }
 
 /// Approve one of the project's programs as it is now. UI only: consent to
+/// What approving provider `instance` as it is on disk would change
+/// against what it runs with now (P6b.E3) — what Settings → Data shows
+/// before its Approve.
+pub async fn provider_declaration_effects(
+    svc: &Services,
+    instance: String,
+) -> Result<oxplow_app::extension_effects::ProviderEffect, IpcError> {
+    Ok(svc.providers.declaration_effects(&instance).await?)
+}
+
 /// run a program from the repo is a person's (tsk331).
 pub async fn approve_project_program(
     svc: &Services,
