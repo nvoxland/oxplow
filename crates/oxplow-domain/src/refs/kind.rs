@@ -179,7 +179,10 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new("answer", r"^[0-9]+$"),
         // A shell route (`page:settings`) or an extension's page
         // (`page:ext.<extension>.<page>`, P6.G2).
-        KindSpec::new("page", r"^[a-z0-9.-]+(\?.*)?$"),
+        KindSpec::new(
+            "page",
+            r"^(?:[a-z0-9-]+|ext\.[a-z0-9-]+\.[a-z0-9-]+)(\?.*)?$",
+        ),
         KindSpec::new("metric", r"^[a-z0-9_.-]+$"),
         KindSpec::new("model", r"^v_[a-z0-9_]+$"),
         KindSpec::new("plugin", r"^[a-z0-9-]+$"),

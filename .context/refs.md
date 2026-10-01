@@ -66,7 +66,8 @@ capability's active provider.
 
 `config` (a config key, `config:zones`) is registered too (P2.4b, tsk450).
 A `page` id is a shell route (`page:settings`) or an extension's page
-(`page:ext.<extension>.<page>`, P6.G2), so its id pattern allows `.`.
+(`page:ext.<extension>.<page>`, P6.G2): its id pattern is exactly those
+two shapes, so a `.` appears only in `ext.<extension>.<page>`.
 `answer` (a lens an agent showed on a thread, `answer:12`, P6.C1) is
 registered with a numeric id; `build::answer_ref` and `build::lens_ref`
 (`lens:<extension>/<slug>`) build them.

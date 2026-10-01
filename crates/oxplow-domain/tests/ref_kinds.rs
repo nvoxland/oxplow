@@ -61,6 +61,17 @@ fn the_core_kinds_are_registered_and_validate_ids() {
     // An extension's page (P6.G2): `page:ext.<extension>.<page>`.
     assert!(reg.validate(&canon("page:ext.acme.open-prs")).is_ok());
     assert!(reg.validate(&canon("page:ext.acme.Open PRs")).is_err());
+    // A dot only in that shape: not a stray one, not a half-named page.
+    for bad in [
+        "page:ext.acme",
+        "page:settings.",
+        "page:..",
+        "page:ext.a.b.c",
+        "page:a.b",
+    ] {
+        assert!(reg.validate(&canon(bad)).is_err(), "{bad}");
+    }
+    assert!(reg.validate(&canon("page:settings?tab=ai")).is_ok());
     assert!(reg.validate(&canon("work_item:oxplow:tsk42")).is_ok());
     assert!(
         reg.validate(&canon("work_item:tsk42")).is_err(),
