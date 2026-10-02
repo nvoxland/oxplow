@@ -916,18 +916,27 @@ mod tests {
             thread_id: Some(f.thread),
             stream_id: None,
         };
-        let err = review(
-            &f,
-            &agent,
-            "oxplow_review.accept",
-            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
-        )
-        .await
-        .unwrap_err();
-        assert!(
-            matches!(err, oxplow_domain::CommandError::Denied { .. }),
-            "{err:?}"
-        );
+        // Nor a lens acting for one (P7 review, tsk729): the agent policy
+        // closes a command closed to agents to an agent through a lens
+        // too — denied, not turned into a proposal for a person.
+        let through_lens = oxplow_domain::Actor::Lens {
+            lens_id: "oxplow-review/packet".into(),
+            on_behalf_of: Box::new(agent.clone()),
+        };
+        for actor in [&agent, &through_lens] {
+            let err = review(
+                &f,
+                actor,
+                "oxplow_review.accept",
+                serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                matches!(err, oxplow_domain::CommandError::Denied { .. }),
+                "{actor:?}: {err:?}"
+            );
+        }
         assert_eq!(task_status(&f).await, "in_progress");
     }
 

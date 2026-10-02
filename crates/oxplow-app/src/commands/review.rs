@@ -35,7 +35,10 @@ pub const REOPEN_DECISION: &str = "effort.reopen_decision";
 /// What a claim cites when a person verified it by looking.
 pub const REVIEWER: &str = "reviewer";
 
-/// A person, or a lens acting for one: never an agent.
+/// A person, or a lens acting for one: never an agent — nor a lens acting
+/// for an agent, which the agent policy denies like the agent itself
+/// (`agent_policy::check_command`, on every agent-driven run, nested
+/// ones included).
 const REVIEWERS: Invokers = Invokers {
     human: true,
     agent: false,
@@ -86,16 +89,6 @@ fn id_of(item: &str, kind: &str, field: &str) -> Result<i64, CommandError> {
     item.strip_prefix(&format!("{kind}:"))
         .and_then(|n| n.parse().ok())
         .ok_or_else(|| invalid(field, format!("`{item}` isn't a {kind} ref ({kind}:<id>)")))
-}
-
-/// A reviewer is a person: a lens acting for an agent is the agent.
-fn reviewer(ctx: &TxCtx<'_>, what: &str) -> Result<(), CommandError> {
-    if ctx.actor.is_agent_driven() {
-        return Err(CommandError::Denied {
-            reason: format!("{what} is a person's review; an agent can't review its own work"),
-        });
-    }
-    Ok(())
 }
 
 fn spec(name: &str, summary: &str, schema: serde_json::Value) -> CommandSpec {
@@ -178,7 +171,6 @@ pub fn verify_claim_command() -> Command {
         ),
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: VerifyClaimInput = parse(input)?;
-            reviewer(ctx, "verifying a claim")?;
             let id = id_of(&input.claim, "claim", "/claim")?;
             let (effort, evidence) = claim_row(ctx, id, &input.claim)?;
             if let Some(cited) = evidence {
@@ -213,7 +205,6 @@ pub fn unverify_claim_command() -> Command {
         ),
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ClaimInput = parse(input)?;
-            reviewer(ctx, "taking back a claim's verification")?;
             let id = id_of(&input.claim, "claim", "/claim")?;
             let (effort, evidence) = claim_row(ctx, id, &input.claim)?;
             let Some(cited) = evidence else {
@@ -246,7 +237,6 @@ fn review_decision(
     from: &[&str],
     to: &str,
 ) -> Result<HandlerOutput, CommandError> {
-    reviewer(ctx, "reviewing a decision")?;
     let id = id_of(&input.decision, "decision", "/decision")?;
     let (effort, provenance): (Option<i64>, String) = ctx
         .conn
