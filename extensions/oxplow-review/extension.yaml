@@ -29,5 +29,83 @@ ui:
     - { slot: effort.review.details, lens: struggled }
     - { slot: effort.review.details, lens: context-read }
     - { slot: effort.review.details, lens: review-prompt }
+  commands:
+    - { command: oxplow_review.accept, label: Accept Review, about: effort }
+    - { command: oxplow_review.request_changes, label: Request Changes, about: effort }
 panels:
   - { id: waiting, title: Waiting on You, icon: bell, scope: project, body: waiting-on-me, badge: waiting-on-me }
+models:
+  - name: deviation
+    version: 1
+    description: "Files each effort changed outside the area its work item names: a file is in the area when the item's title or body names it, or one of its directories at least two levels deep (`src/ui`). An item that names no area has none."
+    columns:
+      - { name: effort_id, type: INTEGER, doc: "The effort (v_effort.id)." }
+      - { name: path, type: TEXT, doc: "Repo-relative file path." }
+      - { name: change_kind, type: TEXT, doc: "`created`, `updated` or `deleted`." }
+commands:
+  - name: accept
+    summary: Accept an effort's work — comment the review on its work item and mark it done. Refuses while a claim is unverified or an inferred decision unreviewed, unless forced.
+    input_schema:
+      type: object
+      required: [ref]
+      properties:
+        ref: { type: string, description: "The effort (`effort:eff<id>`)." }
+        force: { type: boolean, description: "Accept even with unverified claims or unreviewed decisions; they're listed in the comment." }
+      additionalProperties: false
+    entry: handlers/accept.star
+    input: |
+      SELECT e.work_item,
+             (SELECT json_group_array(json_object('claim', 'claim:' || c.id, 'statement', c.statement))
+                FROM v_claim c WHERE c.effort_id = e.id AND c.verified = 0) AS unverified,
+             (SELECT json_group_array(json_object('decision', 'decision:' || d.id, 'question', d.question, 'choice', d.choice))
+                FROM v_decision d WHERE d.effort_id = e.id AND d.provenance = 'inferred') AS inferred,
+             (SELECT json_group_array(v.path)
+                FROM v_oxplow_review_deviation v WHERE v.effort_id = e.id) AS deviated
+      FROM v_effort e
+      WHERE 'effort:eff' || e.id = :ref
+    confirm: always
+    invokers: { human: true, agent: false, lens: true }
+    examples:
+      - name: reviewed
+        input: { ref: "effort:eff1" }
+        rows: [{ work_item: "work_item:oxplow:tsk1", unverified: "[]", inferred: "[]", deviated: "[]" }]
+        expect_commands: [work_item.comment, work_item.transition]
+      - name: an unverified claim
+        input: { ref: "effort:eff1" }
+        rows: [{ work_item: "work_item:oxplow:tsk1", unverified: '[{"claim":"claim:1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]
+        refuses: 1 unverified claim
+      - name: forced
+        input: { ref: "effort:eff1", force: true }
+        rows: [{ work_item: "work_item:oxplow:tsk1", unverified: '[{"claim":"claim:1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]
+        expect_commands: [work_item.comment, work_item.transition]
+  - name: request_changes
+    summary: Send an effort's work back — comment a checklist of its unverified claims, inferred decisions and files outside its work item's area (and your note) on the item, and move it back to todo.
+    input_schema:
+      type: object
+      required: [ref]
+      properties:
+        ref: { type: string, description: "The effort (`effort:eff<id>`)." }
+        note: { type: string, description: "What else to change." }
+      additionalProperties: false
+    entry: handlers/request_changes.star
+    input: |
+      SELECT e.work_item,
+             (SELECT json_group_array(json_object('claim', 'claim:' || c.id, 'statement', c.statement))
+                FROM v_claim c WHERE c.effort_id = e.id AND c.verified = 0) AS unverified,
+             (SELECT json_group_array(json_object('decision', 'decision:' || d.id, 'question', d.question, 'choice', d.choice))
+                FROM v_decision d WHERE d.effort_id = e.id AND d.provenance = 'inferred') AS inferred,
+             (SELECT json_group_array(v.path)
+                FROM v_oxplow_review_deviation v WHERE v.effort_id = e.id) AS deviated
+      FROM v_effort e
+      WHERE 'effort:eff' || e.id = :ref
+    confirm: always
+    invokers: { human: true, agent: false, lens: true }
+    examples:
+      - name: a file outside the area
+        input: { ref: "effort:eff1" }
+        rows: [{ work_item: "work_item:oxplow:tsk1", unverified: "[]", inferred: "[]", deviated: '["crates/db/store.rs"]' }]
+        expect_commands: [work_item.comment, work_item.transition]
+      - name: nothing to ask for
+        input: { ref: "effort:eff1" }
+        rows: [{ work_item: "work_item:oxplow:tsk1", unverified: "[]", inferred: "[]", deviated: "[]" }]
+        refuses: nothing to ask for

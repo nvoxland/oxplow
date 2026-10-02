@@ -4517,8 +4517,19 @@ empty: No tasks.
             .await
             .unwrap();
         assert!(a.errors.is_empty(), "{:?}", a.errors);
-        // Every bundled lens's SQL runs against a real schema.
-        let v = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-review", None)
+        // Every bundled lens's SQL runs against a real schema — with the
+        // extension's models published, as boot publishes them.
+        let db = Database::in_memory();
+        let published = db
+            .compile_extension_models(vec![oxplow_db::models::ExtensionModels {
+                extension: review.name.clone(),
+                sources: review.models.clone(),
+            }])
+            .await
+            .unwrap();
+        assert!(published.values().all(|e| e.is_empty()), "{published:?}");
+        let layer = crate::sql_gateway::SqlGateway::new(db);
+        let v = validate_extension(&layer, &cat(), dir.path(), "oxplow-review", None)
             .await
             .unwrap();
         assert!(v.errors.is_empty(), "{:?}", v.errors);

@@ -411,11 +411,16 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   `effort.review.details`:
   - Decisions Made (`v_decision`, `provenance = 'recorded'`)
   - Decisions Oxplow Noticed (`v_decision`, `provenance = 'inferred'`)
-  - Unverified Claims (`v_claim` where `verified = 0`)
-  - What Deviated (`v_effort_file` vs the task's title/description: a
-    file is in the task's area when the text names it or one of its
-    directories at least two levels deep; silent when the task names no
-    area)
+  - Unverified Claims (`v_claim` where `verified = 0`), each row with
+    **Mark Verified** (`effort.verify_claim`)
+  - Decisions Oxplow Noticed's rows carry **Confirm** / **Dismiss**
+    (`effort.confirm_decision` / `effort.dismiss_decision`)
+  - What Deviated (its own model `v_oxplow_review_deviation`: each
+    effort's files against its work item's title and body — a file is in
+    the area when the text names it or one of its directories at least
+    two levels deep; none when the item names no area. Live, not
+    materialized: 0.2 s over all 5.5k effort files of this repo's
+    database)
   - Tests Weakened (deleted test functions from `v_change_function`,
     fewer assertions and new skip markers from `v_change_test_file`;
     also mounted in the `vcs.commit.details` and `vcs.status.details` slots)
@@ -428,6 +433,25 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     What Deviated stays silent there: with no task text, no area is
     stated)
   - Context Read (`v_context_read`)
+  - Verify a Claim With Evidence (hidden, `viz: form` over
+    `effort.verify_claim`, `claim` a param)
+
+  **Its verdicts (P7.C5, the first bundled `commands:`)**, on an
+  effort's page under **Commands** (`ui.commands` about `effort`):
+  `oxplow_review.accept { ref, force? }` comments the review on the
+  effort's work item then transitions it to `done`, refusing (`{ refuse }`)
+  while a claim is unverified or an inferred decision unreviewed unless
+  `force` (then it lists them in the comment);
+  `oxplow_review.request_changes { ref, note? }` comments a checklist —
+  each unverified claim, inferred decision, file outside the area, and
+  the note — then transitions to `todo`. Both read one `input` query
+  (`v_effort` + `json_group_array`s over `v_claim`, `v_decision`,
+  `v_oxplow_review_deviation`), compose the dispatching `work_item.*`
+  (so any provider's item), are `confirm: always`, and are a person's or
+  a lens's — never an agent's. `questions.yaml` + `README.md` (its skill)
+  say what an agent can read of the packet; a bundled extension's
+  questions are checked against a running registry by
+  `the_bundled_extensions_answer_their_questions` (oxplow-sdk).
 
   It also has a Waiting on Me lens, reachable from the launcher:
   questions agents are waiting on you to answer (the latest `await_user`
@@ -1020,8 +1044,13 @@ commands:
       - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [work_item.transition] }
 ```
 
-`transform` returns `{ commands: [{ name, input }], result? }`
-(`composed`). The **namespace** is the extension's name with `-` → `_`
+`transform` returns `{ commands: [{ name, input }], result? }`, or
+`{ refuse: "<why>" }` to decline — the run is `Invalid` with that reason
+and writes nothing (`composed` → `Composed::{Run, Refused}`). An example
+may give `rows:` — standing in for the `input` query's result, so it
+doesn't depend on the project's data (the query is still compiled) — and
+may expect a refusal with `refuses: <part of the reason>` instead of
+`expect_commands` (not both). The **namespace** is the extension's name with `-` → `_`
 (`command_namespace`). Who holds a namespace is the bus's to say
 (`CommandBus::namespace_owner`: `oxplow` for core commands,
 `extension:<name>` / `provider:<instance>` for one registered whole with

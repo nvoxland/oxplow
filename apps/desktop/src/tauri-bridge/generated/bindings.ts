@@ -1843,12 +1843,20 @@ export type CommandEffect = "read" | "write" | "record";
 
 /**
  *  An example run of a command: its input, and the commands its script
- *  should compose, in order (checked by `oxplow plugin check` / Settings).
+ *  should compose, in order — or the refusal it should make (checked by
+ *  `oxplow plugin check` / Settings).
  */
 export type CommandExample = {
 	name: string,
 	input: unknown,
+	/**
+	 *  Rows standing in for the `input` query's (so the example doesn't
+	 *  depend on the project's data); `None` runs the query.
+	 */
+	rows: unknown[] | null,
 	expectCommands: string[],
+	// A part of the reason the script should refuse with.
+	refuses: string | null,
 };
 
 // A completed run.

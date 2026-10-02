@@ -4,9 +4,14 @@ hidden: true    # needs a slot param (effort_id / change_id); shown on the diff
 params:
   - { name: effort_id, label: Effort }
 query: |
-  SELECT statement, kind
+  SELECT statement, kind, 'claim:' || id AS claim
   FROM v_claim
   WHERE effort_id = :effort_id AND verified = 0
   ORDER BY created_at
 viz: list
+columns:
+  - { key: statement, label: Claim }
+  - { key: kind, label: Kind }
+actions:
+  - { id: verify, label: Mark Verified, command: effort.verify_claim, input: { claim: "{{row.claim}}" }, row: true }
 empty: Every claim for this effort is backed by evidence (or none were made).

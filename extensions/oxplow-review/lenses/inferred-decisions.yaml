@@ -6,7 +6,7 @@ params:
 query: |
   SELECT question, choice,
          (SELECT group_concat(value, '; ') FROM json_each(alternatives)) AS alternatives,
-         confidence, why
+         confidence, why, 'decision:' || id AS decision
   FROM v_decision
   WHERE effort_id = :effort_id AND provenance = 'inferred'
   ORDER BY id
@@ -17,4 +17,7 @@ columns:
   - { key: alternatives, label: Over }
   - { key: confidence, label: How Sure }
   - { key: why, label: Why }
+actions:
+  - { id: confirm, label: Confirm, command: effort.confirm_decision, input: { decision: "{{row.decision}}" }, row: true }
+  - { id: dismiss, label: Dismiss, command: effort.dismiss_decision, input: { decision: "{{row.decision}}" }, row: true }
 empty: Nothing inferred. Either the agent recorded its decisions, or no summarize model is assigned (Settings → AI).

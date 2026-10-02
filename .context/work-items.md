@@ -142,7 +142,10 @@ its inverse to `work_item.<verb>`, so an undo dispatches again.
 `reorder` and `move` stay oxplow's own `Tx` (they place a task in
 oxplow's lists). A Rust client, **`work_items::WorkItems`**
 (`Services::work_items_client()`), types the calls; `task_writes` and the
-conformance suite use it.
+conformance suite use it. Extension commands compose the same verbs:
+oxplow-review's Accept Review / Request Changes (P7.C5) comment on and
+transition an effort's work item whatever its provider
+([extensions.md](./extensions.md) "oxplow-review").
 
 **The contract is the `v_work_item` columns**, one shape for every
 provider (a provider's verb receives the same input, less `provider`):

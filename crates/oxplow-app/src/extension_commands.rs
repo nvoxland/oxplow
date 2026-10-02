@@ -14,9 +14,12 @@
 //!     invokers: { human: true, agent: true, lens: true }
 //!     examples:
 //!       - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [work_item.transition] }
+//!       - { name: gone, input: { ref: "work_item:oxplow:tsk9" }, rows: [], refuses: no such task }
 //! ```
 //!
-//! The namespace is the extension's name with `-` → `_`.
+//! The script returns `{ commands: [{ name, input }], result? }`, or
+//! `{ refuse: "<why>" }` to decline (the run is `Invalid` with that
+//! reason). The namespace is the extension's name with `-` → `_`.
 
 use std::collections::BTreeMap;
 
@@ -31,14 +34,21 @@ use crate::extensions::{CommandSchemas, Extension};
 pub const INPUT_ROW_CAP: usize = 1_000;
 
 /// An example run of a command: its input, and the commands its script
-/// should compose, in order (checked by `oxplow plugin check` / Settings).
+/// should compose, in order — or the refusal it should make (checked by
+/// `oxplow plugin check` / Settings).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandExample {
     pub name: String,
     #[specta(type = oxplow_domain::Json)]
     pub input: Value,
+    /// Rows standing in for the `input` query's (so the example doesn't
+    /// depend on the project's data); `None` runs the query.
+    #[specta(type = Option<Vec<oxplow_domain::Json>>)]
+    pub rows: Option<Vec<Value>>,
     pub expect_commands: Vec<String>,
+    /// A part of the reason the script should refuse with.
+    pub refuses: Option<String>,
 }
 
 /// A command an extension declares (valid ones; invalid ones are in the
@@ -92,7 +102,11 @@ struct ExampleFile {
     #[serde(default)]
     input: Value,
     #[serde(default)]
+    rows: Option<Vec<Value>>,
+    #[serde(default)]
     expect_commands: Vec<String>,
+    #[serde(default)]
+    refuses: Option<String>,
 }
 
 /// The namespace an extension's commands register under: its name with
@@ -236,12 +250,22 @@ fn command_of(
         examples: f
             .examples
             .into_iter()
-            .map(|e| CommandExample {
-                name: e.name,
-                input: e.input,
-                expect_commands: e.expect_commands,
+            .map(|e| {
+                if e.refuses.is_some() && !e.expect_commands.is_empty() {
+                    return Err(format!(
+                        "example `{}` expects commands and a refusal — fix: one or the other",
+                        e.name
+                    ));
+                }
+                Ok(CommandExample {
+                    name: e.name,
+                    input: e.input,
+                    rows: e.rows,
+                    expect_commands: e.expect_commands,
+                    refuses: e.refuses,
+                })
             })
-            .collect(),
+            .collect::<Result<_, _>>()?,
     })
 }
 
@@ -274,13 +298,16 @@ pub fn refuse_shared_namespaces(extensions: &mut [Extension]) {
 
 /// The commands a script composed, and its optional `result`:
 /// `{ commands: [{ name, input }], result? }`.
-pub fn composed(value: Value) -> Result<(Vec<CommandCall>, Option<Value>), String> {
+pub fn composed(value: Value) -> Result<Composed, String> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Out {
-        commands: Vec<Call>,
+        #[serde(default)]
+        commands: Option<Vec<Call>>,
         #[serde(default)]
         result: Option<Value>,
+        #[serde(default)]
+        refuse: Option<String>,
     }
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -292,19 +319,36 @@ pub fn composed(value: Value) -> Result<(Vec<CommandCall>, Option<Value>), Strin
     fn empty_object() -> Value {
         json!({})
     }
-    let out: Out = serde_json::from_value(value).map_err(|e| {
-        format!("the script must return `{{ commands: [{{ name, input }}], result? }}`: {e}")
-    })?;
-    Ok((
-        out.commands
-            .into_iter()
-            .map(|c| CommandCall {
-                name: c.name,
-                input: c.input,
-            })
-            .collect(),
-        out.result,
-    ))
+    const SHAPE: &str =
+        "the script must return `{ commands: [{ name, input }], result? }` or `{ refuse: \"why\" }`";
+    let out: Out = serde_json::from_value(value).map_err(|e| format!("{SHAPE}: {e}"))?;
+    match (out.refuse, out.commands) {
+        (Some(why), None) if out.result.is_none() => Ok(Composed::Refused(why)),
+        (Some(_), _) => Err(format!("{SHAPE}: a refusal composes nothing")),
+        (None, None) => Err(format!("{SHAPE}: it returned neither")),
+        (None, Some(commands)) => Ok(Composed::Run {
+            calls: commands
+                .into_iter()
+                .map(|c| CommandCall {
+                    name: c.name,
+                    input: c.input,
+                })
+                .collect(),
+            result: out.result,
+        }),
+    }
+}
+
+/// What a command's script decided.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Composed {
+    /// Run these, in order; the run's result is `result`.
+    Run {
+        calls: Vec<CommandCall>,
+        result: Option<Value>,
+    },
+    /// Decline, for this reason.
+    Refused(String),
 }
 
 /// A query result as the script sees it: one object per row.
@@ -366,7 +410,7 @@ pub fn compose_calls(
     script: &str,
     input: Value,
     rows: Vec<Value>,
-) -> Result<(Vec<CommandCall>, Option<Value>), oxplow_domain::CommandError> {
+) -> Result<Composed, oxplow_domain::CommandError> {
     use oxplow_collect_plugin::runtime::{run_sandboxed, run_starlark};
     let script = script.to_string();
     let out = run_sandboxed(&COMMAND_SCRIPT_BUDGET, move || {
@@ -427,7 +471,15 @@ pub fn extension_command(
                 ),
                 None => Vec::new(),
             };
-            let (calls, result) = compose_calls(&script, input, rows)?;
+            let (calls, result) = match compose_calls(&script, input, rows)? {
+                Composed::Run { calls, result } => (calls, result),
+                Composed::Refused(message) => {
+                    return Err(CommandError::Invalid {
+                        field: None,
+                        message,
+                    })
+                }
+            };
             let nested = bus.run_nested(ctx, &parent, &calls)?;
             Ok(HandlerOutput {
                 result: json!({ "result": result, "children": nested.children }),
@@ -658,17 +710,20 @@ async fn check_example(
     ex: &CommandExample,
     schema_of: CommandSchemas<'_>,
 ) -> Result<(), String> {
-    let rows = match &cmd.input {
-        Some(sql) => rows_json(&layer.run(input_query(sql, &ex.input)).await.map_err(|e| {
-            format!(
-                "`input`: {}",
-                e.to_string().replacen("invalid value: ", "", 1)
-            )
-        })?),
-        None => Vec::new(),
+    let rows = match (&ex.rows, &cmd.input) {
+        (Some(rows), _) => rows.clone(),
+        (None, Some(sql)) => {
+            rows_json(&layer.run(input_query(sql, &ex.input)).await.map_err(|e| {
+                format!(
+                    "`input`: {}",
+                    e.to_string().replacen("invalid value: ", "", 1)
+                )
+            })?)
+        }
+        (None, None) => Vec::new(),
     };
     let (script, input) = (cmd.script.clone(), ex.input.clone());
-    let (calls, _) = tokio::task::spawn_blocking(move || compose_calls(&script, input, rows))
+    let decided = tokio::task::spawn_blocking(move || compose_calls(&script, input, rows))
         .await
         .map_err(|e| format!("the script's worker failed: {e}"))?
         .map_err(|e| match e {
@@ -676,6 +731,26 @@ async fn check_example(
             | oxplow_domain::CommandError::Invalid { message, .. } => message,
             other => other.to_string(),
         })?;
+    let calls = match (decided, &ex.refuses) {
+        (Composed::Refused(why), Some(want)) if why.contains(want.as_str()) => return Ok(()),
+        (Composed::Refused(why), Some(want)) => {
+            return Err(format!("refused ({why}) but it should refuse ({want})"))
+        }
+        (Composed::Refused(why), None) => {
+            return Err(format!(
+                "refused ({why}) but `expect_commands` is [{}]",
+                ex.expect_commands.join(", ")
+            ))
+        }
+        (Composed::Run { calls, .. }, Some(want)) => {
+            let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
+            return Err(format!(
+                "composed [{}] but it should refuse ({want})",
+                names.join(", ")
+            ));
+        }
+        (Composed::Run { calls, .. }, None) => calls,
+    };
     for call in &calls {
         let Some(schema) = schema_of.input_schema(&call.name) else {
             return Err(format!("no command `{}`", call.name));
@@ -1391,5 +1466,115 @@ mod tests {
             "{:?}",
             fx.svc.extension_commands.problem("my-review")
         );
+    }
+
+    /// A script declines with `{ refuse: "<why>" }`: the run is `Invalid`
+    /// with that reason and writes nothing. A refusal composes nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_script_refuses_with_its_reason() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        with_finish(
+            &fx,
+            "def transform(x):\n    return {\"refuse\": \"it has unverified claims\"}\n",
+        )
+        .await;
+        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "my_review.finish",
+                json!({ "ref": r }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, oxplow_domain::CommandError::Invalid { message, .. } if message == "it has unverified claims"),
+            "{err:?}"
+        );
+        assert!(composed(json!({ "refuse": "no", "commands": [] }))
+            .unwrap_err()
+            .contains("a refusal composes nothing"),);
+    }
+
+    /// An example may stand in rows for its `input` query (`rows:`, so it
+    /// doesn't depend on the project's data) and may expect a refusal
+    /// (`refuses:`, a part of its reason).
+    #[tokio::test]
+    async fn an_example_runs_on_its_rows_and_may_expect_a_refusal() {
+        let transition_schema = serde_json::json!({
+            "type": "object",
+            "required": ["ref", "to"],
+            "properties": { "ref": { "type": "string" }, "to": { "type": "string" } },
+            "additionalProperties": false
+        });
+        let schema =
+            move |name: &str| (name == "work_item.transition").then(|| transition_schema.clone());
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let cat = crate::extension_catalog::ExtensionCatalog::new();
+        const SCRIPT: &str = "def transform(x):
+    if not x[\"rows\"]:
+        return {\"refuse\": \"no such item\"}
+    return {\"commands\": [{\"name\": \"work_item.transition\", \"input\": {\"ref\": x[\"rows\"][0][\"ref\"], \"to\": \"done\"}}]}
+";
+        let check = |examples: &str| {
+            let d = tempfile::tempdir().unwrap();
+            write_ext(
+                d.path(),
+                "x",
+                &format!(
+                    "  - name: finish_review
+    summary: Mark the task done.
+    input_schema: {{ type: object, required: [ref], properties: {{ ref: {{ type: string }} }} }}
+    entry: handlers/finish_review.star
+    input: \"SELECT ref FROM v_work_item WHERE ref = :ref\"
+    examples:
+{examples}"
+                ),
+                &[("handlers/finish_review.star", SCRIPT)],
+            );
+            d
+        };
+        let schema = &schema;
+        let errors = |d: tempfile::TempDir| {
+            let (layer, cat) = (&layer, &cat);
+            async move {
+                validate_extension(layer, cat, d.path(), "x", Some(schema))
+                    .await
+                    .unwrap()
+                    .errors
+                    .join("\n")
+            }
+        };
+
+        // The project has no such item, but the example's rows stand in.
+        let d = check(
+            "      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [{ ref: \"work_item:oxplow:tsk1\" }], expect_commands: [work_item.transition] }\n      - { name: missing, input: { ref: \"work_item:oxplow:tsk9\" }, rows: [], refuses: no such item }\n",
+        );
+        assert_eq!(errors(d).await, "");
+
+        for (example, says) in [
+            (
+                "      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, expect_commands: [work_item.transition] }\n",
+                "example `happy`: refused (no such item) but `expect_commands` is [work_item.transition]",
+            ),
+            (
+                "      - { name: missing, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [{ ref: \"work_item:oxplow:tsk1\" }], refuses: no such item }\n",
+                "example `missing`: composed [work_item.transition] but it should refuse (no such item)",
+            ),
+            (
+                "      - { name: missing, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [], refuses: unverified }\n",
+                "example `missing`: refused (no such item) but it should refuse (unverified)",
+            ),
+            (
+                "      - { name: both, input: { ref: \"work_item:oxplow:tsk1\" }, rows: [], refuses: x, expect_commands: [work_item.transition] }\n",
+                "example `both` expects commands and a refusal",
+            ),
+        ] {
+            let errs = errors(check(example)).await;
+            assert!(errs.contains(says), "{example}: {errs}");
+        }
     }
 }

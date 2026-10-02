@@ -1,0 +1,9 @@
+title: Verify a Claim With Evidence
+description: Mark a claim the agent made verified, citing what backs it — a test run (`run:12`), a file, a commit. Leave the evidence empty if you checked it yourself.
+hidden: true    # needs a claim (claim:<id>)
+params:
+  - { name: claim, label: Claim }
+viz: form
+form:
+  command: effort.verify_claim
+  defaults: { claim: "{{param.claim}}" }

@@ -184,10 +184,16 @@ empty: Nothing is waiting on you.
   `<extension name with - → _>.<name>`: `{ name, summary, input_schema,
   entry: handlers/x.star, input?: "SELECT … WHERE ref = :ref", confirm?,
   effect?, invokers?, examples? }`. The Starlark `transform(x)` gets `{
-  input, rows }` and returns `{ commands: [{ name, input }], result? }`;
+  input, rows }` and returns `{ commands: [{ name, input }], result? }`
+  — or `{ refuse: "why" }` to decline (the caller sees the reason);
   those core commands run as the caller in one transaction (each one's
   own policy and confirmation apply; one undo). It does no I/O, has 5 s,
-  and `examples` (at most 10) are dry-run by `check`.
+  and `examples` (at most 10) are dry-run by `check`: give each `rows:`
+  (what the `input` query would return) so it doesn't depend on the
+  project's data, and `expect_commands: [...]` or `refuses: <part of the
+  reason>`. A command on a ref's menu (`ui.commands`) gets `{ ref }`, so
+  name its input field `ref`. `extensions/oxplow-review/` (bundled) is a
+  working example.
 - **`custom_components:`** (experimental, private only) are web bundles a
   `viz: custom` lens renders: `{ id, title?, bundle?: components/<id>,
   assets: [lens ids], commands: [names] }`. The bundle (an `index.html`

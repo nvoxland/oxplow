@@ -22,9 +22,21 @@ mock.module("../api.js", () => ({
         decorators: [],
       },
     },
+    {
+      name: "oxplow-review",
+      enabled: true,
+      ui: {
+        slots: [],
+        commands: [
+          { id: "oxplow-review/0", extension: "oxplow-review", group: "oxplow-review", command: "oxplow_review.accept", label: "Accept Review", about: "effort", placement: ["menu", "context"], input: { ref: "{{ref}}" } },
+          { id: "oxplow-review/1", extension: "oxplow-review", group: "oxplow-review", command: "oxplow_review.request_changes", label: "Request Changes", about: "effort", placement: ["menu", "context"], input: { ref: "{{ref}}" } },
+        ],
+        decorators: [],
+      },
+    },
   ],
   runCommand: async (name: string, input: unknown, ...rest: unknown[]) => {
-    if (!name.startsWith("fake.")) return (realRunCommand as (...a: unknown[]) => unknown)(name, input, ...rest);
+    if (!name.startsWith("fake.") && !name.startsWith("oxplow_review.")) return (realRunCommand as (...a: unknown[]) => unknown)(name, input, ...rest);
     ran.push([name, input]);
     return { result: null, audit_id: 1, event_id: null, inverse: null };
   },
@@ -46,4 +58,17 @@ test("no commands for the page's kind, no menu", async () => {
   const view = render(<RefCommandsMenu target={{ ref: "wiki:notes", streamId: null }} buttonStyle={{}} />);
   await new Promise((r) => setTimeout(r, 20));
   expect(view.queryByTestId("page-nav-commands")).toBeNull();
+});
+
+// P7.C5: an effort's page (its diff, `effort:effN`) offers oxplow-review's
+// verdicts, each run as the person on that effort.
+test("an effort's page offers Accept Review and Request Changes", async () => {
+  ran.length = 0;
+  const view = render(<RefCommandsMenu target={{ ref: "effort:eff3", streamId: null }} buttonStyle={{}} />);
+  fireEvent.click(await waitFor(() => view.getByTestId("page-nav-commands")));
+  const menu = view.getByTestId("page-nav-commands-menu").textContent ?? "";
+  expect(menu).toContain("Accept Review");
+  expect(menu).toContain("Request Changes");
+  fireEvent.click(view.getByTestId("page-nav-command-oxplow-review/0"));
+  await waitFor(() => expect(ran).toEqual([["oxplow_review.accept", { ref: "effort:eff3" }]]));
 });

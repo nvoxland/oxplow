@@ -82,6 +82,16 @@ Already fixed — **do not re-optimize these**:
 - `representative_facts_by_slice` was **38% of backend CPU** in a live capture;
   most calls no longer run it at all (tsk239/tsk242, below).
 
+## oxplow-review's deviation model (P7.C5, 2026-10-02)
+
+`v_oxplow_review_deviation` (an extension model with a recursive CTE over
+every effort file's directory prefixes) computes all efforts at once:
+**0.21 s** over this repo's 658 efforts / 5,484 effort files (sqlite3 on
+the live database, the same SQL over the physical tables). It stays a
+live view; `materialize: on_change` would recompute on every task edit
+for a read that's cheap enough as is. Revisit when a What Deviated slot
+read shows up in a profile.
+
 ## The cube decision at 7.1 M facts (P4.4, tsk489, 2026-09-29)
 
 Measured before `metric_grid()` (P4.5) builds on the engine: the harness on a

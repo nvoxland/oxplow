@@ -65,7 +65,11 @@ pub const BUNDLED: &[BundledExtension] = &[
     BundledExtension {
         name: "oxplow-review",
         files: &[
+            ext_file!("oxplow-review", "README.md"),
             ext_file!("oxplow-review", "extension.yaml"),
+            ext_file!("oxplow-review", "handlers/accept.star"),
+            ext_file!("oxplow-review", "handlers/request_changes.star"),
+            ext_file!("oxplow-review", "models/deviation.sql"),
             ext_file!("oxplow-review", "lenses/context-read.yaml"),
             ext_file!("oxplow-review", "lenses/decisions.yaml"),
             ext_file!("oxplow-review", "lenses/inferred-decisions.yaml"),
@@ -75,8 +79,10 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-review", "lenses/tests-weakened.yaml"),
             ext_file!("oxplow-review", "lenses/unbacked-claims.yaml"),
             ext_file!("oxplow-review", "lenses/unverified-claims.yaml"),
+            ext_file!("oxplow-review", "lenses/verify-claim-with-evidence.yaml"),
             ext_file!("oxplow-review", "lenses/waiting-on-me.yaml"),
             ext_file!("oxplow-review", "lenses/what-deviated.yaml"),
+            ext_file!("oxplow-review", "questions.yaml"),
         ],
     },
 ];
@@ -229,11 +235,13 @@ mod tests {
     }
 
     /// P4.1 (tsk486): every query a bundled extension ships — lens,
-    /// advisory, source input — reads only published views, never a
-    /// physical table (what the authorizer will refuse, P4.3).
+    /// advisory, collector or command input — reads only published views
+    /// (its own models' included), never a physical table (what the
+    /// authorizer will refuse, P4.3).
     #[tokio::test]
     async fn bundled_queries_read_only_published_views() {
         let f = crate::test_fixtures::services_with_effort().await;
+        f.svc.extension_models.sync().await.unwrap();
         let bundled: Vec<&str> = super::BUNDLED.iter().map(|b| b.name).collect();
         let mut checked = 0;
         for ext in f.svc.extension_catalog.get(f._dir.path()).iter() {
@@ -255,6 +263,11 @@ mod tests {
                     s.input
                         .clone()
                         .map(|q| (format!("collector {} input", s.id), q))
+                }))
+                .chain(ext.commands.iter().filter_map(|c| {
+                    c.input
+                        .clone()
+                        .map(|q| (format!("command {} input", c.name), q))
                 }));
             for (what, sql) in queries {
                 let reads = f
@@ -477,6 +490,7 @@ mod tests {
         use oxplow_db::EffortStore as _;
         use oxplow_domain::stores::TaskStore as _;
         let f = crate::test_fixtures::services_with_effort().await;
+        f.svc.extension_models.sync().await.unwrap();
         let describe = |text: &'static str| {
             let svc = f.svc.clone();
             let task = f.task;
@@ -761,5 +775,317 @@ mod tests {
         let a = alert(run);
         assert!(a.firing);
         assert_eq!(a.message, "Waiting on you: 1");
+    }
+
+    /// An effort with one unverified claim and one inferred decision, its
+    /// task naming `src/ui/` as its area and the effort touching
+    /// `crates/db/store.rs` outside it; oxplow-review's commands registered.
+    async fn review_fixture() -> crate::test_fixtures::EffortFixture {
+        use oxplow_db::EffortStore as _;
+        use oxplow_domain::stores::TaskStore as _;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let mut t = f.svc.task_store.get(f.task).await.unwrap().unwrap();
+        t.description = "Fix the hover state in [[src/ui/button.ts]].".into();
+        f.svc.task_store.update(&t).await.unwrap();
+        for path in ["src/ui/button.ts", "crates/db/store.rs"] {
+            f.svc
+                .effort_store
+                .record_file(
+                    &f.effort,
+                    path,
+                    oxplow_db::EffortFileChange::Updated,
+                    oxplow_db::FileRefVersion {
+                        local_snapshot_id: 0,
+                        closest_vcs_rev: None,
+                        vcs_rev_exact: false,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        f.svc
+            .reasoning_store
+            .record_claim(oxplow_db::NewClaim {
+                thread_id: f.thread.value(),
+                task_id: Some(f.task.value()),
+                effort_id: Some(f.effort.value()),
+                statement: "no behavior change".into(),
+                kind: "no_behavior_change".into(),
+                evidence_ref: None,
+            })
+            .await
+            .unwrap();
+        f.svc
+            .reasoning_store
+            .replace_inferred(
+                f.effort.value(),
+                vec![oxplow_db::NewDecision {
+                    thread_id: f.thread.value(),
+                    task_id: Some(f.task.value()),
+                    effort_id: Some(f.effort.value()),
+                    question: "Which store?".into(),
+                    choice: "SQLite".into(),
+                    alternatives: vec!["files".into()],
+                    confidence: "medium".into(),
+                    why: "it's there".into(),
+                }],
+            )
+            .await
+            .unwrap();
+        f.svc.extension_models.sync().await.unwrap();
+        f.svc.extension_commands.reconcile().await;
+        f
+    }
+
+    fn effort_ref(f: &crate::test_fixtures::EffortFixture) -> String {
+        oxplow_domain::refs::build::effort_ref(f.effort)
+    }
+
+    async fn review(
+        f: &crate::test_fixtures::EffortFixture,
+        actor: &oxplow_domain::Actor,
+        command: &str,
+        input: serde_json::Value,
+    ) -> Result<oxplow_domain::CommandOutcome, oxplow_domain::CommandError> {
+        f.svc.commands.run(actor, command, input, true).await
+    }
+
+    async fn task_notes(f: &crate::test_fixtures::EffortFixture) -> Vec<String> {
+        let task = f.task.value();
+        f.svc
+            .db
+            .read(move |c| {
+                let mut st = c
+                    .prepare("SELECT body FROM task_note WHERE task_id = ?1 ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = st
+                    .query_map([task], |r| r.get::<_, String>(0))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<rusqlite::Result<_>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn task_status(f: &crate::test_fixtures::EffortFixture) -> String {
+        use oxplow_domain::stores::TaskStore as _;
+        let t = f.svc.task_store.get(f.task).await.unwrap().unwrap();
+        serde_json::to_value(t.status)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// P7.C5: oxplow-review loads with no errors, its examples dry-run
+    /// clean against the running registry, and its verbs register at boot
+    /// as a person's (and a lens's), never an agent's, each confirmed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_review_extension_registers_its_verbs_and_its_examples_check() {
+        let f = review_fixture().await;
+        let v = crate::extensions::validate_extension(
+            &f.svc.sql,
+            &f.svc.extension_catalog,
+            f._dir.path(),
+            "oxplow-review",
+            Some(f.svc.commands.as_ref()),
+        )
+        .await
+        .unwrap();
+        assert!(v.errors.is_empty(), "{:?}", v.errors);
+        assert!(v.warnings.is_empty(), "{:?}", v.warnings);
+        for name in ["oxplow_review.accept", "oxplow_review.request_changes"] {
+            let spec = f
+                .svc
+                .commands
+                .spec(name)
+                .unwrap_or_else(|| panic!("{name}"));
+            assert_eq!(spec.confirm, oxplow_domain::Confirm::Always, "{name}");
+            assert_eq!(
+                (spec.invokers.human, spec.invokers.agent, spec.invokers.lens),
+                (true, false, true),
+                "{name}"
+            );
+        }
+        let agent = oxplow_domain::Actor::Agent {
+            thread_id: Some(f.thread),
+            stream_id: None,
+        };
+        let err = review(
+            &f,
+            &agent,
+            "oxplow_review.accept",
+            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(err, oxplow_domain::CommandError::Denied { .. }),
+            "{err:?}"
+        );
+        assert_eq!(task_status(&f).await, "in_progress");
+    }
+
+    /// Accept refuses while a claim is unverified or an inferred decision
+    /// is unreviewed; forced, it closes the task and leaves one review
+    /// comment, in one run.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn accept_refuses_unreviewed_work_unless_forced() {
+        let f = review_fixture().await;
+        let human = oxplow_domain::Actor::Human;
+        let err = review(
+            &f,
+            &human,
+            "oxplow_review.accept",
+            serde_json::json!({ "ref": effort_ref(&f) }),
+        )
+        .await
+        .unwrap_err();
+        let oxplow_domain::CommandError::Invalid { message, .. } = &err else {
+            panic!("{err:?}");
+        };
+        assert!(
+            message.contains("1 unverified claim") && message.contains("1 inferred decision"),
+            "{message}"
+        );
+        assert_eq!(task_status(&f).await, "in_progress");
+        assert!(task_notes(&f).await.is_empty());
+
+        review(
+            &f,
+            &human,
+            "oxplow_review.accept",
+            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(task_status(&f).await, "done");
+        let notes = task_notes(&f).await;
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].starts_with("Review accepted"), "{}", notes[0]);
+        assert!(notes[0].contains("no behavior change"), "{}", notes[0]);
+    }
+
+    /// Once its claims are verified and its decisions confirmed, accept
+    /// needs no force.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn accept_after_review_needs_no_force() {
+        let f = review_fixture().await;
+        let human = oxplow_domain::Actor::Human;
+        let ids: (i64, i64) = f
+            .svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT (SELECT max(id) FROM claim), (SELECT max(id) FROM decision)",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        review(
+            &f,
+            &human,
+            "effort.verify_claim",
+            serde_json::json!({ "claim": format!("claim:{}", ids.0) }),
+        )
+        .await
+        .unwrap();
+        review(
+            &f,
+            &human,
+            "effort.confirm_decision",
+            serde_json::json!({ "decision": format!("decision:{}", ids.1) }),
+        )
+        .await
+        .unwrap();
+        review(
+            &f,
+            &human,
+            "oxplow_review.accept",
+            serde_json::json!({ "ref": effort_ref(&f) }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(task_status(&f).await, "done");
+        assert_eq!(
+            task_notes(&f).await,
+            vec![format!("Review accepted ({}).", effort_ref(&f))]
+        );
+    }
+
+    /// Request Changes comments a checklist — each unverified claim, each
+    /// inferred decision, each file outside the task's area, and the
+    /// note — and moves the task back to ready.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn request_changes_lists_what_to_fix_and_reopens_the_task() {
+        let f = review_fixture().await;
+        review(
+            &f,
+            &oxplow_domain::Actor::Human,
+            "oxplow_review.request_changes",
+            serde_json::json!({ "ref": effort_ref(&f), "note": "Keep it to the UI." }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(task_status(&f).await, "ready");
+        let notes = task_notes(&f).await;
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        let body = &notes[0];
+        for line in [
+            "Changes requested",
+            "Keep it to the UI.",
+            "- [ ] Back up the claim: no behavior change",
+            "- [ ] Confirm or rework the decision: Which store? → SQLite",
+            "- [ ] Explain or revert the change outside the task's area: crates/db/store.rs",
+        ] {
+            assert!(body.contains(line), "{line}\n---\n{body}");
+        }
+        assert!(!body.contains("src/ui/button.ts"), "{body}");
+    }
+
+    /// The packet's rows carry their reviews: Mark Verified on an
+    /// unverified claim; Confirm and Dismiss on an inferred decision.
+    #[test]
+    fn the_review_lenses_declare_their_row_actions() {
+        let exts = crate::extensions::load_extensions(std::path::Path::new("/nonexistent"));
+        let ext = exts.iter().find(|e| e.name == "oxplow-review").unwrap();
+        let actions = |slug: &str| {
+            ext.lenses
+                .iter()
+                .find(|l| l.id == format!("oxplow-review/{slug}"))
+                .unwrap_or_else(|| panic!("{slug}"))
+                .actions
+                .iter()
+                .filter(|a| a.row)
+                .map(|a| (a.label.clone(), a.command.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            actions("unverified-claims"),
+            vec![(
+                "Mark Verified".to_string(),
+                "effort.verify_claim".to_string()
+            )]
+        );
+        assert_eq!(
+            actions("inferred-decisions"),
+            vec![
+                ("Confirm".to_string(), "effort.confirm_decision".to_string()),
+                ("Dismiss".to_string(), "effort.dismiss_decision".to_string()),
+            ]
+        );
+        assert!(ext
+            .lenses
+            .iter()
+            .any(|l| l.id == "oxplow-review/verify-claim-with-evidence"));
+        assert!(ext
+            .ui
+            .commands
+            .iter()
+            .any(|c| c.command == "oxplow_review.accept" && c.label == "Accept Review"));
     }
 }

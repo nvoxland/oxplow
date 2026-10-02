@@ -451,6 +451,50 @@ mod tests {
         assert_eq!(errors, Vec::<String>::new());
     }
 
+    /// P7.C5: a bundled extension's `questions.yaml` reaches what its
+    /// skill (a markdown file in it) names, against a running oxplow — its
+    /// models published and its commands registered, as at boot.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_bundled_extensions_answer_their_questions() {
+        let tmp = tempfile::tempdir().unwrap();
+        oxplow_app::vcs::GitProvider
+            .init_repository(tmp.path())
+            .await
+            .unwrap();
+        let svc = oxplow_app::Services::in_memory(tmp.path()).unwrap();
+        svc.extension_models.sync().await.unwrap();
+        svc.extension_commands.reconcile().await;
+        let command = |name: &str| svc.commands.spec(name).map(|s| s.input_schema);
+        let mut asked = 0;
+        for b in oxplow_app::bundled_extensions::BUNDLED {
+            let file_of = |name: &str| {
+                b.files
+                    .iter()
+                    .find(|(p, _)| *p == name)
+                    .map(|(_, text)| text.to_string())
+            };
+            let Some(yaml) = file_of("questions.yaml") else {
+                continue;
+            };
+            let file = format!("{}/questions.yaml", b.name);
+            let questions = parse(&yaml).unwrap_or_else(|e| panic!("{file}: {e}"));
+            asked += questions.len();
+            let checked = check(
+                &file,
+                &questions,
+                &Checker {
+                    skill_text: &file_of,
+                    sql: Some(&svc.sql),
+                    command_schema: &command,
+                },
+            )
+            .await;
+            assert_eq!(checked.errors, Vec::<String>::new());
+            assert_eq!(checked.warnings, Vec::<String>::new());
+        }
+        assert!(asked >= 3, "{asked}");
+    }
+
     /// Every model and every command an agent may run: what the live check
     /// offers the model.
     async fn catalog(svc: &oxplow_app::Services) -> Vec<String> {
