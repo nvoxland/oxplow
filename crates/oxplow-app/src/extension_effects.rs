@@ -575,6 +575,7 @@ mod tests {
                     .collect(),
                 tests: Vec::new(),
                 deprecated: Vec::new(),
+                materialize: None,
             },
             file: format!("models/{name}.sql"),
             sql: sql.into(),

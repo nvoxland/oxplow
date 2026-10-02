@@ -538,7 +538,7 @@ launcher:            # entries for non-lens targets; a lens uses its own launche
   - { label: …, category: Data, target: { ref: page:… } }        # a page (a ref of a kind that opens as one)
   - { label: …, category: Work, target: { command: …, input: { … } } }   # a command, run as the person
   - { label: …, category: Code, target: { prompt: … } }          # a one-line prompt, put in the agent's input
-models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name> (semantic-layer.md "Extension models")
+models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name>; `materialize: on_change` stores one (semantic-layer.md "Extension models", "Materialized models")
 pages: …  panels: …  # running (P6.G1/G2): see "Panels" and "Pages"
 commands:  [...]   # Starlark scripts composing core commands (see "Commands")
 config: …          # parsed as data

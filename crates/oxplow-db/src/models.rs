@@ -17,6 +17,13 @@
 //! Declared tests (`not_null`, `unique`, `accepted_values`,
 //! `relationships`, `sql`) run on demand ([`run_tests`]) and record their
 //! result in `model_test`.
+//!
+//! A model declared `materialize: on_change` (P7.B1/B2) is checked like
+//! any other — its SELECT against lineage and contract — and then
+//! published as a view over its own table, [`materialized_table`] (the
+//! contract's columns and types), which the asset runner refills when an
+//! input changes. Its table persists across opens; a changed contract
+//! recreates it empty, and the first recompute fills it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -51,6 +58,37 @@ pub struct ModelDecl {
     /// change, each as `<view>_v<version>` until its date.
     #[serde(default)]
     pub deprecated: Vec<Deprecated>,
+    /// How it is computed: absent, on read (a view); `on_change`, stored
+    /// and recomputed when one of its inputs changes.
+    #[serde(default)]
+    pub materialize: Option<Materialize>,
+}
+
+/// A model's freshness policy beyond the default (computed on read).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum Materialize {
+    /// Stored in its table and recomputed, whole, when an input changes.
+    OnChange,
+}
+
+impl Materialize {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Materialize::OnChange => "on_change",
+        }
+    }
+}
+
+/// The table a materialized model's view reads: `m_<view>`.
+pub fn materialized_table(view: &str) -> String {
+    format!("m_{view}")
+}
+
+/// Whether `table` is a materialized model's table — never a `source()`:
+/// a model reads another (or itself) through `ref()`.
+fn is_materialized_table(table: &str) -> bool {
+    table.starts_with("m_v_")
 }
 
 /// An earlier version kept after a breaking change: its SQL (in `file`,
@@ -223,6 +261,7 @@ pub fn join_sources(
                     ),
                     columns: Vec::new(),
                     tests: Vec::new(),
+                    materialize: None,
                     deprecated: Vec::new(),
                 },
                 file: format!("{dir}/{}", d.file),
@@ -350,6 +389,13 @@ fn resolve_one<'a>(
     let mut read_tables = BTreeSet::new();
     for call in calls(&src.sql, "source").map_err(|e| invalid(format!("{}: {e}", src.file)))? {
         let table = only_name(src, &call, "source")?;
+        if is_materialized_table(&table) {
+            return Err(invalid(format!(
+                "{}: source('{table}') is a materialized model's table; read the model through \
+                 ref() (a model may not read itself)",
+                at(src, call.start)
+            )));
+        }
         source_ok(&table)
             .map_err(|why| invalid(format!("{}: source('{table}') {why}", at(src, call.start))))?;
         edits.push((call.start, call.end, quote(&table)));
@@ -609,9 +655,23 @@ fn publish(
     if mode == Pass::Check {
         return Ok(());
     }
+    if decl.materialize.is_some() {
+        // The SELECT checked out: publish the view over its table instead.
+        conn.execute_batch(&format!("DROP VIEW {}", quote(&m.view)))
+            .map_err(map_sql_err)?;
+        materialize_table(conn, &m.view, &decl.columns)?;
+        let columns: Vec<String> = decl.columns.iter().map(|c| quote(&c.name)).collect();
+        conn.execute_batch(&format!(
+            "CREATE VIEW {} AS SELECT {} FROM {}",
+            quote(&m.view),
+            columns.join(", "),
+            quote(&materialized_table(&m.view))
+        ))
+        .map_err(map_sql_err)?;
+    }
     conn.execute(
-        "INSERT INTO model (view, name, owner, version, description, sql, compiled_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO model (view, name, owner, version, description, sql, compiled_at, materialize)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             m.view,
             decl.name,
@@ -619,7 +679,8 @@ fn publish(
             decl.version,
             decl.description,
             m.sql,
-            now
+            now,
+            decl.materialize.map(Materialize::as_str)
         ],
     )
     .map_err(map_sql_err)?;
@@ -634,6 +695,64 @@ fn publish(
             params![m.view, input, kind],
         )
         .map_err(map_sql_err)?;
+    }
+    Ok(())
+}
+
+/// The table a materialized model's view reads, with the contract's
+/// columns and types: kept when it already has them (its rows are the
+/// last recompute's), else recreated empty for the first recompute to
+/// fill. Not STRICT: a computed (untyped) contract column stays untyped,
+/// as the view reports it.
+fn materialize_table(
+    conn: &Connection,
+    view: &str,
+    columns: &[ColumnDecl],
+) -> Result<(), DomainError> {
+    let table = materialized_table(view);
+    let wanted: Vec<(String, String)> = columns
+        .iter()
+        .map(|c| (c.name.clone(), c.sql_type.clone()))
+        .collect();
+    if view_columns(conn, &table)? == wanted {
+        return Ok(());
+    }
+    let defs: Vec<String> = columns
+        .iter()
+        .map(|c| {
+            format!("{} {}", quote(&c.name), c.sql_type)
+                .trim()
+                .to_string()
+        })
+        .collect();
+    conn.execute_batch(&format!(
+        "DROP TABLE IF EXISTS {t}; CREATE TABLE {t} ({});",
+        defs.join(", "),
+        t = quote(&table)
+    ))
+    .map_err(map_sql_err)
+}
+
+/// Drop the tables of materialized models that are no longer published
+/// (run once every model is registered: after the extensions' pass).
+fn drop_orphaned_tables(conn: &Connection) -> Result<(), DomainError> {
+    let orphans: Vec<String> = {
+        let mut st = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'm\\_v\\_%' ESCAPE '\\'
+                   AND substr(name, 3) NOT IN (SELECT view FROM model WHERE materialize IS NOT NULL)",
+            )
+            .map_err(map_sql_err)?;
+        let rows = st
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(map_sql_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(map_sql_err)?;
+        rows
+    };
+    for table in orphans {
+        conn.execute_batch(&format!("DROP TABLE {}", quote(&table)))
+            .map_err(map_sql_err)?;
     }
     Ok(())
 }
@@ -930,6 +1049,9 @@ pub fn compile_extensions(
     )
     .map_err(map_sql_err)?;
     let errors = pass(&tx, extensions, Pass::Publish)?;
+    // Every model is registered now (core's compiled at the open): a
+    // materialized table no published model reads goes.
+    drop_orphaned_tables(&tx)?;
     tx.commit().map_err(map_sql_err)?;
     Ok(errors)
 }
@@ -1219,6 +1341,7 @@ mod tests {
                     .collect(),
                 tests: vec![],
                 deprecated: vec![],
+                materialize: None,
             },
             file: format!("models/{name}.sql"),
             sql: sql.into(),
@@ -1490,6 +1613,147 @@ mod tests {
         .unwrap()
         .collect::<rusqlite::Result<Vec<_>>>()
         .unwrap()
+    }
+
+    fn on_change(mut m: ModelSource) -> ModelSource {
+        m.decl.materialize = Some(Materialize::OnChange);
+        m
+    }
+
+    fn table_exists(conn: &Connection, name: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            [name],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    /// P7.B2: an on-change model publishes as a view over its own table
+    /// (the contract's columns), keeps the lineage its SELECT declared,
+    /// keeps its rows across a recompile, and starts empty again when its
+    /// contract changes.
+    #[test]
+    fn an_on_change_model_is_a_view_over_its_table_and_keeps_its_lineage() {
+        let mut conn = fresh();
+        let busy = on_change(source(
+            "busy",
+            "SELECT id, title FROM source('task') WHERE status = 'blocked'",
+            &["id INTEGER", "title TEXT"],
+        ));
+        compile(&mut conn, "t", std::slice::from_ref(&busy), &view).unwrap();
+        let view_sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = 'v_t_busy'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(view_sql.contains("m_v_t_busy"), "{view_sql}");
+        assert_eq!(
+            view_columns(&conn, "v_t_busy").unwrap(),
+            vec![
+                ("id".to_string(), "INTEGER".to_string()),
+                ("title".to_string(), "TEXT".to_string())
+            ]
+        );
+        let (materialize, input): (Option<String>, String) = conn
+            .query_row(
+                "SELECT m.materialize, i.input FROM model m JOIN model_input i USING (view)
+                 WHERE m.view = 'v_t_busy'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (materialize.as_deref(), input.as_str()),
+            (Some("on_change"), "task")
+        );
+
+        conn.execute("INSERT INTO m_v_t_busy VALUES (1, 'kept')", [])
+            .unwrap();
+        compile(&mut conn, "t", std::slice::from_ref(&busy), &view).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM v_t_busy", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1, "a recompile keeps the last recompute's rows");
+        // A query reads the model, never its table: the refusal names it.
+        let refused = crate::semantic_layer::check_query_on(
+            &conn,
+            &crate::SqlQuery::new("SELECT * FROM m_v_t_busy"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(refused.contains("read v_t_busy"), "{refused}");
+
+        let mut changed = on_change(source(
+            "busy",
+            "SELECT id FROM source('task') WHERE status = 'blocked'",
+            &["id INTEGER"],
+        ));
+        changed.decl.version = 2;
+        compile(&mut conn, "t", &[changed], &view).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM v_t_busy", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "a changed contract starts the table empty");
+    }
+
+    /// P7.B2: a model never reads a materialized model's table — its own
+    /// or another's — through `source()`.
+    #[test]
+    fn a_model_may_not_source_a_materialized_table() {
+        let mut conn = fresh();
+        compile(
+            &mut conn,
+            "t",
+            &[on_change(source(
+                "busy",
+                "SELECT id FROM source('task')",
+                &["id INTEGER"],
+            ))],
+            &view,
+        )
+        .unwrap();
+        let err = compile(
+            &mut conn,
+            "t",
+            &[on_change(source(
+                "busy",
+                "SELECT id FROM source('m_v_t_busy')",
+                &["id INTEGER"],
+            ))],
+            &view,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("may not read itself"), "{err}");
+    }
+
+    /// P7.B2: checking an extension's on-change model (what `plugin check`
+    /// runs, read-only) creates no table; publishing does, and a table no
+    /// published model reads goes with the next extensions' pass.
+    #[test]
+    fn a_check_creates_no_table_and_an_orphaned_one_goes() {
+        let mut conn = fresh();
+        let models = [ext(
+            "acme",
+            vec![on_change(source(
+                "busy",
+                "SELECT id FROM ref('task')",
+                &["id INTEGER"],
+            ))],
+        )];
+        let tx = conn.transaction().unwrap();
+        let errors = check_extensions(&tx, &models).unwrap();
+        assert_eq!(errors["acme"], Vec::<String>::new());
+        assert!(!table_exists(&tx, "m_v_acme_busy"));
+        drop(tx);
+        let errors = compile_extensions(&mut conn, &models).unwrap();
+        assert_eq!(errors["acme"], Vec::<String>::new());
+        assert!(table_exists(&conn, "m_v_acme_busy"));
+        compile_extensions(&mut conn, &[]).unwrap();
+        assert!(!table_exists(&conn, "m_v_acme_busy"));
     }
 
     /// P4.9 (tsk494): an extension's model reads core models through

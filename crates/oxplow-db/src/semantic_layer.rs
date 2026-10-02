@@ -303,8 +303,9 @@ fn view_names(
         .collect())
 }
 
-/// Table → the models whose view reads it (`model_input`, sources). Empty
-/// before the registry exists.
+/// Table → the models whose view reads it (`model_input`, sources; a
+/// materialized model's own table → that model). Empty before the
+/// registry exists.
 fn source_readers(
     conn: &rusqlite::Connection,
 ) -> Result<std::collections::HashMap<String, Vec<String>>, DomainError> {
@@ -319,8 +320,22 @@ fn source_readers(
     if !has {
         return Ok(out);
     }
+    let materialized: bool = conn
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('model') WHERE name = 'materialize')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(crate::database::map_sql_err)?;
     let mut st = conn
-        .prepare("SELECT input, view FROM model_input WHERE kind = 'source' ORDER BY view")
+        .prepare(if materialized {
+            "SELECT input, view FROM model_input WHERE kind = 'source'
+             UNION ALL
+             SELECT 'm_' || view, view FROM model WHERE materialize IS NOT NULL
+             ORDER BY 2"
+        } else {
+            "SELECT input, view FROM model_input WHERE kind = 'source' ORDER BY view"
+        })
         .map_err(crate::database::map_sql_err)?;
     let rows = st
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))

@@ -37,8 +37,15 @@ impl Lineage {
     pub async fn load(db: &Database) -> Result<Self, DomainError> {
         let rows: Vec<(String, String)> = db
             .read(|tx| {
+                // A materialized model changes when its table is refilled
+                // (P7.B2), not when its inputs do.
                 let mut st = tx
-                    .prepare("SELECT input, view FROM model_input")
+                    .prepare(
+                        "SELECT i.input, i.view FROM model_input i JOIN model m USING (view)
+                          WHERE m.materialize IS NULL
+                         UNION ALL
+                         SELECT 'm_' || view, view FROM model WHERE materialize IS NOT NULL",
+                    )
                     .map_err(oxplow_db::map_sql_err)?;
                 let rows = st
                     .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -213,6 +220,9 @@ pub fn spawn(
             tracing::warn!(%error, "model lineage didn't load; no model will be reported changed");
             Lineage::default()
         });
+        if let Err(error) = assets.sync_models().await {
+            tracing::warn!(%error, "the materialized models didn't register");
+        }
         let mut captures = CaptureListener::at_end(&db).await.unwrap_or_else(|error| {
             tracing::warn!(%error, "the capture listener starts from the beginning");
             CaptureListener::default()
@@ -220,9 +230,12 @@ pub fn spawn(
         loop {
             let (models, samples) = match rx.recv().await {
                 Ok(tables) => {
-                    if tables.contains("model_input") {
+                    if tables.contains("model_input") || tables.contains("model") {
                         if let Ok(fresh) = Lineage::load(&db).await {
                             lineage = fresh;
+                        }
+                        if let Err(error) = assets.sync_models().await {
+                            tracing::warn!(%error, "the materialized models didn't resync");
                         }
                     }
                     assets.changed(&tables);
@@ -443,6 +456,119 @@ mod tests {
         assert_eq!(measures, vec!["acme.gamma".to_string()]);
         let first_c = first.clone();
         until(Box::new(move |at| at.is_some() && at != first_c)).await;
+    }
+
+    /// P7.B2: an on-change model recomputes once after a burst of writes
+    /// to its inputs, and the change loop announces it — and a model
+    /// reading it — when its table is refilled, not when its inputs move.
+    #[tokio::test]
+    async fn a_materialized_model_recomputes_once_per_burst_and_announces_its_readers() {
+        use oxplow_db::models::{ColumnDecl, ExtensionModels, Materialize, ModelDecl, ModelSource};
+        use oxplow_domain::stores::TaskStore as _;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let model =
+            |name: &str, sql: &str, columns: &[(&str, &str)], on_change: bool| ModelSource {
+                decl: ModelDecl {
+                    name: name.into(),
+                    version: 1,
+                    description: format!("{name}."),
+                    columns: columns
+                        .iter()
+                        .map(|(n, t)| ColumnDecl {
+                            name: (*n).into(),
+                            sql_type: (*t).into(),
+                            doc: "d".into(),
+                        })
+                        .collect(),
+                    tests: Vec::new(),
+                    deprecated: Vec::new(),
+                    materialize: on_change.then_some(Materialize::OnChange),
+                },
+                file: format!("models/{name}.sql"),
+                sql: sql.into(),
+                twin: None,
+            };
+        let errors = f
+            .svc
+            .db
+            .compile_extension_models(vec![ExtensionModels {
+                extension: "acme".into(),
+                sources: vec![
+                    model(
+                        "titles",
+                        "SELECT id, title FROM ref('task')",
+                        &[("id", "INTEGER"), ("title", "TEXT")],
+                        true,
+                    ),
+                    model(
+                        "title_count",
+                        "SELECT count(*) AS n FROM ref('titles')",
+                        &[("n", "")],
+                        false,
+                    ),
+                ],
+            }])
+            .await
+            .unwrap();
+        assert_eq!(errors["acme"], Vec::<String>::new());
+
+        let assets =
+            crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(50));
+        let mut rx = f.svc.events.subscribe();
+        spawn(
+            f.svc.db.clone(),
+            Arc::new(ModelWatermarks::default()),
+            f.svc.events.clone(),
+            assets,
+        );
+        let titles = || async {
+            f.svc
+                .db
+                .read(|tx| {
+                    let mut st = tx
+                        .prepare("SELECT title FROM v_acme_titles ORDER BY id")
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let rows = st
+                        .query_map([], |r| r.get::<_, String>(0))
+                        .map_err(oxplow_db::map_sql_err)?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .map_err(oxplow_db::map_sql_err)?;
+                    Ok(rows)
+                })
+                .await
+                .unwrap()
+        };
+        let announced = |rx: &mut tokio::sync::broadcast::Receiver<OxplowEvent>| {
+            let mut n = 0;
+            let mut readers = false;
+            while let Ok(e) = rx.try_recv() {
+                if let OxplowEvent::ModelsChanged { models } = e {
+                    if models.contains(&"v_acme_titles".to_string()) {
+                        n += 1;
+                        readers |= models.contains(&"v_acme_title_count".to_string());
+                    }
+                }
+            }
+            (n, readers)
+        };
+        // Its first build fills it.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(titles().await, vec!["t".to_string()]);
+        let _ = announced(&mut rx);
+
+        let mut task = f.svc.task_store.get(f.task).await.unwrap().unwrap();
+        for i in 0..5 {
+            task.title = format!("renamed {i}");
+            f.svc.task_store.update(&task).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        assert_eq!(titles().await, vec!["renamed 4".to_string()]);
+        assert_eq!(
+            announced(&mut rx),
+            (1, true),
+            "one refill, its reader with it"
+        );
     }
 
     /// P7.B1: the change loop is the one place `MetricSamplesChanged` is

@@ -18,7 +18,7 @@
 //! events_to, snapshot_id, elapsed_ms }`. A recompute that fails is
 //! logged; the next change tries again.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -51,6 +51,16 @@ struct Entry {
     materializer: Arc<dyn Materializer>,
     inputs: BTreeSet<String>,
     dirty: Arc<Notify>,
+    /// Its recompute loop, stopped when the asset goes.
+    task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+/// A materialized model as the registry has it: its compiled SELECT and
+/// the tables it reads, transitively.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ModelAsset {
+    sql: String,
+    tables: Vec<String>,
 }
 
 /// The registered assets. Cloning shares them.
@@ -59,6 +69,9 @@ pub struct Assets {
     db: Database,
     coalesce: Duration,
     entries: Arc<std::sync::RwLock<Vec<Arc<Entry>>>>,
+    /// The materialized models registered from the model registry
+    /// ([`Assets::sync_models`]), by view.
+    models: Arc<tokio::sync::Mutex<BTreeMap<String, ModelAsset>>>,
 }
 
 impl Assets {
@@ -67,6 +80,7 @@ impl Assets {
             db,
             coalesce,
             entries: Arc::default(),
+            models: Arc::default(),
         }
     }
 
@@ -77,13 +91,15 @@ impl Assets {
             inputs: materializer.inputs().into_iter().collect(),
             materializer,
             dirty: Arc::new(Notify::new()),
+            task: std::sync::Mutex::new(None),
         });
         self.entries
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .push(entry.clone());
-        let (db, coalesce) = (self.db.clone(), self.coalesce);
-        tokio::spawn(async move {
+        let (db, coalesce, looping) = (self.db.clone(), self.coalesce, entry.clone());
+        let task = tokio::spawn(async move {
+            let entry = looping;
             recompute(&db, entry.materializer.as_ref()).await;
             loop {
                 entry.dirty.notified().await;
@@ -95,6 +111,49 @@ impl Assets {
                 recompute(&db, entry.materializer.as_ref()).await;
             }
         });
+        *entry.task.lock().unwrap_or_else(|e| e.into_inner()) = Some(task);
+    }
+
+    /// Stop and forget `asset` (a materialized model no longer published).
+    pub fn remove(&self, asset: &str) {
+        let mut entries = self.entries.write().unwrap_or_else(|e| e.into_inner());
+        entries.retain(|e| {
+            let keep = e.materializer.asset() != asset;
+            if !keep {
+                if let Some(task) = e.task.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                    task.abort();
+                }
+            }
+            keep
+        });
+    }
+
+    /// Keep one [`SqlModelMaterializer`] per model the registry says is
+    /// `materialize: on_change` (P7.B2): new ones registered (their first
+    /// recompute fills the table), gone or changed ones replaced or
+    /// stopped. Run when the registry changes.
+    pub async fn sync_models(&self) -> Result<(), DomainError> {
+        let wanted = materialized_models(&self.db).await?;
+        let mut have = self.models.lock().await;
+        for (view, old) in have.clone() {
+            if wanted.get(&view) != Some(&old) {
+                self.remove(&view);
+                have.remove(&view);
+            }
+        }
+        for (view, model) in wanted {
+            if have.contains_key(&view) {
+                continue;
+            }
+            self.register(Arc::new(SqlModelMaterializer {
+                db: self.db.clone(),
+                view: view.clone(),
+                sql: model.sql.clone(),
+                tables: model.tables.clone(),
+            }));
+            have.insert(view, model);
+        }
+        Ok(())
     }
 
     /// `tables` changed: mark every asset reading one dirty.
@@ -121,6 +180,97 @@ impl Assets {
         {
             entry.dirty.notify_one();
         }
+    }
+}
+
+/// The registry's materialized models, with the tables each reads: its
+/// inputs followed through live models to tables — and to a materialized
+/// model's own table, which is where that one's changes come from.
+async fn materialized_models(db: &Database) -> Result<BTreeMap<String, ModelAsset>, DomainError> {
+    db.read(|tx| {
+        let mut st = tx
+            .prepare("SELECT view, sql, materialize FROM model")
+            .map_err(oxplow_db::map_sql_err)?;
+        let models: BTreeMap<String, (String, Option<String>)> = st
+            .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))
+            .map_err(oxplow_db::map_sql_err)?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(oxplow_db::map_sql_err)?;
+        let mut st = tx
+            .prepare("SELECT view, input FROM model_input")
+            .map_err(oxplow_db::map_sql_err)?;
+        let mut inputs: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for row in st
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(oxplow_db::map_sql_err)?
+        {
+            let (view, input) = row.map_err(oxplow_db::map_sql_err)?;
+            inputs.entry(view).or_default().push(input);
+        }
+        let mut out = BTreeMap::new();
+        for (view, (sql, materialize)) in &models {
+            if materialize.is_none() {
+                continue;
+            }
+            let mut tables = BTreeSet::new();
+            let mut seen = BTreeSet::new();
+            let mut todo: Vec<&String> = inputs.get(view).into_iter().flatten().collect();
+            while let Some(input) = todo.pop() {
+                if !seen.insert(input.clone()) {
+                    continue;
+                }
+                match models.get(input) {
+                    Some((_, Some(_))) => {
+                        tables.insert(oxplow_db::models::materialized_table(input));
+                    }
+                    Some((_, None)) => todo.extend(inputs.get(input).into_iter().flatten()),
+                    None => {
+                        tables.insert(input.clone());
+                    }
+                }
+            }
+            out.insert(
+                view.clone(),
+                ModelAsset {
+                    sql: sql.clone(),
+                    tables: tables.into_iter().collect(),
+                },
+            );
+        }
+        Ok(out)
+    })
+    .await
+}
+
+/// A `materialize: on_change` model (P7.B2): its table refilled, whole,
+/// from its SELECT in one transaction.
+pub struct SqlModelMaterializer {
+    db: Database,
+    view: String,
+    sql: String,
+    tables: Vec<String>,
+}
+
+#[async_trait]
+impl Materializer for SqlModelMaterializer {
+    fn asset(&self) -> &str {
+        &self.view
+    }
+
+    fn inputs(&self) -> Vec<String> {
+        self.tables.clone()
+    }
+
+    async fn recompute(&self) -> Result<Recomputed, DomainError> {
+        let table = oxplow_db::models::materialized_table(&self.view);
+        let refill = format!(
+            "DELETE FROM \"{table}\"; INSERT INTO \"{table}\" SELECT * FROM ({});",
+            self.sql
+        );
+        self.db
+            .transaction(move |tx| tx.execute_batch(&refill).map_err(oxplow_db::map_sql_err))
+            .await?;
+        Ok(Recomputed::default())
     }
 }
 

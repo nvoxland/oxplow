@@ -225,6 +225,40 @@ each one's columns and types equal the migration view it replaced),
 migrations and compiled after them at every writable open; a read-only
 open (`oxplow plugin check`) uses what the last open compiled.
 
+### Materialized models (P7.B2)
+
+A model may declare **`materialize: on_change`** (`ModelDecl.materialize`;
+core's `models.yaml` and an extension's `models:` alike). It compiles and
+is checked exactly like any other — its SELECT against lineage and
+contract, `model_input` recording what it reads — and then publishes as a
+view over its own table, **`m_<view>`** (`models::materialized_table`),
+which has the contract's columns and declared types (not STRICT, so a
+computed, untyped column stays untyped, as the view reports it). The
+table keeps its rows across opens (they are the last recompute's); a
+changed contract recreates it empty for the first recompute to fill.
+`model.materialize` (V131) records the policy. A model never
+`source()`s an `m_*` table — its own or another's ("a model may not read
+itself"); it reads a materialized model through `ref()`. A query's own
+SQL can't read one either: the read contract refuses it, naming the
+model over it. `plugin check` (the read-only `Pass::Check`) creates the
+temp view only, never the table; a table no published model reads goes
+after the extensions' pass (`drop_orphaned_tables`).
+
+**Recomputing** is the asset runner's ("Assets"): `Assets::sync_models`
+keeps one `SqlModelMaterializer` per materialized model — its inputs are
+its `model_input` followed through live models down to tables (and to a
+materialized input's own table) — re-run when the registry (`model`,
+`model_input`) changes. A recompute refills the table, whole, in one
+transaction (`DELETE`, then `INSERT … SELECT`), after its inputs have
+been quiet for the coalesce window, and is recorded in `asset_state`.
+**Lineage for subscriptions** routes through the table: a materialized
+model changes when `m_<view>` is refilled, not when its inputs move, so
+`ModelsChanged` names it and its readers once per recompute. Its
+watermark is therefore when it was computed; `v_model` (v3) adds
+`materialize`, `computed_at` and `events_to` (from `asset_state`).
+**Not yet:** `interval:` freshness, incremental recompute, and keys in a
+contract.
+
 ## Metrics in SQL (P4.5)
 
 A query reads metrics as columns of a grid:

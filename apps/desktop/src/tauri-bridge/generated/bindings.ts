@@ -3462,6 +3462,11 @@ export type LspServerListing = {
 // Where a server config came from, for the settings UI.
 export type LspServerSource = "yaml" | "installed";
 
+// A model's freshness policy beyond the default (computed on read).
+export type Materialize = 
+// Stored in its table and recomputed, whole, when an input changes.
+"on_change";
+
 /**
  *  One entry in the top-level `measures:` block — the **measure catalog**
  *  authoring surface (epic tsk12, workstream E). A measure is a *type of atomic
@@ -3633,6 +3638,11 @@ export type ModelDecl = {
 	 *  change, each as `<view>_v<version>` until its date.
 	 */
 	deprecated?: Deprecated[],
+	/**
+	 *  How it is computed: absent, on read (a view); `on_change`, stored
+	 *  and recomputed when one of its inputs changes.
+	 */
+	materialize?: Materialize | null,
 };
 
 export type ModelEffect = {
