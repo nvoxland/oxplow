@@ -1933,8 +1933,9 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   exclusively by the `Indexer` service (`crates/oxplow-app/src/indexer.rs`),
   which backfills at boot, indexes tasks and snapshot files from the event log
   (the `search.index` pump consumer, P3.10), wiki pages from the event
-  log's `knowledge.page.written` / `deleted`, and notes / comments from
-  the in-memory bus (`WorkNotesChanged` / `CommentsChanged`).
+  log's `knowledge.page.written` / `deleted`, and thread notes / comments
+  from `knowledge.note.*` / `knowledge.comment.*` (P7.B6), which their
+  stores log with each write.
   `purge_stream` is called when a stream is archived/deleted.
 - `sanitize_query` turns arbitrary user input into a safe MATCH expression
   (each token double-quoted + `*` prefix), so junk input can't throw FTS5

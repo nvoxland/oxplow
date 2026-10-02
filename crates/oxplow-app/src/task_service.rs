@@ -1652,7 +1652,10 @@ mod tests {
             .with_metrics(fact_store, event_bus.clone())
             .with_steering_sources(
                 Arc::new(oxplow_db::SqliteAgentTurnStore::new(db.clone())),
-                Arc::new(oxplow_db::SqliteCommentStore::new(db.clone())),
+                Arc::new(oxplow_db::SqliteCommentStore::new(
+                    db.clone(),
+                    std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
+                )),
             );
         let svc = with_lifecycle_pump(svc, &db);
         (svc, t.id, effort_store, project, snapshot_captures)

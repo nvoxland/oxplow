@@ -3999,8 +3999,6 @@ export type OxplowEvent =
 { kind: "selectedThreadChanged"; streamId: StreamId; threadId: ThreadId | null } | 
 // tasks on `thread_id` (or backlog if `thread_id` is None).
 { kind: "tasksChanged"; threadId: ThreadId | null } | 
-// A note was added or removed against an item or thread.
-{ kind: "workNotesChanged"; itemId: TaskId | null; threadId: ThreadId | null } | 
 /**
  *  A comment (or one of its messages) changed on `target_kind` /
  *  `target_id` within `stream_id`. Renderer refetches the affected

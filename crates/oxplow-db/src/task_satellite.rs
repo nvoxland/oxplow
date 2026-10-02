@@ -131,14 +131,86 @@ pub fn create_link_tx(
 pub struct SqliteTaskNoteStore {
     db: Database,
     page_refs: SqlitePageRefStore,
+    schemas: std::sync::Arc<oxplow_domain::events::schema::EventSchemaRegistry>,
+}
+
+/// A thread note's `knowledge.note.written@1` / `deleted@1` (P7.B6: how
+/// the search index hears of it). Task notes are `work_item.commented`.
+fn note_event(id: i64, thread: i64, deleted: bool) -> oxplow_domain::Envelope {
+    use oxplow_domain::events::schema::{
+        KnowledgeNoteDeleted, KnowledgeNoteDeletedV1, KnowledgeNoteWritten, KnowledgeNoteWrittenV1,
+    };
+    let note = format!("task_note:{}", NoteId::new(id));
+    let thread = oxplow_domain::refs::build::thread_ref(ThreadId::new(thread));
+    const SOURCE: &str = "system:notes";
+    let env = if deleted {
+        oxplow_domain::Envelope::typed::<KnowledgeNoteDeleted>(
+            SOURCE,
+            &KnowledgeNoteDeletedV1 {
+                note: note.clone(),
+                thread: thread.clone(),
+            },
+        )
+    } else {
+        oxplow_domain::Envelope::typed::<KnowledgeNoteWritten>(
+            SOURCE,
+            &KnowledgeNoteWrittenV1 {
+                note: note.clone(),
+                thread: thread.clone(),
+            },
+        )
+    };
+    env.with_subject([note, thread])
+}
+
+/// The event for a change to note `id` when it's a thread note.
+fn thread_note_event(
+    conn: &rusqlite::Connection,
+    id: i64,
+    deleted: bool,
+) -> rusqlite::Result<Option<oxplow_domain::Envelope>> {
+    use rusqlite::OptionalExtension;
+    let thread: Option<i64> = conn
+        .query_row(
+            "SELECT thread_id FROM task_note WHERE id = ?1 AND task_id IS NULL",
+            params![id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(thread.map(|t| note_event(id, t, deleted)))
 }
 
 impl SqliteTaskNoteStore {
-    pub fn new(db: Database) -> Self {
+    pub fn new(
+        db: Database,
+        schemas: std::sync::Arc<oxplow_domain::events::schema::EventSchemaRegistry>,
+    ) -> Self {
         Self {
             page_refs: SqlitePageRefStore::new(db.clone()),
             db,
+            schemas,
         }
+    }
+
+    /// Run `f` and log the event it returns, in one transaction.
+    async fn logged<R, F>(&self, f: F) -> Result<R, DomainError>
+    where
+        F: Fn(&rusqlite::Connection) -> rusqlite::Result<(R, Option<oxplow_domain::Envelope>)>
+            + Send
+            + 'static,
+        R: Send + 'static,
+    {
+        let schemas = self.schemas.clone();
+        self.db
+            .transaction(move |tx| {
+                let (out, event) = f(tx).map_err(crate::database::map_sql_err)?;
+                if let Some(e) = &event {
+                    crate::event_log_store::append_tx(tx, &schemas, e)?;
+                }
+                Ok(out)
+            })
+            .await
     }
 
     /// Iterate every note id + body for the boot-time backfill.
@@ -196,23 +268,25 @@ impl TaskNoteStore for SqliteTaskNoteStore {
         let body_owned = body.to_string();
         let author = author.to_string();
         let note = self
-            .db
-            .call(move |conn| {
+            .logged(move |conn| {
                 let now = Timestamp::now();
                 conn.execute(
                     "INSERT INTO task_note (thread_id, body, author, created_at)
                      VALUES (?1, ?2, ?3, ?4)",
                     params![thread.value(), body_owned, author, ts_to_string(now)],
                 )?;
-                let id = NoteId::new(conn.last_insert_rowid());
-                Ok(TaskNote {
-                    id,
-                    task_id: None,
-                    thread_id: Some(thread),
-                    body: body_owned,
-                    author,
-                    created_at: now,
-                })
+                let id = conn.last_insert_rowid();
+                Ok((
+                    TaskNote {
+                        id: NoteId::new(id),
+                        task_id: None,
+                        thread_id: Some(thread),
+                        body: body_owned.clone(),
+                        author: author.clone(),
+                        created_at: now,
+                    },
+                    Some(note_event(id, thread.value(), false)),
+                ))
             })
             .await?;
         self.project_note(&note.id.to_string(), &note.body).await?;
@@ -247,30 +321,30 @@ impl TaskNoteStore for SqliteTaskNoteStore {
     async fn update_body(&self, id: &NoteId, body: &str) -> Result<(), DomainError> {
         let id_clone = *id;
         let body_clone = body.to_string();
-        self.db
-            .call(move |conn| {
-                conn.execute(
-                    "UPDATE task_note SET body = ?2 WHERE id = ?1",
-                    params![id_clone.value(), body_clone],
-                )?;
-                Ok(())
-            })
-            .await?;
+        self.logged(move |conn| {
+            conn.execute(
+                "UPDATE task_note SET body = ?2 WHERE id = ?1",
+                params![id_clone.value(), body_clone],
+            )?;
+            Ok(((), thread_note_event(conn, id_clone.value(), false)?))
+        })
+        .await?;
         self.project_note(&id.to_string(), body).await?;
         Ok(())
     }
 
     async fn delete(&self, id: &NoteId) -> Result<(), DomainError> {
         let id_clone = *id;
-        self.db
-            .call(move |conn| {
-                conn.execute(
-                    "DELETE FROM task_note WHERE id = ?1",
-                    params![id_clone.value()],
-                )?;
-                Ok(())
-            })
-            .await?;
+        self.logged(move |conn| {
+            // Read before it goes: the event names its thread.
+            let event = thread_note_event(conn, id_clone.value(), true)?;
+            conn.execute(
+                "DELETE FROM task_note WHERE id = ?1",
+                params![id_clone.value()],
+            )?;
+            Ok(((), event))
+        })
+        .await?;
         {
             let refs = &self.page_refs;
             refs.replace_source(KIND_TASK_NOTE, &id.to_string(), vec![])
@@ -496,7 +570,10 @@ mod tests {
     #[tokio::test]
     async fn note_for_item_round_trips() {
         let (db, _tid, item_id) = fixture().await;
-        let store = SqliteTaskNoteStore::new(db.clone());
+        let store = SqliteTaskNoteStore::new(
+            db.clone(),
+            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
+        );
         let note = add_note(&db, item_id, "looking good", "user").await;
         assert_eq!(note.task_id, Some(item_id));
         assert!(note.thread_id.is_none());
@@ -508,7 +585,10 @@ mod tests {
     #[tokio::test]
     async fn note_for_thread_round_trips() {
         let (db, tid, _item_id) = fixture().await;
-        let store = SqliteTaskNoteStore::new(db.clone());
+        let store = SqliteTaskNoteStore::new(
+            db.clone(),
+            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
+        );
         let note = store
             .add_for_thread(&tid, "thread-level finding", "agent")
             .await
@@ -522,7 +602,10 @@ mod tests {
     #[tokio::test]
     async fn note_delete_removes() {
         let (db, _tid, item_id) = fixture().await;
-        let store = SqliteTaskNoteStore::new(db.clone());
+        let store = SqliteTaskNoteStore::new(
+            db.clone(),
+            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
+        );
         let note = add_note(&db, item_id, "x", "u").await;
         store.delete(&note.id).await.unwrap();
         assert!(store.list_for_item(item_id).await.unwrap().is_empty());
@@ -533,7 +616,10 @@ mod tests {
         use crate::page_ref_store::SqlitePageRefStore;
         let (db, tid, item_id) = fixture().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteTaskNoteStore::new(db.clone());
+        let store = SqliteTaskNoteStore::new(
+            db.clone(),
+            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
+        );
 
         let note = add_note(&db, item_id, "blocked by tsk99 see [[src/app.rs]]", "u").await;
         let inbound_task = page_refs

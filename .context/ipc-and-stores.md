@@ -700,10 +700,14 @@ log** — the `search.index` pump consumer on `work_item.created` / `edited` /
 `transitioned` / `deleted` and `snapshot.taken` (durable, redelivered after a
 crash; on any of them the task's rows are removed in every stream and it is
 re-indexed where it lives now, so a moved or deleted task leaves no stale
-row, tsk508) — and notes, comments and wiki pages from the in-memory
-**EventBus** (`WorkNotesChanged`, `CommentsChanged`) until those capabilities
-log events (P5); wiki pages come from the event log's
-`knowledge.page.written` / `deleted`. It upserts/removes the affected rows.
+row, tsk508) — wiki pages from `knowledge.page.written` / `deleted`, and
+thread notes and comments from `knowledge.note.written` / `deleted` and
+`knowledge.comment.written` / `deleted` (P7.B6: the note and comment
+stores log them in the write's transaction — `SqliteTaskNoteStore` for a
+thread note only, a task note being `work_item.commented`;
+`SqliteCommentStore` for every create, reply, intent/status/anchor
+change, relink, delete and retention sweep). It upserts/removes the
+affected rows; nothing reaches it on the in-memory bus.
 Every task field edit logs `work_item.edited` (the store's raw `update` goes
 through `update_with_status_tx`), and a move to another thread logs
 `work_item.edited{fields: [thread]}` (`move_task`), so the log sees them

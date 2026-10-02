@@ -449,13 +449,12 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // LSP diagnostics → `v_diagnostic` (live state; cleared here first).
     crate::lsp_diagnostics::spawn(state.clone());
 
-    // Search indexer: backfill the unified FTS index from current
-    // state, then keep it fresh off the event bus.
+    // Search indexer: backfill the unified FTS index from current state;
+    // the `search.index` pump consumer keeps it fresh from the event log.
     {
         let indexer = crate::indexer::Indexer::new(state.clone());
-        let rx = state.events.subscribe();
         tokio::spawn(async move {
-            indexer.run(rx).await;
+            indexer.backfill().await;
         });
     }
 

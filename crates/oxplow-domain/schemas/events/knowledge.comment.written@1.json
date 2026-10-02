@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`knowledge.comment.written@1`: a comment (a threaded annotation on a\npage) was created or changed — a reply, its intent, status or anchor\n(P7.B6).",
+  "properties": {
+    "comment": {
+      "description": "`comment:cmt<n>`.",
+      "type": "string"
+    },
+    "target_id": {
+      "type": "string"
+    },
+    "target_kind": {
+      "description": "What it annotates: the target's kind (`file`, `work_item`, …) and id.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "comment",
+    "target_kind",
+    "target_id"
+  ],
+  "title": "KnowledgeCommentWrittenV1",
+  "type": "object"
+}

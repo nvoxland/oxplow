@@ -149,6 +149,14 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<KnowledgePageDeleted>()
             .expect("core type registers");
+        r.register::<KnowledgeNoteWritten>()
+            .expect("core type registers");
+        r.register::<KnowledgeNoteDeleted>()
+            .expect("core type registers");
+        r.register::<KnowledgeCommentWritten>()
+            .expect("core type registers");
+        r.register::<KnowledgeCommentDeleted>()
+            .expect("core type registers");
         r.register::<CodeDiagnosticsChanged>()
             .expect("core type registers");
         r.register::<PluginEnabled>().expect("core type registers");
@@ -1297,6 +1305,78 @@ impl EventType for KnowledgePageDeleted {
     type Payload = KnowledgePageDeletedV1;
 }
 
+/// `knowledge.note.written@1`: a thread note was added or its body
+/// changed (P7.B6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgeNoteWrittenV1 {
+    /// `task_note:not<n>`.
+    pub note: String,
+    /// The thread it's on (`thread:thr<n>`).
+    pub thread: String,
+}
+
+pub struct KnowledgeNoteWritten;
+impl EventType for KnowledgeNoteWritten {
+    const TYPE: &'static str = "knowledge.note.written";
+    const V: u32 = 1;
+    type Payload = KnowledgeNoteWrittenV1;
+}
+
+/// `knowledge.note.deleted@1`: a thread note is gone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgeNoteDeletedV1 {
+    /// `task_note:not<n>`.
+    pub note: String,
+    /// The thread it was on (`thread:thr<n>`).
+    pub thread: String,
+}
+
+pub struct KnowledgeNoteDeleted;
+impl EventType for KnowledgeNoteDeleted {
+    const TYPE: &'static str = "knowledge.note.deleted";
+    const V: u32 = 1;
+    type Payload = KnowledgeNoteDeletedV1;
+}
+
+/// `knowledge.comment.written@1`: a comment (a threaded annotation on a
+/// page) was created or changed — a reply, its intent, status or anchor
+/// (P7.B6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgeCommentWrittenV1 {
+    /// `comment:cmt<n>`.
+    pub comment: String,
+    /// What it annotates: the target's kind (`file`, `work_item`, …) and id.
+    pub target_kind: String,
+    pub target_id: String,
+}
+
+pub struct KnowledgeCommentWritten;
+impl EventType for KnowledgeCommentWritten {
+    const TYPE: &'static str = "knowledge.comment.written";
+    const V: u32 = 1;
+    type Payload = KnowledgeCommentWrittenV1;
+}
+
+/// `knowledge.comment.deleted@1`: a comment is gone, its messages with it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgeCommentDeletedV1 {
+    /// `comment:cmt<n>`.
+    pub comment: String,
+    pub target_kind: String,
+    pub target_id: String,
+}
+
+pub struct KnowledgeCommentDeleted;
+impl EventType for KnowledgeCommentDeleted {
+    const TYPE: &'static str = "knowledge.comment.deleted";
+    const V: u32 = 1;
+    type Payload = KnowledgeCommentDeletedV1;
+}
+
 /// `effort.finished@1`: an effort's close is fully handled — its end
 /// snapshot pinned, unclaimed work reconciled, lifecycle metrics projected.
 /// Logged once per effort by the effort-lifecycle consumer (dedupe key
@@ -1372,6 +1452,10 @@ mod tests {
                 ("effort.decision_reviewed", 1),
                 ("effort.finished", 1),
                 ("effort.opened", 1),
+                ("knowledge.comment.deleted", 1),
+                ("knowledge.comment.written", 1),
+                ("knowledge.note.deleted", 1),
+                ("knowledge.note.written", 1),
                 ("knowledge.page.deleted", 1),
                 ("knowledge.page.written", 1),
                 ("lens.kept", 1),

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`knowledge.comment.deleted@1`: a comment is gone, its messages with it.",
+  "properties": {
+    "comment": {
+      "description": "`comment:cmt<n>`.",
+      "type": "string"
+    },
+    "target_id": {
+      "type": "string"
+    },
+    "target_kind": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "comment",
+    "target_kind",
+    "target_id"
+  ],
+  "title": "KnowledgeCommentDeletedV1",
+  "type": "object"
+}

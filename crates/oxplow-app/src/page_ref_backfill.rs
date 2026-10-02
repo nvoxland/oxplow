@@ -278,7 +278,10 @@ mod tests {
         let links = Arc::new(SqliteTaskLinkStore::new(db.clone()));
         let efforts = Arc::new(SqliteEffortStore::new(db.clone()));
         let findings_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
-        let notes = Arc::new(SqliteTaskNoteStore::new(db.clone()));
+        let notes = Arc::new(SqliteTaskNoteStore::new(
+            db.clone(),
+            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
+        ));
 
         let counts = run(
             page_refs.clone(),

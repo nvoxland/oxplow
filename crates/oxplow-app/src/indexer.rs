@@ -18,12 +18,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::broadcast;
-
 use oxplow_domain::stores::{CommentStore, TaskNoteStore, TaskStore, ThreadStore};
 use oxplow_domain::{CommentTarget, CommentThread, StreamId, Task, ThreadId};
 
-use crate::events::OxplowEvent;
 use crate::Services;
 
 pub const KIND_TASK: &str = "task";
@@ -63,6 +60,10 @@ impl crate::event_pump::AsyncEventConsumer for SearchIndexConsumer {
                 | "work_item.deleted"
                 | "knowledge.page.written"
                 | "knowledge.page.deleted"
+                | "knowledge.note.written"
+                | "knowledge.note.deleted"
+                | "knowledge.comment.written"
+                | "knowledge.comment.deleted"
                 | "snapshot.taken"
         )
     }
@@ -92,6 +93,41 @@ impl crate::event_pump::AsyncEventConsumer for SearchIndexConsumer {
             // Restated from the page as it stands: a deleted one drops out.
             indexer.index_wiki(slug).await;
             return Ok(());
+        }
+        // A thread note: its thread's notes restated, or it's gone.
+        match event.envelope.event_type.as_str() {
+            "knowledge.note.written" => {
+                if let Some(thread) = payload["thread"]
+                    .as_str()
+                    .and_then(|r| r.strip_prefix("thread:"))
+                    .and_then(oxplow_domain::ThreadId::try_from_str)
+                {
+                    indexer.reindex_thread_notes(&thread).await;
+                }
+                return Ok(());
+            }
+            "knowledge.comment.written" => {
+                if let (Some(kind), Some(id)) = (
+                    payload["target_kind"].as_str(),
+                    payload["target_id"].as_str(),
+                ) {
+                    indexer.reindex_target_comments(kind, id).await;
+                }
+                return Ok(());
+            }
+            "knowledge.note.deleted" | "knowledge.comment.deleted" => {
+                let (kind, field, prefix) = if event.envelope.event_type == "knowledge.note.deleted"
+                {
+                    (KIND_NOTE, "note", "task_note:")
+                } else {
+                    (KIND_COMMENT, "comment", "comment:")
+                };
+                if let Some(id) = payload[field].as_str().and_then(|r| r.strip_prefix(prefix)) {
+                    svc.search_store.remove_everywhere(kind, id).await?;
+                }
+                return Ok(());
+            }
+            _ => {}
         }
         if event.envelope.event_type == "snapshot.taken" {
             let stream = payload["stream"]
@@ -161,40 +197,6 @@ pub struct Indexer {
 impl Indexer {
     pub fn new(services: Arc<Services>) -> Self {
         Self { services }
-    }
-
-    /// Backfill the DB + wiki portion of the index from current state, then
-    /// process events forever. Spawned once at boot (see `main.rs`). File
-    /// contents backfill for free via the snapshot startup sweep, which emits
-    /// `SnapshotTaken`.
-    pub async fn run(self, mut rx: broadcast::Receiver<OxplowEvent>) {
-        self.backfill().await;
-        loop {
-            match rx.recv().await {
-                Ok(ev) => self.handle(ev).await,
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    }
-
-    /// Dispatch one event to the matching reindex. File-snapshot events are
-    /// handled here too (see `index_snapshot_files`).
-    pub async fn handle(&self, ev: OxplowEvent) {
-        match ev {
-            OxplowEvent::WorkNotesChanged {
-                thread_id: Some(tid),
-                ..
-            } => self.reindex_thread_notes(&tid).await,
-            OxplowEvent::CommentsChanged {
-                target_kind,
-                target_id,
-                ..
-            } => self.reindex_target_comments(&target_kind, &target_id).await,
-            // Tasks, wiki pages and snapshot files come off the event log
-            // (`register`).
-            _ => {}
-        }
     }
 
     // ---- backfill ----
@@ -684,6 +686,90 @@ mod tests {
             .await
             .iter()
             .any(|h| h.kind == KIND_COMMENT));
+    }
+
+    /// P7.B6: a thread note and a page comment are indexed from their
+    /// `knowledge.note.*` / `knowledge.comment.*` events — written, then
+    /// gone when deleted — with no in-memory bus in the loop.
+    #[tokio::test]
+    async fn notes_and_comments_are_indexed_from_their_events() {
+        let (svc, _dir) = services().await;
+        register(&svc);
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = svc
+            .threads
+            .create(&stream.id, "T", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
+        let sid = stream.id.to_string();
+        let found = |q: &'static str, kind: &'static str| {
+            let svc = svc.clone();
+            let sid = sid.clone();
+            async move {
+                svc.search_store
+                    .search(q, Some(&sid), &[], 10)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .any(|h| h.kind == kind)
+            }
+        };
+        let note = svc
+            .work_note_store
+            .add_for_thread(&thread.id, "a note about the gadget", "agent")
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert!(
+            found("gadget", KIND_NOTE).await,
+            "indexed on knowledge.note.written"
+        );
+        svc.work_note_store.delete(&note.id).await.unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert!(
+            !found("gadget", KIND_NOTE).await,
+            "removed on knowledge.note.deleted"
+        );
+
+        let comment = svc
+            .comment_store
+            .create(
+                &stream.id,
+                Some(&thread.id),
+                &CommentTarget {
+                    kind: "file".into(),
+                    id: "src/lib.rs".into(),
+                },
+                "quoted text",
+                "{}",
+                &[],
+                &[],
+                CommentIntent::Note,
+                "user",
+                "this mentions the doohickey",
+            )
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert!(
+            found("doohickey", KIND_COMMENT).await,
+            "indexed on knowledge.comment.written"
+        );
+        svc.comment_store
+            .add_message(comment.comment.id, "agent", "and the thingamajig")
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert!(
+            found("thingamajig", KIND_COMMENT).await,
+            "a reply re-indexes it"
+        );
+        svc.comment_store.delete(comment.comment.id).await.unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert!(
+            !found("doohickey", KIND_COMMENT).await,
+            "removed on knowledge.comment.deleted"
+        );
     }
 
     #[tokio::test]

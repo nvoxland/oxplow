@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tokio::sync::broadcast;
 
-use oxplow_domain::{AgentStatusState, StreamId, TaskId, ThreadId};
+use oxplow_domain::{AgentStatusState, StreamId, ThreadId};
 
 /// Event channel names shared by every transport that carries backend
 /// events to the renderer. The Tauri shell `app.emit`s on the channel
@@ -80,11 +80,6 @@ pub enum OxplowEvent {
     },
     /// tasks on `thread_id` (or backlog if `thread_id` is None).
     TasksChanged { thread_id: Option<ThreadId> },
-    /// A note was added or removed against an item or thread.
-    WorkNotesChanged {
-        item_id: Option<TaskId>,
-        thread_id: Option<ThreadId>,
-    },
     /// A comment (or one of its messages) changed on `target_kind` /
     /// `target_id` within `stream_id`. Renderer refetches the affected
     /// page's comments + the Comments inbox.
