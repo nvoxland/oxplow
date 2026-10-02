@@ -1592,6 +1592,17 @@ fact-insert transaction, which is safe only because whole-capture replay is
 idempotent and the watermark advances atomically with the rows. Full rationale +
 the read's eligibility rules: **`.context/metrics.md`**.
 
+
+### `test_case_stat` — each test's summary (`V139__test_case_stat.sql`, tsk733)
+
+One row per `(stream, branch, producer, subject)`, STRICT: last status
+and duration, the last duration written as a fact (`recorded_ms`, what the
+change-only tolerance compares to), max and running total duration,
+runs, failures, flips, first / last seen, last failed / passed, the
+latest run (`last_run_id`, SET NULL with its capture). Written only by
+`SqliteFactStore::record_test_run`, in the transaction that records the
+run and its change-only per-case facts. Published as `v_test_case_stat`
+(`mean_ms` derived). Cascades with its stream.
 ### `agent_nudge` — `SqliteAgentNudgeStore` (`crates/oxplow-db/src/agent_nudge_store.rs`, migration `V33__agent_nudge.sql`)
 
 The persisted record of the informational **nudges** oxplow surfaces to the

@@ -3889,15 +3889,6 @@ export type OxplowConfig = {
 	 */
 	metricDetailRetentionDays: number,
 	/**
-	 *  Keep per-case test facts (`oxplow.test_case`, `oxplow.test_duration`)
-	 *  for this many days. Older runs' cases are pruned daily, **except each
-	 *  test's latest result per branch** (every current number and a new
-	 *  branch's starting point stand on it) and the runs of an open effort;
-	 *  the run records stay. `0` keeps everything. Trend points older than
-	 *  the window recompute from fewer facts once the cube rebuilds.
-	 */
-	testCaseRetentionDays: number,
-	/**
 	 *  Extra `exclude`/`include` paths layered on top of `.gitignore`
 	 *  for fs-watch / snapshot capture / code-quality scans. `.git`,
 	 *  `.oxplow`, and everything in `.gitignore` (+ `.git/info/exclude`)

@@ -502,6 +502,66 @@ pub fn get_spec_tx(conn: &rusqlite::Connection, key: &str) -> rusqlite::Result<O
 /// returns the existing id (the partial unique index is the true guard;
 /// this read is the fast path on the serialized write connection). The
 /// caller commits, then calls [`SqliteFactStore::facts_committed`].
+/// A duration moves enough to be written again when it differs from the last
+/// one written by more than this fraction of it… (tsk733)
+pub const DURATION_MOVE_RATIO: f64 = 0.5;
+/// …and by at least this many milliseconds (a 5 ms test that takes 12 ms
+/// didn't get slower in any way a person reads).
+pub const DURATION_MOVE_MIN_MS: f64 = 20.0;
+
+/// One test case's result in a run (a JUnit case), as
+/// [`SqliteFactStore::record_test_run`] takes it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TestCaseResult {
+    /// `test:<classname>::<name>` — the fact's subject and the summary key.
+    pub subject: String,
+    /// `passed`, `failed` or `skipped`.
+    pub status: String,
+    pub time_ms: Option<f64>,
+    /// The status fact's (and duration fact's) dims.
+    pub dims_json: Option<String>,
+}
+
+/// One test's summary on a (stream, branch, producer): `v_test_case_stat`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TestCaseStat {
+    pub subject: String,
+    pub last_status: String,
+    pub last_ms: Option<f64>,
+    /// The last duration written as a fact (what the tolerance compares to).
+    pub recorded_ms: Option<f64>,
+    pub max_ms: Option<f64>,
+    pub mean_ms: Option<f64>,
+    pub runs: i64,
+    pub failures: i64,
+    pub flips: i64,
+    pub last_failed_at: Option<String>,
+    pub last_passed_at: Option<String>,
+    pub last_run_id: Option<i64>,
+}
+
+/// Which of a case's facts a run writes, given the test's summary on its
+/// branch (`None`: new there): `(status fact, duration fact)`. A failure
+/// is always written; a pass or skip only when new or its status changed; a
+/// duration when the status fact is written for a new test, or when it moved
+/// past the tolerance from the last duration written.
+pub fn test_case_writes(prev: Option<&TestCaseStat>, case: &TestCaseResult) -> (bool, bool) {
+    let status = match prev {
+        _ if case.status == "failed" => true,
+        None => true,
+        Some(p) => p.last_status != case.status,
+    };
+    let duration = match (case.time_ms, prev.and_then(|p| p.recorded_ms)) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some(ms), Some(was)) => {
+            let moved = (ms - was).abs();
+            moved > DURATION_MOVE_RATIO * was.max(1.0) && moved >= DURATION_MOVE_MIN_MS
+        }
+    };
+    (status, duration)
+}
+
 pub fn record_facts_tx(
     conn: &rusqlite::Connection,
     capture: NewMetricCapture,
@@ -531,6 +591,45 @@ pub fn record_facts_tx(
         crate::event_log_store::append_unique_tx(conn, &log.schemas, &env)?;
     }
     Ok(capture_id)
+}
+
+/// The summaries of `(stream, branch, producer)`, by subject.
+fn test_case_stats_tx(
+    conn: &rusqlite::Connection,
+    stream_id: i64,
+    branch: &str,
+    producer: &str,
+) -> Result<std::collections::HashMap<String, TestCaseStat>, DomainError> {
+    let mut stmt = conn
+        .prepare_cached(
+            "SELECT subject, last_status, last_ms, recorded_ms, max_ms,
+                    CASE WHEN timed_runs > 0 THEN total_ms / timed_runs END,
+                    runs, failures, flips, last_failed_at, last_passed_at, last_run_id
+               FROM test_case_stat
+              WHERE stream_id = ?1 AND branch = ?2 AND producer = ?3",
+        )
+        .map_err(map_sql_err)?;
+    let rows = stmt
+        .query_map(params![stream_id, branch, producer], |r| {
+            Ok(TestCaseStat {
+                subject: r.get(0)?,
+                last_status: r.get(1)?,
+                last_ms: r.get(2)?,
+                recorded_ms: r.get(3)?,
+                max_ms: r.get(4)?,
+                mean_ms: r.get(5)?,
+                runs: r.get(6)?,
+                failures: r.get(7)?,
+                flips: r.get(8)?,
+                last_failed_at: r.get(9)?,
+                last_passed_at: r.get(10)?,
+                last_run_id: r.get(11)?,
+            })
+        })
+        .map_err(map_sql_err)?;
+    rows.map(|r| r.map(|s| (s.subject.clone(), s)))
+        .collect::<rusqlite::Result<_>>()
+        .map_err(map_sql_err)
 }
 
 fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite::Result<i64> {
@@ -1289,6 +1388,142 @@ impl SqliteFactStore {
             self.db.memo().invalidate_facts();
         }
         result
+    }
+
+    /// Record a test run with per-case results (tsk733): the capture, the
+    /// per-case facts that say something new ([`test_case_writes`] against
+    /// each test's summary on the capture's branch), and every case's
+    /// summary row — one transaction. A replay under the capture's
+    /// idempotency key returns the recorded run and changes nothing.
+    pub async fn record_test_run(
+        &self,
+        capture: NewMetricCapture,
+        cases: Vec<TestCaseResult>,
+        case_measure: i64,
+        duration_measure: Option<i64>,
+        log: Option<CaptureEvent>,
+    ) -> Result<i64, DomainError> {
+        let result = self
+            .db
+            .call_mut(move |conn| {
+                let tx = conn.transaction().map_err(map_sql_err)?;
+                if let Some(key) = capture.idempotency_key.as_deref() {
+                    let existing: Option<i64> = tx
+                        .query_row(
+                            "SELECT id FROM metric_capture WHERE idempotency_key = ?1",
+                            params![key],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .map_err(map_sql_err)?;
+                    if let Some(id) = existing {
+                        return Ok(id);
+                    }
+                }
+                let stream = capture.stream_id;
+                let branch = capture.branch.clone().unwrap_or_default();
+                let producer = capture.producer.clone();
+                let when = capture.captured_at.unwrap_or_else(Timestamp::now);
+                let at = ts_to_string(when);
+                let mut capture = capture;
+                capture.captured_at = Some(when);
+                let prev = test_case_stats_tx(&tx, stream, &branch, &producer)?;
+                let mut facts = Vec::new();
+                for case in &cases {
+                    let (status, duration) = test_case_writes(prev.get(&case.subject), case);
+                    if status {
+                        facts.push(NewFact {
+                            subject_kind: Some("test".into()),
+                            subject_ref: Some(case.subject.clone()),
+                            dims_json: case.dims_json.clone(),
+                            ..NewFact::new(case_measure, 1.0)
+                        });
+                    }
+                    if let (true, Some(measure), Some(ms)) = (duration, duration_measure, case.time_ms) {
+                        facts.push(NewFact {
+                            subject_kind: Some("test".into()),
+                            subject_ref: Some(case.subject.clone()),
+                            dims_json: case.dims_json.clone(),
+                            ..NewFact::new(measure, ms)
+                        });
+                    }
+                }
+                let capture_id = record_facts_tx(&tx, capture, facts, log.as_ref())?;
+                let mut upsert = tx
+                    .prepare_cached(
+                        "INSERT INTO test_case_stat
+                           (stream_id, branch, producer, subject, last_status, last_ms, recorded_ms,
+                            max_ms, timed_runs, total_ms, runs, failures, flips, first_seen_at,
+                            last_seen_at, last_failed_at, last_passed_at, last_run_id)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?6, ?8, coalesce(?6, 0), 1, ?9, 0, ?10,
+                                 ?10, CASE WHEN ?5 = 'failed' THEN ?10 END,
+                                 CASE WHEN ?5 = 'passed' THEN ?10 END, ?11)
+                         ON CONFLICT (stream_id, branch, producer, subject) DO UPDATE SET
+                           flips = flips + (last_status <> excluded.last_status),
+                           last_status = excluded.last_status,
+                           last_ms = coalesce(excluded.last_ms, last_ms),
+                           recorded_ms = coalesce(excluded.recorded_ms, recorded_ms),
+                           max_ms = CASE WHEN excluded.last_ms IS NULL THEN max_ms
+                                         ELSE max(coalesce(max_ms, excluded.last_ms), excluded.last_ms) END,
+                           timed_runs = timed_runs + excluded.timed_runs,
+                           total_ms = total_ms + excluded.total_ms,
+                           runs = runs + 1,
+                           failures = failures + excluded.failures,
+                           last_seen_at = excluded.last_seen_at,
+                           last_failed_at = coalesce(excluded.last_failed_at, last_failed_at),
+                           last_passed_at = coalesce(excluded.last_passed_at, last_passed_at),
+                           last_run_id = excluded.last_run_id",
+                    )
+                    .map_err(map_sql_err)?;
+                for case in &cases {
+                    let (_, duration) = test_case_writes(prev.get(&case.subject), case);
+                    let recorded = if duration { case.time_ms } else { None };
+                    upsert
+                        .execute(params![
+                            stream,
+                            branch,
+                            producer,
+                            case.subject,
+                            case.status,
+                            case.time_ms,
+                            recorded,
+                            i64::from(case.time_ms.is_some()),
+                            i64::from(case.status == "failed"),
+                            at,
+                            capture_id,
+                        ])
+                        .map_err(map_sql_err)?;
+                }
+                drop(upsert);
+                tx.commit().map_err(map_sql_err)?;
+                Ok(capture_id)
+            })
+            .await;
+        if result.is_ok() {
+            self.db.memo().invalidate_facts();
+        }
+        result
+    }
+
+    /// Every test's summary on `(stream, branch, producer)`.
+    pub async fn test_case_stats(
+        &self,
+        stream_id: i64,
+        branch: Option<String>,
+        producer: &str,
+    ) -> Result<Vec<TestCaseStat>, DomainError> {
+        let branch = branch.unwrap_or_default();
+        let producer = producer.to_string();
+        self.db
+            .call_mut(move |conn| {
+                let mut out: Vec<TestCaseStat> =
+                    test_case_stats_tx(conn, stream_id, &branch, &producer)?
+                        .into_values()
+                        .collect();
+                out.sort_by(|a, b| a.subject.cmp(&b.subject));
+                Ok(out)
+            })
+            .await
     }
 
     /// Forget the memoized fact reads — after a caller's own transaction
@@ -2672,128 +2907,6 @@ impl SqliteFactStore {
             .await
     }
 
-    /// Prune **per-case test facts** older than `cutoff` — the rolling window
-    /// (`testCaseRetentionDays`, tsk514). A run's facts on a per-subject
-    /// measure (`oxplow.test_case`, `oxplow.test_duration`) go when the run
-    /// is older than the cutoff and not in an open effort, **except each
-    /// test's latest result** per `(measure, stream, branch, producer,
-    /// subject)` — every fact of that latest run under that subject — which
-    /// every current number and a new branch's seed stand on. The captures
-    /// (the run records `v_test_run` reads) and every other measure stay.
-    ///
-    /// Trend points older than the window recompute from fewer facts once
-    /// the cube rebuilds: that is the trade the window buys. A closed effort
-    /// loses nothing it shows (its outcome facts were computed at close).
-    ///
-    /// Works in chunks so a first pass over millions of facts never holds one
-    /// giant transaction: the latest run per test is computed once, then old
-    /// runs are deleted a few at a time, each chunk invalidating its stream's
-    /// cube **for the per-subject measures** in the same transaction when it
-    /// deleted something (the tsk100 rule, scoped: no other measure's cube
-    /// row reads these facts). Returns the facts deleted.
-    pub async fn prune_aged_test_cases(&self, cutoff: Timestamp) -> Result<u64, DomainError> {
-        /// Old runs per transaction (~2,500 facts each for a real suite).
-        const CHUNK: usize = 20;
-        let cutoff = ts_to_string(cutoff);
-        self.db
-            .call_mut(move |conn| {
-                conn.execute_batch(
-                    "DROP TABLE IF EXISTS temp.test_case_latest;
-                     CREATE TEMP TABLE test_case_latest (
-                       measure_id INTEGER NOT NULL,
-                       capture_id INTEGER NOT NULL,
-                       subject_key TEXT NOT NULL,
-                       PRIMARY KEY (measure_id, capture_id, subject_key)
-                     ) WITHOUT ROWID;
-                     INSERT OR IGNORE INTO temp.test_case_latest
-                       SELECT measure_id, capture_id, subject_key FROM (
-                         SELECT f.measure_id, f.capture_id,
-                                COALESCE(f.subject_ref, f.path, '') AS subject_key,
-                                DENSE_RANK() OVER (
-                                  PARTITION BY f.measure_id, c.stream_id, COALESCE(c.branch, ''),
-                                               c.producer, COALESCE(f.subject_ref, f.path, '')
-                                  ORDER BY c.captured_at DESC, c.id DESC
-                                ) AS latest
-                           FROM fact f
-                           JOIN metric_capture c ON c.id = f.capture_id
-                           JOIN measure m ON m.id = f.measure_id
-                          WHERE m.capture_scope = 'per-subject' AND c.status = 'done'
-                       ) WHERE latest = 1;",
-                )
-                .map_err(map_sql_err)?;
-                let old: Vec<(i64, i64)> = {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT c.id, c.stream_id FROM metric_capture c
-                              WHERE c.captured_at < ?1 AND c.status = 'done'
-                                AND (c.effort_id IS NULL OR c.effort_id NOT IN
-                                       (SELECT id FROM effort WHERE ended_at IS NULL))
-                                AND EXISTS (SELECT 1 FROM fact f JOIN measure m ON m.id = f.measure_id
-                                             WHERE f.capture_id = c.id
-                                               AND m.capture_scope = 'per-subject')
-                              ORDER BY c.captured_at, c.id",
-                        )
-                        .map_err(map_sql_err)?;
-                    let rows = stmt
-                        .query_map(params![cutoff], |r| Ok((r.get(0)?, r.get(1)?)))
-                        .map_err(map_sql_err)?
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                        .map_err(map_sql_err)?;
-                    rows
-                };
-                let mut deleted: u64 = 0;
-                for chunk in old.chunks(CHUNK) {
-                    let tx = conn.transaction().map_err(map_sql_err)?;
-                    let ids = serde_json::to_string(&chunk.iter().map(|(id, _)| *id).collect::<Vec<_>>())
-                        .unwrap_or_else(|_| "[]".into());
-                    let n = tx
-                        .execute(
-                            "DELETE FROM fact
-                              WHERE capture_id IN (SELECT value FROM json_each(?1))
-                                AND measure_id IN (SELECT id FROM measure WHERE capture_scope = 'per-subject')
-                                AND NOT EXISTS (
-                                  SELECT 1 FROM temp.test_case_latest l
-                                   WHERE l.measure_id = fact.measure_id
-                                     AND l.capture_id = fact.capture_id
-                                     AND l.subject_key = COALESCE(fact.subject_ref, fact.path, ''))",
-                            params![ids],
-                        )
-                        .map_err(map_sql_err)?;
-                    if n > 0 {
-                        // Only the per-subject measures' cube describes the
-                        // deleted facts; every other measure's stays built.
-                        let mut streams: Vec<i64> = chunk.iter().map(|(_, s)| *s).collect();
-                        streams.sort_unstable();
-                        streams.dedup();
-                        for stream_id in streams {
-                            for sql in [
-                                "DELETE FROM metric_cube
-                                  WHERE measure_id IN (SELECT id FROM measure WHERE capture_scope = 'per-subject')
-                                    AND capture_id IN (SELECT id FROM metric_capture WHERE stream_id = ?1)",
-                                "DELETE FROM metric_live_fact
-                                  WHERE stream_id = ?1
-                                    AND measure_id IN (SELECT id FROM measure WHERE capture_scope = 'per-subject')",
-                                "DELETE FROM metric_cube_state
-                                  WHERE stream_id = ?1
-                                    AND measure_id IN (SELECT id FROM measure WHERE capture_scope = 'per-subject')",
-                            ] {
-                                tx.execute(sql, params![stream_id]).map_err(map_sql_err)?;
-                            }
-                        }
-                        // Fence any build already in flight (tsk103).
-                        tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
-                            .map_err(map_sql_err)?;
-                    }
-                    tx.commit().map_err(map_sql_err)?;
-                    deleted += n as u64;
-                }
-                conn.execute_batch("DROP TABLE IF EXISTS temp.test_case_latest")
-                    .map_err(map_sql_err)?;
-                Ok(deleted)
-            })
-            .await
-    }
-
     /// Prune metric captures older than `cutoff` — the OPT-IN retention knob
     /// (`metricRetentionDays`, tsk93; the default 0 means this is never
     /// called). Deletes ONLY history no current value stands on; kept
@@ -4045,29 +4158,14 @@ mod tests {
         let _ = c4;
     }
 
-    /// tsk514: per-case test facts keep a rolling window. Older than the
-    /// cutoff, a run's per-subject facts go — except each test's latest
-    /// result per (stream, branch, producer), which every current number and
-    /// a new branch's seed stand on, and the runs of an open effort. Other
-    /// measures, and the captures themselves (the run records), stay. A pass
-    /// that deletes invalidates the cube; one that deletes nothing doesn't.
+    /// tsk733: a test run records per-case facts only where they say
+    /// something new — every failure, and a pass or skip only when the test
+    /// is new on the branch, changed status, or moved its duration past the
+    /// threshold — and keeps a per-test summary row up to date in the same
+    /// transaction.
     #[tokio::test]
-    async fn test_case_retention_keeps_each_tests_latest_result_and_the_window() {
+    async fn a_test_run_records_what_changed_and_keeps_the_per_test_summary() {
         let store = fixture().await;
-        let db = store.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|c| {
-                c.execute(
-                    "INSERT INTO effort (id, work_item, thread_id, started_at, ended_at)
-                     VALUES (2, 'work_item:oxplow:tsk9', 1, '2026-06-01T00:00:00.000000Z', NULL)",
-                    [],
-                )
-                .map(|_| ())
-            })
-        })
-        .await
-        .unwrap()
-        .unwrap();
         let cases = store
             .upsert_measure(NewMeasure {
                 capture_scope: "per-subject".into(),
@@ -4075,162 +4173,189 @@ mod tests {
             })
             .await
             .unwrap();
-        let other = store
-            .upsert_measure(NewMeasure::new("acme.other", "acme.other"))
+        let durations = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-subject".into(),
+                ..NewMeasure::new("acme.test_duration", "acme.test_duration")
+            })
             .await
             .unwrap();
-        let case = |s: &str| NewFact {
-            subject_ref: Some(s.into()),
-            ..NewFact::new(cases, 1.0)
+        let result = |t: &str, status: &str, ms: f64| TestCaseResult {
+            subject: format!("test:{t}"),
+            status: status.into(),
+            time_ms: Some(ms),
+            dims_json: Some(format!(r#"{{"oxplow.status":"{status}"}}"#)),
         };
-        let run = |branch: &str, when: &str, effort: Option<i64>| NewMetricCapture {
+        let run = |branch: &str, when: &str| NewMetricCapture {
             captured_at: Some(at(when)),
             branch: Some(branch.into()),
-            effort_id: effort,
             ..NewMetricCapture::done(1, "tests", "t")
         };
-        let old1 = store
-            .record_facts(
-                run("main", "2026-06-01T08:00:00.000000Z", None),
-                vec![case("A"), case("B"), NewFact::new(other, 5.0)],
-            )
-            .await
-            .unwrap();
-        let old2 = store
-            .record_facts(
-                run("main", "2026-06-02T08:00:00.000000Z", None),
-                vec![case("A")],
-            )
-            .await
-            .unwrap();
-        let recent = store
-            .record_facts(
-                run("main", "2026-06-20T08:00:00.000000Z", None),
-                vec![case("B")],
-            )
-            .await
-            .unwrap();
-        let feat = store
-            .record_facts(
-                run("feat", "2026-06-01T09:00:00.000000Z", None),
-                vec![case("A")],
-            )
-            .await
-            .unwrap();
-        let open = store
-            .record_facts(
-                run("main", "2026-06-01T10:00:00.000000Z", Some(2)),
-                vec![case("C"), case("C")],
-            )
-            .await
-            .unwrap();
-        let closed = store
-            .record_facts(
-                run("main", "2026-06-01T11:00:00.000000Z", Some(1)),
-                vec![case("D")],
-            )
-            .await
-            .unwrap();
-        let later_d = store
-            .record_facts(
-                run("main", "2026-06-03T11:00:00.000000Z", None),
-                vec![case("D")],
-            )
-            .await
-            .unwrap();
-        store
-            .write_cube_rows(
-                cases,
-                1,
-                Some("main".into()),
-                recent,
-                at("2026-06-20T08:00:00.000000Z"),
-                vec![],
-                store.cube_epoch().await.unwrap(),
-            )
-            .await
-            .unwrap();
-
-        store
-            .write_cube_rows(
-                other,
-                1,
-                Some("main".into()),
-                old1,
-                at("2026-06-01T08:00:00.000000Z"),
-                vec![],
-                store.cube_epoch().await.unwrap(),
-            )
-            .await
-            .unwrap();
-
-        let cutoff = at("2026-06-10T00:00:00.000000Z");
-        let deleted = store.prune_aged_test_cases(cutoff).await.unwrap();
-        assert_eq!(
-            deleted, 3,
-            "old1's A and B, and the closed effort's superseded D"
-        );
-        let left = |id: i64, measure: i64| {
+        let recorded = |id: i64| {
             let store = &store;
             async move {
-                store
-                    .facts_for_captures(measure, vec![id])
+                let mut status: Vec<String> = store
+                    .facts_for_captures(cases, vec![id])
                     .await
                     .unwrap()
-                    .len()
+                    .into_iter()
+                    .map(|f| f.subject_ref.unwrap())
+                    .collect();
+                status.sort();
+                let mut timed: Vec<String> = store
+                    .facts_for_captures(durations, vec![id])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|f| f.subject_ref.unwrap())
+                    .collect();
+                timed.sort();
+                (status, timed)
             }
         };
-        assert_eq!(
-            left(old1, cases).await,
-            0,
-            "superseded on its branch, older than the window"
-        );
-        assert_eq!(left(old1, other).await, 1, "another measure is untouched");
-        assert_eq!(left(old2, cases).await, 1, "main's latest A stays");
-        assert_eq!(left(recent, cases).await, 1, "inside the window");
-        assert_eq!(left(feat, cases).await, 1, "feat's latest A stays");
-        assert_eq!(left(open, cases).await, 2, "an open effort's runs stay");
-        assert_eq!(
-            left(closed, cases).await,
-            0,
-            "a closed effort's superseded result goes"
-        );
-        assert_eq!(left(later_d, cases).await, 1);
-        assert!(
-            store
-                .captures_for_producers(vec!["tests".into()])
-                .await
-                .unwrap()
-                .iter()
-                .any(|c| c.id == old1),
-            "the run record stays"
-        );
-        assert!(
-            store.cube_watermark(cases, 1).await.unwrap().is_none(),
-            "a pass that deleted facts invalidates their measure's cube"
-        );
-        assert!(
-            store.cube_watermark(other, 1).await.unwrap().is_some(),
-            "another measure's cube stays built"
-        );
+        let sets = |a: &[&str]| a.iter().map(|t| format!("test:{t}")).collect::<Vec<_>>();
 
-        store
-            .write_cube_rows(
+        // First run on main: everything is new.
+        let r1 = store
+            .record_test_run(
+                run("main", "2026-06-01T08:00:00.000000Z"),
+                vec![
+                    result("a", "passed", 100.0),
+                    result("b", "failed", 10.0),
+                    result("c", "skipped", 0.0),
+                    result("tiny", "passed", 5.0),
+                ],
                 cases,
-                1,
-                Some("main".into()),
-                recent,
-                at("2026-06-20T08:00:00.000000Z"),
-                vec![],
-                store.cube_epoch().await.unwrap(),
+                Some(durations),
+                None,
             )
             .await
             .unwrap();
-        assert_eq!(store.prune_aged_test_cases(cutoff).await.unwrap(), 0);
-        assert!(
-            store.cube_watermark(cases, 1).await.unwrap().is_some(),
-            "a pass that deleted nothing leaves the cube built"
+        assert_eq!(
+            recorded(r1).await,
+            (
+                sets(&["a", "b", "c", "tiny"]),
+                sets(&["a", "b", "c", "tiny"])
+            )
         );
+
+        // The same results again, a little slower: only the failure.
+        let r2 = store
+            .record_test_run(
+                run("main", "2026-06-01T09:00:00.000000Z"),
+                vec![
+                    result("a", "passed", 140.0),
+                    result("b", "failed", 10.0),
+                    result("c", "skipped", 0.0),
+                    result("tiny", "passed", 12.0),
+                ],
+                cases,
+                Some(durations),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            recorded(r2).await,
+            (sets(&["b"]), sets(&[])),
+            "40% slower and a 7 ms move are both inside the tolerance"
+        );
+
+        // a drifts past 50% of its LAST RECORDED duration; b goes green.
+        let r3 = store
+            .record_test_run(
+                run("main", "2026-06-01T10:00:00.000000Z"),
+                vec![
+                    result("a", "passed", 160.0),
+                    result("b", "passed", 10.0),
+                    result("c", "skipped", 0.0),
+                    result("tiny", "passed", 5.0),
+                ],
+                cases,
+                Some(durations),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(recorded(r3).await, (sets(&["b"]), sets(&["a"])));
+
+        // Another branch starts from nothing of its own.
+        let r4 = store
+            .record_test_run(
+                run("feat", "2026-06-01T11:00:00.000000Z"),
+                vec![result("a", "passed", 100.0)],
+                cases,
+                Some(durations),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(recorded(r4).await, (sets(&["a"]), sets(&["a"])));
+
+        let stats = store
+            .test_case_stats(1, Some("main".into()), "tests")
+            .await
+            .unwrap();
+        let b = stats.iter().find(|s| s.subject == "test:b").unwrap();
+        assert_eq!(
+            (b.runs, b.failures, b.flips, b.last_status.as_str()),
+            (3, 2, 1, "passed")
+        );
+        assert_eq!(
+            b.last_failed_at.as_deref(),
+            Some("2026-06-01T09:00:00.000000Z")
+        );
+        assert_eq!(
+            b.last_passed_at.as_deref(),
+            Some("2026-06-01T10:00:00.000000Z")
+        );
+        let a = stats.iter().find(|s| s.subject == "test:a").unwrap();
+        assert_eq!(
+            (a.last_ms, a.max_ms, a.recorded_ms),
+            (Some(160.0), Some(160.0), Some(160.0))
+        );
+        assert_eq!(a.mean_ms, Some((100.0 + 140.0 + 160.0) / 3.0));
+        assert_eq!(a.last_run_id, Some(r3));
+        assert_eq!(stats.len(), 4);
+    }
+
+    /// A run replayed under the same idempotency key records nothing and
+    /// counts nothing twice.
+    #[tokio::test]
+    async fn a_replayed_test_run_changes_nothing() {
+        let store = fixture().await;
+        let cases = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-subject".into(),
+                ..NewMeasure::new("acme.test_case", "acme.test_case")
+            })
+            .await
+            .unwrap();
+        let run = || NewMetricCapture {
+            idempotency_key: Some("test-run:evt1".into()),
+            branch: Some("main".into()),
+            ..NewMetricCapture::done(1, "tests", "t")
+        };
+        let case = || TestCaseResult {
+            subject: "test:a".into(),
+            status: "failed".into(),
+            time_ms: None,
+            dims_json: None,
+        };
+        let first = store
+            .record_test_run(run(), vec![case()], cases, None, None)
+            .await
+            .unwrap();
+        let again = store
+            .record_test_run(run(), vec![case()], cases, None, None)
+            .await
+            .unwrap();
+        assert_eq!(first, again);
+        let stats = store
+            .test_case_stats(1, Some("main".into()), "tests")
+            .await
+            .unwrap();
+        assert_eq!((stats[0].runs, stats[0].failures), (1, 1));
     }
 
     #[tokio::test]

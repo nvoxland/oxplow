@@ -164,69 +164,69 @@
   "ai_result": {
     "2": [
       {
+        "doc": "Row id.",
         "name": "id",
-        "type": "INTEGER",
-        "doc": "Row id."
+        "type": "INTEGER"
       },
       {
+        "doc": "sha256 of the canonical `{ op, args }`.",
         "name": "input_hash",
-        "type": "TEXT",
-        "doc": "sha256 of the canonical `{ op, args }`."
+        "type": "TEXT"
       },
       {
+        "doc": "The provider that served the model (`ai_*` settings id); another provider of the same model name is another result.",
         "name": "provider",
-        "type": "TEXT",
-        "doc": "The provider that served the model (`ai_*` settings id); another provider of the same model name is another result."
+        "type": "TEXT"
       },
       {
+        "doc": "The model that computed it.",
         "name": "model",
-        "type": "TEXT",
-        "doc": "The model that computed it."
+        "type": "TEXT"
       },
       {
+        "doc": "The op's prompt version (`classify@1`); a new prompt is a new result.",
         "name": "prompt_version",
-        "type": "TEXT",
-        "doc": "The op's prompt version (`classify@1`); a new prompt is a new result."
+        "type": "TEXT"
       },
       {
+        "doc": "`classify`, `score`, `summarize` or `extract`.",
         "name": "op",
-        "type": "TEXT",
-        "doc": "`classify`, `score`, `summarize` or `extract`."
+        "type": "TEXT"
       },
       {
+        "doc": "The role it ran on (`decide`, `summarize`, `main`).",
         "name": "role",
-        "type": "TEXT",
-        "doc": "The role it ran on (`decide`, `summarize`, `main`)."
+        "type": "TEXT"
       },
       {
+        "doc": "What first asked, e.g. `inferred-decisions`, `source:<ext>/<id>`.",
         "name": "caller",
-        "type": "TEXT",
-        "doc": "What first asked, e.g. `inferred-decisions`, `source:<ext>/<id>`."
+        "type": "TEXT"
       },
       {
+        "doc": "The result as JSON.",
         "name": "output_json",
-        "type": "TEXT",
-        "doc": "The result as JSON."
+        "type": "TEXT"
       },
       {
+        "doc": "Input tokens of the call that computed it.",
         "name": "input_tokens",
-        "type": "INTEGER",
-        "doc": "Input tokens of the call that computed it."
+        "type": "INTEGER"
       },
       {
+        "doc": "Output tokens of that call.",
         "name": "output_tokens",
-        "type": "INTEGER",
-        "doc": "Output tokens of that call."
+        "type": "INTEGER"
       },
       {
+        "doc": "When it was computed (RFC 3339).",
         "name": "at",
-        "type": "TEXT",
-        "doc": "When it was computed (RFC 3339)."
+        "type": "TEXT"
       },
       {
+        "doc": "The call that computed it (v_ai_call.id).",
         "name": "ai_call_id",
-        "type": "INTEGER",
-        "doc": "The call that computed it (v_ai_call.id)."
+        "type": "INTEGER"
       }
     ],
     "3": [
@@ -373,7 +373,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "The provider's name: a work item ref's segment (`work_item:<provider>:\u2026`), `git`.",
+        "doc": "The provider's name: a work item ref's segment (`work_item:<provider>:…`), `git`.",
         "name": "provider",
         "type": "TEXT"
       },
@@ -417,7 +417,7 @@
         "type": "INTEGER"
       },
       {
-        "doc": "What produced it (collector, gauge, hook\u2026).",
+        "doc": "What produced it (collector, gauge, hook…).",
         "name": "producer",
         "type": "TEXT"
       },
@@ -713,7 +713,7 @@
         "type": "INTEGER"
       },
       {
-        "doc": "Its share of the change's function churn (0\u20131).",
+        "doc": "Its share of the change's function churn (0–1).",
         "name": "churn_share",
         "type": "REAL"
       }
@@ -810,54 +810,54 @@
   "claim": {
     "1": [
       {
+        "doc": "Claim id.",
         "name": "id",
-        "type": "INTEGER",
-        "doc": "Claim id."
+        "type": "INTEGER"
       },
       {
+        "doc": "Thread it was made in.",
         "name": "thread_id",
-        "type": "INTEGER",
-        "doc": "Thread it was made in."
+        "type": "INTEGER"
       },
       {
+        "doc": "Task, if known.",
         "name": "task_id",
-        "type": "INTEGER",
-        "doc": "Task, if known."
+        "type": "INTEGER"
       },
       {
+        "doc": "Effort, if one was open.",
         "name": "effort_id",
-        "type": "INTEGER",
-        "doc": "Effort, if one was open."
+        "type": "INTEGER"
       },
       {
+        "doc": "Turn it happened in (v_agent_turn.id), when known.",
         "name": "turn_id",
-        "type": "INTEGER",
-        "doc": "Turn it happened in (v_agent_turn.id), when known."
+        "type": "INTEGER"
       },
       {
+        "doc": "The claim in words.",
         "name": "statement",
-        "type": "TEXT",
-        "doc": "The claim in words."
+        "type": "TEXT"
       },
       {
+        "doc": "`tests_pass`, `no_behavior_change`, `handles_case` or `other`.",
         "name": "kind",
-        "type": "TEXT",
-        "doc": "`tests_pass`, `no_behavior_change`, `handles_case` or `other`."
+        "type": "TEXT"
       },
       {
+        "doc": "What backs it (`run:<id>`, a test, a file); NULL if nothing was cited.",
         "name": "evidence_ref",
-        "type": "TEXT",
-        "doc": "What backs it (`run:<id>`, a test, a file); NULL if nothing was cited."
+        "type": "TEXT"
       },
       {
+        "doc": "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0.",
         "name": "verified",
-        "type": "",
-        "doc": "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0."
+        "type": ""
       },
       {
+        "doc": "RFC 3339 timestamp.",
         "name": "created_at",
-        "type": "TEXT",
-        "doc": "RFC 3339 timestamp."
+        "type": "TEXT"
       }
     ],
     "2": [
@@ -1162,12 +1162,12 @@
         "type": "INTEGER"
       },
       {
-        "doc": "Kind of page it is anchored to: `file`, `wiki`, `task`, \u2026",
+        "doc": "Kind of page it is anchored to: `file`, `wiki`, `task`, …",
         "name": "target_kind",
         "type": "TEXT"
       },
       {
-        "doc": "Id of that page (path, slug, task id\u2026).",
+        "doc": "Id of that page (path, slug, task id…).",
         "name": "target_id",
         "type": "TEXT"
       },
@@ -1410,64 +1410,64 @@
   "decision": {
     "1": [
       {
+        "doc": "Decision id.",
         "name": "id",
-        "type": "INTEGER",
-        "doc": "Decision id."
+        "type": "INTEGER"
       },
       {
+        "doc": "Thread it was made in.",
         "name": "thread_id",
-        "type": "INTEGER",
-        "doc": "Thread it was made in."
+        "type": "INTEGER"
       },
       {
+        "doc": "Task being worked on, if known.",
         "name": "task_id",
-        "type": "INTEGER",
-        "doc": "Task being worked on, if known."
+        "type": "INTEGER"
       },
       {
+        "doc": "Effort it was made during, if one was open.",
         "name": "effort_id",
-        "type": "INTEGER",
-        "doc": "Effort it was made during, if one was open."
+        "type": "INTEGER"
       },
       {
+        "doc": "Turn it happened in (v_agent_turn.id), when known.",
         "name": "turn_id",
-        "type": "INTEGER",
-        "doc": "Turn it happened in (v_agent_turn.id), when known."
+        "type": "INTEGER"
       },
       {
+        "doc": "What had to be decided.",
         "name": "question",
-        "type": "TEXT",
-        "doc": "What had to be decided."
+        "type": "TEXT"
       },
       {
+        "doc": "What was chosen.",
         "name": "choice",
-        "type": "TEXT",
-        "doc": "What was chosen."
+        "type": "TEXT"
       },
       {
+        "doc": "Options not taken, as a JSON array of strings.",
         "name": "alternatives",
-        "type": "TEXT",
-        "doc": "Options not taken, as a JSON array of strings."
+        "type": "TEXT"
       },
       {
+        "doc": "`low`, `medium` or `high`.",
         "name": "confidence",
-        "type": "TEXT",
-        "doc": "`low`, `medium` or `high`."
+        "type": "TEXT"
       },
       {
+        "doc": "The reasoning.",
         "name": "why",
-        "type": "TEXT",
-        "doc": "The reasoning."
+        "type": "TEXT"
       },
       {
+        "doc": "`recorded` (the agent recorded it) or `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed).",
         "name": "provenance",
-        "type": "TEXT",
-        "doc": "`recorded` (the agent recorded it) or `inferred` (oxplow proposed it from the effort's activity when the effort closed \u2014 a recorded `extract` computation on the `main` role; unconfirmed)."
+        "type": "TEXT"
       },
       {
+        "doc": "RFC 3339 timestamp.",
         "name": "created_at",
-        "type": "TEXT",
-        "doc": "RFC 3339 timestamp."
+        "type": "TEXT"
       }
     ],
     "2": [
@@ -1522,7 +1522,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed \u2014 a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`).",
+        "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`).",
         "name": "provenance",
         "type": "TEXT"
       },
@@ -1561,12 +1561,12 @@
         "type": "TEXT"
       },
       {
-        "doc": "The tool behind it (`rustc`, `ts`, `eslint`, \u2026), if given.",
+        "doc": "The tool behind it (`rustc`, `ts`, `eslint`, …), if given.",
         "name": "source",
         "type": "TEXT"
       },
       {
-        "doc": "Its code (`E0308`, `2304`, \u2026), if given.",
+        "doc": "Its code (`E0308`, `2304`, …), if given.",
         "name": "code",
         "type": "TEXT"
       },
@@ -1762,7 +1762,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "`gauge`, `coverage`, `test`, `event`, \u2026",
+        "doc": "`gauge`, `coverage`, `test`, `event`, …",
         "name": "kind",
         "type": "TEXT"
       },
@@ -1777,7 +1777,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "How the delta was computed: `files` (over the effort's claimed files), `sum` (in-window total) or `level` (before\u2192after).",
+        "doc": "How the delta was computed: `files` (over the effort's claimed files), `sum` (in-window total) or `level` (before→after).",
         "name": "agg",
         "type": "TEXT"
       },
@@ -1792,7 +1792,7 @@
         "type": "REAL"
       },
       {
-        "doc": "current \u2212 baseline, or the total for `sum`.",
+        "doc": "current − baseline, or the total for `sum`.",
         "name": "delta",
         "type": "REAL"
       },
@@ -1856,7 +1856,7 @@
         "type": "INTEGER"
       },
       {
-        "doc": "`test-run`, `diff-coverage`, `static-analysis`, \u2026",
+        "doc": "`test-run`, `diff-coverage`, `static-analysis`, …",
         "name": "kind",
         "type": "TEXT"
       },
@@ -1895,7 +1895,7 @@
   "event": {
     "1": [
       {
-        "doc": "Insert order \u2014 the delivery order consumers checkpoint on.",
+        "doc": "Insert order — the delivery order consumers checkpoint on.",
         "name": "seq",
         "type": "INTEGER"
       },
@@ -1920,7 +1920,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, \u2026",
+        "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, …",
         "name": "source",
         "type": "TEXT"
       },
@@ -2008,7 +2008,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "The event namespace it belongs to (`agent`, `test`, \u2026); sets its retention.",
+        "doc": "The event namespace it belongs to (`agent`, `test`, …); sets its retention.",
         "name": "namespace",
         "type": "TEXT"
       },
@@ -2244,7 +2244,7 @@
         "type": ""
       },
       {
-        "doc": "Its language (`rust`, `typescript`, \u2026).",
+        "doc": "Its language (`rust`, `typescript`, …).",
         "name": "language",
         "type": ""
       },
@@ -2409,7 +2409,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "What a fact is about: `symbol`, `file`, `test`, `model`, \u2026",
+        "doc": "What a fact is about: `symbol`, `file`, `test`, `model`, …",
         "name": "subject_kind",
         "type": "TEXT"
       },
@@ -2443,7 +2443,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "How it displays (`gauge`, \u2026).",
+        "doc": "How it displays (`gauge`, …).",
         "name": "kind",
         "type": "TEXT"
       },
@@ -2468,7 +2468,7 @@
         "type": "REAL"
       },
       {
-        "doc": "When a gauge runs (`on-snapshot`, \u2026); `auto` for a metric fed by its producer.",
+        "doc": "When a gauge runs (`on-snapshot`, …); `auto` for a metric fed by its producer.",
         "name": "trigger",
         "type": "TEXT"
       },
@@ -2478,7 +2478,7 @@
         "type": "INTEGER"
       },
       {
-        "doc": "`operational`, `testing`, `static-quality` or `custom` \u2014 how the catalog groups it.",
+        "doc": "`operational`, `testing`, `static-quality` or `custom` — how the catalog groups it.",
         "name": "category",
         "type": "TEXT"
       }
@@ -2507,7 +2507,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "How facts combine within a capture: count, sum, avg, min, max, last, p95, ratio, \u2026",
+        "doc": "How facts combine within a capture: count, sum, avg, min, max, last, p95, ratio, …",
         "name": "aggregation",
         "type": "TEXT"
       },
@@ -2621,7 +2621,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "For a materialized model: the event log's highest seq when that recompute began \u2014 what its inputs had seen.",
+        "doc": "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen.",
         "name": "events_to",
         "type": "INTEGER"
       }
@@ -2717,12 +2717,12 @@
         "type": "INTEGER"
       },
       {
-        "doc": "Page kind (`task`, `file`, `lens`, \u2026).",
+        "doc": "Page kind (`task`, `file`, `lens`, …).",
         "name": "page_kind",
         "type": "TEXT"
       },
       {
-        "doc": "Page id (`task:42`, `file:src/a.rs`, \u2026).",
+        "doc": "Page id (`task:42`, `file:src/a.rs`, …).",
         "name": "page_id",
         "type": "TEXT"
       },
@@ -2869,7 +2869,7 @@
         "type": "INTEGER"
       },
       {
-        "doc": "Snapshot the worktree was at just before this take; parent \u2192 snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id \u2192 snapshot_id).",
+        "doc": "Snapshot the worktree was at just before this take; parent → snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id → snapshot_id).",
         "name": "parent_snapshot_id",
         "type": "INTEGER"
       },
@@ -3021,7 +3021,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "`function`, `class`, `method`, `module`, \u2026 (the LSP symbol kinds).",
+        "doc": "`function`, `class`, `method`, `module`, … (the LSP symbol kinds).",
         "name": "kind",
         "type": "TEXT"
       },
@@ -3031,7 +3031,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "The language server that reported it (`rust`, `python`, \u2026).",
+        "doc": "The language server that reported it (`rust`, `python`, …).",
         "name": "language",
         "type": "TEXT"
       },
@@ -3251,7 +3251,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "Who wrote it (`agent`, `user`, \u2026).",
+        "doc": "Who wrote it (`agent`, `user`, …).",
         "name": "author",
         "type": "TEXT"
       },
@@ -3275,7 +3275,7 @@
         "type": ""
       },
       {
-        "doc": "Grouping path (module path, file\u00b7class, describe path).",
+        "doc": "Grouping path (module path, file·class, describe path).",
         "name": "classname",
         "type": ""
       },
@@ -3293,6 +3293,90 @@
         "doc": "Its duration, when the report gave one.",
         "name": "time_ms",
         "type": ""
+      }
+    ]
+  },
+  "test_case_stat": {
+    "1": [
+      {
+        "doc": "Stream it ran in (v_stream.id).",
+        "name": "stream_id",
+        "type": "INTEGER"
+      },
+      {
+        "doc": "Branch checked out when it ran; empty when unknown.",
+        "name": "branch",
+        "type": "TEXT"
+      },
+      {
+        "doc": "What recorded the runs (`tests`).",
+        "name": "producer",
+        "type": "TEXT"
+      },
+      {
+        "doc": "The test: `test:<classname>::<name>`.",
+        "name": "subject",
+        "type": "TEXT"
+      },
+      {
+        "doc": "`passed`, `failed` or `skipped` in its latest run.",
+        "name": "last_status",
+        "type": "TEXT"
+      },
+      {
+        "doc": "Its duration in its latest timed run, in milliseconds.",
+        "name": "last_ms",
+        "type": "REAL"
+      },
+      {
+        "doc": "Its longest duration in any run.",
+        "name": "max_ms",
+        "type": "REAL"
+      },
+      {
+        "doc": "Its mean duration across its timed runs.",
+        "name": "mean_ms",
+        "type": ""
+      },
+      {
+        "doc": "Runs it was part of.",
+        "name": "runs",
+        "type": "INTEGER"
+      },
+      {
+        "doc": "Runs it failed in.",
+        "name": "failures",
+        "type": "INTEGER"
+      },
+      {
+        "doc": "Times its status changed from one run to the next: how flaky it is.",
+        "name": "flips",
+        "type": "INTEGER"
+      },
+      {
+        "doc": "Its first run here (RFC 3339).",
+        "name": "first_seen_at",
+        "type": "TEXT"
+      },
+      {
+        "doc": "Its latest run here (RFC 3339).",
+        "name": "last_seen_at",
+        "type": "TEXT"
+      },
+      {
+        "doc": "When it last failed; NULL if never.",
+        "name": "last_failed_at",
+        "type": "TEXT"
+      },
+      {
+        "doc": "When it last passed; NULL if never.",
+        "name": "last_passed_at",
+        "type": "TEXT"
+      },
+      {
+        "doc": "Its latest run (v_test_run.id).",
+        "name": "last_run_id",
+        "type": "INTEGER"
       }
     ]
   },
@@ -3359,7 +3443,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "What recorded it (`hook`, `mcp`, \u2026).",
+        "doc": "What recorded it (`hook`, `mcp`, …).",
         "name": "source",
         "type": "TEXT"
       },
@@ -3477,7 +3561,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, \u2026); NULL for an existing lens.",
+        "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, …); NULL for an existing lens.",
         "name": "spec",
         "type": "TEXT"
       },
@@ -3526,7 +3610,7 @@
         "type": "INTEGER"
       },
       {
-        "doc": "Harness (`claude`, `codex`, \u2026).",
+        "doc": "Harness (`claude`, `codex`, …).",
         "name": "agent_kind",
         "type": "TEXT"
       },
@@ -3595,7 +3679,7 @@
         "type": "INTEGER"
       },
       {
-        "doc": "Tool name (`Read`, `Edit`, `Bash`, `Grep`, \u2026).",
+        "doc": "Tool name (`Read`, `Edit`, `Bash`, `Grep`, …).",
         "name": "tool",
         "type": "TEXT"
       },
@@ -3605,7 +3689,7 @@
         "type": "TEXT"
       },
       {
-        "doc": "Short context: the Bash command (truncated), a search pattern, the question an `await_user` call asked, \u2026",
+        "doc": "Short context: the Bash command (truncated), a search pattern, the question an `await_user` call asked, …",
         "name": "detail",
         "type": "TEXT"
       },

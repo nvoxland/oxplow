@@ -7,7 +7,6 @@
 //! Run against a consistent copy, never the live file:
 //!     sqlite3 .oxplow/local.sqlite "VACUUM INTO '/tmp/cube-burst.sqlite'"
 //!     cargo run -p oxplow-app --example cube_burst --release -- /tmp/cube-burst.sqlite
-//!     … -- /tmp/cube-burst.sqlite --prune-test-cases 7   # the tsk514 window first
 //!
 //! It catches the copy's cube up first (a no-op on a copy of a running
 //! app's database), then times three empty bursts, a burst after a test
@@ -26,31 +25,10 @@ use oxplow_db::{Database, NewFact, NewMetricCapture, SqliteFactStore};
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let path = args
-        .get(1)
-        .expect("usage: cube_burst <path to a DB COPY> [--prune-test-cases <days>]");
+    let path = args.get(1).expect("usage: cube_burst <path to a DB COPY>");
     let db = Database::open(path).expect("open the db copy");
     let facts = SqliteFactStore::new(db.clone());
     let builder = MetricCubeBuilder::new(facts.clone());
-
-    // What the per-case test window (tsk514) deletes on its first pass, and
-    // what the bursts below cost after it.
-    if let Some(days) = args
-        .iter()
-        .position(|a| a == "--prune-test-cases")
-        .and_then(|i| args.get(i + 1))
-        .and_then(|d| d.parse::<i64>().ok())
-    {
-        let cutoff = oxplow_domain::Timestamp::from_unix_ms(
-            oxplow_domain::Timestamp::now().unix_ms() - days * 86_400_000,
-        );
-        let t = Instant::now();
-        let pruned = facts.prune_aged_test_cases(cutoff).await.unwrap();
-        eprintln!(
-            "test-case window ({days} d): {pruned} facts pruned in {} ms",
-            t.elapsed().as_millis()
-        );
-    }
 
     let t = Instant::now();
     let folded = builder.build_all().await;

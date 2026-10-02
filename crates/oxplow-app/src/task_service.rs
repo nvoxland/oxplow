@@ -616,6 +616,14 @@ impl TaskService {
                     .await
                     .unwrap_or(true);
                 if outcome_gate || ttg_gate {
+                    // The effort's runs are its run records: a green run
+                    // that repeated the branch's results wrote no case facts
+                    // (tsk733) and still counts.
+                    let run_ids: Vec<i64> = effort_caps
+                        .iter()
+                        .filter(|c| c.producer == "tests")
+                        .map(|c| c.id)
+                        .collect();
                     if let Some(case_measure) = facts.get_measure("oxplow.test_case").await? {
                         let case_facts = facts
                             .facts_for_captures(case_measure.id, cap_ids.clone())
@@ -643,7 +651,8 @@ impl TaskService {
                             if let Some(outcome_measure) =
                                 facts.get_measure("oxplow.effort_test_outcome").await?
                             {
-                                let runs = crate::test_outcome::runs_from_case_facts(&tuples);
+                                let runs =
+                                    crate::test_outcome::runs_with_failures(&run_ids, &tuples);
                                 if let Some(outcome) =
                                     crate::test_outcome::compute_effort_test_outcome(&runs)
                                 {
@@ -676,24 +685,14 @@ impl TaskService {
                             if let Some(ttg_measure) =
                                 facts.get_measure("oxplow.effort_time_to_green").await?
                             {
-                                let mut order: Vec<i64> = Vec::new();
-                                let mut red_by_cap: std::collections::HashMap<i64, bool> =
-                                    std::collections::HashMap::new();
-                                for (cap, failed, _) in &tuples {
-                                    if !red_by_cap.contains_key(cap) {
-                                        order.push(*cap);
-                                    }
-                                    let e = red_by_cap.entry(*cap).or_insert(false);
-                                    *e = *e || *failed;
-                                }
-                                let at_by_cap: std::collections::HashMap<i64, i64> = effort_caps
+                                let mut timed: Vec<(i64, bool)> = effort_caps
                                     .iter()
-                                    .map(|c| (c.id, c.captured_at.unix_ms()))
-                                    .collect();
-                                let mut timed: Vec<(i64, bool)> = order
-                                    .iter()
-                                    .filter_map(|cap| {
-                                        at_by_cap.get(cap).map(|at| (*at, red_by_cap[cap]))
+                                    .filter(|c| c.producer == "tests")
+                                    .map(|c| {
+                                        let red = tuples
+                                            .iter()
+                                            .any(|(cap, failed, _)| *cap == c.id && *failed);
+                                        (c.captured_at.unix_ms(), red)
                                     })
                                     .collect();
                                 timed.sort_by_key(|(at, _)| *at);
@@ -2356,6 +2355,63 @@ mod tests {
         assert_eq!(got[0].subject_kind.as_deref(), Some("effort"));
         assert_eq!(got[0].numerator, Some(60_000.0));
         assert_eq!(got[0].denominator, Some(1.0));
+    }
+
+    /// tsk733: a green run that repeats the branch's previous results writes
+    /// no per-case facts, so an effort's runs come from its run records — an
+    /// effort whose only run is such a repeat still closed green.
+    #[tokio::test]
+    async fn an_effort_whose_run_wrote_no_case_facts_still_closed_green() {
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid),
+                CreateTaskInput {
+                    title: "no-op change".into(),
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let effort = effort_store
+            .find_single_open_for_thread(&tid)
+            .await
+            .unwrap()
+            .expect("open effort");
+        let facts = svc.fact_store.as_ref().expect("fact store attached");
+        let case = facts
+            .get_measure("oxplow.test_case")
+            .await
+            .unwrap()
+            .unwrap();
+        let mut cap = oxplow_db::NewMetricCapture::done(1, "tests", "junit");
+        cap.thread_id = Some(tid.value());
+        cap.effort_id = Some(effort.id.value());
+        facts.record_facts(cap, Vec::new()).await.unwrap();
+        let _ = case;
+
+        svc.update(
+            item.id,
+            UpdateTaskChanges {
+                status: Some(TaskStatus::Done),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let outcome = facts
+            .get_measure("oxplow.effort_test_outcome")
+            .await
+            .unwrap()
+            .expect("effort_test_outcome measure");
+        let got = facts.facts_for_measure(outcome.id).await.unwrap();
+        assert_eq!(got.len(), 4, "the run counts: four outcome stats at close");
+        assert!(
+            got.iter().all(|f| f.value == 0.0),
+            "it closed green: {got:?}"
+        );
     }
 
     #[tokio::test]

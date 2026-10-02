@@ -90,9 +90,6 @@ const DEFAULT_METRIC_RETENTION_DAYS: u32 = 0;
 /// 795 MB database in under three weeks of heavy use.
 const DEFAULT_METRIC_DETAIL_MAX_PER_PRODUCER: u32 = 100;
 const DEFAULT_METRIC_DETAIL_RETENTION_DAYS: u32 = 30;
-/// Per-case test facts keep a week (tsk514): each test's latest result per
-/// branch stays regardless, so no current number moves.
-const DEFAULT_TEST_CASE_RETENTION_DAYS: u32 = 7;
 const DEFAULT_SNAPSHOT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 /// How long a turn-end snapshot may hold up the Stop hook (P2.3).
 pub const DEFAULT_SNAPSHOT_TURN_BUDGET_MS: u64 = 2000;
@@ -690,14 +687,6 @@ pub struct OxplowConfig {
     /// bounds a busy repo, this reaches a project that has gone quiet.
     #[serde(rename = "metricDetailRetentionDays")]
     pub metric_detail_retention_days: u32,
-    /// Keep per-case test facts (`oxplow.test_case`, `oxplow.test_duration`)
-    /// for this many days. Older runs' cases are pruned daily, **except each
-    /// test's latest result per branch** (every current number and a new
-    /// branch's starting point stand on it) and the runs of an open effort;
-    /// the run records stay. `0` keeps everything. Trend points older than
-    /// the window recompute from fewer facts once the cube rebuilds.
-    #[serde(rename = "testCaseRetentionDays")]
-    pub test_case_retention_days: u32,
     /// Extra `exclude`/`include` paths layered on top of `.gitignore`
     /// for fs-watch / snapshot capture / code-quality scans. `.git`,
     /// `.oxplow`, and everything in `.gitignore` (+ `.git/info/exclude`)
@@ -942,9 +931,6 @@ struct RawConfig {
     /// Compact per-run detail older than this many days; 0 disables.
     #[serde(rename = "metricDetailRetentionDays", default)]
     metric_detail_retention_days: Option<f64>,
-    /// Per-case test fact retention in days; 0 keeps everything.
-    #[serde(rename = "testCaseRetentionDays", default)]
-    test_case_retention_days: Option<f64>,
     /// Extra `exclude` / `include` paths layered over .gitignore for watching, snapshots and scans.
     #[serde(rename = "generated", default)]
     generated: Option<RawGenerated>,
@@ -1260,11 +1246,6 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         config.metric_detail_retention_days != DEFAULT_METRIC_DETAIL_RETENTION_DAYS,
     );
     put(
-        "testCaseRetentionDays",
-        config.test_case_retention_days.into(),
-        config.test_case_retention_days != DEFAULT_TEST_CASE_RETENTION_DAYS,
-    );
-    put(
         "generated",
         to_yaml(&config.generated),
         !config.generated.exclude.is_empty() || !config.generated.include.is_empty(),
@@ -1536,7 +1517,6 @@ fn default_config(project_name: String) -> OxplowConfig {
         metric_retention_days: DEFAULT_METRIC_RETENTION_DAYS,
         metric_detail_max_per_producer: DEFAULT_METRIC_DETAIL_MAX_PER_PRODUCER,
         metric_detail_retention_days: DEFAULT_METRIC_DETAIL_RETENTION_DAYS,
-        test_case_retention_days: DEFAULT_TEST_CASE_RETENTION_DAYS,
         generated: GeneratedConfig::default(),
         snapshot_max_file_bytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
         snapshot_turn_budget_ms: DEFAULT_SNAPSHOT_TURN_BUDGET_MS,
@@ -1759,15 +1739,6 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         Some(n) => n as u32,
         None => DEFAULT_METRIC_DETAIL_RETENTION_DAYS,
     };
-    let test_case_retention_days = match raw.test_case_retention_days {
-        Some(n) if !n.is_finite() || n < 0.0 => {
-            return Err(ConfigError::Invalid(
-                "testCaseRetentionDays must be a non-negative number".into(),
-            ));
-        }
-        Some(n) => n as u32,
-        None => DEFAULT_TEST_CASE_RETENTION_DAYS,
-    };
 
     let generated = match raw.generated {
         Some(g) => GeneratedConfig {
@@ -1898,7 +1869,6 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         metric_retention_days,
         metric_detail_max_per_producer,
         metric_detail_retention_days,
-        test_case_retention_days,
         generated,
         snapshot_max_file_bytes,
         snapshot_turn_budget_ms,

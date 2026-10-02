@@ -225,7 +225,6 @@ mod tests {
             metric_retention_days: 0,
             metric_detail_max_per_producer: 100,
             metric_detail_retention_days: 30,
-            test_case_retention_days: 7,
             generated: oxplow_config::GeneratedConfig::default(),
             snapshot_max_file_bytes: 1_000_000,
             snapshot_turn_budget_ms: 2000,

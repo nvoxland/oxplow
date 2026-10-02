@@ -85,31 +85,23 @@ pub fn compute_effort_test_outcome(runs: &[TestRunFailures]) -> Option<EffortTes
     })
 }
 
-/// Group flat `oxplow.test_case` facts into per-run failure lists, one run per
-/// capture in **first-seen order** (`facts` must be captured-at ASC, as
-/// `facts_for_captures` returns). Every capture with any case fact becomes a run
-/// — so a fully-green run is an empty `failed_refs`, which keeps `at_close` /
-/// `red_runs` correct. Each input is `(capture_id, is_failed, subject_ref)`.
-pub fn runs_from_case_facts(facts: &[(i64, bool, Option<String>)]) -> Vec<TestRunFailures> {
-    let mut order: Vec<i64> = Vec::new();
-    let mut by_cap: std::collections::HashMap<i64, Vec<Option<String>>> =
-        std::collections::HashMap::new();
-    for (cap, failed, subject_ref) in facts {
-        if !by_cap.contains_key(cap) {
-            order.push(*cap);
-            by_cap.insert(*cap, Vec::new());
-        }
-        if *failed {
-            by_cap
-                .get_mut(cap)
-                .expect("just inserted")
-                .push(subject_ref.clone());
-        }
-    }
-    order
-        .into_iter()
-        .map(|cap| TestRunFailures {
-            failed_refs: by_cap.remove(&cap).unwrap_or_default(),
+/// The effort's test runs with each one's failures. `runs` are the effort's
+/// run records (captures) in captured-at order — every run counts, including
+/// a green run that wrote no per-case facts (a run records passes only where
+/// they changed, tsk733). `facts` are the runs' `oxplow.test_case` facts as
+/// `(capture_id, is_failed, subject_ref)`; every failure is recorded on every
+/// run, so a run's failures are exactly its failed facts.
+pub fn runs_with_failures(
+    runs: &[i64],
+    facts: &[(i64, bool, Option<String>)],
+) -> Vec<TestRunFailures> {
+    runs.iter()
+        .map(|run| TestRunFailures {
+            failed_refs: facts
+                .iter()
+                .filter(|(cap, failed, _)| cap == run && *failed)
+                .map(|(_, _, subject)| subject.clone())
+                .collect(),
         })
         .collect()
 }
@@ -258,19 +250,19 @@ mod tests {
     }
 
     #[test]
-    fn runs_from_case_facts_groups_by_capture_and_keeps_green_runs() {
-        // Capture 1: a failed + b passed. Capture 2: all green (only a passed).
+    fn every_run_counts_even_one_that_wrote_no_case_facts() {
+        // Run 1: a failed (b passed). Run 2: a passed. Run 3: a green repeat
+        // that wrote no case facts at all (tsk733).
         let facts = [
             (1, true, Some("test:a".to_string())),
             (1, false, Some("test:b".to_string())),
             (2, false, Some("test:a".to_string())),
         ];
-        let runs = runs_from_case_facts(&facts);
-        assert_eq!(runs.len(), 2, "both captures become runs");
+        let runs = runs_with_failures(&[1, 2, 3], &facts);
+        assert_eq!(runs.len(), 3, "every run record is a run");
         assert_eq!(runs[0].failed_refs, vec![Some("test:a".to_string())]);
-        assert!(runs[1].failed_refs.is_empty(), "green run has no failures");
+        assert!(runs[1].failed_refs.is_empty() && runs[2].failed_refs.is_empty());
 
-        // Feeds the outcome: went red (1) then green → closes clean.
         let out = compute_effort_test_outcome(&runs).unwrap();
         assert_eq!(
             out,

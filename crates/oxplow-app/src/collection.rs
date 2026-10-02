@@ -605,7 +605,11 @@ impl CollectionService {
             oxplow_domain::StreamId::try_from_str(&stream_id).map(|s| s.value())
         {
             let dual = async {
+                // A run with per-case results records them change-only
+                // against each test's summary (tsk733, `record_test_run`);
+                // asserted counts have no case identity and record plainly.
                 let mut facts = Vec::new();
+                let mut cases: Option<(i64, Option<i64>, Vec<oxplow_db::TestCaseResult>)> = None;
                 // Stop-collecting gate (tsk31): only emit `oxplow.test_case` facts
                 // when an enabled metric consumes that measure. When every
                 // `oxplow.tests.*` metric is disabled the facts are skipped and the
@@ -623,11 +627,8 @@ impl CollectionService {
                         else {
                             return Ok::<Option<i64>, DomainError>(None);
                         };
-                        // Per-test DURATION (tsk46) — the JUnit parser already gives us
-                        // `time_ms` per case; nothing was recording it. Same subject as
-                        // the status fact, on a `per-subject` measure, so a partial run
-                        // refreshes only the timings it measured and the suite total
-                        // stays a real total. Gated like every other producer.
+                        // Per-test DURATION (tsk46), on the same subject as the
+                        // status, when its metric is on.
                         let duration = if self
                             .facts
                             .measure_has_active_spec("oxplow.test_duration")
@@ -639,6 +640,7 @@ impl CollectionService {
                             None
                         };
                         use oxplow_coverage::TestStatus::*;
+                        let mut results = Vec::new();
                         for suite in &r.suites {
                             for case in &suite.cases {
                                 let status = match case.status {
@@ -646,28 +648,21 @@ impl CollectionService {
                                     Failed => "failed",
                                     Skipped => "skipped",
                                 };
-                                let subject = format!("test:{}::{}", case.classname, case.name);
-                                let dims = serde_json::to_string(&json!({
-                                    "oxplow.status": status,
-                                    "oxplow.test_suite": suite.name,
-                                }))
-                                .ok();
-                                facts.push(NewFact {
-                                    subject_kind: Some("test".into()),
-                                    subject_ref: Some(subject.clone()),
-                                    dims_json: dims.clone(),
-                                    ..NewFact::new(measure.id, 1.0)
+                                results.push(oxplow_db::TestCaseResult {
+                                    subject: format!("test:{}::{}", case.classname, case.name),
+                                    status: status.into(),
+                                    time_ms: duration
+                                        .as_ref()
+                                        .and(case.time_ms.map(|ms| ms as f64)),
+                                    dims_json: serde_json::to_string(&json!({
+                                        "oxplow.status": status,
+                                        "oxplow.test_suite": suite.name,
+                                    }))
+                                    .ok(),
                                 });
-                                if let (Some(d), Some(ms)) = (duration.as_ref(), case.time_ms) {
-                                    facts.push(NewFact {
-                                        subject_kind: Some("test".into()),
-                                        subject_ref: Some(subject),
-                                        dims_json: dims,
-                                        ..NewFact::new(d.id, ms as f64)
-                                    });
-                                }
                             }
                         }
+                        cases = Some((measure.id, duration.map(|d| d.id), results));
                     } else if counted {
                         let Some(measure) = self.facts.get_measure("oxplow.test_case").await?
                         else {
@@ -753,10 +748,18 @@ impl CollectionService {
                         source: source.to_string(),
                     },
                 );
-                let id = self
-                    .facts
-                    .record_facts_logged(capture, facts, Some(log))
-                    .await?;
+                let id = match cases {
+                    Some((measure, duration, results)) => {
+                        self.facts
+                            .record_test_run(capture, results, measure, duration, Some(log))
+                            .await?
+                    }
+                    None => {
+                        self.facts
+                            .record_facts_logged(capture, facts, Some(log))
+                            .await?
+                    }
+                };
                 Ok(Some(id))
             }
             .await;

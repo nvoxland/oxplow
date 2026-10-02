@@ -183,7 +183,6 @@ mod tests {
             "metricRetentionDays",
             "metricDetailMaxPerProducer",
             "metricDetailRetentionDays",
-            "testCaseRetentionDays",
             "iconTint",
             "zones",
             "ai",
@@ -258,12 +257,6 @@ mod tests {
         assert_eq!(days.metric_retention_days, 30);
         let reset = with_key(&days, dir, "metricRetentionDays", None).unwrap();
         assert_eq!(reset.metric_retention_days, base.metric_retention_days);
-        // Per-case test facts keep a 7-day window unless the project says
-        // otherwise (tsk514); 0 keeps everything.
-        assert_eq!(base.test_case_retention_days, 7);
-        let window = with_key(&base, dir, "testCaseRetentionDays", Some(&json!(30))).unwrap();
-        assert_eq!(window.test_case_retention_days, 30);
-        assert!(with_key(&base, dir, "testCaseRetentionDays", Some(&json!(-1))).is_err());
         assert!(with_key(&base, dir, "nope", Some(&json!(1))).is_err());
         assert!(with_key(&base, dir, "metricRetentionDays", Some(&json!("x"))).is_err());
     }

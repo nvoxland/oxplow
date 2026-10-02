@@ -396,23 +396,6 @@ welded to collection.
   > same daily `boot.rs` loop as the prune, but independently of it — the loop
   > used to be gated on `metricRetentionDays > 0`, which would have disabled
   > compaction for everyone.
-  >
-  > **Per-case test facts keep a rolling window (tsk514), on by default.**
-  > `testCaseRetentionDays` (default **7**, `0` keeps everything) runs
-  > `prune_aged_test_cases` in the same daily loop: a run's facts on a
-  > per-subject measure (`oxplow.test_case`, `oxplow.test_duration`) go once
-  > the run is older than the window and not in an open effort — **except
-  > each test's latest result per `(stream, branch, producer)`**, which every
-  > current number and a new branch's seed stand on. Captures (the run
-  > records `v_test_run` reads) and every other measure stay. It works in
-  > chunks of 20 runs, each chunk invalidating only the per-subject measures'
-  > cube for its stream in the same transaction. The trade, chosen by Nathan
-  > (2026-10-02): trend points older than the window recompute from fewer
-  > facts once that cube rebuilds; a closed effort loses nothing (its outcome
-  > facts are computed at close). Known limit: a branch that never re-ran a
-  > test reads it from its fork's history, and once that history is older
-  > than the window and superseded on its own branch, the branch's value for
-  > that test falls back to whatever older result remains visible.
   > **Stamp `closest_vcs_rev` on every capture you add (tsk95).** Use
   > `file_ref_version::resolve(store, dir, snap)`: a snapshot with its own commit
   > reads `vcs_rev_exact = true`, otherwise it falls back to HEAD with
@@ -1016,7 +999,7 @@ lands. Note this also means such an effort can never own a test run: it has no
 open window for a run to land in.
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr). **Branch + function coverage (tsk123)** ride the SAME capture as extra per-file facts on `oxplow.coverage.branch` / `oxplow.coverage.function` (num/den=hit/found), emitted only for files whose report carried the counts (`*_found > 0`) and only when their spec is enabled (per-measure gate via `active_coverage_measure`). Specs: `oxplow.coverage.branch_pct` / `oxplow.coverage.function_pct` (ratio %, higher-better). **Untested files (tsk124)** is a read-only spec `oxplow.coverage.untested_files` — a `count` over `oxplow.coverage` filtered `max_value: 0` (the new upper-bound `FactFilter` field, cube-ineligible like `min_value`), `findings` display so the drill-in lists which files, lower-better — no new collection |
-| test cases | `collection.rs::record_test_run` | one `oxplow.test_case` fact per case, status as the `oxplow.status` dim (+ `oxplow.test_suite`). MCP-asserted counts (no report) synthesize status-sliced facts (no case identity). A report-less, count-less run records its capture under the **`test-run`** producer — a run RECORD, not a measurement: an empty `tests` capture would read as "found 0 tests" to the zero-fill/currency logic and collapse the semi-additive `oxplow.tests.*` timeline |
+| test cases | `collection.rs::record_test_run` → `SqliteFactStore::record_test_run` (tsk733) | **change-only** per-case facts on `oxplow.test_case` (status as the `oxplow.status` dim, + `oxplow.test_suite`) and `oxplow.test_duration`: every **failure**, every run; a pass or skip only when the test is new on the branch or changed status; a duration when it moved more than `DURATION_MOVE_RATIO` (50%) **and** `DURATION_MOVE_MIN_MS` (20 ms) from the last one written (constants, not settings — a compression tolerance that changes no pass/fail number). The per-subject fold carries an unchanged test's last fact forward, so every `oxplow.tests.*` number is the same as recording all cases (durations within the tolerance). In the same transaction it upserts each case's `test_case_stat` row (`v_test_case_stat`: last status and duration, runs, failures, flips, last failed / passed, max and mean duration) — where per-test history lives. A replayed run (same idempotency key) changes nothing. Measured on sample usage (tsk732): ~2.6% of per-case results are written. Effort outcomes (`test_outcome`) take the effort's runs from its run records, not its facts, since an all-green repeat run writes none. MCP-asserted counts (no report) synthesize status-sliced facts (no case identity). A report-less, count-less run records its capture under the **`test-run`** producer — a run RECORD, not a measurement: an empty `tests` capture would read as "found 0 tests" to the zero-fill/currency logic and collapse the semi-additive `oxplow.tests.*` timeline |
 | duplication | the built-in collector `oxplow.duplicate_lines` (P7.B5, tsk388) — whole tree, on every ref move; the change analyzer's scoped scans record findings but no facts (tsk365) | one `oxplow.duplicate_lines` fact per side of each duplicate block (value=line count, subject=`block:path:start-end`); a `full` capture on the snapshot's stream. A zero-hit scan still writes its EMPTY capture (tsk44 currency) — else the last non-empty scan's blocks stay "current" forever |
 | built-in code collectors | `metrics_service.rs::run_one_collector` → `record_collector_facts` (tsk23) | the bundled code collectors return `facts`: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders |
 | per-language idiom collectors | same path (tsk30) | the ~10 idiom collectors (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug, dims carrying the conformed `oxplow.language`); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`) |

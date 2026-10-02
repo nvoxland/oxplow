@@ -87,7 +87,7 @@ pub use event_log_store::{anchors_for_thread_tx, DeadLetter, EventCtx, SqliteEve
 pub use fact_store::{
     BatchApply, BatchRows, CubeReadRow, Dimension, EffortMetricDelta, FactRow, FactSliceKey,
     Measure, MetricCapture, MetricSpec, NewCubeRow, NewDimension, NewFact, NewMeasure,
-    NewMetricCapture, NewMetricSpec, SqliteFactStore,
+    NewMetricCapture, NewMetricSpec, SqliteFactStore, TestCaseResult, TestCaseStat,
 };
 pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
 pub use observation_store::EffortObservation;

@@ -757,6 +757,29 @@
   tests:
     - { not_null: asset }
     - { unique: asset }
+- name: test_case_stat
+  version: 1
+  description: "Each test's summary per stream, branch and producer (tsk733): what it is doing now and how it has behaved — flaky (flips), recently broken (last_failed_at), slow (max_ms, mean_ms). Updated with every test run; a run records per-case facts only where they change something, so this is where per-test history lives."
+  columns:
+    - { name: "stream_id", type: "INTEGER", doc: "Stream it ran in (v_stream.id)." }
+    - { name: "branch", type: "TEXT", doc: "Branch checked out when it ran; empty when unknown." }
+    - { name: "producer", type: "TEXT", doc: "What recorded the runs (`tests`)." }
+    - { name: "subject", type: "TEXT", doc: "The test: `test:<classname>::<name>`." }
+    - { name: "last_status", type: "TEXT", doc: "`passed`, `failed` or `skipped` in its latest run." }
+    - { name: "last_ms", type: "REAL", doc: "Its duration in its latest timed run, in milliseconds." }
+    - { name: "max_ms", type: "REAL", doc: "Its longest duration in any run." }
+    - { name: "mean_ms", type: "", doc: "Its mean duration across its timed runs." }
+    - { name: "runs", type: "INTEGER", doc: "Runs it was part of." }
+    - { name: "failures", type: "INTEGER", doc: "Runs it failed in." }
+    - { name: "flips", type: "INTEGER", doc: "Times its status changed from one run to the next: how flaky it is." }
+    - { name: "first_seen_at", type: "TEXT", doc: "Its first run here (RFC 3339)." }
+    - { name: "last_seen_at", type: "TEXT", doc: "Its latest run here (RFC 3339)." }
+    - { name: "last_failed_at", type: "TEXT", doc: "When it last failed; NULL if never." }
+    - { name: "last_passed_at", type: "TEXT", doc: "When it last passed; NULL if never." }
+    - { name: "last_run_id", type: "INTEGER", doc: "Its latest run (v_test_run.id)." }
+  tests:
+    - { not_null: subject }
+    - { relationships: { column: stream_id, to: stream, field: id } }
 - name: collector_run
   version: 1
   description: "Each collector's last run (P7.B3): its outcome, the row counts it wrote and its checkpoint. A collector is owned by an extension, the project (`project`) or oxplow (`built-in`)."
