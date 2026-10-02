@@ -690,10 +690,12 @@ type without a `trigger` field:
   and doesn't dead-letter the event: one broken collector never holds up
   the rest. An exec collector nobody approved records `needs_approval`
   (no event) and runs nothing.
-- **Order.** The consumer's `after()` is the union of the collectors'
-  `after:` lists, limited to consumers the pump has (an unknown name is
-  logged and ignored), so every `on:` collector waits for the slowest
-  one named. `on: [collector.synced]` is refused at parse.
+- **Order.** An event waits on the `after:` lists of the collectors **it
+  triggers** (`after_for(event_type)`), limited to consumers the pump has
+  (an unknown name is logged and ignored): an `effort.finished` event waits
+  for `change.analyze` because `effort_churn` names it, while a
+  `snapshot.taken` event doesn't (tsk711). `on: [collector.synced]` is
+  refused at parse.
 
 **Derived collectors** (`runtime: starlark` or `jaq`, tsk323) compute
 entities from data already in the semantic layer:

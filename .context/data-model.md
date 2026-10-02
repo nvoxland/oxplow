@@ -1289,7 +1289,10 @@ what they consume). **Ordering (tsk506):** an async consumer may declare
 `after()` — consumers whose effect it reads; an event reaches it only once
 each of theirs has checkpointed past it (until then the delivery is
 deferred, checkpoint unmoved, later events behind it), so no reactor reads
-another's half-written result for the same event.
+another's half-written result for the same event. `after_for(event_type)`
+narrows that to one event's predecessors (default: `after()`);
+`collector.triggers` uses it so a collector's `after:` holds up only the
+events that trigger it, and `after()` still orders consumers in `settle`.
 `EventPump::settle(&[names], timeout)` spawns a catch-up of just the named
 consumers — side by side within a level, a consumer in a level after those
 it runs `after` — and waits for it, for callers whose answer needs their

@@ -56,6 +56,14 @@ pub trait AsyncEventConsumer: Send + Sync {
     fn after(&self) -> Vec<String> {
         Vec::new()
     }
+    /// The consumers an event of `event_type` waits on — a subset of
+    /// [`Self::after`] for a consumer whose predecessors depend on what it
+    /// is handling (`collector.triggers`, tsk711). `after` alone orders the
+    /// consumers when the pump settles.
+    fn after_for(&self, event_type: &str) -> Vec<String> {
+        let _ = event_type;
+        self.after()
+    }
     fn handles(&self, event_type: &str) -> bool;
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError>;
 }
@@ -313,7 +321,11 @@ impl EventPump {
         let name = consumer.name();
         let seq = event.seq;
         let wanted = delivers(consumer.handles(&event.envelope.event_type), &event);
-        if wanted && !self.predecessors_past(consumer.after(), seq).await? {
+        if wanted
+            && !self
+                .predecessors_past(consumer.after_for(&event.envelope.event_type), seq)
+                .await?
+        {
             return Ok(Delivery::Deferred);
         }
         let outcome = if wanted {

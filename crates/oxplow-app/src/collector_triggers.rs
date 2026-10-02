@@ -14,9 +14,11 @@
 //! the others. An exec collector nobody approved is recorded as
 //! `needs_approval` and doesn't run.
 //!
-//! `after()` is the union of the collectors' `after:` lists, limited to
-//! consumers the pump has: an event reaches the collectors once each has
-//! handled it.
+//! `after_for(event)` is the union of the `after:` lists of the
+//! collectors that event triggers (limited to consumers the pump has): an
+//! event reaches the collectors once each of those has handled it, so a
+//! collector's `after:` holds up only its own events (tsk711). `after()`, the
+//! union over every collector, orders the consumers when the pump settles.
 //!
 //! It holds `Services` weakly: the pump that runs it is part of it.
 
@@ -147,21 +149,24 @@ impl CollectorTriggers {
             .map(|c| (format!("{}/{}", c.owner, c.key), c.trigger, c.after));
         entities.chain(facts).collect()
     }
-}
 
-#[async_trait]
-impl AsyncEventConsumer for CollectorTriggers {
-    fn name(&self) -> &'static str {
-        NAME
-    }
-
-    fn after(&self) -> Vec<String> {
+    /// The `after:` consumers of the collectors `event_type` triggers (all
+    /// of them for `None`), limited to consumers the pump has.
+    fn predecessors(&self, event_type: Option<&str>) -> Vec<String> {
         let Some(svc) = self.services.upgrade() else {
             return Vec::new();
         };
         let known = svc.event_pump.consumer_names();
         let mut after: Vec<String> = Vec::new();
-        for (collector, _, names) in Self::triggers(&svc) {
+        for (collector, trigger, names) in Self::triggers(&svc) {
+            let triggered = match (event_type, &trigger) {
+                (None, _) => true,
+                (Some(t), Trigger::On { events, .. }) => events.iter().any(|e| e == t),
+                (Some(_), _) => false,
+            };
+            if !triggered {
+                continue;
+            }
             for name in names {
                 if !known.contains(&name.as_str()) {
                     tracing::warn!(%collector, consumer = %name, "`after` names no consumer; ignored");
@@ -171,6 +176,24 @@ impl AsyncEventConsumer for CollectorTriggers {
             }
         }
         after
+    }
+}
+
+#[async_trait]
+impl AsyncEventConsumer for CollectorTriggers {
+    fn name(&self) -> &'static str {
+        NAME
+    }
+
+    fn after(&self) -> Vec<String> {
+        self.predecessors(None)
+    }
+
+    /// Only the collectors `event_type` triggers wait on their `after:`
+    /// (tsk711): a `snapshot.taken` collector doesn't wait on the
+    /// `change.analyze` an `effort.finished` collector names.
+    fn after_for(&self, event_type: &str) -> Vec<String> {
+        self.predecessors(Some(event_type))
     }
 
     fn handles(&self, event_type: &str) -> bool {
@@ -436,7 +459,18 @@ mod tests {
             &[("seen.star", SEEN)],
         );
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
-        assert_eq!(consumer.after(), vec!["effort.evidence".to_string()]);
+        assert_eq!(
+            consumer.after_for("effort.claim_verified"),
+            vec!["effort.evidence".to_string()]
+        );
+        // tsk711: predecessors follow the event's own collectors — an event
+        // no collector waiting on `effort.evidence` handles doesn't wait.
+        assert_eq!(consumer.after_for("snapshot.taken"), Vec::<String>::new());
+        assert_eq!(
+            consumer.after(),
+            vec!["effort.evidence".to_string()],
+            "every predecessor, for ordering"
+        );
         assert!(consumer.handles("effort.claim_verified"));
         assert!(!consumer.handles("snapshot.taken"));
         assert!(!consumer.handles("collector.synced"));
