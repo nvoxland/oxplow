@@ -36,7 +36,7 @@ use oxplow_db::{
     CollectorRun, EntityTable, EntityWrite, SqlCell, SqliteCollectorStore, StoredType,
 };
 use oxplow_domain::events::schema::{CollectorSynced, CollectorSyncedV1, EventSchemaRegistry};
-use oxplow_domain::{DomainError, Envelope};
+use oxplow_domain::{DomainError, Envelope, StoredEvent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -512,20 +512,25 @@ pub fn exec_collector(
     ScriptOutput::parse(spec, value)
 }
 
-/// Run a derived (starlark / jaq) collector: read its `input` rows, then run
-/// its script over `{"rows": [...]}` in the collector sandbox.
+/// Run a derived (starlark / jaq) collector: read its `input` rows (the
+/// trigger event's anchors bound by name), then run its script over
+/// `{"rows": [...], "event"?: {...}}` in the collector sandbox.
 pub async fn derive_collector(
     layer: &crate::sql_gateway::SqlGateway,
     script: String,
     spec: &CollectorSpec,
     oracle: std::sync::Arc<dyn oxplow_collect_plugin::AiOracle>,
+    event: Option<&StoredEvent>,
 ) -> Result<ScriptOutput, String> {
     let rows = match &spec.input {
         None => Vec::new(),
         Some(sql) => {
             let limit = oxplow_db::semantic_layer::MAX_ROW_LIMIT;
+            let query = oxplow_db::semantic_layer::SqlQuery::new(sql.as_str())
+                .named(anchor_params(event))
+                .limit(Some(limit));
             let out = layer
-                .query_sql(sql, vec![], Some(limit))
+                .run(query)
                 .await
                 .map_err(|e| format!("collector `{}` input: {e}", spec.id))?;
             if out.truncated {
@@ -551,7 +556,10 @@ pub async fn derive_collector(
                 .collect()
         }
     };
-    let input = serde_json::json!({ "rows": rows });
+    let mut input = serde_json::json!({ "rows": rows });
+    if let Some(e) = event {
+        input["event"] = event_input(e);
+    }
     let runtime = spec.runtime;
     let value = tokio::task::spawn_blocking(move || {
         use oxplow_collect_plugin::runtime::{
@@ -648,20 +656,68 @@ impl From<RunCollectorError> for DomainError {
     }
 }
 
-/// What ran a collector: `collector.sync` by hand, its `every:` schedule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What ran a collector: `collector.sync` by hand, its `every:` schedule,
+/// or an event its `on:` names.
+#[derive(Debug, Clone)]
 pub enum RunTrigger {
     Manual,
     Every,
+    On(Arc<StoredEvent>),
 }
 
 impl RunTrigger {
-    fn name(self) -> &'static str {
+    fn name(&self) -> &'static str {
         match self {
             RunTrigger::Manual => "manual",
             RunTrigger::Every => "every",
+            RunTrigger::On(_) => "on",
         }
     }
+
+    fn event(&self) -> Option<&StoredEvent> {
+        match self {
+            RunTrigger::On(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+/// The named parameters a collector's `input` may use: the trigger
+/// event's anchors (`:stream_id`, `:snapshot_id`, `:effort_id`,
+/// `:thread_id`, `:turn_id`) and its seq (`:event_id`), NULL without one.
+fn anchor_params(event: Option<&StoredEvent>) -> Vec<(String, SqlCell)> {
+    let a = event.map(|e| &e.envelope.anchors);
+    let int = |v: Option<i64>| v.map_or(SqlCell::Null(()), SqlCell::Int);
+    vec![
+        (
+            "stream_id".into(),
+            int(a.and_then(|a| a.stream_id).map(|v| v.value())),
+        ),
+        ("snapshot_id".into(), int(a.and_then(|a| a.snapshot_id))),
+        (
+            "effort_id".into(),
+            int(a.and_then(|a| a.effort_id).map(|v| v.value())),
+        ),
+        (
+            "thread_id".into(),
+            int(a.and_then(|a| a.thread_id).map(|v| v.value())),
+        ),
+        ("turn_id".into(), int(a.and_then(|a| a.turn_id))),
+        ("event_id".into(), int(event.map(|e| e.seq))),
+    ]
+}
+
+/// The trigger event as a script sees it (`input.event`).
+fn event_input(e: &StoredEvent) -> serde_json::Value {
+    serde_json::json!({
+        "type": e.envelope.event_type,
+        "seq": e.seq,
+        "id": e.envelope.id.to_string(),
+        "at": e.envelope.at,
+        "subject": e.envelope.subject,
+        "payload": e.envelope.payload,
+        "anchors": e.envelope.anchors,
+    })
 }
 
 /// Run one collector end to end: consent check, run, coercion, then one
@@ -677,8 +733,9 @@ pub async fn run_collector(
     source: &str,
 ) -> Result<CollectorRunReport, RunCollectorError> {
     let started = std::time::Instant::now();
-    let (spec, output) = produce(ctx, owner, id).await?;
+    let (spec, output) = produce(ctx, owner, id, trigger.event()).await?;
     let writes = output.and_then(|o| plan_writes(owner, &spec, o));
+    let last_event_id = trigger.event().map(|e| e.seq);
     let run = |status: &str, error: Option<String>| CollectorRun {
         owner: owner.to_string(),
         id: id.to_string(),
@@ -687,13 +744,14 @@ pub async fn run_collector(
         error,
         row_counts: BTreeMap::new(),
         cursor: None,
-        last_event_id: None,
+        last_event_id,
     };
     let collector = oxplow_domain::refs::build::collector_ref(owner, id);
     let event = Synced {
         source: source.to_string(),
+        cause: trigger.event().map(|e| (e.envelope.id.clone(), e.seq)),
         collector,
-        trigger,
+        trigger: trigger.name(),
     };
     let error = match writes {
         Ok(writes) => {
@@ -762,7 +820,10 @@ struct Synced {
     source: String,
     /// `collector:<owner>/<id>`.
     collector: String,
-    trigger: RunTrigger,
+    trigger: &'static str,
+    /// The trigger event (`on:`): the envelope's cause, and its seq keys
+    /// the dedupe, so a redelivery can't log a second run.
+    cause: Option<(oxplow_domain::EventId, i64)>,
 }
 
 impl Synced {
@@ -773,11 +834,11 @@ impl Synced {
         elapsed_ms: i64,
         error: Option<String>,
     ) -> Envelope {
-        Envelope::typed::<CollectorSynced>(
+        let env = Envelope::typed::<CollectorSynced>(
             self.source.clone(),
             &CollectorSyncedV1 {
                 collector: self.collector.clone(),
-                trigger: self.trigger.name().into(),
+                trigger: self.trigger.into(),
                 status: status.into(),
                 entities,
                 facts: 0,
@@ -785,12 +846,72 @@ impl Synced {
                 error,
             },
         )
-        .with_subject([self.collector.clone()])
+        .with_subject([self.collector.clone()]);
+        match &self.cause {
+            Some((id, seq)) => env
+                .with_cause(id.clone())
+                .with_dedupe_key(format!("collector.synced:{}:{seq}", self.collector)),
+            None => env,
+        }
     }
 }
 
 fn elapsed_ms(started: std::time::Instant) -> i64 {
     i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX)
+}
+
+/// What [`run_for_event`] did.
+#[derive(Debug)]
+pub enum EventRun {
+    /// It had already run for this event (a redelivery), or it's gone.
+    Skipped,
+    /// An exec collector nobody approved: recorded, nothing ran.
+    NeedsApproval,
+    /// It ran: its report, or what failed (recorded and announced).
+    Ran(Result<CollectorRunReport, String>),
+}
+
+/// Run collector `owner/id` for `event`, as the system (the
+/// `collector.triggers` consumer). Idempotent per event: a collector whose
+/// `last_event_id` is already at or past the event's seq is skipped.
+pub async fn run_for_event(
+    ctx: &Collectors<'_>,
+    owner: &str,
+    id: &str,
+    event: Arc<StoredEvent>,
+) -> Result<EventRun, DomainError> {
+    let seq = event.seq;
+    if ctx
+        .store
+        .run_of(owner, id)
+        .await?
+        .and_then(|r| r.last_event_id)
+        .is_some_and(|last| last >= seq)
+    {
+        return Ok(EventRun::Skipped);
+    }
+    let source = oxplow_domain::Actor::System.source();
+    match run_collector(ctx, owner, id, RunTrigger::On(event), &source).await {
+        Ok(report) => Ok(EventRun::Ran(Ok(report))),
+        Err(RunCollectorError::Failed(m)) => Ok(EventRun::Ran(Err(m))),
+        Err(RunCollectorError::NotFound) => Ok(EventRun::Skipped),
+        Err(RunCollectorError::NeedsApproval(m)) => {
+            ctx.store
+                .record_run(CollectorRun {
+                    owner: owner.to_string(),
+                    id: id.to_string(),
+                    status: "needs_approval".into(),
+                    last_run_at: now_rfc3339(),
+                    error: Some(m),
+                    row_counts: BTreeMap::new(),
+                    cursor: None,
+                    last_event_id: Some(seq),
+                })
+                .await?;
+            Ok(EventRun::NeedsApproval)
+        }
+        Err(RunCollectorError::Storage(e)) => Err(e),
+    }
 }
 
 /// Now as RFC 3339, as `Timestamp` serializes.
@@ -839,7 +960,7 @@ pub async fn preview_collector(
     owner: &str,
     id: &str,
 ) -> Result<CollectorPreview, RunCollectorError> {
-    let (spec, output) = produce(ctx, owner, id).await?;
+    let (spec, output) = produce(ctx, owner, id, None).await?;
     let writes = plan_writes(owner, &spec, output.map_err(RunCollectorError::Failed)?)
         .map_err(RunCollectorError::Failed)?;
     let entities = writes
@@ -927,6 +1048,7 @@ async fn produce(
     ctx: &Collectors<'_>,
     owner: &str,
     id: &str,
+    event: Option<&StoredEvent>,
 ) -> Result<(CollectorSpec, Result<ScriptOutput, String>), RunCollectorError> {
     let (root, approvals) = (ctx.root, ctx.approvals);
     let (ext, spec) = find_collector(ctx, owner, id)?;
@@ -944,7 +1066,14 @@ async fn produce(
                     ctx.ai.clone(),
                     format!("collector:{}/{}", ext.name, spec.id),
                 );
-                derive_collector(&ctx.layer, script, &spec, std::sync::Arc::new(oracle)).await
+                derive_collector(
+                    &ctx.layer,
+                    script,
+                    &spec,
+                    std::sync::Arc::new(oracle),
+                    event,
+                )
+                .await
             }
             None => Err(format!(
                 "collector `{id}`: entry `{}` doesn't exist in the extension",

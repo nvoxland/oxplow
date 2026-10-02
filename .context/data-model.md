@@ -1258,9 +1258,13 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `token_usage.turns` | async | `agent.turn.ended` | a turn's token rows (transcript tail or reported counts) | boot |
 | `effort.evidence` / `effort.decisions` / `effort.gauges` | async | `effort.finished` | evidence rows, inferred decisions, on-effort gauges | boot.rs |
 | `search.index` | async | `work_item.*`, `snapshot.taken` | the search index for tasks and snapshot files | boot.rs |
+| `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event: its rows, `collector_run` and `collector.synced@1` (P7.B3) | boot.rs |
 
 **Async consumers (P2.6.2, tsk454).** `trait AsyncEventConsumer { name,
-handles(type), async handle(&StoredEvent) }` is for work that can't run
+after() -> Vec<String>, handles(type), async handle(&StoredEvent) }`
+(`after` is owned so a consumer can derive it from declarations, as
+`collector.triggers` does; `EventPump::consumer_names` lists what it may
+name) is for work that can't run
 in a SQLite transaction (take a snapshot, call a service). The pump runs
 the handler outside any transaction — on its own task, so a panic is a
 failure — and checkpoints in a transaction after it returns: a crash

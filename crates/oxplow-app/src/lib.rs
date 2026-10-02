@@ -36,6 +36,7 @@ pub mod code_intel_conformance;
 pub mod code_quality_runner;
 pub mod collection;
 pub mod collector_runner;
+pub mod collector_triggers;
 pub mod commands;
 pub mod commit_indexer;
 pub mod config_reactors;

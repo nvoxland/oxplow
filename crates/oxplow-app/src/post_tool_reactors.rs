@@ -97,8 +97,8 @@ impl AsyncEventConsumer for PostToolAdvisories {
 
     /// An advisory reads what collection recorded for the same run
     /// (`v_effort_observation`), so it sees the run only after collection.
-    fn after(&self) -> &'static [&'static str] {
-        &[COLLECTION]
+    fn after(&self) -> Vec<String> {
+        vec![COLLECTION.to_string()]
     }
 
     fn handles(&self, event_type: &str) -> bool {

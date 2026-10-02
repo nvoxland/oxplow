@@ -51,9 +51,10 @@ pub trait AsyncEventConsumer: Send + Sync {
     fn name(&self) -> &'static str;
     /// Consumers whose effect this one reads: an event reaches this one
     /// only once each of theirs has checkpointed past it (until then it is
-    /// deferred, and later events wait behind it).
-    fn after(&self) -> &'static [&'static str] {
-        &[]
+    /// deferred, and later events wait behind it). Owned names: a
+    /// collector consumer's list comes from what collectors declare.
+    fn after(&self) -> Vec<String> {
+        Vec::new()
     }
     fn handles(&self, event_type: &str) -> bool;
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError>;
@@ -141,6 +142,20 @@ impl EventPump {
     /// Add an async consumer. Services and boot register them once the
     /// services they drive exist; one registered after [`Self::spawn`]
     /// gets its loop at once.
+    /// Every consumer's name, sync and async: what an `after` may name.
+    pub fn consumer_names(&self) -> Vec<&'static str> {
+        self.consumers
+            .iter()
+            .map(|c| c.name())
+            .chain(
+                self.async_consumers
+                    .read()
+                    .iter()
+                    .map(|s| s.consumer.name()),
+            )
+            .collect()
+    }
+
     pub fn register_async(&self, consumer: Arc<dyn AsyncEventConsumer>) {
         let slot = Arc::new(AsyncSlot {
             consumer,
@@ -326,17 +341,13 @@ impl EventPump {
     }
 
     /// Whether every consumer in `after` has checkpointed at or past `seq`.
-    async fn predecessors_past(
-        &self,
-        after: &'static [&'static str],
-        seq: i64,
-    ) -> Result<bool, DomainError> {
+    async fn predecessors_past(&self, after: Vec<String>, seq: i64) -> Result<bool, DomainError> {
         if after.is_empty() {
             return Ok(true);
         }
         self.db
             .read(move |c| {
-                for name in after {
+                for name in &after {
                     if oxplow_db::event_log_store::checkpoint_tx(c, name)? < seq {
                         return Ok(false);
                     }
@@ -569,7 +580,7 @@ fn settle_levels(mut slots: Vec<Arc<AsyncSlot>>) -> Vec<Vec<Arc<AsyncSlot>>> {
             s.consumer
                 .after()
                 .iter()
-                .all(|dep| placed.contains(dep) || !names.contains(dep))
+                .all(|dep| placed.contains(&dep.as_str()) || !names.contains(&dep.as_str()))
         });
         if ready.is_empty() {
             levels.push(waiting);
@@ -901,8 +912,8 @@ mod tests {
         fn name(&self) -> &'static str {
             self.name
         }
-        fn after(&self) -> &'static [&'static str] {
-            self.after
+        fn after(&self) -> Vec<String> {
+            self.after.iter().map(|s| s.to_string()).collect()
         }
         fn handles(&self, event_type: &str) -> bool {
             event_type == "config.changed"

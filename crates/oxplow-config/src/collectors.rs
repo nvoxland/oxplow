@@ -415,6 +415,13 @@ fn parse_trigger(
             if events.is_empty() {
                 return Err("trigger: `on` names no event type".into());
             }
+            if events.iter().any(|t| t == "collector.synced") {
+                return Err(
+                    "trigger: a collector can't run on `collector.synced` (a run would trigger \
+                     itself); name the consumer to wait for in `after:` instead"
+                        .into(),
+                );
+            }
             if let Some(unknown) = events.iter().find(|t| !knows_event(t)) {
                 return Err(format!(
                     "trigger: `{unknown}` isn't a registered event type (see `v_event_type`)"
@@ -796,6 +803,10 @@ mod tests {
             ),
             ("trigger: { every: 5m }\n  after: [x]", "`after` goes with"),
             ("trigger: { at: noon }", "unknown key `at`"),
+            (
+                "trigger: { on: [collector.synced] }",
+                "can't run on `collector.synced`",
+            ),
         ] {
             let (s, e) = with(t);
             assert!(s.is_empty(), "{t}");

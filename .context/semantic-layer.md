@@ -581,6 +581,29 @@ needs_approval), last_run_at, error, row_counts_json, cursor_json,
 last_event_id`. The UI refreshes when `v_collector_run` changes
 (`collectorRan`); the in-memory `SourceSynced` is gone.
 
+**`on:` triggers** (`collector_triggers.rs`, the `collector.triggers`
+async pump consumer). When an event an enabled collector's `on:` names is
+logged — and each `where` field of its payload equals its value — the
+consumer runs that collector for it (`collector_runner::run_for_event`),
+serially, as the system:
+
+- **Input.** The `input` SQL binds the event's anchors by name
+  (`:stream_id`, `:snapshot_id`, `:effort_id`, `:thread_id`, `:turn_id`,
+  integers, and `:event_id`, its seq; NULL when absent), and the script
+  gets the event as `input.event` (`type`, `seq`, `id`, `at`, `subject`,
+  `payload`, `anchors`).
+- **Once per event.** The run's `collector_run.last_event_id` is the
+  event's seq, and its `collector.synced@1` is caused by the event with a
+  per-event dedupe key, so a redelivered event writes nothing.
+- **Failure.** A failing collector is recorded and announced like any run
+  and doesn't dead-letter the event: one broken collector never holds up
+  the rest. An exec collector nobody approved records `needs_approval`
+  (no event) and runs nothing.
+- **Order.** The consumer's `after()` is the union of the collectors'
+  `after:` lists, limited to consumers the pump has (an unknown name is
+  logged and ignored), so every `on:` collector waits for the slowest
+  one named. `on: [collector.synced]` is refused at parse.
+
 **Derived collectors** (`runtime: starlark` or `jaq`, tsk323) compute
 entities from data already in the semantic layer:
 
@@ -631,7 +654,8 @@ entities from data already in the semantic layer:
 |---|---|
 | Parse/validate declarations (`CollectorSpec`, `Trigger`) | `crates/oxplow-config/src/collectors.rs` |
 | v1 `sources:` / `schedule:` → `collectors:` / `trigger:` | `crates/oxplow-app/src/extensions/migrate_v1.rs` |
-| Consent (`approve_reviewed`), exec, coercion, `run_collector`, `CollectorRunner` + the `collector.sync` command, scheduler | `crates/oxplow-app/src/collector_runner.rs` |
+| Consent (`approve_reviewed`), exec, coercion, `run_collector` / `run_for_event`, `CollectorRunner` + the `collector.sync` command, scheduler | `crates/oxplow-app/src/collector_runner.rs` |
+| The `collector.triggers` consumer (`on:` / `where` / `after`) | `crates/oxplow-app/src/collector_triggers.rs` |
 | Entity tables + views, run state (V133 `collector_run`) | `crates/oxplow-db/src/collector_store.rs` |
 | Settings → Data read model (`data_entities`) | `crates/oxplow-app/src/semantic_catalog.rs` |
 | IPC `list_collectors` / `approve_collector` / `set_credential` (UI only); running is `run_command collector.sync` | `crates/oxplow-rpc/src/commands/collectors.rs` |

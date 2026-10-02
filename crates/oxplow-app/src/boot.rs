@@ -142,13 +142,15 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         snapshot_svc.spawn_cleanup_loop(retention_days, Some(state.background_tasks.clone()));
     }
 
-    // Extension-source scheduler (tsk292): runs approved `every <n>` sources.
     // The event pump: delivers the log to its consumers (page_ref
     // projections first); catches up on anything logged while down.
     crate::effort_reactors::register(state);
     crate::indexer::register(state);
     crate::symbol_collector::register(state);
+    // `on:` collectors (P7.B3), after the consumers they may name.
+    crate::collector_triggers::register(state);
     state.event_pump.clone().spawn();
+    // `every:` collectors: the scheduler runs `collector.sync` as the system.
     crate::collector_runner::spawn_scheduler(state.clone());
     // Core's capability providers, before the registry publishes the
     // external ones it starts.
