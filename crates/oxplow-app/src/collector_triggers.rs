@@ -6,9 +6,10 @@
 //! matches its payload, serially, each through
 //! [`collector_runner::run_for_event`](crate::collector_runner::run_for_event):
 //! the run's `input` binds the event's anchors, its script gets the event
-//! as `input.event`, and its rows, `collector_run` row (the event as
-//! `last_event_id`) and `collector.synced@1` (caused by the event, deduped
-//! per event) commit together — so a redelivered event writes nothing.
+//! as `input.event`, and its rows (an entity collector's) or capture (a fact
+//! collector's), `collector_run` row (the event as `last_event_id`) and
+//! `collector.synced@1` (caused by the event, deduped per event) commit
+//! together — so a redelivered event writes nothing.
 //! A collector that fails is recorded and announced like any run; it
 //! doesn't dead-letter the event, so one broken collector never holds up
 //! the others. An exec collector nobody approved is recorded as

@@ -685,7 +685,10 @@ type without a `trigger` field:
   `payload`, `anchors`).
 - **Once per event.** The run's `collector_run.last_event_id` is the
   event's seq, and its `collector.synced@1` is caused by the event with a
-  per-event dedupe key, so a redelivered event writes nothing.
+  per-event dedupe key. They commit with what the run wrote — an entity
+  collector's rows, or a fact collector's capture and facts
+  (`RunLog::record_with`, tsk712) — so a redelivered event writes nothing,
+  and no run lands without its record.
 - **Failure.** A failing collector is recorded and announced like any run
   and doesn't dead-letter the event: one broken collector never holds up
   the rest. An exec collector nobody approved records `needs_approval`

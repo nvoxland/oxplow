@@ -1840,7 +1840,7 @@ impl MetricsService {
         let runner = match self.fact_runner(&metric) {
             Ok(r) => r,
             Err(e) => {
-                self.log_run(&metric, &ctx, &FactRun::Failed(e.clone()), 0)
+                self.log_run(&metric, &ctx, &FactRun::Failed(e.clone()), 0, None)
                     .await;
                 return Err(e);
             }
@@ -2008,7 +2008,7 @@ impl MetricsService {
             Ok(runner) => self.run_fact_runner(gauge, runner, ctx, files).await,
             Err(e) => {
                 tracing::warn!(key = %gauge.key, error = %e, "fact collector: not run");
-                self.log_run(gauge, ctx, &FactRun::Failed(e.clone()), 0)
+                self.log_run(gauge, ctx, &FactRun::Failed(e.clone()), 0, None)
                     .await;
                 FactRun::Failed(e)
             }
@@ -2042,34 +2042,37 @@ impl MetricsService {
                     .unwrap_or_else(|e| Err(format!("task failed: {e}")))
             }
         };
-        let run = match outcome {
+        let (run, capture) = match outcome {
             Ok(gauge_facts) => {
                 tracing::debug!(
                     key = %gauge.key,
                     elapsed_ms = started.elapsed().as_millis() as u64,
                     "fact collector: complete",
                 );
-                FactRun::Recorded(
-                    self.record_collector_facts(gauge, ctx, &source, &gauge_facts)
-                        .await,
-                )
+                match self
+                    .collector_capture(gauge, ctx, &source, &gauge_facts)
+                    .await
+                {
+                    Some((capture, rows)) => (FactRun::Recorded(rows.len()), Some((capture, rows))),
+                    None => (FactRun::Recorded(0), None),
+                }
             }
             Err(e) => {
                 // NOT a silent warn: a collector that fails leaves its metric
                 // reading stale or empty, which is how two built-in metrics
                 // went unnoticed for weeks. Record the failure durably.
-                self.record_collector_failure(gauge, ctx, &source, &e).await;
                 tracing::error!(
                     key = %gauge.key,
                     error = %e,
                     elapsed_ms = started.elapsed().as_millis() as u64,
                     "fact collector: FAILED — its metric will read stale or empty",
                 );
-                FactRun::Failed(e)
+                let capture = self.failure_capture(gauge, ctx, &source, &e);
+                (FactRun::Failed(e), Some((capture, Vec::new())))
             }
         };
         let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
-        self.log_run(gauge, ctx, &run, elapsed).await;
+        self.log_run(gauge, ctx, &run, elapsed, capture).await;
         run
     }
 
@@ -2114,17 +2117,25 @@ impl MetricsService {
         Ok(serde_json::Value::Object(input))
     }
 
-    /// Record a fact collector's run as its `collector_run` row and
-    /// `collector.synced@1` (when the run log is wired). A failure to record
-    /// is logged: the facts already landed.
+    /// Record a fact collector's run: its `capture` (and facts), its
+    /// `collector_run` row and `collector.synced@1` in one transaction
+    /// (tsk712) — a run never lands without its record, and a redelivered
+    /// event writes nothing. Without a run log (tests) the capture alone is
+    /// written. A failure to record is logged.
     async fn log_run(
         &self,
         c: &FactCollector,
         ctx: &CollectorRunContext,
         run: &FactRun,
         elapsed_ms: i64,
+        capture: Option<(oxplow_db::NewMetricCapture, Vec<oxplow_db::NewFact>)>,
     ) {
         let Some(log) = self.run_log.as_ref() else {
+            if let (Some(facts), Some((capture, rows))) = (self.fact_store.as_ref(), capture) {
+                if let Err(e) = facts.record_facts(capture, rows).await {
+                    tracing::warn!(key = %c.key, error = %e, "fact collector: capture write failed");
+                }
+            }
             return;
         };
         let (status, facts, error) = match run {
@@ -2154,26 +2165,37 @@ impl MetricsService {
             "manual" => "manual",
             _ => "on",
         };
-        if let Err(e) = log
-            .record(crate::collector_runner::RunRecord {
-                owner: &c.owner,
-                id: &c.key,
-                trigger,
-                source: &ctx.source,
-                cause: ctx.event.as_deref(),
-                status,
-                entities: Default::default(),
-                facts,
-                elapsed_ms,
-                error,
-            })
+        match log
+            .record_with(
+                crate::collector_runner::RunRecord {
+                    owner: &c.owner,
+                    id: &c.key,
+                    trigger,
+                    source: &ctx.source,
+                    cause: ctx.event.as_deref(),
+                    status,
+                    entities: Default::default(),
+                    facts,
+                    elapsed_ms,
+                    error,
+                },
+                capture,
+            )
             .await
         {
-            tracing::warn!(key = %c.key, error = %e, "fact collector: run record failed");
+            Ok(_) => {
+                if let Some(facts) = self.fact_store.as_ref() {
+                    facts.facts_committed();
+                }
+            }
+            Err(e) => {
+                tracing::warn!(key = %c.key, error = %e, "fact collector: run record failed; its capture with it")
+            }
         }
     }
 
-    /// Record a FAILED gauge run as a `status = 'failed'` capture (tsk47).
+    /// A FAILED gauge run as a `status = 'failed'` capture (tsk47), recorded
+    /// with the run ([`Self::log_run`]).
     ///
     /// Two reasons this must be durable rather than a log line:
     /// 1. **Visibility.** A gauge that fails leaves its metric reading stale or empty
@@ -2187,16 +2209,13 @@ impl MetricsService {
     /// It carries NO facts, and the read folds skip non-`done` captures — critical,
     /// because an empty capture over a *full-tree* snapshot restates every path, and
     /// would otherwise supersede everything and zero the metric.
-    async fn record_collector_failure(
+    fn failure_capture(
         &self,
         gauge: &FactCollector,
         ctx: &CollectorRunContext,
         source: &str,
         error: &str,
-    ) {
-        let Some(facts) = self.fact_store.as_ref() else {
-            return;
-        };
+    ) -> oxplow_db::NewMetricCapture {
         let mut capture = oxplow_db::NewMetricCapture::done(
             ctx.stream_val,
             gauge.key.clone(),
@@ -2214,12 +2233,10 @@ impl MetricsService {
         capture.branch = ctx.branch.clone();
         capture.producer_version = collector_fingerprint(gauge, &self.project_dir);
         capture.scan_kind = ctx.scan_kind.into();
-        if let Err(e) = facts.record_facts(capture, Vec::new()).await {
-            tracing::warn!(key = %gauge.key, error = %e, "gauge: failure record write failed");
-        }
+        capture
     }
 
-    /// Persist a gauge's per-item `facts` (epic tsk12) as `fact` rows under one
+    /// A gauge's per-item `facts` (epic tsk12) as `fact` rows under one
     /// `metric_capture`, resolving each fact's measure key to a defined measure.
     /// Enforces **declare-to-collect** (decision #4): a fact is dropped (surfaced
     /// via `tracing::warn!`, never silently written) if its measure is undefined
@@ -2230,24 +2247,22 @@ impl MetricsService {
     /// A ZERO-fact run still writes its (empty) capture — "this scan ran and
     /// found nothing" is the record that lets a count metric drop back to zero
     /// after the last offender is fixed; the engine zero-fills the series from
-    /// the producer's captures (tsk44). Returns the number of facts recorded.
-    /// Emits `MetricSamplesChanged` when it writes. Best-effort.
-    async fn record_collector_facts(
+    /// the producer's captures (tsk44). Builds the capture and its facts;
+    /// [`Self::log_run`] writes them with the run's record.
+    async fn collector_capture(
         &self,
         gauge: &FactCollector,
         ctx: &CollectorRunContext,
         source: &str,
         gauge_facts: &[CollectedFact],
-    ) -> usize {
-        let Some(facts) = self.fact_store.as_ref() else {
-            return 0;
-        };
+    ) -> Option<(oxplow_db::NewMetricCapture, Vec<oxplow_db::NewFact>)> {
+        let facts = self.fact_store.as_ref()?;
         // Resolve the measure catalog once (one query), then map each fact's key.
         let by_key: HashMap<String, i64> = match facts.list_measures().await {
             Ok(ms) => ms.into_iter().map(|m| (m.key, m.id)).collect(),
             Err(e) => {
                 tracing::warn!(key = %gauge.key, error = %e, "gauge facts: measure catalog read failed");
-                return 0;
+                return None;
             }
         };
         let mut rows = Vec::new();
@@ -2297,7 +2312,6 @@ impl MetricsService {
             });
         }
         // No `rows.is_empty()` bail: the empty capture IS the zero record.
-        let count = rows.len();
         let capture = oxplow_db::NewMetricCapture {
             thread_id: ctx.thread_id,
             effort_id: ctx.effort_id,
@@ -2318,12 +2332,7 @@ impl MetricsService {
                 source.to_string(),
             )
         };
-        // The change loop announces the measures that landed (P7.B1).
-        if let Err(e) = facts.record_facts(capture, rows).await {
-            tracing::warn!(key = %gauge.key, error = %e, "gauge facts: record failed");
-            return 0;
-        }
-        count
+        Some((capture, rows))
     }
 }
 
@@ -3358,6 +3367,82 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cube_states, 1, "the stream's cube survives a clean restate");
+    }
+
+    /// P7 review (tsk712): a fact collector's capture, its `collector_run`
+    /// row and its `collector.synced@1` commit together — when the run
+    /// record can't be written, no capture lands either, so a redelivered
+    /// event can't record the run twice.
+    #[tokio::test]
+    async fn a_fact_collectors_capture_and_run_record_commit_together() {
+        let (svc, dir) = fixture().await;
+        std::fs::write(
+            dir.path().join("once.star"),
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"tree:.\"}]}\n",
+        )
+        .unwrap();
+        let (specs, errors) = oxplow_config::collectors::parse_collectors(
+            oxplow_config::collectors::PROJECT,
+            &serde_yaml::from_str(
+                "- { id: repo.once, runtime: starlark, entry: once.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
+            )
+            .unwrap(),
+            &|_| true,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        svc.config.write().unwrap().collectors = specs;
+        let snap =
+            snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
+        let event = log_take(&svc, snap, SnapshotTrigger::TurnEnd, false, 1).await;
+        // The run record can't be written.
+        svc.db
+            .transaction(|c| {
+                c.execute_batch(
+                    "CREATE TRIGGER no_runs BEFORE INSERT ON collector_run
+                     BEGIN SELECT RAISE(ABORT, 'no run records'); END;",
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
+        use crate::event_pump::AsyncEventConsumer as _;
+        let _ = consumer.handle(&event).await;
+        let count = |sql: &'static str| {
+            let svc = svc.clone();
+            async move {
+                svc.db
+                    .read(move |c| {
+                        c.query_row(sql, [], |r| r.get::<_, i64>(0))
+                            .map_err(oxplow_db::map_sql_err)
+                    })
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(
+            count("SELECT count(*) FROM metric_capture WHERE producer = 'repo.once'").await,
+            0,
+            "no capture without its run record"
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM event_log WHERE type = 'collector.synced'").await,
+            0
+        );
+        // Once it can be written, the redelivered event records the run once.
+        svc.db
+            .transaction(|c| {
+                c.execute_batch("DROP TRIGGER no_runs")
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        consumer.handle(&event).await.unwrap();
+        consumer.handle(&event).await.unwrap();
+        assert_eq!(
+            count("SELECT count(*) FROM metric_capture WHERE producer = 'repo.once'").await,
+            1
+        );
     }
 
     fn starlark_gauge(key: &str, entry_file: &str) -> FactCollector {

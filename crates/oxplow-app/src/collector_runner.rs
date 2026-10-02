@@ -1029,6 +1029,18 @@ impl RunLog {
     /// Record `r`: its `collector_run` row and its `collector.synced@1`.
     /// A redelivered trigger event (same dedupe key) writes nothing.
     pub async fn record(&self, r: RunRecord<'_>) -> Result<(), DomainError> {
+        self.record_with(r, None).await.map(|_| ())
+    }
+
+    /// [`Self::record`] with a fact collector's `capture` and its facts in
+    /// the same transaction (tsk712), so a run never lands without its
+    /// record or twice for one trigger event. `false` when the event's run
+    /// was already recorded (nothing written).
+    pub async fn record_with(
+        &self,
+        r: RunRecord<'_>,
+        capture: Option<(oxplow_db::NewMetricCapture, Vec<oxplow_db::NewFact>)>,
+    ) -> Result<bool, DomainError> {
         let run = CollectorRun {
             owner: r.owner.to_string(),
             id: r.id.to_string(),
@@ -1050,9 +1062,19 @@ impl RunLog {
         self.db
             .transaction(move |tx| {
                 if !oxplow_db::event_log_store::append_unique_tx(tx, &schemas, &envelope)? {
-                    return Ok(());
+                    return Ok(false);
                 }
-                oxplow_db::collector_store::record_run_in(tx, &run).map_err(oxplow_db::map_sql_err)
+                if let Some((capture, facts)) = &capture {
+                    oxplow_db::fact_store::record_facts_tx(
+                        tx,
+                        capture.clone(),
+                        facts.clone(),
+                        None,
+                    )?;
+                }
+                oxplow_db::collector_store::record_run_in(tx, &run)
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(true)
             })
             .await
     }
