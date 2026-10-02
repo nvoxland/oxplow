@@ -47,20 +47,19 @@ function relTime(ts: unknown): string {
 
 /// Floating card showing one comment thread: the anchored quote, the
 /// message back-and-forth, the intent toggle, resolve/reopen, delete,
-/// and a reply composer. Mutations go straight through the api; the
-/// live `CommentsChanged` subscription on the owning surface refetches
+/// and a reply composer. Mutations run the `knowledge.*` commands (the
+/// author is whoever runs them); the owning surface's `v_comment`
+/// subscription refetches
 /// and re-feeds an updated `thread` prop, so this stays presentational
 /// apart from firing the calls.
 export function CommentPopover({
   thread,
-  author = "user",
   anchorRect,
   onClose,
   onStep,
   onRelink,
 }: {
   thread: CommentThread;
-  author?: string;
   anchorRect: DOMRect | null;
   onClose: () => void;
   /// Step to the prev/next comment on the page. When provided, ◀ ▶
@@ -238,7 +237,7 @@ export function CommentPopover({
           placeholder="Reply…"
           testIdPrefix={`comment-reply-${comment.id}`}
           onSubmit={async (body) => {
-            await addCommentMessage(comment.id, author, body);
+            await addCommentMessage(comment.id, body);
           }}
           onCancel={onClose}
         />

@@ -18,12 +18,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use oxplow_app::ref_resolver::{self, RefSummary};
-use oxplow_app::{CreateTaskInput, OxplowEvent, Services, UpdateTaskChanges};
+use oxplow_app::{CreateTaskInput, Services, UpdateTaskChanges};
 use oxplow_domain::comment::CommentThread;
 use oxplow_domain::stores::{CommentStore, TaskNoteStore, TaskStore, ThreadStore};
 use oxplow_domain::{
-    CommentId, CommentStatus, EffortId, NoteId, StreamId, Task, TaskId, TaskPriority, TaskStatus,
-    ThreadId,
+    CommentStatus, EffortId, StreamId, Task, TaskId, TaskPriority, TaskStatus, ThreadId,
 };
 
 mod lenient_params;
@@ -198,19 +197,6 @@ pub struct ReorderTasksParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DelegateQueryParams {
-    pub thread_id: String,
-    pub question: String,
-    pub focus: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RecordQueryFindingParams {
-    pub note_id: String,
-    pub body: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UpsertTaskParams {
     /// JSON-encoded Task. Use this rather than nesting the struct
     /// directly so we don't have to plumb JsonSchema through every
@@ -278,15 +264,6 @@ pub struct GetOpenEffortParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AddThreadNoteParams {
-    pub thread_id: String,
-    /// Markdown note body. Wiki-format it (`[[…]]` wikilinks) —
-    /// reference a task as `[[tsk42]]` (never the GitHub `#42` form).
-    pub body: String,
-    pub author: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ListCommentsParams {
     /// `"thread"` (id = `thr…`) or `"stream"` (id = `str…`). Optional —
     /// when omitted it's inferred from `id`'s prefix.
@@ -295,19 +272,6 @@ pub struct ListCommentsParams {
     pub id: Option<String>,
     /// Filter: `"all"` (default), `"open"`, or `"needs_response"`.
     pub status: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RespondToCommentParams {
-    /// Integer comment id (from `list_comments`).
-    pub comment_id: String,
-    pub body: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CommentIdParams {
-    /// Integer comment id (from `list_comments`).
-    pub comment_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -956,32 +920,6 @@ pub struct CodeQualityScanIdParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CreateCommentMcpParams {
-    pub stream_id: String,
-    /// Optional thread to attribute the comment to.
-    pub thread_id: Option<String>,
-    /// The target's ref kind: `wiki | file | dir | work_item | commit |
-    /// finding` (see .context/refs.md).
-    pub target_kind: String,
-    /// The ref's id for that kind: wiki slug, repo-relative path,
-    /// `oxplow:tsk42` for a task, the sha for a commit.
-    pub target_id: String,
-    pub body: String,
-    /// Optional quoted span the comment is about (empty = whole-target note).
-    pub quote: Option<String>,
-    /// `note` (default) or `followup`.
-    pub intent: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SetCommentIntentParams {
-    /// Integer comment id from `list_comments`.
-    pub comment_id: String,
-    /// `note` or `followup`.
-    pub intent: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SelectThreadMcpParams {
     pub stream_id: String,
     /// Thread to select, or omit/null to clear the selection.
@@ -1007,16 +945,6 @@ impl OxplowMcp {
             services,
             tool_router: Self::tool_router(),
         }
-    }
-
-    /// Renderer is a separate process; emit so it refetches the page's
-    /// comments + the Comments inbox after an agent-driven change.
-    fn emit_comments_changed(&self, comment: &oxplow_domain::Comment) {
-        self.services.events.emit(OxplowEvent::CommentsChanged {
-            stream_id: comment.stream_id,
-            target_kind: comment.target_kind.clone(),
-            target_id: comment.target_id.clone(),
-        });
     }
 
     // ---------- liveness / version ----------
@@ -2269,81 +2197,10 @@ impl OxplowMcp {
         json_result(&findings)
     }
 
-    // ---------- comments + stream/thread lifecycle ----------
+    // ---------- UI selection ----------
     //
-    // Originate comments and manage thread/stream lifecycle, matching the UI's
-    // affordances over the same services. Each mutation emits the same event
-    // the IPC command does, so the (separate-process) renderer refetches.
-    // Stream-branch checkout stays on Bash (subprocess logic lives in the IPC
-    // command layer, and the agent's worktree shell can `git checkout`).
-
-    #[tool(
-        description = "Create a comment anchored to a target (wiki/file/task/…). Omit `quote` \
-                          for a whole-target note. `intent` is `note` (default) or `followup`."
-    )]
-    async fn create_comment(
-        &self,
-        params: Parameters<CreateCommentMcpParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        expect_id_kind("create_comment", "stream_id", &p.stream_id, ID_STREAM)?;
-        if let Some(tid) = &p.thread_id {
-            expect_id_kind("create_comment", "thread_id", tid, ID_THREAD)?;
-        }
-        let intent = parse_comment_intent("create_comment", p.intent.as_deref().unwrap_or("note"))?;
-        let stream_id = parse_stream_id(&p.stream_id)?;
-        let thread_id = p.thread_id.as_deref().map(parse_thread_id).transpose()?;
-        let target = oxplow_domain::CommentTarget {
-            kind: p.target_kind,
-            id: p.target_id,
-        };
-        let thread = self
-            .services
-            .comment_store
-            .create(
-                &stream_id,
-                thread_id.as_ref(),
-                &target,
-                p.quote.as_deref().unwrap_or(""),
-                "",
-                &[],
-                &[],
-                intent,
-                "agent",
-                &p.body,
-            )
-            .await
-            .map_err(internal)?;
-        self.emit_comments_changed(&thread.comment);
-        json_result(&thread)
-    }
-
-    #[tool(
-        description = "Set a comment's intent: `note` (agent leaves it alone) or `followup` \
-                          (agent should act on it)."
-    )]
-    async fn set_comment_intent(
-        &self,
-        params: Parameters<SetCommentIntentParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let intent = parse_comment_intent("set_comment_intent", &params.0.intent)?;
-        let id = parse_comment_id(&params.0.comment_id)?;
-        self.services
-            .comment_store
-            .set_intent(id, intent)
-            .await
-            .map_err(internal)?;
-        let thread = self
-            .services
-            .comment_store
-            .get(id)
-            .await
-            .map_err(internal)?;
-        if let Some(t) = &thread {
-            self.emit_comments_changed(&t.comment);
-        }
-        json_result(&thread)
-    }
+    // Selection pointers are off the bus (ipc-and-stores.md). Stream-branch
+    // checkout stays on Bash (the agent's worktree shell can `git checkout`).
 
     #[tool(description = "Select (focus) a thread on a stream, or clear the selection.")]
     async fn select_thread(
@@ -2583,33 +2440,6 @@ impl OxplowMcp {
     // shipped on this item", so a parallel note table for the same
     // purpose was duplicative. Thread-scoped notes stay — they back
     // the Explore-subagent findings flow.
-
-    #[tool(
-        description = "Add a thread-scoped note (not attached to any item). A non-empty \
-                       `link_warnings` array in the response flags invalid `[[…]]` wikilinks \
-                       in the note body — fix them."
-    )]
-    async fn add_thread_note(
-        &self,
-        params: Parameters<AddThreadNoteParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "add_thread_note",
-            "thread_id",
-            &params.0.thread_id,
-            ID_THREAD,
-        )?;
-        let id = parse_thread_id(&params.0.thread_id)?;
-        let note = self
-            .services
-            .work_note_store
-            .add_for_thread(&id, &params.0.body, &params.0.author)
-            .await
-            .map_err(internal)?;
-        let link_warnings =
-            oxplow_app::link_check::check_links(&self.services, &params.0.body).await;
-        json_result(&WithLinkWarnings::new(note, link_warnings))
-    }
 
     #[tool(description = "List thread-scoped notes.")]
     async fn list_thread_notes(
@@ -2857,8 +2687,9 @@ impl OxplowMcp {
                        usually pass only `id`. `status` filters: \"all\" (default), \"open\", or \
                        \"needs_response\" (open follow-ups whose latest message isn't yours — what \
                        the user wants you to act on). Each result carries the anchored `quote`, \
-                       the message thread, and `intent` (note vs followup). Respond with \
-                       respond_to_comment; close with resolve_comment."
+                       the message thread, and `intent` (note vs followup). Reply with \
+                       `run_command knowledge.reply_comment { comment, body }`; resolve with \
+                       `run_command knowledge.update_comment { comment, status: \"resolved\" }`."
     )]
     async fn list_comments(
         &self,
@@ -2912,139 +2743,6 @@ impl OxplowMcp {
             });
         }
         json_result(&enriched)
-    }
-
-    #[tool(
-        description = "Respond to a comment: append your reply to its thread (recorded as author \
-                       \"agent\"). This marks an open follow-up answered until the user replies \
-                       again. `comment_id` is the integer id from list_comments. Returns the \
-                       updated thread."
-    )]
-    async fn respond_to_comment(
-        &self,
-        params: Parameters<RespondToCommentParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let id = parse_comment_id(&params.0.comment_id)?;
-        self.services
-            .comment_store
-            .add_message(id, "agent", &params.0.body)
-            .await
-            .map_err(internal)?;
-        let thread = self
-            .services
-            .comment_store
-            .get(id)
-            .await
-            .map_err(internal)?;
-        if let Some(t) = &thread {
-            self.emit_comments_changed(&t.comment);
-        }
-        json_result(&thread)
-    }
-
-    #[tool(
-        description = "Resolve a comment thread (status = resolved). Use when the user's note is \
-                       fully addressed. `comment_id` is the integer id from list_comments."
-    )]
-    async fn resolve_comment(
-        &self,
-        params: Parameters<CommentIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let id = parse_comment_id(&params.0.comment_id)?;
-        self.services
-            .comment_store
-            .set_status(id, CommentStatus::Resolved)
-            .await
-            .map_err(internal)?;
-        let thread = self
-            .services
-            .comment_store
-            .get(id)
-            .await
-            .map_err(internal)?;
-        if let Some(t) = &thread {
-            self.emit_comments_changed(&t.comment);
-        }
-        json_result(&thread)
-    }
-
-    #[tool(
-        description = "Prepare an exploration query for an Explore subagent. Use to understand a \
-                       codebase area before dispatching real work when you'd otherwise read 5+ \
-                       files inline — offloading the reads keeps your cached context small. \
-                       Returns { prompt, provisionalNoteId }; call Agent(subagent_type='Explore', \
-                       prompt=<prompt>) — the prompt tells the subagent to record findings via \
-                       record_query_finding({ note_id: <provisionalNoteId>, body }), which you \
-                       read later via list_thread_notes."
-    )]
-    async fn delegate_query(
-        &self,
-        params: Parameters<DelegateQueryParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "delegate_query",
-            "thread_id",
-            &params.0.thread_id,
-            ID_THREAD,
-        )?;
-        let thread_id = parse_thread_id(&params.0.thread_id)?;
-        let question = params.0.question.trim().to_string();
-        if question.is_empty() {
-            return Err(McpError::invalid_params(
-                "delegate_query: `question` is required",
-                None,
-            ));
-        }
-        let focus = params.0.focus.unwrap_or_default().trim().to_string();
-        // Allocate the finding note up front with an empty body. The
-        // subagent fills it in via record_query_finding when done.
-        let provisional = self
-            .services
-            .work_note_store
-            .add_for_thread(&thread_id, "", "explore-subagent")
-            .await
-            .map_err(internal)?;
-        let prompt = compose_delegate_query_prompt(
-            &params.0.thread_id,
-            &question,
-            &focus,
-            &provisional.id.to_string(),
-        );
-        json_result(&serde_json::json!({
-            "ok": true,
-            "prompt": prompt,
-            "provisionalNoteId": provisional.id.to_string(),
-        }))
-    }
-
-    #[tool(
-        description = "Write the Explore subagent's finding into a pre-allocated thread-scoped note \
-                       (id returned by mcp__oxplow__delegate_query). Call this once at the end of \
-                       the exploration — the orchestrator reads it later via list_thread_notes."
-    )]
-    async fn record_query_finding(
-        &self,
-        params: Parameters<RecordQueryFindingParams>,
-    ) -> Result<CallToolResult, McpError> {
-        if params.0.note_id.is_empty() {
-            return Err(McpError::invalid_params(
-                "record_query_finding: `note_id` is required",
-                None,
-            ));
-        }
-        expect_id_kind(
-            "record_query_finding",
-            "note_id",
-            &params.0.note_id,
-            ID_NOTE,
-        )?;
-        let id = parse_note_id(&params.0.note_id)?;
-        self.services
-            .work_note_store
-            .update_body(&id, &params.0.body)
-            .await
-            .map_err(internal)?;
-        json_result(&serde_json::json!({ "ok": true, "noteId": params.0.note_id }))
     }
 
     #[tool(description = "For one wiki page file ref, return the unified diff \
@@ -4361,20 +4059,13 @@ const WRITE_TOOLS: &[&str] = &[
     "install_extension",
     "update_extension",
     "restore_file_snapshot",
-    "create_comment",
-    "set_comment_intent",
     "select_thread",
     "switch_stream",
     "reorder_tasks",
     "upsert_task",
-    "add_thread_note",
     "ingest_coverage",
     "ingest_analysis",
     "record_test_run",
-    "respond_to_comment",
-    "resolve_comment",
-    "delegate_query",
-    "record_query_finding",
     "add_followup",
     "remove_followup",
     "create_task",
@@ -4754,18 +4445,6 @@ fn resolve_comment_scope(scope: Option<&str>, id: Option<&str>) -> Result<Commen
     }
 }
 
-/// Parse a `note`/`followup` string into a `CommentIntent`.
-fn parse_comment_intent(tool: &str, value: &str) -> Result<oxplow_domain::CommentIntent, McpError> {
-    match value.to_ascii_lowercase().as_str() {
-        "note" => Ok(oxplow_domain::CommentIntent::Note),
-        "followup" => Ok(oxplow_domain::CommentIntent::Followup),
-        other => Err(McpError::invalid_params(
-            format!("{tool}: `intent` expects `note` or `followup`, got `{other}`"),
-            None,
-        )),
-    }
-}
-
 /// Validate that a caller-supplied id string carries the expected
 /// `<prefix>-…` shape. When the prefix mismatches a known one, return
 /// an `invalid_params` error that names the tool/parameter, the value
@@ -4792,24 +4471,6 @@ fn parse_task_id(tool: &str, param: &str, value: &str) -> Result<oxplow_domain::
     ))
 }
 
-/// Parse a comment id from its string form. Accepts the prefixed form
-/// (`cmt5`) or a bare positive integer.
-fn parse_comment_id(value: &str) -> Result<CommentId, McpError> {
-    let v = value.trim();
-    if let Some(id) = CommentId::try_from_str(v) {
-        return Ok(id);
-    }
-    if let Ok(n) = v.parse::<i64>() {
-        if n > 0 {
-            return Ok(CommentId::new(n));
-        }
-    }
-    Err(McpError::invalid_params(
-        format!("`comment_id` expects a comment id (e.g. `cmt5`), got `{value}`"),
-        None,
-    ))
-}
-
 fn parse_stream_id(value: &str) -> Result<StreamId, McpError> {
     StreamId::try_from_str(value)
         .ok_or_else(|| McpError::invalid_params(format!("invalid stream id `{value}`"), None))
@@ -4817,10 +4478,6 @@ fn parse_stream_id(value: &str) -> Result<StreamId, McpError> {
 fn parse_thread_id(value: &str) -> Result<ThreadId, McpError> {
     ThreadId::try_from_str(value)
         .ok_or_else(|| McpError::invalid_params(format!("invalid thread id `{value}`"), None))
-}
-fn parse_note_id(value: &str) -> Result<NoteId, McpError> {
-    NoteId::try_from_str(value)
-        .ok_or_else(|| McpError::invalid_params(format!("invalid note id `{value}`"), None))
 }
 fn parse_effort_id(value: &str) -> Result<EffortId, McpError> {
     EffortId::try_from_str(value)
@@ -4845,10 +4502,6 @@ pub(crate) const ID_STREAM: IdPrefix = IdPrefix {
 pub(crate) const ID_THREAD: IdPrefix = IdPrefix {
     prefix: "thr",
     label: "thread id (thr…)",
-};
-pub(crate) const ID_NOTE: IdPrefix = IdPrefix {
-    prefix: "not",
-    label: "note id (not…)",
 };
 pub(crate) const ID_FOLLOWUP: IdPrefix = IdPrefix {
     prefix: "fup",
@@ -4903,41 +4556,6 @@ fn expect_id_kind(
             None,
         )),
     }
-}
-
-/// Compose the prompt the orchestrator passes to
-/// `Agent(subagent_type='Explore', prompt=…)`. Pure so it's
-/// testable without an MCP server. Mirrors `composeDelegateQueryPrompt`
-/// from `src/mcp/mcp-tools.ts`.
-fn compose_delegate_query_prompt(
-    thread_id: &str,
-    question: &str,
-    focus: &str,
-    note_id: &str,
-) -> String {
-    let mut parts: Vec<String> = vec![
-        "You are an Explore subagent answering one focused exploration question for the orchestrator.".into(),
-        String::new(),
-        format!("threadId: {thread_id}"),
-        format!("note_id: {note_id}"),
-        String::new(),
-        "## Question".into(),
-        question.to_string(),
-    ];
-    if !focus.is_empty() {
-        parts.push(String::new());
-        parts.push("## Focus".into());
-        parts.push(focus.to_string());
-    }
-    parts.push(String::new());
-    parts.push("## How to report".into());
-    parts.push(
-        "When done, call `mcp__oxplow__record_query_finding({ note_id, body })` ONCE with your complete finding. \
-         The body should be concise, structured prose — file paths, key function names, and the direct answer to the question. \
-         Do not make code changes. Do not create tasks. Read/Grep/Glob only."
-            .into(),
-    );
-    parts.join("\n")
 }
 
 /// Compose the brief the orchestrator passes to the general-purpose
@@ -5817,7 +5435,6 @@ mod tests {
 
     #[tokio::test]
     async fn list_comments_enriches_primary_and_context() {
-        use oxplow_domain::comment::{CommentIntent, CommentTarget};
         let (_proj, services, server) = boot();
         let stream = services.streams.list_streams().await.unwrap()[0].id;
 
@@ -5835,27 +5452,21 @@ mod tests {
             .unwrap();
 
         services
-            .comment_store
-            .create(
-                &stream,
-                None,
-                &CommentTarget {
-                    kind: "work_item".into(),
-                    id: format!("oxplow:{primary_task}"),
-                },
-                "the highlighted text",
-                "[]",
-                &[CommentTarget {
-                    kind: "work_item".into(),
-                    id: format!("oxplow:{parent_task}"),
-                }],
-                &[CommentTarget {
-                    kind: "file".into(),
-                    id: "src/app.rs".into(),
-                }],
-                CommentIntent::Followup,
-                "user",
-                "what about this?",
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "knowledge.add_comment",
+                serde_json::json!({
+                    "stream": format!("stream:{stream}"),
+                    "target": { "kind": "work_item", "id": format!("oxplow:{primary_task}") },
+                    "quote": "the highlighted text",
+                    "selectors_json": "[]",
+                    "context_chain": [{ "kind": "work_item", "id": format!("oxplow:{parent_task}") }],
+                    "referenced_refs": [{ "kind": "file", "id": "src/app.rs" }],
+                    "intent": "followup",
+                    "body": "what about this?",
+                }),
+                false,
             )
             .await
             .unwrap();
@@ -7535,31 +7146,6 @@ mod tests {
             msg.contains("\"thread\"") && msg.contains("\"stream\""),
             "lists valid scopes: {msg}"
         );
-    }
-
-    // ---- compose_delegate_query_prompt ----
-
-    #[test]
-    fn delegate_query_prompt_contains_required_sections() {
-        let s = compose_delegate_query_prompt("b-1", "Where is X?", "", "n-2");
-        assert!(s.contains("threadId: b-1"));
-        assert!(s.contains("note_id: n-2"));
-        assert!(s.contains("## Question"));
-        assert!(s.contains("Where is X?"));
-        assert!(s.contains("record_query_finding"));
-    }
-
-    #[test]
-    fn delegate_query_prompt_omits_focus_section_when_empty() {
-        let s = compose_delegate_query_prompt("b-1", "Q", "", "n-1");
-        assert!(!s.contains("## Focus"));
-    }
-
-    #[test]
-    fn delegate_query_prompt_includes_focus_when_provided() {
-        let s = compose_delegate_query_prompt("b-1", "Q", "look in src/foo.rs", "n-1");
-        assert!(s.contains("## Focus"));
-        assert!(s.contains("look in src/foo.rs"));
     }
 
     // ---- compose_dispatch_brief ----

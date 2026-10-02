@@ -270,6 +270,200 @@ fn written(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<Vec<Envelop
         .collect())
 }
 
+/// What a new comment is (`knowledge.add_comment`, P8.A6).
+#[derive(Debug, Clone)]
+pub struct NewComment {
+    pub stream: StreamId,
+    pub thread: Option<ThreadId>,
+    pub target: CommentTarget,
+    pub quote: String,
+    pub selectors_json: String,
+    pub context_chain: Vec<CommentTarget>,
+    pub referenced_refs: Vec<CommentTarget>,
+    pub intent: CommentIntent,
+    pub author: String,
+    pub body: String,
+}
+
+fn sql(e: rusqlite::Error) -> DomainError {
+    crate::database::map_sql_err(e)
+}
+
+/// Comment `id` with its messages, on `conn`.
+pub fn get_tx(
+    conn: &rusqlite::Connection,
+    id: CommentId,
+) -> Result<Option<CommentThread>, DomainError> {
+    Ok(list_threads(conn, "id = ?1", &[&id.value()])
+        .map_err(sql)?
+        .into_iter()
+        .next())
+}
+
+/// Create a comment with its first message, on `conn` — a command's
+/// transaction. The inline refs its quote mentions join the provided
+/// ones, so typed context survives a surface that didn't link them.
+/// Returns it and the `knowledge.comment.written` to log.
+pub fn create_tx(
+    conn: &rusqlite::Connection,
+    new: &NewComment,
+) -> Result<(CommentThread, Vec<Envelope>), DomainError> {
+    let referenced_refs = union_referenced_refs(&new.referenced_refs, &new.quote);
+    let now = Timestamp::now();
+    let now_s = ts_to_string(now);
+    conn.execute(
+        "INSERT INTO comment
+               (stream_id, thread_id, target_kind, target_id, quote, selectors_json,
+                context_chain_json, referenced_refs_json,
+                intent, status, orphaned, author, created_at, updated_at, last_activity_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'open', 0, ?10, ?11, ?11, ?11)",
+        params![
+            new.stream.value(),
+            new.thread.as_ref().map(|t| t.value()),
+            new.target.kind,
+            new.target.id,
+            new.quote,
+            new.selectors_json,
+            refs_to_json(&new.context_chain),
+            refs_to_json(&referenced_refs),
+            intent_to_str(new.intent),
+            new.author,
+            now_s,
+        ],
+    )
+    .map_err(sql)?;
+    let comment_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO comment_message (comment_id, author, body, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+        params![comment_id, new.author, new.body, now_s],
+    )
+    .map_err(sql)?;
+    let comment = Comment {
+        id: CommentId::new(comment_id),
+        stream_id: new.stream,
+        thread_id: new.thread,
+        target_kind: new.target.kind.clone(),
+        target_id: new.target.id.clone(),
+        quote: new.quote.clone(),
+        selectors_json: new.selectors_json.clone(),
+        context_chain: new.context_chain.clone(),
+        referenced_refs,
+        intent: new.intent,
+        status: CommentStatus::Open,
+        orphaned: false,
+        author: new.author.clone(),
+        created_at: now,
+        updated_at: now,
+        last_activity_at: now,
+        resolved_at: None,
+    };
+    let messages = load_messages(conn, comment_id).map_err(sql)?;
+    let event = comment_event(comment_id, &new.target.kind, &new.target.id, false);
+    Ok((CommentThread { comment, messages }, vec![event]))
+}
+
+/// Reply on comment `comment`; bumps its last activity.
+pub fn add_message_tx(
+    conn: &rusqlite::Connection,
+    comment: CommentId,
+    author: &str,
+    body: &str,
+) -> Result<(CommentMessage, Vec<Envelope>), DomainError> {
+    let now = Timestamp::now();
+    let now_s = ts_to_string(now);
+    conn.execute(
+        "INSERT INTO comment_message (comment_id, author, body, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+        params![comment.value(), author, body, now_s],
+    )
+    .map_err(sql)?;
+    let message_id = conn.last_insert_rowid();
+    conn.execute(
+        "UPDATE comment SET updated_at = ?2, last_activity_at = ?2 WHERE id = ?1",
+        params![comment.value(), now_s],
+    )
+    .map_err(sql)?;
+    Ok((
+        CommentMessage {
+            id: CommentMessageId::new(message_id),
+            comment_id: comment,
+            author: author.to_string(),
+            body: body.to_string(),
+            created_at: now,
+        },
+        written(conn, comment.value()).map_err(sql)?,
+    ))
+}
+
+pub fn set_intent_tx(
+    conn: &rusqlite::Connection,
+    id: CommentId,
+    intent: CommentIntent,
+) -> Result<Vec<Envelope>, DomainError> {
+    conn.execute(
+        "UPDATE comment SET intent = ?2, updated_at = ?3 WHERE id = ?1",
+        params![
+            id.value(),
+            intent_to_str(intent),
+            ts_to_string(Timestamp::now())
+        ],
+    )
+    .map_err(sql)?;
+    written(conn, id.value()).map_err(sql)
+}
+
+/// Stamps `resolved_at` on resolve and clears it on reopen, so the
+/// dashboard can bucket resolved comments by date.
+pub fn set_status_tx(
+    conn: &rusqlite::Connection,
+    id: CommentId,
+    status: CommentStatus,
+) -> Result<Vec<Envelope>, DomainError> {
+    let now = ts_to_string(Timestamp::now());
+    let resolved_at = match status {
+        CommentStatus::Resolved => Some(now.clone()),
+        CommentStatus::Open => None,
+    };
+    conn.execute(
+        "UPDATE comment SET status = ?2, updated_at = ?3, resolved_at = ?4 WHERE id = ?1",
+        params![id.value(), status_to_str(status), now, resolved_at],
+    )
+    .map_err(sql)?;
+    written(conn, id.value()).map_err(sql)
+}
+
+/// Re-attach a comment to a newly selected span: its quote and anchor,
+/// no longer orphaned.
+pub fn relink_tx(
+    conn: &rusqlite::Connection,
+    id: CommentId,
+    quote: &str,
+    selectors_json: &str,
+) -> Result<Vec<Envelope>, DomainError> {
+    conn.execute(
+        "UPDATE comment
+             SET quote = ?2, selectors_json = ?3, orphaned = 0, updated_at = ?4
+             WHERE id = ?1",
+        params![
+            id.value(),
+            quote,
+            selectors_json,
+            ts_to_string(Timestamp::now())
+        ],
+    )
+    .map_err(sql)?;
+    written(conn, id.value()).map_err(sql)
+}
+
+/// Delete a comment; its messages cascade.
+pub fn delete_tx(conn: &rusqlite::Connection, id: CommentId) -> Result<Vec<Envelope>, DomainError> {
+    let gone = deleted(conn, "id = ?1", params![id.value()]).map_err(sql)?;
+    conn.execute("DELETE FROM comment WHERE id = ?1", params![id.value()])
+        .map_err(sql)?;
+    Ok(gone)
+}
+
 impl SqliteCommentStore {
     pub fn new(
         db: Database,
@@ -300,123 +494,6 @@ impl SqliteCommentStore {
 
 #[async_trait]
 impl CommentStore for SqliteCommentStore {
-    async fn create(
-        &self,
-        stream: &StreamId,
-        thread: Option<&ThreadId>,
-        target: &CommentTarget,
-        quote: &str,
-        selectors_json: &str,
-        context_chain: &[CommentTarget],
-        referenced_refs: &[CommentTarget],
-        intent: CommentIntent,
-        author: &str,
-        body: &str,
-    ) -> Result<CommentThread, DomainError> {
-        let stream = *stream;
-        let thread = thread.cloned();
-        let target = target.clone();
-        // Enrich the FE-captured refs with anything the durable quote
-        // mentions inline, so typed context survives even when a surface
-        // didn't render the mention as a link.
-        let referenced_refs = union_referenced_refs(referenced_refs, quote);
-        let quote = quote.to_string();
-        let selectors_json = selectors_json.to_string();
-        let context_chain = context_chain.to_vec();
-        let author = author.to_string();
-        let body = body.to_string();
-        self.logged(move |conn| {
-            let now = Timestamp::now();
-            let now_s = ts_to_string(now);
-            let context_chain_json = refs_to_json(&context_chain);
-            let referenced_refs_json = refs_to_json(&referenced_refs);
-            conn.execute(
-                "INSERT INTO comment
-                       (stream_id, thread_id, target_kind, target_id, quote, selectors_json,
-                        context_chain_json, referenced_refs_json,
-                        intent, status, orphaned, author, created_at, updated_at, last_activity_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'open', 0, ?10, ?11, ?11, ?11)",
-                params![
-                    stream.value(),
-                    thread.as_ref().map(|t| t.value()),
-                    target.kind,
-                    target.id,
-                    quote,
-                    selectors_json,
-                    context_chain_json,
-                    referenced_refs_json,
-                    intent_to_str(intent),
-                    author,
-                    now_s,
-                ],
-            )?;
-            let comment_id = conn.last_insert_rowid();
-            conn.execute(
-                "INSERT INTO comment_message (comment_id, author, body, created_at)
-                     VALUES (?1, ?2, ?3, ?4)",
-                params![comment_id, author, body, now_s],
-            )?;
-            let comment = Comment {
-                id: CommentId::new(comment_id),
-                stream_id: stream,
-                thread_id: thread,
-                target_kind: target.kind.clone(),
-                target_id: target.id.clone(),
-                quote: quote.clone(),
-                selectors_json: selectors_json.clone(),
-                context_chain: context_chain.clone(),
-                referenced_refs: referenced_refs.clone(),
-                intent,
-                status: CommentStatus::Open,
-                orphaned: false,
-                author: author.clone(),
-                created_at: now,
-                updated_at: now,
-                last_activity_at: now,
-                resolved_at: None,
-            };
-            let messages = load_messages(conn, comment_id)?;
-            let event = comment_event(comment_id, &target.kind, &target.id, false);
-            Ok((CommentThread { comment, messages }, vec![event]))
-        })
-        .await
-    }
-
-    async fn add_message(
-        &self,
-        comment: CommentId,
-        author: &str,
-        body: &str,
-    ) -> Result<CommentMessage, DomainError> {
-        let author = author.to_string();
-        let body = body.to_string();
-        self.logged(move |conn| {
-            let now = Timestamp::now();
-            let now_s = ts_to_string(now);
-            conn.execute(
-                "INSERT INTO comment_message (comment_id, author, body, created_at)
-                     VALUES (?1, ?2, ?3, ?4)",
-                params![comment.value(), author, body, now_s],
-            )?;
-            let message_id = conn.last_insert_rowid();
-            conn.execute(
-                "UPDATE comment SET updated_at = ?2, last_activity_at = ?2 WHERE id = ?1",
-                params![comment.value(), now_s],
-            )?;
-            Ok((
-                CommentMessage {
-                    id: CommentMessageId::new(message_id),
-                    comment_id: comment,
-                    author: author.clone(),
-                    body: body.clone(),
-                    created_at: now,
-                },
-                written(conn, comment.value())?,
-            ))
-        })
-        .await
-    }
-
     async fn get(&self, id: CommentId) -> Result<Option<CommentThread>, DomainError> {
         self.db
             .call(move |conn| {
@@ -457,39 +534,6 @@ impl CommentStore for SqliteCommentStore {
             .await
     }
 
-    async fn set_intent(&self, id: CommentId, intent: CommentIntent) -> Result<(), DomainError> {
-        self.logged(move |conn| {
-            conn.execute(
-                "UPDATE comment SET intent = ?2, updated_at = ?3 WHERE id = ?1",
-                params![
-                    id.value(),
-                    intent_to_str(intent),
-                    ts_to_string(Timestamp::now())
-                ],
-            )?;
-            Ok(((), written(conn, id.value())?))
-        })
-        .await
-    }
-
-    async fn set_status(&self, id: CommentId, status: CommentStatus) -> Result<(), DomainError> {
-        self.logged(move |conn| {
-            // Stamp resolved_at on →resolved, clear it on →open, so
-            // the dashboard can bucket resolved comments by date.
-            let now = ts_to_string(Timestamp::now());
-            let resolved_at = match status {
-                CommentStatus::Resolved => Some(now.clone()),
-                CommentStatus::Open => None,
-            };
-            conn.execute(
-                "UPDATE comment SET status = ?2, updated_at = ?3, resolved_at = ?4 WHERE id = ?1",
-                params![id.value(), status_to_str(status), now, resolved_at],
-            )?;
-            Ok(((), written(conn, id.value())?))
-        })
-        .await
-    }
-
     async fn set_anchor(
         &self,
         id: CommentId,
@@ -513,41 +557,6 @@ impl CommentStore for SqliteCommentStore {
         .await
     }
 
-    async fn relink(
-        &self,
-        id: CommentId,
-        quote: &str,
-        selectors_json: &str,
-    ) -> Result<(), DomainError> {
-        let quote = quote.to_string();
-        let selectors_json = selectors_json.to_string();
-        self.logged(move |conn| {
-            conn.execute(
-                "UPDATE comment
-                     SET quote = ?2, selectors_json = ?3, orphaned = 0, updated_at = ?4
-                     WHERE id = ?1",
-                params![
-                    id.value(),
-                    quote,
-                    selectors_json,
-                    ts_to_string(Timestamp::now())
-                ],
-            )?;
-            Ok(((), written(conn, id.value())?))
-        })
-        .await
-    }
-
-    async fn delete(&self, id: CommentId) -> Result<(), DomainError> {
-        self.logged(move |conn| {
-            let gone = deleted(conn, "id = ?1", params![id.value()])?;
-            // comment_message rows cascade via FK.
-            conn.execute("DELETE FROM comment WHERE id = ?1", params![id.value()])?;
-            Ok(((), gone))
-        })
-        .await
-    }
-
     async fn cleanup(&self, retention_days: i64) -> Result<u64, DomainError> {
         if retention_days <= 0 {
             return Ok(0);
@@ -565,6 +574,87 @@ impl CommentStore for SqliteCommentStore {
             Ok((n as u64, gone))
         })
         .await
+    }
+}
+
+/// The write cores in their own transaction, their events logged — what
+/// a command does, for this module's tests.
+#[cfg(test)]
+impl SqliteCommentStore {
+    async fn run<R: Send + 'static>(
+        &self,
+        f: impl Fn(&rusqlite::Connection) -> Result<(R, Vec<Envelope>), DomainError> + Send + 'static,
+    ) -> Result<R, DomainError> {
+        let schemas = self.schemas.clone();
+        self.db
+            .transaction(move |tx| {
+                let (out, events) = f(tx)?;
+                for e in &events {
+                    crate::event_log_store::append_tx(tx, &schemas, e)?;
+                }
+                Ok(out)
+            })
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn create(
+        &self,
+        stream: &StreamId,
+        thread: Option<&ThreadId>,
+        target: &CommentTarget,
+        quote: &str,
+        selectors_json: &str,
+        context_chain: &[CommentTarget],
+        referenced_refs: &[CommentTarget],
+        intent: CommentIntent,
+        author: &str,
+        body: &str,
+    ) -> Result<CommentThread, DomainError> {
+        let new = NewComment {
+            stream: *stream,
+            thread: thread.copied(),
+            target: target.clone(),
+            quote: quote.into(),
+            selectors_json: selectors_json.into(),
+            context_chain: context_chain.to_vec(),
+            referenced_refs: referenced_refs.to_vec(),
+            intent,
+            author: author.into(),
+            body: body.into(),
+        };
+        self.run(move |c| create_tx(c, &new)).await
+    }
+
+    async fn add_message(
+        &self,
+        comment: CommentId,
+        author: &str,
+        body: &str,
+    ) -> Result<CommentMessage, DomainError> {
+        let (author, body) = (author.to_string(), body.to_string());
+        self.run(move |c| add_message_tx(c, comment, &author, &body))
+            .await
+    }
+
+    async fn set_status(&self, id: CommentId, status: CommentStatus) -> Result<(), DomainError> {
+        self.run(move |c| Ok(((), set_status_tx(c, id, status)?)))
+            .await
+    }
+
+    async fn relink(
+        &self,
+        id: CommentId,
+        quote: &str,
+        selectors_json: &str,
+    ) -> Result<(), DomainError> {
+        let (quote, selectors) = (quote.to_string(), selectors_json.to_string());
+        self.run(move |c| Ok(((), relink_tx(c, id, &quote, &selectors)?)))
+            .await
+    }
+
+    async fn delete(&self, id: CommentId) -> Result<(), DomainError> {
+        self.run(move |c| Ok(((), delete_tx(c, id)?))).await
     }
 }
 

@@ -18,7 +18,7 @@
 //!   menus, terminals, LSP-client lifecycle, telemetry, background tasks,
 //!   launcher, workspace file I/O the agent does via its own Read/Write tools).
 //! - [`Exposure::AgentOnly`] — intentionally agent-only (dispatch, await_user,
-//!   delegate_query, batch/orchestration affordances).
+//!   batch/orchestration affordances).
 //! - [`Exposure::AgentTodo`] — *should* be on both; the MCP tool is not built
 //!   yet. A tracked, reviewed gap. `ipc` is set, `mcp` is `None`.
 //!
@@ -116,7 +116,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("update_task"),
     agent("upsert_task"),
     agent("reorder_tasks"),
-    both("add_thread_note"),
     both("list_thread_notes"),
     agent("list_effort_observations"),
     // Per-effort metric roll-up for the task-page panel (tsk250) — UI-only; the
@@ -226,16 +225,6 @@ pub const MANIFEST: &[Capability] = &[
     both_named("thread.list", "list_threads", "list_thread_work"),
     agent("list_tasks"),
     both_named("comment.list", "list_comments_for_stream", "list_comments"),
-    both_named(
-        "comment.respond",
-        "add_comment_message",
-        "respond_to_comment",
-    ),
-    both_named(
-        "comment.set_status",
-        "set_comment_status",
-        "resolve_comment",
-    ),
     // ---- agent-only (orchestration / agent affordances) ----
     agent("read_task_options"),
     agent("complete_task"),
@@ -244,8 +233,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("dispatch_task"),
     agent("get_thread_context"),
     agent("file_epic_with_children"),
-    agent("delegate_query"),
-    agent("record_query_finding"),
     agent("await_user"),
     agent("wiki_ref_drift"),
     // ---- collection (effort-scoped observations) ----
@@ -292,9 +279,7 @@ pub const MANIFEST: &[Capability] = &[
     // ---- code quality: duplication findings mirrored to MCP (metrics scan
     //      retired in tsk229; signals moved to the metric substrate) ----
     agent("list_code_quality_findings"),
-    // ---- comments + stream/thread lifecycle mirrored to MCP (Child 5) ----
-    both("create_comment"),
-    both("set_comment_intent"),
+    // ---- UI selection mirrored to MCP ----
     both("select_thread"),
     both("switch_stream"),
     // checkout stays on Bash — subprocess logic lives in the IPC command layer.
@@ -323,11 +308,9 @@ pub const MANIFEST: &[Capability] = &[
     // (both); the rest are pure-UI edits (tsk140). ----
     both("list_dashboards"),
     both("get_dashboard"),
-    // ---- ui-only: comments (anchor management / destructive) ----
+    // ---- ui-only: comments (reads + the passive anchor re-sync; writes are knowledge.*) ----
     ui("list_comments_for_target"),
     ui("set_comment_anchor"),
-    ui("relink_comment"),
-    ui("delete_comment"),
     // ---- ui-only: wiki (writes are the knowledge.* commands) ----
     // ---- ui-only: wiki freshness ----
     // ---- ui-only: page visits ----

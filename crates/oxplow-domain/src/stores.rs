@@ -9,9 +9,9 @@
 
 use async_trait::async_trait;
 
-use crate::comment::{CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread};
+use crate::comment::{CommentTarget, CommentThread};
 use crate::hook::{AgentStatus, AgentTurn};
-use crate::ids::{AgentTurnId, CommentId, NoteId, StreamId, TaskId, TaskLinkId, ThreadId};
+use crate::ids::{AgentTurnId, CommentId, StreamId, TaskId, TaskLinkId, ThreadId};
 use crate::stream::Stream;
 use crate::task::{Task, TaskLink, TaskNote, TaskStatus};
 use crate::thread::Thread;
@@ -87,20 +87,11 @@ pub trait TaskStore: Send + Sync {
 #[async_trait]
 pub trait TaskNoteStore: Send + Sync {
     // A note on a task is a work-item comment: the `work_item.comment`
-    // command (`oxplow_db::task_satellite::add_task_note_tx`).
-    async fn add_for_thread(
-        &self,
-        thread: &ThreadId,
-        body: &str,
-        author: &str,
-    ) -> Result<TaskNote, DomainError>;
+    // command (`oxplow_db::task_satellite::add_task_note_tx`). A thread
+    // note is `knowledge.add_note` / `update_note` (P8.A6,
+    // `add_thread_note_tx`, `update_note_tx`).
     async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskNote>, DomainError>;
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<TaskNote>, DomainError>;
-    /// Replace the body of an existing note. Used by
-    /// `oxplow__record_query_finding` to fill in a note that was
-    /// pre-allocated empty by `oxplow__delegate_query`.
-    async fn update_body(&self, id: &NoteId, body: &str) -> Result<(), DomainError>;
-    async fn delete(&self, id: &NoteId) -> Result<(), DomainError>;
 }
 
 #[async_trait]
@@ -152,33 +143,8 @@ pub trait AgentTurnStore: Send + Sync {
 /// Reads return whole [`CommentThread`]s (anchor + messages).
 #[async_trait]
 pub trait CommentStore: Send + Sync {
-    /// Create a comment anchored to `target` with its first message.
-    /// `context_chain` is the ancestor regions the selection sat inside
-    /// (innermost→outermost, excluding `target`); `referenced_refs` are
-    /// the canonical refs found inside the selection.
-    #[allow(clippy::too_many_arguments)]
-    async fn create(
-        &self,
-        stream: &StreamId,
-        thread: Option<&ThreadId>,
-        target: &CommentTarget,
-        quote: &str,
-        selectors_json: &str,
-        context_chain: &[CommentTarget],
-        referenced_refs: &[CommentTarget],
-        intent: CommentIntent,
-        author: &str,
-        body: &str,
-    ) -> Result<CommentThread, DomainError>;
-
-    /// Append a reply to an existing thread; bumps `last_activity_at`.
-    async fn add_message(
-        &self,
-        comment: CommentId,
-        author: &str,
-        body: &str,
-    ) -> Result<CommentMessage, DomainError>;
-
+    // Writing a comment is a `knowledge.*_comment` command (P8.A6), over
+    // `oxplow_db::comment_store::*_tx`.
     async fn get(&self, id: CommentId) -> Result<Option<CommentThread>, DomainError>;
     async fn list_for_target(
         &self,
@@ -187,8 +153,6 @@ pub trait CommentStore: Send + Sync {
     async fn list_for_stream(&self, stream: &StreamId) -> Result<Vec<CommentThread>, DomainError>;
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<CommentThread>, DomainError>;
 
-    async fn set_intent(&self, id: CommentId, intent: CommentIntent) -> Result<(), DomainError>;
-    async fn set_status(&self, id: CommentId, status: CommentStatus) -> Result<(), DomainError>;
     /// Persist a re-resolved selectors array (and whether it's orphaned).
     async fn set_anchor(
         &self,
@@ -196,17 +160,6 @@ pub trait CommentStore: Send + Sync {
         selectors_json: &str,
         orphaned: bool,
     ) -> Result<(), DomainError>;
-    /// Re-attach an orphaned comment to a freshly-selected span: replace
-    /// both the `quote` and the `selectors_json` and clear `orphaned`.
-    /// (The old quote no longer matches, so unlike `set_anchor` this
-    /// rewrites the durable anchor text too.)
-    async fn relink(
-        &self,
-        id: CommentId,
-        quote: &str,
-        selectors_json: &str,
-    ) -> Result<(), DomainError>;
-    async fn delete(&self, id: CommentId) -> Result<(), DomainError>;
 
     /// Delete `resolved` and `orphaned` threads whose last activity is
     /// older than `retention_days`. Returns the number deleted.

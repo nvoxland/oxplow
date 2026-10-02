@@ -440,7 +440,6 @@ impl Indexer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::CommentIntent;
 
     async fn services() -> (Arc<Services>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -628,28 +627,19 @@ mod tests {
             )
             .await
             .unwrap();
-        svc.work_note_store
-            .add_for_thread(&thread.id, "a note about the gadget", "agent")
-            .await
-            .unwrap();
-        svc.comment_store
-            .create(
-                &stream.id,
-                Some(&thread.id),
-                &CommentTarget {
-                    kind: "work_item".into(),
-                    id: format!("oxplow:{}", task.id),
-                },
-                "quoted sprocket text",
-                "{}",
-                &[],
-                &[],
-                CommentIntent::Note,
-                "user",
-                "comment body mentions doohickey",
-            )
-            .await
-            .unwrap();
+        add_note(&svc, thread.id, "a note about the gadget").await;
+        add_comment(
+            &svc,
+            stream.id,
+            thread.id,
+            CommentTarget {
+                kind: "work_item".into(),
+                id: format!("oxplow:{}", task.id),
+            },
+            "quoted sprocket text",
+            "comment body mentions doohickey",
+        )
+        .await;
 
         Indexer::new(svc.clone()).backfill().await;
 
@@ -676,6 +666,52 @@ mod tests {
             .any(|h| h.kind == KIND_COMMENT));
     }
 
+    /// Run `name` as a person; its result.
+    async fn run(svc: &Services, name: &str, input: serde_json::Value) -> serde_json::Value {
+        svc.commands
+            .run(&oxplow_domain::Actor::Human, name, input, false)
+            .await
+            .unwrap()
+            .result
+    }
+
+    /// A thread note, through `knowledge.add_note`.
+    async fn add_note(
+        svc: &Services,
+        thread: oxplow_domain::ThreadId,
+        body: &str,
+    ) -> oxplow_domain::NoteId {
+        let out = run(
+            svc,
+            crate::commands::note::ADD,
+            serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(thread), "body": body }),
+        )
+        .await;
+        serde_json::from_value(out["note"]["id"].clone()).unwrap()
+    }
+
+    /// A comment, through `knowledge.add_comment`.
+    async fn add_comment(
+        svc: &Services,
+        stream: oxplow_domain::StreamId,
+        thread: oxplow_domain::ThreadId,
+        target: CommentTarget,
+        quote: &str,
+        body: &str,
+    ) -> oxplow_domain::CommentId {
+        let out = run(
+            svc,
+            crate::commands::comment::ADD,
+            serde_json::json!({
+                "stream": oxplow_domain::refs::build::stream_ref(stream),
+                "thread": oxplow_domain::refs::build::thread_ref(thread),
+                "target": target, "quote": quote, "body": body,
+            }),
+        )
+        .await;
+        serde_json::from_value(out["comment"]["id"].clone()).unwrap()
+    }
+
     /// P7.B6: a thread note and a page comment are indexed from their
     /// `knowledge.note.*` / `knowledge.comment.*` events — written, then
     /// gone when deleted — with no in-memory bus in the loop.
@@ -698,57 +734,66 @@ mod tests {
                     .any(|h| h.kind == kind)
             }
         };
-        let note = svc
-            .work_note_store
-            .add_for_thread(&thread.id, "a note about the gadget", "agent")
-            .await
-            .unwrap();
+        let note = add_note(&svc, thread.id, "a note about the gadget").await;
         svc.event_pump.run_once().await.unwrap();
         assert!(
             found("gadget", KIND_NOTE).await,
             "indexed on knowledge.note.written"
         );
-        svc.work_note_store.delete(&note.id).await.unwrap();
+        // Nothing deletes a note but this test: the core, its event logged.
+        let schemas = svc.event_schemas.clone();
+        svc.db
+            .transaction(move |tx| {
+                if let Some(e) = oxplow_db::task_satellite::delete_note_tx(tx, note)? {
+                    oxplow_db::event_log_store::append_tx(tx, &schemas, &e)?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
         svc.event_pump.run_once().await.unwrap();
         assert!(
             !found("gadget", KIND_NOTE).await,
             "removed on knowledge.note.deleted"
         );
 
-        let comment = svc
-            .comment_store
-            .create(
-                &stream.id,
-                Some(&thread.id),
-                &CommentTarget {
-                    kind: "file".into(),
-                    id: "src/lib.rs".into(),
-                },
-                "quoted text",
-                "{}",
-                &[],
-                &[],
-                CommentIntent::Note,
-                "user",
-                "this mentions the doohickey",
-            )
-            .await
-            .unwrap();
+        let comment = add_comment(
+            &svc,
+            stream.id,
+            thread.id,
+            CommentTarget {
+                kind: "file".into(),
+                id: "src/lib.rs".into(),
+            },
+            "quoted text",
+            "this mentions the doohickey",
+        )
+        .await;
         svc.event_pump.run_once().await.unwrap();
         assert!(
             found("doohickey", KIND_COMMENT).await,
             "indexed on knowledge.comment.written"
         );
-        svc.comment_store
-            .add_message(comment.comment.id, "agent", "and the thingamajig")
-            .await
-            .unwrap();
+        run(
+            &svc,
+            crate::commands::comment::REPLY,
+            serde_json::json!({ "comment": comment, "body": "and the thingamajig" }),
+        )
+        .await;
         svc.event_pump.run_once().await.unwrap();
         assert!(
             found("thingamajig", KIND_COMMENT).await,
             "a reply re-indexes it"
         );
-        svc.comment_store.delete(comment.comment.id).await.unwrap();
+        svc.commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::commands::comment::DELETE,
+                serde_json::json!({ "comment": comment }),
+                true,
+            )
+            .await
+            .unwrap();
         svc.event_pump.run_once().await.unwrap();
         assert!(
             !found("doohickey", KIND_COMMENT).await,

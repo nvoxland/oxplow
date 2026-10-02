@@ -1,6 +1,6 @@
 ---
 name: oxplow-runtime
-description: Oxplow runtime — task filing, status transitions, work items across providers (v_work_item, work_item.* commands), and orchestrator dispatch. Loads on mcp__oxplow__create_task, file_epic_with_children, update_task, add_thread_note, read_task_options, dispatch_task, v_work_item or work_item.* calls, and when composing a subagent brief.
+description: Oxplow runtime — task filing, status transitions, work items across providers (v_work_item, work_item.* commands), and orchestrator dispatch. Loads on mcp__oxplow__create_task, file_epic_with_children, update_task, knowledge.add_note, read_task_options, dispatch_task, v_work_item or work_item.* calls, and when composing a subagent brief.
 ---
 
 # Filing oxplow tasks
@@ -136,7 +136,8 @@ Legitimate reasons to *stay* `in_progress` across a stop boundary:
 - You have a question the user must answer before you can finish.
 - The work is genuinely multi-turn and you're pausing partway through.
 
-In either case, leave a note (`add_thread_note`) explaining what's
+In either case, leave a note (`run_command knowledge.add_note { body }`
+— it lands on your own thread) explaining what's
 pending so the stop-hook nudge suppresses itself — it only fires for
 items the agent didn't touch during the turn.
 
@@ -263,7 +264,13 @@ scoped to "user rejected my last attempt at this same item."
   subagent protocol preamble.
 
 Subagents return a one-line `oxplow-result: { ok, itemId, … }`.
-Record that as a work note via `add_thread_note`.
+Record that as a thread note: `run_command knowledge.add_note { body }`.
+
+To offload a read-heavy question to an Explore subagent, allocate its
+note first (`knowledge.add_note {}` returns `note.id`), then tell the
+subagent to write its finding once, at the end, with
+`run_command knowledge.update_note { note, body }`. Read it back with
+`list_thread_notes`.
 
 # Commands (the one write path)
 

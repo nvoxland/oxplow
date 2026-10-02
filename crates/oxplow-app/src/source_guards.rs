@@ -97,8 +97,6 @@ const EMITTERS: &[(&str, &str)] = &[
     ("AgentStatusChanged", "crates/oxplow-app/src/hook_ingest.rs"),
     ("AgentTurnsChanged", "crates/oxplow-app/src/hook_ingest.rs"), // P8.A10
     ("BackgroundTasksChanged", "crates/oxplow-app/src/lib.rs"),
-    ("CommentsChanged", "crates/oxplow-mcp/src/lib.rs"), // P8.A6
-    ("CommentsChanged", "crates/oxplow-rpc/src/commands/comments.rs"), // P8.A6
     ("ConfigChanged", "crates/oxplow-app/src/commands/config_commands.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/lib.rs"),
     ("ConfigChanged", "crates/oxplow-rpc/src/commands/ai.rs"),

@@ -246,7 +246,6 @@ export function TerminalCommentLayer({
       quote: pending.quote,
       selectorsJson: pending.selectorsJson,
       intent: input.intent,
-      author: "user",
       body: input.body,
     });
     setComposing(false);

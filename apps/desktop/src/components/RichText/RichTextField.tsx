@@ -47,7 +47,6 @@ export interface RichTextCommentConfig {
   threadId: string | null;
   targetKind: string;
   targetId: string;
-  author?: string;
 }
 
 /// Build the enriched `anchor_json` for a resolved `[from, to)` doc
@@ -491,7 +490,6 @@ export function RichTextField({
       selectorsJson: pendingSel.anchorJson,
       referencedRefs: pendingSel.referencedRefs,
       intent: input.intent,
-      author: comments.author ?? "user",
       body: input.body,
     });
     setPendingSel(null);
@@ -601,7 +599,6 @@ export function RichTextField({
       {comments && activeComment && activeThread && (
         <CommentPopover
           thread={activeThread}
-          author={comments.author ?? "user"}
           anchorRect={activeComment.rect}
           onClose={() => setActiveComment(null)}
           onStep={

@@ -341,125 +341,32 @@ async fn thread_reads_over_default_thread() {
         .unwrap();
 }
 
-// ---- comment commands (full round-trip) ----
+// ---- comment + note reads (writes are the knowledge.* commands) ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn comment_lifecycle_round_trip() {
-    use commands::comments::CreateCommentRequest;
-    use oxplow_domain::{CommentIntent, CommentStatus};
+async fn comment_and_note_reads_over_fresh_project() {
     let app = TestApp::build();
     let (stream, thread) = primary_and_thread(&app).await;
-
     assert!(
         commands::generated::list_comments_for_stream(app.state(), stream.id)
             .await
             .unwrap()
             .is_empty()
     );
-
-    let c = commands::generated::create_comment(
+    assert!(commands::generated::list_comments_for_target(
         app.state(),
-        CreateCommentRequest {
-            stream_id: stream.id,
-            thread_id: Some(thread.id),
-            target_kind: "wiki".into(),
-            target_id: "some-page".into(),
-            quote: "the quote".into(),
-            selectors_json: "{}".into(),
-            context_chain: vec![],
-            referenced_refs: vec![],
-            intent: CommentIntent::Note,
-            author: "tester".into(),
-            body: "first message".into(),
-        },
+        "wiki".into(),
+        "some-page".into()
     )
     .await
-    .unwrap();
-
-    assert_eq!(
-        commands::generated::list_comments_for_stream(app.state(), stream.id)
-            .await
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(
-        commands::generated::list_comments_for_target(
-            app.state(),
-            "wiki".into(),
-            "some-page".into()
-        )
-        .await
-        .unwrap()
-        .len(),
-        1
-    );
-
-    commands::generated::add_comment_message(
-        app.state(),
-        c.comment.id,
-        "tester".into(),
-        "reply".into(),
-    )
-    .await
-    .unwrap();
-    commands::generated::set_comment_intent(app.state(), c.comment.id, CommentIntent::Followup)
-        .await
-        .unwrap();
-    commands::generated::set_comment_anchor(app.state(), c.comment.id, "{\"v\":1}".into(), true)
-        .await
-        .unwrap();
-    commands::generated::relink_comment(
-        app.state(),
-        c.comment.id,
-        "new quote".into(),
-        "{\"v\":2}".into(),
-    )
-    .await
-    .unwrap();
-    commands::generated::set_comment_status(app.state(), c.comment.id, CommentStatus::Resolved)
-        .await
-        .unwrap();
-    commands::generated::delete_comment(app.state(), c.comment.id)
-        .await
-        .unwrap();
-
-    assert!(
-        commands::generated::list_comments_for_stream(app.state(), stream.id)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-}
-
-// ---- note commands (round-trip) ----
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn thread_note_round_trip() {
-    let app = TestApp::build();
-    let (_, thread) = primary_and_thread(&app).await;
+    .unwrap()
+    .is_empty());
     assert!(
         commands::generated::list_thread_notes(app.state(), thread.id)
             .await
             .unwrap()
             .is_empty()
     );
-    let note = commands::generated::add_thread_note(
-        app.state(),
-        thread.id,
-        "a finding".into(),
-        "me".into(),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        commands::generated::list_thread_notes(app.state(), thread.id)
-            .await
-            .unwrap()
-            .len(),
-        1
-    );
-    let _ = note;
 }
 
 // ---- page-ref + search + wiki-freshness reads ----

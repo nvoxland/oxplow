@@ -2179,7 +2179,7 @@ mod tests {
         // opened in the effort window) + Stop-hook nudges (the effort's
         // `oxplow.nudge` facts) + user-authored comments in the thread window,
         // as ONE `oxplow.effort_steering` fact. `task.steering` averages it.
-        use oxplow_domain::stores::{AgentTurnStore, CommentStore};
+        use oxplow_domain::stores::AgentTurnStore;
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
@@ -2231,24 +2231,25 @@ mod tests {
 
         // One user review comment in the thread + one agent-authored comment
         // that must NOT count (the agent steering itself isn't steering).
-        let comments = svc.comment_store.as_ref().expect("comment store attached");
         for author in ["user", "agent"] {
-            comments
-                .create(
-                    &StreamId::new(1),
-                    Some(&tid),
-                    &oxplow_domain::CommentTarget {
-                        kind: "work_item".into(),
-                        id: format!("oxplow:{}", item.id),
-                    },
-                    "",
-                    "[]",
-                    &[],
-                    &[],
-                    oxplow_domain::CommentIntent::Followup,
-                    author,
-                    "please adjust",
-                )
+            let new = oxplow_db::comment_store::NewComment {
+                stream: StreamId::new(1),
+                thread: Some(tid),
+                target: oxplow_domain::CommentTarget {
+                    kind: "work_item".into(),
+                    id: format!("oxplow:{}", item.id),
+                },
+                quote: String::new(),
+                selectors_json: "[]".into(),
+                context_chain: Vec::new(),
+                referenced_refs: Vec::new(),
+                intent: oxplow_domain::CommentIntent::Followup,
+                author: author.into(),
+                body: "please adjust".into(),
+            };
+            facts
+                .database()
+                .transaction(move |tx| oxplow_db::comment_store::create_tx(tx, &new).map(|_| ()))
                 .await
                 .unwrap();
         }

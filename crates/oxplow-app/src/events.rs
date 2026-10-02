@@ -66,14 +66,6 @@ pub enum WorkspaceChangeKind {
     rename_all_fields = "camelCase"
 )]
 pub enum OxplowEvent {
-    /// A comment (or one of its messages) changed on `target_kind` /
-    /// `target_id` within `stream_id`. Renderer refetches the affected
-    /// page's comments + the Comments inbox.
-    CommentsChanged {
-        stream_id: StreamId,
-        target_kind: String,
-        target_id: String,
-    },
     /// Followups for a thread.
     FollowupsChanged { thread_id: ThreadId },
     /// Background task progress.

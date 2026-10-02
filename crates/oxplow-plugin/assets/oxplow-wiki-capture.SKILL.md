@@ -143,8 +143,9 @@ auto-loads when you write a fence and carries the syntax rules.
 
 ## Folding in Explore findings
 
-If this turn dispatched query subagents (`oxplow__delegate_query` →
-`record_query_finding`), call `mcp__oxplow__list_thread_notes` and
+If this turn dispatched Explore subagents that wrote their findings
+into thread notes (`knowledge.update_note`), call
+`mcp__oxplow__list_thread_notes` and
 incorporate their findings into the wiki page rather than discarding
 them. Subagent notes are otherwise invisible — the wiki is where they
 become durable.

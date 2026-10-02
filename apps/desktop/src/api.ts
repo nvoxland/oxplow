@@ -1373,6 +1373,7 @@ export async function deleteWikiPage(slug: string, confirmed: boolean): Promise<
 
 // ---- Comments ----
 
+/** A comment, written as the person (`knowledge.add_comment`, P8.A6). */
 export async function createComment(input: {
   streamId: string;
   threadId: string | null;
@@ -1386,32 +1387,24 @@ export async function createComment(input: {
   /** Canonical refs found inside the selection. */
   referencedRefs?: { kind: string; id: string }[];
   intent: CommentIntent;
-  author: string;
   body: string;
 }): Promise<CommentThread> {
-  return unwrap(
-    await commands.createComment({
-      streamId: input.streamId,
-      threadId: input.threadId,
-      targetKind: input.targetKind,
-      targetId: input.targetId,
-      quote: input.quote,
-      selectorsJson: input.selectorsJson,
-      contextChain: input.contextChain ?? [],
-      referencedRefs: input.referencedRefs ?? [],
-      intent: input.intent,
-      author: input.author,
-      body: input.body,
-    }),
-  );
+  const outcome = await runCommand("knowledge.add_comment", {
+    stream: `stream:${input.streamId}`,
+    ...(input.threadId ? { thread: `thread:${input.threadId}` } : {}),
+    target: { kind: input.targetKind, id: input.targetId },
+    quote: input.quote,
+    selectors_json: input.selectorsJson,
+    context_chain: input.contextChain ?? [],
+    referenced_refs: input.referencedRefs ?? [],
+    intent: input.intent,
+    body: input.body,
+  });
+  return outcome.result as CommentThread;
 }
 
-export async function addCommentMessage(
-  commentId: string,
-  author: string,
-  body: string,
-): Promise<CommentMessage> {
-  return unwrap(await commands.addCommentMessage(commentId, author, body));
+export async function addCommentMessage(commentId: string, body: string): Promise<CommentMessage> {
+  return (await runCommand("knowledge.reply_comment", { comment: commentId, body })).result as CommentMessage;
 }
 
 export async function listCommentsForTarget(
@@ -1426,11 +1419,11 @@ export async function listCommentsForStream(streamId: string): Promise<CommentTh
 }
 
 export async function setCommentIntent(commentId: string, intent: CommentIntent): Promise<void> {
-  unwrap(await commands.setCommentIntent(commentId, intent));
+  await runCommand("knowledge.update_comment", { comment: commentId, intent });
 }
 
 export async function setCommentStatus(commentId: string, status: CommentStatus): Promise<void> {
-  unwrap(await commands.setCommentStatus(commentId, status));
+  await runCommand("knowledge.update_comment", { comment: commentId, status });
 }
 
 export async function setCommentAnchor(
@@ -1448,26 +1441,23 @@ export async function relinkComment(
   quote: string,
   selectorsJson: string,
 ): Promise<void> {
-  unwrap(await commands.relinkComment(commentId, quote, selectorsJson));
+  await runCommand("knowledge.update_comment", { comment: commentId, quote, selectors_json: selectorsJson });
 }
 
+/** The popover's delete sits behind an `InlineConfirm`, the person's
+ *  confirmation (`knowledge.delete_comment` is destructive). */
 export async function deleteComment(commentId: string): Promise<void> {
-  unwrap(await commands.deleteComment(commentId));
+  await runCommand("knowledge.delete_comment", { comment: commentId }, true);
 }
 
-/// Subscribe to comment changes. The callback receives the affected
-/// `{ targetKind, targetId }`; pass a filter to scope to one target.
-export function subscribeCommentEvents(
-  onChange: (target: { targetKind: string; targetId: string }) => void,
-  filter?: { targetKind?: string; targetId?: string },
-): () => void {
+/// Subscribe to comment changes: a commit touched `v_comment` (a comment
+/// or one of its messages), whoever wrote it. A view re-reads its list.
+export function subscribeCommentEvents(onChange: () => void): () => void {
   return subscribeOxplowEvents((event) => {
-    if (event.kind !== "commentsChanged") return;
-    const targetKind = typeof event.targetKind === "string" ? event.targetKind : "";
-    const targetId = typeof event.targetId === "string" ? event.targetId : "";
-    if (filter?.targetKind !== undefined && filter.targetKind !== targetKind) return;
-    if (filter?.targetId !== undefined && filter.targetId !== targetId) return;
-    onChange({ targetKind, targetId });
+    const models = (event as { models?: unknown }).models;
+    if (event.kind === "modelsChanged" && Array.isArray(models) && models.includes("v_comment")) {
+      onChange();
+    }
   });
 }
 

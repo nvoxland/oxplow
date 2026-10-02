@@ -334,22 +334,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<TaskNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listThreadNotes: (threadId: ThreadId) => typedError<TaskNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	createComment: (req: CreateCommentRequest) => typedError<CommentThread, IpcError>(__TAURI_INVOKE("create_comment", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	addCommentMessage: (commentId: CommentId, author: string, body: string) => typedError<CommentMessage, IpcError>(__TAURI_INVOKE("add_comment_message", { commentId, author, body })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -364,27 +349,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setCommentIntent: (commentId: CommentId, intent: CommentIntent) => typedError<null, IpcError>(__TAURI_INVOKE("set_comment_intent", { commentId, intent })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setCommentStatus: (commentId: CommentId, status: CommentStatus) => typedError<null, IpcError>(__TAURI_INVOKE("set_comment_status", { commentId, status })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	setCommentAnchor: (commentId: CommentId, selectorsJson: string, orphaned: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_comment_anchor", { commentId, selectorsJson, orphaned })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	relinkComment: (commentId: CommentId, quote: string, selectorsJson: string) => typedError<null, IpcError>(__TAURI_INVOKE("relink_comment", { commentId, quote, selectorsJson })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	deleteComment: (commentId: CommentId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_comment", { commentId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1924,27 +1889,6 @@ export type ContextUsage = {
 	size: number,
 	costAmount: number | null,
 	costCurrency: string | null,
-};
-
-/**
- *  Bundled args for [`create_comment`]. A single struct keeps the
- *  command under tauri-specta's argument-count cap and reads better
- *  than a dozen positional params. `selectors` is the W3C selectors
- *  array (opaque JSON); `context_chain` / `referenced_refs` are the
- *  typed context (see [`Comment`]).
- */
-export type CreateCommentRequest = {
-	streamId: StreamId,
-	threadId: ThreadId | null,
-	targetKind: string,
-	targetId: string,
-	quote: string,
-	selectorsJson: string,
-	contextChain: CommentTarget[],
-	referencedRefs: CommentTarget[],
-	intent: CommentIntent,
-	author: string,
-	body: string,
 };
 
 export type CredentialStatus = {
@@ -3877,12 +3821,6 @@ export type OxplowConfig = {
  *  reconcile diffs from the payload.
  */
 export type OxplowEvent = 
-/**
- *  A comment (or one of its messages) changed on `target_kind` /
- *  `target_id` within `stream_id`. Renderer refetches the affected
- *  page's comments + the Comments inbox.
- */
-{ kind: "commentsChanged"; streamId: StreamId; targetKind: string; targetId: string } | 
 // Followups for a thread.
 { kind: "followupsChanged"; threadId: ThreadId } | 
 // Background task progress.

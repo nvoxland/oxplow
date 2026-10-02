@@ -151,11 +151,11 @@ selectors; screenshot when looks matter, and read the image.
 Drive these like a user would, not just the agent terminal:
 
 - **Comments are the human's voice.** Anchor a comment to a task/page
-  (`create_comment`; intent `followup` = "agent, act on this" vs `note`
+  (`knowledge.add_comment`; intent `followup` = "agent, act on this" vs `note`
   = private). It surfaces in the **Comments Dashboard** and bumps the
   **"For me"** badge. A *different* thread's agent (even a different
   runtime, e.g. opencode) answers it via `list_comments` →
-  `respond_to_comment` → `resolve_comment`. Exercise this cross-thread,
+  `knowledge.reply_comment` → `knowledge.update_comment {status: resolved}`. Exercise this cross-thread,
   cross-agent Q&A loop — it's a core collaboration primitive and it works.
 - **Query/investigation threads + wiki.** Point a second thread at a
   question ("trace subsystem X end to end") and have it write a wiki

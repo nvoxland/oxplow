@@ -4,10 +4,9 @@ import { listCommentsForTarget, onRemoteReconnect, subscribeCommentEvents } from
 import type { CommentThread } from "../../tauri-bridge/generated/bindings.js";
 
 /// Fetch the comment threads anchored to one target (`wiki:<slug>`,
-/// `file:<path>`, `task:<id>`) and keep them live: any `CommentsChanged`
-/// event for this exact target triggers a refetch, so a reply landed by
-/// the agent (a separate process) or another window shows up without a
-/// manual reload.
+/// `file:<path>`, `task:<id>`) and keep them live: a commit that touches
+/// `v_comment` triggers a refetch, so a reply landed by the agent (a
+/// separate process) or another window shows up without a manual reload.
 export function useCommentsForTarget(
   targetKind: string,
   targetId: string,
@@ -38,7 +37,7 @@ export function useCommentsForTarget(
       }
     };
     void fetch();
-    const unsub = subscribeCommentEvents(() => void fetch(), { targetKind, targetId });
+    const unsub = subscribeCommentEvents(() => void fetch());
     // Re-fetch after a remote-daemon WS reconnect so comment threads go
     // live again without a manual reload (events missed during the drop).
     const unsubReconnect = onRemoteReconnect(() => void fetch());

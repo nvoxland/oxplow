@@ -130,8 +130,6 @@ pub fn create_link_tx(
 #[derive(Clone)]
 pub struct SqliteTaskNoteStore {
     db: Database,
-    page_refs: SqlitePageRefStore,
-    schemas: std::sync::Arc<oxplow_domain::events::schema::EventSchemaRegistry>,
 }
 
 /// A thread note's `knowledge.note.written@1` / `deleted@1` (P7.B6: how
@@ -181,36 +179,91 @@ fn thread_note_event(
     Ok(thread.map(|t| note_event(id, t, deleted)))
 }
 
-impl SqliteTaskNoteStore {
-    pub fn new(
-        db: Database,
-        schemas: std::sync::Arc<oxplow_domain::events::schema::EventSchemaRegistry>,
-    ) -> Self {
-        Self {
-            page_refs: SqlitePageRefStore::new(db.clone()),
-            db,
-            schemas,
-        }
-    }
+/// A note on `thread`, with its `page_ref` edges, on `conn` — a command's
+/// transaction (`knowledge.add_note`, P8.A6). Returns it and the
+/// `knowledge.note.written` to log.
+pub fn add_thread_note_tx(
+    conn: &rusqlite::Connection,
+    thread: ThreadId,
+    body: &str,
+    author: &str,
+) -> Result<(TaskNote, oxplow_domain::Envelope), DomainError> {
+    let now = Timestamp::now();
+    conn.execute(
+        "INSERT INTO task_note (thread_id, body, author, created_at) VALUES (?1, ?2, ?3, ?4)",
+        params![thread.value(), body, author, ts_to_string(now)],
+    )
+    .map_err(crate::database::map_sql_err)?;
+    let id = conn.last_insert_rowid();
+    let note_id = NoteId::new(id);
+    replace_source_tx(
+        conn,
+        KIND_TASK_NOTE,
+        &note_id.to_string(),
+        note_edges(&note_id.to_string(), body),
+    )?;
+    Ok((
+        TaskNote {
+            id: note_id,
+            task_id: None,
+            thread_id: Some(thread),
+            body: body.to_string(),
+            author: author.to_string(),
+            created_at: now,
+        },
+        note_event(id, thread.value(), false),
+    ))
+}
 
-    /// Run `f` and log the event it returns, in one transaction.
-    async fn logged<R, F>(&self, f: F) -> Result<R, DomainError>
-    where
-        F: Fn(&rusqlite::Connection) -> rusqlite::Result<(R, Option<oxplow_domain::Envelope>)>
-            + Send
-            + 'static,
-        R: Send + 'static,
-    {
-        let schemas = self.schemas.clone();
-        self.db
-            .transaction(move |tx| {
-                let (out, event) = f(tx).map_err(crate::database::map_sql_err)?;
-                if let Some(e) = &event {
-                    crate::event_log_store::append_tx(tx, &schemas, e)?;
-                }
-                Ok(out)
-            })
-            .await
+/// Note `id`, on `conn`.
+pub fn note_tx(conn: &rusqlite::Connection, id: NoteId) -> Result<Option<TaskNote>, DomainError> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT * FROM task_note WHERE id = ?1",
+        params![id.value()],
+        row_to_note,
+    )
+    .optional()
+    .map_err(crate::database::map_sql_err)
+}
+
+/// Replace a note's body and its `page_ref` edges; the event to log when
+/// it's a thread note.
+pub fn update_note_tx(
+    conn: &rusqlite::Connection,
+    id: NoteId,
+    body: &str,
+) -> Result<Option<oxplow_domain::Envelope>, DomainError> {
+    conn.execute(
+        "UPDATE task_note SET body = ?2 WHERE id = ?1",
+        params![id.value(), body],
+    )
+    .map_err(crate::database::map_sql_err)?;
+    replace_source_tx(
+        conn,
+        KIND_TASK_NOTE,
+        &id.to_string(),
+        note_edges(&id.to_string(), body),
+    )?;
+    thread_note_event(conn, id.value(), false).map_err(crate::database::map_sql_err)
+}
+
+/// Delete a note and its `page_ref` edges; the event to log when it's a
+/// thread note (read before it goes).
+pub fn delete_note_tx(
+    conn: &rusqlite::Connection,
+    id: NoteId,
+) -> Result<Option<oxplow_domain::Envelope>, DomainError> {
+    let event = thread_note_event(conn, id.value(), true).map_err(crate::database::map_sql_err)?;
+    conn.execute("DELETE FROM task_note WHERE id = ?1", params![id.value()])
+        .map_err(crate::database::map_sql_err)?;
+    replace_source_tx(conn, KIND_TASK_NOTE, &id.to_string(), vec![])?;
+    Ok(event)
+}
+
+impl SqliteTaskNoteStore {
+    pub fn new(db: Database) -> Self {
+        Self { db }
     }
 
     /// Iterate every note id + body for the boot-time backfill.
@@ -227,12 +280,6 @@ impl SqliteTaskNoteStore {
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
-    }
-
-    async fn project_note(&self, id: &str, body: &str) -> Result<(), DomainError> {
-        let refs = &self.page_refs;
-        let edges = note_edges(id, body);
-        refs.replace_source(KIND_TASK_NOTE, id, edges).await
     }
 }
 
@@ -258,41 +305,6 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskNote> {
 
 #[async_trait]
 impl TaskNoteStore for SqliteTaskNoteStore {
-    async fn add_for_thread(
-        &self,
-        thread: &ThreadId,
-        body: &str,
-        author: &str,
-    ) -> Result<TaskNote, DomainError> {
-        let thread = *thread;
-        let body_owned = body.to_string();
-        let author = author.to_string();
-        let note = self
-            .logged(move |conn| {
-                let now = Timestamp::now();
-                conn.execute(
-                    "INSERT INTO task_note (thread_id, body, author, created_at)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![thread.value(), body_owned, author, ts_to_string(now)],
-                )?;
-                let id = conn.last_insert_rowid();
-                Ok((
-                    TaskNote {
-                        id: NoteId::new(id),
-                        task_id: None,
-                        thread_id: Some(thread),
-                        body: body_owned.clone(),
-                        author: author.clone(),
-                        created_at: now,
-                    },
-                    Some(note_event(id, thread.value(), false)),
-                ))
-            })
-            .await?;
-        self.project_note(&note.id.to_string(), &note.body).await?;
-        Ok(note)
-    }
-
     async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskNote>, DomainError> {
         self.db
             .call(move |conn| {
@@ -316,41 +328,6 @@ impl TaskNoteStore for SqliteTaskNoteStore {
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
-    }
-
-    async fn update_body(&self, id: &NoteId, body: &str) -> Result<(), DomainError> {
-        let id_clone = *id;
-        let body_clone = body.to_string();
-        self.logged(move |conn| {
-            conn.execute(
-                "UPDATE task_note SET body = ?2 WHERE id = ?1",
-                params![id_clone.value(), body_clone],
-            )?;
-            Ok(((), thread_note_event(conn, id_clone.value(), false)?))
-        })
-        .await?;
-        self.project_note(&id.to_string(), body).await?;
-        Ok(())
-    }
-
-    async fn delete(&self, id: &NoteId) -> Result<(), DomainError> {
-        let id_clone = *id;
-        self.logged(move |conn| {
-            // Read before it goes: the event names its thread.
-            let event = thread_note_event(conn, id_clone.value(), true)?;
-            conn.execute(
-                "DELETE FROM task_note WHERE id = ?1",
-                params![id_clone.value()],
-            )?;
-            Ok(((), event))
-        })
-        .await?;
-        {
-            let refs = &self.page_refs;
-            refs.replace_source(KIND_TASK_NOTE, &id.to_string(), vec![])
-                .await?;
-        }
-        Ok(())
     }
 }
 
@@ -560,6 +537,26 @@ mod tests {
         (db, t.id, item_id)
     }
 
+    async fn thread_note(db: &Database, thread: ThreadId, body: &str, author: &str) -> TaskNote {
+        let (body, author) = (body.to_string(), author.to_string());
+        db.transaction(move |tx| add_thread_note_tx(tx, thread, &body, &author).map(|(n, _)| n))
+            .await
+            .unwrap()
+    }
+
+    async fn update_note(db: &Database, id: NoteId, body: &str) {
+        let body = body.to_string();
+        db.transaction(move |tx| update_note_tx(tx, id, &body).map(|_| ()))
+            .await
+            .unwrap()
+    }
+
+    async fn delete_note(db: &Database, id: NoteId) {
+        db.transaction(move |tx| delete_note_tx(tx, id).map(|_| ()))
+            .await
+            .unwrap()
+    }
+
     async fn add_note(db: &Database, item: TaskId, body: &str, author: &str) -> TaskNote {
         let (body, author) = (body.to_string(), author.to_string());
         db.transaction(move |tx| add_task_note_tx(tx, item, &body, &author))
@@ -570,10 +567,7 @@ mod tests {
     #[tokio::test]
     async fn note_for_item_round_trips() {
         let (db, _tid, item_id) = fixture().await;
-        let store = SqliteTaskNoteStore::new(
-            db.clone(),
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
+        let store = SqliteTaskNoteStore::new(db.clone());
         let note = add_note(&db, item_id, "looking good", "user").await;
         assert_eq!(note.task_id, Some(item_id));
         assert!(note.thread_id.is_none());
@@ -585,14 +579,8 @@ mod tests {
     #[tokio::test]
     async fn note_for_thread_round_trips() {
         let (db, tid, _item_id) = fixture().await;
-        let store = SqliteTaskNoteStore::new(
-            db.clone(),
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
-        let note = store
-            .add_for_thread(&tid, "thread-level finding", "agent")
-            .await
-            .unwrap();
+        let store = SqliteTaskNoteStore::new(db.clone());
+        let note = thread_note(&db, tid, "thread-level finding", "agent").await;
         assert!(note.task_id.is_none());
         assert_eq!(note.thread_id.as_ref(), Some(&tid));
         let listed = store.list_for_thread(&tid).await.unwrap();
@@ -602,12 +590,9 @@ mod tests {
     #[tokio::test]
     async fn note_delete_removes() {
         let (db, _tid, item_id) = fixture().await;
-        let store = SqliteTaskNoteStore::new(
-            db.clone(),
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
+        let store = SqliteTaskNoteStore::new(db.clone());
         let note = add_note(&db, item_id, "x", "u").await;
-        store.delete(&note.id).await.unwrap();
+        delete_note(&db, note.id).await;
         assert!(store.list_for_item(item_id).await.unwrap().is_empty());
     }
 
@@ -616,10 +601,6 @@ mod tests {
         use crate::page_ref_store::SqlitePageRefStore;
         let (db, tid, item_id) = fixture().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteTaskNoteStore::new(
-            db.clone(),
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
 
         let note = add_note(&db, item_id, "blocked by tsk99 see [[src/app.rs]]", "u").await;
         let inbound_task = page_refs
@@ -640,7 +621,7 @@ mod tests {
             .iter()
             .any(|e| e.source_id == note.id.to_string()));
 
-        store.update_body(&note.id, "no refs").await.unwrap();
+        update_note(&db, note.id, "no refs").await;
         let inbound_file = page_refs
             .list_backlinks("file", "src/app.rs", None)
             .await
@@ -649,7 +630,7 @@ mod tests {
             .iter()
             .all(|e| e.source_id != note.id.to_string()));
 
-        store.delete(&note.id).await.unwrap();
+        delete_note(&db, note.id).await;
         let inbound_task = page_refs
             .list_backlinks("work_item", "oxplow:tsk99", None)
             .await
@@ -658,10 +639,7 @@ mod tests {
             .iter()
             .all(|e| e.source_id != note.id.to_string()));
 
-        let tnote = store
-            .add_for_thread(&tid, "see [[src/lib.rs]]", "u")
-            .await
-            .unwrap();
+        let tnote = thread_note(&db, tid, "see [[src/lib.rs]]", "u").await;
         let inbound_lib = page_refs
             .list_backlinks("file", "src/lib.rs", None)
             .await

@@ -465,12 +465,11 @@ directly (see the `summary_*` ref_types in the `page_ref` section
 below). Pre-existing item-scoped rows stay in the table but no
 surface reads or writes them.
 
-Thread-scoped rows (`thread_id` set, `task_id` NULL) are the
-landing spot for `oxplow__delegate_query` Explore-subagent findings.
-The delegate tool pre-allocates a row with empty body (via
-`addThreadNote`), passes the id into the subagent prompt, and the
-subagent fills the body by calling `oxplow__record_query_finding`
-(store method `updateThreadNoteBody`). The orchestrator reads them
+Thread-scoped rows (`thread_id` set, `task_id` NULL) are the per-thread
+capture pad, written by `knowledge.add_note` / `knowledge.update_note`
+(P8.A6). An orchestrator handing a question to an Explore subagent
+allocates an empty note first and the subagent fills in its body with
+`knowledge.update_note`. The orchestrator reads them
 back via `oxplow__list_thread_notes` / `listThreadNotes(threadId)` —
 reverse-chronological, capped at 100.
 

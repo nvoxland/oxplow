@@ -711,7 +711,7 @@ impl Services {
             db.clone(),
             event_schemas.clone(),
         ));
-        let work_note_store = Arc::new(SqliteTaskNoteStore::new(db.clone(), event_schemas.clone()));
+        let work_note_store = Arc::new(SqliteTaskNoteStore::new(db.clone()));
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), event_schemas.clone()));
         let sql = sql_gateway::SqlGateway::new(db.clone());
@@ -1079,6 +1079,11 @@ impl Services {
         .chain(commands::review::commands())
         .chain(commands::thread::commands(config_arc.clone(), acp.clone()))
         .chain(commands::dashboard::commands(db.clone(), sql.clone()))
+        .chain(commands::comment::commands())
+        .chain(commands::note::commands(commands::note::NoteDeps {
+            project_dir: layout.project_dir.clone(),
+            vcs: vcs.clone(),
+        }))
         .chain(commands::stream::commands(commands::stream::StreamDeps {
             streams: streams.clone(),
             snapshot_captures: snapshot_captures.clone(),

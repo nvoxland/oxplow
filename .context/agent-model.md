@@ -1035,8 +1035,8 @@ and `tests/parity.rs` enumerates the *actual* registered names on each
 surface (MCP via `oxplow_mcp::registered_tool_names()`, IPC via a
 capturing `tauri_specta::LanguageExt` over `specta_builder()`) and
 fails if anything is unclassified, dangling, or a `Both` row is missing
-a side. Names may diverge per surface (e.g. IPC `add_comment_message` ↔
-MCP `respond_to_comment`), so each row carries both names.
+a side. Names may diverge per surface (e.g. IPC `list_comments_for_stream`
+↔ MCP `list_comments`), so each row carries both names.
 
 **Consequence for new work:** adding a `#[tool]` (or a
 `#[tauri::command]`) requires a `MANIFEST` row or the parity test
@@ -1061,10 +1061,10 @@ restore writes into the row's stream's worktree, not the primary
 checkout — P2.9, tsk433);
 **code quality** (`run_code_quality_scan`, `list_code_quality_scans`,
 `list_code_quality_findings` — the scan orchestration is shared via
-`Services::run_code_quality_scan`); **comments + lifecycle**
-(`create_comment`, `set_comment_intent`, `select_thread`,
+`Services::run_code_quality_scan`); **selection** (`select_thread`,
 `switch_stream`; a thread's and a stream's lifecycle are the `thread.*`
-and `stream.*` commands through `run_command`, P8.A3–A4); and **site-wide search** (`search` —
+and `stream.*` commands, comments and notes the `knowledge.*` ones, all
+through `run_command`, P8.A3–A6); and **site-wide search** (`search` —
 BM25 over tasks/comments/notes/wiki/file-contents via the unified FTS index,
 fed by the `Indexer` service; optional `stream_id` scopes file hits).
 Still `AgentTodo` (see the backlog): composed snapshot DTOs, git
@@ -1276,8 +1276,9 @@ intermediate `ready` step.
   (`workItems.readThreadWork`).
 - Forking a thread is `run_command thread.create { from }` — see
   "Forking a thread" above.
-- `list_comments({ id, scope?, status? })` / `respond_to_comment({
-  comment_id, body })` / `resolve_comment({ comment_id })` — the user's
+- `list_comments({ id, scope?, status? })`, then `run_command
+  knowledge.reply_comment { comment, body }` / `knowledge.update_comment
+  { comment, status: "resolved" }` (P8.A6) — the user's
   threaded annotations anchored to text in pages (wiki / file / task).
   `id` is a thread id (`thr…`) or stream id (`str…`, the whole
   workspace). `scope` (`"thread"` / `"stream"`) is **optional** — when
@@ -1287,13 +1288,14 @@ intermediate `ready` step.
   uninferable id, or a bogus `scope` string all return a clear
   in-handler `McpError` naming the fix, not a raw transport -32602 —
   see `resolve_comment_scope` in `crates/oxplow-mcp/src/lib.rs`.
-  `status` filters `"all"` / `"open"` / `"needs_response"`. `respond_to_comment` appends a message authored
-  `"agent"` (which clears `needs_response` until the user replies
-  again); `resolve_comment` marks the thread resolved. **The runtime
+  `status` filters `"all"` / `"open"` / `"needs_response"`. A reply is
+  authored `"agent"` — the actor, never an input — which clears
+  `needs_response` until the user replies again; an agent comments only
+  in its own stream and thread. **The runtime
   never force-triggers any of this — there is no Stop-hook branch and
   no synthesized work item for comments.** The agent only touches
   comments when the user prompts it (typically via the
-  `/review-comments` plugin command, which just wraps these tools).
+  `/review-comments` plugin command, which just wraps these calls).
   `comment_id` is an integer (comments use autoincrement ids). Store:
   `crates/oxplow-db/src/comment_store.rs`; mutations emit
   `CommentsChanged` on the bus.
@@ -1419,7 +1421,8 @@ lookbehind,
 so backlinks/freshness work without parser changes. The
 
 **Link checker (MCP write-tool feedback).** The MCP write tools
-`create_task`, `update_task`, `complete_task` and `add_thread_note` run
+`create_task`, `update_task` and `complete_task` (and the
+`knowledge.add_note` / `update_note` commands, through `check_links_in`) run
 `oxplow_app::link_check::check_links` over
 the body/summary they just persisted and return a `link_warnings` array
 (omitted when empty) naming each invalid `[[…]]` — unrecognized syntax

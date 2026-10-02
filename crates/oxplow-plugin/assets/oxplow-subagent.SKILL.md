@@ -1,6 +1,6 @@
 ---
 name: oxplow-subagent-work-protocol
-description: Standing protocol for subagents executing an oxplow task. Loads on any task id in a brief or on mcp__oxplow__update_task / add_thread_note calls.
+description: Standing protocol for subagents executing an oxplow task. Loads on any task id in a brief or on mcp__oxplow__update_task / knowledge.add_note calls.
 ---
 
 # Subagent protocol

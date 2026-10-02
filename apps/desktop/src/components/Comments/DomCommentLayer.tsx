@@ -153,7 +153,6 @@ export function DomCommentLayer({
       contextChain: pending.contextChain,
       referencedRefs: pending.referencedRefs,
       intent: input.intent,
-      author: "user",
       body: input.body,
     });
     cancel();

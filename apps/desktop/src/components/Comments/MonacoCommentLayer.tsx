@@ -304,7 +304,6 @@ export const MonacoCommentLayer = forwardRef<
       quote: pending.quote,
       selectorsJson: pending.anchorJson,
       intent: input.intent,
-      author: "user",
       body: input.body,
     });
     setPending(null);

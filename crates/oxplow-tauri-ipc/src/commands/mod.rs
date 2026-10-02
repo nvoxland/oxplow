@@ -8,7 +8,6 @@
 pub mod app;
 pub mod background;
 pub mod branch;
-pub mod comments;
 pub mod config;
 pub mod effort;
 pub mod followup;
@@ -19,7 +18,6 @@ pub mod log;
 pub mod lsp;
 pub mod menu;
 pub mod metrics;
-pub mod notes;
 pub mod page_refs;
 pub mod page_visit;
 pub mod search;

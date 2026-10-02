@@ -30,7 +30,7 @@ use crate::ids::{CommentId, CommentMessageId, StreamId, ThreadId};
 use crate::time::Timestamp;
 
 /// Why the comment exists — drives what the agent acts on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CommentIntent {
     /// A private thinking note; the agent leaves it alone unless asked.
@@ -40,7 +40,7 @@ pub enum CommentIntent {
 }
 
 /// Lifecycle of a comment thread.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CommentStatus {
     Open,
@@ -56,7 +56,7 @@ pub enum CommentStatus {
 /// Used as a comment's primary anchor target and, in `Vec` form, as the
 /// `context_chain` (ancestor regions) and `referenced_refs` (refs inside
 /// the selection).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 pub struct CommentTarget {
     pub kind: String,
     pub id: String,

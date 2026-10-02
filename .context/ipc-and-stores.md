@@ -25,6 +25,7 @@ command):
 | Write | Why it isn't a command |
 |---|---|
 | select a thread, switch stream, report the open page | UI selection pointers, not project facts |
+| a comment's anchor re-locate (`set_comment_anchor`) | a passive sync of where the quote sits in the current content, run by the renderer on load — not a person's edit (relinking an orphan is `knowledge.update_comment`) |
 | page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit` |
 | follow-ups, background-task progress | in memory and transient |
 | hook ingest, ACP prompt / cancel / permission answers, terminal input, `await_user` | agent-session activity, born as `agent.*` events (§5.1 of target-architecture.md); oxplow never synthesizes agent input |
@@ -693,37 +694,22 @@ the flow above.
 
 ## Comments
 
-Threaded annotations anchored to a text selection on any page — a
-straightforward 7-layer instance (`SqliteCommentStore`,
-`crates/oxplow-db/src/comment_store.rs`; schema in
-[data-model.md](./data-model.md)). The Tauri commands live in
-`crates/oxplow-tauri-ipc/src/commands/comments.rs`: `create_comment`,
-`add_comment_message`, `list_comments_for_target`,
-`list_comments_for_stream`, `set_comment_intent`, `set_comment_status`,
-`set_comment_anchor`, `delete_comment`. The same store is exposed to the
-agent via three MCP tools (`list_comments`, `respond_to_comment`,
-`resolve_comment`) — see [agent-model.md](./agent-model.md).
+Threaded annotations anchored to a text selection on any page
+(`crates/oxplow-db/src/comment_store.rs`; schema in
+[data-model.md](./data-model.md)). Every write is a `knowledge.*` comment
+command (`commands/comment.rs`, P8.A6 — see [commands.md](./commands.md)):
+the store keeps its reads plus the `_tx` cores the handlers call, and the
+desktop's `createComment` / `addCommentMessage` / `setComment*` /
+`relinkComment` / `deleteComment` helpers run them through `runCommand`
+(`deleteComment` confirmed — the popover's `InlineConfirm` is the
+person's confirmation). The author is whoever runs the command, so no
+surface passes one. The reads stay RPCs (`list_comments_for_target`,
+`list_comments_for_stream`; MCP `list_comments`).
 
-`create_comment` takes a single `CreateCommentRequest` struct argument
-(not positional params) because the field count — `stream_id`,
-`thread_id`, `target_kind`/`target_id`, `quote`, `selectors_json` (the
-W3C selectors array, renamed from `anchor_json` in V24), `context_chain`
-+ `referenced_refs` (`Vec<CommentTarget>` typed context), `intent`,
-`author`, `body` — exceeds tauri-specta's 10-argument cap on a
-`#[tauri::command]`. This mirrors the `CreateTaskRequest` pattern in
-`commands/tasks.rs`: when a command would take too many args, bundle them
-in a `#[derive(Serialize, Deserialize, Type)] #[serde(rename_all =
-"camelCase")]` request struct. `set_comment_anchor` / `relink_comment`
-take `selectors_json` (same rename).
-
-Every mutating command (and the MCP `respond_to_comment` /
-`resolve_comment`) emits `OxplowEvent::CommentsChanged { streamId,
-targetKind, targetId }`; the wire kind is `commentsChanged`, mirrored in
-`OxplowEventKind` in `apps/desktop/src/tauri-bridge/index.ts`. The
-renderer subscribes to refetch the affected page's comments + the
-Comments inbox. `set_comment_anchor` is the one mutation that does **not**
-emit — it's a passive re-anchor sync the renderer runs on load, not a
-user action.
+Views re-read on `ModelsChanged` naming `v_comment` (comments and their
+messages) — `subscribeCommentEvents` in `api.ts`. The one write left off
+the bus is `set_comment_anchor`, the renderer's passive re-anchor sync
+(see the table above).
 
 ## Search index (read model + indexer)
 

@@ -154,18 +154,11 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::set_ai_role,
             commands::generated::test_ai_provider,
             // notes (task / thread)
-            commands::generated::add_thread_note,
             commands::generated::list_thread_notes,
             // comments
-            commands::generated::create_comment,
-            commands::generated::add_comment_message,
             commands::generated::list_comments_for_target,
             commands::generated::list_comments_for_stream,
-            commands::generated::set_comment_intent,
-            commands::generated::set_comment_status,
             commands::generated::set_comment_anchor,
-            commands::generated::relink_comment,
-            commands::generated::delete_comment,
             // wiki
             // events (dead-letter queue)
             commands::generated::list_dead_letters,

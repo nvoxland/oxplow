@@ -24,10 +24,10 @@ Steps:
    look. Note any themes, then address each: read the anchored
    `quote` in its `target` (open the file/page), do the work the
    comment asks for, and reply with
-   `mcp__oxplow__respond_to_comment({ comment_id, body })` summarizing
+   `run_command knowledge.reply_comment { comment, body }` summarizing
    what you did or answering the question.
-4. When a comment is fully addressed, call
-   `mcp__oxplow__resolve_comment({ comment_id })`. Leave it open if
+4. When a comment is fully addressed, run
+   `knowledge.update_comment { comment, status: "resolved" }`. Leave it open if
    you've replied but the user still needs to weigh in.
 
 File a oxplow task for any follow-up that turns into real shippable
