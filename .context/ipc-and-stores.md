@@ -583,11 +583,8 @@ The collection subsystem (`.context/collection.md`) follows the same
   `Services.observation_store`) is `Both` in the surface-parity manifest
   — same name on IPC and MCP. Mutations are agent-only (MCP
   `ingest_coverage` / `record_test_run`) since the UI never writes
-  observations. The renderer refetches on `EffortObservationsChanged
-  { threadId, effortId }` — wire kind `effortObservationsChanged`
-  (mirrored in `apps/desktop/src/tauri-bridge/index.ts`'s
-  `OxplowEventKind`; mind the camelcase trap above). `TaskPage` →
-  `EffortObservations` subscribes and refetches per effort.
+  observations. A view of them re-runs on `ModelsChanged` (P8.A2: the
+  bespoke `EffortObservationsChanged` had no listener and is gone).
 - **The engine lives in `oxplow-app`, not a store.** `CollectionService`
   (`crates/oxplow-app/src/collection.rs`) owns the orchestration
   (effort resolution, coverage parse via `oxplow-coverage`, changed-line
@@ -612,11 +609,10 @@ schema in [data-model.md](./data-model.md), migration `V33`).
   There are no write IPCs — nudges are written exclusively by the service
   inside `on_post_tool_use`, best-effort (a persistence error is logged,
   never fails the hook).
-- **Event**: `AgentNudgesChanged { threadId, effortId: Option<String> }`
-  (wire kind `agentNudgesChanged`) emitted by the service after a successful
-  record; lenses re-run on it like any data event. Persistence happens AFTER
-  the existing one-shot dedup gates, so a deduped nudge is never stored or
-  re-emitted.
+- **Change**: a view of `v_agent_nudge` re-runs on `ModelsChanged` when a
+  record commits (P8.A2: the bespoke `AgentNudgesChanged` had no listener
+  and is gone). Persistence happens AFTER the existing one-shot dedup
+  gates, so a deduped nudge is never stored.
 
 ## Multi-owner stores: the `page_ref` slice pattern
 

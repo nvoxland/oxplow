@@ -96,8 +96,8 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   subscribes to the session broadcast and stores every
   `publishDiagnostics` in `lsp_diagnostic`, read as `v_diagnostic`
   (see `.context/semantic-layer.md`). Cleared at boot and per server on
-  restart/crash/stop. Debounced per stream, it emits `DiagnosticsChanged`
-  and logs **`code.diagnostics.changed@1 { stream, path, counts }`** once
+  restart/crash/stop; a view of `v_diagnostic` re-runs on
+  `ModelsChanged`. Debounced per stream, it logs **`code.diagnostics.changed@1 { stream, path, counts }`** once
   per changed file with its counts after the burst (a crash logs the
   files it cleared, at zero, and so does the boot clear, `clear_at_boot`;
   tsk571) — the durable record, on the event log.

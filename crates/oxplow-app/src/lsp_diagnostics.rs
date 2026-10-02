@@ -1,10 +1,10 @@
 //! Persists what the language servers publish (`textDocument/publishDiagnostics`)
 //! into `lsp_diagnostic`, so the semantic layer can read it as
 //! `v_diagnostic`. Diagnostics are live state: the table is cleared at boot
-//! and a server's rows are cleared when it (re)starts or stops. Debounced,
-//! it emits [`OxplowEvent::DiagnosticsChanged`] so lenses re-run and logs
-//! `code.diagnostics.changed@1` once per changed file with its counts
-//! after the burst. See `.context/lsp.md`, `.context/semantic-layer.md`.
+//! and a server's rows are cleared when it (re)starts or stops; a view
+//! reading `v_diagnostic` re-runs on `ModelsChanged` like any other.
+//! Debounced, it logs `code.diagnostics.changed@1` once per changed file
+//! with its counts after the burst. See `.context/lsp.md`, `.context/semantic-layer.md`.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -15,7 +15,7 @@ use serde_json::Value;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::lsp_sessions::{LspSessionEvent, LspSessionStatus};
-use crate::{OxplowEvent, Services};
+use crate::Services;
 
 /// How long a burst of publishes is coalesced before one event goes out.
 const DEBOUNCE: Duration = Duration::from_millis(500);
@@ -197,8 +197,8 @@ pub fn spawn(svc: std::sync::Arc<Services>) {
     });
 }
 
-/// Announce a stream's changed diagnostics: the in-memory event, and
-/// `code.diagnostics.changed@1` per file with its counts now.
+/// Announce a stream's changed diagnostics: `code.diagnostics.changed@1`
+/// per file with its counts now.
 async fn announce(svc: &Services, stream_id: i64, paths: BTreeSet<String>) {
     use oxplow_domain::events::schema::{CodeDiagnosticsChanged, CodeDiagnosticsChangedV1};
     let stream = oxplow_domain::StreamId::new(stream_id);
@@ -227,13 +227,12 @@ async fn announce(svc: &Services, stream_id: i64, paths: BTreeSet<String>) {
             tracing::warn!(error = %e, path, "logging code.diagnostics.changed failed");
         }
     }
-    svc.events
-        .emit(OxplowEvent::DiagnosticsChanged { stream_id });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::OxplowEvent;
     use serde_json::json;
 
     fn publish(uri: &str) -> Value {
@@ -348,6 +347,14 @@ mod tests {
         let svc = std::sync::Arc::new(Services::in_memory(dir.path()).unwrap());
         let stream = svc.streams.ensure_primary().await.unwrap();
         let mut events = svc.events.subscribe_ui();
+        // The renderer hears a diagnostics change as the model changing.
+        crate::models_changed::spawn(
+            svc.db.clone(),
+            std::sync::Arc::new(crate::models_changed::ModelWatermarks::default()),
+            svc.events.clone(),
+            svc.assets.clone(),
+            svc.event_pump.clone(),
+        );
         spawn(svc.clone());
         let uri =
             url::Url::from_file_path(std::path::Path::new(&stream.worktree_path).join("src/a.rs"))
@@ -365,20 +372,19 @@ mod tests {
             serde_json::to_value(r.rows).unwrap()
         };
         let changed = |events: &mut tokio::sync::broadcast::Receiver<OxplowEvent>| {
-            let id = stream.id.value();
             let mut rx = events.resubscribe();
             async move {
                 tokio::time::timeout(Duration::from_secs(10), async {
                     loop {
-                        if let Ok(OxplowEvent::DiagnosticsChanged { stream_id }) = rx.recv().await {
-                            if stream_id == id {
+                        if let Ok(OxplowEvent::ModelsChanged { models }) = rx.recv().await {
+                            if models.iter().any(|m| m == "v_diagnostic") {
                                 return;
                             }
                         }
                     }
                 })
                 .await
-                .expect("DiagnosticsChanged");
+                .expect("ModelsChanged naming v_diagnostic");
             }
         };
         // The subscriber may not be listening yet: publish until it lands.
@@ -413,7 +419,24 @@ mod tests {
                 .map(|e| e.envelope.payload)
                 .collect::<Vec<_>>()
         };
-        let first = logged().await;
+        // The log entry follows the debounced burst: wait for `n` of them.
+        let logged_n = |n: usize| {
+            let logged = &logged;
+            async move {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    loop {
+                        let got = logged().await;
+                        if got.len() >= n {
+                            return got;
+                        }
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                })
+                .await
+                .expect("code.diagnostics.changed logged")
+            }
+        };
+        let first = logged_n(1).await;
         assert_eq!(first[0]["path"], "src/a.rs");
         assert_eq!(first[0]["stream"], format!("stream:{}", stream.id));
         assert_eq!(first[0]["counts"]["error"], 1);
@@ -429,7 +452,7 @@ mod tests {
         wait.await;
         assert_eq!(count().await, serde_json::json!([]));
         // The server's reports went with it, and the log says so.
-        let last = logged().await.pop().unwrap();
+        let last = logged_n(first.len() + 1).await.pop().unwrap();
         assert_eq!(last["path"], "src/a.rs");
         assert_eq!(last["counts"]["error"], 0);
     }

@@ -118,8 +118,6 @@ pub async fn get_current_stream(svc: &Services) -> Result<Option<Stream>, IpcErr
 
 pub async fn switch_stream(svc: &Services, id: Option<StreamId>) -> Result<(), IpcError> {
     svc.streams.set_current(id.as_ref()).await?;
-    svc.events
-        .emit(OxplowEvent::CurrentStreamChanged { stream_id: id });
     Ok(())
 }
 

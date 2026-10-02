@@ -197,10 +197,6 @@ pub async fn select_thread(svc: &Services, req: SelectThreadRequest) -> Result<(
     svc.threads
         .select(&req.stream_id, req.thread_id.as_ref())
         .await?;
-    svc.events.emit(OxplowEvent::SelectedThreadChanged {
-        stream_id: req.stream_id,
-        thread_id: req.thread_id,
-    });
     Ok(())
 }
 

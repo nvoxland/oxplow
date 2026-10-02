@@ -34,7 +34,6 @@ use oxplow_db::{NewFact, NewMetricCapture, SqliteFactStore};
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{DomainError, EffortId, TaskId, ThreadId};
 
-use crate::events::{EventBus, OxplowEvent};
 use crate::file_ref_version;
 use crate::metric_engine::threshold_state;
 
@@ -357,7 +356,6 @@ pub struct CollectionService {
     project_dir: PathBuf,
     /// This machine's program approvals (`exec_consent`).
     approvals: Arc<crate::exec_consent::ApprovalStore>,
-    events: EventBus,
     /// Kind-agnostic attribution ledger (tsk262/263) — runs (test/coverage/
     /// analysis) record their claim state here. A run is auto-attributed to the
     /// open effort at record time only when unambiguous (`find_single_open_for_thread`);
@@ -408,7 +406,6 @@ impl CollectionService {
         vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
         config: Arc<RwLock<OxplowConfig>>,
         project_dir: PathBuf,
-        events: EventBus,
         attribution: Arc<SqliteAttributionStore>,
     ) -> Self {
         let metric_visibility = Arc::new(crate::metric_visibility::VisibilityResolver::new(
@@ -427,7 +424,6 @@ impl CollectionService {
             config,
             project_dir,
             approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
-            events,
             attribution,
             metric_visibility,
             event_schemas: Arc::new(oxplow_domain::EventSchemaRegistry::core()),
@@ -777,7 +773,6 @@ impl CollectionService {
         // is the CAPTURE id (T-E1) — the legacy run row is no longer the identity.
         if let (Some(cid), Some(effort)) = (capture_id, owning.as_ref()) {
             self.claim_run(effort, cid).await;
-            self.emit(thread, effort);
         }
         Ok(capture_id)
     }
@@ -1413,7 +1408,6 @@ impl CollectionService {
         // refresh the panel for the effort it landed on (if any).
         if let (Some(cid), Some(effort)) = (capture_id, attribute_to.as_ref()) {
             self.claim_run(effort, cid).await;
-            self.emit(thread, effort);
         }
 
         Ok(CoverageIngest::Stored {
@@ -1953,8 +1947,8 @@ impl CollectionService {
         Ok(None)
     }
 
-    /// Persist a fired nudge (best-effort) and emit `AgentNudgesChanged` so
-    /// the renderer's debug sub-view live-updates. Called only AFTER the
+    /// Persist a fired nudge (best-effort; the renderer re-reads
+    /// `v_agent_nudge` when it lands). Called only AFTER the
     /// one-shot dedup gates pass, so a deduped/non-fired nudge is never
     /// stored. Never fails the hook: a persistence error is logged and
     /// swallowed.
@@ -1980,10 +1974,6 @@ impl CollectionService {
             // Already fired for this cause (a redelivered event).
             Ok(None) => {}
             Ok(Some(_)) => {
-                self.events.emit(OxplowEvent::AgentNudgesChanged {
-                    thread_id: *thread,
-                    effort_id: effort.map(|e| e.id.to_string()),
-                });
                 // Project the fired nudge into the metric substrate (tsk216):
                 // `agent.nudges.fired` is an agent-activity signal — the agent
                 // drifted off-task often enough to be corrected.
@@ -2380,23 +2370,14 @@ impl CollectionService {
             closest_vcs_rev,
             vcs_rev_exact,
         );
-        // Attribute the run via the unified ledger, then refresh the panel for the
-        // effort it landed on (command-only runs have no run → refresh the single
-        // open effort if any).
-        let attribute_to = match run_id {
-            Some(rid) => {
-                let owner = self
-                    .resolve_owner(thread, None, anchored_effort(cause), Some(command))
-                    .await;
-                if let Some(effort) = owner.as_ref() {
-                    self.claim_run(effort, rid).await;
-                }
-                owner
+        // Attribute the run via the unified ledger.
+        if let Some(rid) = run_id {
+            let owner = self
+                .resolve_owner(thread, None, anchored_effort(cause), Some(command))
+                .await;
+            if let Some(effort) = owner.as_ref() {
+                self.claim_run(effort, rid).await;
             }
-            None => effort,
-        };
-        if let Some(e) = attribute_to.as_ref() {
-            self.emit(thread, e);
         }
         Ok(Some(0))
     }
@@ -3140,13 +3121,6 @@ impl CollectionService {
             return BTreeSet::new();
         }
         diff_new_side_lines(&old, &new)
-    }
-
-    fn emit(&self, thread: &ThreadId, effort: &Effort) {
-        self.events.emit(OxplowEvent::EffortObservationsChanged {
-            thread_id: *thread,
-            effort_id: effort.id.to_string(),
-        });
     }
 }
 
@@ -4084,7 +4058,6 @@ mod tests {
                 Arc::new(crate::vcs::GitProvider),
                 Arc::new(RwLock::new(cfg)),
                 project_dir,
-                EventBus::new(),
                 Arc::new(oxplow_db::SqliteAttributionStore::new(db.clone())),
             );
             Harness {

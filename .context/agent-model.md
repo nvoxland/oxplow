@@ -1514,7 +1514,7 @@ are gone. Prompt advisories use the same marks.
 
 These are surfaced UI-side only (the agent never reads them back): an
 "Agent Nudges" H2 section on the task page (after each effort's Metrics)
-lists them, live-updating on the `agentNudgesChanged` event.
+lists them, re-running when `ModelsChanged` names `v_agent_nudge`.
 The point is a reviewer/human-facing record of "what oxplow told the agent
 this effort" — previously the nudges were fully ephemeral. IPC + event wiring
 is in `.context/ipc-and-stores.md` (Agent nudges).
@@ -1570,8 +1570,8 @@ The transcript path:
    the first.
 5. Advance the cursor to the new offset **in the same transaction as the
    rows** (`SqliteTokenUsageStore::record_batch`), so a redelivered turn
-   never reads the same bytes twice; rows carry `turn_id`. Then emit
-   `AgentTokenUsageChanged { thread_id, effort_id }`. The `oxplow.turn`
+   never reads the same bytes twice; rows carry `turn_id` (a view of
+   `v_token_usage` re-runs on `ModelsChanged`). The `oxplow.turn`
    facts capture is keyed by the event (`turn-tokens:<event id>`).
 
 **Prompt capture is pure OBSERVATION (tsk143).** The prompt text is read

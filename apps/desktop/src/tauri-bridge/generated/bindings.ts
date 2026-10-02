@@ -4016,12 +4016,8 @@ export type OxplowEvent =
  *  updated). Renderer refetches `list_streams`.
  */
 { kind: "streamsChanged" } | 
-// The current-stream pointer in `runtime_state` moved.
-{ kind: "currentStreamChanged"; streamId: StreamId | null } | 
 // Threads on `stream_id` changed (created, status flipped, etc.).
 { kind: "threadsChanged"; streamId: StreamId } | 
-// Selected-thread pointer for `stream_id` moved.
-{ kind: "selectedThreadChanged"; streamId: StreamId; threadId: ThreadId | null } | 
 /**
  *  A comment (or one of its messages) changed on `target_kind` /
  *  `target_id` within `stream_id`. Renderer refetches the affected
@@ -4086,12 +4082,6 @@ detail: string | null } |
  */
 { kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null; effortId: EffortId | null } | 
 /**
- *  Effort-scoped collection observations changed for `effort_id`
- *  (a test-run or diff-coverage row landed). The renderer refetches
- *  the effort's observation list. See `.context/collection.md`.
- */
-{ kind: "effortObservationsChanged"; threadId: ThreadId; effortId: string } | 
-/**
  *  One or more metric samples landed in `stream_id` (unified metric
  *  substrate, tsk213). `measures` names the measure keys the write touched
  *  so a consumer can skip an event that can't affect it (tsk198); an EMPTY
@@ -4102,19 +4092,6 @@ detail: string | null } |
  *  when a model it read is listed.
  */
 { kind: "modelsChanged"; models: string[] } | { kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] } | 
-/**
- *  A persisted agent nudge landed (report-less-run / coverage-target).
- *  The renderer refetches the effort's (or thread's) nudge list. See
- *  `.context/agent-model.md` (Nudge persistence).
- */
-{ kind: "agentNudgesChanged"; threadId: ThreadId; effortId: string | null } | 
-/**
- *  A per-turn agent token-usage row landed (parsed on Stop from the
- *  hook transcript). The renderer refetches the effort's usage list +
- *  the thread's running total. `effort_id` is absent when the Stop had
- *  no open effort. See `.context/agent-model.md` (Token usage capture).
- */
-{ kind: "agentTokenUsageChanged"; threadId: ThreadId; effortId: string | null } | 
 /**
  *  `.oxplow/project.yaml` was reloaded from disk (external edit, e.g. the agent
  *  running `/oxplow:configure`). The in-memory config has been swapped;
@@ -4127,11 +4104,6 @@ detail: string | null } |
  *  fieldless — the renderer refetches the affected dashboard(s).
  */
 { kind: "dashboardsChanged" } | 
-/**
- *  A language server published diagnostics (or restarted) for
- *  `stream_id`: `v_diagnostic` changed. Debounced; lenses re-run.
- */
-{ kind: "diagnosticsChanged"; streamId: number } | 
 /**
  *  `.git` directory appeared/disappeared at the project root —
  *  "is this a git workspace" flipped. Renderer hides/restores the

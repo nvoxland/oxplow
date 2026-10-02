@@ -1702,8 +1702,7 @@ already-recorded usage. No FK (the transcript outlives any single row).
 Store methods: `record`, `list_for_effort`, `totals_for_effort`,
 `totals_for_thread`, `cursor`/`set_cursor`. There are no IPC reads: the UI
 reads `v_token_usage` through oxplow-analytics lenses (`task-tokens`,
-`thread-tokens`, `usage`); mutations emit `AgentTokenUsageChanged {
-thread_id, effort_id }`, which re-runs them.
+`thread-tokens`, `usage`), which re-run on `ModelsChanged`.
 
 ### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)
 
@@ -2038,7 +2037,6 @@ The runtime relays each store's changes onto the typed EventBus
 - `task.changed`, `backlog.changed`, `thread.changed`
 - `file-snapshot.created`, `agent-status.changed`
 - `hook.recorded`, `config.changed`
-- `effortObservationsChanged`, `agentNudgesChanged`, `agentTokenUsageChanged`
 
 UI components subscribe via `subscribeOxplowEvents()` (or scoped helpers
 like `subscribeWorkspaceEvents`, `subscribeGitRefsEvents`) in

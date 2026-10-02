@@ -402,7 +402,7 @@ return a nudge, it also calls `persist_nudge` (best-effort — a write error is
 logged via `tracing::warn!` and swallowed, never failing the hook), which
 records a row in the `agent_nudge` table tagged with `kind`
 (`report-less-run` / `coverage-target`), the message, and the trigger (the
-bash command) and emits `AgentNudgesChanged`. Persistence sits **after** the
+bash command); a view of `v_agent_nudge` re-runs on `ModelsChanged`. Persistence sits **after** the
 durable dedup gate (`mark_nudged`), so a deduped/non-fired nudge is never
 stored. The store
 (`SqliteAgentNudgeStore`), IPC (`list_nudges_for_thread`), the

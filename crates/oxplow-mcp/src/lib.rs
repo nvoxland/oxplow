@@ -2547,12 +2547,6 @@ impl OxplowMcp {
             .select(&stream_id, thread_id.as_ref())
             .await
             .map_err(internal)?;
-        self.services
-            .events
-            .emit(OxplowEvent::SelectedThreadChanged {
-                stream_id,
-                thread_id,
-            });
         json_result(&serde_json::json!({ "ok": true }))
     }
 
@@ -2573,9 +2567,6 @@ impl OxplowMcp {
             .set_current(id.as_ref())
             .await
             .map_err(internal)?;
-        self.services
-            .events
-            .emit(OxplowEvent::CurrentStreamChanged { stream_id: id });
         json_result(&serde_json::json!({ "ok": true }))
     }
 

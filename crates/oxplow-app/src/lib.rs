@@ -1179,7 +1179,6 @@ impl Services {
             vcs.clone(),
             config_arc.clone(),
             layout.project_dir.clone(),
-            event_bus.clone(),
             attribution_store.clone(),
         )
         .with_approvals(approvals.clone())
@@ -1190,7 +1189,6 @@ impl Services {
             effort_store.clone(),
             thread_store.clone(),
             fact_store.clone(),
-            event_bus.clone(),
         );
 
         let advisories = Arc::new(advisories::AdvisoryRunner::new((*nudge_store).clone()));

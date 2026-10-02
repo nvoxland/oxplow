@@ -91,7 +91,6 @@ fn emitters() -> BTreeSet<(String, String)> {
 /// `.context/ipc-and-stores.md` → "Event bus"). Rows marked `P8.A` go as
 /// their writes move onto the command bus and the desktop reads the model.
 const EMITTERS: &[(&str, &str)] = &[
-    ("AgentNudgesChanged", "crates/oxplow-app/src/collection.rs"), // P8.A2
     (
         "AgentStallAlert",
         "crates/oxplow-app/src/agent_stall_watch.rs",
@@ -101,10 +100,6 @@ const EMITTERS: &[(&str, &str)] = &[
         "crates/oxplow-app/src/agent_stall_watch.rs",
     ),
     ("AgentStatusChanged", "crates/oxplow-app/src/hook_ingest.rs"),
-    (
-        "AgentTokenUsageChanged",
-        "crates/oxplow-app/src/token_usage.rs",
-    ), // P8.A2
     ("AgentTurnsChanged", "crates/oxplow-app/src/hook_ingest.rs"), // P8.A10
     ("BackgroundTasksChanged", "crates/oxplow-app/src/lib.rs"),
     ("CommentsChanged", "crates/oxplow-mcp/src/lib.rs"), // P8.A6
@@ -118,24 +113,11 @@ const EMITTERS: &[(&str, &str)] = &[
     ),
     ("ConfigChanged", "crates/oxplow-app/src/lib.rs"),
     ("ConfigChanged", "crates/oxplow-rpc/src/commands/ai.rs"),
-    ("CurrentStreamChanged", "crates/oxplow-mcp/src/lib.rs"),
-    (
-        "CurrentStreamChanged",
-        "crates/oxplow-rpc/src/commands/streams.rs",
-    ),
     ("DashboardsChanged", "crates/oxplow-mcp/src/lib.rs"), // P8.A5
     (
         "DashboardsChanged",
         "crates/oxplow-rpc/src/commands/dashboards.rs",
     ), // P8.A5
-    (
-        "DiagnosticsChanged",
-        "crates/oxplow-app/src/lsp_diagnostics.rs",
-    ), // P8.A2
-    (
-        "EffortObservationsChanged",
-        "crates/oxplow-app/src/collection.rs",
-    ), // P8.A2
     ("HookEventsChanged", "crates/oxplow-app/src/hook_ingest.rs"), // P8.A10
     ("HookEventsChanged", "crates/oxplow-app/src/recovery.rs"), // P8.A10
     ("LspServersChanged", "crates/oxplow-mcp/src/lib.rs"), // P8.A9
@@ -149,11 +131,6 @@ const EMITTERS: &[(&str, &str)] = &[
         "PageVisitChanged",
         "crates/oxplow-rpc/src/commands/page_visit.rs",
     ), // P8.A10
-    ("SelectedThreadChanged", "crates/oxplow-mcp/src/lib.rs"),
-    (
-        "SelectedThreadChanged",
-        "crates/oxplow-rpc/src/commands/threads.rs",
-    ),
     ("SnapshotTaken", "crates/oxplow-app/src/ui_push.rs"),
     ("StreamOrphaned", "crates/oxplow-app/src/workspace_watch.rs"),
     (
@@ -231,6 +208,53 @@ fn rpc_and_mcp_never_write_the_database_themselves() {
         })
         .collect();
     assert_eq!(offenders, Vec::<String>::new());
+}
+
+/// The `OxplowEvent` variants, as the wire names them (`kind`, camelCase).
+fn event_kinds() -> Vec<String> {
+    let src = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/events.rs"))
+        .unwrap();
+    let body = &src[src.find("pub enum OxplowEvent {").unwrap()..];
+    let body = &body[..body.find("\n}").unwrap()];
+    body.lines()
+        .filter(|l| l.starts_with("    ") && !l.starts_with("     "))
+        .map(str::trim)
+        .filter(|l| l.starts_with(|c: char| c.is_ascii_uppercase()))
+        .map(|l| {
+            let name: String = l.chars().take_while(|c| c.is_alphanumeric()).collect();
+            let mut kind = name[..1].to_lowercase();
+            kind.push_str(&name[1..]);
+            kind
+        })
+        .collect()
+}
+
+/// P8.A2: every UI event has a listener in the renderer — one nobody hears
+/// is a write path's leftover, and its readers re-read a model instead.
+#[test]
+fn every_ui_event_has_a_listener() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/desktop/src");
+    let mut text = String::new();
+    let mut stack = vec![root];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if path.is_dir() {
+                if name != "generated" {
+                    stack.push(path);
+                }
+            } else if (name.ends_with(".ts") || name.ends_with(".tsx")) && !name.contains(".test.")
+            {
+                text.push_str(&std::fs::read_to_string(&path).unwrap_or_default());
+            }
+        }
+    }
+    let unheard: Vec<String> = event_kinds()
+        .into_iter()
+        .filter(|k| !text.contains(&format!("\"{k}\"")))
+        .collect();
+    assert_eq!(unheard, Vec::<String>::new());
 }
 
 /// P7.B6's guard: nothing listens to the in-memory bus but the `/events`

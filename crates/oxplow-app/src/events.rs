@@ -69,15 +69,8 @@ pub enum OxplowEvent {
     /// Any stream row changed (created, renamed, deleted, panes
     /// updated). Renderer refetches `list_streams`.
     StreamsChanged,
-    /// The current-stream pointer in `runtime_state` moved.
-    CurrentStreamChanged { stream_id: Option<StreamId> },
     /// Threads on `stream_id` changed (created, status flipped, etc.).
     ThreadsChanged { stream_id: StreamId },
-    /// Selected-thread pointer for `stream_id` moved.
-    SelectedThreadChanged {
-        stream_id: StreamId,
-        thread_id: Option<ThreadId>,
-    },
     /// A comment (or one of its messages) changed on `target_kind` /
     /// `target_id` within `stream_id`. Renderer refetches the affected
     /// page's comments + the Comments inbox.
@@ -149,13 +142,6 @@ pub enum OxplowEvent {
         turn_id: Option<i64>,
         effort_id: Option<oxplow_domain::EffortId>,
     },
-    /// Effort-scoped collection observations changed for `effort_id`
-    /// (a test-run or diff-coverage row landed). The renderer refetches
-    /// the effort's observation list. See `.context/collection.md`.
-    EffortObservationsChanged {
-        thread_id: ThreadId,
-        effort_id: String,
-    },
     /// One or more metric samples landed in `stream_id` (unified metric
     /// substrate, tsk213). `measures` names the measure keys the write touched
     /// so a consumer can skip an event that can't affect it (tsk198); an EMPTY
@@ -170,21 +156,6 @@ pub enum OxplowEvent {
         #[serde(default)]
         measures: Vec<String>,
     },
-    /// A persisted agent nudge landed (report-less-run / coverage-target).
-    /// The renderer refetches the effort's (or thread's) nudge list. See
-    /// `.context/agent-model.md` (Nudge persistence).
-    AgentNudgesChanged {
-        thread_id: ThreadId,
-        effort_id: Option<String>,
-    },
-    /// A per-turn agent token-usage row landed (parsed on Stop from the
-    /// hook transcript). The renderer refetches the effort's usage list +
-    /// the thread's running total. `effort_id` is absent when the Stop had
-    /// no open effort. See `.context/agent-model.md` (Token usage capture).
-    AgentTokenUsageChanged {
-        thread_id: ThreadId,
-        effort_id: Option<String>,
-    },
     /// `.oxplow/project.yaml` was reloaded from disk (external edit, e.g. the agent
     /// running `/oxplow:configure`). The in-memory config has been swapped;
     /// the renderer refetches `get_config`.
@@ -193,9 +164,6 @@ pub enum OxplowEvent {
     /// deleted (tsk138). Project-global (dashboards aren't stream-scoped), so
     /// fieldless — the renderer refetches the affected dashboard(s).
     DashboardsChanged,
-    /// A language server published diagnostics (or restarted) for
-    /// `stream_id`: `v_diagnostic` changed. Debounced; lenses re-run.
-    DiagnosticsChanged { stream_id: i64 },
     /// `.git` directory appeared/disappeared at the project root —
     /// "is this a git workspace" flipped. Renderer hides/restores the
     /// git-aware UI on receipt.

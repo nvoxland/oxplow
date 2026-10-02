@@ -44,8 +44,6 @@ use oxplow_db::{
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{AgentKind, DomainError, StreamId, ThreadId};
 
-use crate::events::{EventBus, OxplowEvent};
-
 /// Summed usage across a chunk of transcript (one Stop's delta).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UsageDelta {
@@ -348,7 +346,6 @@ enum Counted {
 
 struct RecordedTurns {
     last_id: Option<i64>,
-    effort_id: Option<String>,
     effort_val: Option<i64>,
     by_model: std::collections::HashMap<String, TokenAgg>,
 }
@@ -361,7 +358,6 @@ pub struct TokenUsageService {
     /// Durable fact layer (epic tsk12): per-kind token totals land as facts
     /// on the `oxplow.tokens` measure (the legacy sample write is gone, T-E2).
     facts: Arc<SqliteFactStore>,
-    events: EventBus,
 }
 
 impl TokenUsageService {
@@ -370,14 +366,12 @@ impl TokenUsageService {
         efforts: Arc<SqliteEffortStore>,
         threads: Arc<SqliteThreadStore>,
         facts: Arc<SqliteFactStore>,
-        events: EventBus,
     ) -> Self {
         Self {
             usage,
             efforts,
             threads,
             facts,
-            events,
         }
     }
 
@@ -582,7 +576,6 @@ impl TokenUsageService {
         let last_id = ids.last().copied();
         Ok(RecordedTurns {
             last_id,
-            effort_id,
             effort_val,
             by_model,
         })
@@ -597,10 +590,6 @@ impl TokenUsageService {
         recorded: &RecordedTurns,
         rec: &TurnRecord,
     ) {
-        self.events.emit(OxplowEvent::AgentTokenUsageChanged {
-            thread_id: *thread,
-            effort_id: recorded.effort_id.clone(),
-        });
         self.project_token_metrics(
             thread,
             stream_id,
