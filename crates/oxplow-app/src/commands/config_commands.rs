@@ -48,6 +48,8 @@ pub struct ConfigTarget {
     pub config: Arc<RwLock<OxplowConfig>>,
     pub project_dir: PathBuf,
     pub events: EventBus,
+    /// Woken after each swap of the in-memory config.
+    pub applied: Arc<tokio::sync::Notify>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -231,6 +233,7 @@ fn apply_committed(target: &ConfigTarget, key: &str, value: Option<&Value>) {
     }
     *guard = next;
     drop(guard);
+    target.applied.notify_waiters();
     target.events.emit(OxplowEvent::ConfigChanged);
 }
 
@@ -346,6 +349,7 @@ mod tests {
             config,
             project_dir: dir.path().to_path_buf(),
             events: EventBus::new(),
+            applied: Arc::new(tokio::sync::Notify::new()),
         };
         let db = Database::in_memory();
         let log = SqliteEventLogStore::new(db.clone(), Arc::new(EventSchemaRegistry::core()));

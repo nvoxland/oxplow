@@ -593,50 +593,21 @@ impl ExtensionCommands {
     }
 }
 
-/// Keep the extension commands matching the config and the extension
-/// files: once at boot, then on every config change (enabling or
-/// disabling an extension) and every change under `oxplow/extensions/`.
+/// Keep the extension commands matching the enabled extensions of the
+/// primary worktree: once at boot, then whenever they may have changed
+/// (the extension catalog's signal: a file under `oxplow/extensions/`
+/// there, or the `extensions` config key).
 pub fn spawn_reconciler(state: std::sync::Arc<crate::Services>) {
-    use oxplow_domain::stores::StreamStore as _;
-    let mut rx = state.events.subscribe();
+    let mut changes = state.extension_catalog.changes();
     tokio::spawn(async move {
         state.extension_commands.reconcile().await;
-        let Ok(Some(primary)) = state.stream_store.primary().await else {
-            tracing::warn!("no primary stream; extension commands follow config changes only");
-            return;
-        };
-        loop {
-            match rx.recv().await {
-                Ok(event) if reconciles(&event, primary.id) => {
-                    state.extension_commands.reconcile().await
-                }
-                Ok(_) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    state.extension_commands.reconcile().await
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
+        // Lagging only means it missed some: one pass covers them.
+        while let Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) =
+            changes.recv().await
+        {
+            state.extension_commands.reconcile().await;
         }
     });
-}
-
-/// Whether `event` can change the registered extension commands: a
-/// config change (enabling or disabling an extension), or a file under
-/// `oxplow/extensions/` in the primary worktree, where they run from.
-pub fn reconciles(event: &crate::events::OxplowEvent, primary: oxplow_domain::StreamId) -> bool {
-    use crate::events::OxplowEvent;
-    match event {
-        OxplowEvent::ConfigChanged => true,
-        OxplowEvent::WorkspaceChanged {
-            stream_id, path, ..
-        } => {
-            *stream_id == primary
-                && path
-                    .strip_prefix(crate::extensions::EXTENSIONS_DIR)
-                    .is_some_and(|rest| rest.starts_with('/'))
-        }
-        _ => false,
-    }
 }
 
 /// Check `ext`'s commands (`check_extension`): with the running oxplow's
@@ -964,34 +935,6 @@ mod tests {
         let ext = project(d.path(), "a-b");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.commands.len(), 1);
-    }
-
-    /// Only a change under `oxplow/extensions/` in the primary worktree
-    /// (where extension commands run from) reconciles.
-    #[test]
-    fn the_reconciler_listens_to_the_primary_extensions_folder() {
-        use crate::events::{OxplowEvent, WorkspaceChangeKind};
-        let primary = oxplow_domain::StreamId::new(1);
-        let changed = |stream: i64, path: &str| OxplowEvent::WorkspaceChanged {
-            stream_id: oxplow_domain::StreamId::new(stream),
-            change_kind: WorkspaceChangeKind::Updated,
-            path: path.into(),
-        };
-        assert!(reconciles(
-            &changed(1, "oxplow/extensions/x/handlers/a.star"),
-            primary
-        ));
-        assert!(reconciles(&OxplowEvent::ConfigChanged, primary));
-        assert!(!reconciles(
-            &changed(2, "oxplow/extensions/x/handlers/a.star"),
-            primary
-        ));
-        assert!(!reconciles(
-            &changed(1, "oxplow/extensions-old/x.yaml"),
-            primary
-        ));
-        assert!(!reconciles(&changed(1, "oxplow/extensions"), primary));
-        assert!(!reconciles(&changed(1, "src/main.rs"), primary));
     }
 
     /// A changed script re-registers its command with the new script.

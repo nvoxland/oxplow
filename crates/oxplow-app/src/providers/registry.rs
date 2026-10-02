@@ -1426,24 +1426,19 @@ impl HostError {
     }
 }
 
-/// Keep the instances matching the config: once at boot, then on every
-/// config change (which is also how enabling or disabling an extension
-/// arrives).
+/// Keep the instances matching the extensions: once at boot, then
+/// whenever the primary worktree's extensions may have changed (the
+/// extension catalog's signal; an instance's own config arrives through
+/// the `config.providers` reactor).
 pub fn spawn_reconciler(state: Arc<crate::Services>) {
-    let mut rx = state.events.subscribe();
+    let mut changes = state.extension_catalog.changes();
     tokio::spawn(async move {
         state.providers.reconcile().await;
-        loop {
-            match rx.recv().await {
-                Ok(crate::events::OxplowEvent::ConfigChanged) => {
-                    state.providers.reconcile().await;
-                }
-                Ok(_) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    state.providers.reconcile().await;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
+        // Lagging only means it missed some: one pass covers them.
+        while let Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) =
+            changes.recv().await
+        {
+            state.providers.reconcile().await;
         }
     });
 }

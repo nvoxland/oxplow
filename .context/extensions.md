@@ -1161,11 +1161,13 @@ nothing and `ai_*` is refused without a host. **Registration**
 (`ExtensionCommands`, `Services.extension_commands`): the enabled
 extensions of the **primary worktree** (one bus, like providers — a
 command authored in another stream registers once merged), one
-namespace at a time, all-or-nothing; reconciled at boot, on
-`ConfigChanged` (enabling or disabling) and on a `WorkspaceChanged` under
-`oxplow/extensions/` **in the primary stream** (`reconciles`, the
-predicate `spawn_reconciler` applies; another stream's edits wait for
-the merge); a namespace something else
+namespace at a time, all-or-nothing; reconciled at boot and on the
+extension catalog's change signal (`ExtensionCatalog::changes`, P7.B6):
+the workspace watcher fires it for a file under `oxplow/extensions/`
+**in the primary worktree** only (another stream's edits wait for the
+merge), the `config.extensions` reactor for the `extensions` key
+(enabling or disabling). The extension models, the provider registry and
+the metric catalog follow the same signal; a namespace something else
 already holds (a provider) is refused and kept as the extension's
 `problem`. A launcher `{ command }` entry may name one.
 

@@ -6,11 +6,12 @@
 //! once merged.
 //!
 //! A pass runs at boot and again whenever what it compiles may have
-//! changed: an edit under `oxplow/extensions/`, a config change (an
-//! extension turned on or off), or a registry change (an extension's
-//! source synced a new entity a model reads). The inputs are
-//! fingerprinted, so a pass over the same models and entities — including
-//! the one the pass's own registry writes set off — does nothing.
+//! changed: the extension catalog's signal (an edit under
+//! `oxplow/extensions/` in the primary worktree, the `extensions` config
+//! key), or a collector run (`collector.synced`, the
+//! `extension_models.entities` consumer: it may have registered a new
+//! entity a model reads). The inputs are fingerprinted, so a pass over the
+//! same models and entities does nothing.
 //!
 //! A model that fails doesn't stop the others; its errors are its
 //! extension's health, merged into the extension list, never a boot
@@ -27,9 +28,8 @@ use oxplow_db::Database;
 use oxplow_domain::DomainError;
 use tokio::sync::Mutex;
 
-use crate::events::{EventBus, OxplowEvent};
 use crate::extension_catalog::ExtensionCatalog;
-use crate::extensions::{Extension, EXTENSIONS_DIR};
+use crate::extensions::Extension;
 
 /// A burst of file events is one pass.
 const SETTLE: Duration = Duration::from_millis(250);
@@ -128,38 +128,60 @@ impl ExtensionModelsService {
         extensions
     }
 
-    /// Compile now, then again after each change that may matter, for the
-    /// life of the process.
-    pub fn spawn(self: Arc<Self>, events: EventBus) {
-        let mut rx = events.subscribe();
+    /// Compile now, then again whenever the primary worktree's extensions
+    /// may have changed (`changes`, the catalog's signal), for the life of
+    /// the process. A burst settles into one pass.
+    pub fn spawn(self: Arc<Self>, mut changes: tokio::sync::broadcast::Receiver<()>) {
         tokio::spawn(async move {
             if let Err(error) = self.sync().await {
                 tracing::warn!(%error, "extension models didn't compile at boot");
             }
             loop {
-                let relevant = match rx.recv().await {
-                    Ok(OxplowEvent::WorkspaceChanged { path, .. }) => {
-                        path.starts_with(&format!("{EXTENSIONS_DIR}/"))
-                    }
-                    Ok(OxplowEvent::ConfigChanged) => true,
-                    Ok(OxplowEvent::ModelsChanged { models }) => {
-                        models.iter().any(|m| m == "v_model")
-                    }
-                    Ok(_) => false,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => true,
+                match changes.recv().await {
+                    Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-                };
-                if !relevant {
-                    continue;
                 }
                 tokio::time::sleep(SETTLE).await;
-                while rx.try_recv().is_ok() {}
+                while changes.try_recv().is_ok() {}
                 if let Err(error) = self.sync().await {
                     tracing::warn!(%error, "extension models didn't compile");
                 }
             }
         });
     }
+}
+
+/// `extension_models.entities` (P7.B6): a collector run may have
+/// registered an entity a model reads, so the models compile again (a
+/// no-op when nothing they read changed).
+pub const ENTITIES: &str = "extension_models.entities";
+
+pub struct EntitiesConsumer {
+    models: std::sync::Weak<ExtensionModelsService>,
+}
+
+#[async_trait::async_trait]
+impl crate::event_pump::AsyncEventConsumer for EntitiesConsumer {
+    fn name(&self) -> &'static str {
+        ENTITIES
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        event_type == "collector.synced"
+    }
+
+    async fn handle(&self, _event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
+        match self.models.upgrade() {
+            Some(models) => models.sync().await,
+            None => Ok(()),
+        }
+    }
+}
+
+pub fn register(state: &Arc<crate::Services>) {
+    state.event_pump.register_async(Arc::new(EntitiesConsumer {
+        models: Arc::downgrade(&state.extension_models),
+    }));
 }
 
 #[cfg(test)]

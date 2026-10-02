@@ -438,6 +438,9 @@ struct MachineEnv {
 /// hands out another sender into the same backing task.
 pub struct Services {
     pub config: Arc<RwLock<OxplowConfig>>,
+    /// Woken each time the in-memory config is swapped (`config.set`'s
+    /// after-commit apply) — what a `config.changed` reactor waits on.
+    pub config_applied: Arc<tokio::sync::Notify>,
     pub db: Database,
     pub layout: AppLayout,
     pub streams: StreamService,
@@ -1141,10 +1144,12 @@ impl Services {
                 .register(command)
                 .expect("knowledge commands register");
         }
+        let config_applied = Arc::new(tokio::sync::Notify::new());
         let config_target = commands::config_commands::ConfigTarget {
             config: config_arc.clone(),
             project_dir: layout.project_dir.clone(),
             events: event_bus.clone(),
+            applied: config_applied.clone(),
         };
         for command in commands::config_commands::commands(config_target.clone())
             .into_iter()
@@ -1183,6 +1188,10 @@ impl Services {
         );
 
         let advisories = Arc::new(advisories::AdvisoryRunner::new((*nudge_store).clone()));
+        // State entity metrics re-capture as their rows move (P7.B6).
+        event_pump.register_async(Arc::new(metrics_service::EntityStates {
+            metrics: metrics.clone(),
+        }));
         // A `generated` change reaches the snapshot captures (tsk515).
         event_pump.register_async(Arc::new(config_reactors::WorkspaceFilterConsumer {
             captures: snapshot_captures.clone(),
@@ -1217,6 +1226,7 @@ impl Services {
         }));
         Ok(Self {
             config: config_arc,
+            config_applied,
             db,
             layout,
             streams,
@@ -1357,6 +1367,7 @@ impl Services {
             *guard = fresh;
         }
         self.snapshot_captures.set_workspace_filter(filter);
+        self.config_applied.notify_waiters();
         self.events.emit(OxplowEvent::ConfigChanged);
         Ok(())
     }

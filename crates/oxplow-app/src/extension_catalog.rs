@@ -13,6 +13,13 @@
 //! fresh lens file is invisible. Consent hashing (`approval_hash`) keeps
 //! reading the disk itself, so a cached `Extension` never stands in for
 //! the bytes a person approved.
+//!
+//! **The change signal** (P7.B6) is for what follows the primary
+//! worktree's extensions — their models, commands, providers and metric
+//! declarations: [`ExtensionCatalog::changes`] hears that they may have
+//! changed (a file under `oxplow/extensions/` in the primary worktree,
+//! from the workspace watcher; the `extensions` config key, from its
+//! `config.changed` reactor). The cache itself still needs no signal.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -32,16 +39,38 @@ struct Entry {
     extensions: Arc<Vec<Extension>>,
 }
 
-#[derive(Default)]
 pub struct ExtensionCatalog {
     by_root: Mutex<HashMap<PathBuf, Entry>>,
     /// Full loads performed; tests read it to prove a hit parses nothing.
     loads: AtomicUsize,
+    /// The primary worktree's extensions may have changed.
+    changes: tokio::sync::broadcast::Sender<()>,
+}
+
+impl Default for ExtensionCatalog {
+    fn default() -> Self {
+        Self {
+            by_root: Mutex::default(),
+            loads: AtomicUsize::default(),
+            changes: tokio::sync::broadcast::channel(64).0,
+        }
+    }
 }
 
 impl ExtensionCatalog {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Hear that the primary worktree's extensions may have changed.
+    pub fn changes(&self) -> tokio::sync::broadcast::Receiver<()> {
+        self.changes.subscribe()
+    }
+
+    /// Say they may have: a file under the primary worktree's
+    /// `oxplow/extensions/` changed, or the `extensions` config key.
+    pub fn changed(&self) {
+        let _ = self.changes.send(());
     }
 
     /// Every extension under `root` (bundled ones included), as

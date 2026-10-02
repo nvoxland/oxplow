@@ -906,10 +906,12 @@ The UI shows the entity aggregation (`specAggregation`).
 
 **The `entity-metric` producer** (`MetricsService::capture_entity_states`):
 
-- **When it runs.** Forced at boot, on `ConfigChanged` and on an
-  extension manifest change. Throttled, at most once per 10 minutes per
-  metric, on `TasksChanged`, a collector run (`ModelsChanged` naming
-  `v_collector_run`) and snapshot batches.
+- **When it runs.** Forced at boot and on a reseed (`MetricsService::
+  reseed`: a config change through the `config.metrics` reactor, an
+  extension change through the catalog's signal). Throttled, at most
+  once per 10 minutes per metric, by the `metrics.entity_states` pump
+  consumer on `work_item.*`, `snapshot.taken` and `collector.synced`
+  (P7.B6; it used to follow the in-memory bus).
 - **What it writes.** One fact with the current value on the primary
   stream.
 - **When it skips.** When the value equals the last capture: the
@@ -1201,15 +1203,16 @@ dimensions:                        # custom conformed slice axes
 - **Read-path caching (tsk17):** `resolved_specs`/`fact_collectors` run on
   **every** snapshot event, so the three global YAML dirs are loaded once into a
   `MetricsService.global_catalog` (`Arc<Mutex<Option<GlobalCatalog>>>`) and
-  served from cache (`with_global_catalog`); the service's run loop clears it
-  on every `ConfigChanged` before reseeding (an external edit to a global file
+  served from cache (`with_global_catalog`); `reseed` clears it on every
+  config change (`config.metrics`) and extension change before reseeding (an external edit to a global file
   needs a config change to refresh). Project config stays read fresh from the in-memory `RwLock`.
   `with_global_dir` forks a fresh cache (dir changed). Two more per-read memos:
   `effort_metric_deltas` loads each measure's history **once** across the
   File-family specs sharing it (a per-call `fact_cache`), and `dim_value` parses
   a fact's `dims_json` **once** per lookup (`parse_dims` + `dim_from_map`).
 - **Boot seeding:** `MetricsService::seed_catalog()` runs once at boot and on
-  every `ConfigChanged` (beside `seed_definitions`), upserting resolved
+  every reseed — a config change (`config.metrics`) or extension change (the
+  catalog's signal) — (beside `seed_definitions`), upserting resolved
   measures/dimensions into the `measure`/`dimension` tables. `MetricsService`
   holds a `fact_store` via `.with_fact_store()`. Metric specs seed in two
   passes: the override-free built-ins (`builtin_metric_specs` /
@@ -1668,7 +1671,7 @@ The mechanics behind those controls (unchanged by tsk117):
   `metrics:` spec (`<key>`, `sum` over the measure), rendered by
   `oxplow_config::entries_yaml`. The agent writes the script with its own
   tools and adds the entries through `config.set` (`collectors` is person-only,
-  so the person confirms); `ConfigChanged` reseeds. It used to write the files itself
+  so the person confirms); the `config.metrics` reactor reseeds. It used to write the files itself
   (and had a `global` scope writing the global config dir), which let a
   read-only thread change the repo and always wrote to the primary worktree.
   Global metrics are authored by hand in the global config dir (there are no

@@ -56,6 +56,7 @@ impl WorkspaceWatchRegistry {
         vcs: std::sync::Arc<dyn Vcs>,
         events: EventBus,
         ref_moves: crate::ref_moves::RefMoves,
+        extensions: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
         project_dir: PathBuf,
         filter: oxplow_fs_watch::WorkspaceFilter,
     ) -> Self {
@@ -88,6 +89,7 @@ impl WorkspaceWatchRegistry {
                 Announce {
                     events: events.clone(),
                     ref_moves: ref_moves.clone(),
+                    extensions: matches!(s.kind, StreamKind::Primary).then(|| extensions.clone()),
                 },
                 is_worktree,
                 on_orphan,
@@ -134,18 +136,31 @@ type OnOrphan =
     Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send>;
 
 /// Where a stream's watchers announce: file changes on the UI's event
-/// bus, ref moves on their own channel.
+/// bus, ref moves on their own channel, and — the primary worktree's
+/// only, where extensions load from — a change under `oxplow/extensions/`
+/// on the extension catalog's signal.
 #[derive(Clone)]
 struct Announce {
     events: EventBus,
     ref_moves: crate::ref_moves::RefMoves,
+    extensions: Option<std::sync::Arc<crate::extension_catalog::ExtensionCatalog>>,
+}
+
+/// Whether `rel` (worktree-relative) is a file under `oxplow/extensions/`.
+fn is_extension_file(rel: &str) -> bool {
+    rel.strip_prefix(crate::extensions::EXTENSIONS_DIR)
+        .is_some_and(|rest| rest.starts_with('/'))
 }
 
 fn spawn_for_stream(
     stream_id: oxplow_domain::StreamId,
     worktree: PathBuf,
     vcs: &dyn Vcs,
-    Announce { events, ref_moves }: Announce,
+    Announce {
+        events,
+        ref_moves,
+        extensions,
+    }: Announce,
     is_worktree: bool,
     on_orphan: OnOrphan,
     filter: oxplow_fs_watch::WorkspaceFilter,
@@ -220,6 +235,11 @@ fn spawn_for_stream(
                             continue;
                         }
                         let rel = rel_path.to_string_lossy().into_owned();
+                        if let Some(catalog) =
+                            extensions.as_ref().filter(|_| is_extension_file(&rel))
+                        {
+                            catalog.changed();
+                        }
                         bus.emit(OxplowEvent::WorkspaceChanged {
                             stream_id: id,
                             change_kind: classify(&kind),
@@ -347,6 +367,7 @@ mod tests {
             Announce {
                 events: bus.clone(),
                 ref_moves: crate::ref_moves::RefMoves::new(bus.clone()),
+                extensions: None,
             },
             false,
             on_orphan,
@@ -387,6 +408,15 @@ mod tests {
         // Keep arc alive to avoid drop ordering surprises.
         drop(_watchers);
         let _ = Arc::new(());
+    }
+
+    /// P7.B6: only a file under `oxplow/extensions/` is an extension change.
+    #[test]
+    fn extension_files_are_under_the_extensions_folder() {
+        assert!(is_extension_file("oxplow/extensions/x/handlers/a.star"));
+        assert!(!is_extension_file("oxplow/extensions-old/x.yaml"));
+        assert!(!is_extension_file("oxplow/extensions"));
+        assert!(!is_extension_file("src/main.rs"));
     }
 
     #[tokio::test]
@@ -449,6 +479,7 @@ mod tests {
             Arc::new(crate::vcs::GitProvider),
             bus.clone(),
             crate::ref_moves::RefMoves::new(bus.clone()),
+            Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             project.clone(),
             oxplow_fs_watch::WorkspaceFilter::default(),
         )
@@ -539,6 +570,7 @@ mod tests {
             Arc::new(crate::vcs::GitProvider),
             bus.clone(),
             crate::ref_moves::RefMoves::new(bus.clone()),
+            Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             project.clone(),
             oxplow_fs_watch::WorkspaceFilter::default(),
         )

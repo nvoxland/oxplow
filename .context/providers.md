@@ -189,8 +189,10 @@ credentials, health). The config object is the provider's
 `config_schema`'s; `check` validates it.
 
 **The registry** (`registry.rs`, `Services.providers`) keeps the running
-instances matching the config: `reconcile()` runs at boot and on every
-`ConfigChanged` (`spawn_reconciler`), starting enabled instances and
+instances matching the config: `reconcile()` runs at boot, on the
+extension catalog's change signal (`spawn_reconciler`) and on an
+`extensionInstances` / `activeProviders` change (the `config.providers`
+reactor on `config.changed`, P7.B6), starting enabled instances and
 stopping the rest (a config or spec change restarts one). `enable(ext,
 spec, config)` starts an instance and only then registers its capability
 provider (`ExternalWorkItems::provider`: id, declared features, and the

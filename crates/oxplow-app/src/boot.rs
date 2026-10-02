@@ -153,6 +153,11 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     crate::plugin_repair::register(state);
     // `on:` collectors (P7.B3), after the consumers they may name.
     crate::collector_triggers::register(state);
+    // Config changes reach the extension catalog, the provider registry and
+    // the metric catalog (P7.B6).
+    crate::config_reactors::register(state);
+    // A collector that registered a new entity may let a model compile.
+    crate::extension_models::register(state);
     state.event_pump.clone().spawn();
     // `every:` collectors: the scheduler runs `collector.sync` as the system.
     crate::collector_runner::spawn_scheduler(state.clone());
@@ -267,6 +272,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         let watch_vcs = state.vcs.clone();
         let watch_bus = event_bus.clone();
         let watch_moves = state.ref_moves.clone();
+        let watch_catalog = state.extension_catalog.clone();
         let watch_project_dir = state.layout.project_dir.clone();
         let watch_filter = {
             let cfg = crate::config_service::read_config(&state.config);
@@ -289,6 +295,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
                 watch_vcs,
                 watch_bus,
                 watch_moves,
+                watch_catalog,
                 watch_project_dir,
                 watch_filter,
             )
@@ -359,7 +366,10 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     state.branch_reconciler.clone().spawn();
 
     // Extensions' SQL models (P4.9): compiled now and on every change.
-    state.extension_models.clone().spawn(event_bus.clone());
+    state
+        .extension_models
+        .clone()
+        .spawn(state.extension_catalog.changes());
 
     // The one change loop (P4.6, P7.B1): which models each commit
     // changed, which metric samples landed, which assets went stale.
@@ -449,13 +459,14 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         });
     }
 
-    // Metric runner (tsk213, P3): seed config-declared metric definitions,
-    // then run on-snapshot gauges as snapshots land + reseed on config change.
+    // Metric catalog (tsk213, P7.B6): seed the declared metrics, then reseed
+    // when the extensions may have changed (config changes reseed through
+    // the `config.metrics` reactor).
     {
         let metrics = state.metrics.clone();
-        let rx = state.events.subscribe();
+        let changes = state.extension_catalog.changes();
         tokio::spawn(async move {
-            metrics.run(rx).await;
+            metrics.run(changes).await;
         });
     }
 

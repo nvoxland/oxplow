@@ -37,7 +37,6 @@ use oxplow_domain::{DomainError, EffortId, StreamId, ThreadId};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::events::OxplowEvent;
 use crate::producer_metrics::builtin_producer_metrics;
 use crate::snapshot_content::SnapshotContent;
 
@@ -283,14 +282,6 @@ struct CollectorRunContext {
     /// Who ran it, as an event source (`collector.synced@1`'s): the
     /// system, unless someone ran it by hand.
     source: String,
-}
-
-/// Whether a workspace path is an extension's manifest
-/// (`oxplow/extensions/<name>/extension.yaml`).
-fn is_extension_manifest(path: &str) -> bool {
-    path.strip_prefix("oxplow/extensions/")
-        .and_then(|rest| rest.split_once('/'))
-        .is_some_and(|(name, file)| !name.is_empty() && file == "extension.yaml")
 }
 
 /// Measures, metrics, fact collectors and dimensions from enabled
@@ -1359,46 +1350,30 @@ impl MetricsService {
         })
     }
 
-    /// Event loop: seed once, then reseed on `ConfigChanged` or an extension
-    /// manifest change, and re-capture state entity metrics when their rows
-    /// may have moved. Spawned at boot (see `boot.rs`). Fact collectors run
-    /// from the `collector.triggers` pump consumer.
-    pub async fn run(self, mut rx: tokio::sync::broadcast::Receiver<OxplowEvent>) {
+    /// Reseed the catalog from scratch — the global catalog dropped, the
+    /// config's and the extensions' declarations seeded — and re-capture
+    /// every state entity metric. What a config change (`config.metrics`)
+    /// and an extension change (the catalog's signal) run.
+    pub async fn reseed(&self) {
+        self.invalidate_global_catalog();
         self.seed_catalog().await;
         self.capture_entity_states(true).await;
-        loop {
-            let event = rx.recv().await;
-            // Anything that may move an entity's rows — a task write, a
-            // snapshot, a collector run (its `collector_run` commit) —
-            // re-captures state entity metrics, throttled per metric.
-            let collector_ran = matches!(
-                &event,
-                Ok(OxplowEvent::ModelsChanged { models }) if models.iter().any(|m| m == "v_collector_run")
-            );
-            if collector_ran
-                || matches!(
-                    event,
-                    Ok(OxplowEvent::TasksChanged { .. } | OxplowEvent::SnapshotTaken { .. })
-                )
-            {
-                self.capture_entity_states(false).await;
-            }
-            match event {
-                Ok(OxplowEvent::ConfigChanged) => {
-                    self.invalidate_global_catalog();
-                    self.seed_catalog().await;
-                    self.capture_entity_states(true).await;
-                }
-                // An extension's manifest can add or drop measures, metrics
-                // and collectors.
-                Ok(OxplowEvent::WorkspaceChanged { path, .. }) if is_extension_manifest(&path) => {
-                    self.seed_catalog().await;
-                    self.capture_entity_states(true).await;
-                }
-                Ok(_) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
+    }
+
+    /// Seed once, then reseed whenever the primary worktree's extensions
+    /// may have changed (`changes`, the extension catalog's signal: their
+    /// measures, metrics and collectors). A config change reseeds through
+    /// `config.metrics`; rows moving re-capture state metrics through
+    /// `metrics.entity_states`; fact collectors run from
+    /// `collector.triggers`. Spawned at boot (`boot.rs`).
+    pub async fn run(self, mut changes: tokio::sync::broadcast::Receiver<()>) {
+        self.seed_catalog().await;
+        self.capture_entity_states(true).await;
+        // Lagging only means it missed some: one pass covers them.
+        while let Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) =
+            changes.recv().await
+        {
+            self.reseed().await;
         }
     }
 
@@ -2922,6 +2897,36 @@ pub struct BaselineReport {
     /// Gauges that failed during the sweep (empty on success). Non-empty means those
     /// metrics will read stale/empty — a visible failure, not a silent one.
     pub failed: Vec<String>,
+}
+
+/// `metrics.entity_states` (P7.B6): re-capture state entity metrics when
+/// their rows may have moved — a work item written, a snapshot taken, a
+/// collector run — throttled per metric (`capture_entity_states`).
+pub const ENTITY_STATES: &str = "metrics.entity_states";
+
+pub struct EntityStates {
+    pub metrics: MetricsService,
+}
+
+#[async_trait::async_trait]
+impl crate::event_pump::AsyncEventConsumer for EntityStates {
+    fn name(&self) -> &'static str {
+        ENTITY_STATES
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        event_type.starts_with("work_item.")
+            || event_type == "snapshot.taken"
+            || event_type == "collector.synced"
+    }
+
+    async fn handle(
+        &self,
+        _event: &oxplow_domain::StoredEvent,
+    ) -> Result<(), oxplow_domain::DomainError> {
+        self.metrics.capture_entity_states(false).await;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -4866,18 +4871,6 @@ def transform(input):
             .await
             .unwrap();
         assert_eq!(count, 0, "empty snapshot → no facts, runs without error");
-    }
-
-    #[test]
-    fn extension_manifests_are_recognized() {
-        assert!(is_extension_manifest(
-            "oxplow/extensions/acme/extension.yaml"
-        ));
-        assert!(!is_extension_manifest(
-            "oxplow/extensions/acme/lenses/a.yaml"
-        ));
-        assert!(!is_extension_manifest("oxplow/extensions/extension.yaml"));
-        assert!(!is_extension_manifest("src/extension.yaml"));
     }
 
     #[tokio::test]
