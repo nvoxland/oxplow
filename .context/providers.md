@@ -212,7 +212,7 @@ none); an id whose namespace is already held (`namespace_owner`) or
 that is already a provider is refused. **A provider emits only its capability's event
 types** (`spec::allowed_event_types`: `work_items` → `work_item.recorded@1`;
 tsk548): declaring any other type — another core one such as
-`provider.enabled`, which would clear another instance's disable — is
+`plugin.enabled`, which would clear another contribution's disable — is
 refused when the manifest loads, and the declared schema must equal
 core's (checked at enable). Its own types are P7. A command's run
 invokes the process and hands the bus its result, its inverse (as
@@ -227,7 +227,7 @@ one of its own refs (`check_subject`: `work_item:<id>:…` or
 app, 2 s in `Services::in_memory`); a timeout sends `$/cancel` and
 counts as a failure. A restart runs under its own `starting` lock,
 never holding `live`, so a start that hangs can't block `stop` (and
-through it reconcile, `provider.enable` or `set_instance`). `Peer::start`
+through it reconcile, `plugin.enable` or `set_instance`). `Peer::start`
 refuses once the other side's stream has closed, instead of leaving a
 waiter that nothing resolves.
 
@@ -251,21 +251,27 @@ mean_invoke_ms, rate_limited_until, activity }`, per machine, in memory): `state
 `failing { errors }` (the last five) or `disabled { reason }`. A failed
 start or call counts (a refused input or a cancel doesn't); a success
 resets the count and updates `last_ok_at` and the moving-average
-`mean_invoke_ms`. **Three failures in a row disable the instance**: it
-stops and `provider.disabled@1 { instance, reason }` is logged (source
-`system:providers`, subject `plugin:<extension>`). So is a handshake that
-doesn't match the approved declarations. The log is what keeps it off,
-across reconciles and restarts: an instance whose latest
-`provider.disabled` has no later `provider.enabled` stays `disabled`,
-and one whose record can't be read stays off too (`failing`, naming
-the error — not knowing isn't a yes). **A disable wins over a start in
+`mean_invoke_ms`. The count and the disable are the policy every plugin
+contribution shares (P7.C1, `plugin_health.rs`; [extensions.md](./extensions.md)):
+the `plugin_health` row keyed `<extension>` / `<provider id>`, kind
+`provider` (`v_plugin_health`). **Three failures in a row disable the
+instance**: it stops, and the row (`disabled`, its reason) and
+`plugin.disabled@1 { plugin, contribution, kind, reason }` commit
+together (source `system:plugins`, subject `plugin:<extension>`). So is
+a handshake that doesn't match the approved declarations. The row is
+what keeps it off, across reconciles and restarts, and one whose row
+can't be read stays off too (`failing`, naming the error — not knowing
+isn't a yes). `InstanceHealth` is the process's state, showing the
+row's count. **A disable wins over a start in
 flight** (tsk569): each disable bumps the instance's epoch under the
 `running` lock, and a start registers (`admit`) only if the epoch it
 began with still holds, so a concurrent reconcile can't bring back
 what was just disabled.
-Only a person turns it back on — **`provider.enable { instance }`**
-(human-only, `External`, not undoable), which logs `provider.enabled@1`,
-resets the count and reconciles.
+Only a person turns it back on — **`plugin.enable { plugin,
+contribution }`** (human-only, `External`, not undoable; it replaced
+`provider.enable`), which marks the row `ok`, logs `plugin.enabled@1`,
+resets the backoff and reconciles. Settings → Integrations' Enable runs
+it before writing `extensionInstances`.
 
 **Reading: collectors and sync** (`sync.rs`, P7.A3). `Instance::read`
 runs one declared collector's `read` from the checkpoint it last stored
@@ -305,7 +311,7 @@ outcome is the view's state) and `set_provider_instance { instance,
 enabled, config }` (`ProviderRegistry::set_instance`: enabling checks
 first and refuses an unapproved or unconfigured instance, writing
 nothing, with the problem's field as `/config/<path>`; then `config.set`
-of `extensionInstances` — to enable, `provider.enable` runs **first**, so
+of `extensionInstances` — to enable, `plugin.enable` runs **first**, so
 a failed enable writes nothing and the config never says enabled for
 an instance that wasn't — then a reconcile). Each row
 shows its state, its credentials (set into the keychain through
@@ -330,7 +336,7 @@ the instance; an unconfigured instance can't be enabled (nothing
 written) and a configured one enables, writes `extensionInstances` and
 disables again; `fail-next:3` disables it after three failures with the
 reason logged, keeps it off across a reconcile, refuses an agent's
-`provider.enable` and comes back on a person's; and the work-items
+`plugin.enable` and comes back on a person's; and the work-items
 conformance suite passes through the dispatching `work_item.*` over the
 fake; `work_item.*` writes the fake's items through its process with one
 audit row (and undo dispatches again), its verbs aren't on the bus but

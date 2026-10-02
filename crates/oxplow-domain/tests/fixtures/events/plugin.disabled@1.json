@@ -1,0 +1,6 @@
+{
+  "plugin": "plugin:tracker",
+  "contribution": "fake",
+  "kind": "provider",
+  "reason": "3 failures in a row; the last: timed out"
+}

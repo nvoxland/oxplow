@@ -147,7 +147,7 @@ impl Instance {
         let (finished, result) = match outcome {
             Ok(records) => {
                 if let Some(r) = &registry {
-                    r.call_succeeded(&self.name, started.elapsed());
+                    r.call_succeeded(&self.name, started.elapsed()).await;
                 }
                 (
                     None,

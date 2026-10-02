@@ -43,6 +43,7 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "lens",
     "config",
     "provider",
+    "plugin",
 ];
 
 /// One event type at one schema version. `Payload` is the Rust shape
@@ -150,10 +151,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<CodeDiagnosticsChanged>()
             .expect("core type registers");
-        r.register::<ProviderEnabled>()
-            .expect("core type registers");
-        r.register::<ProviderDisabled>()
-            .expect("core type registers");
+        r.register::<PluginEnabled>().expect("core type registers");
+        r.register::<PluginDisabled>().expect("core type registers");
         r.register::<LensShown>().expect("core type registers");
         r.register::<LensKept>().expect("core type registers");
         r.register::<CommandProposed>()
@@ -1175,39 +1174,48 @@ impl EventType for CodeDiagnosticsChanged {
     type Payload = CodeDiagnosticsChangedV1;
 }
 
-/// `provider.enabled@1`: a person enabled an extension provider's
-/// instance on this machine (`provider.enable`), clearing an automatic
-/// disable.
+/// `plugin.disabled@1` (P7.C1): one of a plugin's contributions — a
+/// provider instance, a collector — was stopped on this machine after
+/// repeated failures (or a provider whose handshake no longer matches what
+/// was approved), and stays off until a person enables it again
+/// (`plugin.enable`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ProviderEnabledV1 {
-    /// `<extension>/<provider id>`.
-    pub instance: String,
-}
-
-pub struct ProviderEnabled;
-impl EventType for ProviderEnabled {
-    const TYPE: &'static str = "provider.enabled";
-    const V: u32 = 1;
-    type Payload = ProviderEnabledV1;
-}
-
-/// `provider.disabled@1`: an instance was stopped on this machine after
-/// repeated failures, and stays off until a person enables it again.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ProviderDisabledV1 {
-    /// `<extension>/<provider id>`.
-    pub instance: String,
-    /// The failure that stopped it.
+pub struct PluginDisabledV1 {
+    /// `plugin:<extension>`.
+    pub plugin: String,
+    /// The contribution within it: a provider's id, a collector's id.
+    pub contribution: String,
+    /// `provider` or `collector`.
+    pub kind: String,
+    /// What stopped it.
     pub reason: String,
 }
 
-pub struct ProviderDisabled;
-impl EventType for ProviderDisabled {
-    const TYPE: &'static str = "provider.disabled";
+pub struct PluginDisabled;
+impl EventType for PluginDisabled {
+    const TYPE: &'static str = "plugin.disabled";
     const V: u32 = 1;
-    type Payload = ProviderDisabledV1;
+    type Payload = PluginDisabledV1;
+}
+
+/// `plugin.enabled@1` (P7.C1): a person enabled a disabled contribution
+/// again on this machine (`plugin.enable`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PluginEnabledV1 {
+    /// `plugin:<extension>`.
+    pub plugin: String,
+    pub contribution: String,
+    /// `provider` or `collector`.
+    pub kind: String,
+}
+
+pub struct PluginEnabled;
+impl EventType for PluginEnabled {
+    const TYPE: &'static str = "plugin.enabled";
+    const V: u32 = 1;
+    type Payload = PluginEnabledV1;
 }
 
 /// `knowledge.page.written@1`: a knowledge page's row and edges were
@@ -1368,8 +1376,8 @@ mod tests {
                 ("knowledge.page.written", 1),
                 ("lens.kept", 1),
                 ("lens.shown", 1),
-                ("provider.disabled", 1),
-                ("provider.enabled", 1),
+                ("plugin.disabled", 1),
+                ("plugin.enabled", 1),
                 ("snapshot.taken", 1),
                 ("test.coverage.recorded", 1),
                 ("test.run.recorded", 1),

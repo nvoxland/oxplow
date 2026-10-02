@@ -216,7 +216,7 @@ async fn a_provider_must_answer_with_its_approved_declarations() {
         fx.svc.providers.health(INSTANCE).unwrap().state,
         InstanceState::Disabled { .. }
     ));
-    assert_eq!(logged(&fx, "provider.disabled").await.len(), 1);
+    assert_eq!(logged(&fx, "plugin.disabled").await.len(), 1);
 }
 
 /// P5.D4's red: an unconfigured instance can't be enabled — the check
@@ -252,7 +252,7 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
     let written =
         std::fs::read_to_string(oxplow_config::config_path(&fx.svc.layout.project_dir)).unwrap();
     assert!(written.contains("extensionInstances"), "{written}");
-    assert_eq!(logged(&fx, "provider.enabled").await.len(), 1);
+    assert_eq!(logged(&fx, "plugin.enabled").await.len(), 1);
 
     // Disabling stops it.
     let view = providers
@@ -265,7 +265,7 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
 
 /// P5.D4's red: three failures in a row disable the instance, logged
 /// with the reason; it stays off across reconciles until a person runs
-/// `provider.enable`.
+/// `plugin.enable`.
 #[tokio::test]
 async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it() {
     let (fx, _ext) = approved("fail-next:3").await;
@@ -298,9 +298,10 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
     };
     assert!(reason.contains("3 failures in a row"), "{reason}");
     assert!(!fx.svc.commands.namespace_owner("fake").is_some());
-    let disabled = logged(&fx, "provider.disabled").await;
+    let disabled = logged(&fx, "plugin.disabled").await;
     assert_eq!(disabled.len(), 1);
-    assert_eq!(disabled[0]["instance"], INSTANCE);
+    assert_eq!(disabled[0]["plugin"], "plugin:tracker");
+    assert_eq!(disabled[0]["contribution"], "fake");
     assert_eq!(disabled[0]["reason"], reason.as_str());
 
     // The log keeps it off.
@@ -319,8 +320,8 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
                 thread_id: Some(ThreadId::new(fx.thread.value())),
                 stream_id: None,
             },
-            "provider.enable",
-            json!({ "instance": INSTANCE }),
+            "plugin.enable",
+            json!({ "plugin": "tracker", "contribution": "fake" }),
             false,
         )
         .await;
@@ -335,16 +336,16 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         .commands
         .run(
             &Actor::Human,
-            "provider.enable",
-            json!({ "instance": INSTANCE }),
+            "plugin.enable",
+            json!({ "plugin": "tracker", "contribution": "fake" }),
             false,
         )
         .await
         .unwrap();
+    assert_eq!(enabled.result["state"], "ok", "{}", enabled.result);
     assert_eq!(
-        enabled.result["health"]["state"]["state"], "ready",
-        "{}",
-        enabled.result
+        fx.svc.providers.health(INSTANCE).unwrap().state,
+        InstanceState::Ready
     );
     assert!(fx.svc.commands.namespace_owner("fake").is_some());
 }
@@ -853,7 +854,7 @@ async fn a_provider_runs_from_its_verified_copy() {
 }
 
 /// tsk548: a provider may emit only its capability's event types — a
-/// declared `provider.enabled` (which would clear another instance's
+/// declared `plugin.enabled` (which would clear another contribution's
 /// automatic disable) is refused when the manifest loads.
 #[tokio::test]
 async fn a_provider_cannot_declare_another_core_event_type() {
@@ -864,10 +865,10 @@ async fn a_provider_cannot_declare_another_core_event_type() {
     declared
         .event_types
         .push(oxplow_provider_protocol::model::EventTypeDecl {
-            event_type: "provider.enabled".into(),
+            event_type: "plugin.enabled".into(),
             v: 1,
             schema: oxplow_domain::events::schema::schema_for::<
-                oxplow_domain::events::schema::ProviderEnabled,
+                oxplow_domain::events::schema::PluginEnabled,
             >(),
         });
     std::fs::write(
@@ -884,7 +885,7 @@ async fn a_provider_cannot_declare_another_core_event_type() {
         loaded
             .errors
             .iter()
-            .any(|e| e.contains("provider.enabled@1") && e.contains("work_items")),
+            .any(|e| e.contains("plugin.enabled@1") && e.contains("work_items")),
         "{:?}",
         loaded.errors
     );
@@ -1001,7 +1002,7 @@ async fn an_unreadable_disable_record_keeps_the_instance_off() {
     fx.svc
         .db
         .transaction(|c| {
-            c.execute_batch("ALTER TABLE event_log RENAME TO event_log_unreadable")
+            c.execute_batch("ALTER TABLE plugin_health RENAME TO plugin_health_unreadable")
                 .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
         })
         .await
@@ -1042,7 +1043,7 @@ async fn approving_updated_declarations_restarts_the_instance() {
         fx.svc.providers.health(INSTANCE).unwrap().state,
         InstanceState::Ready
     );
-    assert!(logged(&fx, "provider.disabled").await.is_empty());
+    assert!(logged(&fx, "plugin.disabled").await.is_empty());
     // The restarted instance republished its capability row, with the
     // features it declares now.
     let row = oxplow_db::SqliteCapabilityStore::new(fx.svc.db.clone())
@@ -1098,7 +1099,7 @@ async fn a_failed_enable_writes_no_config() {
         .transaction(|c| {
             c.execute_batch(
                 "CREATE TRIGGER refuse_enabled BEFORE INSERT ON event_log
-                 WHEN NEW.type = 'provider.enabled'
+                 WHEN NEW.type = 'plugin.enabled'
                  BEGIN SELECT RAISE(ABORT, 'refused'); END;",
             )
             .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))

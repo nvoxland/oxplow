@@ -1728,6 +1728,20 @@ back). A failed run keeps the last good counts and cursor.
 logs its `collector.synced@1`. Read as `v_collector_run`; see
 [semantic-layer.md](./semantic-layer.md) "Collectors".
 
+### `plugin_health` — `SqlitePluginHealthStore` (`crates/oxplow-db/src/plugin_health_store.rs`)
+
+V135 (P7.C1). Each plugin contribution's health on this machine, keyed
+`plugin` (the extension) + `contribution` (its provider's or collector's
+id), `kind` `provider` | `collector`: `state` (`ok` / `failing` /
+`disabled`), `reason`, `consecutive_failures`, `last_ok_at`,
+`last_error`, `mean_ms` (a moving average), `next_due_at` (a schedule's
+next slot), `updated_at`. The policy is `oxplow-app/src/plugin_health.rs`:
+three failures in a row disable it, the row and `plugin.disabled@1` in
+one transaction; `plugin.enable` clears it (`plugin.enabled@1`).
+`v_plugin_health` adds `dead_letters` (pending dead letters of its
+consumer `extension:<plugin>/<contribution>`, or of events whose subject
+is `plugin:<plugin>`) and `fresh` (0 once `next_due_at` has passed).
+
 ### `provider_collector_state` — `SqliteProviderCollectorStore` (`crates/oxplow-db/src/provider_collector_store.rs`)
 
 V129 (P7.A3). Where each provider instance's collector left off:

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`plugin.disabled@1` (P7.C1): one of a plugin's contributions — a\nprovider instance, a collector — was stopped on this machine after\nrepeated failures (or a provider whose handshake no longer matches what\nwas approved), and stays off until a person enables it again\n(`plugin.enable`).",
+  "properties": {
+    "contribution": {
+      "description": "The contribution within it: a provider's id, a collector's id.",
+      "type": "string"
+    },
+    "kind": {
+      "description": "`provider` or `collector`.",
+      "type": "string"
+    },
+    "plugin": {
+      "description": "`plugin:<extension>`.",
+      "type": "string"
+    },
+    "reason": {
+      "description": "What stopped it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "plugin",
+    "contribution",
+    "kind",
+    "reason"
+  ],
+  "title": "PluginDisabledV1",
+  "type": "object"
+}

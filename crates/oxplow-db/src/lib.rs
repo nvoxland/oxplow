@@ -31,6 +31,7 @@ pub mod observation_store;
 pub mod page_ref_projections;
 pub mod page_ref_store;
 pub mod panel_layout_store;
+pub mod plugin_health_store;
 pub mod proposal_store;
 pub mod provider_collector_store;
 pub mod reasoning_store;
@@ -94,6 +95,7 @@ pub use git_store::{
 pub use observation_store::EffortObservation;
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};
+pub use plugin_health_store::{PluginHealthRow, PluginKey, SqlitePluginHealthStore};
 pub use proposal_store::{NewProposal, Proposal, ProposalDecision, SqliteProposalStore};
 pub use provider_collector_store::{CollectorState, SqliteProviderCollectorStore};
 pub use reasoning_store::{NewClaim, NewDecision, SqliteReasoningStore};

@@ -12,11 +12,12 @@
 //! `<id>.<name>` (`Atomicity::External`), under the namespace `<id>` it
 //! then holds. Every restart goes through consent again.
 //!
-//! Health is per machine: [`InstanceHealth`]. A start or call that fails
-//! (not a refused input) counts; [`FAILURES_TO_DISABLE`] in a row stop the
-//! instance, log `provider.disabled@1 { instance, reason }` and keep it off
-//! — across restarts, since the log says so — until a person runs
-//! `provider.enable`, which logs `provider.enabled@1`.
+//! Health is per machine. [`InstanceHealth`] is the process's state; the
+//! failure policy is the one every plugin contribution shares
+//! ([`crate::plugin_health`]): a start or call that fails (not a refused
+//! input) counts, three in a row stop the instance and log
+//! `plugin.disabled@1`, and it stays off — across restarts, since
+//! `plugin_health` says so — until a person runs `plugin.enable`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -24,15 +25,13 @@ use std::sync::{Arc, RwLock, Weak};
 use std::time::{Duration, Instant};
 
 use oxplow_ai::secrets::SecretStore;
+use oxplow_db::PluginKey;
 use oxplow_db::{Database, SqliteEventLogStore};
-use oxplow_domain::events::schema::{
-    EventType as _, ProviderDisabled, ProviderDisabledV1, ProviderEnabled, ProviderEnabledV1,
-    WorkItemRecorded,
-};
+use oxplow_domain::events::schema::{EventType as _, WorkItemRecorded};
 use oxplow_domain::work_items::WorkItemsRegistry;
 use oxplow_domain::{
-    Actor, Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, DomainError,
-    Envelope, Invokers, Lifecycle,
+    Actor, Atomicity, CommandCall, CommandError, CommandSpec, DomainError, Envelope, Invokers,
+    Lifecycle,
 };
 use oxplow_provider_protocol::model::{
     method, CheckParams, CheckResult, EventDraft, Handle, InitializeResult, InvokeParams,
@@ -49,8 +48,6 @@ use crate::exec_consent::ApprovalStore;
 use crate::extension_catalog::ExtensionCatalog;
 use crate::extensions::Extension;
 
-/// Failed starts or calls in a row that stop an instance.
-pub const FAILURES_TO_DISABLE: u32 = 3;
 /// The longest a failed instance waits before its next start.
 pub const MAX_BACKOFF: Duration = Duration::from_secs(60);
 /// The errors an instance's health keeps.
@@ -58,8 +55,6 @@ const ERRORS_KEPT: usize = 5;
 /// The longest rate-limit wait a call or read sits through (then retries
 /// once); a longer one fails the call — never counted as a failure.
 pub const RATE_LIMIT_WAIT_MAX: Duration = Duration::from_secs(10);
-/// The command a person runs to (re-)enable an instance.
-pub const ENABLE: &str = "provider.enable";
 
 /// What the registry needs from the host.
 #[derive(Clone)]
@@ -126,6 +121,7 @@ pub enum InstanceState {
 #[serde(rename_all = "camelCase")]
 pub struct InstanceHealth {
     pub state: InstanceState,
+    /// Its failures in a row (`plugin_health`'s count, shown here).
     pub consecutive_failures: u32,
     /// RFC 3339.
     pub last_ok_at: Option<String>,
@@ -428,7 +424,7 @@ impl Instance {
         match result {
             Ok(out) => {
                 if let Some(r) = registry {
-                    r.call_succeeded(&self.name, started.elapsed());
+                    r.call_succeeded(&self.name, started.elapsed()).await;
                 }
                 Ok(out)
             }
@@ -524,11 +520,26 @@ pub struct ProviderRegistry {
     /// How many times each instance has been disabled: a start that began
     /// before a disable doesn't register what the disable stopped.
     disables: parking_lot::Mutex<BTreeMap<String, u64>>,
+    /// The failure policy instances share with every plugin contribution.
+    plugins: crate::plugin_health::PluginHealth,
+}
+
+/// An instance's `plugin_health` key: `<extension>/<provider id>`.
+fn plugin_key(instance: &str) -> PluginKey {
+    let (plugin, contribution) = instance.split_once('/').unwrap_or((instance, ""));
+    PluginKey {
+        plugin: plugin.to_string(),
+        contribution: contribution.to_string(),
+        kind: "provider",
+    }
 }
 
 impl ProviderRegistry {
     pub fn new(deps: HostDeps, bus: &Arc<CommandBus>, work_items: WorkItemsRegistry) -> Arc<Self> {
+        let plugins =
+            crate::plugin_health::PluginHealth::new(deps.db.clone(), deps.log.schemas().clone());
         Arc::new_cyclic(|me| Self {
+            plugins,
             deps,
             me: me.clone(),
             bus: Arc::downgrade(bus),
@@ -562,7 +573,7 @@ impl ProviderRegistry {
     }
 
     /// The enabled extension and spec behind `instance`.
-    fn find(&self, instance: &str) -> Option<(Extension, ProviderSpec)> {
+    pub(crate) fn find(&self, instance: &str) -> Option<(Extension, ProviderSpec)> {
         self.extensions()
             .iter()
             .filter(|e| e.enabled)
@@ -774,29 +785,10 @@ impl ProviderRegistry {
         }
     }
 
-    /// Why `instance` is automatically disabled on this machine: its last
-    /// `provider.disabled` has no later `provider.enabled`.
+    /// Why `instance` is automatically disabled on this machine
+    /// (`plugin_health`).
     async fn disabled_reason(&self, instance: &str) -> Result<Option<String>, DomainError> {
-        let instance = instance.to_string();
-        Ok(self
-            .deps
-            .db
-            .read(move |c| {
-                use rusqlite::OptionalExtension;
-                c.query_row(
-                    "SELECT type, json_extract(payload, '$.reason') FROM event_log
-                     WHERE type IN ('provider.disabled', 'provider.enabled')
-                       AND json_extract(payload, '$.instance') = ?1
-                     ORDER BY seq DESC LIMIT 1",
-                    [instance],
-                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
-                )
-                .optional()
-                .map_err(|e| DomainError::Storage(e.to_string()))
-            })
-            .await?
-            .filter(|(t, _)| t == ProviderDisabled::TYPE)
-            .map(|(_, reason)| reason.unwrap_or_default()))
+        self.plugins.disabled_reason(&plugin_key(instance)).await
     }
 
     /// Check `ext`'s provider `spec` against `config` without enabling it:
@@ -835,8 +827,8 @@ impl ProviderRegistry {
 
     /// Start `ext`'s provider `spec` with `config` and register what it
     /// declares. Consent, a matching handshake and a clean `check` come
-    /// first: refused, nothing is registered (a failed start counts
-    /// towards [`FAILURES_TO_DISABLE`]).
+    /// first: refused, nothing is registered (a failed start counts as a
+    /// failure, [`crate::plugin_health`]).
     pub async fn enable(
         &self,
         ext: &Extension,
@@ -895,6 +887,9 @@ impl ProviderRegistry {
                     h.state = InstanceState::Ready;
                     h.consecutive_failures = 0;
                     h.last_ok_at = Some(now());
+                }
+                if let Err(e) = self.plugins.succeeded(&plugin_key(&name), None).await {
+                    tracing::warn!(instance = %name, error = %e, "recording its health failed");
                 }
                 // Its items, before the first scheduled read (P7.A3).
                 self.sync_started(&name).await;
@@ -1074,8 +1069,14 @@ impl ProviderRegistry {
         // enable writes nothing, so the config never says enabled for an
         // instance that wasn't. The write then starts it (a reconcile).
         if enabled {
-            bus.run(actor, ENABLE, json!({ "instance": instance }), false)
-                .await?;
+            let key = plugin_key(instance);
+            bus.run(
+                actor,
+                crate::plugin_health::ENABLE,
+                json!({ "plugin": key.plugin, "contribution": key.contribution }),
+                false,
+            )
+            .await?;
         }
         let mut all = self.instances_config();
         let sync_minutes = all.get(instance).and_then(|c| c.sync_minutes);
@@ -1129,9 +1130,9 @@ impl ProviderRegistry {
         Ok(view)
     }
 
-    /// A person enables `instance` again (`provider.enable`): its failure
+    /// A person enabled `instance` again (`plugin.enable`): its failure
     /// count and backoff start over.
-    async fn reset(&self, instance: &str) {
+    pub(crate) async fn reset(&self, instance: &str) {
         if let Some(h) = self.health.lock().get_mut(instance) {
             h.consecutive_failures = 0;
         }
@@ -1182,15 +1183,21 @@ impl ProviderRegistry {
         }
     }
 
-    /// A start or call failed: count it; [`FAILURES_TO_DISABLE`] in a row
-    /// disable the instance. The next start backs off meanwhile.
+    /// A start or call failed: count it ([`crate::plugin_health`]); the
+    /// verdict either backs the next start off or stops the instance.
     pub(super) async fn failed(&self, instance: &str, error: String) {
+        let verdict = match self.plugins.failed(&plugin_key(instance), &error).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(instance, error = %e, "recording a provider failure failed");
+                crate::plugin_health::Verdict::Backoff { failures: 1 }
+            }
+        };
         let failures = {
             let mut health = self.health.lock();
             let h = health
                 .entry(instance.to_string())
                 .or_insert_with(|| InstanceHealth::new(InstanceState::Checking));
-            h.consecutive_failures += 1;
             let mut errors = match &h.state {
                 InstanceState::Failing { errors } => errors.clone(),
                 _ => Vec::new(),
@@ -1199,29 +1206,37 @@ impl ProviderRegistry {
             let excess = errors.len().saturating_sub(ERRORS_KEPT);
             errors.drain(..excess);
             h.state = InstanceState::Failing { errors };
+            if let crate::plugin_health::Verdict::Backoff { failures } = verdict {
+                h.consecutive_failures = u32::try_from(failures).unwrap_or(u32::MAX);
+            }
             h.consecutive_failures
         };
-        if failures >= FAILURES_TO_DISABLE {
-            self.disable(
-                instance,
-                format!("{failures} failures in a row; the last: {error}"),
-            )
-            .await;
-            return;
-        }
-        if let Some(i) = self.get(instance).await {
-            let wait = self
-                .deps
-                .backoff
-                .saturating_mul(1 << (failures - 1).min(6))
-                .min(MAX_BACKOFF);
-            *i.not_before.lock() = Some(Instant::now() + wait);
+        match verdict {
+            crate::plugin_health::Verdict::Disabled { reason } => self.halt(instance, reason).await,
+            crate::plugin_health::Verdict::Backoff { .. } => {
+                if let Some(i) = self.get(instance).await {
+                    let wait = self
+                        .deps
+                        .backoff
+                        .saturating_mul(1 << failures.saturating_sub(1).min(6))
+                        .min(MAX_BACKOFF);
+                    *i.not_before.lock() = Some(Instant::now() + wait);
+                }
+            }
         }
     }
 
     /// Stop `instance` and keep it off on this machine until a person
-    /// enables it: `provider.disabled@1`.
+    /// enables it, for `reason` (`plugin.disabled@1`).
     pub(super) async fn disable(&self, instance: &str, reason: String) {
+        if let Err(e) = self.plugins.disable(&plugin_key(instance), &reason).await {
+            tracing::error!(instance, error = %e, "recording the disable failed");
+        }
+        self.halt(instance, reason).await;
+    }
+
+    /// Stop a disabled `instance` and show why.
+    async fn halt(&self, instance: &str, reason: String) {
         let removed = {
             let mut running = self.running.lock().await;
             *self
@@ -1234,23 +1249,7 @@ impl ProviderRegistry {
         if let Some(running) = removed {
             self.tear_down(running).await;
         }
-        self.set_state(
-            instance,
-            InstanceState::Disabled {
-                reason: reason.clone(),
-            },
-        );
-        let event = Envelope::typed::<ProviderDisabled>(
-            "system:providers",
-            &ProviderDisabledV1 {
-                instance: instance.to_string(),
-                reason,
-            },
-        )
-        .with_subject([plugin_ref(instance)]);
-        if let Err(e) = self.deps.log.append(event).await {
-            tracing::error!(instance, error = %e, "logging provider.disabled failed");
-        }
+        self.set_state(instance, InstanceState::Disabled { reason });
     }
 
     /// Its service said to wait (`wait`, when it said how long).
@@ -1282,7 +1281,14 @@ impl ProviderRegistry {
             .is_some_and(|t| t.unix_ms() > now)
     }
 
-    pub(super) fn call_succeeded(&self, instance: &str, took: Duration) {
+    pub(super) async fn call_succeeded(&self, instance: &str, took: Duration) {
+        if let Err(e) = self
+            .plugins
+            .succeeded(&plugin_key(instance), Some(took))
+            .await
+        {
+            tracing::warn!(instance, error = %e, "recording its health failed");
+        }
         let ms = took.as_secs_f64() * 1000.0;
         let mut health = self.health.lock();
         let h = health
@@ -1297,11 +1303,6 @@ impl ProviderRegistry {
             Some(mean) => mean + (ms - mean) / 10.0,
         });
     }
-}
-
-/// The ref of an instance's extension (`plugin:<extension>`).
-fn plugin_ref(instance: &str) -> String {
-    format!("plugin:{}", instance.split('/').next().unwrap_or_default())
 }
 
 /// A typed request that is cancelled (`$/cancel`) and fails if no reply
@@ -1357,72 +1358,6 @@ fn now() -> String {
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
         .unwrap_or_default()
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct EnableInput {
-    /// `<extension>/<provider id>`.
-    instance: String,
-}
-
-/// `provider.enable { instance }`: a person turns an instance back on
-/// on this machine — clearing an automatic disable — and it starts when
-/// the project's config enables it. Human only; logs `provider.enabled@1`.
-pub fn enable_command(registry: &Arc<ProviderRegistry>) -> Command {
-    let registry = Arc::downgrade(registry);
-    Command::new(
-        CommandSpec {
-            name: ENABLE.into(),
-            summary: "Enable an extension provider's instance on this machine again, clearing an \
-                      automatic disable (runs the provider process, a system the bus doesn't own)."
-                .into(),
-            input_schema: serde_json::to_value(schemars::schema_for!(EnableInput))
-                .expect("schema serializes"),
-            invokers: Invokers::HUMAN_ONLY,
-            confirm: Confirm::Never,
-            undoable: false,
-            lifecycle: Lifecycle::Experimental,
-            atomicity: Atomicity::External,
-            effect: CommandEffect::Write,
-        },
-        Handler::External(Arc::new(move |actor, input| {
-            let registry = registry.clone();
-            Box::pin(async move {
-                let EnableInput { instance } =
-                    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-                        field: None,
-                        message: e.to_string(),
-                    })?;
-                let registry = registry.upgrade().ok_or_else(|| CommandError::Failed {
-                    message: "the provider registry is gone".into(),
-                })?;
-                if registry.find(&instance).is_none() {
-                    return Err(CommandError::Invalid {
-                        field: Some("/instance".into()),
-                        message: format!("no enabled extension declares provider `{instance}`"),
-                    });
-                }
-                // Logged first, so the reconcile below sees it cleared.
-                let event = Envelope::typed::<ProviderEnabled>(
-                    actor.source(),
-                    &ProviderEnabledV1 {
-                        instance: instance.clone(),
-                    },
-                )
-                .with_subject([plugin_ref(&instance)]);
-                registry.deps.log.append(event).await?;
-                registry.reset(&instance).await;
-                registry.reconcile().await;
-                let view = registry.view(&instance).await?;
-                Ok(HandlerOutput {
-                    result: serde_json::to_value(view).expect("view serializes"),
-                    ..HandlerOutput::default()
-                })
-            })
-        })),
-    )
-    .expect("provider.enable is a valid command")
 }
 
 /// The instance's declared commands, as bus commands — less its

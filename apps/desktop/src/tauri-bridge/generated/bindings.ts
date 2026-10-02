@@ -2941,6 +2941,7 @@ export type InstalledLspPackage = {
 
 export type InstanceHealth = {
 	state: InstanceState,
+	// Its failures in a row (`plugin_health`'s count, shown here).
 	consecutiveFailures: number,
 	// RFC 3339.
 	lastOkAt: string | null,

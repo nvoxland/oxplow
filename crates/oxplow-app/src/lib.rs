@@ -89,6 +89,7 @@ pub mod otlp_tokens;
 pub mod output_activity;
 pub mod page_ref_backfill;
 pub mod page_ref_consumers;
+pub mod plugin_health;
 pub mod post_tool_reactors;
 pub mod producer_metrics;
 pub mod prompt_catalog;
@@ -1081,9 +1082,14 @@ impl Services {
             &commands,
             work_items.clone(),
         );
+        let plugin_health =
+            plugin_health::PluginHealth::new(db.clone(), event_log_store.schemas().clone());
         commands
-            .register(providers::registry::enable_command(&providers))
-            .expect("provider.enable registers");
+            .register(plugin_health::enable_command(
+                plugin_health.clone(),
+                Arc::downgrade(&providers),
+            ))
+            .expect("plugin.enable registers");
         commands
             .register(providers::sync::sync_command(&providers))
             .expect("provider.sync registers");
@@ -1509,7 +1515,8 @@ mod tests {
                 "lens.keep",
                 "lens.share",
                 "metric.rebuild",
-                "provider.enable",
+                // A provider's process restarts (P7.C1; was provider.enable).
+                "plugin.enable",
                 // The provider process's collectors (P7.A3).
                 "provider.sync",
                 "vcs.checkout_branch",
