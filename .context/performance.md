@@ -129,27 +129,46 @@ declined specs are the next place to look, not the cube.
 
 **The size is per-case test facts:** `oxplow.test_case` (3.16 M) and
 `oxplow.test_duration` (3.06 M) are 88% of all facts — retention or
-aggregation of those is its own task (filed with this measurement).
+aggregation of those is its own task (tsk514; see the next section for what
+they cost the cube).
 
-## The cube as an asset: what a burst costs (P7.B1, 2026-10-01)
+## The cube as an asset: what a burst costs (P7.B1, 2026-10-01; corrected 2026-10-02)
 
 `crates/oxplow-app/examples/cube_burst.rs` on a `VACUUM INTO` copy of the
-live project DB (3.9 GB, **11,325,374 facts**, 47 measures), release
-build. The asset runner calls `build_all` once per quiet burst of commits
-to `metric_capture` / `fact`:
+live project DB (3.8 GB, ~11.3 M facts, 47 measures), release build. The
+asset runner calls `build_all` once per quiet burst of commits to
+`metric_capture` / `fact`:
 
 | | |
 |---|---|
-| A burst with nothing new to fold | **~145 ms** (47 measures' watermark checks) |
-| A burst after one `oxplow.test_case` capture | **~22 s** — 21.5 s of it that one measure's fold |
-| … the same burst's other 46 measures | ~0.6 s |
+| A burst with nothing new to fold | **~190 ms** (47 measures' watermark checks) |
+| A burst after a test run (2,598 per-case facts) on a branch the cube holds | **~0.9 s** — `oxplow.test_case` 332 ms, `oxplow.test_duration` 145 ms |
+| The same run on a branch the cube has never seen (that branch's **seed**) | **~25 s** — 15.8 s + 8.7 s for the two per-case measures |
 
-The 145 ms empty burst is the asset mechanism's own cost. The 22 s is
-not new — the bus loop it replaced ran the same `build_all` per burst —
-but it is what every test run costs the live app, since each records an
-`oxplow.test_case` capture over a measure with ~5 M facts. It is filed
-as tsk704 (the per-case test measures' fold), with this
-measurement.
+**The first version of this table said every test run cost ~22 s. It
+didn't:** the harness recorded its one capture with no branch, so it timed
+a new branch's seed, not an incremental fold (tsk704). A test run lands on
+its branch's existing partition and folds in well under a second.
+
+**The seed is the real cost.** A branch's first fold replays the history
+visible to it into its live partition, and for the per-case test measures
+that is every one of ~5 M facts. It is paid once per new branch, and again
+for every branch after anything invalidates the cube (the dominated-capture
+prune — no longer on a clean tree's `oxplow.duplicate_lines` restate,
+tsk709 — or a promoted-dim flip). A per-subject seed is now one SQL query
+over the visible captures (`live_seed_per_subject`: the latest capture per
+`(producer, subject)`), equivalent to the replay and pinned against the
+fact fold, instead of loading every fact into memory; that took the seed
+from 25.3 s to 20.0 s. The query alone is 17.8 s on 5 M facts, and a
+covering index `fact(measure_id, capture_id, subject_ref, path)` only
+brought it to 8.2 s for a large index — **the lever is the volume of
+per-case facts** (tsk514), not the fold.
+
+**Where the facts are:** `oxplow.test_case` and `oxplow.test_duration` are
+87.5% of all facts (the `fact` table is 1.9 GB, its indexes another
+1.4 GB). 1,979 of the 2,044 `tests` captures are effort-stamped, which the
+opt-in `metricRetentionDays` keeps unconditionally — so no retention
+setting today can reclaim them.
 
 ## Zero-splice producer discovery (tsk239)
 

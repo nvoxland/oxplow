@@ -1738,6 +1738,49 @@ impl SqliteFactStore {
             .await
     }
 
+    /// A **per-subject** partition's seed: for each `(producer, subject)` among
+    /// the facts of `capture_ids` (the captures visible to the branch), every
+    /// fact of the LATEST such capture, as `(producer, subject_key, fact_id)`.
+    /// The subject key is the fold key — `subject_ref`, else `path`, else
+    /// `scalar_key` — so this is exactly what replaying those captures
+    /// oldest-first (evict the keys a capture restates, insert its facts)
+    /// leaves standing, computed over the index instead of by loading the
+    /// history (tsk704: ten million per-case test facts took 25 s a seed).
+    pub async fn live_seed_per_subject(
+        &self,
+        measure_id: i64,
+        capture_ids: Vec<i64>,
+        scalar_key: &str,
+    ) -> Result<Vec<(String, String, i64)>, DomainError> {
+        let ids = serde_json::to_string(&capture_ids).unwrap_or_else(|_| "[]".into());
+        let scalar_key = scalar_key.to_string();
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    "WITH ranked AS (
+                       SELECT c.producer,
+                              COALESCE(f.subject_ref, f.path, ?3) AS subject_key,
+                              f.id AS fact_id,
+                              DENSE_RANK() OVER (
+                                PARTITION BY c.producer, COALESCE(f.subject_ref, f.path, ?3)
+                                ORDER BY c.captured_at DESC, c.id DESC
+                              ) AS latest
+                         FROM fact f
+                         JOIN metric_capture c ON c.id = f.capture_id
+                        WHERE f.measure_id = ?1
+                          AND c.id IN (SELECT value FROM json_each(?2))
+                     )
+                     SELECT producer, subject_key, fact_id FROM ranked WHERE latest = 1
+                      ORDER BY producer, subject_key, fact_id",
+                )?;
+                let rows = stmt.query_map(params![measure_id, ids, scalar_key], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// Establish a branch's live partition in ONE transaction: drop whatever the
     /// partition holds and insert `(producer, subject_key, fact_id)` rows — the
     /// final state of the builder's in-memory replay of the history visible to
@@ -3776,6 +3819,108 @@ mod tests {
             store.cube_watermark(per_path, 1).await.unwrap().is_some(),
             "the stream's cube survives a clean tree's restate"
         );
+    }
+
+    /// tsk704: a per-subject partition's seed is the latest visible capture
+    /// per (producer, subject) — every fact of that capture under that key —
+    /// computed in SQL over the visible captures, never by loading history.
+    #[tokio::test]
+    async fn the_per_subject_seed_is_the_latest_visible_capture_per_subject() {
+        let store = fixture().await;
+        let m = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-subject".into(),
+                ..NewMeasure::new("acme.test_case", "acme.test_case")
+            })
+            .await
+            .unwrap();
+        let subject = |s: &str, v: f64| NewFact {
+            subject_ref: Some(s.into()),
+            ..NewFact::new(m, v)
+        };
+        let at = |t: &str| at(t);
+        let capture = |producer: &str, when: &str| NewMetricCapture {
+            captured_at: Some(at(when)),
+            ..NewMetricCapture::done(1, producer, "t")
+        };
+        // c1: A, B, a scalar (no subject, no path) and a path-only fact.
+        let c1 = store
+            .record_facts(
+                capture("tests", "2026-06-30T08:00:00.000000Z"),
+                vec![
+                    subject("A", 1.0),
+                    subject("B", 1.5),
+                    NewFact::new(m, 7.0),
+                    NewFact {
+                        path: Some("src/p.rs".into()),
+                        ..NewFact::new(m, 3.0)
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        // c2 restates A (twice: two facts under one key both stay).
+        let c2 = store
+            .record_facts(
+                capture("tests", "2026-06-30T09:00:00.000000Z"),
+                vec![subject("A", 2.0), subject("A", 2.5)],
+            )
+            .await
+            .unwrap();
+        // Another producer's A is its own key.
+        let c3 = store
+            .record_facts(
+                capture("other", "2026-06-30T09:30:00.000000Z"),
+                vec![subject("A", 9.0)],
+            )
+            .await
+            .unwrap();
+        // c4 is not visible to the seeded branch: ignored.
+        let c4 = store
+            .record_facts(
+                capture("tests", "2026-06-30T10:00:00.000000Z"),
+                vec![subject("A", 100.0)],
+            )
+            .await
+            .unwrap();
+        let facts_of = |id: i64| {
+            let store = &store;
+            async move {
+                let mut v: Vec<(f64, i64)> = store
+                    .facts_for_captures(m, vec![id])
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|f| (f.value, f.id))
+                    .collect();
+                v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                v
+            }
+        };
+        let (f1, f2, f3) = (facts_of(c1).await, facts_of(c2).await, facts_of(c3).await);
+        let id_of =
+            |rows: &[(f64, i64)], value: f64| rows.iter().find(|(v, _)| *v == value).unwrap().1;
+
+        let mut seed = store
+            .live_seed_per_subject(m, vec![c1, c2, c3], "\u{0}repo-scalar")
+            .await
+            .unwrap();
+        seed.sort();
+        let mut want = vec![
+            ("other".to_string(), "A".to_string(), id_of(&f3, 9.0)),
+            ("tests".to_string(), "A".to_string(), id_of(&f2, 2.0)),
+            ("tests".to_string(), "A".to_string(), id_of(&f2, 2.5)),
+            ("tests".to_string(), "B".to_string(), id_of(&f1, 1.5)),
+            ("tests".to_string(), "src/p.rs".to_string(), id_of(&f1, 3.0)),
+            (
+                "tests".to_string(),
+                "\u{0}repo-scalar".to_string(),
+                id_of(&f1, 7.0),
+            ),
+        ];
+        want.sort();
+        assert_eq!(seed, want);
+        let _ = c4;
     }
 
     #[tokio::test]

@@ -9,8 +9,10 @@
 //!     cargo run -p oxplow-app --example cube_burst --release -- /tmp/cube-burst.sqlite
 //!
 //! It catches the copy's cube up first (a no-op on a copy of a running
-//! app's database), then times three empty bursts and one burst after a
-//! single capture lands on the busiest measure.
+//! app's database), then times three empty bursts, a burst after a test
+//! run's capture on the latest run's branch (an incremental fold — what
+//! every `test:collect` costs), and the same run on a new branch (that
+//! branch's seed).
 
 // Dev-only measurement tool — `unwrap()` is fine here.
 #![allow(clippy::unwrap_used)]
@@ -45,13 +47,14 @@ async fn main() {
         );
     }
 
-    // One capture on the busiest measure, as a recording would add it.
-    let (measure_id, stream_id): (i64, i64) = db
+    // What a test run adds: a copy of the latest `tests` capture's
+    // per-case facts, on the same branch — an incremental fold into an
+    // already-seeded partition, which is what every `test:collect` pays.
+    let (latest, branch): (i64, Option<String>) = db
         .read(|tx| {
             tx.query_row(
-                "SELECT f.measure_id, c.stream_id FROM fact f
-                   JOIN metric_capture c ON c.id = f.capture_id
-                  GROUP BY f.measure_id ORDER BY count(*) DESC LIMIT 1",
+                "SELECT id, branch FROM metric_capture WHERE producer = 'tests'
+                  ORDER BY captured_at DESC, id DESC LIMIT 1",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -59,14 +62,44 @@ async fn main() {
         })
         .await
         .unwrap();
+    let mut copied = Vec::new();
+    for m in facts.list_measures().await.unwrap() {
+        for f in facts.facts_for_captures(m.id, vec![latest]).await.unwrap() {
+            copied.push(NewFact {
+                subject_kind: f.subject_kind.clone(),
+                subject_ref: f.subject_ref.clone(),
+                path: f.path.clone(),
+                dims_json: f.dims_json.clone(),
+                ..NewFact::new(m.id, f.value)
+            });
+        }
+    }
+    let run = |branch: Option<String>| NewMetricCapture {
+        branch,
+        ..NewMetricCapture::done(1, "tests", "cube-burst")
+    };
+    eprintln!(
+        "a test run: {} facts on branch {:?}",
+        copied.len(),
+        branch.as_deref().unwrap_or("")
+    );
     facts
-        .record_facts(
-            NewMetricCapture::done(stream_id, "cube-burst", "cube-burst"),
-            vec![NewFact::new(measure_id, 1.0)],
-        )
+        .record_facts(run(branch), copied.clone())
         .await
         .unwrap();
-    // Per measure, so a slow fold is named.
+    burst(&facts, &builder, "test-run burst (seeded branch)").await;
+
+    // The same run on a branch the cube has never seen: its first fold
+    // seeds the partition from the history visible to it.
+    facts
+        .record_facts(run(Some("cube-burst-new-branch".into())), copied)
+        .await
+        .unwrap();
+    burst(&facts, &builder, "test-run burst (new branch: a seed)").await;
+}
+
+/// One burst, timed per measure so a slow fold is named.
+async fn burst(facts: &SqliteFactStore, builder: &MetricCubeBuilder, label: &str) {
     let t = Instant::now();
     let mut folded = 0;
     for m in facts.list_measures().await.unwrap() {
@@ -78,8 +111,5 @@ async fn main() {
             eprintln!("  {}: {n} folded in {ms} ms", m.key);
         }
     }
-    eprintln!(
-        "one-capture burst: {folded} folded in {} ms",
-        t.elapsed().as_millis()
-    );
+    eprintln!("{label}: {folded} folded in {} ms", t.elapsed().as_millis());
 }

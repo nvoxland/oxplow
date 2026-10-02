@@ -437,6 +437,17 @@ impl MetricCubeBuilder {
             return Ok(Vec::new());
         }
         let ids: Vec<i64> = earlier.iter().map(|e| e.id).collect();
+        // Per-subject's replay has a closed form — a capture restates exactly
+        // the keys of its own facts, so the latest visible capture per
+        // (producer, key) wins — and the store computes it over the index
+        // (tsk704). Per-path's eviction set is the capture's scanned paths,
+        // not its facts, so it is replayed below.
+        if scope == CaptureScope::PerSubject {
+            return self
+                .facts
+                .live_seed_per_subject(measure.id, ids, SCALAR_SUBJECT)
+                .await;
+        }
         let facts = self
             .facts
             .facts_for_captures(measure.id, ids.clone())
@@ -1445,6 +1456,57 @@ mod tests {
             2,
             "only the two new captures fold — the branch states are durable, not re-seeded"
         );
+        assert_cube_answers(&engine, &facts, "acme.test_case", &spec, &oracle).await;
+    }
+
+    /// tsk704: a new branch's per-subject seed (one SQL over the visible
+    /// captures) lands on the fact fold's numbers, with the fold key's
+    /// fallbacks in play — a path-only fact and a scalar fact beside the
+    /// subjects, and a subject restated twice.
+    #[tokio::test]
+    async fn a_per_subject_seed_matches_the_fact_fold_with_every_fold_key() {
+        let (engine, facts, builder) = fixture().await;
+        let m = per_subject_measure(&facts, "acme.test_case").await;
+        let on = |branch: &str, at: &str| NewMetricCapture {
+            captured_at: Some(ts(at)),
+            branch: Some(branch.into()),
+            ..NewMetricCapture::done(1, "tests", "builtin")
+        };
+        facts
+            .record_facts(
+                on("main", "2026-06-30T10:00:00Z"),
+                vec![
+                    case(m, "A", 1.0),
+                    case(m, "B", 1.0),
+                    NewFact::new(m, 7.0),
+                    NewFact {
+                        path: Some("src/p.rs".into()),
+                        ..NewFact::new(m, 3.0)
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(on("main", "2026-06-30T11:00:00Z"), vec![case(m, "A", 2.0)])
+            .await
+            .unwrap();
+        // feature-x's first capture: its partition is seeded from main's two.
+        facts
+            .record_facts(
+                on("feature-x", "2026-06-30T12:00:00Z"),
+                vec![case(m, "B", 0.0)],
+            )
+            .await
+            .unwrap();
+        let spec = spec(&facts, "acme.cases", "acme.test_case", "sum").await;
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![12.0, 13.0, 12.0],
+            "feature-x = main's A(2) + scalar(7) + p.rs(3) + its own B(0)"
+        );
+        assert_eq!(builder.build_measure("acme.test_case").await.unwrap(), 3);
         assert_cube_answers(&engine, &facts, "acme.test_case", &spec, &oracle).await;
     }
 
