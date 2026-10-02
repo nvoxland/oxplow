@@ -866,10 +866,15 @@ oxplow-analytics change cards) only read them.
   (shared with the `diff` IPC, `.context/vcs.md`), reads the
   first 200 changed files' contents, runs `code_analysis::analyze_files`
   (tree-sitter metrics per side, churn, import deltas), and builds rows:
-  - files: status, +/−, zone (project zone rules), `is_test`, and the
-    "look here first" `interest` score + reasons (`file_interest`, ported
-    from the old UI formula: `(1 + log2(1+lines)) × (1 + 0.6·Σcomplexity↑) ×
-    (1 + 0.4·Σparams↑) × (1 + (longest new fn − 60)/40)`);
+  - files: status, +/−, zone (project zone rules), `is_test`. The "look
+    here first" score left core (P7.B5, V137 dropped its columns,
+    `v_change_file` v2): oxplow-analytics' model `change_interest`
+    (`v_oxplow_analytics_change_interest { change_id, path, interest,
+    reasons }`) computes it in SQL over `change_file` and
+    `change_function` — `(1 + log2(1+lines)) × (1 + 0.6·Σcomplexity↑) ×
+    (1 + 0.4·Σparams↑) × (1 + (longest new fn − 60)/40)` — using SQLite's
+    math functions (`LIBSQLITE3_FLAGS = -DSQLITE_ENABLE_MATH_FUNCTIONS`
+    in `.cargo/config.toml`);
   - functions: added / deleted / modified (signature and/or body), deltas,
     churn and churn share; unchanged ones aren't stored;
   - imports: added/removed with zones, `cross_zone` for new boundary

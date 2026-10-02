@@ -41,8 +41,6 @@ pub struct ChangeFileRow {
     pub deletions: i64,
     pub zone: Option<String>,
     pub is_test: bool,
-    pub interest: f64,
-    pub interest_reasons: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -261,11 +259,10 @@ impl SqliteChangeStore {
                 }
                 for f in &results.files {
                     tx.execute(
-                        "INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test, interest, interest_reasons)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        "INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                         rusqlite::params![
-                            id, f.path, f.status, f.additions, f.deletions, f.zone, i64::from(f.is_test),
-                            f.interest, f.interest_reasons.join("; ")
+                            id, f.path, f.status, f.additions, f.deletions, f.zone, i64::from(f.is_test)
                         ],
                     )
                     .map_err(map_sql_err)?;
@@ -433,8 +430,6 @@ mod tests {
                 deletions: 1,
                 zone: Some("core".into()),
                 is_test: false,
-                interest: 2.5,
-                interest_reasons: vec!["complexity +2 across 1 fn".into()],
             }],
             functions: vec![ChangeFunctionRow {
                 path: path.into(),
@@ -498,8 +493,8 @@ mod tests {
             }
         };
         assert_eq!(
-            q("SELECT path, zone, interest, interest_reasons FROM v_change_file").await,
-            json!([["b.rs", "core", 2.5, "complexity +2 across 1 fn"]])
+            q("SELECT path, zone, is_test FROM v_change_file").await,
+            json!([["b.rs", "core", 0]])
         );
         assert_eq!(
             q("SELECT container, name, body_changed FROM v_change_function").await,

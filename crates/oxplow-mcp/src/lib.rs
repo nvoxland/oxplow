@@ -1386,8 +1386,9 @@ impl OxplowMcp {
     #[tool(
         description = "Analyze a change and return its row (`v_change`): a commit vs its parent, an \
                        effort (start → end), or a stream's uncommitted work vs HEAD. Then read the \
-                       analysis with query_sql: v_change_file (files, zones, look-here-first \
-                       `interest`), v_change_function (added/deleted/modified functions, deltas, \
+                       analysis with query_sql: v_change_file (files, zones), \
+                       v_oxplow_analytics_change_interest (look-here-first scores, when \
+                       oxplow-analytics is on), v_change_function (added/deleted/modified functions, deltas, \
                        churn), v_change_import (cross-zone imports), v_change_co_change (files whose \
                        usual partners are missing), v_change_duplicate (copied blocks; arrives a \
                        little later). Cached: commits and closed efforts are analyzed once."

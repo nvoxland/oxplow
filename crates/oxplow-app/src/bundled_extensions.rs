@@ -60,6 +60,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-analytics", "lenses/tokens-by-day.yaml"),
             ext_file!("oxplow-analytics", "lenses/top-pages.yaml"),
             ext_file!("oxplow-analytics", "lenses/usage.yaml"),
+            ext_file!("oxplow-analytics", "models/change_interest.sql"),
         ],
     },
     BundledExtension {
@@ -1087,5 +1088,79 @@ mod tests {
             .commands
             .iter()
             .any(|c| c.command == "oxplow_review.accept" && c.label == "Accept Review"));
+    }
+
+    /// P7.B5: the "look here first" score is oxplow-analytics' model over
+    /// core's change rows, the same formula core used to store — size,
+    /// complexity spikes, parameter growth and long new functions,
+    /// multiplied — and it has left `v_change_file`.
+    #[tokio::test]
+    async fn the_interest_model_scores_a_change_like_the_old_formula() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        f.svc.extension_models.sync().await.unwrap();
+        f.svc
+            .db
+            .transaction(|tx| {
+                tx.execute_batch(
+                    "INSERT INTO change (id, stream_id, kind, target, status) VALUES (90, 1, 'commit', 'abc', 'done');
+                     INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test)
+                       VALUES (90, 'src/hot.rs', 'modified', 10, 2, 'other', 0),
+                              (90, 'src/calm.rs', 'modified', 3, 1, 'other', 0),
+                              (90, 'src/big.rs', 'modified', 40, 20, 'other', 0);
+                     INSERT INTO change_function (change_id, path, container, name, status, signature_changed,
+                         body_changed, start_line, visibility, is_test, length, params_before, params_after,
+                         complexity_delta)
+                       VALUES (90, 'src/hot.rs', '', 'grow', 'modified', 0, 1, 1, 'public', 0, 20, 1, 1, 3),
+                              (90, 'src/hot.rs', '', 'widen', 'modified', 1, 0, 30, 'public', 0, 10, 1, 3, NULL),
+                              (90, 'src/hot.rs', '', 'fresh', 'added', 0, 0, 50, 'public', 0, 70, NULL, 0, NULL);",
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let rows = f
+            .svc
+            .sql
+            .query_sql(
+                "SELECT path, interest, reasons FROM v_oxplow_analytics_change_interest
+                 WHERE change_id = 90 ORDER BY path",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        let row = |path: &str| {
+            rows.rows
+                .iter()
+                .find(|r| r[0] == oxplow_db::SqlCell::Text(path.into()))
+                .unwrap_or_else(|| panic!("{path}"))
+                .clone()
+        };
+        let score = |r: &Vec<oxplow_db::SqlCell>| match r[1] {
+            oxplow_db::SqlCell::Real(x) => x,
+            ref other => panic!("{other:?}"),
+        };
+        let reasons = |r: &Vec<oxplow_db::SqlCell>| match &r[2] {
+            oxplow_db::SqlCell::Text(t) => t.clone(),
+            other => panic!("{other:?}"),
+        };
+        // (1 + log2(13)) × (1 + 0.6·3) × (1 + 0.4·2) × (1 + (70 − 60)/40)
+        let hot = row("src/hot.rs");
+        assert!((score(&hot) - 29.6126).abs() < 0.001, "{hot:?}");
+        assert_eq!(
+            reasons(&hot),
+            "complexity +3 across 1 fn; +2 params across 1 fn; added 70-line function"
+        );
+        let calm = row("src/calm.rs");
+        assert!(score(&calm) < 4.0, "{calm:?}");
+        assert_eq!(reasons(&calm), "");
+        assert_eq!(reasons(&row("src/big.rs")), "60 lines touched");
+
+        let gone = f
+            .svc
+            .sql
+            .query_sql("SELECT interest FROM v_change_file", vec![], None)
+            .await;
+        assert!(gone.is_err(), "v_change_file still has interest");
     }
 }

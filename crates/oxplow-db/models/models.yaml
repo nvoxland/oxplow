@@ -145,8 +145,8 @@
     - { name: "peer_start_line", type: "INTEGER", doc: "First line of the copy." }
     - { name: "peer_end_line", type: "INTEGER", doc: "Last line of the copy." }
 - name: change_file
-  version: 1
-  description: "Each file a change touched, with its zone, whether it's a test, and a \"look here first\" interest score (size × complexity spikes × parameter growth × long new functions)."
+  version: 2
+  description: "Each file a change touched, with its zone and whether it's a test. (v2: the \"look here first\" score moved to oxplow-analytics' `v_oxplow_analytics_change_interest`.)"
   columns:
     - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
     - { name: "path", type: "TEXT", doc: "Repo-relative path." }
@@ -155,8 +155,6 @@
     - { name: "deletions", type: "INTEGER", doc: "Lines deleted." }
     - { name: "zone", type: "TEXT", doc: "Architectural zone from the project's zone rules (`other` when none match)." }
     - { name: "is_test", type: "INTEGER", doc: "1 if the path looks like a test file." }
-    - { name: "interest", type: "REAL", doc: "Review priority score; higher means look here first." }
-    - { name: "interest_reasons", type: "TEXT", doc: "Why the score is high, `; `-separated." }
 - name: change_function
   version: 1
   description: "Functions a change added, deleted or modified (signature and/or body), with metric deltas and per-function churn. Unchanged functions aren't listed."

@@ -87,90 +87,6 @@ pub fn is_test_function(path: &str, name: &str, container: &[String]) -> bool {
         || container.iter().any(|c| is_test_container(c))
 }
 
-// "Look here first" weights (formerly interestingness.ts).
-const COMPLEXITY_COEFF: f64 = 0.6;
-const PARAM_COEFF: f64 = 0.4;
-const LONG_NEW_FN_THRESHOLD: i64 = 60;
-const LONG_NEW_FN_DIVISOR: f64 = 40.0;
-const REASON_THRESHOLD: f64 = 1.2;
-
-fn plural(n: i64, word: &str) -> String {
-    if n == 1 {
-        format!("{n} {word}")
-    } else {
-        format!("{n} {word}s")
-    }
-}
-
-/// The "look here first" score for one file and why it's high: size,
-/// complexity spikes, parameter growth and long new functions combine
-/// multiplicatively, so one hot factor dominates.
-pub fn file_interest(
-    additions: i64,
-    deletions: i64,
-    functions: &[&ChangeFunctionRow],
-) -> (f64, Vec<String>) {
-    let size = ((1 + additions + deletions) as f64).log2();
-    let spiked: Vec<f64> = functions
-        .iter()
-        .filter(|f| f.body_changed)
-        .filter_map(|f| f.complexity_delta)
-        .filter(|d| *d > 0.0)
-        .collect();
-    let complexity_spike: f64 = spiked.iter().sum();
-    let grown: Vec<i64> = functions
-        .iter()
-        .filter(|f| f.signature_changed)
-        .filter_map(|f| Some(f.params_after? - f.params_before?))
-        .filter(|d| *d > 0)
-        .collect();
-    let param_spike: i64 = grown.iter().sum();
-    let longest_new = functions
-        .iter()
-        .filter(|f| f.status == "added")
-        .filter_map(|f| f.length)
-        .filter(|l| *l > LONG_NEW_FN_THRESHOLD)
-        .max();
-    let long_factor = 1.0
-        + longest_new.map_or(0.0, |l| {
-            (l - LONG_NEW_FN_THRESHOLD) as f64 / LONG_NEW_FN_DIVISOR
-        });
-    let complexity_factor = 1.0 + COMPLEXITY_COEFF * complexity_spike;
-    let param_factor = 1.0 + PARAM_COEFF * param_spike as f64;
-    let score = (1.0 + size) * complexity_factor * param_factor * long_factor;
-
-    let mut reasons = Vec::new();
-    if complexity_factor >= REASON_THRESHOLD {
-        reasons.push(format!(
-            "complexity +{} across {}",
-            fmt_num(complexity_spike),
-            plural(spiked.len() as i64, "fn")
-        ));
-    }
-    if param_factor >= REASON_THRESHOLD {
-        reasons.push(format!(
-            "+{} across {}",
-            plural(param_spike, "param"),
-            plural(grown.len() as i64, "fn")
-        ));
-    }
-    if let Some(l) = longest_new.filter(|_| long_factor >= REASON_THRESHOLD) {
-        reasons.push(format!("added {l}-line function"));
-    }
-    if size >= 5.0 {
-        reasons.push(format!("{} lines touched", additions + deletions));
-    }
-    (score, reasons)
-}
-
-fn fmt_num(v: f64) -> String {
-    if v.fract() == 0.0 {
-        format!("{v:.0}")
-    } else {
-        format!("{v:.1}")
-    }
-}
-
 fn qualified(f: &AnalyzedFunction) -> String {
     f.container_path
         .iter()
@@ -279,20 +195,13 @@ pub fn build_results(
 
     let files: Vec<ChangeFileRow> = files
         .iter()
-        .map(|f| {
-            let fns: Vec<&ChangeFunctionRow> =
-                functions.iter().filter(|x| x.path == f.path).collect();
-            let (interest, interest_reasons) = file_interest(f.additions, f.deletions, &fns);
-            ChangeFileRow {
-                path: f.path.clone(),
-                status: f.status.clone(),
-                additions: f.additions,
-                deletions: f.deletions,
-                zone: Some(zones.classify(&f.path)),
-                is_test: is_test_path(&f.path),
-                interest,
-                interest_reasons,
-            }
+        .map(|f| ChangeFileRow {
+            path: f.path.clone(),
+            status: f.status.clone(),
+            additions: f.additions,
+            deletions: f.deletions,
+            zone: Some(zones.classify(&f.path)),
+            is_test: is_test_path(&f.path),
         })
         .collect();
 
@@ -1113,32 +1022,6 @@ mod tests {
             (f.status.as_str(), f.additions, f.is_test),
             ("modified", 12, false)
         );
-        assert!(f.interest > 4.0, "{f:?}");
-        assert!(
-            f.interest_reasons
-                .iter()
-                .any(|x| x.starts_with("complexity +3")),
-            "{f:?}"
-        );
-        assert!(
-            f.interest_reasons.iter().any(|x| x.contains("+2 params")),
-            "{f:?}"
-        );
-        assert!(
-            f.interest_reasons
-                .iter()
-                .any(|x| x == "added 70-line function"),
-            "{f:?}"
-        );
-    }
-
-    #[test]
-    fn a_routine_file_scores_low_with_no_reasons() {
-        let (score, reasons) = file_interest(3, 1, &[]);
-        assert!(score < 4.0, "{score}");
-        assert!(reasons.is_empty());
-        let (_, reasons) = file_interest(40, 20, &[]);
-        assert_eq!(reasons, vec!["60 lines touched"]);
     }
 
     #[test]

@@ -1472,6 +1472,14 @@ What moves out of core, and what it becomes:
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
 
+**Owns what reads tables (P7.B5).** Derived data computed only from
+core's rows is the extension's, as SQL: the "look here first" score is
+its model `change_interest` (`v_oxplow_analytics_change_interest`, over
+`ref('change_file')` and `ref('change_function')`), which the
+`change-look-here` lens reads. What needs two revisions' trees — files,
+functions, imports, test signals, per-function churn, the scoped
+duplicate scan — stays in core's change analysis.
+
 **Stays in core, deliberately simple:** a basic **metrics explorer** and
 **simple dashboards** (Nathan, 2026-09-27). The base version must let
 people see what metrics exist and pin a few to a dashboard as a starting

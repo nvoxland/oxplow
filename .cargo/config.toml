@@ -11,3 +11,9 @@
 # first one and the run ends before printing which test failed, which is how an
 # intermittent failure stayed unidentified across several runs (tsk175).
 cov = "llvm-cov nextest --workspace --no-fail-fast --lcov --output-path target/coverage/lcov.info"
+
+[env]
+# SQLite's built-in math functions (`log2`, `ln`, `pow`, …) in the bundled
+# build, so SQL models and lenses can use them (P7.B5: oxplow-analytics'
+# `change_interest` scores with `log2`).
+LIBSQLITE3_FLAGS = "-DSQLITE_ENABLE_MATH_FUNCTIONS"

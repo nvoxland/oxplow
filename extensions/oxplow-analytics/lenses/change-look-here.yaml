@@ -2,11 +2,11 @@ title: Look Here First
 description: The changed files most worth a reviewer's attention — size, complexity and parameter spikes, and long new functions.
 params: [{ name: change_id }]
 query: |
-  SELECT f.path, round(f.interest, 1) AS interest, f.interest_reasons AS reasons,
+  SELECT i.path, round(i.interest, 1) AS interest, i.reasons,
          c.base_revision, c.head_revision
-  FROM v_change_file f JOIN v_change c ON c.id = f.change_id
-  WHERE f.change_id = :change_id AND f.interest > 0
-  ORDER BY f.interest DESC, f.path
+  FROM v_oxplow_analytics_change_interest i JOIN v_change c ON c.id = i.change_id
+  WHERE i.change_id = :change_id AND i.interest > 0
+  ORDER BY i.interest DESC, i.path
   LIMIT 10
 columns:
   - { key: path, label: File, link: { kind: diff-at, base: base_revision, head: head_revision } }

@@ -162,9 +162,9 @@ its changed files. There is no manual "Scan now" any more.
 takes `{ path, base_content, head_content }` specs and calls
 `oxplow_code_metrics::analyze_file` per side (no tempdir, no subprocess).
 The change analyzer buckets the result into added / deleted /
-signature-changed / body-changed functions and scores each file's review
-priority (`file_interest`); see [semantic-layer.md](./semantic-layer.md)
-→ "Change analysis".
+signature-changed / body-changed functions; a file's review priority is
+oxplow-analytics' model `change_interest` over those rows (P7.B5); see
+[semantic-layer.md](./semantic-layer.md) → "Change analysis".
 
 The result also carries a `churn: Vec<AnalyzedFileChurn>` rollup
 — one entry per file where both `base_content` and

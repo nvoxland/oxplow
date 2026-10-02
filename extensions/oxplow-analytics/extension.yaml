@@ -92,3 +92,12 @@ advisories:
       WHERE effort_id = :effort_id AND crossing IS NOT NULL AND kind <> 'event'
         AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'task.%'
       ORDER BY key
+models:
+  - name: change_interest
+    version: 1
+    description: "Each changed file's \"look here first\" review priority (size × complexity spikes × parameter growth × long new functions) and why, `; `-separated."
+    columns:
+      - { name: change_id, type: INTEGER, doc: "The change (v_change.id)." }
+      - { name: path, type: TEXT, doc: "Repo-relative path." }
+      - { name: interest, type: "", doc: "Review priority (a real number); higher means look here first." }
+      - { name: reasons, type: "", doc: "Why it's high, `; `-separated ('' for a routine file)." }
