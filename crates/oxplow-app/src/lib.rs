@@ -885,7 +885,6 @@ impl Services {
             worktrees.clone(),
             vcs.clone(),
             stream_store.clone(),
-            event_bus.clone(),
             ref_moves.clone(),
         ));
         let git = vcs::GitProvider;
@@ -1079,7 +1078,15 @@ impl Services {
         .into_iter()
         .chain(commands::review::commands())
         .chain(commands::thread::commands(config_arc.clone(), acp.clone()))
-        {
+        .chain(commands::stream::commands(commands::stream::StreamDeps {
+            streams: streams.clone(),
+            snapshot_captures: snapshot_captures.clone(),
+            ref_moves: ref_moves.clone(),
+            threads: thread_store.clone(),
+            log: event_log_store.clone(),
+            search: search_store.clone(),
+            worktrees: worktrees.clone(),
+        })) {
             commands.register(command).expect("core commands register");
         }
         let providers = providers::ProviderRegistry::new(
@@ -1544,6 +1551,10 @@ mod tests {
                 "plugin.enable",
                 // The provider process's collectors (P7.A3).
                 "provider.sync",
+                // A stream's worktree and its capture service (P8.A4).
+                "stream.adopt_worktree",
+                "stream.archive",
+                "stream.create_worktree",
                 "vcs.checkout_branch",
                 "vcs.commit",
                 "vcs.delete_branch",

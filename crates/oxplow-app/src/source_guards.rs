@@ -113,10 +113,6 @@ const EMITTERS: &[(&str, &str)] = &[
     ("PageVisitChanged", "crates/oxplow-rpc/src/commands/page_visit.rs"), // P8.A10
     ("SnapshotTaken", "crates/oxplow-app/src/ui_push.rs"),
     ("StreamOrphaned", "crates/oxplow-app/src/workspace_watch.rs"),
-    ("StreamsChanged", "crates/oxplow-app/src/branch_reconciler.rs"), // P8.A4
-    ("StreamsChanged", "crates/oxplow-app/src/workspace_watch.rs"), // P8.A4
-    ("StreamsChanged", "crates/oxplow-mcp/src/lib.rs"), // P8.A4
-    ("StreamsChanged", "crates/oxplow-rpc/src/commands/streams.rs"), // P8.A4
     ("UsageRecorded", "crates/oxplow-rpc/src/commands/usage.rs"), // P8.A10
     ("VcsRefsChanged", "crates/oxplow-app/src/ref_moves.rs"),
     ("WorkspaceChanged", "crates/oxplow-app/src/commands/vcs.rs"),

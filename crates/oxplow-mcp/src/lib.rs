@@ -1029,12 +1029,6 @@ pub struct GetSkillParams {
     pub name: String,
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RenameStreamParams {
-    pub stream_id: String,
-    pub title: String,
-}
-
 #[tool_router]
 impl OxplowMcp {
     pub fn new(services: Arc<Services>) -> Self {
@@ -2488,23 +2482,6 @@ impl OxplowMcp {
             .await
             .map_err(internal)?;
         json_result(&serde_json::json!({ "ok": true }))
-    }
-
-    #[tool(description = "Rename a stream.")]
-    async fn rename_stream(
-        &self,
-        params: Parameters<RenameStreamParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind("rename_stream", "stream_id", &params.0.stream_id, ID_STREAM)?;
-        let id = parse_stream_id(&params.0.stream_id)?;
-        let stream = self
-            .services
-            .streams
-            .rename(&id, params.0.title)
-            .await
-            .map_err(internal)?;
-        self.services.events.emit(OxplowEvent::StreamsChanged);
-        json_result(&stream)
     }
 
     // ---------- threads ----------
@@ -4485,7 +4462,6 @@ const WRITE_TOOLS: &[&str] = &[
     "set_comment_intent",
     "select_thread",
     "switch_stream",
-    "rename_stream",
     "reorder_tasks",
     "upsert_task",
     "add_thread_note",

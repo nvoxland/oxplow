@@ -242,9 +242,9 @@ Each stream owns:
   nothing may drop before it).
 - a `custom_prompt` column (migration V6, nullable TEXT) — per-stream
   standing instructions appended to the agent's system prompt after the
-  global `agentPromptAppend` section. Set via the `set_stream_prompt`
-  IPC command (`apps/desktop/src/api.ts`'s `setStreamPrompt`). Emits a
-  `StreamsChanged` event so the UI re-fetches the full stream list.
+  global `agentPromptAppend` section. Set via the `stream.set_prompt`
+  command (`apps/desktop/src/api.ts`'s `setStreamPrompt`); the stream
+  list re-reads on `ModelsChanged` naming `v_stream`.
   V6 also dropped a legacy `summary` column that was carried over from
   the TS schema and never displayed; the prompt feature briefly
   piggybacked on that slot before getting its own column.
@@ -716,9 +716,9 @@ histories, and `listSnapshotsForStream` queries `WHERE stream_id =
 (`crates/oxplow-app/src/snapshot_capture_registry.rs`) owns one
 service per active stream, each watching its own
 `worktree_path`. `Services::boot` enumerates every active stream
-and registers a service for each; the IPC stream lifecycle
-commands (`create_worktree`, `adopt_worktree`,
-`delete_stream`, `archive_stream`) register/unregister at
+and registers a service for each; the stream lifecycle
+commands (`stream.create_worktree`, `stream.adopt_worktree`,
+`stream.archive`) register/unregister at
 runtime. Callers resolve the right service via
 `snapshot_captures.get(&stream_id)` (when the stream is known)
 or `snapshot_captures.primary()` (for project-shared surfaces
@@ -2024,8 +2024,8 @@ un-blocked.
 
 Cross-store change fan-out is centralized on the typed EventBus
 (`crates/oxplow-app/src/events.rs`). Stores call `EventBus::emit(...)`
-with a coarse `OxplowEvent` variant (e.g. `tasksChanged`,
-`StreamsChanged`); subscribers refetch the affected bucket on
+with a coarse `OxplowEvent` variant (most views instead re-read on
+`ModelsChanged`); subscribers refetch the affected bucket on
 receipt. The bus is a `tokio::sync::broadcast` channel, so a slow
 subscriber sees `RecvError::Lagged` rather than blocking publishers,
 and adding/removing subscribers is lock-free.

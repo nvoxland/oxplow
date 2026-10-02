@@ -297,18 +297,12 @@ pub const MANIFEST: &[Capability] = &[
     both("set_comment_intent"),
     both("select_thread"),
     both("switch_stream"),
-    both("rename_stream"),
     // checkout stays on Bash — subprocess logic lives in the IPC command layer.
     // ---- ui-only: app / misc ----
     ui("log_ui"),
     // ---- ui-only: streams ----
-    ui("create_worktree"),
-    ui("adopt_worktree"),
-    ui("archive_stream"),
     ui("get_primary_stream"),
     ui("get_current_stream"),
-    ui("set_stream_prompt"),
-    ui("reorder_streams"),
     // ---- ui-only: threads ----
     // The thread picker's ACP agents (tsk335).
     ui("list_acp_agents"),

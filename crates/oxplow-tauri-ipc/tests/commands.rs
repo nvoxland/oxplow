@@ -287,7 +287,7 @@ async fn git_list_commands_return_empty_for_fresh_repo() {
 // ---- stream commands ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn stream_reads_and_reorder() {
+async fn stream_reads() {
     let app = TestApp::build();
     let (stream, _) = primary_and_thread(&app).await;
     assert!(commands::generated::get_primary_stream(app.state())
@@ -300,15 +300,6 @@ async fn stream_reads_and_reorder() {
     commands::generated::switch_stream(app.state(), Some(stream.id))
         .await
         .unwrap();
-    commands::generated::reorder_streams(app.state(), vec![stream.id])
-        .await
-        .unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn archive_unknown_stream_errors() {
-    let app = TestApp::build();
-    let _ = commands::generated::archive_stream(app.state(), StreamId::new(999999), false).await;
 }
 
 // ---- config commands ----

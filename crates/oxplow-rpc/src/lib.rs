@@ -391,15 +391,9 @@ macro_rules! oxplow_command_table {
 
                 // streams
                 list_streams => $crate::commands::streams::list_streams {} -> ::std::vec::Vec<::oxplow_domain::Stream>,
-                create_worktree => $crate::commands::streams::create_worktree { req: $crate::commands::streams::CreateWorktreeRequest } -> ::oxplow_domain::Stream,
-                adopt_worktree => $crate::commands::streams::adopt_worktree { req: $crate::commands::streams::AdoptWorktreeRequest } -> ::oxplow_domain::Stream,
-                archive_stream => $crate::commands::streams::archive_stream { id: ::oxplow_domain::StreamId, delete_worktree: bool } -> (),
                 get_primary_stream => $crate::commands::streams::get_primary_stream {} -> Option<::oxplow_domain::Stream>,
                 get_current_stream => $crate::commands::streams::get_current_stream {} -> Option<::oxplow_domain::Stream>,
                 switch_stream => $crate::commands::streams::switch_stream { id: Option<::oxplow_domain::StreamId> } -> (),
-                rename_stream => $crate::commands::streams::rename_stream { req: $crate::commands::streams::RenameStreamRequest } -> ::oxplow_domain::Stream,
-                set_stream_prompt => $crate::commands::streams::set_stream_prompt { req: $crate::commands::streams::SetStreamPromptRequest } -> ::oxplow_domain::Stream,
-                reorder_streams => $crate::commands::streams::reorder_streams { order: Vec<::oxplow_domain::StreamId> } -> (),
             }
         }
     };

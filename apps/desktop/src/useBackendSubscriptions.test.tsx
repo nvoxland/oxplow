@@ -95,7 +95,7 @@ afterEach(cleanup);
 
 test("subscribes to the oxplow event bus on mount", () => {
   render(<Harness workStates={{}} />);
-  // tasks (models + followups), threads (v_thread), streamsChanged,
+  // tasks (models + followups), threads (v_thread), streams (v_stream),
   // streamOrphaned, configChanged = 5 subscriptions.
   expect(oxplowHandlers.length).toBe(5);
 });

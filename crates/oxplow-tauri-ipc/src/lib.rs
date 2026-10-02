@@ -98,15 +98,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::log_ui,
             // streams
             commands::generated::list_streams,
-            commands::generated::create_worktree,
-            commands::generated::adopt_worktree,
-            commands::generated::archive_stream,
             commands::generated::get_primary_stream,
             commands::generated::get_current_stream,
             commands::generated::switch_stream,
-            commands::generated::rename_stream,
-            commands::generated::set_stream_prompt,
-            commands::generated::reorder_streams,
             // threads
             commands::generated::list_threads,
             commands::generated::list_acp_agents,

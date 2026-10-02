@@ -39,7 +39,7 @@ pub mod search_store;
 pub mod semantic_layer;
 pub mod snapshot_tree;
 pub mod sql_tokens;
-mod stream_store;
+pub mod stream_store;
 pub mod symbol_store;
 pub mod task_satellite;
 pub mod task_store;

@@ -25,6 +25,8 @@ import { NO_READS, readsChanged, readsOf, unionReads } from "./lens/lensRerun.js
 
 /** The thread state each stream shows is read from `v_thread`. */
 const THREAD_READS = readsOf("v_thread");
+/** The stream list is read from `v_stream`. */
+const STREAM_READS = readsOf("v_stream");
 import type { Reads } from "./tauri-bridge/generated/bindings.js";
 import { logUi } from "./logger.js";
 
@@ -191,15 +193,15 @@ export function useBackendSubscriptions(
     return unsubscribe;
   }, [threadStatesRef, setThreadStates]);
 
-  // Refresh the stream list whenever the cross-store bus signals a
-  // `streamsChanged` (creation, archive via Remove…, rename, reorder,
-  // prompt edit). Swap the currently-selected stream for its fresh copy so
+  // Refresh the stream list when a commit touched `v_stream` (the
+  // `stream.*` commands, the branch reconciler, an orphaned worktree's
+  // archive). Swap the currently-selected stream for its fresh copy so
   // content changes (e.g. the custom prompt) reflect live; if it disappeared
   // from the list (e.g. it was just archived), fall back to the primary so the
   // rail doesn't render against a stale id.
   useEffect(() => {
     const unsubscribe = subscribeOxplowEvents((event) => {
-      if (event.kind !== "streamsChanged") return;
+      if (!readsChanged(event as Record<string, unknown>, STREAM_READS)) return;
       void listStreams()
         .then((updated) => {
           setStreams(updated);
@@ -212,7 +214,7 @@ export function useBackendSubscriptions(
           });
         })
         .catch((error) => {
-          logUi("warn", "failed to refresh streams after streamsChanged", { error: String(error) });
+          logUi("warn", "failed to refresh streams after a change", { error: String(error) });
         });
     });
     return unsubscribe;

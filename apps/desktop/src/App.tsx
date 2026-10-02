@@ -34,7 +34,6 @@ import {
   promoteThread,
   recordUsage,
   reorderThreads,
-  reorderStreams,
   switchStream,
   createDashboard,
   writeWorkspaceFile,
@@ -857,19 +856,6 @@ export function App() {
     if (!stream) return;
     try {
       await reorderThreads(stream.id, orderedThreadIds);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function handleReorderStreams(orderedStreamIds: string[]) {
-    try {
-      await reorderStreams(orderedStreamIds);
-      setStreams((prev) => {
-        const byId = new Map(prev.map((s) => [s.id, s]));
-        return orderedStreamIds.map((id) => byId.get(id)).filter((s): s is Stream => s !== undefined);
-      });
       setError(null);
     } catch (e) {
       setError(String(e));

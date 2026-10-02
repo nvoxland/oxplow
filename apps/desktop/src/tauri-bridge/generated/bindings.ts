@@ -28,21 +28,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	createWorktree: (req: CreateWorktreeRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("create_worktree", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	adoptWorktree: (req: AdoptWorktreeRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("adopt_worktree", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	archiveStream: (id: StreamId, deleteWorktree: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("archive_stream", { id, deleteWorktree })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getPrimaryStream: () => typedError<{
 	id: StreamId,
 	kind: StreamKind,
@@ -108,21 +93,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	switchStream: (id: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("switch_stream", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	renameStream: (req: RenameStreamRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("rename_stream", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setStreamPrompt: (req: SetStreamPromptRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("set_stream_prompt", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	reorderStreams: (order: StreamId[]) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_streams", { order })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1231,11 +1201,6 @@ export type AddDashboardItemRequest = {
 	optionsJson: string | null,
 };
 
-export type AdoptWorktreeRequest = {
-	path: string,
-	title: string,
-};
-
 /**
  *  Guidance an extension gives the coding agent: a query over the semantic
  *  layer, run by core at `on`, with `:effort_id` bound to the thread's
@@ -2028,13 +1993,6 @@ export type CreateCommentRequest = {
 	intent: CommentIntent,
 	author: string,
 	body: string,
-};
-
-export type CreateWorktreeRequest = {
-	slug: string,
-	title: string,
-	branch: string,
-	branchSource: string,
 };
 
 export type CredentialStatus = {
@@ -3968,11 +3926,6 @@ export type OxplowConfig = {
  */
 export type OxplowEvent = 
 /**
- *  Any stream row changed (created, renamed, deleted, panes
- *  updated). Renderer refetches `list_streams`.
- */
-{ kind: "streamsChanged" } | 
-/**
  *  A comment (or one of its messages) changed on `target_kind` /
  *  `target_id` within `stream_id`. Renderer refetches the affected
  *  page's comments + the Comments inbox.
@@ -4373,11 +4326,6 @@ export type RenameDashboardRequest = {
 	title: string,
 };
 
-export type RenameStreamRequest = {
-	id: StreamId,
-	title: string,
-};
-
 export type ReorderDashboardItemsRequest = {
 	dashboardId: DashboardId,
 	order: DashboardItemId[],
@@ -4474,11 +4422,6 @@ export type SearchHit = {
 export type SelectThreadRequest = {
 	streamId: StreamId,
 	threadId: ThreadId | null,
-};
-
-export type SetStreamPromptRequest = {
-	id: StreamId,
-	prompt: string | null,
 };
 
 /**

@@ -778,7 +778,8 @@ mod tests {
         // emitting until the first frame lands.
         let frame = tokio::time::timeout(std::time::Duration::from_secs(10), async {
             loop {
-                svc.events.emit(oxplow_app::OxplowEvent::StreamsChanged);
+                svc.events
+                    .emit(oxplow_app::OxplowEvent::BackgroundTasksChanged);
                 match tokio::time::timeout(std::time::Duration::from_millis(200), ws.next()).await {
                     Ok(Some(Ok(msg))) if msg.is_text() => {
                         return msg.into_text().unwrap().to_string()
@@ -791,7 +792,7 @@ mod tests {
         .expect("ws frame within timeout");
         let v: serde_json::Value = serde_json::from_str(&frame).unwrap();
         assert_eq!(v["channel"], "oxplow");
-        assert_eq!(v["payload"]["kind"], "streamsChanged");
+        assert_eq!(v["payload"]["kind"], "backgroundTasksChanged");
     }
 
     #[tokio::test]

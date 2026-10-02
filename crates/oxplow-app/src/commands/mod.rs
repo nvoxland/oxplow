@@ -22,6 +22,7 @@ pub mod lens;
 pub mod metric;
 pub mod review;
 mod steps;
+pub mod stream;
 pub mod thread;
 pub mod vcs;
 pub mod work_item;

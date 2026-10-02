@@ -76,6 +76,67 @@ fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {
     })
 }
 
+/// Stream `id`, on `conn` — a command's transaction.
+pub fn get_tx(conn: &rusqlite::Connection, id: StreamId) -> rusqlite::Result<Option<Stream>> {
+    let mut stmt = conn.prepare_cached("SELECT * FROM streams WHERE id = ?1")?;
+    let mut rows = stmt.query_map(params![id.value()], row_to_stream)?;
+    rows.next().transpose()
+}
+
+/// Insert `stream` (a placeholder id allocates one) or update it in place,
+/// on `conn`; the effective id.
+pub fn upsert_tx(conn: &rusqlite::Connection, stream: &Stream) -> rusqlite::Result<StreamId> {
+    // Placeholder id → NULL so SQLite autoincrements; an
+    // explicit id is inserted / upserted in place.
+    let id_param: Option<i64> = if stream.id.is_placeholder() {
+        None
+    } else {
+        Some(stream.id.value())
+    };
+    conn.execute(
+        "INSERT INTO streams (
+            id, kind, title, branch, branch_ref, branch_source,
+            worktree_path, working_pane, talking_pane,
+            working_session_id, talking_session_id, custom_prompt,
+            created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+         ON CONFLICT(id) DO UPDATE SET
+            kind = excluded.kind,
+            title = excluded.title,
+            branch = excluded.branch,
+            branch_ref = excluded.branch_ref,
+            branch_source = excluded.branch_source,
+            worktree_path = excluded.worktree_path,
+            working_pane = excluded.working_pane,
+            talking_pane = excluded.talking_pane,
+            working_session_id = excluded.working_session_id,
+            talking_session_id = excluded.talking_session_id,
+            custom_prompt = excluded.custom_prompt,
+            updated_at = excluded.updated_at",
+        params![
+            id_param,
+            kind_to_str(stream.kind),
+            stream.title,
+            stream.branch,
+            stream.branch_ref,
+            stream.branch_source,
+            stream.worktree_path,
+            stream.working_pane,
+            stream.talking_pane,
+            stream.working_session_id,
+            stream.talking_session_id,
+            stream.custom_prompt,
+            ts_to_string(stream.created_at),
+            ts_to_string(stream.updated_at),
+        ],
+    )?;
+    Ok(if stream.id.is_placeholder() {
+        StreamId::new(conn.last_insert_rowid())
+    } else {
+        stream.id
+    })
+}
+
 #[async_trait]
 impl StreamStore for SqliteStreamStore {
     async fn list(&self) -> Result<Vec<Stream>, DomainError> {
@@ -95,16 +156,7 @@ impl StreamStore for SqliteStreamStore {
 
     async fn get(&self, id: &StreamId) -> Result<Option<Stream>, DomainError> {
         let id = *id;
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare("SELECT * FROM streams WHERE id = ?1")?;
-                let mut rows = stmt.query_map(params![id.value()], row_to_stream)?;
-                match rows.next() {
-                    Some(r) => Ok(Some(r?)),
-                    None => Ok(None),
-                }
-            })
-            .await
+        self.db.call(move |conn| get_tx(conn, id)).await
     }
 
     async fn set_branch(&self, id: &StreamId, branch: &str) -> Result<bool, DomainError> {
@@ -125,59 +177,7 @@ impl StreamStore for SqliteStreamStore {
 
     async fn upsert(&self, stream: &Stream) -> Result<StreamId, DomainError> {
         let stream = stream.clone();
-        self.db
-            .call(move |conn| {
-                // Placeholder id → NULL so SQLite autoincrements; an
-                // explicit id is inserted / upserted in place.
-                let id_param: Option<i64> = if stream.id.is_placeholder() {
-                    None
-                } else {
-                    Some(stream.id.value())
-                };
-                conn.execute(
-                    "INSERT INTO streams (
-                        id, kind, title, branch, branch_ref, branch_source,
-                        worktree_path, working_pane, talking_pane,
-                        working_session_id, talking_session_id, custom_prompt,
-                        created_at, updated_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
-                     ON CONFLICT(id) DO UPDATE SET
-                        kind = excluded.kind,
-                        title = excluded.title,
-                        branch = excluded.branch,
-                        branch_ref = excluded.branch_ref,
-                        branch_source = excluded.branch_source,
-                        worktree_path = excluded.worktree_path,
-                        working_pane = excluded.working_pane,
-                        talking_pane = excluded.talking_pane,
-                        working_session_id = excluded.working_session_id,
-                        talking_session_id = excluded.talking_session_id,
-                        custom_prompt = excluded.custom_prompt,
-                        updated_at = excluded.updated_at",
-                    params![
-                        id_param,
-                        kind_to_str(stream.kind),
-                        stream.title,
-                        stream.branch,
-                        stream.branch_ref,
-                        stream.branch_source,
-                        stream.worktree_path,
-                        stream.working_pane,
-                        stream.talking_pane,
-                        stream.working_session_id,
-                        stream.talking_session_id,
-                        stream.custom_prompt,
-                        ts_to_string(stream.created_at),
-                        ts_to_string(stream.updated_at),
-                    ],
-                )?;
-                Ok(if stream.id.is_placeholder() {
-                    StreamId::new(conn.last_insert_rowid())
-                } else {
-                    stream.id
-                })
-            })
-            .await
+        self.db.call(move |conn| upsert_tx(conn, &stream)).await
     }
 
     async fn delete(&self, id: &StreamId) -> Result<(), DomainError> {

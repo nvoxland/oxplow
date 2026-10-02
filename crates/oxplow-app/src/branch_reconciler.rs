@@ -15,7 +15,6 @@ use oxplow_domain::vcs::Vcs;
 use oxplow_domain::StreamId;
 use tracing::{debug, warn};
 
-use crate::events::{EventBus, OxplowEvent};
 use crate::ref_moves::Moved;
 use crate::worktrees::WorktreeRouter;
 
@@ -23,8 +22,6 @@ pub struct BranchReconciler {
     router: Arc<WorktreeRouter>,
     vcs: Arc<dyn Vcs>,
     streams: Arc<dyn StreamStore>,
-    /// Where a changed branch is announced (the UI's `StreamsChanged`).
-    events: EventBus,
     /// What it listens to: the VCS watcher's ref moves.
     ref_moves: crate::ref_moves::RefMoves,
 }
@@ -34,14 +31,12 @@ impl BranchReconciler {
         router: Arc<WorktreeRouter>,
         vcs: Arc<dyn Vcs>,
         streams: Arc<dyn StreamStore>,
-        events: EventBus,
         ref_moves: crate::ref_moves::RefMoves,
     ) -> Self {
         Self {
             router,
             vcs,
             streams,
-            events,
             ref_moves,
         }
     }
@@ -98,7 +93,6 @@ impl BranchReconciler {
             return;
         }
         debug!(stream_id = %stream_id, branch = %detected, "reconciled stream branch from HEAD");
-        self.events.emit(OxplowEvent::StreamsChanged);
     }
 }
 

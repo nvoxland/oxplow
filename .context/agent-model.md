@@ -1063,8 +1063,8 @@ checkout — P2.9, tsk433);
 `list_code_quality_findings` — the scan orchestration is shared via
 `Services::run_code_quality_scan`); **comments + lifecycle**
 (`create_comment`, `set_comment_intent`, `select_thread`,
-`switch_stream`, `rename_stream`; a thread's lifecycle is the `thread.*`
-commands through `run_command`, P8.A3); and **site-wide search** (`search` —
+`switch_stream`; a thread's and a stream's lifecycle are the `thread.*`
+and `stream.*` commands through `run_command`, P8.A3–A4); and **site-wide search** (`search` —
 BM25 over tasks/comments/notes/wiki/file-contents via the unified FTS index,
 fed by the `Indexer` service; optional `stream_id` scopes file hits).
 Still `AgentTodo` (see the backlog): composed snapshot DTOs, git

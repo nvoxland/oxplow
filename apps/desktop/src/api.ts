@@ -963,11 +963,13 @@ export async function switchStream(id: string): Promise<Stream> {
 }
 
 export async function renameStream(streamId: string, title: string): Promise<Stream> {
-  return unwrap(await commands.renameStream({ id: streamId, title }));
+  return (await runCommand("stream.rename", { stream: `stream:${streamId}`, title })).result as Stream;
 }
 
+/** Archive a stream. The Remove dialog is the person's confirmation
+ *  (`stream.archive` is destructive), so this runs it confirmed. */
 export async function archiveStream(streamId: string, deleteWorktree: boolean): Promise<void> {
-  unwrap(await commands.archiveStream(streamId, deleteWorktree));
+  await runCommand("stream.archive", { stream: `stream:${streamId}`, delete_worktree: deleteWorktree }, true);
 }
 
 export async function renameCurrentStream(title: string): Promise<Stream> {
@@ -1146,32 +1148,25 @@ export async function createStream(input:
   | { title: string; source: "worktree"; worktreePath: string },
 ): Promise<Stream> {
   const slug = slugifyTitle(input.title);
+  const run = async (name: string, body: Record<string, unknown>) =>
+    (await runCommand(name, body)).result as Stream;
   switch (input.source) {
     case "existing":
-      return unwrap(
-        await commands.createWorktree({
-          slug,
-          title: input.title,
-          branch: input.ref,
-          branchSource: input.ref,
-        }),
-      );
+      return run("stream.create_worktree", {
+        slug,
+        title: input.title,
+        branch: input.ref,
+        branch_source: input.ref,
+      });
     case "new":
-      return unwrap(
-        await commands.createWorktree({
-          slug,
-          title: input.title,
-          branch: input.branch,
-          branchSource: input.startPointRef ?? input.branch,
-        }),
-      );
+      return run("stream.create_worktree", {
+        slug,
+        title: input.title,
+        branch: input.branch,
+        branch_source: input.startPointRef ?? input.branch,
+      });
     case "worktree":
-      return unwrap(
-        await commands.adoptWorktree({
-          path: input.worktreePath,
-          title: input.title,
-        }),
-      );
+      return run("stream.adopt_worktree", { path: input.worktreePath, title: input.title });
   }
 }
 
@@ -1224,10 +1219,6 @@ export async function reorderThreads(streamId: string, orderedThreadIds: string[
   });
 }
 
-export async function reorderStreams(orderedStreamIds: string[]): Promise<void> {
-  unwrap(await commands.reorderStreams(orderedStreamIds));
-}
-
 export async function selectThread(streamId: string, threadId: string): Promise<ThreadState> {
   unwrap(await commands.selectThread({ streamId, threadId }));
   return getThreadState(streamId);
@@ -1257,7 +1248,7 @@ export async function renameThread(_streamId: string, threadId: string, title: s
 }
 
 export async function setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]> {
-  unwrap(await commands.setStreamPrompt({ id: streamId, prompt }));
+  await runCommand("stream.set_prompt", { stream: `stream:${streamId}`, ...(prompt ? { prompt } : {}) });
   return listStreams();
 }
 

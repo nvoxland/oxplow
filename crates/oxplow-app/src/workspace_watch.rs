@@ -120,8 +120,6 @@ async fn auto_archive_orphan(streams: &StreamService, events: &EventBus, stream:
     );
     if let Err(e) = streams.archive_stream(&stream.id, false).await {
         warn!(error = %e, stream_id = %stream.id, "failed to archive orphaned stream");
-    } else {
-        events.emit(OxplowEvent::StreamsChanged);
     }
     events.emit(OxplowEvent::StreamOrphaned {
         stream_id: stream.id,

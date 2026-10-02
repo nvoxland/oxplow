@@ -66,9 +66,6 @@ pub enum WorkspaceChangeKind {
     rename_all_fields = "camelCase"
 )]
 pub enum OxplowEvent {
-    /// Any stream row changed (created, renamed, deleted, panes
-    /// updated). Renderer refetches `list_streams`.
-    StreamsChanged,
     /// A comment (or one of its messages) changed on `target_kind` /
     /// `target_id` within `stream_id`. Renderer refetches the affected
     /// page's comments + the Comments inbox.
@@ -229,15 +226,15 @@ mod tests {
     async fn subscribers_receive_events() {
         let bus = EventBus::new();
         let mut rx = bus.subscribe_ui();
-        bus.emit(OxplowEvent::StreamsChanged);
+        bus.emit(OxplowEvent::BackgroundTasksChanged);
         let got = rx.recv().await.unwrap();
-        assert!(matches!(got, OxplowEvent::StreamsChanged));
+        assert!(matches!(got, OxplowEvent::BackgroundTasksChanged));
     }
 
     #[tokio::test]
     async fn emit_with_no_subscribers_is_noop() {
         let bus = EventBus::new();
         // Should not panic / error.
-        bus.emit(OxplowEvent::StreamsChanged);
+        bus.emit(OxplowEvent::BackgroundTasksChanged);
     }
 }

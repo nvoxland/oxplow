@@ -375,22 +375,6 @@ impl StreamService {
         Ok(())
     }
 
-    pub async fn rename(
-        &self,
-        id: &StreamId,
-        title: impl Into<String>,
-    ) -> Result<Stream, SessionError> {
-        let mut s = self
-            .streams
-            .get(id)
-            .await?
-            .ok_or(SessionError::Storage(DomainError::NotFound))?;
-        s.title = title.into();
-        s.updated_at = Timestamp::now();
-        self.streams.upsert(&s).await?;
-        Ok(s)
-    }
-
     /// Set per-stream pane targets. Either field can be empty to clear.
     pub async fn set_panes(
         &self,

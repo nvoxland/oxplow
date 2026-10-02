@@ -136,7 +136,7 @@ fn save(ctx: &TxCtx<'_>, thread: &Thread) -> Result<ThreadId, CommandError> {
 }
 
 /// The agent's own thread and stream, when the run is an agent's.
-fn agent_scope(ctx: &TxCtx<'_>) -> Result<Option<(ThreadId, StreamId)>, CommandError> {
+pub(super) fn agent_scope(ctx: &TxCtx<'_>) -> Result<Option<(ThreadId, StreamId)>, CommandError> {
     match ctx.actor.agent_thread() {
         None => Ok(None),
         Some(None) => Err(CommandError::Denied {
