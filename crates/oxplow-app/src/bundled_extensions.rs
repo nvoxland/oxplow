@@ -24,6 +24,7 @@ pub const BUNDLED: &[BundledExtension] = &[
         name: "oxplow-analytics",
         files: &[
             ext_file!("oxplow-analytics", "extension.yaml"),
+            ext_file!("oxplow-analytics", "collectors/effort_churn.star"),
             ext_file!("oxplow-analytics", "lenses/backlog-tasks.yaml"),
             ext_file!("oxplow-analytics", "lenses/change-co-change.yaml"),
             ext_file!("oxplow-analytics", "lenses/change-cross-zone-imports.yaml"),
@@ -1254,5 +1255,51 @@ mod tests {
             .query_sql("SELECT * FROM v_change_co_change", vec![], None)
             .await;
         assert!(gone.is_err(), "core still has v_change_co_change");
+    }
+
+    /// P7.B5: an effort's churn is a fact oxplow-analytics records when the
+    /// effort finishes, from the effort's change rows (its collector
+    /// `effort_churn`, `on: effort.finished`, after `change.analyze`).
+    #[tokio::test]
+    async fn effort_churn_is_a_fact_from_the_efforts_change() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let effort = f.effort.value();
+        f.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO change (id, stream_id, kind, target, status) VALUES (92, 1, 'effort', ?1, 'done')",
+                    [effort.to_string()],
+                )
+                .and_then(|_| {
+                    tx.execute_batch(
+                        "INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test)
+                           VALUES (92, 'src/a.rs', 'modified', 10, 4, 'other', 0),
+                                  (92, 'src/b.rs', 'added', 6, 0, 'other', 0);",
+                    )
+                })
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        f.svc.metrics.seed_catalog().await;
+        f.svc
+            .metrics
+            .run_effort_collectors(&f.thread, &f.effort, None)
+            .await;
+        let rows = f
+            .svc
+            .sql
+            .query_sql(
+                "SELECT value FROM v_fact WHERE measure_key = 'oxplow_analytics.effort_churn_lines'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&rows.rows).unwrap(),
+            serde_json::json!([[20.0]])
+        );
     }
 }

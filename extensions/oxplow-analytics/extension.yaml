@@ -92,6 +92,33 @@ advisories:
       WHERE effort_id = :effort_id AND crossing IS NOT NULL AND kind <> 'event'
         AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'task.%'
       ORDER BY key
+measures:
+  - key: oxplow_analytics.effort_churn_lines
+    unit: lines
+    subjectKind: effort
+    temporalSemantics: additive
+metrics:
+  - key: oxplow_analytics.effort_churn_lines
+    title: Effort churn
+    sourceMeasure: oxplow_analytics.effort_churn_lines
+    aggregation: sum
+    unit: lines
+    direction: neutral
+    displayKind: gauge
+    description: Lines each finished effort's change added and deleted.
+collectors:
+  - id: oxplow_analytics.effort_churn
+    doc: An effort's churn, from its change, when it finishes.
+    runtime: starlark
+    entry: collectors/effort_churn.star
+    trigger:
+      on: [effort.finished]
+    after: [change.analyze]
+    input: |
+      SELECT f.path, f.additions, f.deletions
+      FROM v_change c JOIN v_change_file f ON f.change_id = c.id
+      WHERE c.kind = 'effort' AND c.target = CAST(:effort_id AS TEXT)
+    facts: [oxplow_analytics.effort_churn_lines]
 models:
   - name: change_interest
     version: 1

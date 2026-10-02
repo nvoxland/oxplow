@@ -4670,8 +4670,8 @@ def transform(input):
         let (m, d) = svc.metrics.seed_catalog().await;
         assert_eq!(
             (m, d),
-            (1, 1),
-            "one project measure + one project dimension"
+            (2, 1),
+            "the project's measure and oxplow-analytics' (bundled, on), one project dimension"
         );
 
         // The custom measure lands beside the migration-seeded `oxplow.*` built-ins.

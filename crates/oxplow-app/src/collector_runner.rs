@@ -2173,7 +2173,8 @@ mod tests {
         let listings = list_collectors(&Collectors::of(&fx.svc, &root))
             .await
             .unwrap();
-        assert!(listings[0].disabled.is_some());
+        let bad = listings.iter().find(|l| l.owner == "work").unwrap();
+        assert!(bad.disabled.is_some());
         assert!(due_collectors(&listings, i64::MAX).is_empty());
 
         let enable = json!({ "plugin": "work", "contribution": "bad" });
@@ -2242,7 +2243,8 @@ mod tests {
         let listings = list_collectors(&Collectors::of(&fx.svc, &root))
             .await
             .unwrap();
-        assert_eq!(listings[0].run.as_ref().unwrap().status, "ok");
+        let ran = listings.iter().find(|l| l.owner == "work").unwrap();
+        assert_eq!(ran.run.as_ref().unwrap().status, "ok");
         let trigger: String = fx
             .svc
             .db
