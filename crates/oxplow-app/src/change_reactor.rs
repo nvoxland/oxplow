@@ -8,6 +8,10 @@
 //! ([`change_analysis::refresh_change`](crate::change_analysis::refresh_change)).
 //! A burst analyzes once: an event is skipped when a newer one that would
 //! trigger it for the same stream is already logged — that one recomputes.
+//! On `effort.finished` it recomputes that effort's change, now against its
+//! end snapshot: the effort closed before its end take, so no take event
+//! reached it while it was open (tsk710; what `effort_churn`, `after:
+//! [change.analyze]`, reads).
 //! The results land in `v_change*` (`ModelsChanged` announces them); an
 //! analysis already running for a change defers the event (`Busy`), and a
 //! failure is a dead letter naming the stream.
@@ -28,6 +32,7 @@ pub const NAME: &str = "change.analyze";
 
 const SNAPSHOT_TAKEN: &str = "snapshot.taken";
 const HEAD_MOVED: &str = "vcs.head.moved";
+const EFFORT_FINISHED: &str = "effort.finished";
 
 pub struct ChangeReactor {
     services: Weak<Services>,
@@ -85,13 +90,33 @@ impl AsyncEventConsumer for ChangeReactor {
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        matches!(event_type, SNAPSHOT_TAKEN | HEAD_MOVED)
+        matches!(event_type, SNAPSHOT_TAKEN | HEAD_MOVED | EFFORT_FINISHED)
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
         let Some(svc) = self.services.upgrade() else {
             return Err(DomainError::Busy("services are shutting down".into()));
         };
+        if event.envelope.event_type == EFFORT_FINISHED {
+            let effort = event.envelope.payload["effort"]
+                .as_str()
+                .ok_or_else(|| {
+                    DomainError::Invalid(format!("effort.finished seq {}: no effort", event.seq))
+                })?
+                .to_string();
+            return crate::change_analysis::refresh_change(
+                &svc,
+                ChangeTarget::Effort {
+                    effort_id: effort.clone(),
+                },
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| match e {
+                DomainError::Busy(_) => e,
+                e => DomainError::Invalid(format!("analyzing finished {effort}: {e}")),
+            });
+        }
         let Some(stream) = event.envelope.anchors.stream_id else {
             return Ok(());
         };
@@ -335,6 +360,101 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .contains(&serde_json::json!(["src/new.rs"])),
+            "{paths}"
+        );
+    }
+
+    /// P7 review (tsk710): an effort that edits and finishes before any take
+    /// while it is open is recomputed against its end snapshot when
+    /// `effort.finished` arrives — what `effort_churn` (`after:
+    /// [change.analyze]`) reads.
+    #[tokio::test]
+    async fn a_finished_effort_is_recomputed_against_its_end_snapshot() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        repo(&root);
+        let capture = crate::snapshot_capture::SnapshotCaptureService::new(
+            f.svc.snapshot_store.clone(),
+            f.svc.blobs.clone(),
+            root.clone(),
+            Arc::new(crate::vcs::GitProvider),
+            StreamId::new(1),
+            1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .with_settle_duration(std::time::Duration::ZERO)
+        .with_predrain_delay(std::time::Duration::ZERO);
+        let take = |path: &str| {
+            capture.mark_dirty(root.join(path), oxplow_fs_watch::WatchEventKind::Other);
+            capture.request_snapshot(crate::snapshot_capture::TakeRequest {
+                trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
+                thread_id: None,
+                turn_id: None,
+                effort_id: None,
+                budget: None,
+            })
+        };
+        let start = take("src/lib.rs").await.unwrap().unwrap();
+        f.svc
+            .effort_store
+            .set_start_snapshot(&f.effort, start)
+            .await
+            .unwrap();
+        // Analyzed once while open, before the edit.
+        let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
+        reactor
+            .handle(&log(&f.svc, taken(false, 1)).await)
+            .await
+            .unwrap();
+        // The edit lands and the effort closes: its end snapshot holds it.
+        std::fs::write(root.join("src/late.rs"), "fn late() {}\n").unwrap();
+        let end = take("src/late.rs").await.unwrap().unwrap();
+        f.svc
+            .effort_store
+            .set_end_snapshot(&f.effort, end)
+            .await
+            .unwrap();
+        let effort = f.effort;
+        f.svc
+            .db
+            .transaction(move |c| {
+                c.execute(
+                    "UPDATE effort SET ended_at = '2026-10-02T00:00:00.000000Z' WHERE id = ?1",
+                    [effort.value()],
+                )
+                .map(|_| ())
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert!(reactor.handles("effort.finished"));
+        let finished = Envelope::typed::<oxplow_domain::events::schema::EffortFinished>(
+            "system",
+            &oxplow_domain::events::schema::EffortFinishedV1 {
+                effort: f.effort.to_string(),
+                work_item: "work_item:oxplow:tsk1".into(),
+                end_snapshot: Some(format!("snapshot:{end}")),
+                retroactive: false,
+            },
+        );
+        reactor.handle(&log(&f.svc, finished).await).await.unwrap();
+        let out = f
+            .svc
+            .sql
+            .query_sql(
+                "SELECT f.path FROM v_change c JOIN v_change_file f ON f.change_id = c.id
+                 WHERE c.kind = 'effort' ORDER BY f.path",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        let paths = serde_json::to_value(out.rows).unwrap();
+        assert!(
+            paths
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!(["src/late.rs"])),
             "{paths}"
         );
     }

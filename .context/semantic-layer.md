@@ -929,8 +929,13 @@ oxplow-analytics change cards) only read them.
   `snapshot.taken` that recorded files (not `unchanged`) or a
   `vcs.head.moved`, `refresh_change` re-analyzes the stream's `working`
   change and every open effort's (one without a start snapshot is
-  skipped). A burst analyzes once: an event a newer qualifying one for the
-  same stream supersedes is skipped. A change already being computed
+  skipped). On `effort.finished` it recomputes that effort's change
+  against its end snapshot: the effort closes before its end take, so no
+  take event reaches it while open, and an effort that edited and
+  finished within one turn would otherwise keep a stale (or no) analysis
+  — the one `effort_churn` (`after: [change.analyze]`) reads (tsk710). A
+  burst analyzes once: an event a newer qualifying one for the same
+  stream supersedes is skipped. A change already being computed
   defers the event (`Busy`, retried); a failure is a dead letter naming
   the stream. Each analysis stamps `change.snapshot_id` (what it was
   computed against) and `events_to` (the log's highest seq as it began;
