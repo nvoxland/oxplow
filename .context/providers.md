@@ -447,7 +447,9 @@ collectors whose last read is older than its `syncMinutes`
 (`extensionInstances.<instance>.syncMinutes`, default 5; `0` means only
 on request), as `Actor::System` through the bus, so each read is
 audited. **A start** reads every collector once (`sync_started`) so the
-items are there before the first scheduled read. An external write whose
+items are there before the first scheduled read — spawned, not awaited:
+a large first read must not hold up Settings' Enable or every other
+reconcile (tsk716). An external write whose
 reply was lost (it landed at the tracker but the call timed out) is
 restated by the next read.
 

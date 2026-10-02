@@ -894,8 +894,15 @@ impl ProviderRegistry {
                 if let Err(e) = self.plugins.succeeded(&plugin_key(&name), None).await {
                     tracing::warn!(instance = %name, error = %e, "recording its health failed");
                 }
-                // Its items, before the first scheduled read (P7.A3).
-                self.sync_started(&name).await;
+                // Its items, before the first scheduled read (P7.A3) — in
+                // the background: a large first read must not hold up the
+                // Enable button or every other reconcile (tsk716).
+                let me = self.me.clone();
+                tokio::spawn(async move {
+                    if let Some(registry) = me.upgrade() {
+                        registry.sync_started(&name).await;
+                    }
+                });
                 Ok(())
             }
             // It may come up: enabled and failing, its next call restarts

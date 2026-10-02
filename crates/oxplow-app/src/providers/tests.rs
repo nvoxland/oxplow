@@ -176,6 +176,8 @@ async fn edited_declarations_need_approving_again() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     assert!(fx.svc.commands.namespace_owner("fake").is_some());
     assert!(providers.stop(INSTANCE).await);
     assert!(!fx.svc.commands.namespace_owner("fake").is_some());
@@ -360,6 +362,8 @@ async fn the_suite_finds_a_read_that_doesnt_restate_the_writes() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     let provider = fx.svc.work_items.get("fake").unwrap();
     let findings = suite(
         &fx.svc.work_items_client(),
@@ -386,6 +390,8 @@ async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     let provider = fx.svc.work_items.get("fake").unwrap();
     let actor = Actor::Agent {
         thread_id: Some(ThreadId::new(fx.thread.value())),
@@ -435,6 +441,8 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     assert!(fx.svc.commands.spec("fake.transition").is_none());
     assert!(fx.svc.commands.spec("fake.create").is_none());
     let estimate = fx
@@ -518,6 +526,8 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     let run = |input: serde_json::Value, name: &'static str| {
         let svc = fx.svc.clone();
         async move { svc.commands.run(&Actor::Human, name, input, false).await }
@@ -613,6 +623,8 @@ async fn a_running_instance_publishes_its_features() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     let fake = store
         .list()
         .await
@@ -703,6 +715,8 @@ async fn declaration_effects_compare_the_files_with_what_runs() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     let path = fx
         .svc
         .layout
@@ -741,6 +755,8 @@ async fn declaration_effects_compare_against_the_last_approved_copy() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     let project = fx.svc.layout.project_dir.clone();
     let manifest = project.join("oxplow/extensions/tracker/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
@@ -943,6 +959,8 @@ async fn a_provider_runs_from_its_verified_copy() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     let copies = fx
         .svc
         .layout
@@ -971,6 +989,8 @@ async fn a_provider_runs_from_its_verified_copy() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     assert_eq!(
         std::fs::read_to_string(&copied).unwrap(),
         std::fs::read_to_string(&script).unwrap()
@@ -1072,6 +1092,8 @@ async fn a_hung_invoke_times_out_and_counts() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     set_hooks(&fx, "slow:30000").await;
     let ran = tokio::time::timeout(
         std::time::Duration::from_secs(10),
@@ -1332,11 +1354,13 @@ async fn a_read_streams_records_into_work_item_and_keeps_its_cursor() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
-    let first = collector_state(&fx).await;
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
+    let first = first_read(&fx).await;
     assert_eq!(
         (first.status.as_str(), first.records),
         ("ok", 0),
-        "read once on start"
+        "read once on start, in the background"
     );
     let refs = three_items(&fx).await;
 
@@ -1395,6 +1419,42 @@ async fn a_read_streams_records_into_work_item_and_keeps_its_cursor() {
     );
 }
 
+/// P7 review (tsk716): starting an instance doesn't wait for its first
+/// read — a team with thousands of issues would hold up the Enable button
+/// and every reconcile — but the read still happens, in the background.
+#[tokio::test]
+async fn enabling_returns_before_the_first_read_finishes() {
+    // Under the in-memory 2 s call timeout, so the read itself succeeds.
+    let (fx, ext) = approved("slow:1500").await;
+    let started = std::time::Instant::now();
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(1000),
+        "enable waited {:?} for the first read",
+        started.elapsed()
+    );
+    let read = first_read(&fx).await;
+    assert_eq!(read.status, "ok");
+}
+
+/// The instance's first read, once its background sync lands.
+async fn first_read(fx: &EffortFixture) -> oxplow_db::CollectorState {
+    let store = oxplow_db::SqliteProviderCollectorStore::new(fx.svc.db.clone());
+    for _ in 0..200 {
+        if let Some(state) = store.get(INSTANCE, "work_items").await.unwrap() {
+            if state.status != "reading" {
+                return state;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("the first read never landed");
+}
+
 /// P7 review (tsk715): two syncs of one collector at once don't both read
 /// from the same checkpoint — the second waits, then resumes after the
 /// first — so each item is recorded once and the cursor never goes back.
@@ -1406,6 +1466,8 @@ async fn concurrent_syncs_of_one_collector_record_each_item_once() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     let refs = three_items(&fx).await;
     set_hooks(&fx, "slow:300").await;
     let sync = || {
@@ -1446,6 +1508,8 @@ async fn a_failed_read_keeps_what_its_checkpoints_covered() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     let refs = three_items(&fx).await;
     set_hooks(&fx, "read-fail-after:2").await;
     let err = fx
@@ -1500,6 +1564,8 @@ async fn a_silent_read_is_cancelled_and_counts() {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     set_hooks(&fx, "slow:5000").await;
     let err = fx
         .svc
@@ -1531,6 +1597,8 @@ async fn scheduled_syncs_run_due_collectors_as_the_system() {
     let (fx, _ext) = approved("").await;
     configure(&fx, true, json!({ "team": "core" }));
     fx.svc.providers.reconcile().await;
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     // Starting read it once; it isn't due again for five minutes.
     assert_eq!(fx.svc.providers.sync_due().await, 0);
     fx.svc
@@ -1604,6 +1672,8 @@ async fn enabled_fake() -> (EffortFixture, Extension) {
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
         .await
         .unwrap();
+    // Its start's first read, in the background (tsk716).
+    first_read(&fx).await;
     (fx, ext)
 }
 
