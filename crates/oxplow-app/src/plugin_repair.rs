@@ -342,17 +342,35 @@ impl AsyncEventConsumer for PluginRepair {
             }
             None => {
                 let context = gather(&svc, &key, &reason).await;
-                client
-                    .create(
-                        &Actor::System,
-                        crate::work_items::NewItem {
-                            title: title(&context),
-                            body: render(&context),
-                            ..Default::default()
-                        },
-                    )
-                    .await
-                    .map_err(|e| DomainError::Invalid(format!("filing the repair item: {e}")))?
+                let item = crate::work_items::NewItem {
+                    title: title(&context),
+                    body: render(&context),
+                    ..Default::default()
+                };
+                // The active provider may be down — even the contribution
+                // just disabled (tsk714): then oxplow's own tasks hold the
+                // item, which says why.
+                let active = svc.work_items.active();
+                match client.create(&Actor::System, item.clone()).await {
+                    Ok(item) => item,
+                    Err(e) if active != crate::work_items::PROVIDER => {
+                        let fallback = crate::work_items::NewItem {
+                            provider: Some(crate::work_items::PROVIDER.into()),
+                            body: format!(
+                                "{}\n\n> Filed on oxplow: the active work-items provider `{active}` \
+                                 couldn't take it ({e}).\n",
+                                item.body
+                            ),
+                            ..item
+                        };
+                        client.create(&Actor::System, fallback).await.map_err(|e| {
+                            DomainError::Invalid(format!("filing the repair item: {e}"))
+                        })?
+                    }
+                    Err(e) => {
+                        return Err(DomainError::Invalid(format!("filing the repair item: {e}")))
+                    }
+                }
             }
         };
         let seq = event.seq;
@@ -441,6 +459,52 @@ mod tests {
                 (text(&r[0]), text(&r[1]))
             })
             .collect()
+    }
+
+    /// P7 review (tsk714): when the active work-items provider isn't
+    /// running — it may be the very contribution that was disabled — the
+    /// repair item is filed on oxplow's own tasks, saying why, rather than
+    /// lost.
+    #[tokio::test]
+    async fn a_repair_item_is_filed_on_oxplow_when_the_active_provider_is_down() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        let ext = root.join("oxplow/extensions/work");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: work\nsharing: private\nintent: { purpose: Lists hot tasks., origin: null, examples: [] }\ncollectors:\n  - { id: hot, runtime: starlark, entry: hot.star, entities: [{ name: hot, key: id, columns: { id: int } }] }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("hot.star"),
+            "def transform(input):\n    return 1 // 0\n",
+        )
+        .unwrap();
+        fx.svc.work_items.set_active("linear");
+        let consumer = PluginRepair::new(Arc::downgrade(&fx.svc));
+        let event = disable(&fx.svc, "3 failures in a row; the last: boom").await;
+        consumer.handle(&event).await.unwrap();
+        let items = repair_items(&fx.svc).await;
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert!(items[0].0.starts_with("work_item:oxplow:"), "{items:?}");
+        let body = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT body FROM v_work_item WHERE ref = ?1",
+                vec![oxplow_db::SqlCell::Text(items[0].0.clone())],
+                None,
+            )
+            .await
+            .unwrap();
+        let oxplow_db::SqlCell::Text(body) = &body.rows[0][0] else {
+            panic!("a body");
+        };
+        assert!(
+            body.contains("`linear`"),
+            "says why it isn't on the active provider: {body}"
+        );
     }
 
     /// A disable files a repair item whose body is the prompt; a repeat

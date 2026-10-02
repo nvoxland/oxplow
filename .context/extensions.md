@@ -1240,7 +1240,10 @@ one failure policy (`plugin_health.rs`, the `plugin_health` table read as
   golden `crates/oxplow-app/tests/fixtures/repair-prompt.md`: what failed,
   its intent and declaration, its recent failures, what `plugin check`
   reports, its intent examples, `engine:` against the running oxplow, and
-  what to do). A later disable while the item is open comments on it;
+  what to do). When the active provider can't take it — not running, or
+  the very contribution just disabled — it's filed on oxplow's own tasks
+  with a line saying why (tsk714), so a repair item always exists. A later
+  disable while the item is open comments on it;
   once it's done or canceled the next disable files a new one
   (`plugin_health.repair_item`, `v_plugin_health.repair_item` while open).
   oxplow never sends it to an agent.
