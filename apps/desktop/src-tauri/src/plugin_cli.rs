@@ -189,14 +189,10 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                 .next()
                 .ok_or_else(|| Failure::Usage("test needs an extension name or path".into()))?;
             let (root, name) = locate(p.root.as_deref(), target);
-            let db = oxplow_sdk::project_database(&root)
-                .and_then(|path| oxplow_db::Database::open_read_only(&path).ok());
-            let layer = db.map(oxplow_app::sql_gateway::SqlGateway::new);
+            // A throwaway oxplow over a copy of the project's extensions:
+            // the project's database is never opened.
             let report = block_on(oxplow_sdk::plugin_test::test_extension(
-                &root,
-                &name,
-                layer.as_ref(),
-                p.bless,
+                &root, &name, p.bless,
             ))?;
             let format = if p.json { Format::Json } else { Format::Text };
             let _ = write!(out, "{}", oxplow_sdk::plugin_test::render(&report, format));

@@ -361,8 +361,8 @@ config change.
 ## The conformance kit (`crates/oxplow-sdk/src/conformance.rs`, `plugin_test.rs`)
 
 What `oxplow plugin test <name> [--bless] [--json]` runs for each
-provider an extension declares ([extensions.md](./extensions.md) "The
-SDK"). The person running it runs their own program, so there is no
+provider an extension declares, after its check and its lens and
+collector examples ([extensions.md](./extensions.md) "The SDK"). The person running it runs their own program, so there is no
 approval check; credentials come from the environment (the declared
 names).
 

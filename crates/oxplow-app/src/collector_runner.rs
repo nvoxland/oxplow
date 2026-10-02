@@ -524,7 +524,8 @@ pub fn exec_collector(
 }
 
 /// Run a derived (starlark / jaq) collector: read its `input` rows (the
-/// trigger event's anchors bound by name), then run its script over
+/// trigger event's anchors bound by name) — or take `rows`, standing in
+/// for them (an example's fixture) — then run its script over
 /// `{"rows": [...], "event"?: {...}}` in the collector sandbox.
 pub async fn derive_collector(
     layer: &crate::sql_gateway::SqlGateway,
@@ -532,10 +533,12 @@ pub async fn derive_collector(
     spec: &CollectorSpec,
     oracle: std::sync::Arc<dyn oxplow_collect_plugin::AiOracle>,
     event: Option<&StoredEvent>,
+    rows: Option<Vec<serde_json::Value>>,
 ) -> Result<ScriptOutput, String> {
-    let rows = match &spec.input {
-        None => Vec::new(),
-        Some(sql) => {
+    let rows = match (rows, &spec.input) {
+        (Some(rows), _) => rows,
+        (None, None) => Vec::new(),
+        (None, Some(sql)) => {
             input_rows(
                 layer,
                 &spec.id,
@@ -833,7 +836,7 @@ async fn run_collector_once(
     source: &str,
 ) -> Result<CollectorRunReport, RunCollectorError> {
     let started = std::time::Instant::now();
-    let (spec, output) = produce(ctx, owner, id, trigger.event()).await?;
+    let (spec, output) = produce(ctx, owner, id, trigger.event(), None).await?;
     let writes = output.and_then(|o| plan_writes(owner, &spec, o));
     let last_event_id = trigger.event().map(|e| e.seq);
     let run = |status: &str, error: Option<String>| CollectorRun {
@@ -1150,12 +1153,15 @@ pub struct EntityPreview {
 }
 
 /// Run a collector and return what it would store (see [`CollectorPreview`]).
+/// `rows` stand in for a derived collector's `input` rows (an example's
+/// fixture, `oxplow plugin test`).
 pub async fn preview_collector(
     ctx: &Collectors<'_>,
     owner: &str,
     id: &str,
+    rows: Option<Vec<serde_json::Value>>,
 ) -> Result<CollectorPreview, RunCollectorError> {
-    let (spec, output) = produce(ctx, owner, id, None).await?;
+    let (spec, output) = produce(ctx, owner, id, None, rows).await?;
     let writes = plan_writes(owner, &spec, output.map_err(RunCollectorError::Failed)?)
         .map_err(RunCollectorError::Failed)?;
     let entities = writes
@@ -1244,6 +1250,7 @@ async fn produce(
     owner: &str,
     id: &str,
     event: Option<&StoredEvent>,
+    rows: Option<Vec<serde_json::Value>>,
 ) -> Result<(CollectorSpec, Result<ScriptOutput, String>), RunCollectorError> {
     let (root, approvals) = (ctx.root, ctx.approvals);
     let (ext, spec) = find_collector(ctx, owner, id)?;
@@ -1267,6 +1274,7 @@ async fn produce(
                     &spec,
                     std::sync::Arc::new(oracle),
                     event,
+                    rows,
                 )
                 .await
             }
@@ -1512,6 +1520,32 @@ async fn exec_approved(
 }
 
 /// A run's output as the writes it makes, coerced to the declared columns.
+/// Publish every entity the enabled `extensions` declare, empty — what a
+/// throwaway oxplow (`oxplow plugin test`, P7.C6) does so the models and
+/// lenses over them run before any collector has. Never on a project's
+/// own database: an empty publish replaces what was collected.
+pub async fn publish_declared_empty(
+    db: &oxplow_db::Database,
+    extensions: &[crate::extensions::Extension],
+) -> Result<(), DomainError> {
+    let mut writes = Vec::new();
+    for ext in extensions.iter().filter(|e| e.enabled) {
+        for spec in ext.collectors.iter().filter(|c| !c.entities.is_empty()) {
+            let empty = ScriptOutput {
+                entities: spec
+                    .entities
+                    .iter()
+                    .map(|e| (e.name.clone(), Vec::new()))
+                    .collect(),
+                deleted: BTreeMap::new(),
+            };
+            writes.extend(plan_writes(&ext.name, spec, empty).map_err(DomainError::Invalid)?);
+        }
+    }
+    db.transaction(move |tx| oxplow_db::collector_store::write_rows_tx(tx, &writes).map(|_| ()))
+        .await
+}
+
 fn plan_writes(
     owner: &str,
     spec: &CollectorSpec,
@@ -2410,7 +2444,7 @@ mod tests {
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
         };
-        let preview = preview_collector(&ctx, "work", "star").await.unwrap();
+        let preview = preview_collector(&ctx, "work", "star", None).await.unwrap();
         assert_eq!(preview.entities.len(), 1);
         let hot = &preview.entities[0];
         assert_eq!(
@@ -2435,7 +2469,9 @@ mod tests {
             "nothing stored"
         );
 
-        let err = preview_collector(&ctx, "work", "sh").await.unwrap_err();
+        let err = preview_collector(&ctx, "work", "sh", None)
+            .await
+            .unwrap_err();
         assert!(
             matches!(err, RunCollectorError::NeedsApproval(_)),
             "{err:?}"

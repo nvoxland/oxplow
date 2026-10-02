@@ -728,9 +728,35 @@ for. A questions file is a list of `{ question, skill, reaches: { sql } |
   the catalog (every `v_model` view and every command an agent may run),
   what it would reach for first; it must pick the same model or command.
 - **An extension's own** `questions.yaml` runs in `oxplow plugin test`:
-  `skill` is a markdown file in the extension, SQL runs against the
-  project's database when there is one (else a warning), and a command
-  is one of its providers' `<id>.<name>` (schema from its declarations).
+  `skill` is a markdown file in the extension, SQL runs on the test's
+  throwaway oxplow, and a command is one on its bus — core's or the
+  extension's own `commands:` — or one of its providers' `<id>.<name>`
+  (schema from its declarations).
+
+**`oxplow plugin test <name>`** (P5.D5, P7.C6; `plugin_test.rs`) runs on
+**a throwaway oxplow** (`Host`): a temp project with a copy of the
+project's `oxplow/extensions/`, `Services::in_memory` over it, every
+declared entity published empty (`collector_runner::publish_declared_empty`
+— as if each collector had run and found nothing; never on a real
+database), the extension models published and commands registered as at
+boot. It never opens the project's database. It runs `check` there
+(with that registry, so `commands:` examples dry-run and `ui.commands` /
+launcher commands are checked), then — only if `check` is clean — each
+`intent.examples[*]` by its fixture `fixtures/<name>.yaml`:
+
+- `input: { lens: <slug>, params? }`, `expect: { columns?, rows: n |
+  $any }` — the lens runs; its row count (and columns, when expected)
+  must match;
+- `input: { collector: <id>, rows? }`, `expect: { entities: { <name>:
+  n | $any } }` — a derived collector runs over `rows` (standing in for
+  its `input` query, `preview_collector(…, rows)`), storing nothing, its
+  rows typed against the declaration; an exec collector's example is a
+  warning, not run (it needs a person's approval);
+- `input: { command, input }` — a provider's, run in its session
+  (providers.md "The conformance kit");
+- no fixture is a warning; an `input` naming none of these is an error.
+
+Then `questions.yaml` and each provider's conformance kit.
 
 ## Lenses
 

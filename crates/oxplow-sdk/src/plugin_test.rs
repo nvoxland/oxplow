@@ -1,6 +1,13 @@
-//! `oxplow plugin test` (P5.D5, `.context/extensions.md` "The SDK";
-//! `.context/providers.md` "The conformance kit"): `check`, then for
-//! each declared provider —
+//! `oxplow plugin test` (P5.D5, P7.C6; `.context/extensions.md` "The
+//! SDK"; `.context/providers.md` "The conformance kit"). Everything runs
+//! on a throwaway oxplow — an in-memory one over a copy of the project's
+//! `oxplow/extensions/` ([`Host`]) — so it never touches the project's
+//! data: `check` (against its real command registry, so `commands:`
+//! examples dry-run), then each intent example whose fixture names a lens
+//! (`input: { lens, params? }`, `expect: { columns?, rows }`) or a derived
+//! collector (`input: { collector, rows? }`, `expect: { entities: { <name>:
+//! n } }`; an exec collector's isn't run — it needs a person's approval),
+//! the extension's `questions.yaml`, and for each declared provider —
 //!
 //! 1. the live `initialize` equals its declarations file;
 //! 2. `check` accepts the instance config in
@@ -19,11 +26,9 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use oxplow_app::extension_catalog::ExtensionCatalog;
 use oxplow_app::extensions::{Extension, EXTENSIONS_DIR};
 use oxplow_app::providers::host::{self, Launch};
 use oxplow_app::providers::{self, ProviderSpec};
-use oxplow_app::sql_gateway::SqlGateway;
 use oxplow_domain::Actor;
 use oxplow_provider_protocol::model::{
     method, CheckParams, CheckResult, InitializeResult, InvokeParams, InvokeResult,
@@ -50,15 +55,60 @@ pub struct TestReport {
     pub ran: Vec<String>,
 }
 
+/// A throwaway oxplow for one test run: in memory, over a copy of the
+/// project's `oxplow/extensions/`, every declared entity published empty
+/// (as if each collector had run and found nothing), its extension models
+/// published and commands registered as at boot.
+struct Host {
+    _dir: tempfile::TempDir,
+    root: std::path::PathBuf,
+    svc: oxplow_app::Services,
+}
+
+impl Host {
+    async fn start(project: &Path) -> Result<Host, String> {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let root = dir.path().to_path_buf();
+        let extensions = project.join(EXTENSIONS_DIR);
+        if extensions.is_dir() {
+            copy_dir(&extensions, &root.join(EXTENSIONS_DIR)).map_err(|e| e.to_string())?;
+        }
+        oxplow_app::vcs::GitProvider
+            .init_repository(&root)
+            .await
+            .map_err(|e| e.to_string())?;
+        let svc = oxplow_app::Services::in_memory(&root).map_err(|e| e.to_string())?;
+        oxplow_app::collector_runner::publish_declared_empty(
+            &svc.db,
+            &svc.extension_catalog.get(&root),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        svc.extension_models
+            .sync()
+            .await
+            .map_err(|e| e.to_string())?;
+        svc.extension_commands.reconcile().await;
+        Ok(Host {
+            _dir: dir,
+            root,
+            svc,
+        })
+    }
+}
+
 /// Run every test of extension `name` under `root`. `bless` writes the
 /// golden transcripts instead of comparing them.
-pub async fn test_extension(
-    root: &Path,
-    name: &str,
-    layer: Option<&SqlGateway>,
-    bless: bool,
-) -> Result<TestReport, SdkError> {
-    let checked = crate::check(root, name, &ExtensionCatalog::new(), layer, None).await?;
+pub async fn test_extension(root: &Path, name: &str, bless: bool) -> Result<TestReport, SdkError> {
+    let host = Host::start(root).await.map_err(SdkError::Invalid)?;
+    let checked = crate::check(
+        &host.root,
+        name,
+        &host.svc.extension_catalog,
+        Some(&host.svc.sql),
+        Some(host.svc.commands.as_ref()),
+    )
+    .await?;
     let mut report = TestReport {
         name: name.to_string(),
         ok: false,
@@ -68,41 +118,218 @@ pub async fn test_extension(
         ran: vec!["check".into()],
     };
     let ext = checked.extension;
-    let examples = ext
-        .intent
-        .as_ref()
-        .map(|i| i.examples.clone())
-        .unwrap_or_default();
-    if ext.providers.is_empty() && !examples.is_empty() {
-        report.warnings.push(format!(
-            "{}/extension.yaml: intent.examples aren't run — nothing here declares a runtime \
-             (`providers:`) — fix: none needed yet",
-            ext.path
-        ));
-    }
     if report.errors.is_empty() {
+        examples(&host, &ext, &mut report).await;
         for spec in &ext.providers {
             report.ran.push(format!("provider {}", spec.id));
             test_provider(root, &ext, spec, bless, &mut report).await;
         }
-        questions(root, &ext, layer, &mut report).await;
+        questions(&host, &ext, &mut report).await;
     }
     report.ok = report.errors.is_empty();
     Ok(report)
 }
 
-/// The extension's own `questions.yaml` (the answerability check): each
-/// question's `skill` is a markdown file in the extension, its SQL runs
-/// against the project's database (when there is one), and a command is
-/// one of its providers' (`<id>.<name>`).
-async fn questions(
-    root: &Path,
+/// An intent example's fixture (`fixtures/<name>.yaml`): `None` when it
+/// has none; the parsed document, or why it isn't one.
+fn example_fixture(
+    dir: &Path,
+    rel: &str,
+    example: &str,
+) -> Option<(String, Result<Value, String>)> {
+    let file = format!("fixtures/{example}.yaml");
+    let shown = format!("{rel}/{file}");
+    let text = std::fs::read_to_string(dir.join(&file)).ok()?;
+    let doc = serde_yaml::from_str::<Value>(&text)
+        .map_err(|e| format!("{shown}:1: not YAML: {e} — fix: correct it"));
+    Some((shown, doc))
+}
+
+/// The intent examples a throwaway oxplow runs: a lens's, a derived
+/// collector's. A provider's (`input: { command, input }`) run in its
+/// session.
+async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
+    let rel = ext.path.trim_end_matches('/').to_string();
+    let dir = host.root.join(&rel);
+    let examples = ext
+        .intent
+        .as_ref()
+        .map(|i| i.examples.clone())
+        .unwrap_or_default();
+    for example in examples {
+        let Some((shown, doc)) = example_fixture(&dir, &rel, &example.name) else {
+            report.warnings.push(format!(
+                "{rel}/fixtures/{}.yaml:1: example `{}` has no fixture, so it isn't run — fix: \
+                 write its `input` (`{{ lens, params? }}`, `{{ collector, rows? }}`, or a \
+                 provider's `{{ command, input }}`) and `expect`",
+                example.name, example.name
+            ));
+            continue;
+        };
+        let doc = match doc {
+            Ok(d) => d,
+            Err(e) => {
+                report.errors.push(e);
+                continue;
+            }
+        };
+        let ex = Example {
+            name: &example.name,
+            shown: &shown,
+            input: doc.get("input").cloned().unwrap_or(Value::Null),
+            expect: doc.get("expect").cloned().unwrap_or(Value::Null),
+        };
+        if let Some(slug) = ex.input.get("lens").and_then(Value::as_str) {
+            report.ran.push(format!("example {}", ex.name));
+            lens_example(host, ext, &ex, slug, report).await;
+        } else if let Some(id) = ex.input.get("collector").and_then(Value::as_str) {
+            collector_example(host, ext, &ex, id, report).await;
+        } else if ex.input.get("command").is_none() || ext.providers.is_empty() {
+            report.errors.push(format!(
+                "{shown}:1: example `{}`'s `input` names no lens, collector or provider command \
+                 — fix: `{{ lens: <slug>, params? }}`, `{{ collector: <id>, rows? }}`, or (with a \
+                 provider) `{{ command, input }}`",
+                example.name
+            ));
+        }
+    }
+}
+
+/// One intent example with its fixture.
+struct Example<'a> {
+    name: &'a str,
+    /// Its fixture file, as findings name it.
+    shown: &'a str,
+    input: Value,
+    expect: Value,
+}
+
+/// Run lens `slug` with the fixture's params; its columns and row count
+/// against `expect` (`$any` matches anything).
+async fn lens_example(
+    host: &Host,
     ext: &Extension,
-    layer: Option<&SqlGateway>,
+    ex: &Example<'_>,
+    slug: &str,
     report: &mut TestReport,
 ) {
+    let (shown, expect) = (ex.shown, &ex.expect);
+    let params = ex
+        .input
+        .get("params")
+        .and_then(Value::as_object)
+        .map(|o| {
+            o.iter()
+                .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
+                .collect()
+        })
+        .unwrap_or_default();
+    let run = oxplow_app::extensions::run_lens(
+        &host.svc.sql,
+        &host.svc.extension_catalog,
+        &host.root,
+        &format!("{}/{slug}", ext.name),
+        params,
+        &oxplow_app::extensions::LensContext::default(),
+    )
+    .await;
+    let run = match run {
+        Ok(run) => run,
+        Err(e) => {
+            report.errors.push(format!(
+                "{shown}:1: lens `{slug}` failed: {e} — fix: the lens, or the example's params"
+            ));
+            return;
+        }
+    };
+    let mut got = json!({ "rows": run.result.rows.len() });
+    if expect.get("columns").is_some() {
+        got["columns"] = json!(run.result.columns);
+    }
+    if let Some((path, want, got)) = first_mismatch(expect, &got) {
+        report.errors.push(format!(
+            "{shown}:1: lens `{slug}` returned {got} at `{path}`, the example expects {want} — \
+             fix: the lens, or the example's `expect` (`{{ columns?, rows: n | $any }}`)"
+        ));
+    }
+}
+
+/// Run derived collector `id` over the fixture's `rows` (else its `input`
+/// query, on the empty throwaway), storing nothing; the rows it would
+/// store per entity — typed against the declaration — against `expect`.
+async fn collector_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    id: &str,
+    report: &mut TestReport,
+) {
+    let (shown, example, expect) = (ex.shown, ex.name, &ex.expect);
+    let Some(spec) = ext.collectors.iter().find(|c| c.id == id) else {
+        report.errors.push(format!(
+            "{shown}:1: example `{example}` names collector `{id}`, which `{}` doesn't declare — \
+             fix: the collector's `id`",
+            ext.name
+        ));
+        return;
+    };
+    if !spec.runtime.is_derived() {
+        report.warnings.push(format!(
+            "{shown}:1: example `{example}` runs exec collector `{id}`, which `plugin test` \
+             doesn't run (it needs a person's approval) — fix: none; run it from Settings → Data"
+        ));
+        return;
+    }
+    report.ran.push(format!("example {example}"));
+    let rows = ex
+        .input
+        .get("rows")
+        .and_then(Value::as_array)
+        .map(|r| r.to_vec());
+    let preview = oxplow_app::collector_runner::preview_collector(
+        &oxplow_app::collector_runner::Collectors::of(&host.svc, &host.root),
+        &ext.name,
+        id,
+        rows,
+    )
+    .await;
+    let preview = match preview {
+        Ok(p) => p,
+        Err(e) => {
+            use oxplow_app::collector_runner::RunCollectorError as E;
+            let why = match e {
+                E::NotFound => "it isn't loaded".to_string(),
+                E::NeedsApproval(m) | E::Failed(m) | E::Disabled(m) => m,
+                E::Storage(e) => e.to_string(),
+            };
+            report.errors.push(format!(
+                "{shown}:1: collector `{id}` failed: {why} — fix: its script, or the example's rows"
+            ));
+            return;
+        }
+    };
+    let entities: serde_json::Map<String, Value> = preview
+        .entities
+        .iter()
+        .map(|e| (e.entity.clone(), json!(e.total)))
+        .collect();
+    let got = json!({ "entities": entities });
+    if let Some((path, want, got)) = first_mismatch(expect, &got) {
+        report.errors.push(format!(
+            "{shown}:1: collector `{id}` returned {got} at `{path}`, the example expects {want} — \
+             fix: the script, or the example's `expect` (`{{ entities: {{ <name>: n | $any }} }}`)"
+        ));
+    }
+}
+
+/// The extension's own `questions.yaml` (the answerability check): each
+/// question's `skill` is a markdown file in the extension, its SQL runs
+/// on the throwaway oxplow, and a command is one on its bus (core's, the
+/// extension's own `commands:`) or one of its providers' (`<id>.<name>`,
+/// not on the bus until an instance runs).
+async fn questions(host: &Host, ext: &Extension, report: &mut TestReport) {
     let rel = ext.path.trim_end_matches('/').to_string();
-    let dir = root.join(&rel);
+    let dir = host.root.join(&rel);
     let file = format!("{rel}/questions.yaml");
     let Ok(text) = std::fs::read_to_string(dir.join("questions.yaml")) else {
         return;
@@ -138,13 +365,14 @@ async fn questions(
             .iter()
             .find(|(n, _)| n == name)
             .map(|(_, s)| s.clone())
+            .or_else(|| host.svc.commands.spec(name).map(|s| s.input_schema))
     };
     let checked = crate::answerability::check(
         &file,
         &questions,
         &crate::answerability::Checker {
             skill_text: &skill_text,
-            sql: layer,
+            sql: Some(&host.svc.sql),
             command_schema: &command_schema,
         },
     )
@@ -332,33 +560,19 @@ async fn session(
         .as_ref()
         .map(|i| i.examples.clone())
         .unwrap_or_default();
+    // The examples that invoke a command; the rest (and a missing or
+    // broken fixture) are `examples`'.
     for example in examples {
-        let file = format!("fixtures/{}.yaml", example.name);
-        let shown = format!("{rel}/{file}");
-        let Ok(text) = std::fs::read_to_string(dir.join(&file)) else {
-            report.warnings.push(format!(
-                "{shown}:1: example `{}` has no fixture, so it isn't run — fix: write \
-                 `input: {{ command, input }}` and `expect`",
-                example.name
-            ));
+        let Some((shown, Ok(doc))) = example_fixture(dir, rel, &example.name) else {
             continue;
         };
-        let doc: Value = match serde_yaml::from_str(&text) {
-            Ok(d) => d,
-            Err(e) => {
-                report
-                    .errors
-                    .push(format!("{shown}:1: not YAML: {e} — fix: correct it"));
-                continue;
-            }
+        let Some(command) = doc.pointer("/input/command").and_then(Value::as_str) else {
+            continue;
         };
-        let (Some(command), Some(input)) = (
-            doc.pointer("/input/command").and_then(Value::as_str),
-            doc.pointer("/input/input"),
-        ) else {
+        let Some(input) = doc.pointer("/input/input") else {
             report.errors.push(format!(
-                "{shown}:1: a provider example's `input` is `{{ command, input }}` — fix: name the \
-                 command it invokes and its input"
+                "{shown}:1: a provider example's `input` is `{{ command, input }}` — fix: give \
+                 the command's input"
             ));
             continue;
         };
@@ -591,5 +805,173 @@ pub fn render(report: &TestReport, format: crate::Format) -> String {
             ));
             out
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(root: &Path, rel: &str, body: &str) {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    }
+
+    /// The tally extension: a starlark collector of `thing`s, a model and a
+    /// lens over them, a command noting one, a README and questions, and an
+    /// intent example per kind, each with its fixture.
+    fn tally(root: &Path, collector_expect: &str, command_expect: &str) {
+        write(
+            root,
+            "oxplow/extensions/tally/extension.yaml",
+            &format!(
+                "manifest: 2
+name: tally
+intent:
+  purpose: Count things.
+  examples:
+    - {{ name: labelled, input: {{ lens: labelled }}, expect: no labelled things yet }}
+    - {{ name: things, input: {{ collector: things }}, expect: one thing per input row }}
+    - {{ name: shell, input: {{ collector: shell }}, expect: whatever the shell says }}
+collectors:
+  - id: things
+    runtime: starlark
+    entry: collectors/things.star
+    input: \"SELECT id FROM v_task\"
+    entities:
+      - {{ name: thing, key: id, columns: {{ id: int, label: text }} }}
+  - id: shell
+    runtime: exec
+    entry: collectors/shell.sh
+    entities:
+      - {{ name: line, key: n, columns: {{ n: int }} }}
+models:
+  - name: labelled
+    version: 1
+    description: Labelled things.
+    columns:
+      - {{ name: id, type: INTEGER, doc: The thing. }}
+      - {{ name: label, type: TEXT, doc: Its label. }}
+commands:
+  - name: note
+    summary: Note a work item.
+    input_schema: {{ type: object, required: [ref], properties: {{ ref: {{ type: string }} }} }}
+    entry: handlers/note.star
+    examples:
+      - {{ name: happy, input: {{ ref: \"work_item:oxplow:tsk1\" }}, expect_commands: {command_expect} }}
+"
+            ),
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/collectors/things.star",
+            "def transform(x):\n    return {\"entities\": {\"thing\": [{\"id\": r[\"id\"], \"label\": \"t\"} for r in x[\"rows\"]]}}\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/collectors/shell.sh",
+            "#!/bin/sh\necho '{}'\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/models/labelled.sql",
+            "SELECT id, label FROM ref('thing') WHERE label IS NOT NULL\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/handlers/note.star",
+            "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.comment\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"body\": \"noted\"}}]}\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/lenses/labelled.yaml",
+            "title: Labelled\nquery: SELECT id, label FROM v_tally_labelled\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/fixtures/labelled.yaml",
+            "input: { lens: labelled }\nexpect: { columns: [id, label], rows: 0 }\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/fixtures/things.yaml",
+            &format!(
+                "input: {{ collector: things, rows: [{{ id: 1 }}, {{ id: 2 }}] }}\nexpect: {collector_expect}\n"
+            ),
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/fixtures/shell.yaml",
+            "input: { collector: shell }\nexpect: { entities: { line: $any } }\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/README.md",
+            "Read `v_tally_labelled`; note a work item with `tally.note`.\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/questions.yaml",
+            "- question: Which things are labelled?\n  skill: README.md\n  reaches:\n    sql: SELECT id, label FROM v_tally_labelled\n  shape: { columns: [id, label] }\n- question: Note a work item.\n  skill: README.md\n  reaches:\n    command: tally.note\n    input: { ref: \"work_item:oxplow:tsk1\" }\n",
+        );
+    }
+
+    /// P7.C6: `plugin test` runs every kind's examples on a throwaway
+    /// oxplow — a lens's rows, a starlark collector's typed entities from
+    /// its fixture rows, a command's composition against the real
+    /// registry — and its questions may name its own commands. An exec
+    /// collector's example isn't run (it needs a person's approval).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn plugin_test_runs_every_kinds_examples() {
+        let dir = tempfile::tempdir().unwrap();
+        tally(
+            dir.path(),
+            "{ entities: { thing: 2 } }",
+            "[work_item.comment]",
+        );
+        let report = test_extension(dir.path(), "tally", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+        for ran in ["check", "example labelled", "example things", "questions"] {
+            assert!(
+                report.ran.iter().any(|r| r == ran),
+                "{ran}: {:?}",
+                report.ran
+            );
+        }
+        let warnings = report.warnings.join("\n");
+        assert!(
+            warnings.contains("fixtures/shell.yaml:1: example `shell` runs exec collector `shell`"),
+            "{warnings}"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        tally(
+            dir.path(),
+            "{ entities: { thing: 3 } }",
+            "[work_item.comment]",
+        );
+        let report = test_extension(dir.path(), "tally", false).await.unwrap();
+        let errors = report.errors.join("\n");
+        assert!(
+            errors.contains(
+                "fixtures/things.yaml:1: collector `things` returned 2 at `/entities/thing`"
+            ),
+            "{errors}"
+        );
+
+        // A command's example is checked against the throwaway's registry.
+        let dir = tempfile::tempdir().unwrap();
+        tally(
+            dir.path(),
+            "{ entities: { thing: 2 } }",
+            "[work_item.transition]",
+        );
+        let report = test_extension(dir.path(), "tally", false).await.unwrap();
+        let errors = report.errors.join("\n");
+        assert!(
+            errors.contains("example `happy`: composed [work_item.comment] but `expect_commands` is [work_item.transition]"),
+            "{errors}"
+        );
     }
 }

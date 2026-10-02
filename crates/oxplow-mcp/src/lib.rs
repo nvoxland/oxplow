@@ -1373,6 +1373,7 @@ impl OxplowMcp {
             &oxplow_app::collector_runner::Collectors::of(&self.services, &root),
             &p.owner,
             &p.id,
+            None,
         )
         .await
         .map_err(|e| match e {
