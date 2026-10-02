@@ -147,6 +147,8 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     crate::effort_reactors::register(state);
     crate::indexer::register(state);
     crate::symbol_collector::register(state);
+    // A stream's working tree and open efforts, re-analyzed as it moves (P7.B4).
+    crate::change_reactor::register(state);
     // `on:` collectors (P7.B3), after the consumers they may name.
     crate::collector_triggers::register(state);
     state.event_pump.clone().spawn();
@@ -161,7 +163,6 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     crate::providers::sync::spawn_sync_scheduler(state.clone());
     crate::extension_commands::spawn_reconciler(state.clone());
     crate::effort_evidence::spawn(state.clone());
-    crate::change_analysis::spawn_invalidation(state.clone());
 
     // Metric retention loop (tsk93) — OPT-IN: `metricRetentionDays` defaults
     // to 0 = keep everything (per-test history is what makes the substrate

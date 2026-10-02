@@ -27,6 +27,10 @@ pub struct ChangeRow {
     pub status: String,
     pub error: Option<String>,
     pub computed_at: Option<String>,
+    /// The stream's snapshot the analysis was computed against.
+    pub snapshot_id: Option<i64>,
+    /// The event log's highest seq when the analysis began.
+    pub events_to: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -188,7 +192,8 @@ impl SqliteChangeStore {
         self.db
             .call(move |c| {
                 let mut st = c.prepare(
-                    "SELECT id, stream_id, kind, target, base_revision, head_revision, status, error, computed_at
+                    "SELECT id, stream_id, kind, target, base_revision, head_revision, status, error, computed_at,
+                            snapshot_id, events_to
                      FROM change WHERE id = ?1",
                 )?;
                 let mut rows = st.query_map([id], |r| {
@@ -202,6 +207,8 @@ impl SqliteChangeStore {
                         status: r.get(6)?,
                         error: r.get(7)?,
                         computed_at: r.get(8)?,
+                        snapshot_id: r.get(9)?,
+                        events_to: r.get(10)?,
                     })
                 })?;
                 rows.next().transpose()
@@ -227,8 +234,15 @@ impl SqliteChangeStore {
             .await
     }
 
-    /// Replace the change's analysis and mark it `done`.
-    pub async fn store_results(&self, id: i64, results: ChangeResults) -> Result<(), DomainError> {
+    /// Replace the change's analysis and mark it `done`, computed against
+    /// `snapshot_id` with its inputs as of `events_to`.
+    pub async fn store_results(
+        &self,
+        id: i64,
+        results: ChangeResults,
+        snapshot_id: Option<i64>,
+        events_to: i64,
+    ) -> Result<(), DomainError> {
         let at = serde_json::to_value(oxplow_domain::Timestamp::now())
             .ok()
             .and_then(|v| v.as_str().map(str::to_string))
@@ -303,8 +317,9 @@ impl SqliteChangeStore {
                     .map_err(map_sql_err)?;
                 }
                 tx.execute(
-                    "UPDATE change SET status = 'done', error = NULL, computed_at = ?2 WHERE id = ?1",
-                    rusqlite::params![id, at],
+                    "UPDATE change SET status = 'done', error = NULL, computed_at = ?2,
+                       snapshot_id = ?3, events_to = ?4 WHERE id = ?1",
+                    rusqlite::params![id, at, snapshot_id, events_to],
                 )
                 .map_err(map_sql_err)?;
                 Ok(())
@@ -312,14 +327,25 @@ impl SqliteChangeStore {
             .await
     }
 
-    /// Replace the change's duplicates (they arrive later, from a slower scan).
+    /// Replace the change's duplicates (they arrive later, from a slower
+    /// scan) — when they belong to its latest analysis (`events_to`); a
+    /// newer analysis supersedes them. Whether they were stored.
     pub async fn store_duplicates(
         &self,
         id: i64,
         rows: Vec<ChangeDuplicateRow>,
-    ) -> Result<(), DomainError> {
+        events_to: i64,
+    ) -> Result<bool, DomainError> {
         self.db
             .transaction(move |tx| {
+                let latest: Option<i64> = tx
+                    .query_row("SELECT events_to FROM change WHERE id = ?1", [id], |r| r.get(0))
+                    .optional()
+                    .map_err(map_sql_err)?
+                    .flatten();
+                if latest != Some(events_to) {
+                    return Ok(false);
+                }
                 tx.execute("DELETE FROM change_duplicate WHERE change_id = ?1", [id])
                     .map_err(map_sql_err)?;
                 for d in &rows {
@@ -334,7 +360,7 @@ impl SqliteChangeStore {
                     )
                     .map_err(map_sql_err)?;
                 }
-                Ok(())
+                Ok(true)
             })
             .await
     }
@@ -436,24 +462,33 @@ mod tests {
             }],
             test_files: Vec::new(),
         };
-        store.store_results(c.id, results("a.rs")).await.unwrap();
-        store.store_results(c.id, results("b.rs")).await.unwrap();
         store
-            .store_duplicates(
-                c.id,
-                vec![ChangeDuplicateRow {
-                    path: "b.rs".into(),
-                    start_line: 1,
-                    end_line: 9,
-                    lines: 9,
-                    peer_path: "c.rs".into(),
-                    peer_start_line: 20,
-                    peer_end_line: 28,
-                }],
-            )
+            .store_results(c.id, results("a.rs"), Some(3), 10)
             .await
             .unwrap();
-        assert_eq!(store.get(c.id).await.unwrap().unwrap().status, "done");
+        store
+            .store_results(c.id, results("b.rs"), Some(4), 11)
+            .await
+            .unwrap();
+        let dup = || {
+            vec![ChangeDuplicateRow {
+                path: "b.rs".into(),
+                start_line: 1,
+                end_line: 9,
+                lines: 9,
+                peer_path: "c.rs".into(),
+                peer_start_line: 20,
+                peer_end_line: 28,
+            }]
+        };
+        // A scan of the superseded analysis stores nothing; the latest's does.
+        assert!(!store.store_duplicates(c.id, dup(), 10).await.unwrap());
+        assert!(store.store_duplicates(c.id, dup(), 11).await.unwrap());
+        let row = store.get(c.id).await.unwrap().unwrap();
+        assert_eq!(
+            (row.status.as_str(), row.snapshot_id, row.events_to),
+            ("done", Some(4), Some(11))
+        );
 
         let sl = SemanticLayer::new(db);
         let q = |sql: &'static str| {

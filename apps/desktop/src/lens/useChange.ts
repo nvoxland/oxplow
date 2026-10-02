@@ -1,25 +1,19 @@
 /**
  * A page's stored change analysis (`v_change*`): ensures the change on
- * mount, asks again when its stream goes stale (working tree, open
- * effort), and refreshes when its analysis lands. Slots pass the returned
- * `changeId` to their lenses. See `.context/semantic-layer.md` →
- * "Change analysis".
+ * mount and asks again whenever `v_change` changes — the analysis landed,
+ * or the `change.analyze` consumer recomputed a working tree or open
+ * effort as its stream moved. Slots pass the returned `changeId` to their
+ * lenses. See `.context/semantic-layer.md` → "Change analysis".
  */
 import { useEffect, useState } from "react";
 import { ensureChange, subscribeOxplowEvents } from "../api.js";
+import { readsChanged } from "./lensRerun.js";
 import type { ChangeRow, ChangeTarget } from "../tauri-bridge/generated/bindings.js";
 
-/** Whether `event` means the page should ask for its change again: its
- *  stream went stale (working tree / open effort), or its analysis landed. */
-export function shouldReensure(
-  event: { kind: string; streamId?: unknown; changeId?: unknown },
-  target: ChangeTarget,
-  row: Pick<ChangeRow, "id" | "streamId"> | null,
-): boolean {
-  if (!row) return false;
-  if (event.kind === "changeAnalyzed") return event.changeId === row.id;
-  if (event.kind === "changeStale") return target.kind !== "commit" && event.streamId === row.streamId;
-  return false;
+/** Whether `event` means the page should ask for its change again: a
+ *  commit that touched `v_change` (its analysis landed or was recomputed). */
+export function shouldReensure(event: Readonly<Record<string, unknown>>, row: Pick<ChangeRow, "id"> | null): boolean {
+  return row !== null && readsChanged(event, { models: ["v_change"], tables: [], measures: [] });
 }
 
 export function useChange(target: ChangeTarget | null): { change: ChangeRow | null; error: string | null } {
@@ -47,7 +41,7 @@ export function useChange(target: ChangeTarget | null): { change: ChangeRow | nu
         });
     ensure();
     const off = subscribeOxplowEvents((event) => {
-      if (shouldReensure(event as unknown as { kind: string }, target, current)) ensure();
+      if (shouldReensure(event, current)) ensure();
     });
     return () => {
       live = false;

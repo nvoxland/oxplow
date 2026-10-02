@@ -387,9 +387,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     stream) clear the old results first, so thread A's rows never show
     under thread B.
   - `change_id` comes from `src/lens/useChange.ts`: it calls
-    `ensure_change` on mount, again on `ChangeStale` for its stream
-    (working tree / effort targets) and on `ChangeAnalyzed` for its
-    change (`shouldReensure`).
+    `ensure_change` on mount and again whenever `v_change` changes
+    (`shouldReensure`): the analysis landed, or the `change.analyze`
+    consumer recomputed a working tree or open effort.
 - **Change links.** `diff-at` (`from` path, optional `line`, `base` and
   `head` columns holding the change's labels; join `v_change`) opens that
   file's diff between the two sides (commit shas / `HEAD` → git refs,

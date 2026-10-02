@@ -432,8 +432,8 @@ pub enum ChangeTarget {
     },
 }
 
-/// Tracks which mutable changes (working tree, open efforts) are stale,
-/// and which are being computed.
+/// Which changes are being computed, the duplicate-scan queue and the
+/// co-change history cache.
 #[derive(Default)]
 pub struct ChangeAnalyzer {
     state: std::sync::Mutex<AnalyzerState>,
@@ -446,9 +446,9 @@ pub struct ChangeAnalyzer {
 
 /// One duplicate scan to run for a change.
 pub(crate) struct DupJob {
-    /// The analysis generation it belongs to: its findings are stored only
-    /// if that's still the change's latest computation.
-    generation: u64,
+    /// The analysis it belongs to (`change.events_to`): its findings are
+    /// stored only if that's still the change's latest.
+    events_to: i64,
     root: std::path::PathBuf,
     revision: Revision,
     changed: Vec<String>,
@@ -505,10 +505,6 @@ impl Drop for RunningGuard<'_> {
 
 #[derive(Default)]
 struct AnalyzerState {
-    /// Bumped per stream whenever its working tree or refs move.
-    stream_gen: std::collections::HashMap<i64, u64>,
-    /// The stream generation each mutable change was computed at.
-    computed_gen: std::collections::HashMap<i64, u64>,
     running: std::collections::HashSet<i64>,
 }
 
@@ -546,68 +542,36 @@ impl ChangeAnalyzer {
         }
         hist
     }
-
-    /// The working tree or refs of `stream_id` moved: its mutable changes
-    /// are stale.
-    pub fn invalidate_stream(&self, stream_id: i64) {
-        if let Ok(mut s) = self.state.lock() {
-            *s.stream_gen.entry(stream_id).or_default() += 1;
-        }
-    }
 }
 
-/// Quiet period before announcing that a stream's changes went stale.
-pub const STALE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(1500);
-
-/// Background: when a stream's working tree or refs move, mark its
-/// mutable changes stale and (debounced) emit `ChangeStale`, so pages
-/// showing them ask for a fresh analysis.
-pub fn spawn_invalidation(state: std::sync::Arc<crate::Services>) {
-    use crate::OxplowEvent;
-    let mut rx = state.events.subscribe();
-    let (stale_tx, mut stale_rx) = tokio::sync::mpsc::unbounded_channel::<i64>();
-    let announcer = state.clone();
-    tokio::spawn(async move {
-        while let Some(first) = stale_rx.recv().await {
-            let mut streams = std::collections::BTreeSet::from([first]);
-            loop {
-                match tokio::time::timeout(STALE_DEBOUNCE, stale_rx.recv()).await {
-                    Ok(Some(s)) => {
-                        streams.insert(s);
-                    }
-                    Ok(None) => return,
-                    Err(_) => break,
-                }
-            }
-            for stream_id in streams {
-                announcer
-                    .events
-                    .emit(OxplowEvent::ChangeStale { stream_id });
-            }
-        }
-    });
-    tokio::spawn(async move {
-        loop {
-            let stream = match rx.recv().await {
-                Ok(OxplowEvent::SnapshotTaken { stream_id: s, .. })
-                | Ok(OxplowEvent::VcsRefsChanged { stream_id: s }) => s.value(),
-                Ok(_) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            };
-            state.change_analyzer.invalidate_stream(stream);
-            let _ = stale_tx.send(stream);
-        }
-    });
-}
-
-/// Analyze `target` if it hasn't been (or, for the working tree and open
-/// efforts, if it's stale), store the results, and return the change.
-/// While another call is computing the same change this returns it with
-/// status `running`; `ChangeAnalyzed` fires when results land.
+/// Analyze `target` if it hasn't been (or its head moved — an effort
+/// closed), store the results, and return the change. A working tree's
+/// and an open effort's analysis is kept current by the `change.analyze`
+/// consumer ([`refresh_change`]); this reads it, computing it the first
+/// time. While another call is computing the same change this returns it
+/// with status `running`; its rows' commit announces the results
+/// (`ModelsChanged` on `v_change`).
 pub async fn ensure_change(
     svc: &crate::Services,
     target: ChangeTarget,
+) -> Result<oxplow_db::ChangeRow, oxplow_domain::DomainError> {
+    analyze(svc, target, false).await
+}
+
+/// Recompute `target` now, however fresh it is (the `change.analyze`
+/// consumer, as its stream moves). `Busy` while another computation of it
+/// runs, so the consumer retries rather than losing the move.
+pub async fn refresh_change(
+    svc: &crate::Services,
+    target: ChangeTarget,
+) -> Result<oxplow_db::ChangeRow, oxplow_domain::DomainError> {
+    analyze(svc, target, true).await
+}
+
+async fn analyze(
+    svc: &crate::Services,
+    target: ChangeTarget,
+    force: bool,
 ) -> Result<oxplow_db::ChangeRow, oxplow_domain::DomainError> {
     use oxplow_db::EffortStore as _;
     use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
@@ -629,7 +593,7 @@ pub async fn ensure_change(
         kind: svc.vcs.rev_kind().into(),
         rev,
     };
-    let (stream, kind, key, base, head, mutable) = match target {
+    let (stream, kind, key, base, head) = match target {
         ChangeTarget::Working { stream_id } => {
             let sid = oxplow_domain::StreamId::try_from_str(&stream_id)
                 .ok_or_else(|| invalid(format!("not a stream id: {stream_id}")))?;
@@ -641,7 +605,6 @@ pub async fn ensure_change(
                 String::new(),
                 head.map(vcs_rev),
                 Revision::Working,
-                true,
             )
         }
         ChangeTarget::Commit { sha, stream_id } => {
@@ -665,7 +628,6 @@ pub async fn ensure_change(
                 full.clone(),
                 parent.map(vcs_rev),
                 vcs_rev(full),
-                false,
             )
         }
         ChangeTarget::Turn { turn_id } => {
@@ -694,7 +656,6 @@ pub async fn ensure_change(
                 tid.value().to_string(),
                 Some(Revision::Snapshot(start)),
                 Revision::Snapshot(end),
-                false,
             )
         }
         ChangeTarget::Effort { effort_id } => {
@@ -715,9 +676,8 @@ pub async fn ensure_change(
                 .get(&effort.thread_id)
                 .await?
                 .ok_or(DomainError::NotFound)?;
-            let open = effort.ended_at.is_none();
             let head = match effort.end_snapshot_id {
-                Some(end) if !open => Revision::Snapshot(end),
+                Some(end) if effort.ended_at.is_some() => Revision::Snapshot(end),
                 _ => Revision::Working,
             };
             (
@@ -726,7 +686,6 @@ pub async fn ensure_change(
                 eid.value().to_string(),
                 Some(Revision::Snapshot(start)),
                 head,
-                open,
             )
         }
     };
@@ -735,48 +694,56 @@ pub async fn ensure_change(
         .change_store
         .get_or_create(stream_val, kind, &key, base.as_ref(), &head)
         .await?;
-    let generation = {
+    {
         let mut st = svc
             .change_analyzer
             .state
             .lock()
             .map_err(|_| invalid("analyzer lock".into()))?;
         if st.running.contains(&row.id) {
-            return Ok(row);
+            return if force {
+                Err(DomainError::Busy(format!(
+                    "change {} is being analyzed",
+                    row.id
+                )))
+            } else {
+                Ok(row)
+            };
         }
-        let generation = st.stream_gen.get(&stream_val).copied().unwrap_or(0);
         // Results of another head (an effort analyzed while open, now
         // closed) are stale however they were computed.
-        let fresh = row.status == "done"
-            && !head_moved
-            && (!mutable || st.computed_gen.get(&row.id) == Some(&generation));
-        if fresh {
+        if row.status == "done" && !head_moved && !force {
             return Ok(row);
         }
         st.running.insert(row.id);
-        generation
-    };
+    }
     let running = RunningGuard {
         state: &svc.change_analyzer.state,
         id: row.id,
     };
     svc.change_store.set_status(row.id, "running", None).await?;
     let root = svc.worktrees.resolve(Some(&stream.to_string())).await;
+    // What the inputs had seen as it began, and the snapshot it's against.
+    let events_to = events_to(svc).await?;
+    let snapshot_id = match &head {
+        Revision::Snapshot(id) => Some(*id),
+        Revision::Working => {
+            svc.snapshot_store
+                .latest_snapshot_id_for_stream(stream)
+                .await?
+        }
+        Revision::Vcs { .. } => None,
+    };
     let dup_head = head.clone();
     let result = compute(svc, &root, base, head).await;
     drop(running);
-    if result.is_ok() {
-        if let Ok(mut st) = svc.change_analyzer.state.lock() {
-            st.computed_gen.insert(row.id, generation);
-        }
-    }
     match result {
         Ok(results) => {
             let changed: Vec<String> = results.files.iter().map(|f| f.path.clone()).collect();
-            svc.change_store.store_results(row.id, results).await?;
-            svc.events
-                .emit(crate::OxplowEvent::ChangeAnalyzed { change_id: row.id });
-            spawn_duplicates(svc, row.id, generation, &root, &dup_head, changed);
+            svc.change_store
+                .store_results(row.id, results, snapshot_id, events_to)
+                .await?;
+            spawn_duplicates(svc, row.id, events_to, &root, &dup_head, changed);
         }
         Err(e) => {
             svc.change_store
@@ -791,15 +758,27 @@ pub async fn ensure_change(
         .ok_or(DomainError::NotFound)
 }
 
+/// The event log's highest seq now.
+async fn events_to(svc: &crate::Services) -> Result<i64, oxplow_domain::DomainError> {
+    svc.db
+        .read(|c| {
+            c.query_row("SELECT coalesce(max(seq), 0) FROM event_log", [], |r| {
+                r.get(0)
+            })
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+}
+
 /// Find duplicated blocks between the changed files and anything else in
 /// the tree at `head`, in the background (it parses the whole tree), then
-/// store them and announce the change again. The scan is also recorded as
-/// a code-quality scan with `oxplow.duplicate_lines` facts
+/// store them if the analysis they belong to (`events_to`) is still the
+/// change's latest. The scan is also recorded as a code-quality scan
 /// ([`crate::duplication_scan`]).
 fn spawn_duplicates(
     svc: &crate::Services,
     change_id: i64,
-    generation: u64,
+    events_to: i64,
     root: &std::path::Path,
     head: &Revision,
     changed: Vec<String>,
@@ -808,7 +787,7 @@ fn spawn_duplicates(
         return;
     }
     let job = DupJob {
-        generation,
+        events_to,
         root: root.to_path_buf(),
         revision: head.clone(),
         changed,
@@ -818,7 +797,6 @@ fn spawn_duplicates(
     }
     let recorder = crate::duplication_scan::DuplicationRecorder::new(svc);
     let store = svc.change_store.clone();
-    let events = svc.events.clone();
     let analyzer = svc.change_analyzer.clone();
     tokio::spawn(async move {
         while let Some(job) = analyzer.dup_queue.next(change_id) {
@@ -833,15 +811,6 @@ fn spawn_duplicates(
                     continue;
                 }
             };
-            // A newer analysis of this change supersedes these findings.
-            let latest = analyzer
-                .state
-                .lock()
-                .map(|st| st.computed_gen.get(&change_id) == Some(&job.generation))
-                .unwrap_or(false);
-            if !latest {
-                continue;
-            }
             let rows: Vec<oxplow_db::ChangeDuplicateRow> = findings
                 .into_iter()
                 .filter(|f| job.changed.contains(&f.path))
@@ -862,11 +831,10 @@ fn spawn_duplicates(
                     }
                 })
                 .collect();
-            if let Err(error) = store.store_duplicates(change_id, rows).await {
+            // A newer analysis of this change supersedes these findings.
+            if let Err(error) = store.store_duplicates(change_id, rows, job.events_to).await {
                 tracing::warn!(change_id, %error, "storing duplicates failed");
-                continue;
             }
-            events.emit(crate::OxplowEvent::ChangeAnalyzed { change_id });
         }
     });
 }
@@ -1408,7 +1376,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_working_tree_is_recomputed_only_when_stale() {
+    async fn the_working_tree_is_recomputed_when_refreshed() {
         let f = crate::test_fixtures::services_with_effort().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
@@ -1440,10 +1408,9 @@ mod tests {
             )
             .await,
             serde_json::json!([[1]]),
-            "not stale yet, so not recomputed"
+            "ensuring reads the stored analysis; the consumer refreshes it"
         );
-        f.svc.change_analyzer.invalidate_stream(1);
-        let fresh = ensure_change(&f.svc, target).await.unwrap();
+        let fresh = refresh_change(&f.svc, target).await.unwrap();
         assert_eq!(fresh.id, c.id);
         assert_eq!(
             rows(
@@ -1520,7 +1487,6 @@ mod tests {
         crate::test_fixtures::commit_all(&root, "base");
         std::fs::write(root.join("src/b.rs"), body.replace("tally", "count_up")).unwrap();
         let sha = crate::test_fixtures::commit_all(&root, "copy");
-        let mut rx = f.svc.events.subscribe();
         let c = ensure_change(
             &f.svc,
             ChangeTarget::Commit {
@@ -1539,17 +1505,6 @@ mod tests {
             .await;
             if got != serde_json::json!([]) {
                 assert_eq!(got, serde_json::json!([["src/b.rs", "src/a.rs"]]));
-                let mut announced = 0;
-                while let Ok(ev) = rx.try_recv() {
-                    if matches!(ev, crate::OxplowEvent::ChangeAnalyzed { change_id } if change_id == c.id)
-                    {
-                        announced += 1;
-                    }
-                }
-                assert_eq!(
-                    announced, 2,
-                    "once for the analysis, once for its duplicates"
-                );
                 // The scan is on the code-quality record too, at the commit,
                 // with both halves of the pair.
                 assert_eq!(
@@ -1572,57 +1527,11 @@ mod tests {
         panic!("no duplicates stored");
     }
 
-    #[tokio::test]
-    async fn working_tree_events_mark_changes_stale_and_announce_it() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let mut rx = f.svc.events.subscribe();
-        spawn_invalidation(f.svc.clone());
-        tokio::task::yield_now().await;
-        for _ in 0..3 {
-            f.svc.events.emit(crate::OxplowEvent::VcsRefsChanged {
-                stream_id: oxplow_domain::StreamId::new(1),
-            });
-        }
-        let got = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            let mut stale = 0;
-            loop {
-                match rx.recv().await {
-                    Ok(crate::OxplowEvent::ChangeStale { stream_id: 1 }) => {
-                        stale += 1;
-                        // Debounced: a burst yields one announcement.
-                        tokio::time::sleep(STALE_DEBOUNCE * 2).await;
-                        while let Ok(ev) = rx.try_recv() {
-                            if matches!(ev, crate::OxplowEvent::ChangeStale { .. }) {
-                                stale += 1;
-                            }
-                        }
-                        return stale;
-                    }
-                    Ok(_) => {}
-                    Err(_) => return 0,
-                }
-            }
-        })
-        .await
-        .unwrap();
-        assert_eq!(got, 1);
-        let generation = f
-            .svc
-            .change_analyzer
-            .state
-            .lock()
-            .unwrap()
-            .stream_gen
-            .get(&1)
-            .copied();
-        assert!(generation.unwrap_or(0) >= 1);
-    }
-
     #[test]
     fn duplicate_scans_run_one_at_a_time_per_change_and_only_the_latest_stores() {
         let q = DupQueue::default();
-        let job = |g: u64| DupJob {
-            generation: g,
+        let job = |g: i64| DupJob {
+            events_to: g,
             root: std::path::PathBuf::from("/r"),
             revision: Revision::Working,
             changed: vec!["a.rs".into()],
@@ -1637,7 +1546,7 @@ mod tests {
             "a newer request replaces the queued one"
         );
         assert!(q.submit(2, job(1)), "another change runs independently");
-        assert_eq!(q.next(1).map(|j| j.generation), Some(3));
+        assert_eq!(q.next(1).map(|j| j.events_to), Some(3));
         assert!(q.next(1).is_none(), "drained: the worker stops");
         assert!(q.submit(1, job(4)), "and the next request starts a new one");
     }

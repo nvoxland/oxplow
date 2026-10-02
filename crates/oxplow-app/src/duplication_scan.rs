@@ -10,7 +10,8 @@
 //!   duplicate (tsk44). A scoped scan anchors only its paths, so its
 //!   capture would restate the whole tree from a slice of it (tsk365);
 //!   its findings still land in the code-quality store;
-//! - a status-bar background task and `CodeQualityScanned` events.
+//! - a status-bar background task. Its rows' commits announce it
+//!   (`ModelsChanged` on `v_code_quality_scan`).
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -22,10 +23,7 @@ use oxplow_domain::DomainError;
 
 use crate::code_quality_runner::{scan_duplicates, CodeQualityFinding, RunOptions};
 use crate::trees::Trees;
-use crate::{
-    BackgroundTaskKind, BackgroundTaskStore, CodeQualityScanPhase, EventBus, OxplowEvent, Services,
-    StartInput,
-};
+use crate::{BackgroundTaskKind, BackgroundTaskStore, Services, StartInput};
 
 /// What a scan needs to leave its record, owned so it can run on a
 /// background task.
@@ -36,7 +34,6 @@ pub struct DuplicationRecorder {
     stream_store: Arc<oxplow_db::SqliteStreamStore>,
     trees: Arc<Trees>,
     background_tasks: BackgroundTaskStore,
-    events: EventBus,
 }
 
 impl DuplicationRecorder {
@@ -47,7 +44,6 @@ impl DuplicationRecorder {
             stream_store: svc.stream_store.clone(),
             trees: svc.trees.clone(),
             background_tasks: svc.background_tasks.clone(),
-            events: svc.events.clone(),
         }
     }
 
@@ -76,14 +72,6 @@ impl DuplicationRecorder {
             .code_quality_store
             .create_scan("duplication", &scope, &revision_str, &fingerprint)
             .await?;
-        let scanned = |phase| OxplowEvent::CodeQualityScanned {
-            stream_id: None,
-            scan_id,
-            tool: "duplication".into(),
-            scope: scope.clone(),
-            phase,
-        };
-        svc.events.emit(scanned(CodeQualityScanPhase::Started));
         let label = match &revision {
             Revision::Working => "Scanning duplicates (working tree)".to_string(),
             Revision::Vcs { rev, .. } => format!("Scanning duplicates @{}", short_ref(rev)),
@@ -107,7 +95,6 @@ impl DuplicationRecorder {
                 svc.code_quality_store
                     .finish_scan(scan_id, CodeQualityScanStatus::Failed, Some(e.clone()))
                     .await?;
-                svc.events.emit(scanned(CodeQualityScanPhase::Failed));
                 svc.background_tasks.fail(&task.id, e.clone(), None);
                 return Err(DomainError::Invalid(e));
             }
@@ -143,7 +130,6 @@ impl DuplicationRecorder {
                 .code_quality_store
                 .finish_scan(scan_id, CodeQualityScanStatus::Failed, Some(e.to_string()))
                 .await;
-            svc.events.emit(scanned(CodeQualityScanPhase::Failed));
             svc.background_tasks.fail(&task.id, e.to_string(), None);
             return Err(e);
         }
@@ -152,7 +138,6 @@ impl DuplicationRecorder {
                 tracing::warn!(%error, scan_id, "duplication: writing facts failed");
             }
         }
-        svc.events.emit(scanned(CodeQualityScanPhase::Completed));
         svc.background_tasks.complete(&task.id, None);
         Ok(findings)
     }

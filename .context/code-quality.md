@@ -138,7 +138,9 @@ in the background. `DuplicationRecorder::record`
   and zero out every untouched file's duplicates (tsk365). Change scans
   therefore write no facts, and the metric has **no production producer**
   until a full-tree scan runs somewhere;
-- a status-bar background task and `CodeQualityScanned` events.
+- a status-bar background task. Its rows' commits announce it
+  (`ModelsChanged` on `v_code_quality_scan`); the `CodeQualityScanned`
+  bus event is gone (P7.B4).
 
 The change's own `v_change_duplicate` rows are the findings anchored in
 its changed files. There is no manual "Scan now" any more.

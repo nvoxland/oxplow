@@ -873,7 +873,8 @@ oxplow-analytics change cards) only read them.
     assertion out lowers the count).
 - **Duplicates** come later: a background whole-tree scan scoped to the
   changed files (`duplication_scan::DuplicationRecorder`) stores
-  `v_change_duplicate` and emits `ChangeAnalyzed` again. The same scan is
+  `v_change_duplicate` — only while the analysis it belongs to is still
+  the change's latest (`change.events_to` unchanged). The same scan is
   recorded as a code-quality scan (`v_code_quality_scan` /
   `v_code_quality_finding`). It writes **no** `oxplow.duplicate_lines`
   facts: only a full-tree scan may restate that metric (tsk365,
@@ -881,13 +882,25 @@ oxplow-analytics change cards) only read them.
   Closed efforts and turns scan their end snapshot: `Trees` reads any
   revision (P5.B2).
 - **Caching.** A change is keyed by (stream, kind, target) — commit shas are
-  resolved to full ids, so `HEAD` and a short sha share one row. Commits
-  and closed efforts are computed once. Working-tree and open-effort
-  changes are recomputed when stale: `spawn_invalidation` bumps a
-  per-stream generation on snapshot and git-ref events and (debounced
-  1.5 s) emits `ChangeStale { stream_id }`, so a page showing one calls
-  `ensure_change` again. Concurrent requests for the same change return it
-  `running`; `ChangeAnalyzed { change_id }` fires when results land.
+  resolved to full ids, so `HEAD` and a short sha share one row. Commits,
+  turns and closed efforts are computed once (an effort that closes since
+  is recomputed: its head moved). `ensure_change` reads a working tree's
+  or an open effort's stored analysis, computing it the first time.
+- **Keeping it current (P7.B4).** The `change.analyze` async pump consumer
+  (`change_reactor.rs`) recomputes them as the stream moves: on a
+  `snapshot.taken` that recorded files (not `unchanged`) or a
+  `vcs.head.moved`, `refresh_change` re-analyzes the stream's `working`
+  change and every open effort's (one without a start snapshot is
+  skipped). A burst analyzes once: an event a newer qualifying one for the
+  same stream supersedes is skipped. A change already being computed
+  defers the event (`Busy`, retried); a failure is a dead letter naming
+  the stream. Each analysis stamps `change.snapshot_id` (what it was
+  computed against) and `events_to` (the log's highest seq as it began;
+  `v_change` v3). Results are announced by their commit (`ModelsChanged`
+  on `v_change*`): `useChange` re-ensures when `v_change` changes. The
+  in-memory `ChangeStale` / `ChangeAnalyzed` / `CodeQualityScanned` and the
+  invalidation loop are gone. Concurrent requests for the same change
+  return it `running`.
 - An effort without a start snapshot is an error, not an empty diff.
 
 Deleted / skipped tests and removed assertions are `v_change_function`

@@ -56,16 +56,6 @@ pub enum WorkspaceChangeKind {
     Renamed,
 }
 
-/// Code-quality scan lifecycle phase the bus broadcasts. Mirrors the
-/// renderer-era enum.
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-pub enum CodeQualityScanPhase {
-    Started,
-    Completed,
-    Failed,
-}
-
 /// What changed. Variants are deliberately broad — the renderer
 /// refetches the affected bucket on receipt rather than trying to
 /// reconcile diffs from the payload.
@@ -213,26 +203,12 @@ pub enum OxplowEvent {
     /// A language server published diagnostics (or restarted) for
     /// `stream_id`: `v_diagnostic` changed. Debounced; lenses re-run.
     DiagnosticsChanged { stream_id: i64 },
-    /// A change's analysis landed (`v_change*` for `change_id`).
-    ChangeAnalyzed { change_id: i64 },
-    /// A stream's working tree or refs moved: its working-tree and
-    /// open-effort changes are stale, so pages showing them re-ensure.
-    ChangeStale { stream_id: i64 },
     /// An effort's stored metric deltas / observations were recomputed
     /// (`v_effort_metric_delta`, `v_effort_observation`); lenses re-run.
     EffortEvidenceChanged { effort_id: i64 },
     /// Decisions or claims changed for `effort_id` (inferred decisions
     /// stored after an effort closed). Review-packet lenses re-run.
     ReasoningChanged { effort_id: Option<i64> },
-    /// A code-quality scan transitioned states (started / completed /
-    /// failed). The renderer refreshes scan + finding lists on receipt.
-    CodeQualityScanned {
-        stream_id: Option<StreamId>,
-        scan_id: i64,
-        tool: String,
-        scope: String,
-        phase: CodeQualityScanPhase,
-    },
     /// `.git` directory appeared/disappeared at the project root —
     /// "is this a git workspace" flipped. Renderer hides/restores the
     /// git-aware UI on receipt.

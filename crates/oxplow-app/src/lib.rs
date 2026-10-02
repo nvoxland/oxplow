@@ -28,6 +28,7 @@ pub mod branch_reconciler;
 pub mod bundled_extensions;
 pub mod capabilities;
 pub mod change_analysis;
+pub mod change_reactor;
 pub mod churn;
 pub mod co_change;
 pub mod code_analysis;
@@ -137,9 +138,7 @@ pub use agent_prompt::{
     build_session_context_block, build_session_context_block_with_role, role_change_banner,
     RoleMode,
 };
-pub use events::{
-    event_channels, CodeQualityScanPhase, EventBus, OxplowEvent, WorkspaceChangeKind,
-};
+pub use events::{event_channels, EventBus, OxplowEvent, WorkspaceChangeKind};
 pub use hook_ingest::{
     HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
 };

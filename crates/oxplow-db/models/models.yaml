@@ -106,8 +106,8 @@
     - { name: "ended_at", type: "TEXT", doc: "When the capture finished." }
     - { name: "scan_kind", type: "TEXT", doc: "`delta` or `full`." }
 - name: change
-  version: 2
-  description: "Analyzed changes: a commit (vs its parent), an effort (start → end snapshot, or → working tree while open), an agent turn (start → end snapshot: what the turn changed) or a stream's working tree (vs HEAD). Created on demand by `ensure_change`; the v_change_* views hold its analysis."
+  version: 3
+  description: "Analyzed changes: a commit (vs its parent), an effort (start → end snapshot, or → working tree while open), an agent turn (start → end snapshot: what the turn changed) or a stream's working tree (vs HEAD). Created on demand by `ensure_change`; a working tree's and an open effort's are recomputed by the `change.analyze` consumer as the stream moves. The v_change_* views hold its analysis."
   columns:
     - { name: "id", type: "INTEGER", doc: "Change id (the change_id in v_change_*)." }
     - { name: "stream_id", type: "INTEGER", doc: "Stream whose repo it's in." }
@@ -118,6 +118,8 @@
     - { name: "status", type: "TEXT", doc: "`pending`, `running`, `done` or `failed`." }
     - { name: "error", type: "TEXT", doc: "Why it failed, if it did." }
     - { name: "computed_at", type: "TEXT", doc: "When the analysis last finished (RFC 3339)." }
+    - { name: "snapshot_id", type: "INTEGER", doc: "The stream's snapshot it was computed against (the head's for a turn or a closed effort); NULL for a commit." }
+    - { name: "events_to", type: "INTEGER", doc: "The event log's highest seq when the last analysis began: what its inputs had seen." }
   tests:
     - { not_null: id }
     - { unique: id }

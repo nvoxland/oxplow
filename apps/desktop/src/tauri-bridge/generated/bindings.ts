@@ -1514,6 +1514,10 @@ export type ChangeRow = {
 	status: string,
 	error: string | null,
 	computedAt: string | null,
+	// The stream's snapshot the analysis was computed against.
+	snapshotId: number | null,
+	// The event log's highest seq when the analysis began.
+	eventsTo: number | null,
 };
 
 /**
@@ -1587,12 +1591,6 @@ export type CheckReport_Serialize = {
 	sqlChecked: boolean,
 	extension: Extension_Serialize,
 };
-
-/**
- *  Code-quality scan lifecycle phase the bus broadcasts. Mirrors the
- *  renderer-era enum.
- */
-export type CodeQualityScanPhase = "started" | "completed" | "failed";
 
 /**
  *  Per-project collection profile (the `collection:` block). Written by
@@ -4082,13 +4080,6 @@ detail: string | null } |
  *  `stream_id`: `v_diagnostic` changed. Debounced; lenses re-run.
  */
 { kind: "diagnosticsChanged"; streamId: number } | 
-// A change's analysis landed (`v_change*` for `change_id`).
-{ kind: "changeAnalyzed"; changeId: number } | 
-/**
- *  A stream's working tree or refs moved: its working-tree and
- *  open-effort changes are stale, so pages showing them re-ensure.
- */
-{ kind: "changeStale"; streamId: number } | 
 /**
  *  An effort's stored metric deltas / observations were recomputed
  *  (`v_effort_metric_delta`, `v_effort_observation`); lenses re-run.
@@ -4099,11 +4090,6 @@ detail: string | null } |
  *  stored after an effort closed). Review-packet lenses re-run.
  */
 { kind: "reasoningChanged"; effortId: number | null } | 
-/**
- *  A code-quality scan transitioned states (started / completed /
- *  failed). The renderer refreshes scan + finding lists on receipt.
- */
-{ kind: "codeQualityScanned"; streamId: StreamId | null; scanId: number; tool: string; scope: string; phase: CodeQualityScanPhase } | 
 /**
  *  `.git` directory appeared/disappeared at the project root —
  *  "is this a git workspace" flipped. Renderer hides/restores the
