@@ -350,6 +350,34 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
     assert!(fx.svc.commands.namespace_owner("fake").is_some());
 }
 
+/// P7.A7: the suite reads the provider back after its writes — a read
+/// that doesn't restate what the writes recorded is a finding.
+#[tokio::test]
+async fn the_suite_finds_a_read_that_doesnt_restate_the_writes() {
+    let (fx, ext) = approved("stale-read").await;
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    let provider = fx.svc.work_items.get("fake").unwrap();
+    let findings = suite(
+        &fx.svc.work_items_client(),
+        &provider.id,
+        provider.features,
+        None,
+        &ServicesProbe(&fx.svc),
+        &Actor::Human,
+    )
+    .await;
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.check == "sync" && f.message.contains("stale")),
+        "{findings:?}"
+    );
+}
+
 #[tokio::test]
 async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
     let (fx, ext) = approved("").await;

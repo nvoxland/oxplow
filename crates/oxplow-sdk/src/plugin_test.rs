@@ -613,6 +613,137 @@ async fn session(
             )),
         }
     }
+    if !declared.collectors.is_empty() {
+        read_back(client, t, &handle, report).await;
+    }
+}
+
+/// What the provider reads (P7.A7): `discover` lists every entity its
+/// collectors declare, and each collector's `read` — from nothing, then
+/// from its last `$/state` — streams records of its entity, as many as it
+/// says, checkpoints them, and doesn't stream them all again from the
+/// checkpoint (a cursor that doesn't advance).
+async fn read_back(
+    client: &ReferenceClient,
+    t: &UnderTest<'_>,
+    handle: &oxplow_provider_protocol::model::Handle,
+    report: &mut TestReport,
+) {
+    use oxplow_provider_protocol::codec::notify;
+    use oxplow_provider_protocol::model::{DiscoverParams, DiscoverResult, ReadParams, ReadResult};
+    let decl_file = format!("{}/{}", t.rel, t.spec.declarations);
+    report.ran.push("discover".into());
+    match client
+        .peer
+        .call::<_, DiscoverResult>(
+            method::DISCOVER,
+            &DiscoverParams {
+                handle: handle.clone(),
+            },
+        )
+        .await
+    {
+        Err(e) => report.errors.push(format!(
+            "{decl_file}:1: discover failed: {e} — fix: answer `discover` with the entities its \
+             collectors read"
+        )),
+        Ok(found) => {
+            for c in &t.declared.collectors {
+                if !found.entities.iter().any(|e| e.name == c.entity) {
+                    report.errors.push(format!(
+                        "{decl_file}:1: collector `{}` reads entity `{}`, which `discover` \
+                         doesn't list — fix: list it, or correct the collector's entity",
+                        c.name, c.entity
+                    ));
+                }
+            }
+        }
+    }
+    for c in &t.declared.collectors {
+        report.ran.push(format!("read {}", c.name));
+        // One read from `state`: what it streamed, and its last checkpoint.
+        let read = |state: Option<Value>| async move {
+            let (records0, states0) = (
+                client.provider_notifications(notify::RECORD).len(),
+                client.provider_notifications(notify::STATE).len(),
+            );
+            let out = client
+                .peer
+                .call::<_, ReadResult>(
+                    method::READ,
+                    &ReadParams {
+                        handle: handle.clone(),
+                        collector: c.name.clone(),
+                        state,
+                    },
+                )
+                .await;
+            let records = client.provider_notifications(notify::RECORD)[records0..].to_vec();
+            let last = client.provider_notifications(notify::STATE)[states0..]
+                .last()
+                .and_then(|s| s.get("state").cloned());
+            out.map(|r| (r.records, records, last))
+        };
+        let first = match read(None).await {
+            Ok(r) => r,
+            Err(e) => {
+                report.errors.push(format!(
+                    "{decl_file}:1: collector `{}`: read failed: {e} — fix: answer `read`",
+                    c.name
+                ));
+                continue;
+            }
+        };
+        let (said, records, last) = first;
+        if said != records.len() as u64 {
+            report.errors.push(format!(
+                "{decl_file}:1: collector `{}`: read says {said} records but streamed {} — fix: \
+                 count every `$/record` it sends",
+                c.name,
+                records.len()
+            ));
+        }
+        if let Some(r) = records
+            .iter()
+            .find(|r| r.get("entity").and_then(Value::as_str) != Some(c.entity.as_str()))
+        {
+            report.errors.push(format!(
+                "{decl_file}:1: collector `{}`: read streamed a record of `{}`, not its entity \
+                 `{}` — fix: stream only what it declares",
+                c.name,
+                r.get("entity").and_then(Value::as_str).unwrap_or("?"),
+                c.entity
+            ));
+        }
+        if records.is_empty() {
+            continue;
+        }
+        let Some(state) = last else {
+            report.errors.push(format!(
+                "{decl_file}:1: collector `{}`: read streamed {} records but no `$/state` \
+                 checkpoint — fix: send `$/state` after each batch",
+                c.name,
+                records.len()
+            ));
+            continue;
+        };
+        match read(Some(state)).await {
+            Err(e) => report.errors.push(format!(
+                "{decl_file}:1: collector `{}`: a read from its own checkpoint failed: {e} — \
+                 fix: accept the `$/state` it sent",
+                c.name
+            )),
+            Ok((_, again, _)) if again.len() >= records.len() => report.errors.push(format!(
+                "{decl_file}:1: collector `{}`: its cursor doesn't advance — read again from its \
+                 last `$/state`, it streamed {} of its {} records again — fix: checkpoint past \
+                 what it streamed",
+                c.name,
+                again.len(),
+                records.len()
+            )),
+            Ok(_) => {}
+        }
+    }
 }
 
 /// Compare the session with its golden, or write it with `bless`.

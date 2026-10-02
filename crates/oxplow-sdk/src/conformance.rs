@@ -220,6 +220,21 @@ impl ReferenceClient {
         })
     }
 
+    /// The `params` of every `method` notification the provider has sent
+    /// so far, in order (`$/record`, `$/state`, `$/progress`).
+    pub fn provider_notifications(&self, method: &str) -> Vec<Value> {
+        let m = self.monitor.lock().unwrap_or_else(|e| e.into_inner());
+        m.transcript
+            .iter()
+            .filter(|(from, msg)| {
+                *from == Side::Provider
+                    && msg.get("id").is_none()
+                    && msg.get("method").and_then(Value::as_str) == Some(method)
+            })
+            .map(|(_, msg)| msg.get("params").cloned().unwrap_or(Value::Null))
+            .collect()
+    }
+
     /// Ask it to shut down, wait for it to go, and hand back what was
     /// recorded.
     pub async fn finish(mut self) -> Session {

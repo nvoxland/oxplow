@@ -34,7 +34,11 @@
 //!   `RateLimited` with `retry_after_ms: <ms>`;
 //! - `read-fail-after:<n>` — a `read` fails (`Internal`) after streaming
 //!   (and checkpointing) `n` records;
-//! - `bad-record` — a `read` streams a record of another provider's item.
+//! - `bad-record` — a `read` streams a record of another provider's item;
+//! - `stale-read` — a `read` streams each item with its title prefixed
+//!   `stale ` (what it reads back isn't what its writes recorded);
+//! - `stuck-cursor` — every `$/state` checkpoint is `{ cursor: 0 }`, so a
+//!   read from it streams everything again.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -63,6 +67,8 @@ pub struct Hooks {
     pub rate_limit_ms: Option<u64>,
     pub read_fail_after: Option<u64>,
     pub bad_record: bool,
+    pub stale_read: bool,
+    pub stuck_cursor: bool,
 }
 
 impl Hooks {
@@ -85,6 +91,8 @@ impl Hooks {
                 None if part == "bad-declarations" => self.bad_declarations = true,
                 None if part == "progress" => self.progress = true,
                 None if part == "bad-record" => self.bad_record = true,
+                None if part == "stale-read" => self.stale_read = true,
+                None if part == "stuck-cursor" => self.stuck_cursor = true,
                 _ => {}
             }
         }
@@ -467,6 +475,12 @@ async fn handle(
                 foreign["ref"] = json!("work_item:other:X-1");
                 rows.insert(0, (after + 1, foreign));
             }
+            if hooks.stale_read {
+                for (_, row) in rows.iter_mut() {
+                    let title = row["title"].as_str().unwrap_or_default().to_string();
+                    row["title"] = json!(format!("stale {title}"));
+                }
+            }
             let total = rows.len();
             for (i, (rev, row)) in rows.into_iter().enumerate() {
                 if hooks.read_fail_after == Some(i as u64) {
@@ -488,9 +502,10 @@ async fn handle(
                     json!({ "id": id, "entity": "work_item", "row": row }),
                 )
                 .await?;
+                let cursor = if hooks.stuck_cursor { 0 } else { rev };
                 peer.notify(
                     notify::STATE,
-                    json!({ "id": id, "state": { "cursor": rev, "seen": seen + i as u64 + 1 } }),
+                    json!({ "id": id, "state": { "cursor": cursor, "seen": seen + i as u64 + 1 } }),
                 )
                 .await?;
             }

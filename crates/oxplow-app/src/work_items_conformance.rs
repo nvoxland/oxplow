@@ -32,6 +32,10 @@ pub trait WorkItemsProbe: Send + Sync {
     async fn open_efforts(&self, item_ref: &str) -> usize;
     /// The type of every logged event whose subject names `item_ref`.
     async fn event_types(&self, item_ref: &str) -> Vec<String>;
+    /// Read `provider` back through its collectors (`provider.sync`), its
+    /// records restating its items; `false` when it has none to read
+    /// (oxplow's own, a provider that declares no collector).
+    async fn sync(&self, provider: &str) -> Result<bool, String>;
 }
 
 /// Run every check against `provider` (its id and declared features) as
@@ -231,7 +235,33 @@ pub async fn suite(
         );
     }
 
-    // 7. Delete follows its feature, and cleans up what the suite made
+    // 7. Reading the provider back restates what its writes recorded:
+    //    after a sync, every item is the row it was.
+    let written: Vec<(String, Option<WorkItemRecord>)> = {
+        let mut rows = Vec::new();
+        for r in &created {
+            rows.push((r.clone(), probe.record(r).await));
+        }
+        rows
+    };
+    match probe.sync(provider).await {
+        Err(e) => fail("sync", format!("reading it back failed: {e}")),
+        Ok(false) => {}
+        Ok(true) => {
+            probe.settle().await;
+            for (r, before) in &written {
+                let after = probe.record(r).await;
+                if &after != before {
+                    fail(
+                        "sync",
+                        format!("reading `{r}` back changed its row from {before:?} to {after:?}"),
+                    );
+                }
+            }
+        }
+    }
+
+    // 8. Delete follows its feature, and cleans up what the suite made
     //    when the provider can (a person confirms it).
     for r in created.iter().rev() {
         let deleted = items.delete(&Actor::Human, r, true).await;
@@ -342,6 +372,42 @@ impl WorkItemsProbe for ServicesProbe<'_> {
             .await
             .map(|n| n as usize)
             .unwrap_or(0)
+    }
+
+    async fn sync(&self, provider: &str) -> Result<bool, String> {
+        let svc = self.0;
+        let instance = svc
+            .extension_catalog
+            .get(&svc.layout.project_dir)
+            .iter()
+            .filter(|e| e.enabled)
+            .find_map(|e| {
+                e.providers
+                    .iter()
+                    .find(|s| s.id == provider)
+                    .map(|s| s.approval_name(&e.name))
+            });
+        let Some(instance) = instance else {
+            return Ok(false);
+        };
+        let reads = svc
+            .providers
+            .get(&instance)
+            .await
+            .is_some_and(|i| !i.declared.collectors.is_empty());
+        if !reads {
+            return Ok(false);
+        }
+        svc.commands
+            .run(
+                &Actor::Human,
+                crate::providers::sync::SYNC,
+                serde_json::json!({ "instance": instance }),
+                true,
+            )
+            .await
+            .map(|_| true)
+            .map_err(|e| e.to_string())
     }
 
     async fn event_types(&self, item_ref: &str) -> Vec<String> {

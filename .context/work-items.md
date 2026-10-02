@@ -220,7 +220,11 @@ provider says so); a parent resolves with `hierarchy` and is refused
 without it; links and comments follow their features; every write that
 changed the item logged an event naming it (oxplow's
 `work_item.created` / `edited` / `transitioned` / `linked` /
-`commented`, an external provider's `work_item.recorded`); and delete
+`commented`, an external provider's `work_item.recorded`); reading the
+provider back restates what its writes recorded — after a
+`provider.sync` (`WorkItemsProbe::sync`; nothing to read for oxplow's
+own or a provider without collectors) every item it filed is the row it
+was (P7.A7; the fake's `stale-read` hook is the red); and delete
 follows its feature, cleaning up what the suite filed when the provider
 can. `native` is the provider's own fields for the items it files
 (oxplow's test passes the actor's thread, so `in_progress` claims). A

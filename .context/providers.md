@@ -392,6 +392,15 @@ names).
   `$any` in the golden matches anything, so an author can loosen a
   volatile value by hand); `--bless` writes it. A missing golden is a
   finding.
+- **What it reads** (P7.A7, `read_back`): when the provider declares
+  collectors, `discover` must list each one's entity, and each
+  collector's `read` — after the examples wrote something — must stream
+  records of its entity, exactly as many as its `ReadResult` says,
+  ending with a `$/state` checkpoint; a second `read` from that
+  checkpoint must not stream them all again (**a cursor that doesn't
+  advance** fails; the fake's `stuck-cursor` hook is the red). It shows
+  in `ran` as `discover` and `read <collector>`; the messages join the
+  golden transcript.
 - **The capability suite** runs through a throwaway host: a temp
   project (`GitProvider::init_repository`: an empty root commit) with a
   copy of the extension, `Services::in_memory` over it, the provider

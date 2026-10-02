@@ -220,10 +220,32 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
     assert_eq!(blessed.errors, Vec::<String>::new());
     let report = test_extension(dir.path(), "fake", false).await.unwrap();
     assert_eq!(report.errors, Vec::<String>::new());
+    for ran in ["work_items suite", "read work_items", "discover"] {
+        assert!(
+            report.ran.iter().any(|r| r == ran),
+            "{ran}: {:?}",
+            report.ran
+        );
+    }
+
+    // P7.A7: a cursor that doesn't advance — a second read from its last
+    // checkpoint streams everything again — fails the kit.
+    std::fs::write(
+        ext.join("bin/provider"),
+        format!(
+            "#!/bin/sh\nOXPLOW_FAKE_HOOKS=stuck-cursor exec '{}' \"$@\"\n",
+            fake_bin().display()
+        ),
+    )
+    .unwrap();
+    let report = test_extension(dir.path(), "fake", false).await.unwrap();
     assert!(
-        report.ran.iter().any(|r| r == "work_items suite"),
+        report
+            .errors
+            .iter()
+            .any(|e| e.contains("collector `work_items`") && e.contains("doesn't advance")),
         "{:?}",
-        report.ran
+        report.errors
     );
 }
 

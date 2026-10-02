@@ -488,7 +488,7 @@ mod tests {
             "{out}"
         );
         assert!(
-            out.contains("ran check, provider fake, work_items suite"),
+            out.contains("ran check, provider fake, discover, read work_items, work_items suite"),
             "{out}"
         );
         let (code, out, _) = cli(&["test", "fake", "--root", root]);
@@ -512,7 +512,9 @@ mod tests {
         let (code, out, _) = cli(&["test", "fake", "--root", root]);
         assert_eq!(code, 0, "{out}");
         assert!(
-            out.contains("ran check, provider fake, work_items suite, questions"),
+            out.contains(
+                "ran check, provider fake, discover, read work_items, work_items suite, questions"
+            ),
             "{out}"
         );
 
