@@ -145,7 +145,10 @@ overriding `https://api.linear.app/graphql`). Its example extension is
   `state.after`. Each page sends `$/progress` (`issues: page N`), its
   records, then the checkpoint `{ since, after, until }` (`until`: the
   latest update seen); the last page's is `{ since: until }`, so the next
-  read starts after everything this one saw.
+  read starts after everything this one saw. An issue that maps to no
+  record (no identifier or state, or a state type outside the table) is
+  skipped with a `$/progress` line and a stderr line, and the checkpoint
+  still moves past it — one odd issue never fails every read (tsk718).
 - **Errors**: HTTP 429 or GraphQL `RATELIMITED` → `RateLimited` with
   `Retry-After` (else `X-RateLimit-Requests-Reset`); 401 or
   `AUTHENTICATION_ERROR` → `Auth`; `INVALID_INPUT` → `InvalidInput`.

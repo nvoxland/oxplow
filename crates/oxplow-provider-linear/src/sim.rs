@@ -47,6 +47,9 @@ struct World {
     max_page: usize,
     rate_limit_secs: Option<u64>,
     requests: Vec<Request>,
+    /// Issues answered with this state type instead of their own (a
+    /// workflow the provider can't map).
+    odd_state_types: std::collections::HashMap<String, String>,
 }
 
 pub const TEAM_ID: &str = "team-eng";
@@ -102,6 +105,7 @@ impl LinearSim {
             max_page: 50,
             rate_limit_secs: None,
             requests: Vec::new(),
+            odd_state_types: std::collections::HashMap::new(),
         }));
         let served = world.clone();
         let task = tokio::spawn(async move {
@@ -137,6 +141,14 @@ impl LinearSim {
     /// Refuse the next request as rate limited, retrying after `secs`.
     pub fn rate_limit_next(&self, secs: u64) {
         self.lock().rate_limit_secs = Some(secs);
+    }
+
+    /// Answer `identifier` with workflow state type `kind`, whatever its
+    /// state — a type the provider maps to nothing.
+    pub fn set_state_type(&self, identifier: &str, kind: &str) {
+        self.lock()
+            .odd_state_types
+            .insert(identifier.to_string(), kind.to_string());
     }
 
     /// The comments on `identifier`, oldest first.
@@ -254,6 +266,7 @@ fn answer(w: &mut World, key: &str, request: &Value) -> (u16, Vec<(String, Strin
 
 fn issue_json(w: &World, i: &Issue) -> Value {
     let (sid, name, kind, _) = &w.states[i.state];
+    let kind = w.odd_state_types.get(&i.identifier).unwrap_or(kind);
     json!({
         "id": i.id,
         "identifier": i.identifier,

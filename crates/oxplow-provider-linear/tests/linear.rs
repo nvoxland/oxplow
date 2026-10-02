@@ -496,6 +496,38 @@ async fn its_refs_carry_the_id_its_manifest_gives_it() {
     );
 }
 
+/// P7 review (tsk718): an issue the provider can't map is skipped — said
+/// in `$/progress` — and the read streams the rest and checkpoints past
+/// it, instead of failing every read at the same page.
+#[tokio::test]
+async fn a_read_skips_an_issue_it_cant_map_and_moves_past_it() {
+    let sim = LinearSim::start(KEY).await.unwrap();
+    let (_child, peer) = spawn(&sim, Some(KEY));
+    initialize(&peer).await;
+    let handle = checked(&peer).await;
+    for title in ["a", "b", "c"] {
+        invoke(&peer, &handle, "create", json!({ "title": title }))
+            .await
+            .unwrap();
+    }
+    sim.set_state_type("ENG-2", "paused");
+    let (streamed, result) = read(&peer, &handle, None).await;
+    assert_eq!(result, json!({ "records": 2 }));
+    let refs: Vec<&str> = streamed
+        .iter()
+        .filter_map(|(_, p)| p["row"]["ref"].as_str())
+        .collect();
+    assert_eq!(refs, ["work_item:linear:ENG-1", "work_item:linear:ENG-3"]);
+    assert!(
+        streamed.iter().any(|(m, p)| m == notify::PROGRESS
+            && p["message"].as_str().is_some_and(|t| t.contains("ENG-2"))),
+        "the skip is said: {streamed:?}"
+    );
+    let cursor = streamed.last().unwrap().1["state"].clone();
+    let (_, again) = read(&peer, &handle, Some(cursor)).await;
+    assert_eq!(again, json!({ "records": 0 }), "the checkpoint is past it");
+}
+
 #[tokio::test]
 async fn a_rate_limited_reply_is_rate_limited_with_its_retry_after() {
     let sim = LinearSim::start(KEY).await.unwrap();

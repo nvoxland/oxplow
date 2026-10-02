@@ -765,12 +765,24 @@ async fn read(
             .await?;
         let issues = &data["issues"];
         for node in issues["nodes"].as_array().into_iter().flatten() {
-            let row = instance.record(node)?;
             if let Some(updated) = node["updatedAt"].as_str() {
                 if until.as_deref().is_none_or(|u| updated > u) {
                     until = Some(updated.to_string());
                 }
             }
+            // An issue the provider can't map is skipped and said, never
+            // a failed read: the checkpoint moves past it, so one odd
+            // issue can't fail every read until the instance disables.
+            let row = match instance.record(node) {
+                Ok(row) => row,
+                Err(e) => {
+                    let message = format!("issues: skipped an issue: {e}");
+                    eprintln!("oxplow-provider-linear: {message}");
+                    peer.notify(notify::PROGRESS, json!({ "id": id, "message": message }))
+                        .await?;
+                    continue;
+                }
+            };
             peer.notify(
                 notify::RECORD,
                 json!({ "id": id, "entity": "work_item", "row": row }),
