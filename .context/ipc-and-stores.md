@@ -17,7 +17,29 @@ transaction as the state change ([data-model.md](./data-model.md)
 "event_log"); a commit that logged one wakes the pump (the change loop
 in `models_changed.rs` sees `event_log` among its tables), and the
 in-memory `EventBus` is only the renderer's channel (see "Event bus"). A new write path that bypasses the bus
-needs a reason recorded here.
+needs a reason recorded here — the table below.
+
+**What stays off the bus, and why** (P8.A; anything not here is a
+command):
+
+| Write | Why it isn't a command |
+|---|---|
+| select a thread, switch stream, report the open page | UI selection pointers, not project facts |
+| page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit` |
+| follow-ups, background-task progress | in memory and transient |
+| hook ingest, ACP prompt / cancel / permission answers, terminal input, `await_user` | agent-session activity, born as `agent.*` events (§5.1 of target-architecture.md); oxplow never synthesizes agent input |
+| terminal / ACP session open and close, LSP restart and requests | process control and protocol passthrough |
+| workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |
+| AI providers and roles, credentials, approving a program or source | secrets and consent: unreachable from `run_command`, so no invoker list can ever open them to an agent, and no audit row holds a secret |
+
+**Guards** (`crates/oxplow-app/src/source_guards.rs`):
+`rpc_and_mcp_never_write_the_database_themselves` fails on a
+transaction, a rehearsal or a store's `_tx` core in oxplow-rpc or
+oxplow-mcp; `ui_events_have_their_pinned_sources` pins which file may
+push each UI event (its `EMITTERS` table; rows marked `P8.A` go as
+their writes move onto the bus and the desktop reads the model). As
+each domain moves, its store loses its write methods — the compiler then
+holds the rest.
 
 **Then: is it a read of data a model can publish?** Reads are SQL
 (P4): a new read of project data is a **model** (a `models/<name>.sql`
@@ -152,9 +174,12 @@ orphaned, an agent's status, `ConfigChanged` for the Settings view).
 consumer of the log), an asset (tables → recompute), the VCS watcher's
 ref moves (`RefMoves`) or the extension catalog's change signal. Only
 the `/events` forwarder subscribes (`EventBus::subscribe_ui`); the
-source-tree test `ui_push::tests::the_bus_has_one_listener` fails on any
+source-tree test `source_guards::the_bus_has_one_listener` fails on any
 other production caller. A new derived UI event goes in `ui.push` from
-the event that records the fact, not as an `emit` beside the write.
+the event that records the fact, not as an `emit` beside the write —
+and first ask whether the view can re-read a model instead
+(`useRerunOnChange` on `ModelsChanged`). Who may emit each variant is
+pinned (`source_guards::ui_events_have_their_pinned_sources`).
 
 `crates/oxplow-app/src/events.rs` defines the typed `OxplowEvent` discriminated
 union. To add an event:
@@ -170,7 +195,8 @@ union. To add an event:
    no hand-maintained kind list anymore. CI's bindings-drift guard
    fails the PR if you forget the regen.
 3. Publish from the relevant service or command by calling
-   `state.events.emit(OxplowEvent::FooChanged { … })`. The Tauri shell
+   `state.events.emit(OxplowEvent::FooChanged { … })`, and pin the
+   emitting file in `source_guards::EMITTERS`. The Tauri shell
    forwards every emit to the renderer via
    `app_handle.emit(event_channels::OXPLOW, ...)`.
 4. Consume in the UI via

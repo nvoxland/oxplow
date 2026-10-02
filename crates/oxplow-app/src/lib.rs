@@ -105,6 +105,8 @@ pub mod snapshot_capture_registry;
 pub mod snapshot_conformance;
 pub mod snapshot_content;
 pub mod snapshot_files;
+#[cfg(test)]
+mod source_guards;
 pub mod sql_gateway;
 #[cfg(test)]
 mod stream_service_tests;

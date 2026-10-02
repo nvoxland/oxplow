@@ -6,7 +6,7 @@
 //! behind them (a toast, a stream orphaned, an agent's status). Backend
 //! work listens to none of it: it runs on the event pump, an asset, the
 //! VCS watcher's ref moves or the extension catalog's signal.
-//! `the_bus_has_one_listener` holds that: only the `/events` forwarder
+//! `source_guards::the_bus_has_one_listener` holds that: only the `/events` forwarder
 //! subscribes (`EventBus::subscribe_ui`), outside tests.
 
 use oxplow_domain::{DomainError, StoredEvent, StreamId};
@@ -75,7 +75,6 @@ impl EventConsumer for UiPush {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
     use oxplow_domain::events::schema::{EventSchemaRegistry, SnapshotTaken, SnapshotTakenV1};
@@ -137,50 +136,5 @@ mod tests {
             }
         }
         assert_eq!(seen, vec![(7, 2)]);
-    }
-
-    /// Every Rust source file in the workspace's crates and the desktop
-    /// shell, with its text before its `#[cfg(test)]` module.
-    fn production_sources() -> Vec<(PathBuf, String)> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let mut out = Vec::new();
-        let mut stack = vec![root.join("crates"), root.join("apps/desktop/src-tauri/src")];
-        while let Some(dir) = stack.pop() {
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let name = entry.file_name().to_string_lossy().to_string();
-                if path.is_dir() {
-                    if !matches!(name.as_str(), "tests" | "target" | "fixtures" | "examples") {
-                        stack.push(path);
-                    }
-                } else if name.ends_with(".rs") {
-                    let text = std::fs::read_to_string(&path).unwrap_or_default();
-                    let prod = text.split("#[cfg(test)]").next().unwrap_or("").to_string();
-                    out.push((path, prod));
-                }
-            }
-        }
-        out
-    }
-
-    /// P7.B6's guard: nothing listens to the in-memory bus but the
-    /// `/events` forwarder that hands it to the renderer. Backend work
-    /// listens to the event pump, an asset, the ref moves or the extension
-    /// catalog's signal instead.
-    #[test]
-    fn the_bus_has_one_listener() {
-        let allowed = ["oxplow-daemon/src/lib.rs", "oxplow-app/src/events.rs"];
-        let listeners: Vec<String> = production_sources()
-            .into_iter()
-            .filter(|(path, text)| {
-                text.contains(".subscribe_ui(")
-                    && !allowed.iter().any(|a| path.to_string_lossy().ends_with(a))
-            })
-            .map(|(path, _)| path.display().to_string())
-            .collect();
-        assert_eq!(listeners, Vec::<String>::new());
     }
 }
