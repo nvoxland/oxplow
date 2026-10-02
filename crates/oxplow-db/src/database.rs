@@ -682,6 +682,25 @@ mod tests {
     /// rather than waiting. r2d2's default error handler logged the
     /// result as `ERROR database is locked` on every fresh project,
     /// for something that its own retry then resolved (tsk262).
+    /// A database that recorded a published contract keeps opening: a
+    /// column doc reworded without a version bump refuses every existing
+    /// database (P7.B3 did that to `ai_result` v2; its v3 is the fix).
+    #[test]
+    fn a_database_holding_an_earlier_published_contract_still_opens() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate_and_compile(&mut conn).unwrap();
+        // The v2 contract as every database recorded it before `480db3ff`.
+        let v2 = r#"[{"name":"id","type":"INTEGER","doc":"Row id."},{"name":"input_hash","type":"TEXT","doc":"sha256 of the canonical `{ op, args }`."},{"name":"provider","type":"TEXT","doc":"The provider that served the model (`ai_*` settings id); another provider of the same model name is another result."},{"name":"model","type":"TEXT","doc":"The model that computed it."},{"name":"prompt_version","type":"TEXT","doc":"The op's prompt version (`classify@1`); a new prompt is a new result."},{"name":"op","type":"TEXT","doc":"`classify`, `score`, `summarize` or `extract`."},{"name":"role","type":"TEXT","doc":"The role it ran on (`decide`, `summarize`, `main`)."},{"name":"caller","type":"TEXT","doc":"What first asked, e.g. `inferred-decisions`, `source:<ext>/<id>`."},{"name":"output_json","type":"TEXT","doc":"The result as JSON."},{"name":"input_tokens","type":"INTEGER","doc":"Input tokens of the call that computed it."},{"name":"output_tokens","type":"INTEGER","doc":"Output tokens of that call."},{"name":"at","type":"TEXT","doc":"When it was computed (RFC 3339)."},{"name":"ai_call_id","type":"INTEGER","doc":"The call that computed it (v_ai_call.id)."}]"#;
+        conn.execute(
+            "INSERT OR REPLACE INTO model_contract (view, version, columns_json, recorded_at)
+             VALUES ('v_ai_result', 2, ?1, '2026-09-30T00:00:00.000000Z')",
+            [v2],
+        )
+        .unwrap();
+        migrate_and_compile(&mut conn)
+            .unwrap_or_else(|e| panic!("an existing database must open: {e}"));
+    }
+
     #[test]
     fn connection_init_never_contends_with_a_writer() {
         let dir = tempfile::tempdir().unwrap();

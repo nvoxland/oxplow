@@ -55,7 +55,7 @@
     - { not_null: id }
     - { unique: id }
 - name: ai_result
-  version: 2
+  version: 3
   description: "Recorded AI computations (P5.E1): a classify / score / summarize / extract result kept by the hash of its input, the provider, the model and the prompt version, so asking again reads it instead of calling. Tokens only; no cost."
   columns:
     - { name: "id", type: "INTEGER", doc: "Row id." }
