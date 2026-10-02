@@ -22,7 +22,10 @@ pub struct BranchReconciler {
     router: Arc<WorktreeRouter>,
     vcs: Arc<dyn Vcs>,
     streams: Arc<dyn StreamStore>,
+    /// Where a changed branch is announced (the UI's `StreamsChanged`).
     events: EventBus,
+    /// What it listens to: the VCS watcher's ref moves.
+    ref_moves: crate::ref_moves::RefMoves,
 }
 
 impl BranchReconciler {
@@ -31,19 +34,21 @@ impl BranchReconciler {
         vcs: Arc<dyn Vcs>,
         streams: Arc<dyn StreamStore>,
         events: EventBus,
+        ref_moves: crate::ref_moves::RefMoves,
     ) -> Self {
         Self {
             router,
             vcs,
             streams,
             events,
+            ref_moves,
         }
     }
 
     /// Reconcile every stream now, then each one whose refs move, for the
     /// life of the process.
     pub fn spawn(self: Arc<Self>) {
-        let mut rx = self.events.subscribe();
+        let mut rx = self.ref_moves.subscribe();
         tokio::spawn(async move {
             match self.router.all().await {
                 Ok(all) => {
@@ -55,11 +60,10 @@ impl BranchReconciler {
             }
             loop {
                 match rx.recv().await {
-                    Ok(OxplowEvent::VcsRefsChanged { stream_id }) => {
+                    Ok(stream_id) => {
                         let path = self.router.resolve(Some(&stream_id.to_string())).await;
                         self.reconcile(&stream_id, &path).await;
                     }
-                    Ok(_) => {}
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -113,5 +117,26 @@ mod tests {
         let row = svc.stream_store.get(&stream.id).await.unwrap().unwrap();
         assert_eq!(row.branch, "elsewhere");
         assert_eq!(row.branch_ref, "refs/heads/elsewhere");
+    }
+
+    /// P7.B6: a ref move reaches the reconciler on the VCS watcher's own
+    /// channel (`RefMoves`), not the in-memory event bus.
+    #[tokio::test]
+    async fn a_ref_move_reaches_the_reconciler_on_its_own_channel() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        svc.branch_reconciler.clone().spawn();
+        let stream = svc.stream_store.list().await.unwrap().remove(0);
+        let ws = svc.worktrees.resolve(Some(&stream.id.to_string())).await;
+        svc.vcs.checkout_branch(&ws, "moved", true).await.unwrap();
+        svc.ref_moves.moved(stream.id);
+        for _ in 0..200 {
+            let row = svc.stream_store.get(&stream.id).await.unwrap().unwrap();
+            if row.branch == "moved" {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("the reconciler never heard the move");
     }
 }

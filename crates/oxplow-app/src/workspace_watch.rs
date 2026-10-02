@@ -55,6 +55,7 @@ impl WorkspaceWatchRegistry {
         streams: StreamService,
         vcs: std::sync::Arc<dyn Vcs>,
         events: EventBus,
+        ref_moves: crate::ref_moves::RefMoves,
         project_dir: PathBuf,
         filter: oxplow_fs_watch::WorkspaceFilter,
     ) -> Self {
@@ -85,6 +86,7 @@ impl WorkspaceWatchRegistry {
                 worktree,
                 &*vcs,
                 events.clone(),
+                ref_moves.clone(),
                 is_worktree,
                 on_orphan,
                 filter.clone(),
@@ -134,6 +136,7 @@ fn spawn_for_stream(
     worktree: PathBuf,
     vcs: &dyn Vcs,
     events: EventBus,
+    ref_moves: crate::ref_moves::RefMoves,
     is_worktree: bool,
     on_orphan: OnOrphan,
     filter: oxplow_fs_watch::WorkspaceFilter,
@@ -224,8 +227,7 @@ fn spawn_for_stream(
     }
 
     let refs = {
-        let bus = events.clone();
-        let on_change = Box::new(move || bus.emit(OxplowEvent::VcsRefsChanged { stream_id }));
+        let on_change = Box::new(move || ref_moves.moved(stream_id));
         match vcs.watch_refs(&worktree, on_change) {
             Ok(guard) => Some(guard),
             Err(e) => {
@@ -334,6 +336,7 @@ mod tests {
             root.clone(),
             &crate::vcs::GitProvider,
             bus.clone(),
+            crate::ref_moves::RefMoves::new(bus.clone()),
             false,
             on_orphan,
             filter,
@@ -434,6 +437,7 @@ mod tests {
             svc.clone(),
             Arc::new(crate::vcs::GitProvider),
             bus.clone(),
+            crate::ref_moves::RefMoves::new(bus.clone()),
             project.clone(),
             oxplow_fs_watch::WorkspaceFilter::default(),
         )
@@ -523,6 +527,7 @@ mod tests {
             svc.clone(),
             Arc::new(crate::vcs::GitProvider),
             bus.clone(),
+            crate::ref_moves::RefMoves::new(bus.clone()),
             project.clone(),
             oxplow_fs_watch::WorkspaceFilter::default(),
         )

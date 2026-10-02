@@ -36,7 +36,7 @@ pub async fn create_worktree(
     // landing in `file_snapshot` immediately.
     if let Some(capture) = svc.snapshot_captures.register(&stream) {
         capture.spawn_watcher();
-        capture.spawn_git_refs_listener();
+        capture.spawn_git_refs_listener(&svc.ref_moves);
     }
     svc.events.emit(OxplowEvent::StreamsChanged);
     Ok(stream)
@@ -59,7 +59,7 @@ pub async fn adopt_worktree(svc: &Services, req: AdoptWorktreeRequest) -> Result
         .await?;
     if let Some(capture) = svc.snapshot_captures.register(&stream) {
         capture.spawn_watcher();
-        capture.spawn_git_refs_listener();
+        capture.spawn_git_refs_listener(&svc.ref_moves);
     }
     svc.events.emit(OxplowEvent::StreamsChanged);
     Ok(stream)

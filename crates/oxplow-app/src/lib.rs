@@ -97,6 +97,7 @@ pub mod prompt_catalog;
 pub mod providers;
 pub mod reasoning;
 pub mod recovery;
+pub mod ref_moves;
 pub mod ref_resolver;
 pub mod resume_check;
 pub mod semantic_catalog;
@@ -612,6 +613,9 @@ pub struct Services {
     /// Keeps `stream.branch` equal to the checked-out branch; spawned at
     /// boot.
     pub branch_reconciler: Arc<branch_reconciler::BranchReconciler>,
+    /// A stream's refs moved (P7.B6): what the backend's ref listeners
+    /// subscribe to instead of the event bus.
+    pub ref_moves: ref_moves::RefMoves,
 }
 
 impl Services {
@@ -785,6 +789,7 @@ impl Services {
         let threads = ThreadService::new(thread_store.clone());
         let tasks = TaskService::new(task_store.clone()).with_event_pump(event_pump.clone());
         let event_bus = EventBus::new();
+        let ref_moves = ref_moves::RefMoves::new(event_bus.clone());
         let hook_ingest = HookIngestService::new(
             db.clone(),
             event_schemas.clone(),
@@ -872,6 +877,7 @@ impl Services {
             vcs.clone(),
             stream_store.clone(),
             event_bus.clone(),
+            ref_moves.clone(),
         ));
         let git = vcs::GitProvider;
         let trees = Arc::new(trees::Trees::new(
@@ -1045,6 +1051,7 @@ impl Services {
             git: vcs::GitProvider,
             worktrees: worktrees.clone(),
             events: event_bus.clone(),
+            ref_moves: ref_moves.clone(),
         }) {
             commands.register(command).expect("vcs commands register");
         }
@@ -1297,6 +1304,7 @@ impl Services {
             worktrees,
             workspace_files,
             branch_reconciler,
+            ref_moves,
             trees,
         })
     }

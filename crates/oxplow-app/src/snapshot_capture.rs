@@ -591,33 +591,22 @@ impl SnapshotCaptureService {
         self.inner.quiet_shutdown.notify_one();
     }
 
-    /// Spawn a listener that turns `OxplowEvent::VcsRefsChanged` into
-    /// a snapshot request for this stream. The event fires whenever
-    /// HEAD or any ref moves (commit, branch switch, fetch, pull,
+    /// Spawn a listener that turns a move of this stream's refs (`moves`,
+    /// the VCS watcher's channel) into a snapshot request. It fires
+    /// whenever HEAD or any ref moves (commit, branch switch, fetch, pull,
     /// rebase, …), so a fresh commit shows up in Local History as a
     /// snapshot row tagged with the new HEAD even when the worktree
     /// itself didn't change between snapshots.
-    ///
-    /// Requires `with_events` to have been called. No-op (returns a
-    /// finished task) when no bus is attached.
-    pub fn spawn_git_refs_listener(&self) -> tokio::task::JoinHandle<()> {
-        let bus = self
-            .inner
-            .events
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        let Some(bus) = bus else {
-            return tokio::spawn(async {});
-        };
-        let mut rx = bus.subscribe();
+    pub fn spawn_git_refs_listener(
+        &self,
+        moves: &crate::ref_moves::RefMoves,
+    ) -> tokio::task::JoinHandle<()> {
+        let mut rx = moves.subscribe();
         let this = self.clone();
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
-                    Ok(OxplowEvent::VcsRefsChanged { stream_id })
-                        if stream_id == this.inner.stream_id =>
-                    {
+                    Ok(stream_id) if stream_id == this.inner.stream_id => {
                         if let Err(e) = this.request_snapshot_for_git_refs().await {
                             debug!(error = %e, "snapshot: git-refs trigger failed");
                         }

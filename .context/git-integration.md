@@ -549,7 +549,8 @@ The index spans every stream's head, up to 5000 commits deep from a
 first boot (the depth the old primary-only walk had).
 
 The boot path runs the initial scan in a detached task. The same
-function is re-run on every `OxplowEvent::VcsRefsChanged` (debounced
+function is re-run on every ref move (`Services.ref_moves`, the VCS
+watcher's own channel — not the in-memory event bus, P7.B6; debounced
 by the refs watch upstream), which catches new commits whether
 they came from the in-app commit affordance or an external
 `git commit` in the user's terminal.
@@ -558,7 +559,7 @@ they came from the in-app commit affordance or an external
 
 `SnapshotCaptureService::spawn_git_refs_listener` (wired from the
 desktop boot in `apps/desktop/src-tauri/src/main.rs`) subscribes to
-`OxplowEvent::VcsRefsChanged` for its stream. On each event it drains
+the ref moves (`RefMoves`) of its stream. On each event it drains
 any pending dirty paths via `request_snapshot(SnapshotSourceKind::GitRefs)`,
 then — if the worktree is clean and HEAD differs from the latest
 snapshot's `revision` — **re-stamps the latest snapshot's

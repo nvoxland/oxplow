@@ -41,7 +41,9 @@ provider stays testable against a tempdir.
   (`StreamService` in `oxplow-session` takes the `Vcs`).
 - **Watching and the graph:** `watch_refs(ws, on_change)` calls back
   when refs move until the returned guard drops (the workspace watch
-  registry turns it into `VcsRefsChanged`); `revision_graph(ws)` is a
+  registry turns it into a **ref move**: `RefMoves::moved(stream)`,
+  `ref_moves.rs` — the backend's listeners hear it on that channel, the
+  renderer as `VcsRefsChanged`, P7.B6); `revision_graph(ws)` is a
   synchronous `RevisionGraph` (ancestry, a revision's time) that metric
   visibility caches over.
 
@@ -93,7 +95,7 @@ that runs each call under `spawn_blocking`. `Services.vcs` holds it as
   undefined.
 - **`BranchReconciler`** (`Services.branch_reconciler`, spawned at
   boot): keeps `stream.branch` equal to the checked-out branch (from
-  `vcs.head`), once per stream at boot and on each `VcsRefsChanged`. A
+  `vcs.head`), once per stream at boot and on each ref move (`RefMoves`). A
   detached head leaves the row alone.
 
 ## Revisions and `Trees`

@@ -47,7 +47,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // commit in any worktree re-stamps that stream's latest snapshot.
     state.snapshot_captures.spawn_all_watchers();
     for svc in state.snapshot_captures.list() {
-        svc.spawn_git_refs_listener();
+        svc.spawn_git_refs_listener(&state.ref_moves);
     }
 
     // Startup sweep + cleanup loop operate on the primary stream's
@@ -266,6 +266,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         let stream_service = state.streams.clone();
         let watch_vcs = state.vcs.clone();
         let watch_bus = event_bus.clone();
+        let watch_moves = state.ref_moves.clone();
         let watch_project_dir = state.layout.project_dir.clone();
         let watch_filter = {
             let cfg = crate::config_service::read_config(&state.config);
@@ -287,6 +288,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
                 stream_service,
                 watch_vcs,
                 watch_bus,
+                watch_moves,
                 watch_project_dir,
                 watch_filter,
             )
@@ -418,16 +420,15 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // change. Idempotent.
     {
         let state = state.clone();
-        let mut rx = state.events.subscribe();
+        let mut rx = state.ref_moves.subscribe();
         tokio::spawn(async move {
             let n = crate::commit_indexer::refresh(&state).await;
             tracing::info!(indexed = n, "commit indexer initial scan done");
             loop {
                 match rx.recv().await {
-                    Ok(crate::events::OxplowEvent::VcsRefsChanged { .. }) => {
+                    Ok(_) => {
                         crate::commit_indexer::refresh(&state).await;
                     }
-                    Ok(_) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }

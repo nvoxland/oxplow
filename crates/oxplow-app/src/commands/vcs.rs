@@ -38,6 +38,8 @@ pub struct VcsTarget {
     pub git: GitProvider,
     pub worktrees: Arc<WorktreeRouter>,
     pub events: EventBus,
+    /// Where a run that moved refs says so.
+    pub ref_moves: crate::ref_moves::RefMoves,
 }
 
 /// What a run changed, for the announcements that follow it.
@@ -145,14 +147,10 @@ async fn announce(target: &VcsTarget, stream: StreamId, touched: Touched) {
     });
     match touched {
         Touched::Workspace => {}
-        Touched::Refs => target
-            .events
-            .emit(OxplowEvent::VcsRefsChanged { stream_id: stream }),
+        Touched::Refs => target.ref_moves.moved(stream),
         Touched::AllRefs => {
             for (id, _) in target.worktrees.all().await.unwrap_or_default() {
-                target
-                    .events
-                    .emit(OxplowEvent::VcsRefsChanged { stream_id: id });
+                target.ref_moves.moved(id);
             }
         }
     }
