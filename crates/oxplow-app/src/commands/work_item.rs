@@ -502,8 +502,13 @@ fn tx_transition(registry: WorkItemsRegistry) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WorkItemTransitionInput = parse(input)?;
         let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
-        let to = oxplow_status(Some(input.to), input.native_state.as_deref())?
-            .expect("a state was given");
+        let to =
+            oxplow_status(Some(input.to), input.native_state.as_deref())?.ok_or_else(|| {
+                CommandError::Invalid {
+                    field: Some("/to".into()),
+                    message: "a transition needs a state".into(),
+                }
+            })?;
         let now = Timestamp::now();
         let set = |status: TaskStatus| {
             oxplow_db::task_store::set_status_tx(ctx.conn, &ctx.events, id, status, now).map_err(
