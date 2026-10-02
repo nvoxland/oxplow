@@ -3565,6 +3565,13 @@ export type ModelDecl = {
 	description: string,
 	// The contract: the view's columns, in order.
 	columns: ColumnDecl[],
+	/**
+	 *  The columns whose values name one row (P8.B1): declared columns,
+	 *  part of the contract. A key implies its test (never null, never
+	 *  repeated), and a materialized model's table takes it as its
+	 *  primary key.
+	 */
+	key?: string[],
 	tests?: TestDecl[],
 	/**
 	 *  Earlier versions kept published beside this one after a breaking

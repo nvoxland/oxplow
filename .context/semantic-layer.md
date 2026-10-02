@@ -184,7 +184,7 @@ by the registry. V109 registered the entity views synced before it.
 
 **Extension models** (P4.9, `crates/oxplow-app/src/extension_models.rs`).
 An extension declares `models:` in `extension.yaml` — each entry the same
-`ModelDecl` as `models.yaml` (name, version, description, columns,
+`ModelDecl` as `models.yaml` (name, version, description, columns, key,
 tests) — with its SQL in `models/<name>.sql` (`models::join_sources`;
 a declaration without its file, or a file without its declaration, is an
 extension error). Each publishes `v_<extension>_<name>` (dashes as
@@ -277,8 +277,20 @@ model changes when `m_<view>` is refilled, not when its inputs move, so
 `ModelsChanged` names it and its readers once per recompute. Its
 watermark is therefore when it was computed; `v_model` (v3) adds
 `materialize`, `computed_at` and `events_to` (from `asset_state`).
-**Not yet:** `interval:` freshness, incremental recompute, and keys in a
-contract.
+**Keys** (P8.B1). A model may declare `key: [col, …]` — the columns
+whose values name one row. Each must be a declared column, named once
+(else an error at the declaration's `file:line`). The key is part of the
+**contract**: `model_contract.key_json` (V141; every version recorded
+before it promised none), the golden pins `{ columns, key }` per version,
+and adding, dropping or reordering a key at a published version is a
+change that needs a bump (`its key became [..]`). A key implies a test,
+`key(<cols>)`, run before the declared ones: its columns are never null
+and no two rows share them. A keyed materialized model's `m_<view>`
+takes the key as its `PRIMARY KEY` (a changed key recreates the table
+for the next recompute). `v_model_column` (v2) shows each column's
+`key_part` (its 1-based place in the key).
+
+**Not yet:** `every:` freshness and incremental recompute.
 
 ## Metrics in SQL (P4.5)
 

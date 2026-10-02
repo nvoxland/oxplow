@@ -488,6 +488,7 @@ mod tests {
                             doc: "d".into(),
                         })
                         .collect(),
+                    key: vec![],
                     tests: Vec::new(),
                     deprecated: Vec::new(),
                     materialize: on_change.then_some(Materialize::OnChange),
@@ -602,6 +603,7 @@ mod tests {
                             doc: "d".into(),
                         })
                         .collect(),
+                    key: vec![],
                     tests: Vec::new(),
                     deprecated: Vec::new(),
                     materialize: on_change.then_some(Materialize::OnChange),

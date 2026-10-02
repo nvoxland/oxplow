@@ -53,6 +53,12 @@ pub struct ModelDecl {
     pub description: String,
     /// The contract: the view's columns, in order.
     pub columns: Vec<ColumnDecl>,
+    /// The columns whose values name one row (P8.B1): declared columns,
+    /// part of the contract. A key implies its test (never null, never
+    /// repeated), and a materialized model's table takes it as its
+    /// primary key.
+    #[serde(default)]
+    pub key: Vec<String>,
     #[serde(default)]
     pub tests: Vec<TestDecl>,
     /// Earlier versions kept published beside this one after a breaking
@@ -206,20 +212,19 @@ pub fn core_sources() -> Result<Vec<ModelSource>, DomainError> {
 pub fn contract_drift(golden: &serde_json::Value, decls: &[ModelDecl]) -> Vec<String> {
     let mut out = Vec::new();
     for d in decls {
-        let now = serde_json::to_value(&d.columns).unwrap_or_default();
+        let now = contract_json(d);
         match golden
             .get(&d.name)
             .and_then(|m| m.get(d.version.to_string()))
         {
             Some(pinned) if *pinned == now => {}
             Some(pinned) => {
-                let was: Vec<ColumnDecl> =
-                    serde_json::from_value(pinned.clone()).unwrap_or_default();
+                let was: Contract = serde_json::from_value(pinned.clone()).unwrap_or_default();
                 out.push(format!(
                     "{} v{}'s contract changed ({}); bump its version",
                     d.name,
                     d.version,
-                    contract_change(&was, &d.columns)
+                    was.change_to(&d.columns, &d.key)
                 ));
             }
             None => out.push(format!(
@@ -241,13 +246,64 @@ pub fn pin_contracts(golden: &serde_json::Value, decls: &[ModelDecl]) -> serde_j
             .entry(d.name.clone())
             .or_insert_with(|| serde_json::Value::Object(Default::default()));
         if let Some(map) = versions.as_object_mut() {
-            map.insert(
-                d.version.to_string(),
-                serde_json::to_value(&d.columns).unwrap_or_default(),
-            );
+            map.insert(d.version.to_string(), contract_json(d));
         }
     }
     serde_json::Value::Object(golden)
+}
+
+/// What a model version promises: its columns and its key (the golden's
+/// and `model_contract`'s shape).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Contract {
+    pub columns: Vec<ColumnDecl>,
+    #[serde(default)]
+    pub key: Vec<String>,
+}
+
+impl Contract {
+    /// The first difference from this contract to `columns` / `key`, in
+    /// words.
+    pub fn change_to(&self, columns: &[ColumnDecl], key: &[String]) -> String {
+        if self.columns != columns {
+            contract_change(&self.columns, columns)
+        } else {
+            format!("its key became [{}]", key.join(", "))
+        }
+    }
+}
+
+fn contract_json(d: &ModelDecl) -> serde_json::Value {
+    serde_json::json!({ "columns": d.columns, "key": d.key })
+}
+
+/// The 1-based line of the declaration `name: <model>` in `text`.
+fn decl_line(text: &str, model: &str) -> Option<usize> {
+    text.lines().enumerate().find_map(|(i, line)| {
+        let rest = line.trim_start().trim_start_matches("- ").trim_start();
+        let value = rest.strip_prefix("name:")?.trim();
+        (value.trim_matches(|c| c == '"' || c == '\'') == model).then_some(i + 1)
+    })
+}
+
+/// A key names declared columns, each once.
+fn check_key(decl: &ModelDecl, at: &str) -> Result<(), DomainError> {
+    let mut seen = BTreeSet::new();
+    for k in &decl.key {
+        if !decl.columns.iter().any(|c| &c.name == k) {
+            return Err(invalid(format!(
+                "{at}: `{}`'s key names `{k}`, which isn't one of its columns",
+                decl.name
+            )));
+        }
+        if !seen.insert(k) {
+            return Err(invalid(format!(
+                "{at}: `{}`'s key names `{k}` twice",
+                decl.name
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Join a `models.yaml` with its SQL files (`file(name)` reads
@@ -260,7 +316,15 @@ pub fn sources_from(
 ) -> Result<Vec<ModelSource>, DomainError> {
     let decls: Vec<ModelDecl> =
         serde_yaml::from_str(yaml).map_err(|e| invalid(format!("{dir}/models.yaml: {e}")))?;
-    join_sources(decls, dir, &format!("{dir}/models.yaml"), file, sql_files)
+    let declared_in = format!("{dir}/models.yaml");
+    for d in &decls {
+        let at = match decl_line(yaml, &d.name) {
+            Some(line) => format!("{declared_in}:{line}"),
+            None => declared_in.clone(),
+        };
+        check_key(d, &at)?;
+    }
+    join_sources(decls, dir, &declared_in, file, sql_files)
 }
 
 /// Join declarations (from `declared_in`) with their `<name>.sql` files in
@@ -276,6 +340,7 @@ pub fn join_sources(
     let mut seen = BTreeSet::new();
     let mut out = Vec::with_capacity(decls.len());
     for decl in decls {
+        check_key(&decl, declared_in)?;
         if !seen.insert(decl.name.clone()) {
             return Err(invalid(format!(
                 "{declared_in}: model `{}` is declared twice",
@@ -315,6 +380,7 @@ pub fn join_sources(
                         d.until
                     ),
                     columns: Vec::new(),
+                    key: Vec::new(),
                     tests: Vec::new(),
                     materialize: None,
                     deprecated: Vec::new(),
@@ -584,7 +650,7 @@ pub fn drop_all(conn: &Connection) -> Result<(), DomainError> {
 /// Whether a source compiles: a kept earlier version is kept only until
 /// its date, and only if its version published.
 enum Kept {
-    Yes(ModelSource),
+    Yes(Box<ModelSource>),
     /// Why not.
     No(String),
 }
@@ -598,7 +664,7 @@ fn fill_twin(
     today: &str,
 ) -> Result<Kept, DomainError> {
     let Some(twin) = &src.twin else {
-        return Ok(Kept::Yes(src.clone()));
+        return Ok(Kept::Yes(Box::new(src.clone())));
     };
     if twin.until.as_str() < today {
         return Ok(Kept::No(format!(
@@ -606,16 +672,9 @@ fn fill_twin(
             src.file, twin.of, src.decl.version, twin.until
         )));
     }
-    let stored: Option<String> = conn
-        .query_row(
-            "SELECT columns_json FROM model_contract WHERE view = ?1 AND version = ?2",
-            params![view_of(&twin.of), src.decl.version],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(map_sql_err)?;
-    let columns: Vec<ColumnDecl> = match stored {
-        Some(json) => serde_json::from_str(&json).map_err(|e| invalid(e.to_string()))?,
+    let stored = stored_contract(conn, &view_of(&twin.of), src.decl.version)?;
+    let contract = match stored {
+        Some(c) => c,
         None => {
             return Ok(Kept::No(format!(
                 "{}: no published contract for `{}` v{} to keep",
@@ -624,8 +683,9 @@ fn fill_twin(
         }
     };
     let mut filled = src.clone();
-    filled.decl.columns = columns;
-    Ok(Kept::Yes(filled))
+    filled.decl.columns = contract.columns;
+    filled.decl.key = contract.key;
+    Ok(Kept::Yes(Box::new(filled)))
 }
 
 pub(crate) fn today() -> String {
@@ -657,7 +717,7 @@ pub fn compile(
     let mut kept = Vec::with_capacity(sources.len());
     for s in sources {
         if let Kept::Yes(s) = fill_twin(&tx, s, view_of, &today)? {
-            kept.push(s);
+            kept.push(*s);
         }
     }
     let sources = kept;
@@ -714,7 +774,7 @@ fn publish(
         // The SELECT checked out: publish the view over its table instead.
         conn.execute_batch(&format!("DROP VIEW {}", quote(&m.view)))
             .map_err(map_sql_err)?;
-        materialize_table(conn, &m.view, &decl.columns)?;
+        materialize_table(conn, &m.view, &decl.columns, &decl.key)?;
         let columns: Vec<String> = decl.columns.iter().map(|c| quote(&c.name)).collect();
         conn.execute_batch(&format!(
             "CREATE VIEW {} AS SELECT {} FROM {}",
@@ -763,16 +823,31 @@ fn materialize_table(
     conn: &Connection,
     view: &str,
     columns: &[ColumnDecl],
+    key: &[String],
 ) -> Result<(), DomainError> {
     let table = materialized_table(view);
-    let wanted: Vec<(String, String)> = columns
+    // Each column with its place in the primary key (0 when not in it).
+    let wanted: Vec<(String, String, i64)> = columns
         .iter()
-        .map(|c| (c.name.clone(), c.sql_type.clone()))
+        .map(|c| {
+            let pk = key
+                .iter()
+                .position(|k| k == &c.name)
+                .map_or(0, |i| i as i64 + 1);
+            (c.name.clone(), c.sql_type.clone(), pk)
+        })
         .collect();
-    if view_columns(conn, &table)? == wanted {
+    let have: Vec<(String, String, i64)> = conn
+        .prepare("SELECT name, type, pk FROM pragma_table_info(?1) ORDER BY cid")
+        .and_then(|mut st| {
+            st.query_map([&table], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect()
+        })
+        .map_err(map_sql_err)?;
+    if have == wanted {
         return Ok(());
     }
-    let defs: Vec<String> = columns
+    let mut defs: Vec<String> = columns
         .iter()
         .map(|c| {
             format!("{} {}", quote(&c.name), c.sql_type)
@@ -780,6 +855,10 @@ fn materialize_table(
                 .to_string()
         })
         .collect();
+    if !key.is_empty() {
+        let cols: Vec<String> = key.iter().map(|k| quote(k)).collect();
+        defs.push(format!("PRIMARY KEY ({})", cols.join(", ")));
+    }
     conn.execute_batch(&format!(
         "DROP TABLE IF EXISTS {t}; CREATE TABLE {t} ({});",
         defs.join(", "),
@@ -866,38 +945,54 @@ fn check_contract(
             show(&declared)
         )));
     }
-    let json = serde_json::to_string(&decl.columns).map_err(|e| invalid(e.to_string()))?;
-    let stored: Option<String> = conn
-        .query_row(
-            "SELECT columns_json FROM model_contract WHERE view = ?1 AND version = ?2",
-            params![m.view, decl.version],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(map_sql_err)?;
-    match stored {
+    match stored_contract(conn, &m.view, decl.version)? {
         None if !record => Ok(()),
         None => {
+            let columns =
+                serde_json::to_string(&decl.columns).map_err(|e| invalid(e.to_string()))?;
+            let key = serde_json::to_string(&decl.key).map_err(|e| invalid(e.to_string()))?;
             conn.execute(
-                "INSERT INTO model_contract (view, version, columns_json, recorded_at)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![m.view, decl.version, json, now],
+                "INSERT INTO model_contract (view, version, columns_json, key_json, recorded_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![m.view, decl.version, columns, key, now],
             )
             .map_err(map_sql_err)?;
             Ok(())
         }
-        Some(before) if before != json => {
-            let before: Vec<ColumnDecl> = serde_json::from_str(&before).unwrap_or_default();
+        Some(before) if before.columns != decl.columns || before.key != decl.key => {
             Err(invalid(format!(
                 "{}: {} v{}'s contract changed ({}); bump its version",
                 m.source.file,
                 decl.name,
                 decl.version,
-                contract_change(&before, &decl.columns)
+                before.change_to(&decl.columns, &decl.key)
             )))
         }
         Some(_) => Ok(()),
     }
+}
+
+/// The contract `(view, version)` recorded, if it published.
+fn stored_contract(
+    conn: &Connection,
+    view: &str,
+    version: u32,
+) -> Result<Option<Contract>, DomainError> {
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT columns_json, key_json FROM model_contract WHERE view = ?1 AND version = ?2",
+            params![view, version],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    row.map(|(columns, key)| {
+        Ok(Contract {
+            columns: serde_json::from_str(&columns).map_err(|e| invalid(e.to_string()))?,
+            key: serde_json::from_str(&key).map_err(|e| invalid(e.to_string()))?,
+        })
+    })
+    .transpose()
 }
 
 fn show(cols: &[(String, String)]) -> String {
@@ -961,9 +1056,12 @@ pub fn run_tests(
         let view = view_of(&src.decl.name);
         conn.execute("DELETE FROM model_test WHERE view = ?1", [&view])
             .map_err(map_sql_err)?;
-        for t in &src.decl.tests {
-            let (name, failing) =
-                test_sql(t, &view, view_of).map_err(|e| invalid(format!("{}: {e}", src.file)))?;
+        let key = (!src.decl.key.is_empty()).then(|| key_test(&src.decl.key, &view));
+        let declared = src.decl.tests.iter().map(|t| {
+            test_sql(t, &view, view_of).map_err(|e| invalid(format!("{}: {e}", src.file)))
+        });
+        for test in key.into_iter().map(Ok).chain(declared) {
+            let (name, failing) = test?;
             let result = conn.query_row(&format!("SELECT count(*) FROM ({failing})"), [], |r| {
                 r.get::<_, i64>(0)
             });
@@ -987,6 +1085,22 @@ pub fn run_tests(
         }
     }
     Ok(out)
+}
+
+/// The test a key implies: its columns are never null, and no two rows
+/// share them.
+fn key_test(key: &[String], view: &str) -> (String, String) {
+    let cols: Vec<String> = key.iter().map(|c| quote(c)).collect();
+    let nulls: Vec<String> = cols.iter().map(|c| format!("{c} IS NULL")).collect();
+    (
+        format!("key({})", key.join(", ")),
+        format!(
+            "SELECT 1 FROM {v} WHERE {} UNION ALL SELECT 1 FROM {v} GROUP BY {} HAVING count(*) > 1",
+            nulls.join(" OR "),
+            cols.join(", "),
+            v = quote(view)
+        ),
+    )
 }
 
 /// A test's name and the query returning the rows that break it.
@@ -1164,7 +1278,7 @@ fn pass(
         let mut sources = Vec::with_capacity(e.sources.len());
         for s in &e.sources {
             match fill_twin(tx, s, &view_of, &today)? {
-                Kept::Yes(s) => sources.push(s),
+                Kept::Yes(s) => sources.push(*s),
                 Kept::No(why) => push(&mut errors, &e.extension, why),
             }
         }
@@ -1455,6 +1569,7 @@ mod tests {
                         }
                     })
                     .collect(),
+                key: vec![],
                 tests: vec![],
                 deprecated: vec![],
                 materialize: None,
@@ -1682,7 +1797,7 @@ mod tests {
             Vec::<String>::new()
         );
         assert!(
-            pinned["a"]["1"].is_array(),
+            pinned["a"]["1"]["columns"].is_array(),
             "the earlier version stays pinned"
         );
     }
@@ -1691,6 +1806,116 @@ mod tests {
     /// `fixtures/model_contracts.json`, so a change without a bump is red
     /// here and not only against a database that recorded the version.
     /// `OXPLOW_BLESS=1` pins a new version (earlier ones stay).
+    /// P8.B1: the key is part of the contract — declaring one at a pinned
+    /// version drifts, and a recorded version refuses a changed key.
+    #[test]
+    fn a_key_is_part_of_the_contract() {
+        let decl: ModelDecl = serde_yaml::from_str(
+            "name: a\nversion: 1\ndescription: d\ncolumns:\n  - { name: id, type: INTEGER, doc: \"Row id.\" }\n",
+        )
+        .unwrap();
+        assert!(decl.key.is_empty());
+        let golden = pin_contracts(&serde_json::json!({}), std::slice::from_ref(&decl));
+        assert_eq!(golden["a"]["1"]["key"], serde_json::json!([]));
+        let mut keyed = decl.clone();
+        keyed.key = vec!["id".into()];
+        assert_eq!(
+            contract_drift(&golden, std::slice::from_ref(&keyed)),
+            vec!["a v1's contract changed (its key became [id]); bump its version".to_string()]
+        );
+
+        let mut conn = fresh();
+        let m = source("k", "SELECT id FROM source('streams')", &["id INTEGER"]);
+        compile(&mut conn, "t", std::slice::from_ref(&m), &view).unwrap();
+        let mut rekeyed = m.clone();
+        rekeyed.decl.key = vec!["id".into()];
+        let err = compile(&mut conn, "t", &[rekeyed], &view).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("(its key became [id]); bump its version"),
+            "{err}"
+        );
+    }
+
+    /// A key names declared columns; another is an error at its line.
+    #[test]
+    fn a_key_on_an_undeclared_column_is_an_error_at_its_line() {
+        let yaml = "- name: a\n  version: 1\n  description: d\n  key: [nope]\n  columns:\n    - { name: id, type: INTEGER, doc: \"Row id.\" }\n";
+        let err = sources_from(
+            yaml,
+            "models",
+            |_| Some("SELECT 1 AS id".into()),
+            || vec!["a".into()],
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains(
+                "models/models.yaml:1: `a`'s key names `nope`, which isn't one of its columns"
+            ),
+            "{err}"
+        );
+    }
+
+    /// A key implies a test: its columns are never null and never repeat.
+    #[test]
+    fn a_duplicate_key_fails_the_key_test() {
+        let mut conn = fresh();
+        conn.execute_batch(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'same', 'main', 'r', 'r', '/a', 't', 't'),
+                      (2, 'worktree', 'same', 'f', 'r', 'r', '/b', 't', 't');",
+        )
+        .unwrap();
+        let mut by_id = source(
+            "by_id",
+            "SELECT id, title FROM source('streams')",
+            &["id INTEGER", "title TEXT"],
+        );
+        by_id.decl.key = vec!["id".into()];
+        let mut by_title = source(
+            "by_title",
+            "SELECT id, title FROM source('streams')",
+            &["id INTEGER", "title TEXT"],
+        );
+        by_title.decl.key = vec!["title".into()];
+        compile(&mut conn, "t", &[by_id.clone(), by_title.clone()], &view).unwrap();
+        let results = run_tests(&conn, &[by_id, by_title], &view).unwrap();
+        let states: Vec<(&str, &str, &str)> = results
+            .iter()
+            .map(|r| (r.view.as_str(), r.test.as_str(), r.state))
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                ("v_t_by_id", "key(id)", "passed"),
+                ("v_t_by_title", "key(title)", "failed"),
+            ]
+        );
+    }
+
+    /// A keyed materialized model's table carries the key as its primary
+    /// key.
+    #[test]
+    fn a_keyed_materialized_table_has_its_primary_key() {
+        let mut conn = fresh();
+        let mut m = source(
+            "mk",
+            "SELECT id, title FROM source('streams')",
+            &["id INTEGER", "title TEXT"],
+        );
+        m.decl.key = vec!["id".into()];
+        m.decl.materialize = Some(Materialize::OnChange);
+        compile(&mut conn, "t", std::slice::from_ref(&m), &view).unwrap();
+        let pk: Vec<(String, i64)> = conn
+            .prepare("SELECT name, pk FROM pragma_table_info('m_v_t_mk') ORDER BY cid")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(pk, vec![("id".to_string(), 1), ("title".to_string(), 0)]);
+    }
+
     #[test]
     fn every_core_model_contract_is_pinned_at_its_version() {
         let path =

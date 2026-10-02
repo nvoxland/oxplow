@@ -999,7 +999,7 @@
     - { not_null: view }
     - { unique: view }
 - name: model_column
-  version: 1
+  version: 2
   description: "Model columns: each model's contract at its current version, in column order."
   columns:
     - { name: view, type: TEXT, doc: "The model's view (`v_model.view`)." }
@@ -1007,6 +1007,7 @@
     - { name: name, type: "", doc: "Column name." }
     - { name: sql_type, type: "", doc: "The column's SQLite declared type; empty for a computed column." }
     - { name: doc, type: "", doc: "What the column holds." }
+    - { name: key_part, type: "", doc: "Its 1-based place in the model's key; null when it isn't part of the key." }
 - name: model_lineage
   version: 1
   description: "Model lineage: what each model reads directly — another model (`ref`, by view) or a table (`source`). Confirmed at compile against what SQLite reports the view reading."

@@ -590,6 +590,7 @@ mod tests {
                         doc: "d".into(),
                     })
                     .collect(),
+                key: vec![],
                 tests: Vec::new(),
                 deprecated: Vec::new(),
                 materialize: None,
