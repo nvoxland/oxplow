@@ -1395,6 +1395,46 @@ async fn a_read_streams_records_into_work_item_and_keeps_its_cursor() {
     );
 }
 
+/// P7 review (tsk715): two syncs of one collector at once don't both read
+/// from the same checkpoint — the second waits, then resumes after the
+/// first — so each item is recorded once and the cursor never goes back.
+#[tokio::test]
+async fn concurrent_syncs_of_one_collector_record_each_item_once() {
+    let (fx, ext) = approved("").await;
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    let refs = three_items(&fx).await;
+    set_hooks(&fx, "slow:300").await;
+    let sync = || {
+        fx.svc.commands.run(
+            &Actor::Human,
+            sync::SYNC,
+            json!({ "instance": INSTANCE }),
+            false,
+        )
+    };
+    let (a, b) = tokio::join!(sync(), sync());
+    let records = [a.unwrap(), b.unwrap()]
+        .iter()
+        .map(|r| r.result["reads"][0]["records"].as_u64().unwrap())
+        .sum::<u64>();
+    assert_eq!(records, 3, "the items were read once between them");
+    for r in &refs {
+        assert_eq!(
+            recorded_for(&fx, r).await,
+            2,
+            "its create's, then one read's"
+        );
+    }
+    assert_eq!(
+        collector_state(&fx).await.state,
+        Some(json!({ "cursor": 3, "seen": 3 }))
+    );
+}
+
 /// P7.A3: a read that fails midway keeps the records its last checkpoint
 /// covered (the next read resumes there), and the failure counts; a
 /// record of another provider's item fails the read and writes nothing.

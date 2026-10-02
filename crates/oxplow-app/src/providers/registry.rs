@@ -210,6 +210,10 @@ pub struct Instance {
     /// One start at a time; held across a start, which `live` never is.
     starting: tokio::sync::Mutex<()>,
     not_before: parking_lot::Mutex<Option<Instant>>,
+    /// One read per collector at a time (tsk715): a second waits, then
+    /// resumes from the checkpoint the first left.
+    pub(super) reading:
+        parking_lot::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl Instance {
@@ -820,6 +824,7 @@ impl ProviderRegistry {
             live: tokio::sync::Mutex::new(None),
             starting: tokio::sync::Mutex::new(()),
             not_before: parking_lot::Mutex::new(None),
+            reading: parking_lot::Mutex::new(std::collections::HashMap::new()),
         }))
     }
 

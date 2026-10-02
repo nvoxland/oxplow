@@ -421,7 +421,9 @@ resets the backoff and reconciles. Settings → Integrations' Enable runs
 it before writing `extensionInstances`.
 
 **Reading: collectors and sync** (`sync.rs`, P7.A3). `Instance::read`
-runs one declared collector's `read` from the checkpoint it last stored
+runs one declared collector's `read` — **one at a time per collector**
+(a second sync waits, then resumes after the first; tsk715) — from the
+checkpoint it last stored
 (`provider_collector_state`, [data-model.md](./data-model.md)), through
 `start_streaming`. Each `$/record` must be the collector's entity and —
 for a work-items provider — a `WorkItemRecord` of its own item; it is

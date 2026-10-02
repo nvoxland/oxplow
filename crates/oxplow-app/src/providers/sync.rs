@@ -106,6 +106,15 @@ impl Instance {
                         .join(", ")
                 ),
             })?;
+        // One read of a collector at a time (tsk715): two from the same
+        // checkpoint would record its items twice and race the cursor.
+        let lock = self
+            .reading
+            .lock()
+            .entry(collector.to_string())
+            .or_default()
+            .clone();
+        let _reading = lock.lock().await;
         let store = oxplow_db::SqliteProviderCollectorStore::new(self.deps.db.clone());
         let started = Instant::now();
         let mut retried = false;
@@ -219,11 +228,16 @@ impl Instance {
                     Err(message) => return Err(failed(message).await),
                 },
                 notify::STATE => {
-                    let state: notify::State = serde_json::from_value(params)
-                        .map_err(|e| ReadFailure::counted(format!("a `$/state`: {e}")))?;
-                    self.commit(&decl.name, std::mem::take(&mut batch), Some(state.state))
+                    let state: notify::State = match serde_json::from_value(params) {
+                        Ok(state) => state,
+                        Err(e) => return Err(failed(format!("a `$/state`: {e}")).await),
+                    };
+                    if let Err(e) = self
+                        .commit(&decl.name, std::mem::take(&mut batch), Some(state.state))
                         .await
-                        .map_err(|e| ReadFailure::counted(e.to_string()))?;
+                    {
+                        return Err(failed(e.to_string()).await);
+                    }
                 }
                 // What it's doing, shown while the read runs (P7.A4).
                 notify::PROGRESS => {
