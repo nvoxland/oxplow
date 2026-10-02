@@ -1696,6 +1696,15 @@ and stops; `set_active` restates which row is a capability's active
 provider (P7.A2). Published as `v_capability_provider`; see
 [work-items.md](./work-items.md).
 
+### `asset_state` — the asset runner (`crates/oxplow-app/src/assets.rs`)
+
+V130 (P7.B1). Each asset's last recompute: `asset` (the primary key —
+`metric_cube`, a materialized model's view), `computed_at`, `events_to`
+(the event log's highest seq as the recompute began), `snapshot_id` (when
+the asset has one), `elapsed_ms`. Written by the runner after each
+recompute; read as `v_asset`. See [semantic-layer.md](./semantic-layer.md)
+"Assets".
+
 ### `provider_collector_state` — `SqliteProviderCollectorStore` (`crates/oxplow-db/src/provider_collector_store.rs`)
 
 V129 (P7.A3). Where each provider instance's collector left off:

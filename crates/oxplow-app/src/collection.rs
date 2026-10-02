@@ -761,13 +761,7 @@ impl CollectionService {
             }
             .await;
             match dual {
-                Ok(id) => {
-                    capture_id = id;
-                    self.events.emit(OxplowEvent::MetricSamplesChanged {
-                        stream_id: oxplow_domain::StreamId::new(stream_val),
-                        measures: self.measures_of(id).await, // tsk207
-                    });
-                }
+                Ok(id) => capture_id = id,
                 Err(e) => {
                     tracing::warn!(error = %e, "failed to write the test-run capture")
                 }
@@ -1107,20 +1101,6 @@ impl CollectionService {
         }
     }
 
-    /// The measure keys a just-written capture touched, for scoping
-    /// `MetricSamplesChanged` (tsk207). Best-effort by design: a `None` capture
-    /// or a lookup failure yields an empty list, which the event treats as
-    /// "unknown — refresh anyway". Never fails an ingest over a hint.
-    async fn measures_of(&self, capture_id: Option<i64>) -> Vec<String> {
-        let Some(id) = capture_id else {
-            return Vec::new();
-        };
-        self.facts
-            .measure_keys_for_capture(id)
-            .await
-            .unwrap_or_default()
-    }
-
     /// The capture-spine detail envelope (T-E1, tsk48): the verbatim per-run
     /// payload wrapped as `{"kind": <detail kind>, "payload": {…}}`, stored in
     /// `metric_capture.detail_json`. The kind discriminates the three run
@@ -1245,13 +1225,7 @@ impl CollectionService {
         }
         .await;
         match dual {
-            Ok(capture_id) => {
-                self.events.emit(OxplowEvent::MetricSamplesChanged {
-                    stream_id: oxplow_domain::StreamId::new(stream_val),
-                    measures: self.measures_of(capture_id).await, // tsk207
-                });
-                capture_id
-            }
+            Ok(capture_id) => capture_id,
             Err(e) => {
                 tracing::warn!(error = %e, "failed to write the analysis capture");
                 None
@@ -1426,13 +1400,7 @@ impl CollectionService {
             }
             .await;
             match dual {
-                Ok(id) => {
-                    capture_id = id;
-                    self.events.emit(OxplowEvent::MetricSamplesChanged {
-                        stream_id: oxplow_domain::StreamId::new(stream_val),
-                        measures: self.measures_of(id).await, // tsk207
-                    });
-                }
+                Ok(id) => capture_id = id,
                 Err(e) => {
                     tracing::warn!(error = %e, "failed to write the coverage capture")
                 }
@@ -1752,11 +1720,6 @@ impl CollectionService {
                 ..NewFact::new(waste_measure.id, spend)
             };
             self.facts.record_facts(capture, vec![fact]).await?;
-            // Single known measure — no lookup needed (tsk207).
-            self.events.emit(OxplowEvent::MetricSamplesChanged {
-                stream_id: thread_row.stream_id,
-                measures: vec![waste_measure.key.clone()],
-            });
         }
         Ok(())
     }
@@ -2085,18 +2048,8 @@ impl CollectionService {
             Ok::<(), DomainError>(())
         }
         .await;
-        match result {
-            // This path only ever writes `oxplow.nudge` (tsk207). Naming it when
-            // the measure was disabled and nothing landed just costs a nudge
-            // consumer one needless refresh — cheaper than threading the write
-            // result back out.
-            Ok(()) => self.events.emit(OxplowEvent::MetricSamplesChanged {
-                stream_id: oxplow_domain::StreamId::new(stream_val),
-                measures: vec!["oxplow.nudge".to_string()],
-            }),
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to project nudge into metric substrate")
-            }
+        if let Err(e) = result {
+            tracing::warn!(error = %e, "failed to project nudge into metric substrate")
         }
     }
 

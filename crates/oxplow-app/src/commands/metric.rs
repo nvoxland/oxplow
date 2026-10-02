@@ -36,7 +36,6 @@ use serde_json::{json, Value};
 
 use super::config_commands::{change, ConfigTarget};
 use super::{Command, Handler, HandlerOutput, TxCtx};
-use crate::events::{EventBus, OxplowEvent};
 use crate::metric_engine::FactFilter;
 use crate::metrics_service::MetricsService;
 
@@ -113,7 +112,6 @@ pub struct MetricTarget {
     pub config: ConfigTarget,
     pub metrics: MetricsService,
     pub facts: Arc<SqliteFactStore>,
-    pub events: EventBus,
     /// Where a run with no stream and no agent stream lands.
     pub primary_stream: StreamId,
 }
@@ -181,11 +179,7 @@ fn stream_for(
 
 /// Assert `input` as a fact on its metric's measure. Returns the capture,
 /// the measure and the stream. Pure over `ctx.conn` (the bus may retry).
-fn record_tx(
-    ctx: &TxCtx<'_>,
-    input: &RecordInput,
-    primary: StreamId,
-) -> Result<(i64, String, StreamId), CommandError> {
+fn record_tx(ctx: &TxCtx<'_>, input: &RecordInput, primary: StreamId) -> Result<i64, CommandError> {
     let stream = stream_for(ctx.actor, input.stream.as_deref(), primary)?;
     let spec = get_spec_tx(ctx.conn, &input.key)
         .map_err(storage)?
@@ -268,7 +262,7 @@ fn record_tx(
         ..NewFact::new(measure.id, input.value)
     };
     let capture_id = record_facts_tx(ctx.conn, capture, vec![fact], None)?;
-    Ok((capture_id, measure.key, stream))
+    Ok(capture_id)
 }
 
 /// The `metric.*` commands.
@@ -277,12 +271,10 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
         config: config_target,
         metrics,
         facts,
-        events,
         primary_stream,
     } = target;
     let record = {
         let facts = facts.clone();
-        let events = events.clone();
         Command::new(
             spec(
                 RECORD,
@@ -296,22 +288,15 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
             ),
             Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
                 let input: RecordInput = parse(input)?;
-                let (capture_id, measure, stream) = record_tx(ctx, &input, primary_stream)?;
+                let capture_id = record_tx(ctx, &input, primary_stream)?;
                 let facts = facts.clone();
-                let events = events.clone();
                 Ok(HandlerOutput {
                     result: json!({
                         "capture_id": capture_id,
                         "key": input.key,
                         "provenance": "asserted",
                     }),
-                    after_commit: Some(Box::new(move || {
-                        facts.facts_committed();
-                        events.emit(OxplowEvent::MetricSamplesChanged {
-                            stream_id: stream,
-                            measures: vec![measure],
-                        });
-                    })),
+                    after_commit: Some(Box::new(move || facts.facts_committed())),
                     ..HandlerOutput::default()
                 })
             })),

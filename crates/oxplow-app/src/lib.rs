@@ -19,6 +19,7 @@ pub mod agent_stall_watch;
 pub mod agent_status_derive;
 pub mod ai_compute;
 pub mod ai_service;
+pub mod assets;
 pub mod attribution;
 pub mod background_task;
 pub mod blob_store;
@@ -454,6 +455,9 @@ pub struct Services {
     /// When each model last changed (P4.6); `models_changed::spawn` keeps
     /// it and announces `ModelsChanged`.
     pub model_watermarks: Arc<models_changed::ModelWatermarks>,
+    /// The assets (P7.B1): derived data recomputed when its input tables
+    /// change — the metric cube; `models_changed::spawn` tells them.
+    pub assets: assets::Assets,
     /// Every event `type@v` the log accepts, with its schema. Core types
     /// at boot; plugin types join when their manifests load.
     pub event_schemas: Arc<EventSchemaRegistry>,
@@ -753,6 +757,7 @@ impl Services {
         let metric_engine = metric_engine::MetricEngine::new(SqliteFactStore::new(db.clone()))
             .with_visibility(metric_visibility.clone());
         let model_watermarks = Arc::new(models_changed::ModelWatermarks::default());
+        let assets = assets::Assets::new(db.clone(), assets::COALESCE);
         let sql = sql
             .with_engine(metric_engine.clone())
             .with_watermarks(model_watermarks.clone());
@@ -966,7 +971,6 @@ impl Services {
             vcs.clone(),
             config_arc.clone(),
             layout.project_dir.clone(),
-            event_bus.clone(),
         )
         .with_fact_store(fact_store.clone())
         .with_background_tasks(background_tasks.clone())
@@ -1125,7 +1129,6 @@ impl Services {
                 config: config_target,
                 metrics: metrics.clone(),
                 facts: fact_store.clone(),
-                events: event_bus.clone(),
                 primary_stream: primary_stream.id,
             }))
         {
@@ -1205,6 +1208,7 @@ impl Services {
             event_log_store,
             sql,
             model_watermarks,
+            assets,
             event_schemas,
             event_pump,
             extension_models,

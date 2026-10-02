@@ -354,11 +354,13 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // Extensions' SQL models (P4.9): compiled now and on every change.
     state.extension_models.clone().spawn(event_bus.clone());
 
-    // Asset subscriptions (P4.6): which models each commit changed.
+    // The one change loop (P4.6, P7.B1): which models each commit
+    // changed, which metric samples landed, which assets went stale.
     crate::models_changed::spawn(
         state.db.clone(),
         state.model_watermarks.clone(),
         event_bus.clone(),
+        state.assets.clone(),
     );
 
     // Event retention (P3.11): expire old agent/test payloads and bodies
@@ -451,21 +453,14 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         });
     }
 
-    // Metric aggregate cube (tsk96): fold each partial-scope measure's captures
-    // into `metric_cube` as facts land, so a sparkline is a GROUP BY over a few
-    // hundred pre-folded rows instead of a replay over every fact. Backfills once,
-    // then keeps up off `MetricSamplesChanged`.
-    //
-    // Purely an accelerator — if this task never ran, every read would take the
-    // fact path exactly as it did before the cube existed.
-    {
-        let builder = crate::metric_cube::MetricCubeBuilder::new((*state.fact_store).clone())
-            .with_visibility(state.metric_visibility.clone());
-        let rx = state.events.subscribe();
-        tokio::spawn(async move {
-            crate::metric_cube::run(builder, rx).await;
-        });
-    }
+    // Metric aggregate cube (tsk96), an asset (P7.B1): it reads the capture
+    // and fact tables, so it folds what lands after each quiet burst of
+    // commits to them; its first build here is the backfill. Purely an
+    // accelerator — an unbuilt cube is a slow read, never a wrong one.
+    state.assets.register(std::sync::Arc::new(
+        crate::metric_cube::MetricCubeBuilder::new((*state.fact_store).clone())
+            .with_visibility(state.metric_visibility.clone()),
+    ));
 
     // Tree-metric BASELINE (tsk41). A `per-path` measure folds over each capture's
     // snapshot file rows, so a repo-wide total needs ONE snapshot listing the whole

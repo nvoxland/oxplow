@@ -198,15 +198,14 @@ welded to collection.
 >   `measures: Vec<String>` (the keys the write touched). A consumer that declares
 >   its own `source_measure` skips an event whose measures it doesn't read — so a
 >   token export stops waking a coverage tile. **Fail-open both ways:** an empty
->   event list (the low-frequency emit sites still send `vec![]`) or an
->   unscoped/formula consumer refreshes on anything. **All emit sites populate it**
->   (tsk198 did the two ~10s token sites; tsk207 the remaining eight). Sites with a
->   single known measure name it directly; multi-measure writers (the gauge sweep,
->   the tests/coverage/analysis ingests) ask the capture they just wrote via
->   `measure_keys_for_capture`, so no call site has to restructure to carry
->   measures back out. An EMPTY capture still names nothing — correctly fail-open,
->   since a capture with no facts can still move a series (supersede / zero-fill,
->   tsk41/tsk44) in ways the facts can't reveal.
+>   event list or an unscoped/formula consumer refreshes on anything. **One
+>   emitter** (P7.B1): the change loop (`models_changed.rs`, `CaptureListener`)
+>   announces it whenever a commit touches `metric_capture` or `fact`, per stream,
+>   naming the measures of the facts that landed since it last read; no recording
+>   site emits it, so none can forget or misname it (a source-tree test holds
+>   that). A capture with no facts is announced with no measures — correctly
+>   fail-open, since a capture with no facts can still move a series (supersede /
+>   zero-fill, tsk41/tsk44) in ways the facts can't reveal.
 >
 > **Before optimizing anything in this path, read
 > [performance.md](./performance.md)** — it has the profiling harness (which
@@ -636,11 +635,12 @@ welded to collection.
 >   `splice_zero_points` — the **same function** the fact path calls (tsk44), not a
 >   copy. Partial deliberately skips it: an empty partial capture restated nothing,
 >   so it means "nothing changed", not "the repo is zero".
-> - **`run`** (spawned in `boot.rs`) — backfills, then keeps up off
->   **`MetricSamplesChanged`**, the one signal every recording site emits
->   (`collection`, `metrics_service`, `task_service`, `token_usage`, MCP). Hooking
->   individual `record_facts` calls would mean five crates to keep in step. Bursts
->   coalesce; failures are logged, never propagated.
+> - **An asset** (P7.B1, `assets.rs`): the builder is a `Materializer` over
+>   `metric_capture` and `fact`, registered at boot. Its first build is the
+>   backfill; after that the change loop marks it dirty on every commit to
+>   either table and it folds once the burst is quiet (1 s), recording
+>   `asset_state`. No bus event, no list of recording sites to keep in step.
+>   Failures are logged, never propagated.
 >
 > **Measured on the real DB (512k facts).** The 5 test specs: **9.26s → 70ms
 > (~131×)**. All **68** specs (both scopes, after tsk99): **11.53s → 1.03s**, with
@@ -931,7 +931,8 @@ and aren't gated.
 
 Each producer writes atomic facts through `record_facts` (a capture + the
 facts). The legacy V38 sample/finding/run/definition writes were removed in
-T-E2 (tsk49); producers emit `MetricSamplesChanged` after their capture write.
+T-E2 (tsk49); the change loop announces `MetricSamplesChanged` for what they
+wrote (P7.B1) — a producer emits nothing itself.
 
 **Collection gate (tsk31).** Before writing, each base-data producer checks
 `fact_store.measure_has_active_spec(<measure>)` and skips when no *enabled* metric
@@ -1147,7 +1148,7 @@ reached through `run_command`, audited like every command):
 - `metric.record { key, value, subject?, dims?, stream? }` — `Tx`: an
   asserted fact (below) written in the bus transaction with its audit
   (`fact_store::record_facts_tx`); after commit it clears the fact memo
-  and emits `MetricSamplesChanged` for the measure.
+  (the change loop announces `MetricSamplesChanged` for the measure).
 - `metric.run { key, stream? }` — `BestEffort` over
   `MetricsService::run_metric_by_key` (the `manual` trigger).
 - `metric.rebuild { force }` — `BestEffort` over
@@ -1393,8 +1394,8 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 > projected** into the substrate: they're oxplow-usage telemetry (UI metadata),
 > not code or agent-activity metrics, so they stay in their own tables.
 
-Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sample`(s)
-→ emit `OxplowEvent::MetricSamplesChanged { stream_id }`.
+Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sample`(s);
+the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 
 > **The plan is for these to become bundled plugins** (jaq/Starlark/exec,
 > registered via `with_builtins()`) so producers are *content*, not hardcoded
@@ -1448,8 +1449,8 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   `v_effort_metric_delta`. The agent
   gets the same numbers as prompt text via oxplow-analytics' `metric-deltas`
   advisory (over the stored `v_effort_metric_delta`).
-- **Event**: `OxplowEvent::MetricSamplesChanged { stream_id }` (coarse — the
-  renderer refetches).
+- **Event**: `OxplowEvent::MetricSamplesChanged { stream_id, measures }`, from
+  the change loop (the renderer refetches).
 
 ## UI
 

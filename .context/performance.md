@@ -109,6 +109,26 @@ declined specs are the next place to look, not the cube.
 `oxplow.test_duration` (3.06 M) are 88% of all facts — retention or
 aggregation of those is its own task (filed with this measurement).
 
+## The cube as an asset: what a burst costs (P7.B1, 2026-10-01)
+
+`crates/oxplow-app/examples/cube_burst.rs` on a `VACUUM INTO` copy of the
+live project DB (3.9 GB, **11,325,374 facts**, 47 measures), release
+build. The asset runner calls `build_all` once per quiet burst of commits
+to `metric_capture` / `fact`:
+
+| | |
+|---|---|
+| A burst with nothing new to fold | **~145 ms** (47 measures' watermark checks) |
+| A burst after one `oxplow.test_case` capture | **~22 s** — 21.5 s of it that one measure's fold |
+| … the same burst's other 46 measures | ~0.6 s |
+
+The 145 ms empty burst is the asset mechanism's own cost. The 22 s is
+not new — the bus loop it replaced ran the same `build_all` per burst —
+but it is what every test run costs the live app, since each records an
+`oxplow.test_case` capture over a measure with ~5 M facts. It is filed
+as tsk704 (the per-case test measures' fold), with this
+measurement.
+
 ## Zero-splice producer discovery (tsk239)
 
 The effort panel asks, per measure, "which producers emit this metric's slice"

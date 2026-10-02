@@ -32,9 +32,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use oxplow_db::{FactRow, Measure, MetricCapture, NewCubeRow, SqliteFactStore};
 use oxplow_domain::{DomainError, Timestamp};
-use tokio::sync::broadcast;
 
-use crate::events::OxplowEvent;
 use crate::metric_engine::{
     dim_value_cached, fold_key, parse_capture_scope, ratio_empty, splice_zero_points, Aggregation,
     CaptureScope, Cell, DimsCache, FactFilter, SeriesPoint, Visibility, SCALAR_SUBJECT,
@@ -533,40 +531,29 @@ fn restated_keys(scope: CaptureScope, own: &[&FactRow], scanned: Vec<String>) ->
     keys
 }
 
-/// Keep the cube fresh off the event bus: backfill once at startup, then fold
-/// each new capture as facts land.
+/// The cube is an asset (P7.B1, `assets.rs`): its inputs are the capture and
+/// fact tables, so a commit to either makes it stale and the asset runner
+/// folds what landed — no bus event, no list of recording sites to keep in
+/// step. Its first build at registration is the backfill: the incremental
+/// fold from an empty watermark, deliberately not a second SQL-side fold
+/// that could drift from it.
 ///
-/// `MetricSamplesChanged` is the right trigger because it is the ONE signal every
-/// recording site emits — `collection`, `metrics_service`, `task_service`,
-/// `token_usage`, and the MCP surface all go through it. Hooking the individual
-/// `record_facts` calls instead would mean five crates to keep in step and a
-/// silent cube lag the first time someone adds a sixth.
-///
-/// Nothing here is load-bearing for correctness: if this task never ran, every
-/// read would simply take the fact path, exactly as before the cube existed.
-pub(crate) async fn run(builder: MetricCubeBuilder, mut rx: broadcast::Receiver<OxplowEvent>) {
-    // The backfill IS the incremental loop from an empty watermark — deliberately
-    // not a second, SQL-side fold, which would be a second implementation free to
-    // drift from this one.
-    let n = builder.build_all().await;
-    tracing::info!(folded = n, "metric cube backfill done");
-    loop {
-        match rx.recv().await {
-            Ok(OxplowEvent::MetricSamplesChanged { .. }) => {
-                // Coalesce a burst: a sweep records many captures back to back,
-                // and the build is incremental, so one pass after the burst does
-                // the same work as one pass per event without the churn.
-                while rx.try_recv().is_ok() {}
-                builder.build_all().await;
-            }
-            Ok(_) => continue,
-            // A lagged subscriber only missed the NUDGE, not the work — the build
-            // folds everything after the watermark either way.
-            Err(broadcast::error::RecvError::Lagged(_)) => {
-                builder.build_all().await;
-            }
-            Err(broadcast::error::RecvError::Closed) => break,
-        }
+/// Nothing here is load-bearing for correctness: an unbuilt cube is a slow
+/// read (every read takes the fact path), never a wrong one.
+#[async_trait::async_trait]
+impl crate::assets::Materializer for MetricCubeBuilder {
+    fn asset(&self) -> &str {
+        "metric_cube"
+    }
+
+    fn inputs(&self) -> Vec<String> {
+        vec!["metric_capture".into(), "fact".into()]
+    }
+
+    async fn recompute(&self) -> Result<crate::assets::Recomputed, DomainError> {
+        let folded = self.build_all().await;
+        tracing::debug!(folded, "metric cube folded");
+        Ok(crate::assets::Recomputed::default())
     }
 }
 

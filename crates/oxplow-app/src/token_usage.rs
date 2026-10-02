@@ -628,26 +628,15 @@ impl TokenUsageService {
         let Some(stream_val) = StreamId::try_from_str(stream_id).map(|s| s.value()) else {
             return;
         };
-        let measures = match self
+        if let Err(e) = self
             .record_token_metrics(thread, stream_val, by_model, effort_val, rec)
             .await
         {
-            Ok(measures) => measures,
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to project token usage into metric substrate");
-                return;
-            }
-        };
-        // Scoped to what this path wrote (tsk198): `oxplow.turn`, or empty
-        // (fail-open) when the turn measure is disabled and nothing landed.
-        self.events.emit(OxplowEvent::MetricSamplesChanged {
-            stream_id: StreamId::new(stream_val),
-            measures,
-        });
+            tracing::warn!(error = %e, "failed to project token usage into metric substrate");
+        }
     }
 
-    /// Returns the measure keys written (for event scoping, tsk198) — `["oxplow.turn"]`
-    /// when turn facts landed, empty when the measure is disabled or no turns occurred.
+    /// Record the turn facts (the change loop announces them, P7.B1).
     async fn record_token_metrics(
         &self,
         thread: &ThreadId,
@@ -655,7 +644,7 @@ impl TokenUsageService {
         by_model: &std::collections::HashMap<String, TokenAgg>,
         effort_val: Option<i64>,
         rec: &TurnRecord,
-    ) -> Result<Vec<String>, DomainError> {
+    ) -> Result<(), DomainError> {
         // Turn facts only (epic tsk22): the `oxplow.tokens` facts now come from
         // the OTEL producer (`ingest_otlp_tokens`) — accurate + multi-agent —
         // so the transcript path projects just the `oxplow.turn` count (one
@@ -670,7 +659,7 @@ impl TokenUsageService {
             .await
             .unwrap_or(true)
         {
-            return Ok(Vec::new());
+            return Ok(());
         }
         let turn_measure = self.facts.get_measure("oxplow.turn").await?;
         if let Some(tm) = turn_measure {
@@ -695,10 +684,9 @@ impl TokenUsageService {
                 capture.effort_id = effort_val;
                 capture.idempotency_key = rec.cause.as_ref().map(|c| format!("turn-tokens:{c}"));
                 self.facts.record_facts(capture, facts).await?;
-                return Ok(vec![tm.key]);
             }
         }
-        Ok(Vec::new())
+        Ok(())
     }
 
     /// Ingest an OTLP metrics export (epic tsk22) — the OpenTelemetry successor
@@ -844,27 +832,12 @@ impl TokenUsageService {
             return Ok(0);
         }
         let count = facts.len();
-        // Scope the event to the measures this export actually wrote (tsk198),
-        // so the ~10s OTLP cadence stops waking metric views that read none of
-        // them. `measure_ids` is the distinct set the facts landed on; map it
-        // back to keys via the measures resolved above.
-        let written: std::collections::HashSet<i64> = facts.iter().map(|f| f.measure_id).collect();
-        let measures: Vec<String> = [&tokens_measure, &cache_measure, &usage_measure]
-            .into_iter()
-            .flatten()
-            .filter(|m| written.contains(&m.id))
-            .map(|m| m.key.clone())
-            .collect();
         let mut capture = NewMetricCapture::done(stream.value(), "otel-tokens", "otel");
         capture.thread_id = Some(thread.value());
         capture.trigger = Some("continuous".into());
         capture.effort_id = effort_val;
         capture.idempotency_key = Some(otlp_idempotency_key(thread, body));
         self.facts.record_facts(capture, facts).await?;
-        self.events.emit(OxplowEvent::MetricSamplesChanged {
-            stream_id: *stream,
-            measures,
-        });
         Ok(count)
     }
 }
@@ -1551,30 +1524,6 @@ mod tests {
                 Some(expected),
                 "{key}: spec headline over OTEL facts",
             );
-        }
-    }
-
-    #[tokio::test]
-    async fn ingest_otlp_tokens_emits_event_scoped_to_the_measures_written() {
-        // tsk198: the ~10s OTLP cadence must name the measures it touched so a
-        // metric view reading none of them can skip the event. A plain
-        // input/output export writes only `oxplow.tokens`.
-        let (svc, _dir, thread) = service_fixture().await;
-        let stream = svc.streams.ensure_primary().await.unwrap().id;
-        let mut rx = svc.events.subscribe();
-        let body = crate::otlp_tokens::encoded_claude_export("claude-opus-4-8", 100, 20);
-
-        svc.token_usage
-            .ingest_otlp_tokens(&thread, &stream, &body)
-            .await
-            .unwrap();
-
-        let ev = rx.try_recv().expect("an event was emitted");
-        match ev {
-            OxplowEvent::MetricSamplesChanged { measures, .. } => {
-                assert_eq!(measures, vec!["oxplow.tokens".to_string()]);
-            }
-            other => panic!("expected MetricSamplesChanged, got {other:?}"),
         }
     }
 

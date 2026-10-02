@@ -303,10 +303,16 @@ What a query read is what it subscribes to.
   not persisted) and emits `OxplowEvent::ModelsChanged { models }`.
 - **Results:** `SqlQueryResult.freshness` is the watermark of each model
   the query read that changed since the app started.
-- A `metric_grid()` query's `reads.measures` pairs with
-  `MetricSamplesChanged { measures }`: facts land on every OTLP burst, and
-  the measure scope keeps a metric tile quiet unless its own measures
-  moved (tsk198).
+- **Metric samples:** the same loop announces
+  `MetricSamplesChanged { stream_id, measures }` when a commit touches
+  `metric_capture` or `fact` (`CaptureListener`: the measures of the facts
+  that landed since it last read, per stream; a capture with no facts is
+  announced with none, fail-open). It is the event's one emitter (P7.B1).
+  A `metric_grid()` query's `reads.measures` pairs with it: facts land on
+  every OTLP burst, and the measure scope keeps a metric tile quiet unless
+  its own measures moved (tsk198).
+- **Assets:** the same loop tells the asset runner which tables changed
+  (see "Assets").
 - **The UI** (`src/lens/lensRerun.ts`): every lens host — the lens page,
   slots, dashboard lens tiles, the rail's alerts and the explorer — keeps
   its last run's `reads` and re-runs through `useRerunOnChange` when
@@ -316,6 +322,29 @@ What a query read is what it subscribes to.
   the old everything-but-two deny-list (`shouldRerunLens`) and its 750 ms
   debounce are gone; a burst of commits coalesces into one re-run
   (100 ms).
+
+## Assets (P7.B1)
+
+Derived data whose inputs are **tables** is an asset
+(`crates/oxplow-app/src/assets.rs`): a `Materializer` names its asset and
+input tables and recomputes it; `Services.assets` (an `Assets` runner) is
+told by the change loop which tables each commit touched, marks the
+materializers reading them dirty, and recomputes each once its inputs have
+been quiet for `COALESCE` (1 s) — a sweep's burst of writes is one
+recompute. Each recompute is recorded in `asset_state` (V130) and read as
+**`v_asset`** (`asset`, `computed_at`, `events_to` — the log's highest
+seq as it began — `snapshot_id`, `elapsed_ms`): an asset's freshness and
+provenance. A registered asset builds once at registration (its
+backfill); a failed recompute is logged and the next change retries.
+
+Derived data whose inputs include the world **outside** the tables (a
+snapshot's blobs, the VCS tree, a program, a provider) is ingestion
+instead — a collector or a pump consumer, at-least-once and checkpointed
+(target-architecture.md §8.2).
+
+The metric cube is the first asset (inputs `metric_capture`, `fact`): see
+[metrics.md](./metrics.md). What a burst costs it is in
+[performance.md](./performance.md).
 
 ## The `v_*` contract (current)
 

@@ -1,12 +1,20 @@
-//! Asset subscriptions (P4.6, `.context/semantic-layer.md`
-//! "Subscriptions"): which models a write changed. The database says which
-//! tables each commit touched (`Database::subscribe_changes`); this follows
-//! the lineage the model compiler recorded (`model_input`: a model reads a
-//! table through `source()` or another model through `ref()`) from those
-//! tables to every model that reads them, directly or through other models,
-//! stamps each one's watermark, and announces `OxplowEvent::ModelsChanged`.
-//! A lens re-runs when a model it read is in it; a query result carries its
-//! models' watermarks as `freshness`.
+//! The one change loop (P4.6, P7.B1; `.context/semantic-layer.md`
+//! "Subscriptions"): the database says which tables each commit touched
+//! (`Database::subscribe_changes`), and three things follow from it.
+//!
+//! - **Models.** This follows the lineage the model compiler recorded
+//!   (`model_input`: a model reads a table through `source()` or another
+//!   model through `ref()`) from those tables to every model that reads
+//!   them, directly or through other models, stamps each one's watermark,
+//!   and announces `OxplowEvent::ModelsChanged`. A lens re-runs when a
+//!   model it read is in it; a query result carries its models'
+//!   watermarks as `freshness`.
+//! - **Metric samples.** A commit to `metric_capture` or `fact` is
+//!   announced as `OxplowEvent::MetricSamplesChanged`, per stream, naming
+//!   the measures of the facts that landed — the one place that event is
+//!   made, so no recording site can forget it ([`CaptureListener`]).
+//! - **Assets.** Each asset whose inputs it touched is marked dirty
+//!   (`assets::Assets`), and recomputes once its inputs are quiet.
 //!
 //! The watermarks are in memory: they're derivable (nothing is lost by a
 //! restart but "changed since boot"), and they change on every write.
@@ -98,33 +106,157 @@ impl ModelWatermarks {
     }
 }
 
-/// Follow the database's changes to models, for the life of the process.
-pub fn spawn(db: Database, watermarks: Arc<ModelWatermarks>, events: EventBus) {
+/// Where the listener has read the capture and fact tables up to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CaptureListener {
+    capture: i64,
+    fact: i64,
+}
+
+impl CaptureListener {
+    /// Start at the tables' current ends: only what lands from now on is
+    /// announced.
+    pub async fn at_end(db: &Database) -> Result<Self, DomainError> {
+        db.read(|tx| {
+            tx.query_row(
+                "SELECT (SELECT coalesce(max(id), 0) FROM metric_capture),
+                        (SELECT coalesce(max(id), 0) FROM fact)",
+                [],
+                |r| {
+                    Ok(Self {
+                        capture: r.get(0)?,
+                        fact: r.get(1)?,
+                    })
+                },
+            )
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+    }
+
+    /// What landed since the last call, per stream: the measures of its
+    /// new facts, sorted — and an empty list (fail-open: "unknown, refresh
+    /// anyway") for a stream with a new capture that recorded none.
+    pub async fn landed(
+        &mut self,
+        db: &Database,
+    ) -> Result<Vec<(oxplow_domain::StreamId, Vec<String>)>, DomainError> {
+        let since = *self;
+        let (rows, next) = db
+            .read(move |tx| {
+                let mut st = tx
+                    .prepare(
+                        "SELECT c.stream_id, m.key FROM fact f
+                           JOIN metric_capture c ON c.id = f.capture_id
+                           JOIN measure m ON m.id = f.measure_id
+                          WHERE f.id > ?1
+                         UNION
+                         SELECT c.stream_id, NULL FROM metric_capture c
+                          WHERE c.id > ?2
+                            AND NOT EXISTS (SELECT 1 FROM fact f WHERE f.capture_id = c.id)",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = st
+                    .query_map([since.fact, since.capture], |r| {
+                        Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
+                    })
+                    .map_err(oxplow_db::map_sql_err)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(oxplow_db::map_sql_err)?;
+                let next = tx
+                    .query_row(
+                        "SELECT (SELECT coalesce(max(id), 0) FROM metric_capture),
+                                (SELECT coalesce(max(id), 0) FROM fact)",
+                        [],
+                        |r| {
+                            Ok(Self {
+                                capture: r.get(0)?,
+                                fact: r.get(1)?,
+                            })
+                        },
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok((rows, next))
+            })
+            .await?;
+        *self = next;
+        let mut by_stream: std::collections::BTreeMap<i64, BTreeSet<String>> = Default::default();
+        for (stream, measure) in rows {
+            let measures = by_stream.entry(stream).or_default();
+            if let Some(m) = measure {
+                measures.insert(m);
+            }
+        }
+        Ok(by_stream
+            .into_iter()
+            .map(|(stream, measures)| {
+                (
+                    oxplow_domain::StreamId::new(stream),
+                    measures.into_iter().collect(),
+                )
+            })
+            .collect())
+    }
+}
+
+/// Follow the database's changes — models, metric samples and assets —
+/// for the life of the process.
+pub fn spawn(
+    db: Database,
+    watermarks: Arc<ModelWatermarks>,
+    events: EventBus,
+    assets: crate::assets::Assets,
+) {
     let mut rx = db.subscribe_changes();
     tokio::spawn(async move {
         let mut lineage = Lineage::load(&db).await.unwrap_or_else(|error| {
             tracing::warn!(%error, "model lineage didn't load; no model will be reported changed");
             Lineage::default()
         });
+        let mut captures = CaptureListener::at_end(&db).await.unwrap_or_else(|error| {
+            tracing::warn!(%error, "the capture listener starts from the beginning");
+            CaptureListener::default()
+        });
         loop {
-            let models = match rx.recv().await {
+            let (models, samples) = match rx.recv().await {
                 Ok(tables) => {
                     if tables.contains("model_input") {
                         if let Ok(fresh) = Lineage::load(&db).await {
                             lineage = fresh;
                         }
                     }
-                    lineage.affected(tables.iter())
+                    assets.changed(&tables);
+                    (
+                        lineage.affected(tables.iter()),
+                        tables.contains("metric_capture") || tables.contains("fact"),
+                    )
                 }
                 // Missed some: anything may have changed.
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => lineage.all(),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    assets.all_changed();
+                    (lineage.all(), true)
+                }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             };
-            if models.is_empty() {
-                continue;
+            if !models.is_empty() {
+                watermarks.mark(&models, Timestamp::now());
+                events.emit(OxplowEvent::ModelsChanged { models });
             }
-            watermarks.mark(&models, Timestamp::now());
-            events.emit(OxplowEvent::ModelsChanged { models });
+            if samples {
+                match captures.landed(&db).await {
+                    Ok(landed) => {
+                        for (stream_id, measures) in landed {
+                            events.emit(OxplowEvent::MetricSamplesChanged {
+                                stream_id,
+                                measures,
+                            });
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "reading what metric samples landed failed")
+                    }
+                }
+            }
         }
     });
 }
@@ -154,7 +286,12 @@ mod tests {
         // End to end: a task edit is announced for v_task, with a watermark.
         let watermarks = Arc::new(ModelWatermarks::default());
         let mut rx = f.svc.events.subscribe();
-        spawn(f.svc.db.clone(), watermarks.clone(), f.svc.events.clone());
+        spawn(
+            f.svc.db.clone(),
+            watermarks.clone(),
+            f.svc.events.clone(),
+            crate::assets::Assets::new(f.svc.db.clone(), crate::assets::COALESCE),
+        );
         tokio::task::yield_now().await;
         let mut task = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         task.title = "renamed".into();
@@ -186,5 +323,151 @@ mod tests {
             vec!["v_task"]
         );
         assert!(watermarks.freshness(&["v_snapshot".to_string()]).is_empty());
+    }
+
+    /// P7.B1: what landed in the capture and fact tables is announced per
+    /// stream, naming the measures of its facts (sorted, once each); a
+    /// capture with no facts is announced fail-open (no measures). Only
+    /// what landed since the last read counts.
+    #[tokio::test]
+    async fn the_listener_names_the_measures_that_landed_per_stream() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let facts = &f.svc.fact_store;
+        let mut listener = CaptureListener::at_end(&f.svc.db).await.unwrap();
+        let measure = |key: &'static str| async move {
+            facts
+                .upsert_measure(oxplow_db::NewMeasure::new(key, key))
+                .await
+                .unwrap()
+        };
+        let (a, b) = (measure("acme.alpha").await, measure("acme.beta").await);
+        facts
+            .record_facts(
+                oxplow_db::NewMetricCapture::done(1, "p", "s"),
+                vec![
+                    oxplow_db::NewFact::new(b, 1.0),
+                    oxplow_db::NewFact::new(a, 2.0),
+                    oxplow_db::NewFact::new(b, 3.0),
+                ],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            listener.landed(&f.svc.db).await.unwrap(),
+            vec![(
+                oxplow_domain::StreamId::new(1),
+                vec!["acme.alpha".to_string(), "acme.beta".to_string()]
+            )]
+        );
+        assert!(listener.landed(&f.svc.db).await.unwrap().is_empty());
+        facts
+            .record_facts(oxplow_db::NewMetricCapture::done(1, "p2", "s"), Vec::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            listener.landed(&f.svc.db).await.unwrap(),
+            vec![(oxplow_domain::StreamId::new(1), Vec::new())]
+        );
+    }
+
+    /// P7.B1: a recorded capture is announced by the change loop and folded
+    /// into the cube by the asset runner — no recording site emits anything.
+    #[tokio::test]
+    async fn a_recorded_capture_is_announced_and_folded_without_a_bus_event() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let assets =
+            crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(20));
+        let mut rx = f.svc.events.subscribe();
+        spawn(
+            f.svc.db.clone(),
+            Arc::new(ModelWatermarks::default()),
+            f.svc.events.clone(),
+            assets.clone(),
+        );
+        assets.register(Arc::new(crate::metric_cube::MetricCubeBuilder::new(
+            (*f.svc.fact_store).clone(),
+        )));
+        let computed_at = || async {
+            f.svc
+                .db
+                .read(|tx| {
+                    use rusqlite::OptionalExtension;
+                    tx.query_row(
+                        "SELECT computed_at FROM asset_state WHERE asset = 'metric_cube'",
+                        [],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .optional()
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+        };
+        let until = |pred: Box<dyn Fn(Option<String>) -> bool>| async move {
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let at = computed_at().await;
+                    if pred(at.clone()) {
+                        return at;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect("the cube recorded a recompute")
+        };
+        let first = until(Box::new(|at| at.is_some())).await;
+        let m = f
+            .svc
+            .fact_store
+            .upsert_measure(oxplow_db::NewMeasure::new("acme.gamma", "acme.gamma"))
+            .await
+            .unwrap();
+        f.svc
+            .fact_store
+            .record_facts(
+                oxplow_db::NewMetricCapture::done(1, "p", "s"),
+                vec![oxplow_db::NewFact::new(m, 1.0)],
+            )
+            .await
+            .unwrap();
+        let measures = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(OxplowEvent::MetricSamplesChanged { measures, .. }) = rx.recv().await {
+                    return measures;
+                }
+            }
+        })
+        .await
+        .expect("MetricSamplesChanged from the change loop");
+        assert_eq!(measures, vec!["acme.gamma".to_string()]);
+        let first_c = first.clone();
+        until(Box::new(move |at| at.is_some() && at != first_c)).await;
+    }
+
+    /// P7.B1: the change loop is the one place `MetricSamplesChanged` is
+    /// made — a recording site that emitted its own could drift from what
+    /// landed.
+    #[test]
+    fn only_the_change_loop_makes_metric_samples_changed() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut offenders = Vec::new();
+        let mut stack = vec![src];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs")
+                    && !path.ends_with("models_changed.rs")
+                {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    if text.contains("emit(OxplowEvent::MetricSamplesChanged") {
+                        offenders.push(path.display().to_string());
+                    }
+                }
+            }
+        }
+        assert_eq!(offenders, Vec::<String>::new());
     }
 }

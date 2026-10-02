@@ -29,11 +29,11 @@ use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::stores::{TaskLinkStore, TaskStore};
 use oxplow_domain::EffortId;
 use oxplow_domain::{
-    DomainError, StreamId, Task, TaskActorKind, TaskAuthor, TaskId, TaskImpact, TaskLinkType,
-    TaskPriority, TaskStatus, ThreadId, Timestamp,
+    DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskImpact, TaskLinkType, TaskPriority,
+    TaskStatus, ThreadId, Timestamp,
 };
 
-use crate::events::{EventBus, OxplowEvent};
+use crate::events::EventBus;
 
 #[derive(Debug, Error)]
 pub enum TaskServiceError {
@@ -864,19 +864,9 @@ impl TaskService {
                 Ok(())
             }
             .await;
-            match dual {
-                Ok(()) => {
-                    if let Some(events) = self.events.as_ref() {
-                        // This path writes only `oxplow.effort_steering` (tsk207).
-                        events.emit(OxplowEvent::MetricSamplesChanged {
-                            stream_id: StreamId::new(stream_val),
-                            measures: vec!["oxplow.effort_steering".to_string()],
-                        });
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "effort lifecycle: fact write failed");
-                }
+            // The change loop announces the facts that landed (P7.B1).
+            if let Err(e) = dual {
+                tracing::warn!(error = %e, "effort lifecycle: fact write failed");
             }
         }
     }
