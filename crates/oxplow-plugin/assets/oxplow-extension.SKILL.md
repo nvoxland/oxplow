@@ -467,6 +467,31 @@ to a read-only SQL query:
 - **Unmentioned entities.** One the run doesn't return is left as it was.
 - **Default.** `sync: replace` makes each run restate everything.
 
+## Health and repair
+
+oxplow keeps each provider's and collector's health on this machine in
+`v_plugin_health` (`plugin`, `contribution`, `kind`, `state` = `ok` |
+`failing` | `disabled`, `reason`, `last_error`, `dead_letters`, `fresh`,
+`repair_item`). Each collector's last run is in `v_collector_run`
+(`status`, `last_run_at`, `error`).
+
+- **Three failures in a row disable it.** A disabled collector doesn't
+  run, `collector.sync` refuses naming the reason, and a lens over its
+  view carries the reason as a warning.
+- **A disable files a repair work item** (`repair_item`). Its body is the
+  whole repair brief: what the extension is for, the declaration, the
+  last errors, the failing fixture and the `check` report. A repeat
+  failure comments on the open item. When the user asks you to repair an
+  extension, read that item first.
+- **Fix it, then prove it.** Change the script or declaration, run
+  `oxplow plugin check` and `oxplow plugin test`, then `collector.sync`
+  (`run_collector`) — a refusal while it's disabled is expected.
+- **You can't enable it again.** `plugin.enable` is the user's: tell them
+  to press **Enable Again** in Settings → Extensions once your fix is in.
+- **Undelivered events** (a consumer that failed on an event) are in
+  `v_event_dead_letter` (`state = 'pending'`); the user retries or
+  discards them in Settings → Data → Delivery.
+
 ## Sharing and installing
 
 - **Team:** extensions are ordinary committed files under

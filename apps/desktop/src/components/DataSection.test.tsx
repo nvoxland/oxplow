@@ -1,13 +1,30 @@
 import { afterEach, expect, mock, test } from "bun:test";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 // R16: a provider's Approve waits for its declaration diff — disabled while
 // it loads, and still disabled, with the reason shown, when it failed.
 
 const realApi = await import("../api.js");
 let answer: () => Promise<unknown> = () => new Promise(() => {});
+const decided: string[] = [];
+const letter = { id: 7, consumer: "change.analyze", event_seq: 41, error: "boom", attempts: 2, first_failed_at: "t", last_failed_at: "t" };
 mock.module("../api.js", () => ({
   ...realApi,
+  querySql: async (sql: string) => ({
+    columns: ["id", "consumer", "event_seq", "event_type", "error", "attempts", "last_failed_at"],
+    rows: sql.includes("FROM v_event_dead_letter") ? [[7, "change.analyze", 41, "snapshot.taken", "boom", 2, "t"]] : [],
+    truncated: false,
+    reads: { models: ["v_event_dead_letter"], tables: [], measures: [] },
+    freshness: {},
+  }),
+  retryDeadLetter: async (id: number) => {
+    decided.push(`retry ${id}`);
+    return { ...letter, state: "retried" };
+  },
+  discardDeadLetter: async (id: number) => {
+    decided.push(`discard ${id}`);
+    return { ...letter, state: "discarded" };
+  },
   listDataEntities: async () => [],
   listCollectors: async () => [],
   listProjectPrograms: async () => [
@@ -29,7 +46,10 @@ mock.module("../api.js", () => ({
 }));
 const { DataSection } = await import("./DataSection.js");
 
-afterEach(cleanup);
+afterEach(() => {
+  decided.length = 0;
+  cleanup();
+});
 
 const approve = (view: ReturnType<typeof render>) =>
   view.container.querySelector('[data-testid^="program-approve-"]') as HTMLButtonElement;
@@ -50,4 +70,20 @@ test("a failed diff is shown, and Approve stays disabled", async () => {
   expect(view.container.textContent).not.toContain("Comparing its declarations");
   expect(approve(view).disabled).toBe(true);
   expect(approve(view).title).toContain("couldn't compare");
+});
+
+// P7.C3: Delivery lists the events a consumer couldn't take; Retry runs
+// at once, Discard arms first and runs on Confirm.
+test("Delivery retries at once and discards only once confirmed", async () => {
+  const view = render(<DataSection />);
+  const row = await waitFor(() => view.getByTestId("delivery-row-7"));
+  expect(row.textContent).toContain("change.analyze couldn't take snapshot.taken (event 41), 2 times");
+  expect(row.textContent).toContain("boom");
+  fireEvent.click(view.getByTestId("delivery-retry-7"));
+  await waitFor(() => expect(decided).toEqual(["retry 7"]));
+  await waitFor(() => expect((view.getByTestId("delivery-retry-7") as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(view.getByTestId("delivery-discard-7-trigger"));
+  expect(decided).toEqual(["retry 7"]);
+  fireEvent.click(view.getByTestId("delivery-discard-7-confirm"));
+  await waitFor(() => expect(decided).toEqual(["retry 7", "discard 7"]));
 });

@@ -5,8 +5,12 @@
 /// Install and Update first show what the extension would bring in (its
 /// programs, hosts, credentials, advisories) and install only the commit
 /// the person confirmed (tsk378).
+/// Each provider instance's and collector's health shows on its
+/// extension's row: a disabled one with its reason, **Enable Again**
+/// (`plugin.enable` as the person) and **Repair with the Agent** (fills
+/// the agent's input with a mention of the repair item; never sends).
 /// Running sources is under Data (DataSection.tsx). See
-/// `.context/extensions.md`.
+/// `.context/extensions.md` → "Health, disable and repair".
 ///
 /// Usability contract (.context/usability.md): no modals; Enter submits
 /// the install strip; failures land in opErrorsStore, not alerts.
@@ -28,6 +32,7 @@ import {
   type CollectorListing,
 } from "../api.js";
 import { NEW_LENS_PROMPT } from "../lens/lensModel.js";
+import { enableAgain, healthLine, healthOf, repairWithAgent, usePluginHealth, type PluginHealth } from "../pluginHealth.js";
 import { collectorRan, extensionCredentials, extensionRowModel, reviewModel } from "./extensionRowModel.js";
 import { EffectDiff } from "./EffectDiff.js";
 import { InlineConfirm } from "./InlineConfirm.js";
@@ -38,6 +43,7 @@ import { EmptyState } from "./Prompts/EmptyState.js";
 export function ExtensionsSection() {
   const [exts, setExts] = useState<Extension[] | null>(null);
   const [collectors, setCollectors] = useState<CollectorListing[]>([]);
+  const health = usePluginHealth();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   /** An install or update waiting on the person's go-ahead. */
@@ -171,6 +177,9 @@ export function ExtensionsSection() {
                     {err}
                   </div>
                 ))}
+                {healthOf(health, m.name).map((h) => (
+                  <HealthRow key={`${h.kind}:${h.contribution}`} health={h} />
+                ))}
                 {extensionCredentials(collectors, m.name).map((c) => (
                   <CredentialRow
                     key={c.name}
@@ -214,6 +223,47 @@ export function ExtensionsSection() {
           onConfirm={() => void confirm()}
           onCancel={() => setPending(null)}
         />
+      ) : null}
+    </div>
+  );
+}
+
+/// One contribution's health line; a disabled one offers Enable Again and,
+/// when its repair item is open, Repair with the Agent.
+export function HealthRow({ health }: { health: PluginHealth }) {
+  const line = healthLine(health);
+  const key = `${health.plugin}-${health.contribution}`;
+  const [enabling, setEnabling] = useState(false);
+  return (
+    <div data-testid={`extension-health-${key}`} style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+      <span style={mutedStyle}>
+        {health.kind} <code>{health.contribution}</code>
+      </span>
+      <span style={line.tone === "error" ? errorInlineStyle : line.tone === "warn" ? warnStyle : mutedStyle}>{line.text}</span>
+      <span style={{ flex: 1 }} />
+      {line.repairItem ? (
+        <button
+          type="button"
+          data-testid={`extension-repair-${key}`}
+          title="Put a request to repair it in the agent's input; nothing is sent until you press Enter"
+          onClick={() => repairWithAgent(line.repairItem as string)}
+        >
+          Repair with the Agent
+        </button>
+      ) : null}
+      {line.canEnable ? (
+        <button
+          type="button"
+          data-testid={`extension-enable-${key}`}
+          title="Turn it back on on this machine"
+          disabled={enabling}
+          onClick={() => {
+            setEnabling(true);
+            void enableAgain(health).finally(() => setEnabling(false));
+          }}
+        >
+          {enabling ? "Enabling…" : "Enable Again"}
+        </button>
       ) : null}
     </div>
   );
@@ -369,3 +419,5 @@ export function CredentialRow({
 const mutedStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-secondary)" };
 const rowStyle: CSSProperties = { padding: "8px 0", borderBottom: "1px solid var(--border-subtle)", fontSize: "var(--text-sm)" };
 const errorStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--severity-critical)", marginTop: 4 };
+const errorInlineStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--severity-critical)" };
+const warnStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--severity-medium)" };

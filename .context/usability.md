@@ -780,6 +780,12 @@ no caller may bypass the bus to write to the terminal.
   The launcher's last row for any typed text is **Ask the Agent: <text>**,
   which inserts the text the same way. Nothing in oxplow sends agent
   input on its own; these only fill the draft.
+- **Repair with the Agent** (P7.C3, Settings → Extensions, on a disabled
+  contribution with an open repair item) is the same gesture: it fills
+  the input with `Repair the extension described in [oxplow ref <item>]
+  — read it first.` (`pluginHealth.ts` → `repairWithAgent`). The brief
+  itself is the work item's body, not the inserted line — a one-line
+  mention is all `insertIntoAgent` can carry.
 - **Visual feedback**: drop target shows a dashed accent border +
   centered "Drop to add to agent context" overlay only while a
   payload with our MIME is hovering. Foreign drags (text, OS files)

@@ -2,7 +2,8 @@
 /// its provider and row count, and every extension source with its last
 /// sync and a Run button (Approve & Run for an exec source nobody on this
 /// machine approved yet). Credentials and enabling stay under Extensions.
-/// See `.context/semantic-layer.md`.
+/// Delivery lists the events a consumer couldn't take, with Retry and
+/// Discard (confirmed inline). See `.context/semantic-layer.md`.
 ///
 /// Usability contract (.context/usability.md): no modals; failures land in
 /// opErrorsStore, not alerts.
@@ -17,6 +18,8 @@ import {
   listProjectPrograms,
   listCollectors,
   approveCollector,
+  discardDeadLetter,
+  retryDeadLetter,
   syncCollector,
   subscribeOxplowEvents,
   type CollectorListing,
@@ -33,7 +36,9 @@ import {
   type EntityRowModel,
   type ProviderEffectState,
 } from "./dataSectionModel.js";
+import { letterLine, useUndelivered, type UndeliveredEvent } from "../delivery.js";
 import { collectorRan, collectorRowModel } from "./extensionRowModel.js";
+import { InlineConfirm } from "./InlineConfirm.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
 
@@ -43,6 +48,7 @@ export function DataSection() {
   const [collectors, setCollectors] = useState<CollectorListing[]>([]);
   const [programs, setPrograms] = useState<ProjectProgram[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const undelivered = useUndelivered();
   // What approving each unapproved provider would change, by instance.
   const [effects, setEffects] = useState<Record<string, ProviderEffectState>>({});
 
@@ -116,6 +122,21 @@ export function DataSection() {
     } finally {
       setBusy(null);
       await refresh();
+    }
+  }
+
+  /** Retry or discard a dead letter; the list re-reads itself. */
+  async function decide(l: UndeliveredEvent, retry: boolean) {
+    setBusy(`letter-${l.id}`);
+    try {
+      const after = retry ? await retryDeadLetter(l.id) : await discardDeadLetter(l.id);
+      if (retry) {
+        showToast({ message: after.state === "retried" ? `Delivered event ${l.eventSeq} to ${l.consumer}.` : `${l.consumer} failed on it again.` });
+      }
+    } catch (e) {
+      recordOpError({ label: `${retry ? "Retry" : "Discard"} event ${l.eventSeq} for ${l.consumer}`, message: String(e) });
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -251,6 +272,39 @@ export function DataSection() {
             </div>
           );
         })
+      )}
+      <h3 style={subheadStyle}>Delivery</h3>
+      {undelivered.length === 0 ? (
+        <div style={mutedStyle} data-testid="data-delivery-empty">
+          Every event reached its consumers.
+        </div>
+      ) : (
+        undelivered.map((l) => (
+          <div key={l.id} data-testid={`delivery-row-${l.id}`} style={rowStyle}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span>{letterLine(l)}</span>
+              <span style={{ flex: 1 }} />
+              <button
+                type="button"
+                data-testid={`delivery-retry-${l.id}`}
+                title="Run the event through its consumer again"
+                disabled={busy !== null}
+                onClick={() => void decide(l, true)}
+              >
+                {busy === `letter-${l.id}` ? "Retrying…" : "Retry"}
+              </button>
+              <InlineConfirm
+                triggerLabel="Discard"
+                confirmLabel="Discard"
+                testIdPrefix={`delivery-discard-${l.id}`}
+                title="Give up on this event for this consumer"
+                disabled={busy !== null}
+                onConfirm={() => void decide(l, false)}
+              />
+            </div>
+            <div style={errorStyle}>{l.error}</div>
+          </div>
+        ))
       )}
     </div>
   );

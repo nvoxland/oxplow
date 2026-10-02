@@ -1,0 +1,34 @@
+# What an agent should be able to answer and do about an extension's
+# health: its failing or disabled providers and collectors, the repair
+# work item a disable files, and events no consumer could take.
+- question: Which extension providers or collectors are failing or disabled, and why?
+  skill: oxplow-extension
+  reaches:
+    sql: >-
+      SELECT plugin, contribution, kind, state, reason, last_error
+      FROM v_plugin_health WHERE state <> 'ok'
+  shape: { columns: [plugin, contribution, kind, state, reason, last_error] }
+- question: Which repair work item describes this disabled collector?
+  skill: oxplow-extension
+  reaches:
+    sql: >-
+      SELECT repair_item FROM v_plugin_health
+      WHERE plugin = 'tracker' AND contribution = 'issues'
+  shape: { columns: [repair_item] }
+- question: When did each collector last run, and did it fail?
+  skill: oxplow-extension
+  reaches:
+    sql: SELECT owner, id, status, last_run_at, error FROM v_collector_run
+  shape: { columns: [owner, id, status, last_run_at, error] }
+- question: Which events couldn't be delivered to their consumer?
+  skill: oxplow-extension
+  reaches:
+    sql: >-
+      SELECT consumer, event_type, error, attempts
+      FROM v_event_dead_letter WHERE state = 'pending'
+  shape: { columns: [consumer, event_type, error, attempts] }
+- question: Run my fixed collector again to see that it works.
+  skill: oxplow-extension
+  reaches:
+    command: collector.sync
+    input: { owner: tracker, id: issues }

@@ -2689,14 +2689,11 @@ export async function listBacklinks(
 
 // ----------------------------------------------------------------------
 // The event log's dead-letter queue (.context/data-model.md "event_log").
+// Read through `v_event_dead_letter` (delivery.ts); a person retries or
+// discards here.
 // ----------------------------------------------------------------------
 
 export type DeadLetter = import("./tauri-bridge/generated/bindings.js").DeadLetter;
-
-/** Parked events; `pending` only unless `all`. */
-export async function listDeadLetters(all = false): Promise<DeadLetter[]> {
-  return unwrap(await commands.listDeadLetters(all));
-}
 
 /** Run the parked event through its consumer again; returns the letter's new state. */
 export async function retryDeadLetter(id: number): Promise<DeadLetter> {

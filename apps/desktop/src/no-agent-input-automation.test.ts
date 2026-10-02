@@ -57,4 +57,16 @@ describe("no agent input automation", () => {
       .filter((rel) => /\bacpPrompt\b/.test(readFileSync(join(SRC_DIR, rel), "utf8")));
     expect(hits).toEqual([]);
   });
+
+  // A failing extension's repair (P7.C3): the person presses Repair with
+  // the Agent, which fills the agent's input with one mention line and
+  // sends nothing. Only that button may call it — nothing runs it on a
+  // disable, a refresh or an event.
+  test("repairWithAgent is only referenced by the Extensions settings button", () => {
+    const allowed = new Set(["pluginHealth.ts", join("components", "ExtensionsSection.tsx")]);
+    const hits = sourceFiles()
+      .filter((rel) => !allowed.has(rel))
+      .filter((rel) => /\brepairWithAgent\b/.test(readFileSync(join(SRC_DIR, rel), "utf8")));
+    expect(hits).toEqual([]);
+  });
 });

@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { DiffEntry, FinishedEntry, FileStatus, InProgressOp, ThreadWorkState, Task } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, dashboardRef, lensRef } from "../../tabs/pageRefs.js";
+import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, dashboardRef, lensRef, indexRef } from "../../tabs/pageRefs.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./sections.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
@@ -24,6 +24,7 @@ import {
   toggleCollapsed,
 } from "../Panels/panelLayout.js";
 import { decide, useProposals, type Proposal } from "../../proposals.js";
+import { deliveryAlert, useUndelivered } from "../../delivery.js";
 import { ProposalCard } from "../Proposals/ProposalCard.js";
 import { panelAlerts, useExtensionPanelRuns, type PanelAlert, type PanelRuns } from "../Panels/usePanelRuns.js";
 import { useContextMenu } from "../useRowContextMenu.js";
@@ -416,6 +417,7 @@ export function RailHud({
   const panelRuns = useExtensionPanelRuns(extPanels, streamId ?? null, threadId);
   const alerts = useMemo(() => panelAlerts(extPanels, panelRuns), [extPanels, panelRuns]);
   const proposals = useProposals();
+  const undelivered = useUndelivered();
   // Bumped by the Alerts row; Approvals scrolls itself into view.
   const [revealApprovals, setRevealApprovals] = useState(0);
   const available = useMemo(
@@ -437,6 +439,7 @@ export function RailHud({
             key={id}
             alerts={alerts}
             proposals={proposals.length}
+            undelivered={undelivered.length}
             onShowApprovals={() => {
               sections.reveal("core:approvals");
               setRevealApprovals((n) => n + 1);
@@ -1200,20 +1203,26 @@ function UncommittedSection({
 /// hidden when there are none. Each row opens the Comments inbox.
 /** Alerts (a core panel, P6.G1): the proposals waiting for the person
  *  (one leading row that reveals Approvals), then every panel badge that
- *  fires, one row each with its message, opening the badge's lens. Live. */
+ *  fires, one row each with its message, opening the badge's lens; and
+ *  one row while events couldn't be delivered, opening Settings (Data →
+ *  Delivery). Live. */
 function AlertsSection({
   alerts,
   proposals,
+  undelivered,
   onShowApprovals,
   onOpenPage,
 }: {
   alerts: PanelAlert[];
   /** How many proposals are pending. */
   proposals: number;
+  /** How many events wait in the dead-letter queue. */
+  undelivered: number;
   onShowApprovals(): void;
   onOpenPage(ref: TabRef): void;
 }) {
-  const count = alerts.length + (proposals > 0 ? 1 : 0);
+  const delivery = deliveryAlert(undelivered);
+  const count = alerts.length + (proposals > 0 ? 1 : 0) + (delivery ? 1 : 0);
   return (
     <RailSection id="core:alerts" title="Alerts" count={count || undefined}>
       {count === 0 ? <RailEmpty label="Nothing needs you" /> : null}
@@ -1228,6 +1237,17 @@ function AlertsSection({
           <span style={{ color: "var(--accent)", fontSize: "var(--text-xs)" }}>
             {proposals === 1 ? "1 proposal awaits your approval" : `${proposals} proposals await your approval`}
           </span>
+        </button>
+      ) : null}
+      {delivery ? (
+        <button
+          type="button"
+          data-testid="rail-alert-delivery"
+          onClick={() => onOpenPage(indexRef("settings"))}
+          title="Open Settings → Data → Delivery"
+          style={{ ...rowStyle, padding: "4px 14px 4px", gap: 8 }}
+        >
+          <span style={{ color: "var(--severity-critical)", fontSize: "var(--text-xs)" }}>{delivery}</span>
         </button>
       ) : null}
       {alerts.map((a) => (

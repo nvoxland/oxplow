@@ -180,7 +180,11 @@ leads with "N proposals await your approval" while any agent proposal is
 pending; the row reveals **Approvals** (`revealPanel`: shown if hidden,
 expanded — Approvals then scrolls itself into view). Alerts' own count
 is its rows: each firing badge, plus one for the proposals row however
-many proposals wait (Approvals' count says how many).
+many proposals wait (Approvals' count says how many), plus one —
+"N events couldn't be delivered" (`delivery.ts` → `useUndelivered`,
+over `v_event_dead_letter`) — while any event waits in the dead-letter
+queue; that row opens Settings, where Data → Delivery retries or
+discards them (P7.C3).
 **Approvals** (P6b.A4) lists the pending proposals from
 `v_command_proposal` (`proposals.ts` → `useProposals`, re-read through
 `useRerunOnChange`) as `ProposalCard`s with Approve and Decline

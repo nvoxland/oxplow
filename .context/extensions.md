@@ -1127,7 +1127,7 @@ project's), plus:
   stay, since deleting one would take its facts. It reseeds when an
   `oxplow/extensions/*/extension.yaml` changes (`WorkspaceChanged`).
 
-## Health, disable and repair (P7.C1–C2)
+## Health, disable and repair (P7.C1–C3)
 
 Every contribution that runs — a provider instance, a collector — shares
 one failure policy (`plugin_health.rs`, the `plugin_health` table read as
@@ -1155,6 +1155,24 @@ one failure policy (`plugin_health.rs`, the `plugin_health` table read as
 - **Enabling.** Only a person: `plugin.enable { plugin, contribution }`
   (human-only). Its kind comes from its `plugin_health` row (or the
   provider registry for an instance enabled before it ever failed).
+- **In the app (C3).** Settings → Extensions shows one health line per
+  contribution under its extension (`pluginHealth.ts`, live over
+  `v_plugin_health`): `OK` with its average time, a missed schedule and
+  undelivered events; `Failing (N in a row): <error>`; or `Disabled:
+  <reason>` with **Enable Again** (`plugin.enable` through
+  `personCommands`) and, while its repair item is open, **Repair with
+  the Agent** — one line in the agent's input, `Repair the extension
+  described in [oxplow ref <repair item>] — read it first.`, never sent
+  (the repair brief is the item's body; `no-agent-input-automation.test.ts`
+  pins the button as its only caller). Settings → Data → **Delivery**
+  lists the pending dead letters (`delivery.ts`, live over
+  `v_event_dead_letter`) with Retry and Discard (`InlineConfirm`); the
+  rail's Alerts shows "N events couldn't be delivered" while any wait.
+- **For agents.** `questions/plugins.yaml` and the extension skill's
+  "Health and repair" section: read `v_plugin_health`,
+  `v_collector_run` and `v_event_dead_letter`, read the repair item
+  first, fix, check, test, `collector.sync` — and ask the person to
+  Enable Again (an agent can't run `plugin.enable`).
 
 ## Advisories
 

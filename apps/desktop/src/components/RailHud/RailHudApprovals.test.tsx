@@ -30,10 +30,23 @@ mock.module("../../api.js", () => ({
         freshness: {},
       };
     }
+    if (sql.includes("FROM v_event_dead_letter")) {
+      return {
+        columns: ["id", "consumer", "event_seq", "event_type", "error", "attempts", "last_failed_at"],
+        rows: [
+          [8, "change.analyze", 41, "snapshot.taken", "boom", 1, "t"],
+          [9, "plugin.repair", 42, "plugin.disabled", "boom", 1, "t"],
+        ],
+        truncated: false,
+        reads: { models: ["v_event_dead_letter"], tables: [], measures: [] },
+        freshness: {},
+      };
+    }
     return (realQuerySql as (...a: unknown[]) => unknown)(sql, ...rest);
   },
 }));
 const { RailHud } = await import("./RailHud.js");
+const { indexRef } = await import("../../tabs/pageRefs.js");
 
 afterEach(() => {
   saved.length = 0;
@@ -50,4 +63,15 @@ test("the Alerts row for waiting proposals reveals a hidden Approvals panel", as
   expect(view.getByTestId("proposal-7")).toBeTruthy();
   const last = saved.at(-1) as Array<{ panel: string; hidden: boolean; collapsed: boolean }>;
   expect(last.find((p) => p.panel === "core:approvals")).toMatchObject({ hidden: false, collapsed: false });
+});
+
+// P7.C3: one Alerts row while events couldn't be delivered; it opens
+// Settings, where Data → Delivery lists them.
+test("the Alerts row for undelivered events opens Settings", async () => {
+  const opened: unknown[] = [];
+  const view = render(<RailHud threadId={null} streamId={null} threadWork={null} onOpenPage={(r) => opened.push(r)} />);
+  const row = await waitFor(() => view.getByTestId("rail-alert-delivery"));
+  expect(row.textContent).toBe("2 events couldn't be delivered");
+  fireEvent.click(row);
+  expect(opened).toEqual([indexRef("settings")]);
 });
