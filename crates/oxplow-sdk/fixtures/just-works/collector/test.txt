@@ -1,0 +1,1 @@
+stale-work: 0 errors, 0 warnings; ran check, example basic, example empty-project

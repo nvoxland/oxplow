@@ -634,13 +634,37 @@ CLI, the RPC/MCP `validate_extension`, and `save_lens`'s manifest. Every
 door gives an author the same report, so an agent editing from a terminal
 and one calling MCP read identical `file:line: what — fix` lines.
 
-- **`scaffold(root, Kind::Lens|Extension, name, origin)`** writes
-  `oxplow/extensions/<name>/extension.yaml` (v2, `sharing: private`, an
-  `intent` whose `origin` is the ref passed with `--origin`, one
-  example), `fixtures/basic.yaml` (the example as a fixture for the
-  future `plugin test`), and for a lens `lenses/<name>.yaml` (open tasks
-  in the viewer's stream). It refuses an existing folder, a bad name and
-  a non-ref origin; what it writes passes `check` with no warnings.
+- **`scaffold(root, kind, name, origin)`** (`plugin new <kind> <name>`)
+  writes `oxplow/extensions/<name>/extension.yaml` (v2, `sharing:
+  private`, an `intent` whose `origin` is the ref passed with `--origin`,
+  one example) and, but for a bare extension, that example's fixture
+  `fixtures/basic.yaml` — then the kind's starter (P7.C6):
+  - `lens` — `lenses/<name>.yaml`, open tasks in the viewer's stream, with
+    a Start row action (`work_item.transition`, a `ref` column it selects
+    but doesn't show);
+  - `collector` — a Starlark collector `items` over `v_task` declaring
+    entity `item`, a model `open_items` over `ref('item')` and a lens over
+    the model; its example runs the collector over fixture rows;
+  - `command` — `commands: [note]` whose `handlers/note.star` composes
+    `work_item.comment`, with an example and a `ui.commands` entry on
+    `work_item`; its intent example dry-runs it;
+  - `provider` — below; `extension` — the manifest only.
+  It refuses an existing folder, a bad name and a non-ref origin. **What
+  it writes passes `check` with no warnings and `plugin test` clean**
+  (a provider once a program replaces its stub) —
+  `crates/oxplow-sdk/tests/just_works.rs` holds each kind to it, through
+  to loading in a real oxplow: the lens's row action names a registered
+  command, the collector syncs and its model publishes, the command runs
+  through the bus.
+- **Recorded fresh-agent runs** (`crates/oxplow-sdk/fixtures/just-works/
+  <kind>/`): `scripts/record-just-works.sh <kind>` gives `prompt.md` to
+  `claude -p` in an empty git project — `--safe-mode`, so nothing but
+  the oxplow-extension skill (appended to its system prompt) and the
+  `oxplow` CLI built from the checkout — and keeps `run.json`, the
+  extension it wrote (`produced/`), and `check.txt` / `test.txt`;
+  `notes.md` is written by hand. `recorded_agent_runs_still_check_and_
+  test_clean` replays every `produced/` against today's oxplow. Recorded
+  once (it costs a real run): `collector` (2026-10-02, 64 turns, clean).
 - **`check(root, name, catalog, layer: Option<&SqlGateway>)`** is
   `catalog.named` (manifest shape, lifecycle, cross-refs, lens shape;
   a Starlark collector's script must parse and define `transform`, an

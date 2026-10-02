@@ -13,6 +13,7 @@
 pub mod answerability;
 pub mod conformance;
 pub mod plugin_test;
+mod throwaway;
 
 use std::path::{Path, PathBuf};
 
@@ -34,24 +35,37 @@ pub enum SdkError {
     Domain(#[from] DomainError),
 }
 
-/// What `plugin new` can make.
+/// What `plugin new` can make. Each checks clean as written and passes
+/// `plugin test` (P7.C6, `tests/just_works.rs`) — a provider once a real
+/// program stands behind its stub.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// An extension folder with a v2 manifest and one starter lens.
+    /// One starter lens (open tasks in the viewer's stream) with a row
+    /// action that starts one.
     Lens,
-    /// An extension folder with a v2 manifest only.
+    /// A v2 manifest only.
     Extension,
-    /// An extension declaring a work-items provider: its declarations,
-    /// a stub program to replace, and the fixtures `plugin test` runs.
+    /// A work-items provider: its declarations, a stub program to replace,
+    /// and the fixtures `plugin test` runs.
     Provider,
+    /// A derived (Starlark) collector of an entity, a model over it and a
+    /// lens over the model.
+    Collector,
+    /// A command whose script composes core commands, on a work item's
+    /// Commands menu.
+    Command,
 }
 
 impl Kind {
+    pub const NAMES: &'static str = "`lens`, `extension`, `provider`, `collector` or `command`";
+
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
             "lens" => Some(Kind::Lens),
             "extension" => Some(Kind::Extension),
             "provider" => Some(Kind::Provider),
+            "collector" => Some(Kind::Collector),
+            "command" => Some(Kind::Command),
             _ => None,
         }
     }
@@ -108,15 +122,30 @@ pub fn scaffold(
         files.push(rel.to_string());
         Ok(())
     };
-    let (example_input, example_expect) = match kind {
+    let ns = oxplow_app::extension_commands::command_namespace(name);
+    // The intent example, and its fixture (what `plugin test` runs).
+    let (example_input, example_expect, fixture_expect) = match kind {
         Kind::Lens => (
             format!("{{ lens: {name}, params: {{ stream_id: 1 }} }}"),
-            "one row per open task in the stream, newest first".to_string(),
+            "one row per open task in the stream, newest first",
+            Some("{ rows: $any }".to_string()),
         ),
-        Kind::Extension => ("{}".to_string(), "TODO: what a run should show".to_string()),
+        Kind::Extension => ("{}".to_string(), "TODO: what a run should show", None),
         Kind::Provider => (
             "{ command: create, input: { title: First } }".to_string(),
-            "the new item's ref".to_string(),
+            "the new item's ref",
+            Some("{ ref: $any }".to_string()),
+        ),
+        Kind::Collector => (
+            "{ collector: items, rows: [{ id: 1, title: First, status: ready }, { id: 2, title: Second, status: done }] }"
+                .to_string(),
+            "one item per task that isn't done",
+            Some("{ entities: { item: 1 } }".to_string()),
+        ),
+        Kind::Command => (
+            format!("{{ command: {ns}.note, input: {{ ref: \"work_item:oxplow:tsk1\" }} }}"),
+            "a comment on the work item",
+            Some("{ commands: [work_item.comment] }".to_string()),
         ),
     };
     let provider_id = name.replace('-', "_");
@@ -127,54 +156,91 @@ pub fn scaffold(
         origin,
         example_name: "basic",
         example_input: &example_input,
-        example_expect: &example_expect,
+        example_expect,
         shared: false,
     });
-    if kind == Kind::Provider {
-        manifest.push_str(&format!(
+    match kind {
+        Kind::Provider => manifest.push_str(&format!(
             "providers:\n  - id: {provider_id}\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n"
-        ));
+        )),
+        Kind::Collector => manifest.push_str(&format!(
+            "collectors:\n\
+             \x20 # Runs its script over its `input` rows when synced (`trigger: manual`;\n\
+             \x20 # `{{ every: 15m }}` or `{{ on: [snapshot.taken] }}` run it by themselves).\n\
+             \x20 - id: items\n\
+             \x20   runtime: starlark\n\
+             \x20   entry: collectors/items.star\n\
+             \x20   input: \"SELECT id, title, status FROM v_task\"\n\
+             \x20   entities:\n\
+             \x20     - {{ name: item, key: id, columns: {{ id: int, title: text }} }}\n\
+             models:\n\
+             \x20 # v_{ns}_open_items: SQL over the entity (`ref('item')`), checked at load.\n\
+             \x20 - name: open_items\n\
+             \x20   version: 1\n\
+             \x20   description: \"TODO: what these rows are.\"\n\
+             \x20   columns:\n\
+             \x20     - {{ name: id, type: INTEGER, doc: \"The task.\" }}\n\
+             \x20     - {{ name: title, type: TEXT, doc: \"Its title.\" }}\n"
+        )),
+        Kind::Command => manifest.push_str(&format!(
+            "commands:\n\
+             \x20 # Registered as {ns}.note; its script composes core commands, run as the\n\
+             \x20 # caller in one transaction.\n\
+             \x20 - name: note\n\
+             \x20   summary: \"TODO: what it does. Here: comment on a work item.\"\n\
+             \x20   input_schema:\n\
+             \x20     type: object\n\
+             \x20     required: [ref]\n\
+             \x20     properties:\n\
+             \x20       ref: {{ type: string, description: \"The work item (work_item:<provider>:<id>).\" }}\n\
+             \x20     additionalProperties: false\n\
+             \x20   entry: handlers/note.star\n\
+             \x20   examples:\n\
+             \x20     - {{ name: happy, input: {{ ref: \"work_item:oxplow:tsk1\" }}, expect_commands: [work_item.comment] }}\n\
+             ui:\n\
+             \x20 commands:\n\
+             \x20   # On a work item's page (Commands) and a row's right-click.\n\
+             \x20   - {{ command: {ns}.note, label: Add Note, about: work_item }}\n"
+        )),
+        Kind::Lens | Kind::Extension => {}
     }
     write(&format!("{rel_dir}/extension.yaml"), manifest)?;
-    let fixture_expect = match kind {
-        // What `plugin test` compares the invoke result with.
-        Kind::Provider => "{ ref: $any }".to_string(),
-        _ => example_expect.clone(),
-    };
-    write(
-        &format!("{rel_dir}/fixtures/basic.yaml"),
-        format!(
-            "# The acceptance example from extension.yaml as a fixture for `oxplow plugin test`\n\
-             # (input in, expected output out). Keep the two in step.\n\
-             name: basic\ninput: {example_input}\nexpect: {fixture_expect}\n"
-        ),
-    )?;
-    if kind == Kind::Provider {
+    if let Some(expect) = fixture_expect {
         write(
-            &format!("{rel_dir}/provider.json"),
-            serde_json::to_string_pretty(&provider_declarations(name))
-                .expect("declarations serialize")
-                + "\n",
-        )?;
-        write(
-            &format!("{rel_dir}/bin/provider"),
-            "#!/bin/sh\n\
-             # TODO: the provider program. It speaks the provider protocol (JSON-RPC 2.0,\n\
-             # one message per line) on stdin/stdout and answers what provider.json\n\
-             # declares; see the oxplow-extension skill.\n\
-             echo 'provider: not implemented yet' >&2\n\
-             exit 1\n"
-                .to_string(),
-        )?;
-        make_executable(&root.join(&rel_dir).join("bin/provider"))?;
-        write(
-            &format!("{rel_dir}/fixtures/provider-{provider_id}.yaml"),
-            "# The instance config `oxplow plugin test` checks the provider with.\nconfig: {}\n"
-                .to_string(),
+            &format!("{rel_dir}/fixtures/basic.yaml"),
+            format!(
+                "# The acceptance example from extension.yaml as a fixture for `oxplow plugin test`\n\
+                 # (input in, expected output out). Keep the two in step.\n\
+                 name: basic\ninput: {example_input}\nexpect: {expect}\n"
+            ),
         )?;
     }
-    if kind == Kind::Lens {
-        write(
+    match kind {
+        Kind::Provider => {
+            write(
+                &format!("{rel_dir}/provider.json"),
+                serde_json::to_string_pretty(&provider_declarations(name))
+                    .expect("declarations serialize")
+                    + "\n",
+            )?;
+            write(
+                &format!("{rel_dir}/bin/provider"),
+                "#!/bin/sh\n\
+                 # TODO: the provider program. It speaks the provider protocol (JSON-RPC 2.0,\n\
+                 # one message per line) on stdin/stdout and answers what provider.json\n\
+                 # declares; see the oxplow-extension skill.\n\
+                 echo 'provider: not implemented yet' >&2\n\
+                 exit 1\n"
+                    .to_string(),
+            )?;
+            make_executable(&root.join(&rel_dir).join("bin/provider"))?;
+            write(
+                &format!("{rel_dir}/fixtures/provider-{provider_id}.yaml"),
+                "# The instance config `oxplow plugin test` checks the provider with.\nconfig: {}\n"
+                    .to_string(),
+            )?;
+        }
+        Kind::Lens => write(
             &format!("{rel_dir}/lenses/{name}.yaml"),
             format!(
                 "title: {title}\n\
@@ -183,7 +249,7 @@ pub fn scaffold(
                  \x20 # Filled in with the viewer's stream unless a value is given.\n\
                  \x20 - {{ name: stream_id, label: Stream }}\n\
                  query: |\n\
-                 \x20 SELECT id, title, status, updated_at\n\
+                 \x20 SELECT id, 'work_item:oxplow:tsk' || id AS ref, title, status, updated_at\n\
                  \x20 FROM v_task\n\
                  \x20 WHERE stream_id = :stream_id AND status IN ('ready', 'in_progress', 'blocked')\n\
                  \x20 ORDER BY updated_at DESC\n\
@@ -191,11 +257,58 @@ pub fn scaffold(
                  columns:\n\
                  \x20 - {{ key: title, label: Task, link: {{ kind: task, from: id }} }}\n\
                  \x20 - {{ key: status }}\n\
+                 actions:\n\
+                 \x20 # In each row's right-click menu: a command run as the person, the\n\
+                 \x20 # row's values bound in (`{{{{row.<column>}}}}`).\n\
+                 \x20 - {{ id: start, label: Start, command: work_item.transition, input: {{ ref: \"{{{{row.ref}}}}\", to: in_progress }}, row: true }}\n\
                  empty: No open tasks in this stream.\n\
                  launcher: {{ category: Work }}\n",
                 title = title_case(name)
             ),
-        )?;
+        )?,
+        Kind::Collector => {
+            write(
+                &format!("{rel_dir}/collectors/items.star"),
+                "# Gets {\"rows\": [...]} (its `input` query's) and returns the entities it\n\
+                 # declares. Sandboxed: no files, network or clock.\n\
+                 def transform(x):\n\
+                 \x20   return {\"entities\": {\"item\": [\n\
+                 \x20       {\"id\": r[\"id\"], \"title\": r[\"title\"]}\n\
+                 \x20       for r in x[\"rows\"]\n\
+                 \x20       if r[\"status\"] != \"done\"\n\
+                 \x20   ]}}\n"
+                    .to_string(),
+            )?;
+            write(
+                &format!("{rel_dir}/models/open_items.sql"),
+                "SELECT id, title FROM ref('item')\n".to_string(),
+            )?;
+            write(
+                &format!("{rel_dir}/lenses/{name}.yaml"),
+                format!(
+                    "title: {title}\n\
+                     description: \"TODO: what this lens answers.\"\n\
+                     query: SELECT id, title FROM v_{ns}_open_items ORDER BY id\n\
+                     viz: table\n\
+                     columns:\n\
+                     \x20 - {{ key: title, label: Item, link: {{ kind: task, from: id }} }}\n\
+                     empty: Nothing collected yet — sync the collector (Settings → Data).\n\
+                     launcher: {{ category: Work }}\n",
+                    title = title_case(name)
+                ),
+            )?;
+        }
+        Kind::Command => write(
+            &format!("{rel_dir}/handlers/note.star"),
+            "# Gets {\"input\": {...}, \"rows\": [...]} and returns the core commands to run\n\
+             # as the caller, in one transaction — or {\"refuse\": \"why\"}. No I/O.\n\
+             def transform(x):\n\
+             \x20   return {\"commands\": [\n\
+             \x20       {\"name\": \"work_item.comment\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"body\": \"TODO: the note\"}},\n\
+             \x20   ]}\n"
+                .to_string(),
+        )?,
+        Kind::Extension => {}
     }
     Ok(Scaffolded {
         name: name.to_string(),
@@ -327,6 +440,20 @@ pub async fn check(
     layer: Option<&SqlGateway>,
     commands: Option<extensions::CommandSchemas<'_>>,
 ) -> Result<CheckReport, SdkError> {
+    // No running oxplow to ask which commands exist: a throwaway one over
+    // a copy of the project's extensions knows (core's and theirs).
+    let host = match commands {
+        Some(_) => None,
+        None => Some(
+            throwaway::Host::start(root)
+                .await
+                .map_err(SdkError::Invalid)?,
+        ),
+    };
+    let commands = commands.or_else(|| {
+        host.as_ref()
+            .map(|h| h.svc.commands.as_ref() as extensions::CommandSchemas<'_>)
+    });
     let empty;
     let (layer, dry_run) = match layer {
         Some(layer) => (layer, DryRun::Project),
@@ -527,7 +654,10 @@ mod tests {
         assert!(scaffold(dir.path(), Kind::Lens, "Bad Name", None).is_err());
         assert!(scaffold(dir.path(), Kind::Lens, "other", Some("nope")).is_err());
         let ext_only = scaffold(dir.path(), Kind::Extension, "bare", None).unwrap();
-        assert_eq!(ext_only.files.len(), 2);
+        assert_eq!(
+            ext_only.files,
+            vec!["oxplow/extensions/bare/extension.yaml"]
+        );
         assert!(
             check(dir.path(), "bare", &ExtensionCatalog::new(), None, None)
                 .await
@@ -566,10 +696,9 @@ mod tests {
         ));
     }
 
-    /// Launcher command entries are checked whether or not a project
-    /// database is open: against the registry when one is given, and
-    /// otherwise reported unchecked — with where to check them.
-    #[tokio::test]
+    /// Launcher command entries are always checked: against the registry
+    /// when one is given, else a throwaway oxplow's (P7.C6).
+    #[tokio::test(flavor = "multi_thread")]
     async fn launcher_commands_are_checked_without_a_database() {
         let dir = tempfile::tempdir().unwrap();
         write(
@@ -577,16 +706,16 @@ mod tests {
             "oxplow/extensions/acme/extension.yaml",
             "manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{ name: a }]\nlauncher:\n  - { label: New Bug, category: Work, target: { command: work_item.create, input: { title: 7 } } }\n",
         );
-        let unchecked = check(dir.path(), "acme", &ExtensionCatalog::new(), None, None)
+        let throwaway = check(dir.path(), "acme", &ExtensionCatalog::new(), None, None)
             .await
             .unwrap();
         assert!(
-            unchecked
-                .warnings
+            throwaway
+                .errors
                 .iter()
-                .any(|w| w.contains("its commands weren't checked") && w.contains("Settings")),
+                .any(|e| e.contains("the input doesn't fit")),
             "{:?}",
-            unchecked.warnings
+            throwaway.errors
         );
         let schema = serde_json::json!({
             "type": "object",

@@ -239,6 +239,18 @@ commits. The durable fix is a PostToolUse hook on `Edit`/`Write` that
 runs `rustfmt` + `cargo clippy --fix` against the touched crate.
 Until that's installed, run both manually each turn.
 
+## Recording a fresh agent (`scripts/record-just-works.sh`)
+
+`scripts/record-just-works.sh <kind>` records a fresh `claude -p` agent
+building an extension from `crates/oxplow-sdk/fixtures/just-works/<kind>/
+prompt.md` with nothing but the oxplow-extension skill (P7.C6, see
+[extensions.md](./extensions.md) "The SDK"). It costs a real run, so run
+it when the skill or the SDK changes enough that the recording no longer
+says something true — not per commit. Commit what it writes (`run.json`,
+`produced/`, `check.txt`, `test.txt`) with a hand-written `notes.md`;
+`recorded_agent_runs_still_check_and_test_clean` replays `produced/`, and
+a `prompt.md` with nothing recorded fails it.
+
 ## Sources must stay searchable
 
 CI runs `bun run lint:searchable` (`scripts/check-control-chars.py`),

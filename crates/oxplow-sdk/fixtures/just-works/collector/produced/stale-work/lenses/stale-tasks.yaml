@@ -1,0 +1,18 @@
+title: Stale Tasks
+description: Open tasks nobody has edited, commented on or worked on for a week or more, as of the last sync. Longest idle first.
+query: |
+  SELECT id, title, status, priority, days_idle, last_touched_at
+  FROM v_stale_work_stale_tasks
+  ORDER BY days_idle DESC, last_touched_at ASC, id ASC
+viz: table
+columns:
+  - { key: title, label: Task, link: { kind: task, from: id } }
+  - { key: status, label: Status }
+  - { key: priority, label: Priority }
+  - { key: days_idle, label: Days idle }
+  - { key: last_touched_at, label: Last touched }
+empty: No open task has gone a week untouched — or the collector hasn't synced yet (Settings → Data).
+launcher: { category: Work }
+alert: { min_rows: 1, label: Stale tasks }
+actions:
+  - { id: sync, label: Sync, command: collector.sync, input: { owner: stale-work, id: stale_tasks } }

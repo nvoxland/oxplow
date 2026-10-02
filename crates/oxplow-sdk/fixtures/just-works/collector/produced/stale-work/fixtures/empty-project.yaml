@@ -1,0 +1,4 @@
+# A fresh project: the collector has never synced, so the lens is empty.
+name: empty-project
+input: { lens: stale-tasks }
+expect: { columns: [id, title, status, priority, days_idle, last_touched_at], rows: 0 }

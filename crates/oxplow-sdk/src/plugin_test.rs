@@ -4,9 +4,11 @@
 //! `oxplow/extensions/` ([`Host`]) — so it never touches the project's
 //! data: `check` (against its real command registry, so `commands:`
 //! examples dry-run), then each intent example whose fixture names a lens
-//! (`input: { lens, params? }`, `expect: { columns?, rows }`) or a derived
+//! (`input: { lens, params? }`, `expect: { columns?, rows }`), a derived
 //! collector (`input: { collector, rows? }`, `expect: { entities: { <name>:
 //! n } }`; an exec collector's isn't run — it needs a person's approval),
+//! or one of its own commands (`input: { command, input, rows? }`,
+//! `expect: { commands: [names] }` or `{ refuses }`, dry-run),
 //! the extension's `questions.yaml`, and for each declared provider —
 //!
 //! 1. the live `initialize` equals its declarations file;
@@ -37,6 +39,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::conformance::{first_mismatch, normalize, ReferenceClient};
+use crate::throwaway::Host;
 use crate::SdkError;
 
 /// What `plugin test` found.
@@ -53,48 +56,6 @@ pub struct TestReport {
     pub blessed: Vec<String>,
     /// What ran: `check`, `provider <id>`, `<capability> suite`.
     pub ran: Vec<String>,
-}
-
-/// A throwaway oxplow for one test run: in memory, over a copy of the
-/// project's `oxplow/extensions/`, every declared entity published empty
-/// (as if each collector had run and found nothing), its extension models
-/// published and commands registered as at boot.
-struct Host {
-    _dir: tempfile::TempDir,
-    root: std::path::PathBuf,
-    svc: oxplow_app::Services,
-}
-
-impl Host {
-    async fn start(project: &Path) -> Result<Host, String> {
-        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
-        let root = dir.path().to_path_buf();
-        let extensions = project.join(EXTENSIONS_DIR);
-        if extensions.is_dir() {
-            copy_dir(&extensions, &root.join(EXTENSIONS_DIR)).map_err(|e| e.to_string())?;
-        }
-        oxplow_app::vcs::GitProvider
-            .init_repository(&root)
-            .await
-            .map_err(|e| e.to_string())?;
-        let svc = oxplow_app::Services::in_memory(&root).map_err(|e| e.to_string())?;
-        oxplow_app::collector_runner::publish_declared_empty(
-            &svc.db,
-            &svc.extension_catalog.get(&root),
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-        svc.extension_models
-            .sync()
-            .await
-            .map_err(|e| e.to_string())?;
-        svc.extension_commands.reconcile().await;
-        Ok(Host {
-            _dir: dir,
-            root,
-            svc,
-        })
-    }
 }
 
 /// Run every test of extension `name` under `root`. `bless` writes the
@@ -184,6 +145,14 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
             lens_example(host, ext, &ex, slug, report).await;
         } else if let Some(id) = ex.input.get("collector").and_then(Value::as_str) {
             collector_example(host, ext, &ex, id, report).await;
+        } else if let Some(cmd) = ex
+            .input
+            .get("command")
+            .and_then(Value::as_str)
+            .and_then(|name| ext.commands.iter().find(|c| c.name == name))
+        {
+            report.ran.push(format!("example {}", ex.name));
+            command_example(host, &ex, cmd, report).await;
         } else if ex.input.get("command").is_none() || ext.providers.is_empty() {
             report.errors.push(format!(
                 "{shown}:1: example `{}`'s `input` names no lens, collector or provider command \
@@ -250,6 +219,48 @@ async fn lens_example(
         report.errors.push(format!(
             "{shown}:1: lens `{slug}` returned {got} at `{path}`, the example expects {want} — \
              fix: the lens, or the example's `expect` (`{{ columns?, rows: n | $any }}`)"
+        ));
+    }
+}
+
+/// Dry-run one of the extension's own `commands:` on the fixture's
+/// `input` (and `rows`): what it composes, checked against the throwaway's
+/// registry, against `expect` — `{ commands: [names] }`, or `{ refuses:
+/// <part of the reason> }`. Nothing runs.
+async fn command_example(
+    host: &Host,
+    ex: &Example<'_>,
+    cmd: &oxplow_app::extension_commands::ExtensionCommand,
+    report: &mut TestReport,
+) {
+    use oxplow_app::extension_commands::{call_names, dry_run, Composed};
+    let shown = ex.shown;
+    let rows = ex
+        .input
+        .get("rows")
+        .and_then(Value::as_array)
+        .map(|r| r.to_vec());
+    let input = ex.input.get("input").cloned().unwrap_or_else(|| json!({}));
+    let decided = dry_run(&host.svc.sql, cmd, &input, rows, host.svc.commands.as_ref()).await;
+    let problem = match (decided, ex.expect.get("refuses").and_then(Value::as_str)) {
+        (Err(e), _) => Some(format!("failed: {e}")),
+        (Ok(Composed::Refused(why)), Some(want)) if why.contains(want) => None,
+        (Ok(Composed::Refused(why)), _) => Some(format!("refused ({why})")),
+        (Ok(Composed::Run { calls, .. }), Some(want)) => Some(format!(
+            "composed [{}] but the example expects it to refuse ({want})",
+            call_names(&calls).join(", ")
+        )),
+        (Ok(Composed::Run { calls, .. }), None) => first_mismatch(
+            &ex.expect,
+            &json!({ "commands": call_names(&calls) }),
+        )
+        .map(|(path, want, got)| format!("composed {got} at `{path}`, the example expects {want}")),
+    };
+    if let Some(p) = problem {
+        report.errors.push(format!(
+            "{shown}:1: command `{}` {p} — fix: its script, or the example's `expect` \
+             (`{{ commands: [names] }}` or `{{ refuses: <part of the reason> }}`)",
+            cmd.name
         ));
     }
 }
@@ -691,7 +702,7 @@ async fn suite(
     let run = async {
         let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
         let target = tmp.path().join(EXTENSIONS_DIR).join(&ext.name);
-        copy_dir(&root.join(&ext.path), &target).map_err(|e| e.to_string())?;
+        crate::throwaway::copy_dir(&root.join(&ext.path), &target).map_err(|e| e.to_string())?;
         oxplow_app::vcs::GitProvider
             .init_repository(tmp.path())
             .await
@@ -762,20 +773,6 @@ async fn suite(
             spec.id
         )),
     }
-}
-
-fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
-        let target = to.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir(&entry.path(), &target)?;
-        } else {
-            std::fs::copy(entry.path(), &target)?;
-        }
-    }
-    Ok(())
 }
 
 /// The report as text (`error:` / `warning:` lines, then a summary) or

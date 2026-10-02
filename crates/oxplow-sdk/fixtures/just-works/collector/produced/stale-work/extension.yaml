@@ -1,0 +1,73 @@
+manifest: 2
+name: stale-work
+description: Open tasks nobody has touched for a week
+sharing: private
+intent:
+  purpose: "Answer: which open tasks has nobody touched for a week? A task counts as touched when it is edited, commented on, or worked on in an effort."
+  origin: null
+  examples:
+    - name: basic
+      input:
+        collector: stale_tasks
+        rows:
+          - { id: 1, title: Untouched for ten days, status: ready, priority: medium, thread_id: 1, stream_id: 1, last_touched_at: "2026-09-22T09:00:00.000000Z", days_idle: 10 }
+          - { id: 2, title: Touched yesterday, status: in_progress, priority: high, thread_id: 1, stream_id: 1, last_touched_at: "2026-10-01T09:00:00.000000Z", days_idle: 1 }
+          - { id: 3, title: Exactly a week, status: blocked, priority: low, thread_id: null, stream_id: null, last_touched_at: "2026-09-25T09:00:00.000000Z", days_idle: 7 }
+      expect: one stale task per open task idle for 7 days or more (tasks 1 and 3), none for task 2
+    - name: empty-project
+      input: { lens: stale-tasks }
+      expect: no rows before the collector has synced
+  prompts:
+    - { prompt: "Which open tasks has nobody touched for a week?" }
+collectors:
+  # Open tasks with the last moment anyone touched them: the task's own
+  # update, the latest activity on a comment about it, or the latest effort
+  # on it. The script keeps the ones idle for a week or more.
+  - id: stale_tasks
+    runtime: starlark
+    entry: collectors/stale_tasks.star
+    input: |
+      WITH touched AS (
+        SELECT t.id, t.title, t.status, t.priority, t.thread_id, t.stream_id,
+               max(t.updated_at,
+                   coalesce((SELECT max(c.last_activity_at) FROM v_comment c
+                             WHERE c.target_kind = 'work_item'
+                               AND c.target_id = 'oxplow:tsk' || t.id), ''),
+                   coalesce((SELECT max(coalesce(e.ended_at, e.started_at)) FROM v_effort e
+                             WHERE e.task_id = t.id), '')) AS last_touched_at
+        FROM v_task t
+        WHERE t.status IN ('ready', 'in_progress', 'blocked')
+      )
+      SELECT id, title, status, priority, thread_id, stream_id, last_touched_at,
+             CAST(julianday('now') - julianday(last_touched_at) AS INTEGER) AS days_idle
+      FROM touched
+    entities:
+      - name: stale_task
+        key: id
+        columns:
+          id: int
+          title: text
+          status: text
+          priority: text
+          thread_id: int
+          stream_id: int
+          last_touched_at: time
+          days_idle: int
+models:
+  # v_stale_work_stale_tasks: the collected stale tasks, longest idle first.
+  - name: stale_tasks
+    version: 1
+    description: "Open tasks (ready, in progress or blocked) that nobody has edited, commented on or worked on for at least a week, as of the collector's last sync. Longest idle first."
+    columns:
+      - { name: id, type: INTEGER, doc: The task id. }
+      - { name: title, type: TEXT, doc: The task's title. }
+      - { name: status, type: TEXT, doc: "The task's status: ready, in_progress or blocked." }
+      - { name: priority, type: TEXT, doc: "The task's priority: low, medium, high or urgent." }
+      - { name: thread_id, type: INTEGER, doc: "The thread the task is on, or null for the backlog." }
+      - { name: stream_id, type: INTEGER, doc: "The stream the task's thread is in, or null for the backlog." }
+      - { name: last_touched_at, type: TEXT, doc: "When the task was last edited, commented on or worked on (RFC 3339, UTC)." }
+      - { name: days_idle, type: INTEGER, doc: "Whole days since last_touched_at, at the time of the sync." }
+    tests:
+      - { not_null: id }
+      - { unique: id }
+      - { not_null: last_touched_at }

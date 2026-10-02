@@ -710,19 +710,59 @@ async fn check_example(
     ex: &CommandExample,
     schema_of: CommandSchemas<'_>,
 ) -> Result<(), String> {
-    let rows = match (&ex.rows, &cmd.input) {
-        (Some(rows), _) => rows.clone(),
-        (None, Some(sql)) => {
-            rows_json(&layer.run(input_query(sql, &ex.input)).await.map_err(|e| {
-                format!(
-                    "`input`: {}",
-                    e.to_string().replacen("invalid value: ", "", 1)
-                )
-            })?)
+    let decided = dry_run(layer, cmd, &ex.input, ex.rows.clone(), schema_of).await?;
+    match (decided, &ex.refuses) {
+        (Composed::Refused(why), Some(want)) if why.contains(want.as_str()) => Ok(()),
+        (Composed::Refused(why), Some(want)) => {
+            Err(format!("refused ({why}) but it should refuse ({want})"))
         }
+        (Composed::Refused(why), None) => Err(format!(
+            "refused ({why}) but `expect_commands` is [{}]",
+            ex.expect_commands.join(", ")
+        )),
+        (Composed::Run { calls, .. }, Some(want)) => Err(format!(
+            "composed [{}] but it should refuse ({want})",
+            call_names(&calls).join(", ")
+        )),
+        (Composed::Run { calls, .. }, None) if call_names(&calls) != ex.expect_commands => {
+            Err(format!(
+                "composed [{}] but `expect_commands` is [{}]",
+                call_names(&calls).join(", "),
+                ex.expect_commands.join(", ")
+            ))
+        }
+        (Composed::Run { .. }, None) => Ok(()),
+    }
+}
+
+/// The names of `calls`, in order.
+pub fn call_names(calls: &[CommandCall]) -> Vec<&str> {
+    calls.iter().map(|c| c.name.as_str()).collect()
+}
+
+/// Dry-run `cmd` on `input`: its `input` query's rows (or `rows`, standing
+/// in for them), the script in the sandbox, and — when it composes — each
+/// command against `registry` (it exists, its input fits). What the
+/// script decided; nothing runs. `check`'s examples and `oxplow plugin
+/// test`'s intent examples both run it.
+pub async fn dry_run(
+    layer: &crate::sql_gateway::SqlGateway,
+    cmd: &ExtensionCommand,
+    input: &Value,
+    rows: Option<Vec<Value>>,
+    registry: CommandSchemas<'_>,
+) -> Result<Composed, String> {
+    let rows = match (rows, &cmd.input) {
+        (Some(rows), _) => rows,
+        (None, Some(sql)) => rows_json(&layer.run(input_query(sql, input)).await.map_err(|e| {
+            format!(
+                "`input`: {}",
+                e.to_string().replacen("invalid value: ", "", 1)
+            )
+        })?),
         (None, None) => Vec::new(),
     };
-    let (script, input) = (cmd.script.clone(), ex.input.clone());
+    let (script, input) = (cmd.script.clone(), input.clone());
     let decided = tokio::task::spawn_blocking(move || compose_calls(&script, input, rows))
         .await
         .map_err(|e| format!("the script's worker failed: {e}"))?
@@ -731,44 +771,18 @@ async fn check_example(
             | oxplow_domain::CommandError::Invalid { message, .. } => message,
             other => other.to_string(),
         })?;
-    let calls = match (decided, &ex.refuses) {
-        (Composed::Refused(why), Some(want)) if why.contains(want.as_str()) => return Ok(()),
-        (Composed::Refused(why), Some(want)) => {
-            return Err(format!("refused ({why}) but it should refuse ({want})"))
+    if let Composed::Run { calls, .. } = &decided {
+        for call in calls {
+            let Some(schema) = registry.input_schema(&call.name) else {
+                return Err(format!("no command `{}`", call.name));
+            };
+            InputValidator::compile(&schema)
+                .map_err(|e| e.to_string())
+                .and_then(|v| v.check(&call.input).map_err(|e| e.to_string()))
+                .map_err(|e| format!("the input doesn't fit `{}`: {e}", call.name))?;
         }
-        (Composed::Refused(why), None) => {
-            return Err(format!(
-                "refused ({why}) but `expect_commands` is [{}]",
-                ex.expect_commands.join(", ")
-            ))
-        }
-        (Composed::Run { calls, .. }, Some(want)) => {
-            let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
-            return Err(format!(
-                "composed [{}] but it should refuse ({want})",
-                names.join(", ")
-            ));
-        }
-        (Composed::Run { calls, .. }, None) => calls,
-    };
-    for call in &calls {
-        let Some(schema) = schema_of.input_schema(&call.name) else {
-            return Err(format!("no command `{}`", call.name));
-        };
-        InputValidator::compile(&schema)
-            .map_err(|e| e.to_string())
-            .and_then(|v| v.check(&call.input).map_err(|e| e.to_string()))
-            .map_err(|e| format!("the input doesn't fit `{}`: {e}", call.name))?;
     }
-    let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
-    if names != ex.expect_commands {
-        return Err(format!(
-            "composed [{}] but `expect_commands` is [{}]",
-            names.join(", "),
-            ex.expect_commands.join(", ")
-        ));
-    }
-    Ok(())
+    Ok(decided)
 }
 
 #[cfg(test)]

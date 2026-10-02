@@ -1,0 +1,10 @@
+# The acceptance example from extension.yaml as a fixture for `oxplow plugin test`
+# (input in, expected output out). Keep the two in step.
+name: basic
+input:
+  collector: stale_tasks
+  rows:
+    - { id: 1, title: Untouched for ten days, status: ready, priority: medium, thread_id: 1, stream_id: 1, last_touched_at: "2026-09-22T09:00:00.000000Z", days_idle: 10 }
+    - { id: 2, title: Touched yesterday, status: in_progress, priority: high, thread_id: 1, stream_id: 1, last_touched_at: "2026-10-01T09:00:00.000000Z", days_idle: 1 }
+    - { id: 3, title: Exactly a week, status: blocked, priority: low, thread_id: null, stream_id: null, last_touched_at: "2026-09-25T09:00:00.000000Z", days_idle: 7 }
+expect: { entities: { stale_task: 2 } }

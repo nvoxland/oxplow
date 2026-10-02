@@ -11,9 +11,19 @@ Lenses live in **extensions**: folders of plain files in the repo. The user
 can use a lens themselves, share it with their team by committing it, or
 publish the extension for anyone.
 
-You build them with your normal file tools. `oxplow plugin new lens
+You build them with your normal file tools. `oxplow plugin new <kind>
 <name> --origin <your effort ref>` scaffolds the folder with a v2 manifest,
-an intent, one example and fixture, and a starter lens; then edit.
+an intent, one example and its fixture, and a working starter for the
+kind; then edit. Each passes `check` and `plugin test` as written, so a
+failure after your edit is yours:
+- `lens` — a lens over open tasks with a row action (Start);
+- `collector` — a Starlark collector of an entity, a model over it
+  (`ref('item')`) and a lens over the model;
+- `command` — a command whose script comments on a work item, on a work
+  item's Commands menu;
+- `provider` — a work-items provider's declarations and a stub program
+  (red until you write the program);
+- `extension` — the manifest only.
 
 ## 0. Answering with a lens (`show_lens`)
 
@@ -219,7 +229,9 @@ empty: Nothing is waiting on you.
 - **`actions:`** are commands the lens offers:
   `{ id, label, command, input, row? }`. `input` is the command's input;
   `"{{param.x}}"` binds a lens param and, with `row: true` (a row's
-  right-click action), `"{{row.col}}"` binds that row's column —
+  right-click action), `"{{row.col}}"` binds that row's column — which
+  the query must return even when `columns:` doesn't show it (select a
+  ref for the action and leave it out of `columns:`) —
   e.g. `{ id: finish, label: Finish, command: work_item.transition,
   row: true, input: { ref: "work_item:oxplow:tsk{{row.id}}", to: done } }`,
   or `{ id: sync, label: Sync PRs, command: collector.sync, input:
@@ -241,19 +253,25 @@ names the file and line and says what to change.
 1. `validate_extension(name, stream_id)` (MCP), or `oxplow plugin check
    <name>` from the worktree, is the same check and the same report:
    - manifest errors (YAML, unknown keys, a name/folder mismatch, a
-     missing `intent`, an experimental kind in a `shared` extension);
+     missing `intent`, an experimental kind in a `shared` extension, a
+     Starlark collector script that doesn't parse or define `transform`);
    - cross-references that don't resolve (a slot mount naming a lens
-     that doesn't exist, a link kind nobody registered);
+     that doesn't exist, a link kind nobody registered, a command that
+     doesn't exist or an input that doesn't fit it);
    - its models compiled without publishing (SQL errors, a `ref()` or
      `source()` that doesn't resolve, columns that differ from the
      declared contract, a changed contract at a published version);
-   - a dry run of every lens and advisory with its default params (SQL
-     errors, and `columns` keys the query doesn't return).
+   - a dry run of every lens, advisory and command `input` with its
+     default params (SQL errors, and `columns` keys the query doesn't
+     return), and of every command example.
 
-   `ok: true` (exit 0) means it works. Fix every `error`; fix a `warning`
-   unless you can say why not. (The CLI dry-runs SQL only when the project
-   has been opened in oxplow, so `.oxplow/local.sqlite` exists; the MCP
-   tool always does.)
+   It **always** dry-runs, and what you declared but haven't run yet is
+   there for it: a collector's entities stand in empty, and your own
+   models are compiled for the check. So collector → model → lens checks
+   clean before the first sync — don't sync just to make `check` pass.
+   (The CLI uses the project's database when it has one, else an empty
+   one.) `ok: true` (exit 0) means it works. Fix every `error`; fix a
+   `warning` unless you can say why not.
 2. `run_lens(id, params?, stream_id, thread_id?)` returns exactly the
    rows the user will see. Check that they answer the question.
 3. Pass **your own `stream_id`** to both when you're in a worktree
@@ -273,13 +291,31 @@ names the file and line and says what to change.
    intended — commit it), and the work-items conformance suite must pass.
    A person approves the provider in Settings → Data → Programs and
    enables it in Settings → Integrations; you can't do either.
-5. `oxplow plugin test` also runs the extension's `questions.yaml`, if it
+5. **`oxplow plugin test <name>`** runs every intent example on a
+   throwaway oxplow (empty data, your extension's entities published
+   empty and its models and commands loaded — never the project's
+   database). Give each example a fixture, `fixtures/<example>.yaml`, with
+   `input` and `expect` (`$any` matches anything):
+   - a lens: `input: { lens: <slug>, params? }`, `expect: { columns?,
+     rows: n }` — data is empty, so usually `rows: 0`;
+   - a collector: `input: { collector: <id>, rows: [...] }` (`rows`
+     stands in for its `input` query), `expect: { entities: { <name>: n
+     } }` — it runs your script and types its rows; an exec collector's
+     example isn't run (a person approves it);
+   - a command: `input: { command: <ns>.<name>, input: {...}, rows? }`,
+     `expect: { commands: [names] }` or `{ refuses: <part of the reason>
+     }` — a dry run; nothing changes;
+   - a provider: `input: { command, input }` (below).
+   Give a command's own `examples:` `rows:` too, so they don't depend on
+   the project's data.
+6. `oxplow plugin test` also runs the extension's `questions.yaml`, if it
    has one: questions an agent should be able to answer with it, each
    `{ question, skill, reaches: { sql } or { command, input }, shape:
    { columns } }`. `skill` is a markdown file in the extension (a
    README); it must name every view the SQL reads and the command it
-   runs, the SQL must return exactly `shape.columns`, and the input must
-   fit the command. Write them for what the extension is *for*.
+   runs (core's, the extension's own, or a provider's), the SQL must
+   return exactly `shape.columns`, and the input must fit the command.
+   Write them for what the extension is *for*, whatever its kind.
 
 ## 4. Hand it over
 
@@ -429,8 +465,13 @@ combining two extensions' data), use `runtime: starlark` (a script
 defining `def transform(input): ...`) or `runtime: jaq`, with `input:` set
 to a read-only SQL query:
 
-- **Input and output.** The script gets `{"rows": [...]}` and returns the
-  same `{"entities": ...}` shape.
+- **Input and output.** The script defines `def transform(x):` at the top
+  level (`check` says so at the collector's line otherwise); it gets
+  `{"rows": [...]}` and returns the same `{"entities": ...}` shape. It
+  must handle **no rows** — return an empty list, don't index `rows[0]`
+  — because a fresh project, a `plugin test` throwaway and a filter that
+  matches nothing all give it none; with `sync: replace` an entity it
+  leaves out is emptied.
 - **Approval.** It runs sandboxed (no network, files, env or credentials),
   so it needs no approval and you can `run_collector` it yourself.
 - **Input limits.** `input` can't read the collector's own views, and more

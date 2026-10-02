@@ -14,25 +14,32 @@ use oxplow_sdk::{Format, Kind};
 
 const USAGE: &str = "\
 usage:
-  oxplow plugin new <lens|extension|provider> <name> [--origin <ref>] [--root <dir>]
+  oxplow plugin new <lens|extension|provider|collector|command> <name> [--origin <ref>] [--root <dir>]
       scaffold oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
-      and fixture — and, for a lens, one starter lens; for a provider, its
-      declarations, a stub program and its test config
+      and its fixture, and the kind's starter: a lens with a row action; a
+      provider's declarations, stub program and test config; a Starlark
+      collector with a model and a lens over it; a command composing core
+      commands. Each checks clean and passes `test` as written (a provider
+      once a real program replaces its stub)
   oxplow plugin check <name|path> [--json] [--root <dir>]
-      load the extension and report every problem with file:line; when the
-      project has been opened in oxplow (.oxplow/local.sqlite exists) every
-      lens and advisory is also dry-run against its database
+      load the extension and report every problem with file:line, dry-running
+      its models, commands, lenses and advisories — against the project's
+      database when it has been opened in oxplow (.oxplow/local.sqlite),
+      else an empty one; command names against a throwaway oxplow
   oxplow plugin migrate <name|path> [--root <dir>]
       rewrite a v1 extension.yaml as v2, and its `gauges:` as `collectors:`,
       in place (idempotent)
   oxplow plugin migrate --project [--root <dir>]
       rewrite .oxplow/project.yaml's `gauges:` as `collectors:` in place
   oxplow plugin test <name|path> [--bless] [--json] [--root <dir>]
-      check, then run each declared provider: its handshake against its
-      declarations, its test config, the intent examples' fixtures, every
-      message against the protocol's schemas, its golden transcript
-      (--bless writes it) and its capability's conformance suite
+      on a throwaway oxplow over a copy of the project's extensions: check,
+      then each intent example's fixture (a lens's rows, a collector's
+      entities, a command's composition), questions.yaml, and each declared
+      provider: its handshake against its declarations, its test config,
+      its examples, every message against the protocol's schemas, its
+      golden transcript (--bless writes it) and its capability's
+      conformance suite
 
 <name|path> is an extension name under the project's oxplow/extensions/,
 or the path to that folder. --root names the project (default: the
@@ -127,9 +134,10 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
     };
     match sub.as_str() {
         "new" => {
-            let kind = pos.next().and_then(|k| Kind::parse(k)).ok_or_else(|| {
-                Failure::Usage("new needs a kind: `lens`, `extension` or `provider`".into())
-            })?;
+            let kind = pos
+                .next()
+                .and_then(|k| Kind::parse(k))
+                .ok_or_else(|| Failure::Usage(format!("new needs a kind: {}", Kind::NAMES)))?;
             let name = pos
                 .next()
                 .ok_or_else(|| Failure::Usage("new needs a name".into()))?;
@@ -369,7 +377,7 @@ mod tests {
         assert_eq!(cli(&["frobnicate"]).0, 2);
         let (code, _, err) = cli(&["new", "widget", "x", "--root", root]);
         assert_eq!(code, 2);
-        assert!(err.contains("`lens`, `extension` or `provider`"), "{err}");
+        assert!(err.contains("`collector` or `command`"), "{err}");
         let (code, _, err) = cli(&["check", "nope", "--root", root]);
         assert_eq!(code, 1);
         assert!(err.contains("no extension `nope`"), "{err}");
