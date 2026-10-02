@@ -117,19 +117,31 @@ re-applies the key to the config as it is then, writes project.yaml and
 swaps memory under one lock, so concurrent sets of different keys both
 survive.
 
-## Composition: `command.sequence` and `run_nested` (P6b.A1)
+## Composition: `command.sequence`, `run_nested` and steps (P6b.A1, tsk713)
 
-A composite runs several `Tx` commands as **one run**:
-`CommandBus::run_nested(ctx, parent_spec, calls)` (`commands/mod.rs`) is
-the one mechanism, and `command.sequence { calls: [{ name, input }] }`
-(`commands/compose.rs`) is the core command whose handler is exactly
-that; an extension's own command (P6b.B2) is "run the script to get
-`calls`, then `run_nested`". It first makes a pass that writes nothing:
-every call must name a `Tx` command (an `External` one can't join the
-transaction — "composes Tx commands only" — nor a `Dispatch` one whose
-route for that input is external, the refusal naming the system
-(`provider \`linear\``); nor a `Read` one — a
-sequence composes commands that write), its input must fit (a problem
+A composite is a command made of other commands' calls: a
+`Handler::Compose` (`commands/compose.rs`) whose **composer** says, for
+an input, which calls to run (`Composition { calls, result }`). It is the
+one mechanism: `command.sequence { calls: [{ name, input }] }` composes
+its input's calls; an extension's own command (P6b.B2) composes what its
+script returns over its `input` rows. Its atomicity is `Dispatch` — its
+calls decide where it runs, so composites are pinned with the
+`Dispatch` commands. Once the actor is admitted (steps 2–3), the bus
+**routes** it (`CommandBus::route_composite`, `commands/steps.rs`): it
+composes on a read snapshot and routes each call — a `Tx` command or a
+`Dispatch` one routed inside stays in the transaction; an `External`
+command or a `Dispatch` one routed outside (`work_item.*` on another
+provider's item) leaves it; a nested composite must route inside (its
+steps would otherwise land outside the run they're a step of), and a
+`Read` call is refused (a composite composes commands that write).
+Every call inside → **one run in one transaction**, below; any outside →
+**steps** (next section).
+
+**In one transaction**: `CommandBus::run_nested(ctx, parent_spec,
+calls)` (`commands/mod.rs`), the composite's `Tx` handler — composing
+again, in the run's own transaction. It first makes a pass that writes
+nothing: every call must join the transaction (a call that leaves it is
+refused, naming the system and the composite), its input must fit (a problem
 is reported at `/calls/<i>/input/…`), and its **own** `invokers`, the
 agent policy (with the parent's `may_write`) and its `confirm` apply, so
 a composite never widens what its children allow; a child that asks
@@ -149,6 +161,28 @@ so they are caused by the parent's `command.executed`; their
 so `undo` needs nothing new, and a child whose inverse asks makes the
 undo ask. A child's `Busy` propagates and the bus retries the whole
 parent (handlers are pure).
+
+**As steps** (P7 review, tsk713; `CommandBus::run_steps`): a composite
+with a call outside the transaction can't be all-or-nothing, so its
+calls run as steps. (1) **Checked first**: every step's input (at
+`/calls/<i>/input/…`), its own invokers and the agent policy, before
+anything runs — a refusal is the run's, audited, and nothing ran; a step
+that asks makes the run ask once (`NeedsConfirmation` with the calls in
+the preview), and an agent's run is a proposal **with no dry run**
+(nothing outside the transaction runs before a person decides). (2)
+**In order**, each landing as it runs: a step inside oxplow in its own
+transaction (its events caused by the run's `command.executed`, whose id
+is fixed first), an external one through its system; the first failure
+stops the run, and the steps before it **stand**. (3) **Recorded once**:
+one audit row and one `command.executed` with `result { result,
+children: [the landed steps], failed?: { name, input, error } }` and the
+landed steps' events, caused by it. A run that stopped partway is
+recorded as an `error` with what landed, and returns `Failed` naming the
+failed step and the ones that stand; a run that failed at its first
+step is audited like any failure. **Not undoable** (no inverse): a
+system outside the bus can't be rolled back with it, so a person
+reverses a landed step by hand (each child keeps its own `inverse` in
+the result).
 
 ## Proposals: an agent's run that needs a person (P6b.A3)
 
@@ -306,8 +340,8 @@ is a second command of the same name.
 | Command | Handler | Notes |
 |---|---|---|
 | `<extension namespace>.<name>` (an enabled extension's `commands:`) | `Tx`: the extension's Starlark script composes core commands, run through `run_nested` (`extension_commands.rs`, P6b.B2) | declared invokers / confirm / effect, undoable, `Experimental`; registered while the extension is enabled (primary worktree). See [extensions.md](./extensions.md) → "Commands" |
-| `oxplow_review.accept`, `oxplow_review.request_changes` (bundled oxplow-review, P7.C5) | `Tx` extension commands composing `work_item.comment` + `work_item.transition` (to `done` / `todo`) on an effort's work item — oxplow's own: an external provider's item routes outside the transaction and is refused (tsk713); accept refuses unreviewed claims or inferred decisions unless `force` | human + lens, not agent; `confirm: always`; undoable. See [extensions.md](./extensions.md) → "oxplow-review" |
-| `command.sequence { calls: [{ name, input }] }` | `Tx` (`commands/compose.rs`, P6b.A1) | all invokers, `Write`, `Confirm::Never` — the children decide; undoable as the reversed children. Runs each call through `CommandBus::run_nested`: each child's own invokers, policy and confirmation; one audit row for the parent with the children in `result`; the one composition mechanism (an extension's command runs on it). See "Composition" |
+| `oxplow_review.accept`, `oxplow_review.request_changes` (bundled oxplow-review, P7.C5) | extension composites of `work_item.comment` + `work_item.transition` (to `done` / `todo`) on an effort's work item — oxplow's own in one transaction (undoable), another provider's as steps (not undoable, tsk713); an effort without a work item is refused by name; accept refuses unreviewed claims or inferred decisions unless `force` | human + lens, not agent; `confirm: always`. See [extensions.md](./extensions.md) → "oxplow-review" |
+| `command.sequence { calls: [{ name, input }] }` | `Dispatch` — a composite (`commands/compose.rs`, P6b.A1) | all invokers, `Write`, `Confirm::Never` — the children decide. Each child's own invokers, policy and confirmation; one audit row for the parent with the children in `result`. Every call in oxplow's records → one transaction (`run_nested`), undoable as the reversed children; a call outside it → steps, in order, not undoable (tsk713). The one composition mechanism (an extension's command runs on it). See "Composition" |
 | `work_item.transition { ref, to, native_state? }` | `Dispatch` (`commands/work_item.rs`, P2.6.3 / P7.A1): oxplow's items → `Tx` over `task_store::set_status_tx`; another provider's → its `transition` verb | all invokers, `Record`; undoable (the inverse restores the prior canonical and native state; an external inverse is renamed to `work_item.transition` so undo dispatches again). `to` is a canonical state, `native_state` the provider's own and must map to it (oxplow: its status; `archived` with `done` or `canceled`). For oxplow the row, the effort open/close, `work_item.transitioned` and `effort.*` commit with the audit, all caused by `command.executed`; the effort's snapshot pin is the effort-lifecycle pump consumer's. |
 | `work_item.create { provider?, title, body?, parent_ref?, state?, native_state?, native? }` | `Dispatch` (tsk463 / P7.A1): oxplow → `Tx` over `task_store::insert_logged_tx` | all invokers; not undoable (that would be deleting an item). No `provider` files on the active one, which must be running. oxplow: `native { thread?, priority? }` (absent thread: the backlog); the row at the end of its list (`next_sort_index_tx`), `work_item.created@1 { work_item, status, effort? }`, and — filed `in_progress` on a thread — the effort, all caused by the run; an agent's task is authored `agent`. The result has the item's `ref`. |
 | `work_item.update { ref, title?, body?, parent_ref?, state?, native_state?, native? }` | `Dispatch`: oxplow → `Tx` over `task_store::update_with_status_tx` | all invokers; undoable (the inverse restores exactly the fields and state given). oxplow: fields and status commit together — `work_item.edited@1 { work_item, fields }`, then the status move with everything `work_item.transition` implies; `native { priority? }` (a thread change is `work_item.move`). A refused run writes nothing. |

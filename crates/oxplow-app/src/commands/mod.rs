@@ -21,6 +21,7 @@ pub mod effort;
 pub mod lens;
 pub mod metric;
 pub mod review;
+mod steps;
 pub mod vcs;
 pub mod work_item;
 
@@ -160,6 +161,9 @@ pub enum Handler {
     /// verbs route by the ref's provider — oxplow's items in the
     /// transaction, another provider's through its process.
     Dispatch(Dispatch),
+    /// A composite (`compose.rs`): says which calls an input runs; the bus
+    /// runs them in its transaction when every one can, else as steps.
+    Compose(Arc<compose::Compose>),
 }
 
 /// Where a `Dispatch` command's run goes for one input.
@@ -188,6 +192,16 @@ pub struct Dispatch {
 enum Resolved {
     Tx(Arc<TxHandler>),
     External(Arc<ExternalHandler>),
+    /// A composite with a call outside the transaction: its checked steps.
+    Steps(Arc<steps::Plan>),
+}
+
+/// Step 1's routing: decided from the input alone, or a composite, routed
+/// once the actor has been admitted (composing reads the database and may
+/// run an extension's script).
+enum Routing {
+    Ready(Resolved),
+    Composite(Arc<compose::Compose>),
 }
 
 /// A command with its handler resolved for the input being run.
@@ -215,7 +229,7 @@ impl Command {
         let declared = match handler {
             Handler::Tx(_) => Atomicity::Tx,
             Handler::External(_) => Atomicity::External,
-            Handler::Dispatch(_) => Atomicity::Dispatch,
+            Handler::Dispatch(_) | Handler::Compose(_) => Atomicity::Dispatch,
         };
         if declared != spec.atomicity {
             return Err(CommandError::Invalid {
@@ -271,15 +285,16 @@ impl Command {
 
     /// The handler for `input`: a `Dispatch` command's route decided (its
     /// error is the caller's), the others as they are.
-    fn resolve(&self, input: &Value) -> Result<Resolved, CommandError> {
-        Ok(match &self.handler {
+    fn resolve(&self, input: &Value) -> Result<Routing, CommandError> {
+        Ok(Routing::Ready(match &self.handler {
             Handler::Tx(h) => Resolved::Tx(h.clone()),
             Handler::External(h) => Resolved::External(h.clone()),
             Handler::Dispatch(d) => match (d.route)(input)? {
                 Route::Tx => Resolved::Tx(d.tx.clone()),
                 Route::External(_) => Resolved::External(d.external.clone()),
             },
-        })
+            Handler::Compose(c) => return Ok(Routing::Composite(c.clone())),
+        }))
     }
 }
 
@@ -520,16 +535,17 @@ impl CommandBus {
         names
     }
 
-    /// The `Dispatch` commands, sorted — each decides per input whether it
-    /// runs in the transaction or against a system outside it, so the
-    /// list is pinned like [`Self::external_commands`].
+    /// The `Dispatch` commands (composites included), sorted — each
+    /// decides per input whether it runs in the transaction or against a
+    /// system outside it, so the list is pinned like
+    /// [`Self::external_commands`].
     pub fn dispatch_commands(&self) -> Vec<String> {
         let mut names: Vec<String> = self
             .commands
             .read()
             .commands
             .values()
-            .filter(|c| matches!(c.handler, Handler::Dispatch(_)))
+            .filter(|c| matches!(c.handler, Handler::Dispatch(_) | Handler::Compose(_)))
             .map(|c| c.spec.name.clone())
             .collect();
         names.sort();
@@ -575,12 +591,12 @@ impl CommandBus {
 
         // 1. The input must match the schema — and, for a `Dispatch`
         // command, name a route.
-        let resolved = match command
+        let routing = match command
             .validator
             .check(&input)
             .and_then(|()| command.resolve(&input))
         {
-            Ok(resolved) => resolved,
+            Ok(routing) => routing,
             Err(err) => {
                 self.audit_only(actor, spec, &input, Outcome::Invalid, Some(err.to_string()))
                     .await;
@@ -630,6 +646,23 @@ impl CommandBus {
                 return Err(err);
             }
         }
+        // A composite is routed now that the actor is admitted: composed on
+        // a read snapshot, each call checked and routed (`steps.rs`).
+        let resolved = match routing {
+            Routing::Ready(resolved) => resolved,
+            Routing::Composite(compose) => match self.route_composite(&compose, &input).await {
+                Ok(resolved) => resolved,
+                Err(err) => {
+                    let recorded = match err {
+                        CommandError::Denied { .. } => Outcome::Denied,
+                        _ => Outcome::Error,
+                    };
+                    self.audit_only(actor, spec, &input, recorded, Some(err.to_string()))
+                        .await;
+                    return Err(err);
+                }
+            },
+        };
         // 4. A person confirms; an agent never can. Nothing is written: a
         // person is asked, an agent's run is kept as a proposal.
         let confirmed = confirmed && !actor.is_agent_driven();
@@ -652,6 +685,31 @@ impl CommandBus {
         // 5a. A read runs without a record: no audit row, no event.
         if spec.effect == oxplow_domain::CommandEffect::Read {
             return self.run_read(&resolved, actor, input).await;
+        }
+        // 5'. A composite's steps run outside one transaction: each lands
+        // as it runs, the run recorded once at the end (`steps.rs`). A step
+        // that asks is step 4's answer, as below.
+        if let Resolved::Steps(plan) = &resolved {
+            let admitted = steps::Admitted {
+                confirmed,
+                gates,
+                origin,
+            };
+            return match self
+                .run_steps(actor, spec, &input, plan.clone(), admitted)
+                .await
+            {
+                Err(CommandError::NeedsConfirmation { preview }) => {
+                    let run = Prepared {
+                        command: &command,
+                        resolved: &resolved,
+                    };
+                    Err(self
+                        .unconfirmed(actor, origin, run, input, *preview, gates)
+                        .await)
+                }
+                other => other,
+            };
         }
         // 5. Run, and record the run with its event in one transaction.
         let outcome = match &resolved {
@@ -707,7 +765,7 @@ impl CommandBus {
                             &spec_c,
                             &input_c,
                             &out,
-                            executed_id,
+                            Executed::ok(executed_id),
                         )?;
                         // Fails (and rolls the whole run back) when the row
                         // was undone, or the proposal decided, meanwhile.
@@ -746,6 +804,7 @@ impl CommandBus {
                     }
                 }
             }
+            Resolved::Steps(_) => unreachable!("composite steps ran above"),
             Resolved::External(handler) => {
                 self.claim(origin).await?;
                 match handler(actor.clone(), input.clone()).await {
@@ -863,7 +922,8 @@ impl CommandBus {
                     }
                 }
             }
-            Resolved::External(_) => None,
+            // Nothing outside the transaction runs before a person decides.
+            Resolved::External(_) | Resolved::Steps(_) => None,
         };
         let row = NewProposal {
             command: spec.name.clone(),
@@ -1099,24 +1159,21 @@ impl CommandBus {
                 },
                 other => other,
             };
+            // This composite runs in a transaction (the bus routed every
+            // call inside one, or it is one step of a composite's steps):
+            // a call that leaves it can't join.
             let external = |what: String| CommandError::Invalid {
                 field: name_field(),
                 message: format!(
-                    "`{}` {what}; a sequence composes Tx commands only",
-                    spec.name
+                    "`{}` {what}, outside the transaction `{}` runs in",
+                    spec.name, parent.name
                 ),
             };
-            // Only a `Tx` handler can join the transaction: an `External`
-            // command can't, nor a `Dispatch` command whose route for this
-            // input leaves it.
-            if matches!(command.handler, Handler::External(_)) {
-                return Err(external("is External".into()));
-            }
             if spec.effect == oxplow_domain::CommandEffect::Read {
                 return Err(CommandError::Invalid {
                     field: name_field(),
                     message: format!(
-                        "`{}` only reads; a sequence composes commands that write",
+                        "`{}` only reads; a composite composes commands that write",
                         spec.name
                     ),
                 });
@@ -1124,15 +1181,16 @@ impl CommandBus {
             command.validator.check(&call.input).map_err(at_input)?;
             let handler = match &command.handler {
                 Handler::Tx(h) => h.clone(),
-                Handler::External(_) => unreachable!("refused above"),
+                Handler::External(_) => return Err(external("runs against a system".into())),
                 Handler::Dispatch(d) => match (d.route)(&call.input).map_err(at_input)? {
                     Route::Tx => d.tx.clone(),
                     Route::External(system) => {
-                        return Err(external(format!(
-                            "runs through {system} for this input, outside the transaction"
-                        )));
+                        return Err(external(format!("runs through {system} for this input")));
                     }
                 },
+                // Its own calls join this transaction too, or are refused
+                // there.
+                Handler::Compose(c) => c.tx.clone(),
             };
             handlers.push(handler);
             if !spec.invokers.allows(ctx.actor.invoker()) {
@@ -1271,6 +1329,12 @@ impl CommandBus {
                     })?
             }
             Resolved::External(handler) => handler(actor.clone(), input).await?,
+            Resolved::Steps(_) => {
+                return Err(CommandError::Invalid {
+                    field: None,
+                    message: "a command that only reads can't compose steps that write".into(),
+                })
+            }
         };
         Ok(CommandOutcome {
             result: out.result,
@@ -1342,7 +1406,7 @@ impl CommandBus {
                     &spec_c,
                     &input_c,
                     &shadow,
-                    oxplow_domain::EventId::generate(),
+                    Executed::ok(oxplow_domain::EventId::generate()),
                 )?;
                 match origin {
                     RunOrigin::Call => {}
@@ -1486,6 +1550,20 @@ fn finish(mut out: HandlerOutput, recorded: Recorded) -> CommandOutcome {
     }
 }
 
+/// The `command.executed` a run is recorded under: its id (fixed before a
+/// `Tx` handler runs, so its events can name it as their cause) and, for
+/// a composite's steps that failed partway, why.
+pub(super) struct Executed {
+    pub id: oxplow_domain::EventId,
+    pub failed: Option<String>,
+}
+
+impl Executed {
+    fn ok(id: oxplow_domain::EventId) -> Self {
+        Self { id, failed: None }
+    }
+}
+
 /// Inside the run's transaction: the audit row, `command.executed`
 /// pointing at it, the handler's domain events, and the row's event id.
 fn record_tx(
@@ -1495,8 +1573,19 @@ fn record_tx(
     spec: &CommandSpec,
     input: &Value,
     out: &HandlerOutput,
-    executed_id: oxplow_domain::EventId,
+    executed: Executed,
 ) -> Result<Recorded, oxplow_domain::DomainError> {
+    let Executed {
+        id: executed_id,
+        failed,
+    } = executed;
+    // A run that failed partway (a composite's steps, some landed) is
+    // recorded with what landed, as an error.
+    let outcome = if failed.is_some() {
+        Outcome::Error
+    } else {
+        Outcome::Ok
+    };
     let inverse = if spec.undoable {
         out.inverse.clone()
     } else {
@@ -1510,8 +1599,8 @@ fn record_tx(
             actor_id: actor.id(),
             thread_id: actor.thread_id(),
             input: input.clone(),
-            outcome: Outcome::Ok,
-            error: None,
+            outcome,
+            error: failed,
             result: Some(out.result.clone()),
             inverse: inverse.clone(),
         },
@@ -1522,7 +1611,7 @@ fn record_tx(
             command: spec.name.clone(),
             actor_kind: actor.kind(),
             actor_id: actor.id(),
-            outcome: Outcome::Ok,
+            outcome,
             audit_id,
             undoable: inverse.is_some(),
         },
@@ -2424,13 +2513,35 @@ mod tests {
         plain.undoable = false;
         bus.register(Command::new(plain, kv_set()).unwrap())
             .unwrap();
+        // A system outside the bus's transaction: it writes `kv` in its own
+        // transaction, and refuses the value `fail`.
         let mut ext = kv_spec("kv.external", Invokers::ALL, Confirm::Never);
         ext.atomicity = Atomicity::External;
+        let outside = db.clone();
         bus.register(
             Command::new(
                 ext,
-                Handler::External(Arc::new(|_actor, input| {
+                Handler::External(Arc::new(move |_actor, input| {
+                    let db = outside.clone();
                     Box::pin(async move {
+                        let k = input["k"].as_str().unwrap_or_default().to_string();
+                        let v = input["v"].as_str().unwrap_or_default().to_string();
+                        if v == "fail" {
+                            return Err(CommandError::Failed {
+                                message: "the system refused it".into(),
+                            });
+                        }
+                        db.transaction(move |tx| {
+                            tx.execute(
+                                "INSERT INTO kv (k, v) VALUES (?1, ?2)
+                                 ON CONFLICT (k) DO UPDATE SET v = excluded.v",
+                                [&k, &v],
+                            )
+                            .map(|_| ())
+                            .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+                        })
+                        .await
+                        .map_err(CommandError::from)?;
                         Ok(HandlerOutput {
                             result: input,
                             ..HandlerOutput::default()
@@ -2488,20 +2599,175 @@ mod tests {
         );
         assert_eq!(kv_value(&db, "a").await, None);
 
+        // A composite whose steps leave the transaction can't be one step
+        // of another: its steps would land outside the outer run.
+        let inner = calls(&[("kv.set", "a", "1"), ("kv.external", "b", "2")]);
         let err = bus
             .run(
                 &Actor::Human,
                 "command.sequence",
-                json!({ "calls": [{ "name": "kv.set", "input": { "k": "a", "v": "1" } }, { "name": "kv.external", "input": { "k": "b", "v": "2" } }] }),
+                json!({ "calls": [{ "name": "kv.set", "input": { "k": "c", "v": "3" } }, { "name": "command.sequence", "input": inner }] }),
                 false,
             )
             .await
             .unwrap_err();
         assert!(
-            matches!(&err, CommandError::Invalid { message, .. } if message.contains("composes Tx commands only")),
+            matches!(&err, CommandError::Invalid { message, .. } if message.contains("outside the transaction")),
             "{err:?}"
         );
         assert_eq!(kv_value(&db, "a").await, None);
+        assert_eq!(kv_value(&db, "c").await, None);
+    }
+
+    /// The audit rows of `name`, newest first.
+    async fn audits_of(
+        db: &Database,
+        name: &str,
+    ) -> Vec<oxplow_db::command_audit_store::CommandAudit> {
+        oxplow_db::SqliteCommandAuditStore::new(db.clone())
+            .list_recent(50)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|a| a.command == name)
+            .collect()
+    }
+
+    /// P7 review (tsk713): a composite with a step outside the transaction
+    /// runs its steps in order, each landing as it runs — one audit row
+    /// and one `command.executed` naming them all, and no undo (a system
+    /// outside the bus can't be rolled back with it).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_composite_with_an_external_step_runs_its_steps_in_order() {
+        let (db, bus) = composing_bus();
+        let out = bus
+            .run(
+                &Actor::Human,
+                "command.sequence",
+                calls(&[
+                    ("kv.set", "a", "1"),
+                    ("kv.external", "b", "2"),
+                    ("kv.set", "c", "3"),
+                ]),
+                false,
+            )
+            .await
+            .unwrap();
+        for (k, v) in [("a", "1"), ("b", "2"), ("c", "3")] {
+            assert_eq!(kv_value(&db, k).await.as_deref(), Some(v), "{k}");
+        }
+        let names: Vec<&str> = out.result["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["kv.set", "kv.external", "kv.set"]);
+        assert!(out.inverse.is_none(), "not undoable");
+        let rows = audits_of(&db, "command.sequence").await;
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].outcome, Outcome::Ok);
+        assert!(rows[0].inverse.is_none());
+        for child in ["kv.set", "kv.external"] {
+            assert!(
+                audits_of(&db, child).await.is_empty(),
+                "{child} has no row of its own"
+            );
+        }
+    }
+
+    /// P7 review (tsk713): a step that fails stops the run; the steps
+    /// before it stand, and the one audit row says what landed and what
+    /// failed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failed_step_stops_the_run_and_what_landed_stands() {
+        let (db, bus) = composing_bus();
+        let err = bus
+            .run(
+                &Actor::Human,
+                "command.sequence",
+                calls(&[
+                    ("kv.set", "a", "1"),
+                    ("kv.external", "b", "fail"),
+                    ("kv.set", "c", "3"),
+                ]),
+                false,
+            )
+            .await
+            .unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("`kv.external`") && message.contains("`kv.set`"),
+            "names the failed step and what landed: {message}"
+        );
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"), "it stands");
+        assert_eq!(kv_value(&db, "c").await, None, "nothing after the failure");
+        let rows = audits_of(&db, "command.sequence").await;
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].outcome, Outcome::Error);
+        let result = rows[0].result.clone().unwrap();
+        assert_eq!(result["children"].as_array().unwrap().len(), 1);
+        assert_eq!(result["failed"]["name"], "kv.external");
+        assert!(rows[0].inverse.is_none());
+    }
+
+    /// P7 review (tsk713): every step is checked before any runs — its
+    /// input, its invokers, the agent policy — and a step that asks makes
+    /// the run ask once; an agent's run is a proposal (with no dry run:
+    /// nothing outside the transaction runs before a person decides).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_external_composite_is_checked_and_confirmed_before_any_step_runs() {
+        let (db, bus) = composing_bus();
+        let err = bus
+            .run(
+                &Actor::Human,
+                "command.sequence",
+                json!({ "calls": [{ "name": "kv.external", "input": { "k": "a", "v": "1" } }, { "name": "kv.set", "input": { "k": "b" } }] }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f.starts_with("/calls/1/input")),
+            "{err:?}"
+        );
+        let err = bus
+            .run(
+                &agent(),
+                "command.sequence",
+                calls(&[("kv.external", "a", "1"), ("kv.secret", "b", "2")]),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+        assert_eq!(kv_value(&db, "a").await, None, "nothing ran");
+
+        let asks = calls(&[("kv.external", "a", "1"), ("kv.danger", "b", "2")]);
+        let err = bus
+            .run(&Actor::Human, "command.sequence", asks.clone(), false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::NeedsConfirmation { preview } if preview.destructive),
+            "{err:?}"
+        );
+        let err = bus
+            .run(&agent(), "command.sequence", asks.clone(), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
+        assert_eq!(
+            kv_value(&db, "a").await,
+            None,
+            "nothing ran before a person decided"
+        );
+
+        bus.run(&Actor::Human, "command.sequence", asks, true)
+            .await
+            .unwrap();
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
+        assert_eq!(kv_value(&db, "b").await.as_deref(), Some("2"));
     }
 
     /// A composite runs commands that write; a read can't join it.
@@ -3065,16 +3331,17 @@ mod tests {
 
     /// P7.A1: a `Dispatch` command routes by its input and then runs
     /// exactly as a Tx or an External command: its Tx route commits in the
-    /// bus's transaction and composes; its External route runs the
-    /// external handler and can't join a sequence (the refusal names the
-    /// system); a route the input doesn't name is the caller's error.
+    /// bus's transaction and composes into it; its External route runs the
+    /// external handler, and in a composite makes the composite run as
+    /// steps (P7 review, tsk713); a route the input doesn't name is the
+    /// caller's error. Composites are pinned with the `Dispatch` commands.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_dispatch_command_routes_by_input_and_composes_only_in_the_transaction() {
+    async fn a_dispatch_command_routes_by_input_and_composes_by_its_route() {
         let (db, bus) = bus();
         let bus = Arc::new(bus);
         bus.register(kv_dispatch(Confirm::Never)).unwrap();
         bus.register(compose::sequence_command(&bus)).unwrap();
-        assert_eq!(bus.dispatch_commands(), ["kv.put"]);
+        assert_eq!(bus.dispatch_commands(), ["command.sequence", "kv.put"]);
         assert!(bus.external_commands().is_empty());
         let mut wrong = kv_spec("kv.wrong", Invokers::ALL, Confirm::Never);
         wrong.atomicity = Atomicity::Tx;
@@ -3130,7 +3397,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(kv_value(&db, "b").await.as_deref(), Some("2"));
-        let err = bus
+        let far = bus
             .run(
                 &Actor::Human,
                 compose::SEQUENCE,
@@ -3138,12 +3405,9 @@ mod tests {
                 false,
             )
             .await
-            .unwrap_err();
-        assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), message }
-                if f == "/calls/0/name" && message.contains("far")),
-            "{err:?}"
-        );
+            .unwrap();
+        assert_eq!(far.result["children"][0]["result"]["far"], "far:b");
+        assert!(far.inverse.is_none(), "steps aren't undoable");
     }
 
     /// An agent's run of a `Dispatch` command that needs a person is

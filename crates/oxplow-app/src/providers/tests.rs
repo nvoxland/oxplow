@@ -514,6 +514,63 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
     assert_eq!(state, oxplow_domain::work_items::CanonicalState::Todo);
 }
 
+/// P7 review (tsk713): a composite over another provider's item runs its
+/// calls as steps through the provider's process — the comment, then the
+/// transition — recorded as one run whose `work_item.recorded` events it
+/// caused, and not undoable.
+#[tokio::test]
+async fn a_composite_writes_another_providers_item_as_steps() {
+    let (fx, ext) = approved("").await;
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    first_read(&fx).await;
+    let item = fx
+        .svc
+        .work_items_client()
+        .create(
+            &Actor::Human,
+            crate::work_items::NewItem {
+                provider: Some("fake".into()),
+                title: "theirs".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let out = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            "command.sequence",
+            json!({ "calls": [
+                { "name": "work_item.comment", "input": { "ref": item, "body": "Looks good." } },
+                { "name": "work_item.transition", "input": { "ref": item, "to": "done" } },
+            ] }),
+            false,
+        )
+        .await
+        .unwrap();
+    assert!(out.inverse.is_none());
+    let executed = out.event_id.clone().unwrap();
+    let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
+    let caused = events
+        .iter()
+        .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
+        .filter(|e| e.envelope.event_type == "work_item.recorded")
+        .count();
+    assert_eq!(caused, 2, "each step's record, caused by the one run");
+    let audits = fx.svc.commands.audit_store().list_recent(10).await.unwrap();
+    assert_eq!(audits[0].command, "command.sequence");
+    assert!(!audits.iter().any(|a| a.command == "work_item.comment"));
+    fx.svc.event_pump.run_once().await.unwrap();
+    let state = ServicesProbe(&fx.svc).record(&item).await.unwrap().state;
+    assert_eq!(state, oxplow_domain::work_items::CanonicalState::Done);
+}
+
 /// P7.A1: a provider's verb input is checked against what it declares
 /// (its `native` fields included) before the process is called; another
 /// provider's parent or link target is refused at its field; an agent's

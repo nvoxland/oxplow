@@ -425,18 +425,21 @@ pub fn compose_calls(
     })
 }
 
-/// `decl` of extension `extension` as a command on `bus`: a `Tx` handler
-/// that, before any write, reads its `input` rows on the run's own
-/// connection, runs the script, and runs what it composes as the run's
-/// children (`CommandBus::run_nested`: each child's invokers, policy and
-/// confirmation; one audit row; the reversed children undo it). Pure, so
-/// a retried transaction can re-run it.
+/// `decl` of extension `extension` as a command on `bus`: a composite
+/// (`commands/compose.rs`) whose composer reads its `input` rows on the
+/// run's connection, runs the script and returns what it composes. The bus
+/// runs that in one transaction when every call can (each child's
+/// invokers, policy and confirmation; one audit row; the reversed children
+/// undo it), or as steps when one leaves it — a `work_item.*` call on
+/// another provider's item (P7 review, tsk713). Pure, so the bus may
+/// compose more than once.
 pub fn extension_command(
     bus: &std::sync::Arc<crate::commands::CommandBus>,
     extension: &str,
     decl: &ExtensionCommand,
 ) -> Result<crate::commands::Command, oxplow_domain::CommandError> {
-    use crate::commands::{Command, Handler, HandlerOutput, TxCtx};
+    use crate::commands::compose::{Compose, Composer, Composition};
+    use crate::commands::Command;
     use oxplow_domain::{Atomicity, CommandError, Lifecycle};
     let spec = CommandSpec {
         name: decl.name.clone(),
@@ -446,49 +449,37 @@ pub fn extension_command(
         confirm: decl.confirm,
         undoable: true,
         lifecycle: Lifecycle::Experimental,
-        atomicity: Atomicity::Tx,
+        atomicity: Atomicity::Dispatch,
         effect: decl.effect,
     };
-    let weak = std::sync::Arc::downgrade(bus);
-    let (script, query, parent) = (decl.script.clone(), decl.input.clone(), spec.clone());
-    Command::new(
-        spec,
-        Handler::Tx(std::sync::Arc::new(move |ctx: &TxCtx<'_>, input: Value| {
-            let bus = weak.upgrade().ok_or_else(|| CommandError::Failed {
-                message: "the command bus is gone".into(),
-            })?;
+    let (script, query) = (decl.script.clone(), decl.input.clone());
+    let compose: std::sync::Arc<Composer> =
+        std::sync::Arc::new(move |conn: &rusqlite::Connection, input: &Value| {
             let rows = match &query {
                 Some(sql) => rows_json(
-                    &oxplow_db::semantic_layer::read_on(ctx.conn, &input_query(sql, &input))
-                        .map_err(|e| match e {
+                    &oxplow_db::semantic_layer::read_on(conn, &input_query(sql, input)).map_err(
+                        |e| match e {
                             oxplow_domain::DomainError::Busy(m) => {
                                 CommandError::Busy { message: m }
                             }
                             other => CommandError::Failed {
                                 message: format!("the `input` query failed: {other}"),
                             },
-                        })?,
+                        },
+                    )?,
                 ),
                 None => Vec::new(),
             };
-            let (calls, result) = match compose_calls(&script, input, rows)? {
-                Composed::Run { calls, result } => (calls, result),
-                Composed::Refused(message) => {
-                    return Err(CommandError::Invalid {
-                        field: None,
-                        message,
-                    })
-                }
-            };
-            let nested = bus.run_nested(ctx, &parent, &calls)?;
-            Ok(HandlerOutput {
-                result: json!({ "result": result, "children": nested.children }),
-                inverse: nested.inverse,
-                events: nested.events,
-                after_commit: nested.after_commit,
-            })
-        })),
-    )
+            match compose_calls(&script, input.clone(), rows)? {
+                Composed::Run { calls, result } => Ok(Composition { calls, result }),
+                Composed::Refused(message) => Err(CommandError::Invalid {
+                    field: None,
+                    message,
+                }),
+            }
+        });
+    let handler = Compose::handler(bus, spec.clone(), compose);
+    Command::new(spec, handler)
 }
 
 /// Keeps the bus's extension commands matching the enabled extensions of
@@ -1260,8 +1251,8 @@ mod tests {
                 "the script failed",
             ),
             (
-                "def transform(x):\n    return {\"commands\": [{\"name\": \"vcs.commit\", \"input\": {}}]}\n",
-                "composes Tx commands only",
+                "def transform(x):\n    return {\"commands\": [{\"name\": \"no.such\", \"input\": {}}]}\n",
+                "no.such",
             ),
             (
                 "def transform(x):\n    return {\"commands\": [], \"note\": \"extra\"}\n",

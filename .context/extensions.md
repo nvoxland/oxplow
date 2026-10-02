@@ -447,9 +447,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   the note — then transitions to `todo`. Both read one `input` query
   (`v_effort` + `json_group_array`s over `v_claim`, `v_decision`,
   `v_oxplow_review_deviation`), compose `work_item.comment` and
-  `work_item.transition` in their transaction — so on oxplow's own items:
-  an external provider's item routes outside the transaction and is
-  refused (an open question, tsk713) — are `confirm: always`, and are a person's or
+  `work_item.transition` — one transaction (and one undo) on oxplow's own
+  item, steps through the provider on another provider's (not undoable;
+  [commands.md](./commands.md) → "Composition", tsk713) — refuse an
+  effort without a work item by name, are `confirm: always`, and are a person's or
   a lens's — never an agent's. `questions.yaml` + `README.md` (its skill)
   say what an agent can read of the packet; a bundled extension's
   questions are checked against a running registry by
@@ -1148,19 +1149,24 @@ runaway catch, because at run time the script holds the bus's write
 transaction; no files, no `ai_*`), then the `{ commands, result? }` shape
 (`composed`; any other key is `Invalid`).
 
-**Running** (`extension_command`): each is a `Tx` command
-`<namespace>.<name>` (summary "… (extension `x`)", the declared
-invokers / confirm / effect, undoable, `Lifecycle::Experimental`). Its
-handler, before any write, reads the `input` rows on the run's own
-connection (`semantic_layer::read_on`: the `query_sql` authorizer, row
-cap and timeout, the read session restored — `query_only` off — before
-the writes), runs `compose_calls` (inside the transaction — pure, so a retried
-transaction re-runs it), and runs the commands through
-`CommandBus::run_nested` as the run's children: each child's invokers,
-policy and confirmation apply (an agent's run whose child asks becomes a
-proposal with the children as its dry run), one audit row with `{
-result, children }`, the children's events caused by the run, the
-reversed children as its undo. A script can't do I/O: `files()` sees
+**Running** (`extension_command`): each is a composite
+(`Handler::Compose`, atomicity `Dispatch`) `<namespace>.<name>`
+(summary "… (extension `x`)", the declared invokers / confirm / effect,
+`Lifecycle::Experimental`). Its composer reads the `input` rows on the
+connection it's given (`semantic_layer::read_on`: the `query_sql`
+authorizer, row cap and timeout, the read session restored — `query_only`
+off — before any writes) and runs `compose_calls` (pure, so the bus may
+compose more than once: once to route, again in the run's transaction).
+The bus runs what it composes ([commands.md](./commands.md) →
+"Composition"): when every call stays in oxplow's records, as children
+in one transaction (`run_nested`) — each child's invokers, policy and
+confirmation apply (an agent's run whose child asks becomes a proposal
+with the children as its dry run), one audit row with `{ result,
+children }`, the children's events caused by the run, the reversed
+children as its undo; when one leaves it (`work_item.*` on another
+provider's item, tsk713), as **steps** — all checked first, then run in
+order, each landing as it runs, stopping at the first failure, one audit
+row, no undo. A script can't do I/O: `files()` sees
 nothing and `ai_*` is refused without a host. **Registration**
 (`ExtensionCommands`, `Services.extension_commands`): the enabled
 extensions of the **primary worktree** (one bus, like providers — a

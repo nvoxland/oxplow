@@ -11,6 +11,8 @@ def transform(x):
     if not x["rows"]:
         return {"refuse": "no effort `%s`" % ref}
     row = x["rows"][0]
+    if not row["work_item"]:
+        return {"refuse": "effort `%s` has no work item to review" % ref}
     note = x["input"].get("note", "")
     checklist = (
         ["- [ ] Back up the claim: %s" % c["statement"] for c in _list(row["unverified"])] +

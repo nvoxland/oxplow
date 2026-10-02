@@ -1560,7 +1560,8 @@ mod tests {
 
     /// P7.A1: every `Dispatch` command — one that decides per input
     /// whether it runs in the transaction or through a provider's process
-    /// — is listed here on purpose, like the `External` ones.
+    /// — is listed here on purpose, like the `External` ones. A composite
+    /// is one (P7 review, tsk713): its calls decide.
     #[tokio::test]
     async fn the_dispatch_commands_are_the_reviewed_ones() {
         let dir = tempfile::tempdir().unwrap();
@@ -1569,6 +1570,7 @@ mod tests {
         assert_eq!(
             services.commands.dispatch_commands(),
             [
+                "command.sequence",
                 "work_item.comment",
                 "work_item.create",
                 "work_item.delete",

@@ -78,6 +78,14 @@ commands:
         input: { ref: "effort:eff1", force: true }
         rows: [{ work_item: "work_item:oxplow:tsk1", unverified: '[{"claim":"claim:1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]
         expect_commands: [work_item.comment, work_item.transition]
+      - name: another provider's item
+        input: { ref: "effort:eff2" }
+        rows: [{ work_item: "work_item:linear:ENG-12", unverified: "[]", inferred: "[]", deviated: "[]" }]
+        expect_commands: [work_item.comment, work_item.transition]
+      - name: no work item
+        input: { ref: "effort:eff3" }
+        rows: [{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]
+        refuses: has no work item
   - name: request_changes
     summary: Send an effort's work back — comment a checklist of its unverified claims, inferred decisions and files outside its work item's area (and your note) on the item, and move it back to todo.
     input_schema:
@@ -109,3 +117,11 @@ commands:
         input: { ref: "effort:eff1" }
         rows: [{ work_item: "work_item:oxplow:tsk1", unverified: "[]", inferred: "[]", deviated: "[]" }]
         refuses: nothing to ask for
+      - name: another provider's item
+        input: { ref: "effort:eff2", note: "Add the migration." }
+        rows: [{ work_item: "work_item:linear:ENG-12", unverified: "[]", inferred: "[]", deviated: "[]" }]
+        expect_commands: [work_item.comment, work_item.transition]
+      - name: no work item
+        input: { ref: "effort:eff3", note: "x" }
+        rows: [{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]
+        refuses: has no work item

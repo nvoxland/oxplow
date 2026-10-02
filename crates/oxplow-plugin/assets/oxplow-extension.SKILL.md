@@ -196,8 +196,11 @@ empty: Nothing is waiting on you.
   effect?, invokers?, examples? }`. The Starlark `transform(x)` gets `{
   input, rows }` and returns `{ commands: [{ name, input }], result? }`
   — or `{ refuse: "why" }` to decline (the caller sees the reason);
-  those core commands run as the caller in one transaction (each one's
-  own policy and confirmation apply; one undo). It does no I/O, has 5 s,
+  those core commands run as the caller, each one's own policy and
+  confirmation checked first — in one transaction with one undo when they
+  all touch oxplow's own records, or in order through the provider when
+  one touches another provider's item (then what ran before a failure
+  stays, and there's no undo). It does no I/O, has 5 s,
   and `examples` (at most 10) are dry-run by `check`: give each `rows:`
   (what the `input` query would return) so it doesn't depend on the
   project's data, and `expect_commands: [...]` or `refuses: <part of the

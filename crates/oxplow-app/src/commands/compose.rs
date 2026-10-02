@@ -1,10 +1,19 @@
-//! Composition: `command.sequence` runs several `Tx` commands as one run
-//! (P6b.A1) — the one mechanism a composite is built on, and what an
-//! extension's own command (P6b.B2) becomes once its script has said
-//! which commands to run. Each child's own invokers, policy and
-//! confirmation apply (`CommandBus::run_nested`); the parent has the one
-//! audit row and `command.executed`, its children's events caused by it;
-//! undo is the children's inverses, reversed.
+//! Composition: a command made of other commands' calls (P6b.A1) — the
+//! one mechanism `command.sequence` and an extension's own commands
+//! (P6b.B2) are built on. A composite is a [`Compose`] handler: given its
+//! input it says which calls to run; the bus decides where they run.
+//!
+//! - Every call runs in the transaction (a `Tx` command, a `Dispatch`
+//!   command routed inside it, a composite whose calls all do): one run in
+//!   one transaction (`CommandBus::run_nested`) — all or nothing, one audit
+//!   row and `command.executed` with the children's events caused by it,
+//!   undone by the children's inverses reversed.
+//! - Any call leaves it (an `External` command, `work_item.*` on another
+//!   provider's item): its **steps** run in order (`steps.rs`), each
+//!   landing as it runs, with no undo (P7 review, tsk713).
+//!
+//! Either way each child's own invokers, policy and confirmation apply,
+//! checked before anything runs.
 
 use std::sync::{Arc, Weak};
 
@@ -15,7 +24,52 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Command, CommandBus, Handler, HandlerOutput, TxCtx};
+use super::{Command, CommandBus, Handler, HandlerOutput, TxCtx, TxHandler};
+
+/// What a composite runs for one input: its calls, in order, and the
+/// run's own `result` (beside the children's).
+#[derive(Debug, Clone, Default)]
+pub struct Composition {
+    pub calls: Vec<CommandCall>,
+    pub result: Option<Value>,
+}
+
+/// Say what a composite runs for `input`, reading on `conn` (the run's
+/// transaction, or a read snapshot when the bus routes it). Pure: the bus
+/// may compose more than once.
+pub type Composer =
+    dyn Fn(&rusqlite::Connection, &Value) -> Result<Composition, CommandError> + Send + Sync;
+
+/// A composite's handler: its composer, and the `Tx` handler that runs
+/// what it composes in the bus's transaction (`run_nested`) when every
+/// call can.
+pub struct Compose {
+    pub compose: Arc<Composer>,
+    pub tx: Arc<TxHandler>,
+}
+
+impl Compose {
+    /// The composite `parent` (its spec, for the children's checks) over
+    /// `compose`, on `bus`.
+    pub fn handler(bus: &Arc<CommandBus>, parent: CommandSpec, compose: Arc<Composer>) -> Handler {
+        let bus: Weak<CommandBus> = Arc::downgrade(bus);
+        let composer = compose.clone();
+        let tx: Arc<TxHandler> = Arc::new(move |ctx: &TxCtx<'_>, input: Value| {
+            let bus = bus.upgrade().ok_or_else(|| CommandError::Failed {
+                message: "the command bus is gone".into(),
+            })?;
+            let Composition { calls, result } = composer(ctx.conn, &input)?;
+            let nested = bus.run_nested(ctx, &parent, &calls)?;
+            Ok(HandlerOutput {
+                result: json!({ "result": result, "children": nested.children }),
+                inverse: nested.inverse,
+                events: nested.events,
+                after_commit: nested.after_commit,
+            })
+        });
+        Handler::Compose(Arc::new(Compose { compose, tx }))
+    }
+}
 
 pub const SEQUENCE: &str = "command.sequence";
 
@@ -29,18 +83,19 @@ pub struct SequenceInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SequenceCall {
-    /// A registered `Tx` command.
+    /// A registered command that writes.
     pub name: String,
     /// Its input, matching its schema.
     pub input: Value,
 }
 
 pub fn sequence_command(bus: &Arc<CommandBus>) -> Command {
-    let bus: Weak<CommandBus> = Arc::downgrade(bus);
     let spec = CommandSpec {
         name: SEQUENCE.into(),
-        summary: "Run several commands as one. Each one's own policy and confirmation \
-                  apply; the run has one audit row, and undoing it reverses them all."
+        summary: "Run several commands as one, each one's own policy and confirmation \
+                  checked before any runs; the run has one audit row. In oxplow's own \
+                  records they run in one transaction and undo together; when one goes to \
+                  an external system they run in order, each landing as it runs, with no undo."
             .into(),
         input_schema: serde_json::to_value(schemars::schema_for!(SequenceInput))
             .expect("schema serializes"),
@@ -49,35 +104,29 @@ pub fn sequence_command(bus: &Arc<CommandBus>) -> Command {
         confirm: Confirm::Never,
         undoable: true,
         lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::Tx,
+        // In the transaction, or as steps outside it: its calls decide.
+        atomicity: Atomicity::Dispatch,
         effect: CommandEffect::Write,
     };
-    let parent = spec.clone();
-    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+    let compose: Arc<Composer> = Arc::new(|_conn, input: &Value| {
         let input: SequenceInput =
-            serde_json::from_value(input).map_err(|e| CommandError::Invalid {
+            serde_json::from_value(input.clone()).map_err(|e| CommandError::Invalid {
                 field: None,
                 message: e.to_string(),
             })?;
-        let bus = bus.upgrade().ok_or_else(|| CommandError::Failed {
-            message: "the command bus is gone".into(),
-        })?;
-        let calls: Vec<CommandCall> = input
-            .calls
-            .into_iter()
-            .map(|c| CommandCall {
-                name: c.name,
-                input: c.input,
-            })
-            .collect();
-        let nested = bus.run_nested(ctx, &parent, &calls)?;
-        Ok(HandlerOutput {
-            result: json!({ "result": Value::Null, "children": nested.children }),
-            inverse: nested.inverse,
-            events: nested.events,
-            after_commit: nested.after_commit,
+        Ok(Composition {
+            calls: input
+                .calls
+                .into_iter()
+                .map(|c| CommandCall {
+                    name: c.name,
+                    input: c.input,
+                })
+                .collect(),
+            result: None,
         })
-    }));
+    });
+    let handler = Compose::handler(bus, spec.clone(), compose);
     Command::new(spec, handler).expect("command.sequence registers")
 }
 

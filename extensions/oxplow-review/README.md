@@ -31,8 +31,11 @@ On an effort's page, **Commands**:
   each file outside the area, and the note — and moves the item back to
   todo (an oxplow task: ready).
 
-Both work on oxplow's own work items; an item from an external provider
-(Linear, …) is refused for now.
+Both work on any provider's item. On an oxplow task the comment and the
+move are one change you can undo; on another provider's item (Linear, …)
+they run in order through the provider — if the move fails the comment
+stays — and can't be undone from oxplow. An effort with no work item is
+refused.
 
 On the packet's rows: **Mark Verified** on an unverified claim
 (`effort.verify_claim`), **Confirm** / **Dismiss** on an inferred

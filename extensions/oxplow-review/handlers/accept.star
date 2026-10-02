@@ -13,6 +13,8 @@ def transform(x):
     if not x["rows"]:
         return {"refuse": "no effort `%s`" % ref}
     row = x["rows"][0]
+    if not row["work_item"]:
+        return {"refuse": "effort `%s` has no work item to review" % ref}
     claims = _list(row["unverified"])
     decisions = _list(row["inferred"])
     if (claims or decisions) and not x["input"].get("force", False):
