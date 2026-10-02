@@ -235,6 +235,12 @@ async fn each_verb_sends_its_graphql_and_records_the_issue() {
     )
     .await
     .unwrap();
+    // A parent is an input-object field: Linear wants its uuid, looked up.
+    assert_eq!(ops(&sim)[ops(&sim).len() - 2..], ["Issue", "IssueCreate"]);
+    assert_eq!(
+        sim.requests().last().unwrap().variables["input"]["parentId"],
+        "00000000-0000-4000-8000-000000000001"
+    );
 
     // update → issueUpdate; "" detaches the parent.
     sim.clear_requests();
@@ -308,9 +314,12 @@ async fn each_verb_sends_its_graphql_and_records_the_issue() {
     .await
     .unwrap();
     assert_eq!(
-        sim.requests()[0].variables,
-        json!({ "input": { "issueId": "ENG-1", "relatedIssueId": "ENG-2", "type": "related" } })
+        sim.requests()[2].variables,
+        json!({ "input": { "issueId": "00000000-0000-4000-8000-000000000001",
+                           "relatedIssueId": "00000000-0000-4000-8000-000000000002",
+                           "type": "related" } })
     );
+    assert_eq!(ops(&sim), ["Issue", "Issue", "IssueRelationCreate"]);
     assert_eq!(
         sim.relations(),
         [(
@@ -330,7 +339,11 @@ async fn each_verb_sends_its_graphql_and_records_the_issue() {
     )
     .await
     .unwrap();
-    assert_eq!(ops(&sim), ["CommentCreate"]);
+    assert_eq!(ops(&sim), ["Issue", "CommentCreate"]);
+    assert_eq!(
+        sim.requests()[1].variables["input"]["issueId"],
+        "00000000-0000-4000-8000-000000000001"
+    );
     assert_eq!(sim.comments("ENG-1"), ["noted"]);
 
     // delete → the issue, then issueDelete; recorded deleted.

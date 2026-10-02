@@ -502,6 +502,7 @@ fn issue_input(
     instance: &Instance,
     input: &Value,
     state_field: &str,
+    parent: Option<Value>,
 ) -> Result<serde_json::Map<String, Value>, ProtocolError> {
     let team = &instance.team;
     let mut out = serde_json::Map::new();
@@ -511,11 +512,7 @@ fn issue_input(
     if let Some(body) = input.get("body").and_then(Value::as_str) {
         out.insert("description".into(), json!(body));
     }
-    if let Some(parent) = input.get("parent_ref").and_then(Value::as_str) {
-        let parent = match parent {
-            "" => Value::Null,
-            p => json!(instance.identifier(p, "/parent_ref")?),
-        };
+    if let Some(parent) = parent {
         out.insert("parentId".into(), parent);
     }
     if let Some(state) = target_state(team, input, state_field)? {
@@ -544,6 +541,46 @@ fn written(record: WorkItemRecord, inverse: Option<CommandCall>) -> InvokeResult
     }
 }
 
+/// The uuid of the issue `item_ref` names: what an input object's issue
+/// field takes (`parentId`, `issueId`, `relatedIssueId` — only a top-level
+/// `id` argument accepts the identifier). A missing issue is the input's
+/// fault, at `field`.
+async fn uuid_of(
+    client: &Client,
+    instance: &Instance,
+    item_ref: &str,
+    field: &'static str,
+) -> Result<String, ProtocolError> {
+    let id = instance.identifier(item_ref, field)?;
+    let data = client
+        .run(issue::ISSUE, json!({ "id": id }))
+        .await
+        .map_err(at(field))?;
+    data["issue"]["id"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| ProtocolError::InvalidInput {
+            field: field.into(),
+            message: format!("no issue `{item_ref}`"),
+        })
+}
+
+/// The `parentId` an input's `parent_ref` asks for: its uuid, `null` for
+/// `""` (detach), `None` when not given.
+async fn parent_of(
+    client: &Client,
+    instance: &Instance,
+    input: &Value,
+) -> Result<Option<Value>, ProtocolError> {
+    match input.get("parent_ref").and_then(Value::as_str) {
+        None => Ok(None),
+        Some("") => Ok(Some(Value::Null)),
+        Some(p) => Ok(Some(json!(
+            uuid_of(client, instance, p, "/parent_ref").await?
+        ))),
+    }
+}
+
 /// The issue `id` names, as it stands.
 async fn current(
     client: &Client,
@@ -567,7 +604,8 @@ async fn invoke(
     match command {
         "create" => {
             required(input, "title")?;
-            let mut fields = issue_input(instance, input, "state")?;
+            let parent = parent_of(client, instance, input).await?;
+            let mut fields = issue_input(instance, input, "state", parent)?;
             fields.insert("teamId".into(), json!(team.id));
             if let Some(project) = &instance.project {
                 fields.insert("projectId".into(), json!(project));
@@ -583,7 +621,8 @@ async fn invoke(
         }
         "update" => {
             let id = instance.identifier(required(input, "ref")?, "/ref")?;
-            let fields = issue_input(instance, input, "state")?;
+            let parent = parent_of(client, instance, input).await?;
+            let fields = issue_input(instance, input, "state", parent)?;
             let data = client
                 .run(issue::ISSUE_UPDATE, json!({ "id": id, "input": fields }))
                 .await
@@ -621,8 +660,10 @@ async fn invoke(
             ))
         }
         "link" => {
-            let id = instance.identifier(required(input, "ref")?, "/ref")?;
-            let target = instance.identifier(required(input, "target")?, "/target")?;
+            let item_ref = required(input, "ref")?;
+            let target_ref = required(input, "target")?;
+            instance.identifier(item_ref, "/ref")?;
+            instance.identifier(target_ref, "/target")?;
             let kind = match required(input, "link_type")? {
                 "blocks" => "blocks",
                 "relates_to" => "related",
@@ -636,6 +677,8 @@ async fn invoke(
                     })
                 }
             };
+            let id = uuid_of(client, instance, item_ref, "/ref").await?;
+            let target = uuid_of(client, instance, target_ref, "/target").await?;
             let data = client
                 .run(
                     issue::RELATION_CREATE,
@@ -649,8 +692,8 @@ async fn invoke(
             ))
         }
         "comment" => {
-            let id = instance.identifier(required(input, "ref")?, "/ref")?;
             let body = required(input, "body")?;
+            let id = uuid_of(client, instance, required(input, "ref")?, "/ref").await?;
             let data = client
                 .run(
                     issue::COMMENT_CREATE,

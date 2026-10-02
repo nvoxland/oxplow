@@ -135,7 +135,11 @@ overriding `https://api.linear.app/graphql`). Its example extension is
   `duplicates` → `duplicate`; other link types refused); `comment` →
   `commentCreate`; `delete` → the issue then `issueDelete` (Linear's
   trash). Each records the issue as it now stands; a missing issue is
-  `InvalidInput` at the ref.
+  `InvalidInput` at the ref. A top-level `id` argument takes the
+  identifier, but **an input object's issue field takes the uuid**
+  (`parentId`, `issueId`, `relatedIssueId`), so a parent, a link's two
+  ends and a commented issue are looked up first (`uuid_of`, one `Issue`
+  query each; tsk717).
 - **Collector `issues`**: the team's (and project's) issues with
   `updatedAt` after `state.since`, `includeArchived`, 50 a page from
   `state.after`. Each page sends `$/progress` (`issues: page N`), its
@@ -153,7 +157,8 @@ have. `sim.rs` (`LinearSim`) is an HTTP server on localhost that
 answers the operations this provider sends, by `operationName`, over an
 in-memory team `ENG` (Linear's default workflow plus `Blocked`) and
 project `Roadmap`; it logs every request, checks the key and can refuse
-the next request as rate limited. `tests/linear.rs` pins what each verb
+the next request as rate limited, and refuses an identifier where Linear
+takes only a uuid (an input object's issue field). `tests/linear.rs` pins what each verb
 sends (operation and variables) and records, `check`'s problems, the
 paging read and its cursor, and a rate limit; `tests/kit.rs` runs the
 example through `oxplow plugin test` — handshake, check, its `create`

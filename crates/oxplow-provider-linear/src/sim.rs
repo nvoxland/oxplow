@@ -269,11 +269,23 @@ fn issue_json(w: &World, i: &Issue) -> Value {
     })
 }
 
+/// An issue by a top-level `id` argument, which Linear accepts as the
+/// uuid or the identifier (`ENG-12`).
 fn find(w: &World, id: &str) -> Result<usize, String> {
     w.issues
         .iter()
         .position(|i| (i.id == id || i.identifier == id) && !i.trashed)
         .ok_or_else(|| "Entity not found: Issue".to_string())
+}
+
+/// An issue by an input object's id field (`parentId`, `issueId`,
+/// `relatedIssueId`), which Linear types as a uuid: an identifier there is
+/// refused, as Linear refuses it.
+fn find_uuid(w: &World, id: &str) -> Result<usize, String> {
+    w.issues
+        .iter()
+        .position(|i| i.id == id && !i.trashed)
+        .ok_or_else(|| format!("Argument Validation Error: `{id}` isn't an issue uuid"))
 }
 
 fn state_index(w: &World, id: &str) -> Result<usize, String> {
@@ -299,7 +311,7 @@ fn apply(w: &World, i: &mut Issue, input: &Value) -> Result<(), String> {
     if let Some(p) = input.get("parentId") {
         i.parent = match p.as_str() {
             None => None,
-            Some(p) => Some(w.issues[find(w, p)?].identifier.clone()),
+            Some(p) => Some(w.issues[find_uuid(w, p)?].identifier.clone()),
         };
     }
     if let Some(s) = input["stateId"].as_str() {
@@ -377,8 +389,8 @@ fn op(w: &mut World, operation: &str, vars: &Value) -> Result<Value, String> {
         }
         "IssueRelationCreate" => {
             let input = &vars["input"];
-            let from = find(w, input["issueId"].as_str().unwrap_or_default())?;
-            let to = find(w, input["relatedIssueId"].as_str().unwrap_or_default())?;
+            let from = find_uuid(w, input["issueId"].as_str().unwrap_or_default())?;
+            let to = find_uuid(w, input["relatedIssueId"].as_str().unwrap_or_default())?;
             let kind = input["type"].as_str().unwrap_or_default().to_string();
             if !["blocks", "related", "duplicate"].contains(&kind.as_str()) {
                 return Err(format!("no relation type `{kind}`"));
@@ -393,7 +405,7 @@ fn op(w: &mut World, operation: &str, vars: &Value) -> Result<Value, String> {
         }
         "CommentCreate" => {
             let input = &vars["input"];
-            let at = find(w, input["issueId"].as_str().unwrap_or_default())?;
+            let at = find_uuid(w, input["issueId"].as_str().unwrap_or_default())?;
             let body = input["body"].as_str().unwrap_or_default().to_string();
             let identifier = w.issues[at].identifier.clone();
             w.comments.push((identifier, body));
