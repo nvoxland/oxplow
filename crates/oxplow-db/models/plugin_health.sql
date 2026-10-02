@@ -6,5 +6,8 @@ SELECT h.plugin, h.contribution, h.kind, h.state, h.reason, h.consecutive_failur
            AND (d.consumer = 'extension:' || h.plugin || '/' || h.contribution
                 OR EXISTS (SELECT 1 FROM json_each(e.subject) s
                             WHERE s.value = 'plugin:' || h.plugin))) AS dead_letters,
-       (h.next_due_at IS NULL OR h.next_due_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) AS fresh
+       (h.next_due_at IS NULL OR h.next_due_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) AS fresh,
+       w.ref AS repair_item
 FROM source('plugin_health') h
+LEFT JOIN ref('work_item') w
+  ON w.ref = h.repair_item AND w.state NOT IN ('done', 'canceled')

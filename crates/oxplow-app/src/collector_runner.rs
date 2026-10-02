@@ -78,6 +78,8 @@ pub struct CollectorListing {
     /// back the version they reviewed (tsk349). `None` for derived
     /// collectors and unreadable entries.
     pub version: Option<String>,
+    /// Why failures disabled it on this machine, when they did (P7.C2).
+    pub disabled: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -182,6 +184,7 @@ pub fn set_credential(
 /// Every declared collector under `root`, with its last run and consent.
 pub async fn list_collectors(ctx: &Collectors<'_>) -> Result<Vec<CollectorListing>, DomainError> {
     let runs = ctx.store.list_runs().await?;
+    let health = crate::plugin_health::PluginHealth::new(ctx.db.clone(), ctx.schemas.clone());
     let mut out = Vec::new();
     for ext in ctx.catalog.get(ctx.root).iter().cloned() {
         let ext_dir = ctx.root.join(&ext.path);
@@ -211,8 +214,12 @@ pub async fn list_collectors(ctx: &Collectors<'_>) -> Result<Vec<CollectorListin
                         .is_some(),
                 })
                 .collect();
+            let disabled = health
+                .disabled_reason(&plugin_key(&ext.name, &spec.id))
+                .await?;
             out.push(CollectorListing {
                 owner: ext.name.clone(),
+                disabled,
                 spec,
                 run,
                 approved,
@@ -225,12 +232,13 @@ pub async fn list_collectors(ctx: &Collectors<'_>) -> Result<Vec<CollectorListin
     Ok(out)
 }
 
-/// Collectors the scheduler should run now: approved `every` collectors
-/// that never ran or last ran at least their interval before `now_ms`.
+/// Collectors the scheduler should run now: approved, not disabled
+/// `every` collectors that never ran or last ran at least their interval
+/// before `now_ms`.
 pub fn due_collectors(listings: &[CollectorListing], now_ms: i64) -> Vec<(String, String)> {
     listings
         .iter()
-        .filter(|l| l.approved)
+        .filter(|l| l.approved && l.disabled.is_none())
         .filter(|l| match l.spec.trigger {
             Trigger::Manual | Trigger::On { .. } => false,
             Trigger::Every { minutes } => {
@@ -621,6 +629,9 @@ pub enum RunCollectorError {
     NeedsApproval(String),
     /// It ran (or tried to) and failed; recorded as its run.
     Failed(String),
+    /// Failures disabled it on this machine (P7.C2) until a person runs
+    /// `plugin.enable`. Nothing ran.
+    Disabled(String),
     /// Oxplow's own storage failed.
     Storage(DomainError),
 }
@@ -629,9 +640,9 @@ impl From<RunCollectorError> for DomainError {
     fn from(e: RunCollectorError) -> Self {
         match e {
             RunCollectorError::NotFound => DomainError::NotFound,
-            RunCollectorError::NeedsApproval(m) | RunCollectorError::Failed(m) => {
-                DomainError::Invalid(m)
-            }
+            RunCollectorError::NeedsApproval(m)
+            | RunCollectorError::Failed(m)
+            | RunCollectorError::Disabled(m) => DomainError::Invalid(m),
             RunCollectorError::Storage(e) => e,
         }
     }
@@ -764,12 +775,57 @@ pub fn event_input(e: &StoredEvent) -> serde_json::Value {
     })
 }
 
-/// Run one collector end to end: consent check, run, coercion, then one
+/// A collector's `plugin_health` key: owner / id, kind `collector`.
+pub fn plugin_key(owner: &str, id: &str) -> oxplow_db::PluginKey {
+    oxplow_db::PluginKey {
+        plugin: owner.to_string(),
+        contribution: id.to_string(),
+        kind: "collector",
+    }
+}
+
+/// Run one collector end to end, under the plugin failure policy
+/// (P7.C2, [`crate::plugin_health`]): a disabled one doesn't run (its
+/// reason as [`RunCollectorError::Disabled`]); a failed run counts — the
+/// third in a row disables it — and a good one starts the count over.
+pub async fn run_collector(
+    ctx: &Collectors<'_>,
+    owner: &str,
+    id: &str,
+    trigger: RunTrigger,
+    source: &str,
+) -> Result<CollectorRunReport, RunCollectorError> {
+    let health = crate::plugin_health::PluginHealth::new(ctx.db.clone(), ctx.schemas.clone());
+    let key = plugin_key(owner, id);
+    if let Some(reason) = health
+        .disabled_reason(&key)
+        .await
+        .map_err(RunCollectorError::Storage)?
+    {
+        return Err(RunCollectorError::Disabled(format!(
+            "collector `{owner}/{id}` is disabled: {reason}. A person can enable it again \
+             (`plugin.enable`, Settings → Extensions)."
+        )));
+    }
+    let started = std::time::Instant::now();
+    let result = run_collector_once(ctx, owner, id, trigger, source).await;
+    let recorded = match &result {
+        Ok(_) => health.succeeded(&key, Some(started.elapsed())).await,
+        Err(RunCollectorError::Failed(error)) => health.failed(&key, error).await.map(|_| ()),
+        Err(_) => Ok(()),
+    };
+    if let Err(e) = recorded {
+        tracing::warn!(collector = %format!("{owner}/{id}"), error = %e, "recording its health failed");
+    }
+    result
+}
+
+/// [`run_collector`]'s run: consent check, run, coercion, then one
 /// transaction with its rows, its `collector_run` row and its
 /// `collector.synced@1` event (logged as `source`). A run that fails after
 /// the consent check is recorded the same way, without rows, so the UI
 /// can show it.
-pub async fn run_collector(
+async fn run_collector_once(
     ctx: &Collectors<'_>,
     owner: &str,
     id: &str,
@@ -938,6 +994,11 @@ pub struct RunRecord<'a> {
 }
 
 impl RunLog {
+    /// The plugin failure policy, over this log's database.
+    pub fn health(&self) -> crate::plugin_health::PluginHealth {
+        crate::plugin_health::PluginHealth::new(self.db.clone(), self.schemas.clone())
+    }
+
     /// Whether collector `owner/id` already ran for the event at `seq` (its
     /// `last_event_id` is at or past it): a redelivery runs nothing.
     pub async fn ran_for(&self, owner: &str, id: &str, seq: i64) -> bool {
@@ -1028,7 +1089,7 @@ pub async fn run_for_event(
     match run_collector(ctx, owner, id, RunTrigger::On(event), &source).await {
         Ok(report) => Ok(EventRun::Ran(Ok(report))),
         Err(RunCollectorError::Failed(m)) => Ok(EventRun::Ran(Err(m))),
-        Err(RunCollectorError::NotFound) => Ok(EventRun::Skipped),
+        Err(RunCollectorError::NotFound | RunCollectorError::Disabled(_)) => Ok(EventRun::Skipped),
         Err(RunCollectorError::NeedsApproval(m)) => {
             ctx.store
                 .record_run(CollectorRun {
@@ -1305,6 +1366,18 @@ impl CollectorRunner {
             .iter()
             .any(|c| c.owner == owner && c.key == id)
         {
+            let health =
+                crate::plugin_health::PluginHealth::new(self.db.clone(), self.schemas.clone());
+            if let Some(reason) = health
+                .disabled_reason(&plugin_key(owner, id))
+                .await
+                .map_err(RunCollectorError::Storage)?
+            {
+                return Err(RunCollectorError::Disabled(format!(
+                    "collector `{owner}/{id}` is disabled: {reason}. A person can enable it \
+                     again (`plugin.enable`, Settings → Extensions)."
+                )));
+            }
             let facts = self
                 .metrics
                 .run_collector_by_key(owner, id, None, source)
@@ -1371,24 +1444,25 @@ pub fn sync_command(sync: CollectorRunner) -> crate::commands::Command {
                         field: None,
                         message: e.to_string(),
                     })?;
-                let report = sync
-                    .sync(&input.owner, &input.id, trigger, &source)
-                    .await
-                    .map_err(|e| match e {
-                        RunCollectorError::NotFound => CommandError::Invalid {
-                            field: Some("/id".into()),
-                            message: format!(
-                                "no collector `{}/{}` in the project's extensions",
-                                input.owner, input.id
-                            ),
-                        },
-                        RunCollectorError::NeedsApproval(m) => CommandError::Invalid {
-                            field: Some("/id".into()),
-                            message: m,
-                        },
-                        RunCollectorError::Failed(m) => CommandError::Failed { message: m },
-                        RunCollectorError::Storage(e) => CommandError::from(e),
-                    })?;
+                let report =
+                    sync.sync(&input.owner, &input.id, trigger, &source)
+                        .await
+                        .map_err(|e| match e {
+                            RunCollectorError::NotFound => CommandError::Invalid {
+                                field: Some("/id".into()),
+                                message: format!(
+                                    "no collector `{}/{}` in the project's extensions",
+                                    input.owner, input.id
+                                ),
+                            },
+                            RunCollectorError::NeedsApproval(m)
+                            | RunCollectorError::Disabled(m) => CommandError::Invalid {
+                                field: Some("/id".into()),
+                                message: m,
+                            },
+                            RunCollectorError::Failed(m) => CommandError::Failed { message: m },
+                            RunCollectorError::Storage(e) => CommandError::from(e),
+                        })?;
                 Ok(HandlerOutput {
                     result: serde_json::to_value(report).expect("report serializes"),
                     ..HandlerOutput::default()
@@ -1544,6 +1618,7 @@ mod tests {
 
     use super::*;
     use oxplow_config::collectors::parse_collectors;
+    use oxplow_domain::CommandError;
     use serde_json::json;
 
     /// The version a person would see in the listing right now.
@@ -1811,7 +1886,7 @@ mod tests {
     }
 
     #[test]
-    fn due_collectors_respect_trigger_approval_and_last_run() {
+    fn due_collectors_respect_trigger_approval_disable_and_last_run() {
         let base = spec("x", &[]);
         let listing = |trigger: Trigger, approved: bool, last: Option<&str>| {
             let mut spec = base.clone();
@@ -1823,6 +1898,7 @@ mod tests {
                 network_enforced: false,
                 credentials: vec![],
                 version: None,
+                disabled: None,
                 run: last.map(|t| CollectorRun {
                     owner: "e".into(),
                     id: "gh".into(),
@@ -1852,6 +1928,14 @@ mod tests {
             (listing(every10(), true, Some(&recent)), false),
             (listing(every10(), false, None), false),
             (listing(Trigger::Manual, true, None), false),
+            // A disabled one waits for a person, however due.
+            (
+                CollectorListing {
+                    disabled: Some("3 failures in a row".into()),
+                    ..listing(every10(), true, None)
+                },
+                false,
+            ),
         ];
         for (l, want) in cases {
             let due = due_collectors(std::slice::from_ref(&l), now);
@@ -2019,6 +2103,72 @@ mod tests {
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(p, body).unwrap();
         }
+    }
+
+    /// P7.C2: three failed runs in a row disable a collector; then
+    /// `collector.sync` refuses it naming the reason, and a person's
+    /// `plugin.enable` lets it run again. An agent can't enable it.
+    #[tokio::test]
+    async fn a_collector_failing_three_runs_is_disabled_until_a_person_enables_it() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        extension(
+            &root,
+            "work",
+            "name: work\nsources:\n  - id: bad\n    runtime: starlark\n    entry: bad.star\n    entities:\n      - { name: hot, key: id, columns: { id: int } }\n",
+            &[("bad.star", "def transform(input):\n    return 1 // 0\n")],
+        );
+        let sync = || {
+            fx.svc.commands.run(
+                &oxplow_domain::Actor::Human,
+                SYNC,
+                json!({ "owner": "work", "id": "bad" }),
+                false,
+            )
+        };
+        for _ in 0..3 {
+            let err = sync().await.unwrap_err();
+            assert!(matches!(err, CommandError::Failed { .. }), "{err:?}");
+        }
+        let err = sync().await.unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { message, .. }
+                if message.contains("is disabled") && message.contains("3 failures in a row")),
+            "{err:?}"
+        );
+        let listings = list_collectors(&Collectors::of(&fx.svc, &root))
+            .await
+            .unwrap();
+        assert!(listings[0].disabled.is_some());
+        assert!(due_collectors(&listings, i64::MAX).is_empty());
+
+        let enable = json!({ "plugin": "work", "contribution": "bad" });
+        let agent = oxplow_domain::Actor::Agent {
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let denied = fx
+            .svc
+            .commands
+            .run(&agent, crate::plugin_health::ENABLE, enable.clone(), false)
+            .await;
+        assert!(
+            matches!(denied, Err(CommandError::Denied { .. })),
+            "{denied:?}"
+        );
+        fx.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::plugin_health::ENABLE,
+                enable,
+                false,
+            )
+            .await
+            .unwrap();
+        // Enabled: it runs (and fails) again rather than being refused.
+        let err = sync().await.unwrap_err();
+        assert!(matches!(err, CommandError::Failed { .. }), "{err:?}");
     }
 
     /// A scheduled run is the `collector.sync` command like every other run

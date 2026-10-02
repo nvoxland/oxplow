@@ -1260,6 +1260,7 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `effort.evidence` / `effort.decisions` | async | `effort.finished` | evidence rows, inferred decisions | boot.rs |
 | `search.index` | async | `work_item.*`, `snapshot.taken` | the search index for tasks and snapshot files | boot.rs |
 | `change.analyze` | async | `snapshot.taken` (that recorded files), `vcs.head.moved` | re-analyzes the stream's working change and open efforts' changes, skipping an event a newer one supersedes; dead-letters a failure naming the stream (P7.B4) | boot.rs |
+| `plugin.repair` | async | `plugin.disabled` | files the contribution's repair work item on the active provider as the system, or comments on its open one; records it in `plugin_health.repair_item` (P7.C2) | boot.rs |
 | `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event, once per event (`collector_run.last_event_id`): an entity collector's rows, or a fact collector through the fact engine (`snapshot.taken` only when the take recorded files; `effort.finished` over the effort's end snapshot; anything else over the stream's latest snapshot) — plus `collector_run` and `collector.synced@1` (P7.B3; replaced `effort.gauges` and the metrics bus `SnapshotTaken` arm) | boot.rs |
 
 **Async consumers (P2.6.2, tsk454).** `trait AsyncEventConsumer { name,
@@ -1741,6 +1742,10 @@ one transaction; `plugin.enable` clears it (`plugin.enabled@1`).
 `v_plugin_health` adds `dead_letters` (pending dead letters of its
 consumer `extension:<plugin>/<contribution>`, or of events whose subject
 is `plugin:<plugin>`) and `fresh` (0 once `next_due_at` has passed).
+V136 (P7.C2) adds `repair_item` (the repair work item's ref the
+`plugin.repair` consumer filed) and `repair_seq` (the last
+`plugin.disabled` it handled, so a redelivery files nothing twice);
+`v_plugin_health` v2 shows `repair_item` only while that item is open.
 
 ### `provider_collector_state` — `SqliteProviderCollectorStore` (`crates/oxplow-db/src/provider_collector_store.rs`)
 

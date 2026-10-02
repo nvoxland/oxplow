@@ -149,6 +149,8 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     crate::symbol_collector::register(state);
     // A stream's working tree and open efforts, re-analyzed as it moves (P7.B4).
     crate::change_reactor::register(state);
+    // A disabled plugin contribution's repair work item (P7.C2).
+    crate::plugin_repair::register(state);
     // `on:` collectors (P7.B3), after the consumers they may name.
     crate::collector_triggers::register(state);
     state.event_pump.clone().spawn();

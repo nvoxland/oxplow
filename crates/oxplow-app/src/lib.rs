@@ -90,6 +90,7 @@ pub mod output_activity;
 pub mod page_ref_backfill;
 pub mod page_ref_consumers;
 pub mod plugin_health;
+pub mod plugin_repair;
 pub mod post_tool_reactors;
 pub mod producer_metrics;
 pub mod prompt_catalog;

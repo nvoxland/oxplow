@@ -688,6 +688,7 @@ mod tests {
                 freshness: Vec::new(),
             },
             alert: None,
+            warnings: Vec::new(),
         }
     }
 

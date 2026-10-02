@@ -643,6 +643,12 @@ needs_approval), last_run_at, error, row_counts_json, cursor_json,
 last_event_id`. The UI refreshes when `v_collector_run` changes
 (`collectorRan`); the in-memory `SourceSynced` is gone.
 
+**Health (P7.C2).** Collectors share the plugin failure policy
+([extensions.md](./extensions.md) "Health, disable and repair"): three
+failed runs in a row disable one (`plugin_health`, key owner / id, kind
+`collector`); then nothing runs it until a person's `plugin.enable`, and
+a lens over its view warns that its rows aren't refreshing.
+
 **`on:` triggers** (`collector_triggers.rs`, the `collector.triggers`
 async pump consumer). When an event an enabled collector's `on:` names is
 logged — and each `where` field of its payload equals its value — the

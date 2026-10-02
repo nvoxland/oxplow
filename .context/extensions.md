@@ -1127,6 +1127,35 @@ project's), plus:
   stay, since deleting one would take its facts. It reseeds when an
   `oxplow/extensions/*/extension.yaml` changes (`WorkspaceChanged`).
 
+## Health, disable and repair (P7.C1–C2)
+
+Every contribution that runs — a provider instance, a collector — shares
+one failure policy (`plugin_health.rs`, the `plugin_health` table read as
+`v_plugin_health`):
+
+- **Counting.** A failed run or call counts; a good one starts the count
+  over. A refused input, a missing approval, or a cancel isn't a failure.
+- **Disabling.** The third failure in a row disables it on this machine
+  and logs `plugin.disabled@1` (the row and the event commit together). A
+  provider instance stops. A disabled collector doesn't run: the
+  scheduler, the `collector.triggers` consumer and the snapshot sweep skip
+  it, and `collector.sync` refuses it with its reason (`Invalid` at
+  `/id`). Nothing cascades: a lens over its view still runs, carrying a
+  warning (`LensRun.warnings`) that its rows aren't refreshing.
+- **Repairing.** The `plugin.repair` pump consumer files a work item on
+  the active work-items provider, as the system: title `Repair <plugin>
+  <contribution>: <reason>`, body the repair prompt (`plugin_repair::render`,
+  golden `crates/oxplow-app/tests/fixtures/repair-prompt.md`: what failed,
+  its intent and declaration, its recent failures, what `plugin check`
+  reports, its intent examples, `engine:` against the running oxplow, and
+  what to do). A later disable while the item is open comments on it;
+  once it's done or canceled the next disable files a new one
+  (`plugin_health.repair_item`, `v_plugin_health.repair_item` while open).
+  oxplow never sends it to an agent.
+- **Enabling.** Only a person: `plugin.enable { plugin, contribution }`
+  (human-only). Its kind comes from its `plugin_health` row (or the
+  provider registry for an instance enabled before it ever failed).
+
 ## Advisories
 
 An extension gives the coding agent guidance with **advisories** in

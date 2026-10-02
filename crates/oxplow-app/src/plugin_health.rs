@@ -185,7 +185,8 @@ struct EnableInput {
 
 /// `plugin.enable { plugin, contribution }`: a person turns a contribution
 /// back on on this machine, clearing an automatic disable. A provider
-/// instance starts again when the project's config enables it. Human
+/// instance starts again when the project's config enables it; a
+/// collector runs at its next trigger. Human
 /// only (an agent can't undo what stopped a failing plugin); logs
 /// `plugin.enabled@1`.
 pub fn enable_command(
@@ -222,23 +223,39 @@ pub fn enable_command(
                     message: "the provider registry is gone".into(),
                 })?;
                 let instance = format!("{plugin}/{contribution}");
-                if providers.find(&instance).is_none() {
-                    return Err(CommandError::Invalid {
-                        field: Some("/contribution".into()),
-                        message: format!(
-                            "no enabled extension `{plugin}` declares a provider `{contribution}`"
-                        ),
-                    });
-                }
+                // Its kind: what its health row says (a collector has one
+                // once it failed), else a provider instance the registry
+                // knows (enabled from Settings before it ever failed).
+                let probe = PluginKey {
+                    plugin: plugin.clone(),
+                    contribution: contribution.clone(),
+                    kind: "provider",
+                };
+                let kind = match health.get(&probe).await?.map(|r| r.kind) {
+                    Some(k) if k == "collector" => "collector",
+                    Some(_) => "provider",
+                    None if providers.find(&instance).is_some() => "provider",
+                    None => {
+                        return Err(CommandError::Invalid {
+                            field: Some("/contribution".into()),
+                            message: format!(
+                                "`{instance}` is neither a provider instance nor a collector \
+                                 that has failed; there's nothing to enable"
+                            ),
+                        })
+                    }
+                };
                 let key = PluginKey {
                     plugin,
                     contribution,
-                    kind: "provider",
+                    kind,
                 };
                 // Recorded first, so the reconcile below sees it cleared.
                 health.enable(&key, &actor.source()).await?;
-                providers.reset(&instance).await;
-                providers.reconcile().await;
+                if kind == "provider" {
+                    providers.reset(&instance).await;
+                    providers.reconcile().await;
+                }
                 let row = health.get(&key).await?;
                 Ok(HandlerOutput {
                     result: serde_json::to_value(row).expect("row serializes"),

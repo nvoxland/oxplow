@@ -1682,6 +1682,8 @@ export type CollectorListing = {
 	 *  collectors and unreadable entries.
 	 */
 	version: string | null,
+	// Why failures disabled it on this machine, when they did (P7.C2).
+	disabled: string | null,
 };
 
 // Last run of one collector (`collector_run`).
@@ -3267,6 +3269,11 @@ export type LensRun_Deserialize = {
 	result: SqlQueryResult,
 	// The lens's alert on this result, if it declares one.
 	alert: AlertState | null,
+	/**
+	 *  What's worth knowing about its data: a view it read comes from a
+	 *  collector failures disabled (P7.C2), so it isn't being refreshed.
+	 */
+	warnings: string[],
 };
 
 // The result of running a lens.
@@ -3277,6 +3284,11 @@ export type LensRun_Serialize = {
 	result: SqlQueryResult,
 	// The lens's alert on this result, if it declares one.
 	alert: AlertState | null,
+	/**
+	 *  What's worth knowing about its data: a view it read comes from a
+	 *  collector failures disabled (P7.C2), so it isn't being refreshed.
+	 */
+	warnings: string[],
 };
 
 // A lens an extension mounts into a core page.

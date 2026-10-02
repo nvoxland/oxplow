@@ -479,21 +479,31 @@ impl MetricsService {
         resolve_metrics(&builtin, &global, &ext.metrics, &project)
     }
 
-    /// `collectors` without the ones that already ran for `event` (a
-    /// redelivered event runs nothing again).
-    async fn not_yet_run(
+    /// `collectors` without the ones failures disabled (P7.C2) and the ones
+    /// that already ran for `event` (a redelivered event runs nothing
+    /// again).
+    async fn runnable(
         &self,
         collectors: Vec<FactCollector>,
         event: Option<&oxplow_domain::StoredEvent>,
     ) -> Vec<FactCollector> {
-        let (Some(event), Some(log)) = (event, self.run_log.as_ref()) else {
+        let Some(log) = self.run_log.as_ref() else {
             return collectors;
         };
+        let health = log.health();
         let mut out = Vec::new();
         for c in collectors {
-            if !log.ran_for(&c.owner, &c.key, event.seq).await {
-                out.push(c);
+            let key = crate::collector_runner::plugin_key(&c.owner, &c.key);
+            // Failures disabled it (P7.C2): it waits for a person.
+            if !matches!(health.disabled_reason(&key).await, Ok(None)) {
+                continue;
             }
+            if let Some(event) = event {
+                if log.ran_for(&c.owner, &c.key, event.seq).await {
+                    continue;
+                }
+            }
+            out.push(c);
         }
         out
     }
@@ -1505,7 +1515,7 @@ impl MetricsService {
                     .is_none_or(|e| crate::collector_triggers::matches_where(&g.trigger, e))
             })
             .collect();
-        let gauges = self.not_yet_run(gauges, event.as_deref()).await;
+        let gauges = self.runnable(gauges, event.as_deref()).await;
         if gauges.is_empty() {
             return SweepReport::default();
         }
@@ -1690,7 +1700,7 @@ impl MetricsService {
                     .is_none_or(|e| crate::collector_triggers::matches_where(&g.trigger, e))
             })
             .collect();
-        let gauges = self.not_yet_run(gauges, event.as_deref()).await;
+        let gauges = self.runnable(gauges, event.as_deref()).await;
         if gauges.is_empty() {
             return;
         }
@@ -1737,7 +1747,7 @@ impl MetricsService {
                     && crate::collector_triggers::matches_where(&c.trigger, &event)
             })
             .collect();
-        let collectors = self.not_yet_run(collectors, Some(&event)).await;
+        let collectors = self.runnable(collectors, Some(&event)).await;
         if collectors.is_empty() {
             return;
         }
@@ -1779,6 +1789,20 @@ impl MetricsService {
             .into_iter()
             .find(|m| m.owner == owner && m.key == key)
             .ok_or_else(|| format!("no fact collector `{owner}/{key}`"))?;
+        if let Some(log) = self.run_log.as_ref() {
+            let health_key = crate::collector_runner::plugin_key(owner, key);
+            if let Some(reason) = log
+                .health()
+                .disabled_reason(&health_key)
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                return Err(format!(
+                    "collector `{owner}/{key}` is disabled: {reason}. A person can enable it \
+                     again (`plugin.enable`, Settings → Extensions)."
+                ));
+            }
+        }
         let stream_val = match stream {
             Some(s) => s.value(),
             None => 1, // primary stream default
@@ -2094,6 +2118,24 @@ impl MetricsService {
             FactRun::Failed(e) => ("error", 0, Some(e.clone())),
             FactRun::Skipped => return,
         };
+        // The plugin failure policy (P7.C2): the third failure in a row
+        // disables it.
+        let health = log.health();
+        let key = crate::collector_runner::plugin_key(&c.owner, &c.key);
+        let counted = match &error {
+            None => {
+                health
+                    .succeeded(
+                        &key,
+                        Some(std::time::Duration::from_millis(elapsed_ms.max(0) as u64)),
+                    )
+                    .await
+            }
+            Some(e) => health.failed(&key, e).await.map(|_| ()),
+        };
+        if let Err(e) = counted {
+            tracing::warn!(key = %c.key, error = %e, "fact collector: recording its health failed");
+        }
         let trigger = match ctx.trigger {
             "manual" => "manual",
             _ => "on",

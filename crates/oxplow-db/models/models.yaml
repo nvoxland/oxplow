@@ -549,7 +549,7 @@
     - { not_null: id }
     - { unique: id }
 - name: plugin_health
-  version: 1
+  version: 2
   description: "Each plugin contribution's health on this machine (P7.C1): a provider instance or a collector, under one failure policy — three failures in a row disable it until a person runs `plugin.enable`."
   columns:
     - { name: "plugin", type: "TEXT", doc: "The extension it belongs to." }
@@ -565,6 +565,7 @@
     - { name: "updated_at", type: "TEXT", doc: "When this row last changed." }
     - { name: "dead_letters", type: "", doc: "Events it couldn't handle and that wait for a person: dead letters of its consumer (`extension:<plugin>/<contribution>`) or of events about the plugin." }
     - { name: "fresh", type: "", doc: "1 unless a scheduled run is overdue (`next_due_at` has passed)." }
+    - { name: "repair_item", type: "TEXT", doc: "The open repair work item filed when it was disabled (P7.C2); NULL once that item is done or canceled." }
   tests:
     - { not_null: plugin }
 - name: snapshot

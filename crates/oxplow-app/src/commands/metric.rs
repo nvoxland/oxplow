@@ -611,6 +611,41 @@ mod tests {
         );
     }
 
+    /// P7.C2: a fact collector failing three runs in a row is disabled;
+    /// `collector.sync` then refuses it, naming why.
+    #[tokio::test]
+    async fn a_failing_fact_collector_is_disabled() {
+        let (svc, dir) = services().await;
+        std::fs::write(
+            dir.path().join("bad.star"),
+            "def transform(input):\n    return 1 // 0\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            "collectors:\n  - { id: repo.bad, runtime: starlark, entry: bad.star, facts: [oxplow.ast_hit] }\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        let sync = || {
+            run(
+                &svc,
+                crate::collector_runner::SYNC,
+                json!({ "owner": "project", "id": "repo.bad" }),
+            )
+        };
+        for _ in 0..3 {
+            let err = sync().await.unwrap_err();
+            assert!(matches!(err, CommandError::Failed { .. }), "{err:?}");
+        }
+        let err = sync().await.unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { message, .. } if message.contains("is disabled")),
+            "{err:?}"
+        );
+    }
+
     /// `metric.scaffold` is a read: a template, and nothing written; the
     /// reserved namespace is refused.
     #[tokio::test]

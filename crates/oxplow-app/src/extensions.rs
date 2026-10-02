@@ -994,6 +994,9 @@ pub struct LensRun {
     pub result: SqlQueryResult,
     /// The lens's alert on this result, if it declares one.
     pub alert: Option<AlertState>,
+    /// What's worth knowing about its data: a view it read comes from a
+    /// collector failures disabled (P7.C2), so it isn't being refreshed.
+    pub warnings: Vec<String>,
 }
 
 /// Load bundled extensions plus every project extension under
@@ -2083,12 +2086,56 @@ pub async fn run_lens(
     ctx: &LensContext,
 ) -> Result<LensRun, DomainError> {
     let lens = catalog.find_lens(root, id)?;
-    execute(layer, lens, params, ctx)
+    let mut run = execute(layer, lens, params, ctx)
         .await
         .map_err(|e| match e {
             DomainError::Invalid(m) => DomainError::Invalid(explain_unsynced(catalog, root, &m)),
             other => other,
-        })
+        })?;
+    run.warnings = disabled_sources(layer, catalog, root, &run.result.reads.models).await;
+    Ok(run)
+}
+
+/// For each view in `models` an extension's collector writes, a warning
+/// when failures disabled that collector: its rows aren't refreshing.
+async fn disabled_sources(
+    layer: &crate::sql_gateway::SqlGateway,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
+    root: &Path,
+    models: &[String],
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for ext in catalog.get(root).iter() {
+        for c in &ext.collectors {
+            let Some(view) = c
+                .entities
+                .iter()
+                .map(|e| &e.view)
+                .find(|v| models.contains(v))
+            else {
+                continue;
+            };
+            let reason = layer
+                .query_sql(
+                    "SELECT reason FROM v_plugin_health
+                      WHERE plugin = ?1 AND contribution = ?2 AND state = 'disabled'",
+                    vec![SqlCell::Text(ext.name.clone()), SqlCell::Text(c.id.clone())],
+                    Some(1),
+                )
+                .await
+                .ok()
+                .and_then(|r| r.rows.into_iter().next())
+                .and_then(|row| row.into_iter().next());
+            if let Some(SqlCell::Text(reason)) = reason {
+                out.push(format!(
+                    "`{view}` comes from the collector `{}/{}`, which is disabled ({reason}); \
+                     its rows aren't being refreshed",
+                    ext.name, c.id
+                ));
+            }
+        }
+    }
+    out
 }
 
 /// A lens reading a source entity before its first sync fails with
@@ -2226,6 +2273,7 @@ async fn execute(
         params,
         result,
         alert,
+        warnings: Vec::new(),
     })
 }
 
@@ -4119,6 +4167,70 @@ empty: No tasks.
             e.errors[0].contains("hasn't been collected"),
             "{:?}",
             e.errors
+        );
+    }
+
+    /// P7.C2: a lens over a disabled collector's view says so — its rows
+    /// aren't being refreshed. Nothing cascades: the lens still runs.
+    #[tokio::test]
+    async fn a_lens_over_a_disabled_collectors_view_warns() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/gh/extension.yaml",
+            "name: gh\nsources:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+        );
+        write(dir.path(), "oxplow/extensions/gh/sync.sh", "#!/bin/sh\n");
+        write(
+            dir.path(),
+            "oxplow/extensions/gh/lenses/all.yaml",
+            "title: All\nquery: SELECT number FROM v_gh_pr\n",
+        );
+        let db = Database::in_memory();
+        oxplow_db::SqliteCollectorStore::new(db.clone())
+            .replace_rows(vec![(
+                oxplow_db::EntityTable {
+                    extension: "gh".into(),
+                    entity: "pr".into(),
+                    view: "v_gh_pr".into(),
+                    key: "number".into(),
+                    description: String::new(),
+                    columns: vec![oxplow_db::EntityColumn {
+                        name: "number".into(),
+                        stored: oxplow_db::StoredType::Integer,
+                        doc: String::new(),
+                    }],
+                },
+                vec![vec![SqlCell::Int(1)]],
+            )])
+            .await
+            .unwrap();
+        db.transaction(|tx| {
+            oxplow_db::plugin_health_store::disable_tx(
+                tx,
+                &crate::collector_runner::plugin_key("gh", "prs"),
+                "3 failures in a row; the last: boom",
+                "t",
+            )
+        })
+        .await
+        .unwrap();
+        let layer = crate::sql_gateway::SqlGateway::new(db);
+        let run = run_lens(
+            &layer,
+            &cat(),
+            dir.path(),
+            "gh/all",
+            BTreeMap::new(),
+            &LensContext::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(run.warnings.len(), 1, "{:?}", run.warnings);
+        assert!(
+            run.warnings[0].contains("gh/prs") && run.warnings[0].contains("3 failures in a row"),
+            "{:?}",
+            run.warnings
         );
     }
 

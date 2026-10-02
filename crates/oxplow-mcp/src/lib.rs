@@ -1384,7 +1384,8 @@ impl OxplowMcp {
                 None,
             ),
             oxplow_app::collector_runner::RunCollectorError::NeedsApproval(m)
-            | oxplow_app::collector_runner::RunCollectorError::Failed(m) => {
+            | oxplow_app::collector_runner::RunCollectorError::Failed(m)
+            | oxplow_app::collector_runner::RunCollectorError::Disabled(m) => {
                 McpError::invalid_params(m, None)
             }
             oxplow_app::collector_runner::RunCollectorError::Storage(e) => internal(e),
