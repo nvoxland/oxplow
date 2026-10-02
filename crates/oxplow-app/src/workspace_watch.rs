@@ -85,8 +85,10 @@ impl WorkspaceWatchRegistry {
                 s.id,
                 worktree,
                 &*vcs,
-                events.clone(),
-                ref_moves.clone(),
+                Announce {
+                    events: events.clone(),
+                    ref_moves: ref_moves.clone(),
+                },
                 is_worktree,
                 on_orphan,
                 filter.clone(),
@@ -131,12 +133,19 @@ async fn auto_archive_orphan(streams: &StreamService, events: &EventBus, stream:
 type OnOrphan =
     Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send>;
 
+/// Where a stream's watchers announce: file changes on the UI's event
+/// bus, ref moves on their own channel.
+#[derive(Clone)]
+struct Announce {
+    events: EventBus,
+    ref_moves: crate::ref_moves::RefMoves,
+}
+
 fn spawn_for_stream(
     stream_id: oxplow_domain::StreamId,
     worktree: PathBuf,
     vcs: &dyn Vcs,
-    events: EventBus,
-    ref_moves: crate::ref_moves::RefMoves,
+    Announce { events, ref_moves }: Announce,
     is_worktree: bool,
     on_orphan: OnOrphan,
     filter: oxplow_fs_watch::WorkspaceFilter,
@@ -335,8 +344,10 @@ mod tests {
             stream_id,
             root.clone(),
             &crate::vcs::GitProvider,
-            bus.clone(),
-            crate::ref_moves::RefMoves::new(bus.clone()),
+            Announce {
+                events: bus.clone(),
+                ref_moves: crate::ref_moves::RefMoves::new(bus.clone()),
+            },
             false,
             on_orphan,
             filter,
