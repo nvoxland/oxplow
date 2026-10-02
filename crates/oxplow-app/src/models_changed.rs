@@ -685,4 +685,42 @@ mod tests {
         }
         assert_eq!(offenders, Vec::<String>::new());
     }
+
+    /// P8.A10: telemetry and agent activity reach the renderer as their
+    /// models changing — a recorded use, a page visit — not as bespoke
+    /// pushes.
+    #[tokio::test]
+    async fn telemetry_writes_name_their_models() {
+        use oxplow_db::PageVisitStore as _;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let mut rx = f.svc.events.subscribe_ui();
+        spawn(
+            f.svc.db.clone(),
+            Arc::new(ModelWatermarks::default()),
+            f.svc.events.clone(),
+            crate::assets::Assets::new(f.svc.db.clone(), crate::assets::COALESCE),
+            f.svc.event_pump.clone(),
+        );
+        tokio::task::yield_now().await;
+        f.svc
+            .usage_store
+            .record("wiki", serde_json::json!({ "slug": "home" }))
+            .await
+            .unwrap();
+        f.svc
+            .page_visit_store
+            .record("wiki", "wiki:home", None, None, None)
+            .await
+            .unwrap();
+        let mut want = vec!["v_usage_event", "v_page_visit"];
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !want.is_empty() {
+                if let Ok(OxplowEvent::ModelsChanged { models }) = rx.recv().await {
+                    want.retain(|m| !models.iter().any(|n| n == m));
+                }
+            }
+        })
+        .await
+        .expect("ModelsChanged for v_usage_event and v_page_visit");
+    }
 }

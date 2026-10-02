@@ -184,7 +184,7 @@ export function PlanPane({
   // Open agent turns (ended_at IS NULL) render as live spinner rows at
   // the top of the In Progress section — the passive "agent is doing
   // something right now" affordance CLAUDE.md describes. Seeded per
-  // thread, refreshed on every agentTurnsChanged event for it, and
+  // thread, refreshed on every commit naming `v_agent_turn`, and
   // emptied when the Stop hook closes the turn.
   const [openTurns, setOpenTurns] = useState<OpenAgentTurn[]>([]);
   useEffect(() => {
@@ -203,9 +203,7 @@ export function PlanPane({
         });
     };
     refresh();
-    const unsubscribe = subscribeAgentTurns((event) => {
-      if (event.threadId === threadId) refresh();
-    });
+    const unsubscribe = subscribeAgentTurns(refresh);
     return () => {
       cancelled = true;
       unsubscribe();

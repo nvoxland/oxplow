@@ -382,10 +382,8 @@ impl SqliteUsageStore {
         let stream_id = stream_id.map(|s| s.to_string());
         self.db
             .call(move |conn| {
-                // COALESCE over the canonical key fields. Mirrors
-                // `commands::usage::extract_key` so a renderer
-                // listening to UsageRecorded events sees keys agreeing
-                // with what shows up in the rollup.
+                // COALESCE over the canonical key fields a payload
+                // names its thing by (`key`, `slug`, `path`, `id`, …).
                 let stream_filter = if stream_id.is_some() {
                     "AND COALESCE(json_extract(payload_json, '$.streamId'), \
                                   json_extract(payload_json, '$.stream_id')) = ?3"

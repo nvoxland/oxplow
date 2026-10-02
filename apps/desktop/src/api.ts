@@ -1528,25 +1528,24 @@ export async function listFrequentUsage(input: {
   );
 }
 
-/**
- * Subscribe to `usage.recorded` events. Optionally filter by `kind` so a
- * Wiki-pane consumer only refetches on wiki visits.
- */
-export function subscribeUsageEvents(
-  onEvent: (e: { kind: string; key: string; streamId: string | null; threadId: string | null }) => void,
-  filter?: { kind?: string },
-): () => void {
+/** Call `onChange` whenever a commit names one of `models` — how a view
+ *  re-reads what it shows, whoever wrote it. */
+function onModelsChanged(models: readonly string[], onChange: () => void): () => void {
   return subscribeOxplowEvents((event) => {
-    if (event.kind !== "usageRecorded") return;
-    const usageKind = event.usageKind as string;
-    if (filter?.kind && usageKind !== filter.kind) return;
-    onEvent({
-      kind: usageKind,
-      key: (event.key as string | undefined) ?? "",
-      streamId: (event.streamId as string | null | undefined) ?? null,
-      threadId: (event.threadId as string | null | undefined) ?? null,
-    });
+    const changed = (event as { models?: unknown }).models;
+    if (
+      event.kind === "modelsChanged" &&
+      Array.isArray(changed) &&
+      changed.some((m) => models.includes(m as string))
+    ) {
+      onChange();
+    }
   });
+}
+
+/** Re-read usage whenever a use is recorded (`v_usage_event`). */
+export function subscribeUsageEvents(onChange: () => void): () => void {
+  return onModelsChanged(["v_usage_event"], onChange);
 }
 
 export async function removeFollowup(_threadId: string, id: string): Promise<void> {
@@ -2435,10 +2434,9 @@ export async function topVisitedPages(opts: {
 }
 
 
+/** Re-read visits whenever one is recorded or forgotten (`v_page_visit`). */
 export function subscribePageVisitEvents(onEvent: () => void): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.kind === "pageVisitChanged") onEvent();
-  });
+  return onModelsChanged(["v_page_visit"], onEvent);
 }
 
 /** Drop every visit row for a given page reference. Used when a page
@@ -2485,8 +2483,8 @@ export interface OpenAgentTurn {
 
 /// Open agent turns (`ended_at IS NULL`) for a thread. The Work
 /// panel renders each as a live spinner row at the top of the In
-/// Progress section; the Stop hook closes the row and an
-/// `agentTurnsChanged` event triggers the refetch that removes it.
+/// Progress section; the Stop hook closes the row and the commit's
+/// `ModelsChanged{v_agent_turn}` triggers the refetch that removes it.
 export async function listOpenAgentTurns(threadId: string): Promise<OpenAgentTurn[]> {
   const rows = unwrap(await commands.listOpenAgentTurns(threadId));
   return rows.map((row) => ({
@@ -2497,14 +2495,10 @@ export async function listOpenAgentTurns(threadId: string): Promise<OpenAgentTur
   }));
 }
 
-/// Fires whenever an agent turn opens or closes on any thread.
-export function subscribeAgentTurns(onEvent: (event: { threadId: string }) => void): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.kind !== "agentTurnsChanged") return;
-    const threadId = event.threadId as string | undefined;
-    if (!threadId) return;
-    onEvent({ threadId });
-  });
+/// Fires whenever an agent turn opens or closes, on any thread
+/// (`v_agent_turn`).
+export function subscribeAgentTurns(onChange: () => void): () => void {
+  return onModelsChanged(["v_agent_turn"], onChange);
 }
 
 export interface AgentStallAlertEvent {
@@ -2556,9 +2550,8 @@ export async function listAgentEvents(streamId?: string | null, limit = 200): Pr
   return unwrap(await commands.listAgentEvents(null, streamId ?? null, limit));
 }
 
-/** Load the activity log now and again whenever the backend logs agent
- *  activity (`hookEventsChanged` is a payload-free "something landed"
- *  ping). Only the newest load is delivered, so a slow older one never
+/** Load the activity log now and again whenever the event log grows
+ *  (`ModelsChanged` naming `v_event`). Only the newest load is delivered, so a slow older one never
  *  overwrites it; a failed load goes to `onError`. */
 export function subscribeAgentEvents(
   streamId: string | null,
@@ -2568,9 +2561,7 @@ export function subscribeAgentEvents(
 ): () => void {
   const load = latestWins(() => listAgentEvents(streamId, limit), onEvents, onError);
   load.run();
-  const unsubscribe = subscribeOxplowEvents((event) => {
-    if (event.kind === "hookEventsChanged") load.run();
-  });
+  const unsubscribe = onModelsChanged(["v_event"], () => load.run());
   return () => {
     load.close();
     unsubscribe();

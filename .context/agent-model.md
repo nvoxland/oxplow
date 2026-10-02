@@ -306,7 +306,8 @@ to `runtime.handleHookEnvelope`, which:
 
 1. (There is no in-memory hook ring any more — P3.9. What a hook did is its
    `agent.*` events in the log; the Hook events page lists them through
-   `list_agent_events` and refetches on `HookEventsChanged`.)
+   `list_agent_events` and refetches on `ModelsChanged` naming `v_event`;
+   the Work panel's live turn rows on `v_agent_turn` — P8.A10.)
 2. Runs `HookIngestService::ingest` (`crates/oxplow-app/src/hook_ingest.rs`,
    P3.3): **one transaction per envelope** writes the state the hook changes
    and the `agent.*` events that record it, anchored to the thread's stream,

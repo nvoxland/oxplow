@@ -73,8 +73,6 @@ pub enum OxplowEvent {
     /// The set of known language servers changed (Mason package
     /// installed or removed). Renderer refetches `list_lsp_servers`.
     LspServersChanged,
-    /// A new hook event landed; renderer refreshes the hook log.
-    HookEventsChanged,
     /// Per-thread per-pane agent status changed. `state` carries the
     /// derived status so the renderer can update without a refetch
     /// round-trip — sources that don't have it pre-derived (e.g.
@@ -89,8 +87,6 @@ pub enum OxplowEvent {
         /// agent is asking — `None` for every other transition.
         detail: Option<String>,
     },
-    /// agent_turn opened or closed.
-    AgentTurnsChanged { thread_id: ThreadId },
     /// The stall watchdog noticed `thread_id` has in_progress tasks
     /// but its agent has not been running for longer than the alert
     /// threshold — the queue is silently stalled. Emitted once per
@@ -101,18 +97,7 @@ pub enum OxplowEvent {
         in_progress_count: u32,
         waiting_ms: i64,
     },
-    /// A page visit was recorded (rail history, recently-finished, etc.).
-    /// Coarse — renderer refetches whatever view it cares about.
-    PageVisitChanged,
-    /// A usage event was recorded. The renderer's filtering uses
-    /// `usage_kind` to scope refetches (wiki vs editor-file vs
-    /// task, etc.).
-    UsageRecorded {
-        usage_kind: String,
-        key: String,
-        stream_id: Option<StreamId>,
-        thread_id: Option<ThreadId>,
-    },
+
     /// A snapshot take recorded something new: a new snapshot (its
     /// `file_count` rows), or — `trigger: HeadMoved`, 0 files — the
     /// current snapshot re-stamped with a new HEAD. Emitted after the

@@ -95,20 +95,15 @@ const EMITTERS: &[(&str, &str)] = &[
     ("AgentStallAlert", "crates/oxplow-app/src/agent_stall_watch.rs"),
     ("AgentStatusChanged", "crates/oxplow-app/src/agent_stall_watch.rs"),
     ("AgentStatusChanged", "crates/oxplow-app/src/hook_ingest.rs"),
-    ("AgentTurnsChanged", "crates/oxplow-app/src/hook_ingest.rs"), // P8.A10
     ("BackgroundTasksChanged", "crates/oxplow-app/src/lib.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/commands/config_commands.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/lib.rs"),
     ("ConfigChanged", "crates/oxplow-rpc/src/commands/ai.rs"),
-    ("HookEventsChanged", "crates/oxplow-app/src/hook_ingest.rs"), // P8.A10
-    ("HookEventsChanged", "crates/oxplow-app/src/recovery.rs"), // P8.A10
     ("LspServersChanged", "crates/oxplow-app/src/commands/lsp.rs"),
     ("MetricSamplesChanged", "crates/oxplow-app/src/models_changed.rs"),
     ("ModelsChanged", "crates/oxplow-app/src/models_changed.rs"),
-    ("PageVisitChanged", "crates/oxplow-rpc/src/commands/page_visit.rs"), // P8.A10
     ("SnapshotTaken", "crates/oxplow-app/src/ui_push.rs"),
     ("StreamOrphaned", "crates/oxplow-app/src/workspace_watch.rs"),
-    ("UsageRecorded", "crates/oxplow-rpc/src/commands/usage.rs"), // P8.A10
     ("VcsRefsChanged", "crates/oxplow-app/src/ref_moves.rs"),
     ("WorkspaceChanged", "crates/oxplow-app/src/commands/vcs.rs"),
     ("WorkspaceChanged", "crates/oxplow-app/src/workspace_files.rs"),

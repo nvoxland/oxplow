@@ -820,7 +820,6 @@ impl Services {
             agent_turn_store.clone(),
             task_store.clone(),
             effort_store.clone(),
-            event_bus.clone(),
         );
 
         let pty = oxplow_pty::PtyManager::spawn();

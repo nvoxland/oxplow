@@ -1,7 +1,7 @@
 //! Cores for the `page_visit` command module. Populated by the
 //! oxplow-tauri-ipc -> oxplow-rpc migration; see crate docs.
 
-use oxplow_app::{OxplowEvent, Services};
+use oxplow_app::Services;
 use oxplow_db::analytics_stores::PageVisitStore as _;
 use oxplow_db::PageVisit;
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,6 @@ pub async fn record_page_visit(
             thread_id.as_deref(),
         )
         .await?;
-    svc.events.emit(OxplowEvent::PageVisitChanged);
     Ok(visit)
 }
 
@@ -76,7 +75,6 @@ pub async fn forget_page(
     svc.page_visit_store
         .forget_page(&page_kind, &page_id)
         .await?;
-    svc.events.emit(OxplowEvent::PageVisitChanged);
     Ok(())
 }
 

@@ -26,7 +26,7 @@ command):
 |---|---|
 | select a thread, switch stream, report the open page | UI selection pointers, not project facts |
 | a comment's anchor re-locate (`set_comment_anchor`) | a passive sync of where the quote sits in the current content, run by the renderer on load — not a person's edit (relinking an orphan is `knowledge.update_comment`) |
-| page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit` |
+| page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit`. Their views re-read `v_page_visit` / `v_usage_event` on `ModelsChanged` (P8.A10) |
 | follow-ups, background-task progress | in memory and transient |
 | hook ingest, ACP prompt / cancel / permission answers, terminal input, `await_user` | agent-session activity, born as `agent.*` events (§5.1 of target-architecture.md); oxplow never synthesizes agent input |
 | terminal / ACP session open and close, LSP restart and requests | process control and protocol passthrough |
@@ -37,10 +37,12 @@ command):
 `rpc_and_mcp_never_write_the_database_themselves` fails on a
 transaction, a rehearsal or a store's `_tx` core in oxplow-rpc or
 oxplow-mcp; `ui_events_have_their_pinned_sources` pins which file may
-push each UI event (its `EMITTERS` table; rows marked `P8.A` go as
-their writes move onto the bus and the desktop reads the model). As
-each domain moves, its store loses its write methods — the compiler then
-holds the rest.
+push each UI event (its `EMITTERS` table). What's left there is a
+signal no model carries — the config swap, agent status, a stall alert,
+background tasks, the LSP server list, a snapshot take, VCS refs, the
+workspace; every other view re-reads a model on `ModelsChanged`
+(P8.A2–A10). As each domain moved, its store lost its write methods —
+the compiler holds the rest.
 
 **Then: is it a read of data a model can publish?** Reads are SQL
 (P4): a new read of project data is a **model** (a `models/<name>.sql`

@@ -82,7 +82,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
   useRerunOnChange(notesReads, () => void refreshNotes());
 
   useEffect(() => {
-    const unsub = subscribeUsageEvents(() => { void refreshUsage(); }, { kind: "wiki" });
+    const unsub = subscribeUsageEvents(() => { void refreshUsage(); });
     return unsub;
   }, [refreshUsage]);
 

@@ -3809,6 +3809,30 @@
       }
     ]
   },
+  "usage_event": {
+    "1": [
+      {
+        "doc": "Use id.",
+        "name": "id",
+        "type": "INTEGER"
+      },
+      {
+        "doc": "What was used (`wiki`, …).",
+        "name": "kind",
+        "type": "TEXT"
+      },
+      {
+        "doc": "What the renderer recorded about it (JSON; a `key` / `slug` / `path` / `id` names the thing).",
+        "name": "payload_json",
+        "type": "TEXT"
+      },
+      {
+        "doc": "RFC 3339 timestamp.",
+        "name": "occurred_at",
+        "type": "TEXT"
+      }
+    ]
+  },
   "wiki_page": {
     "1": [
       {

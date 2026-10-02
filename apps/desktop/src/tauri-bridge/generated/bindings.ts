@@ -3805,8 +3805,6 @@ export type OxplowEvent =
  *  installed or removed). Renderer refetches `list_lsp_servers`.
  */
 { kind: "lspServersChanged" } | 
-// A new hook event landed; renderer refreshes the hook log.
-{ kind: "hookEventsChanged" } | 
 /**
  *  Per-thread per-pane agent status changed. `state` carries the
  *  derived status so the renderer can update without a refetch
@@ -3822,8 +3820,6 @@ export type OxplowEvent =
  *  agent is asking — `None` for every other transition.
  */
 detail: string | null } | 
-// agent_turn opened or closed.
-{ kind: "agentTurnsChanged"; threadId: ThreadId } | 
 /**
  *  The stall watchdog noticed `thread_id` has in_progress tasks
  *  but its agent has not been running for longer than the alert
@@ -3832,17 +3828,6 @@ detail: string | null } |
  *  in_progress bucket empties). Renderer surfaces a toast.
  */
 { kind: "agentStallAlert"; threadId: ThreadId; inProgressCount: number; waitingMs: number } | 
-/**
- *  A page visit was recorded (rail history, recently-finished, etc.).
- *  Coarse — renderer refetches whatever view it cares about.
- */
-{ kind: "pageVisitChanged" } | 
-/**
- *  A usage event was recorded. The renderer's filtering uses
- *  `usage_kind` to scope refetches (wiki vs editor-file vs
- *  task, etc.).
- */
-{ kind: "usageRecorded"; usageKind: string; key: string; streamId: StreamId | null; threadId: ThreadId | null } | 
 /**
  *  A snapshot take recorded something new: a new snapshot (its
  *  `file_count` rows), or — `trigger: HeadMoved`, 0 files — the

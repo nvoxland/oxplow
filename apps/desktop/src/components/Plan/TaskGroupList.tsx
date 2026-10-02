@@ -672,7 +672,7 @@ function BrailleSpinner() {
  *  row is not selectable, draggable, or menu-bearing; it exists so an
  *  active turn is visible in the Work panel even before (or without)
  *  the agent filing a task. Disappears when the Stop hook closes the
- *  turn (PlanPane refetches on agentTurnsChanged). */
+ *  turn (PlanPane refetches on `ModelsChanged{v_agent_turn}`). */
 function LiveTurnRow({ turn }: { turn: OpenAgentTurn }) {
   const prompt = turn.prompt.trim() || "(agent turn in progress)";
   return (

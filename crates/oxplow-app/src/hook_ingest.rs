@@ -186,13 +186,9 @@ impl HookIngestService {
             })
             .await?;
 
-        // The activity log (the Hook events page) refetches on this.
-        self.events.emit(OxplowEvent::HookEventsChanged);
+        // The activity log and the Work panel's live turn rows re-read
+        // `v_event` / `v_agent_turn` on the commit's `ModelsChanged`.
         outcome.closed_turn = applied.closed_turn;
-        if applied.opened_turn || applied.closed_turn.is_some() {
-            self.events
-                .emit(OxplowEvent::AgentTurnsChanged { thread_id: thread });
-        }
         match applied.status {
             Some((state, detail)) => self.announce(thread, state, detail),
             None => self.announce_derived_status(&thread, kind).await,
@@ -232,10 +228,7 @@ impl HookIngestService {
                 Ok(true)
             })
             .await?;
-        if logged {
-            // The activity log shows the status change.
-            self.events.emit(OxplowEvent::HookEventsChanged);
-        }
+        let _ = logged;
         self.announce(*thread, state, detail);
         Ok(())
     }
@@ -724,20 +717,12 @@ mod tests {
     #[tokio::test]
     async fn set_status_logs_once_and_refreshes_the_activity_log() {
         let (svc, tid) = fixture().await;
-        let mut rx = svc.events.subscribe_ui();
         for _ in 0..2 {
             svc.set_status(&tid, AgentStatusState::AwaitingUser, Some("A?".into()))
                 .await
                 .unwrap();
         }
-        let mut refreshes = 0;
-        while let Ok(ev) = rx.try_recv() {
-            if matches!(ev, OxplowEvent::HookEventsChanged) {
-                refreshes += 1;
-            }
-        }
-        // The second call changed nothing: no second event, no refetch.
-        assert_eq!(refreshes, 1);
+        // The second call changed nothing: logged once.
         let events = logged(&svc).await;
         assert_eq!(of_type(&events, "agent.status.changed").len(), 1);
     }
@@ -1021,57 +1006,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn turn_open_and_close_emit_agent_turns_changed() {
-        // The Work panel renders open turns as live rows; it needs an
-        // event on every open/close to refetch without polling.
+    async fn a_prompt_opens_a_turn_and_a_stop_closes_it() {
+        // The Work panel's live turn rows re-read `v_agent_turn`.
         let (svc, tid) = fixture().await;
-        let mut rx = svc.events.subscribe_ui();
-        let drain_turns = |rx: &mut tokio::sync::broadcast::Receiver<OxplowEvent>| {
-            let mut n = 0;
-            while let Ok(ev) = rx.try_recv() {
-                if matches!(ev, OxplowEvent::AgentTurnsChanged { .. }) {
-                    n += 1;
-                }
+        let open = |svc: &HookIngestService| {
+            let db = svc.db.clone();
+            async move {
+                db.read(|c| {
+                    c.query_row(
+                        "SELECT count(*) FROM agent_turn WHERE ended_at IS NULL",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
             }
-            n
         };
-        svc.ingest(HookEnvelope {
-            kind: HookKind::UserPromptSubmit,
+        let envelope = |kind, prompt: Option<&str>| HookEnvelope {
+            kind,
             thread_id: Some(tid),
             stream_id: None,
             session_id: None,
             payload_json: "{}".into(),
-            prompt: Some("p".into()),
+            prompt: prompt.map(str::to_string),
             decision: None,
-        })
-        .await
-        .unwrap();
-        assert_eq!(drain_turns(&mut rx), 1, "open must emit AgentTurnsChanged");
-        svc.ingest(HookEnvelope {
-            kind: HookKind::Stop,
-            thread_id: Some(tid),
-            stream_id: None,
-            session_id: None,
-            payload_json: "{}".into(),
-            prompt: None,
-            decision: None,
-        })
-        .await
-        .unwrap();
-        assert_eq!(drain_turns(&mut rx), 1, "close must emit AgentTurnsChanged");
-        // A Stop with nothing open closes nothing — no event.
-        svc.ingest(HookEnvelope {
-            kind: HookKind::Stop,
-            thread_id: Some(tid),
-            stream_id: None,
-            session_id: None,
-            payload_json: "{}".into(),
-            prompt: None,
-            decision: None,
-        })
-        .await
-        .unwrap();
-        assert_eq!(drain_turns(&mut rx), 0, "no-op close must stay quiet");
+        };
+        svc.ingest(envelope(HookKind::UserPromptSubmit, Some("p")))
+            .await
+            .unwrap();
+        assert_eq!(open(&svc).await, 1);
+        let closed = svc.ingest(envelope(HookKind::Stop, None)).await.unwrap();
+        assert!(closed.closed_turn.is_some());
+        assert_eq!(open(&svc).await, 0);
+        // A Stop with nothing open closes nothing.
+        let again = svc.ingest(envelope(HookKind::Stop, None)).await.unwrap();
+        assert!(again.closed_turn.is_none());
     }
 
     #[tokio::test]

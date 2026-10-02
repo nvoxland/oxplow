@@ -537,6 +537,17 @@
   tests:
     - { not_null: id }
     - { unique: id }
+- name: usage_event
+  version: 1
+  description: "What the person used in oxplow, one row per use (a wiki page opened, a command run) — the telemetry behind the wiki's recent and most-used lists."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Use id." }
+    - { name: "kind", type: "TEXT", doc: "What was used (`wiki`, …)." }
+    - { name: "payload_json", type: "TEXT", doc: "What the renderer recorded about it (JSON; a `key` / `slug` / `path` / `id` names the thing)." }
+    - { name: "occurred_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
 - name: plugin_health
   version: 2
   description: "Each plugin contribution's health on this machine (P7.C1): a provider instance or a collector, under one failure policy — three failures in a row disable it until a person runs `plugin.enable`."

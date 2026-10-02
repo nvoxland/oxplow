@@ -20,7 +20,6 @@ use oxplow_db::{EffortStore, SqliteEffortStore, SqliteTaskStore, SqliteThreadSto
 use oxplow_domain::stores::{AgentTurnStore, ThreadStore};
 use oxplow_domain::DomainError;
 
-use crate::events::{EventBus, OxplowEvent};
 use crate::snapshot_capture_registry::SnapshotCaptureRegistry;
 use crate::task_service::reconcile_unattributed_on_close;
 use oxplow_domain::snapshot::SnapshotTrigger;
@@ -30,7 +29,6 @@ pub struct RecoveryService {
     turns: Arc<dyn AgentTurnStore>,
     tasks: Arc<SqliteTaskStore>,
     efforts: Arc<SqliteEffortStore>,
-    events: EventBus,
     /// Optional wiring for reconciling unattributed changes when a
     /// restart-recovery close brackets an orphaned effort. When absent
     /// (e.g. minimal test setups), orphan efforts are still closed —
@@ -45,13 +43,11 @@ impl RecoveryService {
         turns: Arc<dyn AgentTurnStore>,
         tasks: Arc<SqliteTaskStore>,
         efforts: Arc<SqliteEffortStore>,
-        events: EventBus,
     ) -> Self {
         Self {
             turns,
             tasks,
             efforts,
-            events,
             threads: None,
             snapshot_captures: None,
         }
@@ -143,9 +139,6 @@ impl RecoveryService {
             }
         }
 
-        if closed_turns > 0 {
-            self.events.emit(OxplowEvent::HookEventsChanged);
-        }
         info!(
             closed_turns,
             closed_efforts, opened_efforts, "daemon recovery complete"
@@ -308,7 +301,6 @@ mod tests {
             turns.clone(),
             Arc::new(SqliteTaskStore::new(db.clone())),
             Arc::new(SqliteEffortStore::new(db.clone())),
-            EventBus::new(),
         );
         let report = svc.run().await.unwrap();
         assert_eq!(report.closed_turns, 1);
@@ -397,7 +389,6 @@ mod tests {
             Arc::new(SqliteAgentTurnStore::new(db.clone())),
             tasks.clone(),
             efforts.clone(),
-            EventBus::new(),
         );
         let report = svc.run().await.unwrap();
         assert_eq!(report.closed_efforts, 1);
@@ -544,7 +535,6 @@ mod tests {
             Arc::new(SqliteAgentTurnStore::new(db.clone())),
             tasks.clone(),
             efforts.clone(),
-            EventBus::new(),
         )
         .with_snapshot_reconcile(thread_store.clone(), reg.clone());
         svc.run().await.unwrap();
@@ -577,7 +567,6 @@ mod tests {
             turns,
             Arc::new(SqliteTaskStore::new(db.clone())),
             Arc::new(SqliteEffortStore::new(db.clone())),
-            EventBus::new(),
         );
         let report = svc.run().await.unwrap();
         assert_eq!(report.closed_turns, 0);
