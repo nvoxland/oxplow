@@ -196,6 +196,60 @@ pub fn core_sources() -> Result<Vec<ModelSource>, DomainError> {
     )
 }
 
+/// How the declared contracts differ from the pinned ones — the golden
+/// `model_contracts.json`, `{ "<name>": { "<version>": [columns] } }`,
+/// every version each core model has published. A model's columns at a
+/// pinned version must equal the pin (a changed doc included: a
+/// database that recorded the version refuses to open otherwise); a
+/// version the golden lacks is new and needs blessing. One line per
+/// model that drifts.
+pub fn contract_drift(golden: &serde_json::Value, decls: &[ModelDecl]) -> Vec<String> {
+    let mut out = Vec::new();
+    for d in decls {
+        let now = serde_json::to_value(&d.columns).unwrap_or_default();
+        match golden
+            .get(&d.name)
+            .and_then(|m| m.get(d.version.to_string()))
+        {
+            Some(pinned) if *pinned == now => {}
+            Some(pinned) => {
+                let was: Vec<ColumnDecl> =
+                    serde_json::from_value(pinned.clone()).unwrap_or_default();
+                out.push(format!(
+                    "{} v{}'s contract changed ({}); bump its version",
+                    d.name,
+                    d.version,
+                    contract_change(&was, &d.columns)
+                ));
+            }
+            None => out.push(format!(
+                "{} v{} isn't pinned yet; bless the golden with OXPLOW_BLESS=1",
+                d.name, d.version
+            )),
+        }
+    }
+    out
+}
+
+/// `golden` with every declared model's current contract pinned at its
+/// version — earlier versions kept, so the file is the publication
+/// history (what `OXPLOW_BLESS=1` writes).
+pub fn pin_contracts(golden: &serde_json::Value, decls: &[ModelDecl]) -> serde_json::Value {
+    let mut golden = golden.as_object().cloned().unwrap_or_default();
+    for d in decls {
+        let versions = golden
+            .entry(d.name.clone())
+            .or_insert_with(|| serde_json::Value::Object(Default::default()));
+        if let Some(map) = versions.as_object_mut() {
+            map.insert(
+                d.version.to_string(),
+                serde_json::to_value(&d.columns).unwrap_or_default(),
+            );
+        }
+    }
+    serde_json::Value::Object(golden)
+}
+
 /// Join a `models.yaml` with its SQL files (`file(name)` reads
 /// `<name>.sql`; `sql_files()` lists the stems present).
 pub fn sources_from(
@@ -1592,6 +1646,72 @@ mod tests {
         let mut bumped = wider;
         bumped.decl.version = 2;
         compile(&mut conn, "t", &[bumped], &view).unwrap();
+    }
+
+    /// A reworded column doc at the same version is a changed contract
+    /// (tsk731: P7 did that to `ai_result`, `claim` and `decision`, and
+    /// only a database that had recorded the version noticed).
+    #[test]
+    fn a_contract_changed_at_a_pinned_version_drifts() {
+        let decl: ModelDecl = serde_yaml::from_str(
+            "name: a\nversion: 1\ndescription: d\ncolumns:\n  - { name: id, type: INTEGER, doc: \"Row id.\" }\n",
+        )
+        .unwrap();
+        let golden = pin_contracts(&serde_json::json!({}), std::slice::from_ref(&decl));
+        assert_eq!(
+            contract_drift(&golden, std::slice::from_ref(&decl)),
+            Vec::<String>::new()
+        );
+        let mut reworded = decl.clone();
+        reworded.columns[0].doc = "The row's id.".into();
+        assert_eq!(
+            contract_drift(&golden, std::slice::from_ref(&reworded)),
+            vec![
+                "a v1's contract changed (column `id`'s doc changed); bump its version".to_string()
+            ]
+        );
+        let mut bumped = reworded;
+        bumped.version = 2;
+        assert_eq!(
+            contract_drift(&golden, std::slice::from_ref(&bumped)),
+            vec!["a v2 isn't pinned yet; bless the golden with OXPLOW_BLESS=1".to_string()]
+        );
+        let pinned = pin_contracts(&golden, std::slice::from_ref(&bumped));
+        assert_eq!(
+            contract_drift(&pinned, std::slice::from_ref(&bumped)),
+            Vec::<String>::new()
+        );
+        assert!(
+            pinned["a"]["1"].is_array(),
+            "the earlier version stays pinned"
+        );
+    }
+
+    /// Every core model's contract is pinned at its version in
+    /// `fixtures/model_contracts.json`, so a change without a bump is red
+    /// here and not only against a database that recorded the version.
+    /// `OXPLOW_BLESS=1` pins a new version (earlier ones stay).
+    #[test]
+    fn every_core_model_contract_is_pinned_at_its_version() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/model_contracts.json");
+        let decls: Vec<ModelDecl> = core_sources()
+            .unwrap()
+            .into_iter()
+            .map(|s| s.decl)
+            .collect();
+        let golden: serde_json::Value = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        if std::env::var_os("OXPLOW_BLESS").is_some() {
+            let pinned = pin_contracts(&golden, &decls);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, serde_json::to_string_pretty(&pinned).unwrap() + "\n").unwrap();
+            return;
+        }
+        let drift = contract_drift(&golden, &decls);
+        assert!(drift.is_empty(), "{}", drift.join("\n"));
     }
 
     #[test]

@@ -195,7 +195,7 @@
     - { name: "skips_before", type: "INTEGER", doc: "Skip markers on the base side." }
     - { name: "skips_after", type: "INTEGER", doc: "Skip markers on the head side." }
 - name: claim
-  version: 1
+  version: 2
   description: "Claims the agent made about its work (\"tests pass\", \"no behavior change\"), and whether anything backs them."
   columns:
     - { name: "id", type: "INTEGER", doc: "Claim id." }
@@ -323,7 +323,7 @@
     - { not_null: id }
     - { unique: id }
 - name: decision
-  version: 1
+  version: 2
   description: "Decisions: forks the agent resolved while working (what it chose, what it didn't, why), recorded by the agent or inferred by oxplow. What a reviewer most wants to check."
   columns:
     - { name: "id", type: "INTEGER", doc: "Decision id." }

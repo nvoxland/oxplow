@@ -159,8 +159,14 @@ one transaction:
   column ("bump its version"). A column's **doc is part of the contract**:
   rewording one is a bump too, else every database that recorded the
   version refuses to open (`ai_result` went v3 for a reworded `caller` doc
-  in P7.B3's review; the test `a_database_holding_an_earlier_published_
-  contract_still_opens` replays that database);
+  in P7.B3's review, `claim` and `decision` v2 for P7.C4's; the test
+  `a_database_holding_an_earlier_published_contract_still_opens` replays
+  such a database). Because that check needs a database that recorded
+  the version, the core models' contracts are also **pinned in a golden**,
+  `crates/oxplow-db/fixtures/model_contracts.json` (`{ name: { version:
+  columns } }`, every version published): `every_core_model_contract_is_
+  pinned_at_its_version` fails in CI on a change at a pinned version, and
+  `OXPLOW_BLESS=1` pins a new one (earlier versions stay);
 - records `model` (view, name, owner, version, description, compiled
   SQL), `model_input` (`ref` | `source`) — V105.
 
