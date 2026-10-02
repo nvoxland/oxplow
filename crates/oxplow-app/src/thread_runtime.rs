@@ -11,7 +11,7 @@ use oxplow_domain::{EffortId, ThreadId, Timestamp};
 #[derive(Default)]
 struct ThreadRuntime {
     /// Effort ids whose touched_files claim disagreed with the auto-
-    /// diff at complete_task time. Drained by the Stop hook to fire
+    /// diff at the close (`effort.report`) time. Drained by the Stop hook to fire
     /// a one-shot directive prompting the agent to call
     /// `effort.amend` (or silently agree). Cleared after the
     /// directive fires so a single review never repeats.

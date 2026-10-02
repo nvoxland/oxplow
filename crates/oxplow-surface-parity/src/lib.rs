@@ -112,10 +112,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("preview_collector"),
     both("list_streams"),
     agent("get_task"),
-    agent("create_task"),
-    agent("update_task"),
-    agent("upsert_task"),
-    agent("reorder_tasks"),
     both("list_thread_notes"),
     agent("list_effort_observations"),
     // Per-effort metric roll-up for the task-page panel (tsk250) — UI-only; the
@@ -223,11 +219,8 @@ pub const MANIFEST: &[Capability] = &[
     both_named("comment.list", "list_comments_for_stream", "list_comments"),
     // ---- agent-only (orchestration / agent affordances) ----
     agent("read_task_options"),
-    agent("complete_task"),
-    agent("transition_tasks"),
     agent("dispatch_task"),
     agent("get_thread_context"),
-    agent("file_epic_with_children"),
     agent("await_user"),
     agent("wiki_ref_drift"),
     // ---- collection (effort-scoped observations) ----

@@ -64,12 +64,14 @@ to keep in step with the queries (P6 review, tsk610). The typed task RPCs
 `get_backlog_state`, `list_backlog`, `get_task`, `upsert_task`,
 `create_task`, `update_task`, `delete_task`, `reorder_tasks`, `move_task`,
 `list_work_item_efforts`, `list_recently_finished`,
-`clear_recently_finished`) are gone. The MCP task tools stay, and write
-the same way: `reorder_tasks` runs `work_item.reorder` once per listed
-item as the agent (the listed items in order, ahead of the rest), so a
-reorder is audited and dense like the UI's; `delete_task` is gone, since
-`work_item.delete` is destructive and an agent never confirms one (an
-agent cancels or archives). `TaskService::reorder` and `soft_delete` went
+`clear_recently_finished`) are gone, and so are the MCP task-write tools
+(`create_task`, `update_task`, `complete_task`, `upsert_task`,
+`transition_tasks`, `reorder_tasks`, `file_epic_with_children`, P8.A10):
+an agent runs the same `work_item.*` commands through MCP `run_command`
+as itself, so its reorders are `work_item.reorder { ref, before?, after?
+}` by neighbour, audited and dense like the UI's. An agent has no delete,
+since `work_item.delete` is destructive and an agent never confirms one
+(an agent cancels or archives). `TaskService::reorder` and `soft_delete` went
 with them (P6 review, tsk609).
 
 The **Board** (`page:board`, `components/Board/WorkBoard.tsx`) shows
@@ -141,8 +143,8 @@ An external run hands the provider the input less `provider` and renames
 its inverse to `work_item.<verb>`, so an undo dispatches again.
 `reorder` and `move` stay oxplow's own `Tx` (they place a task in
 oxplow's lists). A Rust client, **`work_items::WorkItems`**
-(`Services::work_items_client()`), types the calls; `task_writes` and the
-conformance suite use it. Extension commands compose the same verbs:
+(`Services::work_items_client()`), types the calls; the conformance
+suite uses it. Extension commands compose the same verbs:
 oxplow-review's Accept Review / Request Changes (P7.C5) comment on and
 transition an effort's work item whatever its provider
 ([extensions.md](./extensions.md) "oxplow-review").

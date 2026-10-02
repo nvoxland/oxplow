@@ -4,7 +4,7 @@
 //! Both are `External`: they read the worktree (whether a touched file
 //! still exists, which paths the project snapshots) and the snapshot
 //! diff the report is checked against, so they can't run in the bus's
-//! transaction. `complete_task` is `command.sequence [work_item.transition,
+//! transaction. Finishing a task is `command.sequence [work_item.transition,
 //! effort.report]`: one audit row, the transition first so the effort the
 //! report attaches to has closed.
 //!
@@ -204,7 +204,7 @@ async fn report(
 ) -> Result<Value, CommandError> {
     validate_work_item_ref(&input.work_item).map_err(|e| invalid("/work_item", e.to_string()))?;
     // The report reads the settled effort: a transition just before it
-    // (`complete_task`'s) has its snapshot bracket pinned.
+    // (the close's) has its snapshot bracket pinned.
     deps.tasks.settle_lifecycle().await;
     let named = input.thread.as_deref().map(parse_thread_ref).transpose()?;
     let last = deps
@@ -425,7 +425,33 @@ mod tests {
         }
     }
 
-    /// `complete_task` is one run: the transition and the report land
+    /// What an agent runs to finish its task: the transition to done and
+    /// the report, as one `command.sequence`. Returns the task's row and
+    /// the report's result.
+    async fn complete(fx: &EffortFixture, mut report: Value) -> (Value, Value) {
+        let item = work_item_ref(fx.task);
+        report["work_item"] = item.clone().into();
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &agent(fx),
+                crate::commands::compose::SEQUENCE,
+                json!({ "calls": [
+                    { "name": crate::commands::work_item::NAME,
+                      "input": { "ref": item, "to": "done" } },
+                    { "name": REPORT, "input": report },
+                ] }),
+                false,
+            )
+            .await
+            .unwrap();
+        fx.svc.tasks.settle_lifecycle().await;
+        let children = &out.result["children"];
+        (children[0]["result"].clone(), children[1]["result"].clone())
+    }
+
+    /// Finishing a task is one run: the transition and the report land
     /// under one audit row (`command.sequence`), the effort carries the
     /// summary and files, and the run claim settles the ledger.
     #[tokio::test]
@@ -433,19 +459,16 @@ mod tests {
         let fx = services_with_effort().await;
         let audit = SqliteCommandAuditStore::new(fx.svc.db.clone());
         let before = audit.list_recent(50).await.unwrap().len();
-        let (task, report) = crate::task_writes::complete(
-            &fx.svc,
-            &agent(&fx),
-            fx.task,
+        let (task, report) = complete(
+            &fx,
             json!({
                 "summary": "shipped it",
                 "touched_files": ["src/a.rs"],
                 "claim_runs": ["run:9"],
             }),
         )
-        .await
-        .unwrap();
-        assert_eq!(task.status, oxplow_domain::TaskStatus::Done);
+        .await;
+        assert_eq!(task["status"], "done", "{task}");
         assert_eq!(report["effort"], json!(fx.effort.to_string()));
 
         let rows = audit.list_recent(50).await.unwrap();
@@ -559,5 +582,15 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+    }
+
+    /// A big effort with no recorded decisions is nudged to record them.
+    #[tokio::test]
+    async fn a_big_report_without_decisions_is_nudged() {
+        let fx = services_with_effort().await;
+        let files: Vec<String> = (0..9).map(|i| format!("src/f{i}.rs")).collect();
+        let (_, report) = complete(&fx, json!({ "summary": "done", "touched_files": files })).await;
+        let hint = report["decision_hint"].as_str().expect("a hint");
+        assert!(hint.contains("effort.record_decision"), "{hint}");
     }
 }

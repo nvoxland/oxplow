@@ -190,7 +190,7 @@ hook + MCP wiring):
   **The effort the command ran in owns the run** — the event's effort
   anchor ranks after an `OXPLOW_TASK=` token and before the thread's open
   efforts (`resolve_owner`) — so a run the reactor records after `Stop` +
-  `complete_task` closed the effort still lands on it. Each run capture logs
+  the close (`work_item.transition` → done) closed the effort still lands on it. Each run capture logs
   `test.run.recorded` (subject `run:<capture>`, anchored to the tool's turn,
   caused by the tool event) and each coverage capture `test.coverage.recorded`
   in the capture's transaction (`SqliteFactStore::record_facts_logged`); the
@@ -310,8 +310,8 @@ its effort even under concurrency (resolved via `find_open_for_work_item`); the
 `dispatch_task` brief instructs this. Without a named task, a run attributes
 automatically when one effort is open, else is left unclaimed for the close
 reconcile + window-dominance + the agent's claim — never guessed onto one.
-`claim_runs`/`disclaim_runs` on `complete_task`/`update_task` let the agent fix
-attribution at the close boundary; `effort.amend` does it after the fact. See
+`claim_runs`/`disclaim_runs` on `effort.report` (the close's second call) let
+the agent fix attribution at the close boundary; `effort.amend` does it after the fact. See
 [agent-model.md](./agent-model.md) for the full claim→reconcile loop.
 
 Both paths resolve `format` → collector via the registry and **classify by the

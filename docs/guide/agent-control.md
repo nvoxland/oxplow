@@ -38,14 +38,16 @@ priority order:
 3. **In-progress audit.** If the writer thread has any
    `in_progress` tasks, the runtime blocks with an audit
    directive: reconcile each item — still active → leave alone;
-   change shipped → close it via `complete_task`; stuck → mark
+   change shipped → close it (a `work_item.transition` to `done`
+   plus an `effort.report`, run together as one
+   `command.sequence`); stuck → mark
    `blocked`; obsolete → mark `canceled`. A signature dedup
    prevents the same audit firing repeatedly when nothing
    changed.
 4. **Filed-but-didn't-ship advisory.** Catches the misread
    where the agent logged a `ready` row instead of doing the
    work the user asked for.
-5. **Effort file-review.** After `complete_task`, the runtime
+5. **Effort file-review.** After the agent's `effort.report`, the runtime
    diffs the agent's declared `touched_files` against the
    snapshot bracket the effort actually ran against. If the
    sets disagree, a one-shot directive fires asking the agent

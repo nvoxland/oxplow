@@ -362,7 +362,7 @@ impl TaskService {
 
     /// Run the event pump now and wait (bounded) for the effort-lifecycle
     /// consumer to take and pin the snapshot a just-committed open/close
-    /// logged, so a caller that reads the effort next (`complete_task`'s
+    /// logged, so a caller that reads the effort next (the close's
     /// file review) sees its bracket. On timeout the work finishes on a
     /// later run; nothing is lost.
     pub async fn settle_lifecycle(&self) {
@@ -1126,7 +1126,7 @@ impl TaskService {
 
 /// Set-wise diff between what the agent claimed in `touched_files`
 /// and what the snapshot bracket actually shows changed during the
-/// effort. Returned alongside the task on `complete_task` and
+/// effort. Returned alongside the task on the close (`effort.report`) and
 /// surfaced via the Stop hook so the agent can choose to amend.
 /// Skipped (None) entirely when the auto-diff matches the claim, or
 /// when no snapshot bracket is available (effort has no start/end
@@ -1236,8 +1236,8 @@ pub async fn recompute_effort_file_review(
 /// time and persist the `changed_but_not_claimed` delta as **unattributed**
 /// audit residue (Child 2 of the claim-first attribution epic). Runs on
 /// every snapshot-bracketed close (`TaskService::update` out of
-/// `in_progress`, so IPC `update_task`, MCP `update_task`, and the close
-/// half of `complete_task` all flow through it). Best-effort: returns the
+/// `in_progress`, so every `work_item.transition` / `work_item.update` out
+/// of it flows through here). Best-effort: returns the
 /// marked paths, or an empty vec when the effort has no snapshot bracket
 /// (e.g. a recovery-closed orphan with no end snapshot) or on any error —
 /// it never blocks the close. The existing agent nudge
@@ -1366,7 +1366,7 @@ impl TaskService {
 ///  - `Updated` if the file is present (the dominant case)
 ///
 /// Agents that want explicit "created" attribution should declare
-/// it via the `impacts` parameter on `complete_task`. Returns
+/// it via the `impacts` parameter on the close (`effort.report`). Returns
 /// `Updated` when `worktree_root` is `None` so test fixtures that
 /// don't carry a real worktree keep their old behavior.
 fn classify_change(worktree_root: Option<&Path>, path: &str) -> EffortFileChange {
@@ -1864,7 +1864,7 @@ mod tests {
 
     #[tokio::test]
     async fn closing_a_never_started_task_still_counts_toward_efforts_per_task() {
-        // tsk172: `complete_task` on a task that was never `in_progress`
+        // tsk172: the close (`effort.report`) on a task that was never `in_progress`
         // synthesizes the effort so `touched_files` attributes — but the status
         // transition never crosses OUT of the in-progress band, so
         // `project_effort_lifecycle_metrics` never ran and the work was invisible
@@ -2418,7 +2418,7 @@ mod tests {
     async fn create_with_in_progress_opens_lifecycle_effort() {
         // Filing a task directly in `in_progress` (the path CLAUDE.md
         // recommends for "start the work in the same call") must run
-        // the lifecycle hook — otherwise complete_task's TaskEnd
+        // the lifecycle hook — otherwise the close's TaskEnd
         // snapshot has no open effort to attach to and the snapshot
         // is orphaned.
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
@@ -2804,7 +2804,7 @@ mod tests {
     #[tokio::test]
     async fn out_of_band_close_marks_unclaimed_changes_unattributed() {
         // An effort that changes a file nobody claimed, closed via a plain
-        // status transition (not complete_task), records that file as
+        // status transition (not the close (`effort.report`)), records that file as
         // unattributed audit residue.
         let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
         let dirty = captures.primary().expect("primary capture service");
@@ -2839,7 +2839,7 @@ mod tests {
             project.path().join("parallel.rs"),
             oxplow_fs_watch::WatchEventKind::Other,
         );
-        // Out-of-band close: a plain Done transition (no complete_task,
+        // Out-of-band close: a plain Done transition (no the close (`effort.report`),
         // no touched_files claim).
         svc.update(
             item.id,

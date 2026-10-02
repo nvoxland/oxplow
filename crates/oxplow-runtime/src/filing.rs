@@ -100,6 +100,7 @@ pub fn filing_reason(
     }
     Some(build_filing_enforcement_pre_tool_reason(
         label,
+        thread.id,
         active_work_items,
     ))
 }
@@ -108,9 +109,12 @@ pub fn filing_reason(
 const OXPLOW: &str = "oxplow";
 
 /// The reason, naming the project's active work-items provider when it
-/// isn't oxplow's own: new work belongs on it (P7.A2).
+/// isn't oxplow's own: new work belongs on it (P7.A2). Every fix is a
+/// command (`mcp__oxplow__run_command`, P8.A10); `thread` is the agent's
+/// own, which a new task is filed on.
 pub fn build_filing_enforcement_pre_tool_reason(
     tool_name: &str,
+    thread: oxplow_domain::ThreadId,
     active_work_items: &str,
 ) -> String {
     let mut lines = vec![
@@ -118,11 +122,11 @@ pub fn build_filing_enforcement_pre_tool_reason(
         String::new(),
         "No effort is open in this stream. An effort opens when a task goes `in_progress` — `ready`-status rows don't count: `ready` is backlog, `in_progress` is the actual claim. The Work panel needs to honestly reflect what's shipping while it ships, not after.".into(),
         String::new(),
-        "Pick one before re-issuing the edit:".into(),
-        format!("  • New concern → `mcp__oxplow__create_task` with status=in_progress, then re-run {tool_name}. Close to done via `complete_task` when settled."),
-        format!("  • Fix/redo of a recently-closed done item → `mcp__oxplow__update_task` → status=in_progress on that item, then re-run {tool_name}. Close back to done when settled."),
-        "  • Already dispatched against a ready row → `mcp__oxplow__update_task` → status=in_progress on that row first.".into(),
-        format!("  • Work tracked outside oxplow (a Linear/GitHub issue) → `mcp__oxplow__run_command` `effort.open` with `{{\"work_item\": \"work_item:<provider>:<id>\"}}`, then re-run {tool_name}; `effort.close` when done."),
+        "Pick one before re-issuing the edit — each is `mcp__oxplow__run_command`:".into(),
+        format!("  • New concern → `work_item.create` with `{{\"title\": …, \"body\": …, \"state\": \"in_progress\", \"native\": {{\"thread\": \"{thread}\"}}}}`, then re-run {tool_name}. When it ships: `command.sequence` of `work_item.transition` (`\"to\": \"done\"`) and `effort.report` (`summary`, `touched_files`)."),
+        format!("  • Fix/redo of a recently-closed done item → `work_item.transition` with `{{\"ref\": \"work_item:oxplow:tsk…\", \"to\": \"in_progress\"}}`, then re-run {tool_name}. Close it back to done when settled."),
+        "  • Already dispatched against a ready row → `work_item.transition` it to `in_progress` first.".into(),
+        format!("  • Work tracked outside oxplow (a Linear/GitHub issue) → `effort.open` with `{{\"work_item\": \"work_item:<provider>:<id>\"}}`, then re-run {tool_name}; `effort.close` when done."),
         String::new(),
         "Do not file a placeholder \"untracked work\" item — describe the real change you're about to make.".into(),
     ];
@@ -130,7 +134,7 @@ pub fn build_filing_enforcement_pre_tool_reason(
         lines.splice(
             2..2,
             [
-                format!("This project's work items live on `{active_work_items}` (its active provider). File a new concern there — `mcp__oxplow__run_command` `work_item.create` with `{{\"title\": …}}` files on `{active_work_items}` — then `effort.open` on the ref it returns, and re-run {tool_name}; `effort.close` when done. The task tools below file oxplow tasks."),
+                format!("This project's work items live on `{active_work_items}` (its active provider). File a new concern there — `mcp__oxplow__run_command` `work_item.create` with `{{\"title\": …}}` files on `{active_work_items}` — then `effort.open` on the ref it returns, and re-run {tool_name}; `effort.close` when done. The `work_item:oxplow` lines below file oxplow tasks."),
                 String::new(),
             ],
         );
@@ -263,9 +267,17 @@ mod tests {
     /// says where new work belongs and how to file it there.
     #[test]
     fn the_directive_names_another_active_provider() {
-        let oxplow = build_filing_enforcement_pre_tool_reason("Edit", "oxplow");
+        let thread = oxplow_domain::ThreadId::new(4);
+        let oxplow = build_filing_enforcement_pre_tool_reason("Edit", thread, "oxplow");
         assert!(!oxplow.contains("active provider"), "{oxplow}");
-        let linear = build_filing_enforcement_pre_tool_reason("Edit", "linear");
+        // P8.A10: the fixes are commands; a new task goes on the agent's
+        // own thread.
+        assert!(
+            oxplow.contains("`work_item.create`") && oxplow.contains("\"thread\": \"thr4\""),
+            "{oxplow}"
+        );
+        assert!(!oxplow.contains("create_task"), "{oxplow}");
+        let linear = build_filing_enforcement_pre_tool_reason("Edit", thread, "linear");
         assert!(
             linear.contains("work items live on `linear` (its active provider)")
                 && linear.contains("`work_item.create`")

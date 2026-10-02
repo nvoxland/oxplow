@@ -978,7 +978,7 @@ Landed:
 **Every close, one place (tsk172, P2.6.2).** `project_effort_lifecycle_metrics`
 runs from the effort-lifecycle pump consumer on `effort.closed` — so for a
 status transition out of `in_progress`, for an effort `record_effort`
-synthesizes when `complete_task` closes a task that was never `in_progress`
+synthesizes when `effort.report` closes out a task that was never `in_progress`
 (its close is `retroactive`: no cycle time), for recovery and for
 `effort.close` alike — once per effort (it stops at an existing
 `effort-lifecycle` capture). Only the transition path existed originally,
@@ -1363,7 +1363,7 @@ envelope `{"kind": "test-detail"|"coverage-detail"|"analysis-detail", "payload":
 named a `task_id` (exact) or exactly one effort is open — stamps
 `capture.effort_id`, and writes a `claimed` ledger row for **`run:<capture_id>`**;
 the concurrent-unnamed case is left for the agent to claim at close (`claim_runs`
-on `complete_task`/`update_task`/`effort.amend` — the ids in those refs are
+on `effort.report`/`effort.amend` — the ids in those refs are
 capture ids now). `RunKind` OBSERVES via `captures_in_window_by_trigger`; the
 EFFORT REVIEW's `describe_run` reads the claimed capture + its envelope. The
 `effort_observations_from_metrics` read joins the ledger (claimed capture ids →

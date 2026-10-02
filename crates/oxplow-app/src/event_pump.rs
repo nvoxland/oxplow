@@ -21,7 +21,7 @@
 //! event as a dead letter and moves on, like the sync kind.
 //!
 //! [`EventPump::settle`] runs the pump now and waits (bounded) for it — a
-//! caller whose answer depends on a consumer's effect (`complete_task`'s
+//! caller whose answer depends on a consumer's effect (the close's
 //! file review needs the effort's end snapshot) settles instead of
 //! re-implementing the effect inline. One run at a time: the loop and a
 //! settle never deliver the same event concurrently.

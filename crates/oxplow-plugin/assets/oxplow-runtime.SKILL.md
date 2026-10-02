@@ -1,6 +1,6 @@
 ---
 name: oxplow-runtime
-description: Oxplow runtime — task filing, status transitions, work items across providers (v_work_item, work_item.* commands), and orchestrator dispatch. Loads on mcp__oxplow__create_task, file_epic_with_children, update_task, knowledge.add_note, read_task_options, dispatch_task, v_work_item or work_item.* calls, and when composing a subagent brief.
+description: Oxplow runtime — task filing, status transitions, closing work with effort.report, work items across providers (v_work_item, work_item.* commands), and orchestrator dispatch. Loads on mcp__oxplow__run_command with work_item.*, effort.* or knowledge.add_note, on read_task_options, dispatch_task or v_work_item, and when composing a subagent brief.
 ---
 
 # Filing oxplow tasks
@@ -9,10 +9,25 @@ Active agent turns render as live rows in the Work panel passively —
 no synthesized tasks. File durable tasks explicitly when
 you want to:
 
-- Split pre-planned or multi-phase work into an epic + children
-  (`file_epic_with_children`).
-- Pre-queue work the user wants done in a later turn (`create_task`).
+- Split pre-planned or multi-phase work into an epic + children.
+- Pre-queue work the user wants done in a later turn.
 - Record a follow-up you noticed but can't fix right now.
+
+Every task write is a **command** you run with `mcp__oxplow__run_command
+{ name, input }` (see "Commands" below). A task's ref is
+`work_item:oxplow:tsk42`. File one with:
+
+```json
+{ "name": "work_item.create",
+  "input": { "title": "Fix login redirect loop", "body": "…",
+             "state": "in_progress",
+             "native": { "thread": "<your thread id, thr…>", "priority": "medium" } } }
+```
+
+`state` is `todo` (the default — the backlog's `ready`) or `in_progress`
+(it opens your effort in the same run). Without `native.thread` the task
+goes on the project-wide backlog. The result carries the new task's
+`ref`.
 
 ## Task vs epic
 
@@ -23,12 +38,13 @@ covers all three call sites:
 > Could a single child close to `done` and let the user meaningfully
 > inspect just that piece? If yes → epic. If no → one task.
 
-- **`create_task`** — one coherent change, even across a few files.
-  Sequential chores (edit → typecheck → test) are one task, not
-  sub-steps.
-- **`file_epic_with_children`** — ≥3 sub-steps that each pass the test:
-  distinct phases, handoffs, or separable subsystems (e.g. schema →
-  runtime → IPC → UI → docs). Each child closes on its own as it ships.
+- **One task** (`work_item.create`) — one coherent change, even across a
+  few files. Sequential chores (edit → typecheck → test) are one task,
+  not sub-steps.
+- **An epic** — ≥3 sub-steps that each pass the test: distinct phases,
+  handoffs, or separable subsystems (e.g. schema → runtime → IPC → UI →
+  docs). File the epic, then each child with `"parent_ref": "<the epic's
+  ref>"`. Each child closes on its own as it ships.
 - Don't retroactively wrap a task in an epic if it turns out small —
   just finish it.
 
@@ -47,8 +63,11 @@ covers all three call sites:
 # task transitions
 
 Mark an explicit item `in_progress` when you start executing it and
-`done` (via `update_task` or `complete_task`) when
-you finish. Use `blocked` for items parked on user input.
+`done` when you finish (see "Closing" below). Use `blocked` for items
+parked on user input. A status move is `work_item.transition { ref, to }`
+— `to` is a canonical state (`todo` for `ready`, `in_progress`,
+`blocked`, `done`, `canceled`; `archived` is `{ to: "done" or
+"canceled", native_state: "archived" }`).
 
 **There are six statuses. Pick the true one.**
 
@@ -76,19 +95,39 @@ a decision that needs no work, and no query can distinguish it from
 real work. Titles describe the subject; the status says what's true
 about it.
 
+## Closing
+
 **Close the row in the same turn the work actually ships.** An
 `in_progress` row with finished work parked in it looks stuck to the
-user. Call `complete_task` the moment the code change lands —
-don't wait for a later turn.
+user. The moment the code change lands, run the transition and the
+report as one `command.sequence` (one audited run):
 
-**Pass `touched_files` when you close.** `complete_task`,
-`update_task`, and `create_task` accept `touched_files: string[]`
-(repo-relative paths edited for this effort) so Local History can
-attribute writes to this item when several ran in parallel. Skip only
-if you edited >100 files (assume-all fallback handles big sets). Filing
-straight into `done`/`blocked` *without* `touched_files` opens no
-effort, so attribution is impossible — pass it there too for "file and
-close in one call" rows.
+```json
+{ "name": "command.sequence",
+  "input": { "calls": [
+    { "name": "work_item.transition",
+      "input": { "ref": "work_item:oxplow:tsk42", "to": "done" } },
+    { "name": "effort.report",
+      "input": { "work_item": "work_item:oxplow:tsk42",
+                 "summary": "…", "touched_files": ["src/a.rs"],
+                 "impacts": [{ "kind": "wiki", "id": "some-slug", "action": "updated" }] } }
+  ] } }
+```
+
+The report's result (under the sequence's `children[1].result`) is your
+feedback: a non-null `file_review` means the snapshot diff disagreed with
+your `touched_files` — fix it with `effort.amend { effort, add_files,
+remove_files, claim_runs, disclaim_runs }`, or leave it if your list was
+right; `link_warnings` flags `[[…]]` links in the summary that don't
+resolve; `decision_hint` asks for the decisions a big effort didn't
+record.
+
+**Pass `touched_files` when you close** (repo-relative paths edited for
+this effort) so Local History can attribute writes to this item when
+several ran in parallel. Skip only if you edited >100 files
+(assume-all fallback handles big sets). A task filed straight into
+`done` / `blocked` has no effort until a report records one — run
+`effort.report` for it too for "file and close in one call" rows.
 
 **When the close audit flags a file you didn't author, ask whether it's
 generated.** The EFFORT REVIEW lists paths that changed during your
@@ -122,7 +161,7 @@ committed generated file may be deliberately tracked. Note also that
 needs no entry here; `generated.exclude` is for build output that **is**
 committed, or that git doesn't ignore.
 
-**Declare `impacts` for non-file outcomes.** `complete_task` accepts
+**Declare `impacts` for non-file outcomes.** `effort.report` accepts
 `impacts: { kind, id, action? }[]` — one per cross-page outcome beyond
 raw edits: a wiki page (`kind:"wiki"`), task (`"work_item"`, id
 `tsk42`), commit (`"commit"`), finding (`"finding"`), or directory
@@ -162,10 +201,12 @@ ref — the same commands for oxplow's tasks and another tracker's issues
 state: `todo`, `in_progress`, `blocked`, `done`, `canceled`; oxplow's
 `archived` is `{ to: done, native_state: archived }`),
 `work_item.update { ref, title?, body?, parent_ref?, state?, native? }`,
-`work_item.link { ref, target, link_type }` (`blocks`, `relates_to`, …)
-and `work_item.comment { ref, body }`; `work_item.create { provider?,
-title, body?, … }` files on the active provider unless you name one. The
-task tools above remain the usual way to file and close your own work.
+`work_item.link { ref, target, link_type }` (`blocks`, `relates_to`, …),
+`work_item.comment { ref, body }` and `work_item.reorder { ref, before?,
+after? }`; `work_item.create { provider?, title, body?, … }` files on the
+active provider unless you name one. Another provider's item has no
+status-driven effort: bracket your work on it with `effort.open
+{ work_item }` / `effort.close { effort, summary? }`.
 
 ## Decisions and claims
 
@@ -241,12 +282,12 @@ same concern), **reopen the existing item** — don't file a new one.
 
 Flow:
 
-1. `update_task` the item back to `in_progress` (this opens a
+1. `work_item.transition` the item back to `in_progress` (this opens a
    fresh effort; the `done → in_progress` transition is the documented
    reopen path).
 2. Do the new round of edits.
-3. `complete_task` back to `done` with `touched_files` for the new
-   effort.
+3. Close it again (the `command.sequence` above) with `touched_files`
+   for the new effort.
 
 The item row gets a second effort recording the redo, attributed
 correctly. Filing a new "Fix the thing I just did" task fragments the
@@ -262,7 +303,8 @@ scoped to "user rejected my last attempt at this same item."
   `mcp__oxplow__dispatch_task({thread_id, item_id})` to get a ready
   brief; pass `prompt` to the general-purpose Agent tool. The brief
   already contains the item fields, AC, recent notes, and the
-  subagent protocol preamble.
+  subagent protocol preamble — the subagent moves the item to
+  `in_progress` on entry and closes it on exit.
 
 Subagents return a one-line `oxplow-result: { ok, itemId, … }`.
 Record that as a thread note: `run_command knowledge.add_note { body }`.
@@ -288,7 +330,11 @@ is validated, policy-checked, audited to your thread and logged as
   pick the model (`agents`, `lsp`, `collection`, `ai`, `acpAgents`,
   `agentModels`, `extensions`, `agentPromptAppend`, …) need the person's
   confirmation — your run is kept as a proposal for them.
-- Task status: `transition_tasks` (= `work_item.transition` per id).
+- Tasks and other work items: `work_item.*` (above); your effort's
+  record: `effort.report`, `effort.amend`, `effort.record_decision`,
+  `effort.record_claim`; test evidence: `test.record_run`,
+  `test.ingest_coverage`, `test.ingest_analysis`; notes and comments:
+  `knowledge.add_note`, `knowledge.reply_comment`, ….
 
 Invalid input names the failing field; a denial says why. A run that
 needs a person's confirmation returns `{ kind: "proposed", proposal, message }`: it is

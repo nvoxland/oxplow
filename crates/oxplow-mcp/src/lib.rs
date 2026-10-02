@@ -18,7 +18,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use oxplow_app::ref_resolver::{self, RefSummary};
-use oxplow_app::{CreateTaskInput, Services, UpdateTaskChanges};
+use oxplow_app::Services;
 use oxplow_domain::comment::CommentThread;
 use oxplow_domain::stores::{CommentStore, TaskNoteStore, TaskStore, ThreadStore};
 use oxplow_domain::{CommentStatus, StreamId, Task, TaskId, TaskPriority, TaskStatus, ThreadId};
@@ -186,23 +186,6 @@ pub struct TaskIdParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ReorderTasksParams {
-    /// Optional thread scope. Omit for the project-wide backlog.
-    pub thread_id: Option<String>,
-    /// New sort order. Items not present keep their relative order
-    /// at the end of the list.
-    pub ordered_item_ids: Vec<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpsertTaskParams {
-    /// JSON-encoded Task. Use this rather than nesting the struct
-    /// directly so we don't have to plumb JsonSchema through every
-    /// domain type.
-    pub item_json: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ListEffortObservationsParams {
     /// Effort id to read directly. Omit to use the open effort on
     /// `thread_id`.
@@ -270,116 +253,6 @@ pub struct FollowupIdParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CreateTaskMcpParams {
-    /// Thread to attach the new item to. Required unless `backlog`
-    /// is set to `true` — filing onto the project-wide backlog must
-    /// be an explicit choice, since a thread-detached row trips
-    /// filing-enforcement on the next edit.
-    pub thread_id: Option<String>,
-    /// Set to `true` to file the item onto the project-wide backlog
-    /// (no thread attachment). Mutually exclusive with `thread_id`.
-    /// Default `false`: a missing `thread_id` is an error.
-    #[serde(default)]
-    pub backlog: bool,
-    pub title: String,
-    /// Markdown body — the task's prose. Required: write the full
-    /// detail here. The description is the single source of truth;
-    /// structure it however the task warrants. Write it for a human
-    /// reader and wiki-format it (markdown, `[[…]]` wikilinks) for
-    /// readability — reference a task as `[[tsk42]]` (never the GitHub
-    /// `#42` form), a file as `[[src/f.ts]]`, a commit by its sha.
-    pub description: String,
-    pub kind: Option<String>,
-    pub priority: Option<String>,
-    pub parent_id: Option<String>,
-    /// Initial status — defaults to `ready`. Pass `in_progress`
-    /// when starting the work in the same call (filing-enforcement
-    /// requires an in_progress row to exist before edits land), or
-    /// `done`/`blocked` when filing a row for already-shipped work
-    /// (`touched_files` then drives Local History attribution).
-    pub status: Option<String>,
-    /// Repo-relative paths edited for this effort. When passed
-    /// alongside `status: "done"` or `"blocked"`, the runtime
-    /// synthesizes the in_progress→target effort transition so
-    /// Local History attributes the writes to this item.
-    pub touched_files: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpdateTaskMcpParams {
-    pub id: String,
-    pub title: Option<String>,
-    /// Replacement markdown body. Wiki-format it (`[[…]]` wikilinks) —
-    /// reference a task as `[[tsk42]]` (never the GitHub `#42` form).
-    pub description: Option<String>,
-    /// Reparent (or detach with empty string).
-    pub parent_id: Option<String>,
-    pub status: Option<String>,
-    pub priority: Option<String>,
-    /// Repo-relative paths edited for the effort that's closing
-    /// alongside this update. Required for Local History attribution
-    /// when transitioning to `done`/`blocked` from `in_progress`.
-    pub touched_files: Option<Vec<String>>,
-    /// Run refs (`run:<id>`) to CLAIM for the effort closing alongside this
-    /// transition — the run-kind counterpart of `touched_files`. Use when you
-    /// ran tests during this effort that weren't auto-attributed.
-    pub claim_runs: Option<Vec<String>>,
-    /// Run refs to DISCLAIM (acknowledge as not yours) so they stop being
-    /// flagged in the EFFORT REVIEW.
-    pub disclaim_runs: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct McpTaskImpact {
-    /// Page kind: `wiki | task | file | directory | git_commit |
-    /// finding`. Snake-case on the wire; normalized at projection.
-    pub kind: String,
-    /// Canonical id for that page kind (wiki slug, integer task id
-    /// as string, repo-relative file/directory path, commit sha,
-    /// finding id).
-    pub id: String,
-    /// What happened to it: `created | updated | deleted |
-    /// referenced | resolved | completed | reopened`. Free-form;
-    /// renders as a chip in the UI when present.
-    pub action: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CompleteTaskParams {
-    pub id: String,
-    /// Summary note appended to the task before marking done
-    /// (developer audience — the canonical text). Write it for a
-    /// human reader and wiki-format it (markdown, `[[…]]` wikilinks)
-    /// for readability — reference a task as `[[tsk42]]` (never the
-    /// GitHub `#42` form, which isn't a ref and renders broken).
-    pub summary: String,
-    pub author: Option<String>,
-    /// Repo-relative paths edited for this effort. Drives the file-
-    /// attribution effort row Local History reads from.
-    pub touched_files: Option<Vec<String>>,
-    /// Cross-page outcomes the LLM declares — wiki pages created
-    /// or updated, tasks completed/reopened, commits referenced,
-    /// findings resolved, etc. Each is projected into the
-    /// `page_ref` graph as an outbound edge from this task, so
-    /// backlinks on the target page show this task as the cause
-    /// without relying on summary-body parsing.
-    pub impacts: Option<Vec<McpTaskImpact>>,
-    /// Run refs (`run:<id>`) to CLAIM for this effort — the run-kind
-    /// counterpart of `touched_files`. Use when you ran tests during this
-    /// effort that oxplow didn't auto-attribute (a sibling effort was open).
-    pub claim_runs: Option<Vec<String>>,
-    /// Run refs to DISCLAIM (acknowledge as not yours) so they stop being
-    /// flagged in the EFFORT REVIEW.
-    pub disclaim_runs: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct TransitiontasksParams {
-    pub ids: Vec<String>,
-    pub status: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AwaitUserParams {
     pub thread_id: String,
     pub question: String,
@@ -388,15 +261,6 @@ pub struct AwaitUserParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct GetThreadContextParams {
     pub thread_id: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct FileEpicWithChildrenParams {
-    pub thread_id: Option<String>,
-    pub epic_title: String,
-    /// The epic's prose body (required).
-    pub epic_description: String,
-    pub children: Vec<EpicChildSpec>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -2058,95 +1922,10 @@ impl OxplowMcp {
         json_result(&result)
     }
 
-    #[tool(
-        description = "Reorder tasks on a thread (or backlog). The ordered_item_ids array becomes \
-                       the new sort order; items not in the list keep their relative order at the end. \
-                       Each placement is the `work_item.reorder` command, run as you. Requires the \
-                       connection's thread identity."
-    )]
-    async fn reorder_tasks(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<ReorderTasksParams>,
-    ) -> Result<CallToolResult, McpError> {
-        use oxplow_domain::refs::build::work_item_ref;
-        if let Some(t) = params.0.thread_id.as_deref() {
-            expect_id_kind("reorder_tasks", "thread_id", t, ID_THREAD)?;
-        }
-        let mut ids: Vec<TaskId> = Vec::with_capacity(params.0.ordered_item_ids.len());
-        for raw in &params.0.ordered_item_ids {
-            ids.push(parse_task_id("reorder_tasks", "ordered_item_ids[]", raw)?);
-        }
-        let thread = params
-            .0
-            .thread_id
-            .as_deref()
-            .map(parse_thread_id)
-            .transpose()?;
-        let actor = self.verified_actor(&caller_of(&extensions)).await?;
-        let current: Vec<TaskId> = match thread {
-            Some(t) => self.services.tasks.list_for_thread(&t).await,
-            None => self.services.tasks.list_backlog().await,
-        }
-        .map_err(internal)?
-        .iter()
-        .map(|t| t.id)
-        .collect();
-        // Only this list's items; the given order, ahead of the rest. The
-        // first goes before the list's head, each next one after the one
-        // before it — one `work_item.reorder` per item, audited to the agent.
-        let listed: Vec<TaskId> = ids.into_iter().filter(|i| current.contains(i)).collect();
-        for (k, id) in listed.iter().enumerate() {
-            let place = if k == 0 {
-                match current.first() {
-                    Some(head) if head != id => {
-                        serde_json::json!({ "before": work_item_ref(*head) })
-                    }
-                    _ => continue,
-                }
-            } else {
-                serde_json::json!({ "after": work_item_ref(listed[k - 1]) })
-            };
-            let mut input = place;
-            input["ref"] = serde_json::Value::String(work_item_ref(*id));
-            self.services
-                .commands
-                .run(
-                    &actor,
-                    oxplow_app::commands::work_item::REORDER,
-                    input,
-                    false,
-                )
-                .await
-                .map_err(command_error)?;
-        }
-        json_result(&serde_json::json!({ "ok": true }))
-    }
-
     #[tool(description = "Get a single task by id.")]
     async fn get_task(&self, params: Parameters<TaskIdParams>) -> Result<CallToolResult, McpError> {
         let id = parse_task_id("get_task", "id", &params.0.id)?;
         let item = self.services.task_store.get(id).await.map_err(internal)?;
-        json_result(&item)
-    }
-
-    #[tool(
-        description = "Persist (insert or update) a task. `item_json` is the JSON-encoded Task."
-    )]
-    async fn upsert_task(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<UpsertTaskParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let mut item: Task = serde_json::from_str(&params.0.item_json)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
-        // The row is written as-is except its status, which changes only
-        // through `work_item.transition` (the effort lifecycle, the log,
-        // the audit) — a raw status write would skip all three.
-        let actor = self.verified_actor(&caller_of(&extensions)).await?;
-        item = oxplow_app::task_writes::upsert(&self.services, &actor, item)
-            .await
-            .map_err(command_error)?;
         json_result(&item)
     }
 
@@ -2426,248 +2205,6 @@ impl OxplowMcp {
     // ---------- task orchestration ----------
 
     #[tool(
-        description = "Create a new task (allocates id + sort_index, fires creation event). See \
-                       param docs for `thread_id`/`backlog`, and the `status` shortcuts for \
-                       starting work (`in_progress`) or filing already-shipped work \
-                       (`done`/`blocked` + `touched_files`) in one call. A non-empty \
-                       `link_warnings` array in the response flags invalid `[[…]]` wikilinks \
-                       in the description — fix them."
-    )]
-    async fn create_task(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<CreateTaskMcpParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        match (p.thread_id.as_deref(), p.backlog) {
-            (Some(_), true) => {
-                return Err(McpError::invalid_params(
-                    "create_task: pass `thread_id` OR `backlog: true`, not both",
-                    None,
-                ));
-            }
-            (None, false) => {
-                return Err(McpError::invalid_params(
-                    "create_task: `thread_id` is required (or set `backlog: true` to file \
-                     onto the project-wide backlog)",
-                    None,
-                ));
-            }
-            _ => {}
-        }
-        if let Some(tid) = p.thread_id.as_deref() {
-            expect_id_kind("create_task", "thread_id", tid, ID_THREAD)?;
-        }
-        let parent_task_id = match p.parent_id.as_deref() {
-            Some(pid) => Some(parse_task_id("create_task", "parent_id", pid)?),
-            None => None,
-        };
-        let thread = p.thread_id.as_deref().map(parse_thread_id).transpose()?;
-        let priority = match p.priority.as_deref() {
-            Some(s) => Some(parse_priority(s)?),
-            None => None,
-        };
-        let status = match p.status.as_deref() {
-            Some(s) => Some(parse_status(s)?),
-            None => None,
-        };
-        // Filed as the calling agent (`work_item.create`): audited, and
-        // filed `in_progress` it opens the effort in the same run.
-        let actor = self.verified_actor(&caller_of(&extensions)).await?;
-        let item = oxplow_app::task_writes::create(
-            &self.services,
-            &actor,
-            thread,
-            CreateTaskInput {
-                title: p.title,
-                description: Some(p.description),
-                parent_id: parent_task_id,
-                status,
-                priority,
-                author: Some(oxplow_domain::TaskAuthor::Agent),
-            },
-        )
-        .await
-        .map_err(command_error)?;
-
-        // Filed straight into a closing state with touched files — the
-        // "file and close in one call" shortcut for retroactive splits:
-        // report the effort so Local History attributes the writes to it.
-        let touched = p.touched_files.unwrap_or_default();
-        if !touched.is_empty() && matches!(item.status, TaskStatus::Done | TaskStatus::Blocked) {
-            self.report_effort(
-                &actor,
-                serde_json::json!({
-                    "work_item": work_item_ref(item.id),
-                    "touched_files": touched,
-                }),
-            )
-            .await?;
-        }
-        let link_warnings =
-            oxplow_app::link_check::check_links(&self.services, &item.description).await;
-        json_result(&WithLinkWarnings::new(item, link_warnings))
-    }
-
-    #[tool(
-        description = "Update fields on an existing task (partial-patch). Pass `touched_files` \
-                       (and/or `claim_runs`/`disclaim_runs` for test runs) alongside a `status` \
-                       transition to `done`/`blocked` to attribute the closing effort. \
-                       `parent_id` reparents (empty string detaches). When you pass a new \
-                       `description`, a non-empty `link_warnings` array flags invalid `[[…]]` \
-                       wikilinks in it — fix them."
-    )]
-    async fn update_task(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<UpdateTaskMcpParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let id = parse_task_id("update_task", "id", &p.id)?;
-        // Only link-check when the agent wrote a new body this call.
-        let wrote_description = p.description.is_some();
-        if let Some(pid) = p.parent_id.as_deref() {
-            // Empty string is the "detach" sentinel — only validate non-empty.
-            if !pid.is_empty() {
-                parse_task_id("update_task", "parent_id", pid)?;
-            }
-        }
-        let status = match p.status.as_deref() {
-            Some(s) => Some(parse_status(s)?),
-            None => None,
-        };
-        let priority = match p.priority.as_deref() {
-            Some(s) => Some(parse_priority(s)?),
-            None => None,
-        };
-        // Parent: `Option<Option<…>>` semantics — outer Some means
-        // "the field was passed", inner None means "clear it". Empty
-        // string = clear; non-empty = set.
-        let parent_id: Option<Option<TaskId>> = match p.parent_id {
-            Some(s) if s.is_empty() => Some(None),
-            Some(s) => Some(Some(parse_task_id("update_task", "parent_id", &s)?)),
-            None => None,
-        };
-        // Fields and status in one audited transaction, as the calling
-        // agent (`work_item.update`).
-        let actor = self.verified_actor(&caller_of(&extensions)).await?;
-        let updated = oxplow_app::task_writes::update(
-            &self.services,
-            &actor,
-            id,
-            UpdateTaskChanges {
-                title: p.title,
-                description: p.description,
-                parent_id,
-                status,
-                priority,
-            },
-        )
-        .await
-        .map_err(command_error)?;
-
-        // Closing with files or runs to attribute: report the effort (the
-        // run claims are the run-kind counterpart of `touched_files`, tsk268).
-        let touched = p.touched_files.unwrap_or_default();
-        let claim_runs = p.claim_runs.unwrap_or_default();
-        let disclaim_runs = p.disclaim_runs.unwrap_or_default();
-        let closing = matches!(updated.status, TaskStatus::Done | TaskStatus::Blocked);
-        if closing && !(touched.is_empty() && claim_runs.is_empty() && disclaim_runs.is_empty()) {
-            self.report_effort(
-                &actor,
-                serde_json::json!({
-                    "work_item": work_item_ref(updated.id),
-                    "touched_files": touched,
-                    "claim_runs": claim_runs,
-                    "disclaim_runs": disclaim_runs,
-                }),
-            )
-            .await?;
-        }
-        let link_warnings = if wrote_description {
-            oxplow_app::link_check::check_links(&self.services, &updated.description).await
-        } else {
-            Vec::new()
-        };
-        json_result(&WithLinkWarnings::new(updated, link_warnings))
-    }
-
-    #[tool(
-        description = "Append `summary` to a task and mark it `done`, reporting its effort: the \
-                       `command.sequence [work_item.transition, effort.report]`, one audited run. \
-                       Pass `touched_files` and `impacts` (see param docs) to attribute writes and \
-                       cross-page outcomes. Returns `{ task, file_review }`: when `file_review` is \
-                       non-null the snapshot diff disagreed with your `touched_files` — \
-                       `claimed_but_not_changed` / `changed_but_not_claimed` list the \
-                       mismatches; fix them with `run_command effort.amend { effort, add_files, \
-                       remove_files }`, or leave it if your list was right (edited then reverted, \
-                       or another actor changed them). A non-empty `link_warnings` array flags \
-                       invalid `[[…]]` wikilinks in the summary (unrecognized syntax or \
-                       dangling target) — fix the summary so they resolve."
-    )]
-    async fn complete_task(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<CompleteTaskParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let id = parse_task_id("complete_task", "id", &p.id)?;
-        let _ = p.author; // legacy field — kept on the wire, no longer attributed
-        let actor = self.verified_actor(&caller_of(&extensions)).await?;
-        let (task, report) = oxplow_app::task_writes::complete(
-            &self.services,
-            &actor,
-            id,
-            serde_json::json!({
-                "summary": p.summary,
-                "touched_files": p.touched_files.unwrap_or_default(),
-                "impacts": p.impacts.unwrap_or_default(),
-                "claim_runs": p.claim_runs.unwrap_or_default(),
-                "disclaim_runs": p.disclaim_runs.unwrap_or_default(),
-            }),
-        )
-        .await
-        .map_err(command_error)?;
-        let mut out = serde_json::json!({ "task": task, "file_review": report["file_review"] });
-        for key in ["link_warnings", "decision_hint"] {
-            let value = &report[key];
-            let empty = value.is_null() || value.as_array().is_some_and(Vec::is_empty);
-            if !empty {
-                out[key] = value.clone();
-            }
-        }
-        json_result(&out)
-    }
-
-    #[tool(description = "Transition a batch of tasks to the same status.")]
-    async fn transition_tasks(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<TransitiontasksParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let mut parsed_ids: Vec<TaskId> = Vec::with_capacity(p.ids.len());
-        for raw in &p.ids {
-            parsed_ids.push(parse_task_id("transition_tasks", "ids[]", raw)?);
-        }
-        let target = parse_status(&p.status)?;
-        // Each transition is the `work_item.transition` command, run as
-        // the calling agent: audited, policy-checked, `command.executed`
-        // logged with `source = agent:thr…`.
-        let actor = self.verified_actor(&caller_of(&extensions)).await?;
-        let mut updated: Vec<oxplow_domain::Task> = Vec::with_capacity(parsed_ids.len());
-        for id in parsed_ids {
-            // Settles the effort lifecycle after each, so an open's start
-            // snapshot is taken before a later close in the batch.
-            let row = oxplow_app::task_writes::set_status(&self.services, &actor, id, target)
-                .await
-                .map_err(command_error)?;
-            updated.push(row);
-        }
-        json_result(&updated)
-    }
-
-    #[tool(
         description = "Park this thread on the person: logs that the agent is awaiting their answer (the question shows on the rail), so the Stop that follows adds no directive."
     )]
     async fn await_user(
@@ -2730,67 +2267,16 @@ impl OxplowMcp {
         )]))
     }
 
-    #[tool(description = "Atomic: create an epic plus a list of children attached to it.")]
-    async fn file_epic_with_children(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<FileEpicWithChildrenParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        if let Some(t) = p.thread_id.as_deref() {
-            expect_id_kind("file_epic_with_children", "thread_id", t, ID_THREAD)?;
-        }
-        let thread = p.thread_id.as_deref().map(parse_thread_id).transpose()?;
-        // Each row is a `work_item.create` run as the calling agent.
-        let actor = self.verified_actor(&caller_of(&extensions)).await?;
-        let epic = oxplow_app::task_writes::create(
-            &self.services,
-            &actor,
-            thread,
-            CreateTaskInput {
-                title: p.epic_title,
-                description: Some(p.epic_description),
-                author: Some(oxplow_domain::TaskAuthor::Agent),
-                ..Default::default()
-            },
-        )
-        .await
-        .map_err(command_error)?;
-        let mut children_out = Vec::with_capacity(p.children.len());
-        for child in p.children {
-            let row = oxplow_app::task_writes::create(
-                &self.services,
-                &actor,
-                thread,
-                CreateTaskInput {
-                    title: child.title,
-                    description: Some(child.description),
-                    parent_id: Some(epic.id),
-                    author: Some(oxplow_domain::TaskAuthor::Agent),
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(command_error)?;
-            children_out.push(row);
-        }
-        let bundle = serde_json::json!({ "epic": epic, "children": children_out });
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            bundle.to_string(),
-        )]))
-    }
-
     #[tool(
-        description = "Compose a ready-to-paste dispatch brief for a task and transition it to \
-                       in_progress in one atomic call. With `item_id`, dispatches that item; \
-                       otherwise picks the first ready non-epic item on the thread. Returns \
+        description = "Compose a ready-to-paste dispatch brief for a task. With `item_id`, \
+                       that item; otherwise the first ready non-epic item on the thread. Returns \
                        `{ ok, prompt, itemId }` — pass `prompt` to the general-purpose Agent tool. \
                        The brief carries the item fields, AC, recent notes, and the subagent \
-                       protocol preamble."
+                       protocol preamble; the sub-agent moves the item to in_progress on entry \
+                       (`work_item.transition`)."
     )]
     async fn dispatch_task(
         &self,
-        extensions: rmcp::model::Extensions,
         params: Parameters<DispatchTaskParams>,
     ) -> Result<CallToolResult, McpError> {
         let parsed_item_id = match params.0.item_id.as_deref() {
@@ -2855,20 +2341,12 @@ impl OxplowMcp {
             }
         };
 
-        let updated = self
-            .transition_as(
-                &extensions,
-                target.id,
-                oxplow_domain::TaskStatus::InProgress,
-            )
-            .await?;
-
         let prompt =
-            compose_dispatch_brief(&updated, params.0.extra_context.as_deref().unwrap_or(""));
+            compose_dispatch_brief(&target, params.0.extra_context.as_deref().unwrap_or(""));
         json_result(&serde_json::json!({
             "ok": true,
             "prompt": prompt,
-            "itemId": updated.id,
+            "itemId": target.id,
         }))
     }
 
@@ -3167,39 +2645,6 @@ impl OxplowMcp {
     }
 }
 
-fn parse_status(s: &str) -> Result<TaskStatus, McpError> {
-    Ok(match s {
-        "ready" => TaskStatus::Ready,
-        "in_progress" => TaskStatus::InProgress,
-        "blocked" => TaskStatus::Blocked,
-        "done" => TaskStatus::Done,
-        "canceled" => TaskStatus::Canceled,
-        "archived" => TaskStatus::Archived,
-        other => {
-            return Err(McpError::invalid_params(
-                format!("unknown task status: {other}"),
-                None,
-            ))
-        }
-    })
-}
-
-fn parse_priority(s: &str) -> Result<oxplow_domain::TaskPriority, McpError> {
-    use oxplow_domain::TaskPriority as P;
-    Ok(match s {
-        "low" => P::Low,
-        "medium" => P::Medium,
-        "high" => P::High,
-        "urgent" => P::Urgent,
-        other => {
-            return Err(McpError::invalid_params(
-                format!("unknown priority: {other}"),
-                None,
-            ))
-        }
-    })
-}
-
 /// Resolve the per-(stream, language) LspProxy. Helper sitting
 /// outside the `#[tool_router]` impl so the macro doesn't try to
 /// route it as a tool.
@@ -3265,6 +2710,7 @@ fn code_err(e: oxplow_domain::code_intel::CodeIntelError) -> McpError {
 /// one reviewable place; `read_write_split_covers_every_tool` fails if a new
 /// tool isn't classified here or in [`WRITE_TOOLS`].
 const READ_ONLY_TOOLS: &[&str] = &[
+    "dispatch_task",
     "ping",
     "get_skill",
     "list_collectors",
@@ -3329,35 +2775,34 @@ const READ_ONLY_TOOLS: &[&str] = &[
 /// prove every registered tool is accounted for (read XOR write).
 #[cfg(test)]
 const WRITE_TOOLS: &[&str] = &[
+    // P8.A10: an agent writes project records only through the bus. What
+    // else isn't read-only, and why each isn't a write path of its own:
+    //
     // The one write path: every command, audited to the calling thread.
     "run_command",
     // A lens's action runs its command, as the lens acting for the caller.
     "run_lens_action",
-    // Records an answer in the caller's thread (the `lens.show` command).
+    // The `lens.show` command (records the answer in the caller's thread).
     "show_lens",
-    // Stores the change's analysis and starts its duplicate scan.
+    // The `collector.sync` command.
+    "run_collector",
+    // A derived cache: the change's analysis, recomputed from the VCS on
+    // demand (ipc-and-stores.md, "what stays off the bus").
     "ensure_change",
-    // Runs a source's program (stores nothing, but it executes code).
+    // Runs a source's program; stores nothing.
     "preview_collector",
-    // Clones from the network into .oxplow/tmp.
+    // Clones into .oxplow/tmp; stores nothing.
     "review_extension",
-    // Call an outside model provider and record an `ai_call` row.
+    // A model call, recorded as the computation it was (`ai_call`).
     "ai_decide",
     "ai_summarize",
-    "run_collector",
+    // UI selection pointers and the in-memory follow-ups — off the bus.
     "select_thread",
     "switch_stream",
-    "reorder_tasks",
-    "upsert_task",
     "add_followup",
     "remove_followup",
-    "create_task",
-    "update_task",
-    "complete_task",
-    "transition_tasks",
+    // Agent-session activity, born as an `agent.*` event.
     "await_user",
-    "file_epic_with_children",
-    "dispatch_task",
 ];
 
 /// Stamp `read_only_hint = true` on tools in [`READ_ONLY_TOOLS`], leaving any
@@ -3739,37 +3184,16 @@ fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> St
     }
     out.push("## Protocol".into());
     out.push(format!(
-        "Follow the `oxplow-subagent-work-protocol` skill: mark in_progress on entry; \
-         done on exit. Return ONE line: `oxplow-result: {{\"ok\":true,\"itemId\":\"<id>\",…}}`. \
-         Pass `touched_files` to `complete_task` so Local History attributes the writes. \
+        "Follow the `oxplow-subagent-work-protocol` skill: `work_item.transition` it to \
+         in_progress on entry; on exit run the `command.sequence` of `work_item.transition` \
+         (done) and `effort.report` with your `touched_files` so Local History attributes the \
+         writes. Return ONE line: `oxplow-result: {{\"ok\":true,\"itemId\":\"<id>\",…}}`. \
          If you run tests, run `test.record_run` with `work_item: \"{}\"` — your runs are \
          invisible to oxplow's passive Bash-hook collection, and naming your item attributes \
          them exactly even while sibling efforts are open.",
         work_item_ref(item.id)
     ));
     out.join("\n")
-}
-
-/// Wraps a write-tool result with wikilink-validity warnings for the
-/// body the agent just authored. `#[serde(flatten)]` keeps the wrapped
-/// object's fields at the top level and the empty vec is skipped, so a
-/// clean write serializes exactly as before — only an invalid link adds
-/// a `link_warnings` array the agent can act on.
-#[derive(serde::Serialize)]
-struct WithLinkWarnings<T: serde::Serialize> {
-    #[serde(flatten)]
-    inner: T,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    link_warnings: Vec<oxplow_app::link_check::LinkWarning>,
-}
-
-impl<T: serde::Serialize> WithLinkWarnings<T> {
-    fn new(inner: T, link_warnings: Vec<oxplow_app::link_check::LinkWarning>) -> Self {
-        Self {
-            inner,
-            link_warnings,
-        }
-    }
 }
 
 impl OxplowMcp {
@@ -3900,46 +3324,6 @@ impl OxplowMcp {
         json_result(&outcome)
     }
 
-    /// The caller as a command actor, checked: the thread header is a
-    /// claim, so it must name a real thread, and a stream header must be
-    /// that thread's stream (the actor then carries the thread's stream).
-    /// An anonymous connection is refused — a run with no actor behind it
-    /// is audited to no one.
-    /// Move a task to `to` as the calling agent: the `work_item.transition`
-    /// command (audited to the agent's thread, the transition and effort
-    /// events caused by its `command.executed`), then settle the pump so the
-    /// effort's snapshot pin is in place for whatever this tool reads next.
-    /// Run `effort.report` as `actor`.
-    async fn report_effort(
-        &self,
-        actor: &oxplow_domain::Actor,
-        input: serde_json::Value,
-    ) -> Result<(), McpError> {
-        self.services
-            .commands
-            .run(
-                actor,
-                oxplow_app::commands::effort_report::REPORT,
-                input,
-                false,
-            )
-            .await
-            .map(drop)
-            .map_err(command_error)
-    }
-
-    async fn transition_as(
-        &self,
-        extensions: &rmcp::model::Extensions,
-        id: TaskId,
-        to: TaskStatus,
-    ) -> Result<oxplow_domain::Task, McpError> {
-        let actor = self.verified_actor(&caller_of(extensions)).await?;
-        oxplow_app::task_writes::set_status(&self.services, &actor, id, to)
-            .await
-            .map_err(command_error)
-    }
-
     async fn verified_actor(&self, caller: &McpCaller) -> Result<oxplow_domain::Actor, McpError> {
         use oxplow_domain::stores::ThreadStore as _;
         let Some(thread_id) = caller.thread_id else {
@@ -4060,6 +3444,39 @@ mod tests {
     fn ensure_change_is_not_hinted_read_only() {
         assert!(!READ_ONLY_TOOLS.contains(&"ensure_change"));
         assert!(WRITE_TOOLS.contains(&"ensure_change"));
+    }
+
+    /// P8.A10: an agent writes records through `run_command`; the named
+    /// write tools are gone and stay gone.
+    #[test]
+    fn the_named_write_tools_are_gone() {
+        let registered = registered_tool_names();
+        let back: Vec<&str> = [
+            "create_task",
+            "update_task",
+            "complete_task",
+            "upsert_task",
+            "transition_tasks",
+            "reorder_tasks",
+            "file_epic_with_children",
+            "amend_effort",
+            "record_decision",
+            "record_claim",
+            "record_test_run",
+            "ingest_coverage",
+            "ingest_analysis",
+            "add_thread_note",
+            "create_comment",
+            "respond_to_comment",
+            "resolve_comment",
+            "install_extension",
+            "restore_file_snapshot",
+            "lsp_install_server",
+        ]
+        .into_iter()
+        .filter(|t| registered.iter().any(|r| r == t))
+        .collect();
+        assert_eq!(back, Vec::<&str>::new());
     }
 
     #[test]
@@ -4701,69 +4118,6 @@ mod tests {
         assert!(body.contains("round trip"), "unexpected body: {body}");
     }
 
-    /// A reorder from the agent is the `work_item.reorder` command, one
-    /// placement per listed item, run as the agent — audited to its thread
-    /// and dense like the UI's — not a second write path around the bus.
-    /// Items it doesn't list keep their relative order after the listed.
-    #[tokio::test]
-    async fn reorder_tasks_runs_work_item_reorder_as_the_agent() {
-        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot();
-        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-        let thread = services
-            .thread_store
-            .list_for_stream(&stream.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap();
-        let mut ids = Vec::new();
-        for (i, title) in ["a", "b", "c"].iter().enumerate() {
-            let mut t = make_task(Some(thread.id), title);
-            t.sort_index = i as i64;
-            ids.push(services.task_store.insert(&t).await.unwrap());
-        }
-        let (a, b, c) = (ids[0], ids[1], ids[2]);
-        let params = || ReorderTasksParams {
-            thread_id: Some(thread.id.to_string()),
-            ordered_item_ids: vec![c.to_string(), a.to_string()],
-        };
-        server
-            .reorder_tasks(as_writer(&services).await, Parameters(params()))
-            .await
-            .unwrap();
-        let order: Vec<TaskId> = services
-            .tasks
-            .list_for_thread(&thread.id)
-            .await
-            .unwrap()
-            .iter()
-            .map(|t| t.id)
-            .collect();
-        assert_eq!(order, vec![c, a, b]);
-        let audits = oxplow_db::SqliteCommandAuditStore::new(services.db.clone())
-            .list_recent(10)
-            .await
-            .unwrap();
-        let reorders: Vec<_> = audits
-            .iter()
-            .filter(|r| r.command == "work_item.reorder")
-            .collect();
-        assert_eq!(reorders.len(), 2, "{audits:?}");
-        assert!(reorders.iter().all(|r| {
-            r.actor_kind == oxplow_domain::events::schema::ActorKind::Agent
-                && r.thread_id == Some(thread.id)
-                && r.error.is_none()
-        }));
-        // An anonymous connection may not write.
-        let err = server
-            .reorder_tasks(rmcp::model::Extensions::new(), Parameters(params()))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("thread identity"), "{err}");
-    }
-
     #[tokio::test]
     async fn dispatch_task_infers_thread_from_item_id() {
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
@@ -4786,14 +4140,11 @@ mod tests {
         // Only item_id — thread_id is inferred from the task, so a
         // weak model that omits it still succeeds (no -32602).
         let r = server
-            .dispatch_task(
-                as_writer(&services).await,
-                Parameters(DispatchTaskParams {
-                    thread_id: None,
-                    item_id: Some(id.to_string()),
-                    extra_context: None,
-                }),
-            )
+            .dispatch_task(Parameters(DispatchTaskParams {
+                thread_id: None,
+                item_id: Some(id.to_string()),
+                extra_context: None,
+            }))
             .await
             .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
@@ -4806,16 +4157,13 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_task_requires_thread_or_item() {
-        let (_proj, services, server) = boot();
+        let (_proj, _services, server) = boot();
         let err = server
-            .dispatch_task(
-                as_writer(&services).await,
-                Parameters(DispatchTaskParams {
-                    thread_id: None,
-                    item_id: None,
-                    extra_context: None,
-                }),
-            )
+            .dispatch_task(Parameters(DispatchTaskParams {
+                thread_id: None,
+                item_id: None,
+                extra_context: None,
+            }))
             .await
             .unwrap_err();
         let msg = err.to_string();
@@ -4989,12 +4337,12 @@ mod tests {
             .await
             .unwrap();
         let err = server
-            .transition_tasks(
-                rmcp::model::Extensions::new(),
-                Parameters(TransitiontasksParams {
-                    ids: vec!["tsk1".into()],
-                    status: "done".into(),
-                }),
+            .run_command_as(
+                &McpCaller {
+                    thread_id: None,
+                    stream_id: None,
+                },
+                list(),
             )
             .await
             .unwrap_err();
@@ -5087,239 +4435,6 @@ mod tests {
         assert_eq!(pending[0].dry_run.as_ref().unwrap()["after"], "be brief");
         let yaml = std::fs::read_to_string(proj.path().join(".oxplow/project.yaml")).unwrap();
         assert!(!yaml.contains("be brief"), "nothing written: {yaml}");
-    }
-
-    /// tsk249: `complete_task` must silently ignore a claimed path the
-    /// workspace filter excludes (project `generated.exclude` /
-    /// `.gitignore`). Such a path is never snapshotted, so it can't be
-    /// observed as changed — recording it only guarantees a
-    /// "claimed but not changed" nudge on every close.
-    #[tokio::test]
-    async fn complete_task_nudges_for_decisions_on_a_big_effort() {
-        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot();
-        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-        let thread = services
-            .thread_store
-            .list_for_stream(&stream.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap();
-        let close = |title: &'static str, files: usize| {
-            let services = services.clone();
-            let server = &server;
-            async move {
-                let task_id = services
-                    .task_store
-                    .insert(&make_task(Some(thread.id), title))
-                    .await
-                    .unwrap();
-                let r = server
-                    .complete_task(
-                        as_writer(&services).await,
-                        Parameters(CompleteTaskParams {
-                            id: task_id.to_string(),
-                            summary: "done".into(),
-                            author: None,
-                            touched_files: Some(
-                                (0..files).map(|i| format!("src/f{i}.rs")).collect(),
-                            ),
-                            impacts: None,
-                            claim_runs: None,
-                            disclaim_runs: None,
-                        }),
-                    )
-                    .await
-                    .unwrap();
-                serde_json::from_str::<serde_json::Value>(&text_payload(r)).unwrap()
-            }
-        };
-        let big = close("big change", 9).await;
-        let hint = big["decision_hint"]
-            .as_str()
-            .expect("hint on a big effort with no decisions");
-        assert!(hint.contains("record_decision"), "{hint}");
-        let small = close("small change", 2).await;
-        assert!(small.get("decision_hint").is_none(), "{small}");
-    }
-
-    #[tokio::test]
-    async fn complete_task_ignores_claims_on_never_snapshotted_paths() {
-        use oxplow_db::EffortStore as _;
-        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        // Boot with a real `generated.exclude` in the project config —
-        // the same route the user's `.oxplow/project.yaml` takes.
-        let (_proj, services, server) = boot_with_config(
-            "generated:\n  exclude:\n  - apps/desktop/src/generated/bindings.ts\n",
-        );
-        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-        let thread = services
-            .thread_store
-            .list_for_stream(&stream.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .expect("primary stream must have a writer thread");
-        let mut item = make_task(Some(thread.id), "codegen close");
-        let task_id = services.task_store.insert(&item).await.unwrap();
-        item.id = task_id;
-
-        server
-            .complete_task(
-                as_writer(&services).await,
-                Parameters(CompleteTaskParams {
-                    id: task_id.to_string(),
-                    summary: "regenerated the bindings".into(),
-                    author: None,
-                    touched_files: Some(vec![
-                        "src/authored.rs".into(),
-                        "apps/desktop/src/generated/bindings.ts".into(),
-                    ]),
-                    impacts: None,
-                    claim_runs: None,
-                    disclaim_runs: None,
-                }),
-            )
-            .await
-            .unwrap();
-
-        let effort = services
-            .effort_store
-            .most_recent_for_work_item(&work_item_ref(task_id))
-            .await
-            .unwrap()
-            .expect("close should have recorded an effort");
-        let files = services.effort_store.list_files(&effort.id).await.unwrap();
-        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(
-            paths,
-            vec!["src/authored.rs"],
-            "the generated path should be dropped from the claim, not tracked"
-        );
-    }
-
-    /// P2.6.3 (tsk455): an agent's task edit is the `work_item.update`
-    /// command, audited to its thread; a connection with no identity can't
-    /// change a task.
-    #[tokio::test]
-    async fn status_changes_are_audited_to_the_calling_agent() {
-        let (_proj, services, server) = boot();
-        let item = make_task(None, "audited");
-        let id = services.task_store.insert(&item).await.unwrap();
-        let params = |status: &str| {
-            Parameters(UpdateTaskMcpParams {
-                id: id.to_string(),
-                title: None,
-                description: None,
-                parent_id: None,
-                status: Some(status.into()),
-                priority: None,
-                touched_files: None,
-                claim_runs: None,
-                disclaim_runs: None,
-            })
-        };
-        let err = server
-            .update_task(rmcp::model::Extensions::new(), params("blocked"))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("thread identity"), "{err}");
-
-        server
-            .update_task(as_writer(&services).await, params("blocked"))
-            .await
-            .unwrap();
-        let audit = oxplow_db::SqliteCommandAuditStore::new(services.db.clone())
-            .list_recent(5)
-            .await
-            .unwrap();
-        let row = audit
-            .iter()
-            .find(|r| r.command == oxplow_app::commands::work_item::UPDATE)
-            .expect("the update is audited");
-        assert_eq!(
-            row.actor_kind,
-            oxplow_domain::events::schema::ActorKind::Agent
-        );
-        assert!(row.thread_id.is_some());
-        assert_eq!(
-            services.task_store.get(id).await.unwrap().unwrap().status,
-            TaskStatus::Blocked
-        );
-    }
-
-    #[tokio::test]
-    async fn update_task_claims_runs_at_close_boundary() {
-        // tsk268: the agent claims its runs at the natural close point (no
-        // reactive second amend_effort). update_task(status=done, claim_runs=…)
-        // writes the ledger claim for the task's effort.
-        use oxplow_db::EffortStore as _;
-        use oxplow_db::{STATE_CLAIMED, STATE_UNATTRIBUTED};
-        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot();
-        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-        let thread = services
-            .thread_store
-            .list_for_stream(&stream.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .expect("primary stream must have a writer thread");
-        let mut item = make_task(Some(thread.id), "run close test");
-        item.status = oxplow_domain::TaskStatus::InProgress;
-        let task_id = services.task_store.insert(&item).await.unwrap();
-        item.id = task_id;
-        let effort = services
-            .effort_store
-            .start(&work_item_ref(task_id), &thread.id, None)
-            .await
-            .unwrap();
-        services
-            .attribution_store
-            .set_state(&effort.id, "run", "run:7", STATE_UNATTRIBUTED, None)
-            .await
-            .unwrap();
-
-        server
-            .update_task(
-                as_writer(&services).await,
-                Parameters(UpdateTaskMcpParams {
-                    id: task_id.to_string(),
-                    title: None,
-                    description: None,
-                    parent_id: None,
-                    status: Some("done".into()),
-                    priority: None,
-                    touched_files: None,
-                    claim_runs: Some(vec!["run:7".into()]),
-                    disclaim_runs: None,
-                }),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            services
-                .attribution_store
-                .list_refs(&effort.id, "run", STATE_CLAIMED)
-                .await
-                .unwrap(),
-            vec!["run:7".to_string()],
-            "the closing update claims the run for its effort"
-        );
-        assert!(
-            services
-                .attribution_store
-                .list_refs(&effort.id, "run", STATE_UNATTRIBUTED)
-                .await
-                .unwrap()
-                .is_empty(),
-            "claiming clears the unattributed residue"
-        );
     }
 
     /// A thread on `stream`, made as a person through `thread.create`.
@@ -5599,221 +4714,7 @@ mod tests {
         assert!(text_payload(r2).contains("not_a_ref"));
     }
 
-    #[tokio::test]
-    async fn create_task_rejects_stream_id_passed_as_thread_id() {
-        let (_proj, services, server) = boot();
-        let err = server
-            .create_task(
-                as_writer(&services).await,
-                Parameters(CreateTaskMcpParams {
-                    thread_id: Some("str999".into()),
-                    backlog: false,
-                    title: "x".into(),
-                    description: "dev".into(),
-                    kind: None,
-                    priority: None,
-                    status: None,
-                    parent_id: None,
-                    touched_files: None,
-                }),
-            )
-            .await
-            .expect_err("should reject stream id passed as thread_id");
-        let msg = err.message.to_string();
-        assert!(msg.contains("create_task"), "tool name missing: {msg}");
-        assert!(msg.contains("thread_id"), "param name missing: {msg}");
-        assert!(msg.contains("str999"), "value missing: {msg}");
-        assert!(msg.contains("stream id"), "actual kind missing: {msg}");
-        assert!(msg.contains("thread id"), "expected kind missing: {msg}");
-    }
-
-    #[tokio::test]
-    async fn create_task_rejects_unrecognised_thread_id() {
-        let (_proj, services, server) = boot();
-        let err = server
-            .create_task(
-                as_writer(&services).await,
-                Parameters(CreateTaskMcpParams {
-                    thread_id: Some("nonsense".into()),
-                    backlog: false,
-                    title: "x".into(),
-                    description: "dev".into(),
-                    kind: None,
-                    priority: None,
-                    status: None,
-                    parent_id: None,
-                    touched_files: None,
-                }),
-            )
-            .await
-            .expect_err("should reject unprefixed value");
-        let msg = err.message.to_string();
-        assert!(msg.contains("nonsense"), "value missing: {msg}");
-        assert!(msg.contains("thread id"), "expected kind missing: {msg}");
-    }
-
-    #[tokio::test]
-    async fn upsert_task_round_trips() {
-        let (_proj, services, server) = boot();
-        let item = make_task(None, "via mcp");
-        let json = serde_json::to_string(&item).unwrap();
-
-        let r = server
-            .upsert_task(
-                as_writer(&services).await,
-                Parameters(UpsertTaskParams { item_json: json }),
-            )
-            .await
-            .unwrap();
-        let body = text_payload(r);
-        assert!(body.contains("via mcp"), "upsert response: {body}");
-        // Parse the response to learn the assigned id, then re-fetch.
-        let stored: Task = serde_json::from_str(&body).expect("upsert returns task json");
-        assert_ne!(stored.id.value(), 0, "insert must assign a non-zero id");
-
-        let fetched = server
-            .get_task(Parameters(TaskIdParams {
-                id: stored.id.to_string(),
-            }))
-            .await
-            .unwrap();
-        let body = text_payload(fetched);
-        assert!(body.contains("via mcp"), "fetched after upsert: {body}");
-    }
-
-    #[test]
-    fn create_task_params_require_description() {
-        // `description` is the single required prose field; the
-        // audience-variant params are gone, so an extra `*_executive`
-        // key is simply ignored rather than required.
-        serde_json::from_value::<CreateTaskMcpParams>(serde_json::json!({
-            "title": "t",
-            "description": "developer body",
-        }))
-        .expect("title + description parses");
-        let mut obj = serde_json::json!({ "title": "t", "description": "body" });
-        obj.as_object_mut().unwrap().remove("description");
-        assert!(
-            serde_json::from_value::<CreateTaskMcpParams>(obj).is_err(),
-            "missing `description` should fail to deserialize (required)"
-        );
-    }
-
-    #[tokio::test]
-    async fn create_task_reports_invalid_wikilink() {
-        let (_proj, services, server) = boot();
-        let r = server
-            .create_task(
-                as_writer(&services).await,
-                Parameters(CreateTaskMcpParams {
-                    thread_id: None,
-                    backlog: true,
-                    title: "t".into(),
-                    description: "Follow-up in [[#13]].".into(),
-                    kind: None,
-                    priority: None,
-                    status: None,
-                    parent_id: None,
-                    touched_files: None,
-                }),
-            )
-            .await
-            .unwrap();
-        let body = text_payload(r);
-        assert!(body.contains("link_warnings"), "missing warnings: {body}");
-        assert!(body.contains("#13"), "target missing: {body}");
-        assert!(
-            body.contains("not a recognized reference"),
-            "reason missing: {body}"
-        );
-    }
-
-    #[tokio::test]
-    async fn create_task_omits_link_warnings_when_clean() {
-        let (_proj, services, server) = boot();
-        let r = server
-            .create_task(
-                as_writer(&services).await,
-                Parameters(CreateTaskMcpParams {
-                    thread_id: None,
-                    backlog: true,
-                    title: "t".into(),
-                    description: "A clean body with no wikilinks at all.".into(),
-                    kind: None,
-                    priority: None,
-                    status: None,
-                    parent_id: None,
-                    touched_files: None,
-                }),
-            )
-            .await
-            .unwrap();
-        let body = text_payload(r);
-        // No `[[…]]` links → the field is skip-serialized (shape unchanged).
-        assert!(
-            !body.contains("link_warnings"),
-            "clean write must omit link_warnings: {body}"
-        );
-    }
-
-    #[test]
-    fn file_epic_params_require_descriptions() {
-        serde_json::from_value::<FileEpicWithChildrenParams>(serde_json::json!({
-            "epic_title": "E",
-            "epic_description": "dev",
-            "children": [{ "title": "C", "description": "dev" }],
-        }))
-        .expect("epic + child descriptions parse");
-        let mut obj = serde_json::json!({
-            "epic_title": "E",
-            "epic_description": "dev",
-            "children": [{ "title": "C", "description": "dev" }],
-        });
-        obj.as_object_mut().unwrap().remove("epic_description");
-        assert!(
-            serde_json::from_value::<FileEpicWithChildrenParams>(obj).is_err(),
-            "missing `epic_description` should fail to deserialize (required)"
-        );
-    }
-
     // ---- Pure helpers: parse_status / parse_priority ----
-
-    #[test]
-    fn parse_status_accepts_every_status() {
-        assert!(matches!(parse_status("ready"), Ok(TaskStatus::Ready)));
-        assert!(matches!(
-            parse_status("in_progress"),
-            Ok(TaskStatus::InProgress)
-        ));
-        assert!(matches!(parse_status("blocked"), Ok(TaskStatus::Blocked)));
-        assert!(matches!(parse_status("done"), Ok(TaskStatus::Done)));
-        assert!(matches!(parse_status("canceled"), Ok(TaskStatus::Canceled)));
-        assert!(matches!(parse_status("archived"), Ok(TaskStatus::Archived)));
-    }
-
-    #[test]
-    fn parse_status_rejects_in_progress_with_dash() {
-        // The contract says snake_case `in_progress`; clients writing
-        // `in-progress` should get an actionable error rather than
-        // being silently coerced.
-        let err = parse_status("in-progress").unwrap_err();
-        assert!(err.message.contains("in-progress"));
-    }
-
-    #[test]
-    fn parse_priority_accepts_each_value() {
-        use oxplow_domain::TaskPriority as P;
-        assert!(matches!(parse_priority("low"), Ok(P::Low)));
-        assert!(matches!(parse_priority("medium"), Ok(P::Medium)));
-        assert!(matches!(parse_priority("high"), Ok(P::High)));
-        assert!(matches!(parse_priority("urgent"), Ok(P::Urgent)));
-    }
-
-    #[test]
-    fn parse_priority_unknown_errors() {
-        let err = parse_priority("critical").unwrap_err();
-        assert!(err.message.contains("critical"));
-    }
 
     // ---- expect_id_kind ----
 
@@ -5825,9 +4726,13 @@ mod tests {
     #[test]
     fn expect_id_kind_error_names_tool_param_value_and_kinds() {
         // A stream id passed where a thread id was expected.
-        let err = expect_id_kind("create_task", "thread_id", "str123", ID_THREAD).unwrap_err();
+        let err =
+            expect_id_kind("list_thread_notes", "thread_id", "str123", ID_THREAD).unwrap_err();
         let msg = err.message.to_string();
-        assert!(msg.contains("create_task"), "tool name missing: {msg}");
+        assert!(
+            msg.contains("list_thread_notes"),
+            "tool name missing: {msg}"
+        );
         assert!(msg.contains("thread_id"), "param name missing: {msg}");
         assert!(msg.contains("str123"), "value missing: {msg}");
         assert!(msg.contains("stream id"), "actual label missing: {msg}");

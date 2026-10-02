@@ -28,9 +28,9 @@ field** — tasks aren't typed as epic/task/subtask/bug/note. The shape
 of the work falls out of the data:
 
 - **Epic** — a task that has at least one child (`parent_id` points
-  at it). Use `file_epic_with_children` when the change has ≥3
-  sub-steps a reviewer would naturally inspect separately; otherwise
-  file a single task.
+  at it). File one (then its children with `parent_ref`, each a
+  `work_item.create`) when the change has ≥3 sub-steps a reviewer would
+  naturally inspect separately; otherwise file a single task.
 - **Sub-task** — any task whose `parent_id` is set. Use sparingly:
   three siblings under a parent is a coordination win; one is just
   bookkeeping.

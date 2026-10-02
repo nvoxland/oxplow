@@ -142,7 +142,7 @@ fn to_snake_case(key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CompleteTaskParams, CreateTaskMcpParams, ReorderTasksParams, UpdateTaskMcpParams};
+    use crate::{DispatchTaskParams, FileSnapshotIdParams};
 
     fn obj(v: Value) -> JsonObject {
         v.as_object().unwrap().clone()
@@ -183,72 +183,39 @@ mod tests {
     }
 
     #[test]
-    fn camel_case_completes_task() {
-        // The headline failure from the task: complete_task with
-        // camelCase `touchedFiles` must deserialize, not -32602.
-        let p: CompleteTaskParams = lenient_from_object(obj(serde_json::json!({
-            "id": "tsk1",
-            "summary": "did the thing",
-            "touchedFiles": ["src/lib.rs", "src/main.rs"],
+    fn camel_case_multiword_fields_deserialize() {
+        // The headline failure: camelCase keys (`threadId`) must
+        // deserialize, not -32602.
+        let p: DispatchTaskParams = lenient_from_object(obj(serde_json::json!({
+            "threadId": "thr5",
+            "itemId": "tsk1",
+            "extraContext": "look at src/a.rs",
         })))
         .unwrap();
-        assert_eq!(p.id, "tsk1");
-        assert_eq!(p.touched_files.unwrap(), vec!["src/lib.rs", "src/main.rs"]);
+        assert_eq!(p.thread_id.as_deref(), Some("thr5"));
+        assert_eq!(p.item_id.as_deref(), Some("tsk1"));
+        assert_eq!(p.extra_context.as_deref(), Some("look at src/a.rs"));
     }
 
     #[test]
     fn snake_case_still_works_and_is_canonical() {
-        let p: CompleteTaskParams = lenient_from_object(obj(serde_json::json!({
-            "id": "tsk1",
-            "summary": "did the thing",
-            "touched_files": ["src/lib.rs"],
-        })))
-        .unwrap();
-        assert_eq!(p.touched_files.unwrap(), vec!["src/lib.rs"]);
-    }
-
-    #[test]
-    fn camel_case_create_task_with_many_multiword_fields() {
-        let p: CreateTaskMcpParams = lenient_from_object(obj(serde_json::json!({
-            "threadId": "thr5",
-            "title": "t",
-            "description": "d",
-            "parentId": "tsk9",
-            "touchedFiles": ["a"],
+        let p: DispatchTaskParams = lenient_from_object(obj(serde_json::json!({
+            "thread_id": "thr5",
         })))
         .unwrap();
         assert_eq!(p.thread_id.as_deref(), Some("thr5"));
-        assert_eq!(p.parent_id.as_deref(), Some("tsk9"));
-        assert_eq!(p.touched_files.unwrap(), vec!["a"]);
-    }
-
-    #[test]
-    fn camel_case_update_and_reorder() {
-        let u: UpdateTaskMcpParams = lenient_from_object(obj(serde_json::json!({
-            "id": "tsk1",
-            "parentId": "tsk2",
-        })))
-        .unwrap();
-        assert_eq!(u.parent_id.as_deref(), Some("tsk2"));
-
-        let r: ReorderTasksParams = lenient_from_object(obj(serde_json::json!({
-            "threadId": "thr5",
-            "orderedItemIds": ["tsk1", "tsk2"],
-        })))
-        .unwrap();
-        assert_eq!(r.thread_id.as_deref(), Some("thr5"));
-        assert_eq!(r.ordered_item_ids, vec!["tsk1", "tsk2"]);
     }
 
     #[test]
     fn truly_missing_field_yields_clear_error() {
-        // `summary` is genuinely required and absent under any casing.
-        let err = lenient_from_object::<CompleteTaskParams>(obj(serde_json::json!({
-            "id": "tsk1",
-        })))
-        .unwrap_err();
+        // `file_snapshot_id` is required and absent under any casing.
+        let err =
+            lenient_from_object::<FileSnapshotIdParams>(obj(serde_json::json!({}))).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("summary"), "should name the field: {msg}");
+        assert!(
+            msg.contains("file_snapshot_id"),
+            "should name the field: {msg}"
+        );
         assert!(
             msg.contains("snake_case") && msg.contains("camelCase"),
             "should explain accepted casing: {msg}",

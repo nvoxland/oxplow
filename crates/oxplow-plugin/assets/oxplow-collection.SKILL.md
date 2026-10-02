@@ -1,6 +1,6 @@
 ---
 name: oxplow-collection
-description: Standing rules for oxplow's effort-scoped collection (which tests ran + diff coverage). Loads when finishing/closing a task (complete_task), when the user asks about test coverage or "what tests ran", and on /oxplow:configure. Keeps coverage flowing without bit-rot after a one-time configure.
+description: Standing rules for oxplow's effort-scoped collection (which tests ran + diff coverage). Loads when finishing/closing a task (effort.report), when the user asks about test coverage or "what tests ran", and on /oxplow:configure. Keeps coverage flowing without bit-rot after a one-time configure.
 ---
 
 # Collection — keep coverage flowing per effort
@@ -13,7 +13,7 @@ automatic; your job is small and is about making sure the data exists,
 ## The one rule
 
 When you finish work on a task, **run the project's tests before you
-`complete_task`**, so fresh test + coverage reports exist for oxplow to
+close it** (`work_item.transition` + `effort.report`), so fresh test + coverage reports exist for oxplow to
 attribute to the effort. The test command is recorded in the
 `collection:` block of `.oxplow/project.yaml` (`testCommand`).
 
@@ -30,7 +30,7 @@ Run it three specific ways:
     - **Iterating (red/green, one test, one crate): `fastTestCommand`** when the
       project declares one. It emits the same test report but skips coverage
       instrumentation, and it takes a filter — so it's seconds, not minutes.
-    - **Before `complete_task`: `testCommand`.** The full run, with coverage.
+    - **Before closing the task: `testCommand`.** The full run, with coverage.
       Diff coverage for the effort comes only from this one.
 
     If the project declares no `fastTestCommand`, use `testCommand` throughout.

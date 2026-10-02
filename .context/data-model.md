@@ -371,8 +371,8 @@ distinguish backlog changes from in-thread changes.
 `author` (migration v26, nullable TEXT) — semantic origin of the row,
 distinct from `created_by` (which just classifies the SQL writer as
 `user`/`agent`/`system`). Values: `'user'` (explicit user-initiated
-create), `'agent'` (explicit agent `create_task` /
-`file_epic_with_children` call), or `NULL` (legacy rows). Pre-v29 DBs
+create), `'agent'` (a `work_item.create` run by an agent-driven
+actor), or `NULL` (legacy rows). Pre-v29 DBs
 also held `'agent-auto'` rows synthesized by the removed auto-file
 listener; migration v29 cancels any such still-in_progress rows, and
 the read path maps the legacy string to `null` so older terminal rows
@@ -457,7 +457,7 @@ the canonical record of what shipped on a task, so a parallel
 per-item note table for the same purpose was duplicative. The
 `add_work_note` MCP tool, the `add_work_note` / `list_work_notes`
 IPC commands, and the task modal's "Notes" timeline section
-were removed alongside this. `complete_task` previously still
+were removed alongside this. The (since-deleted) MCP `complete_task` previously still
 shadow-wrote the summary into `task_note` to get its body
 projected into `page_ref`; that orphan write was removed once
 the effort store learned to project `effort.summary`
@@ -505,7 +505,7 @@ provider's item gets edges too. The UI mirrors the helpers in
 and has no task page. Columns: `work_item`,
 `thread_id`, `started_at`, `ended_at`,
 `start_snapshot_id`, `end_snapshot_id`, `summary` (v35 — free-form text
-written by `complete_task` describing what shipped in this effort; one
+written by `effort.report` describing what shipped in this effort; one
 summary per effort, replaces the old per-item note-history append),
 `impacts_json` (V12 — nullable TEXT holding a JSON array of declared
 `TaskImpact` rows of the form `{kind, id, action?}`; the LLM uses this
@@ -526,7 +526,8 @@ Auto-managed by the runtime on `task.changed` status transitions:
   effort in progress. There is no time-based minimum gap.
 
 `summary` is the effort's single canonical prose body, written once on
-completion via `complete_task`. (A `summary_variants` column existed
+completion via `effort.report` (the second half of the close's
+`command.sequence`). (A `summary_variants` column existed
 V27–V28 for the audience-variant feature; dropped in V29.)
 
 Re-opening a task (done → in_progress) produces a second effort. At most one open effort per task at a time.
@@ -539,8 +540,8 @@ primary key `(effort_id, path)`. Rows come from two claim-first
 sources: the PostToolUse hook auto-claims each structured edit
 (Edit/Write/MultiEdit/NotebookEdit) onto the thread's open effort in
 real time (`record_file`, idempotent `INSERT OR REPLACE`), and the
-`touchedFiles` payload on the `update_task`/`complete_task` transition
-to `done` confirms/amends. (Bash/codegen/formatter writes are NOT
+`touched_files` of the `effort.report` that follows the transition to
+`done` confirms/amends. (Bash/codegen/formatter writes are NOT
 auto-claimed — they stay for snapshot reconciliation; the old
 unconditional active-effort heuristic was removed because it
 over-reported when ≥2 efforts were in_progress, but the per-thread
@@ -597,13 +598,14 @@ snapshot diff saw change during the effort that nothing claimed. Columns:
 `effort_id`, `path`, `recorded_at`, primary key `(effort_id, path)`,
 CASCADE on the effort. Written by `reconcile_unattributed_on_close`
 (`oxplow_app::task_service`) at every snapshot-bracketed effort close
-(`TaskService::update` out of `in_progress` — so IPC `update_task`, MCP
-`update_task`, and the close half of `complete_task`), so an out-of-band
+(the effort-lifecycle consumer of `effort.closed`, whatever moved the task
+out of `in_progress` — a desktop edit, `work_item.transition` /
+`work_item.update`, the close half of the agent's close sequence), so an out-of-band
 close can't leave a parallel/external write looking like the agent's
 authored work (the bug that mis-attributed a navigator screenshot to an
 MCP-only effort). **Invariant: a path is CLAIMED (`effort_file`) or
 UNATTRIBUTED here, never both** — `record_file` deletes any matching
-residue row, so a later `complete_task` claim moves a path back into the
+residue row, so a later `effort.report` / `effort.amend` claim moves a path back into the
 claimed set. The existing agent nudge (`compute_effort_file_review`) reads
 `effort_file`, not this table, so it's unaffected. Restart-recovery
 orphan closes are also reconciled: `RecoveryService` (wired with the
@@ -643,7 +645,7 @@ one owning effort and can't double-count across two efforts' rollups
 caller named a `task_id` — exact even under concurrency); the unclaimed
 concurrent case stays observed-only until the close reconciliation writes
 an `unattributed` row, which the agent resolves via
-`effort.amend`/`effort.report` (`complete_task`, `update_task`) `claim_runs`/`disclaim_runs`.
+`effort.report` / `effort.amend` `claim_runs`/`disclaim_runs`.
 **Window-dominance** keeps that residue from over-surfacing: at reconcile a
 run that falls inside a strictly-nested sibling effort's time window
 (`SqliteEffortStore::nested_efforts`) is the *narrower* effort's to
@@ -1325,11 +1327,11 @@ They hold `Services` weakly (the pump is part
 of it). The in-memory `OxplowEvent::EffortFinished` is gone — it dropped on
 lag and never fired for synthesized or recovered efforts, which now reach
 every reactor.
-`TaskService::update` / `create` / the record path, `task_writes`, and
-MCP `run_command` after any write call `settle` on `effort.lifecycle`
+`TaskService::update` / `create` / the record path (and so
+`effort.report`), and MCP `run_command` after any write call `settle` on `effort.lifecycle`
 (up to 10 min — the inline capture it replaced waited without limit; a
 start baseline on a huge repo waits for the startup sweep) so
-`complete_task`'s file review sees the end pin and a batch's opens pin
+the close's `effort.report` file review sees the end pin and a batch's opens pin
 before its closes; the consumer holds
 `TaskService::without_event_pump()` so there's no reference cycle.
 Recovery's opens and closes now get pins, metrics and `effort.finished`

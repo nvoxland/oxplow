@@ -350,7 +350,7 @@ is a second command of the same name.
 | `work_item.link { ref, target, link_type }` / `work_item.comment { ref, body }` | `Dispatch`: oxplow → `Tx` over `task_satellite::create_link_tx` / `add_task_note_tx` (P5.C2) | all invokers; not undoable; only with the provider's `links` / `comments`; the target must be the same provider's. oxplow: a link type of its own list, made in the caller's thread (a person's: the linked task's, else the target's), or a note on the task, with its `page_ref` edges, logging `work_item.linked@1` / `work_item.commented@1` caused by the run. |
 | `effort.open { work_item, thread? }` / `effort.close { effort, summary? }` | `Tx` over `effort_store::start_tx` / `finish_tx` (`commands/effort.rs`, P2.6.4) | all invokers; not undoable. For a work item whose provider doesn't open its own effort (`work_item:linear:ENG-12`): a registered provider declaring `in_progress_opens_effort` — oxplow's tasks, whose effort follows their status — is refused; an unregistered provider's item takes one. `thread` defaults to the caller's and must be its stream's working (active) thread; an agent may name only a thread in its own stream (and close only its stream's efforts). A second open on the same item is refused naming the open effort. Logs `effort.opened` / `effort.closed` caused by the run; the snapshot pin is the effort-lifecycle pump consumer's. |
 | `effort.record_decision { thread?, work_item?, question, choice, alternatives?, confidence?, why? }`, `effort.record_claim { thread?, work_item?, statement, kind, evidence_ref? }` | `Tx` over `reasoning_store::{record_decision_tx, record_claim_tx}` (`commands/reasoning.rs`, P8.A7) | all invokers, `Record`, `Confirm::Never`, not undoable. An agent's land on its own thread whatever thread it names (another is refused); a person names one. They attach to `work_item`'s open effort — refused when the item is another stream's work — else the thread's newest open effort. Read back as `v_decision` / `v_claim` |
-| `effort.report { work_item, thread?, summary?, touched_files?, impacts?, claim_runs?, disclaim_runs? }`, `effort.amend { effort, add_files?, remove_files?, claim_runs?, disclaim_runs? }` | `External` (`commands/effort_report.rs`, P8.A7): they read the worktree and check the report against the snapshot diff | all invokers, `Record`, not undoable. An agent reports and amends only on its own thread (a work item whose last effort is another thread's is refused). `report` settles the effort lifecycle first, records the attribution (`TaskService::record_effort`, synthesizing an effort for an item that never had one), settles the run claims, and returns `{ effort, file_review, link_warnings, decision_hint }`; a file discrepancy or unattributed runs stash the effort for the Stop hook's EFFORT REVIEW, which names `effort.amend`. `complete_task` is `command.sequence [work_item.transition → done, effort.report]` (`task_writes::complete`) — one audit row, the transition first so the report attaches to the just-closed effort |
+| `effort.report { work_item, thread?, summary?, touched_files?, impacts?, claim_runs?, disclaim_runs? }`, `effort.amend { effort, add_files?, remove_files?, claim_runs?, disclaim_runs? }` | `External` (`commands/effort_report.rs`, P8.A7): they read the worktree and check the report against the snapshot diff | all invokers, `Record`, not undoable. An agent reports and amends only on its own thread (a work item whose last effort is another thread's is refused). `report` settles the effort lifecycle first, records the attribution (`TaskService::record_effort`, synthesizing an effort for an item that never had one), settles the run claims, and returns `{ effort, file_review, link_warnings, decision_hint }`; a file discrepancy or unattributed runs stash the effort for the Stop hook's EFFORT REVIEW, which names `effort.amend`. Closing a task (what the deleted MCP `complete_task` did) is `command.sequence [work_item.transition → done, effort.report]` — one audit row, the transition first so the report attaches to the just-closed effort |
 | `test.record_run { thread?, work_item?, command, duration_ms?, passed?, failed?, total? }`, `test.ingest_coverage { thread?, report_path?, format? }`, `test.ingest_analysis { thread?, report_path?, format? }` | `External` over the `CollectionService` (`commands/test_runs.rs`, P8.A8): they read report files and the worktree, and the capture commits in the collector's own transaction | all invokers, `Record`, not undoable. An agent's go on its own thread whatever it names; a person names one. `record_run` is the `asserted` run a sub-agent's Bash hook can't see (`work_item` attributes it exactly); the ingests parse a report oxplow reads itself and return a status (`stored`, or why nothing landed). See [collection.md](./collection.md) |
 | `extension.install { git_url, git_ref?, reviewed_sha, stream? }`, `extension.update { name, reviewed_sha, stream? }` | `External` (`commands/extension_install.rs`, P8.A9): a clone into `.oxplow/tmp/` and a copy into a stream's worktree | all invokers, `Write`, `Confirm::Always`, not undoable. What an extension can run is a person's call, against the review of the commit they saw (`reviewed_sha` is the only commit installed): an agent's run becomes a proposal; Settings → Extensions runs it confirmed. `stream` defaults to an agent's own, else the primary checkout. See [extensions.md](./extensions.md) |
 | `snapshot.restore_file { file_snapshot }` | `External` over `snapshot_files::SnapshotFiles` (`commands/snapshot.rs`, P8.A9) | all invokers, `Write`, `Confirm::Destructive` (it overwrites the file at its path), not undoable: a person confirms, an agent's run is a proposal. Writes into the row's stream's worktree |
@@ -384,22 +384,20 @@ refused naming the registered ones (`no work-items provider \`linear\`;
 registered: oxplow`).
 
 **Callers.** Every task edit or status change made for someone is a
-command, through `oxplow_app::task_writes` (which builds the commands'
-input from oxplow's task shape — a status as oxplow's `native_state`,
-thread and priority under `native` — and runs them through the
-`WorkItems` client): `create` runs `work_item.create`, `update` runs
-`work_item.update` (fields + status, atomic), `set_status` runs
-`work_item.transition`, each settling the
-effort-lifecycle consumer after a status move; `upsert` inserts a new row through the create path
-(`insert_logged`) and edits an existing one with `update` (title,
-description, priority, parent, status — not its thread or position). MCP
-`create_task`, `file_epic_with_children`, `update_task`, `complete_task`,
-`dispatch_task`, `upsert_task` and `transition_tasks` run them as `Actor::Agent` with the caller's verified
-thread and stream (`McpCaller` — see "MCP identity"), so an anonymous
-connection can't file or change a task, and a queued thread can file,
-edit and finish tasks but not move one to `in_progress` (tsk466); RPC
-`create_task` / `update_task` / `upsert_task` run them as
-`Actor::Human`. `TaskService::update`
+`work_item.*` command run under its actor. The desktop runs them through
+RPC `run_command` as `Actor::Human` (the typed task RPCs went in P6.E1b);
+an agent runs them through MCP `run_command` as `Actor::Agent` with the
+caller's verified thread and stream (`McpCaller` — see "MCP identity"),
+so an anonymous connection can't file or change a task, and a queued
+thread can file, edit and finish tasks but not move one to `in_progress`
+(tsk466). P8.A10 deleted the MCP task-write tools (`create_task`,
+`file_epic_with_children`, `update_task`, `complete_task`, `upsert_task`,
+`transition_tasks`, `reorder_tasks`) and `oxplow_app::task_writes` with
+them; an epic is a `work_item.create` per row (children with
+`parent_ref`), and closing is the `command.sequence` above.
+`dispatch_task` only composes a brief. `oxplow_app::work_items::WorkItems`
+is a typed client over the commands (the conformance suite uses it).
+`TaskService::update`
 (no actor) still logs every status change, with source
 `system:task_service`, but isn't audited.
 **Config is written only by `config.*`** (tsk515). The Settings page's
@@ -445,8 +443,10 @@ Agents reach every command through two generic tools — `list_commands`
 `confirm`, `undoable`) and `run_command { name, input }` (the outcome:
 `result`, `audit_id`, `event_id`, `inverse?` — or, for a run that needs
 a person's confirmation, `{ kind: "proposed", proposal, message }`). Extensions never add MCP
-tools. `transition_tasks` is `run_command("work_item.transition")` per
-id.
+tools. `run_command` is an agent's only write path for records — the
+named write tools (`create_task`, `complete_task`, `amend_effort`,
+`record_test_run`, `add_thread_note`, …) are gone (P8.A10;
+`the_named_write_tools_are_gone` keeps them gone).
 
 **Caller identity.** Every harness carries the acting thread on the
 HTTP request, and `oxplow_mcp::McpCaller::from_parts` reads it from the
@@ -457,7 +457,7 @@ per-thread `mcp-config.<thread>.json` with the literal headers, since
 Claude's MCP config reads no env vars), or `?thread=…&stream=…` on the
 endpoint URL (Codex, whose config has no per-session headers). A
 connection with neither is an anonymous agent: it may list, and
-`run_command` / `transition_tasks` refuse it — no run without an actor
+`run_command` refuses it — no run without an actor
 to audit it to. **The header is a claim, not a proof**:
 `OxplowMcp::verified_actor` resolves the thread and refuses an unknown
 thread or a stream header that isn't the thread's stream, and the actor

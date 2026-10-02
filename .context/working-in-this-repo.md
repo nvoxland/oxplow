@@ -300,12 +300,16 @@ change qualifies for the trivial-edit carve-out above). When you're
 about to change project files in a turn and you aren't already working
 against an existing item, file one with status `in_progress`. The item
 should describe the real piece of work you're committing to ship, not
-a placeholder. When it's settled, call `complete_task` to ship an
+a placeholder. Every task write is `mcp__oxplow__run_command`: file
+with `work_item.create { title, body, state: "in_progress", native: {
+thread } }` (without `native.thread` it lands on the backlog). When it's
+settled, close it with one `command.sequence` of `work_item.transition`
+(`to: "done"`) and `effort.report` (`summary`, `touched_files`) to ship an
 explicit summary.
 
-**Pick `create_task` (kind defaults to `task`) for one coherent
-change**, even if it spans a few files. Use `file_epic_with_children`
-only when the work has ≥3 sub-steps a reviewer would naturally
+**File one task for one coherent change**, even if it spans a few
+files. Make an epic (file the parent, then each child with
+`parent_ref`) only when the work has ≥3 sub-steps a reviewer would naturally
 inspect independently — distinct phases, handoffs, or separable
 subsystems. The test: could a child close to `done` on its own
 and have the user inspect just that piece? If no, it's one task.
@@ -328,9 +332,9 @@ single "do everything the user asked" task.
 mid-turn, file a new task rather than silently expanding the
 current item's scope. The exception: if the new ask is genuinely a
 correction to the same concern (a fix/redo on something you just
-shipped to `done`), reopen that item — call `update_task`
-to flip it back to `in_progress`, redo the work, then `complete_task`
-back to `done`. Filing a "Fix what I just did" task
+shipped to `done`), reopen that item — `work_item.transition` it
+back to `in_progress`, redo the work, then close it back to `done`
+the usual way. Filing a "Fix what I just did" task
 fragments the history.
 
 **Mid-turn user prompts are a new ask boundary.** When a
@@ -352,7 +356,8 @@ Don't bury follow-ups in prose at the end of a reply where they'll be
 forgotten. The backlog is the durable record; replies are not.
 
 The runtime handles the rest of the state machine for you: tasks
-persist across turn boundaries automatically, the Stop hook reminds
-you to audit `in_progress` items only when something actually changed,
-and the redo-detection hint on `create_task` flags when a new
-"Fix …" task probably belongs as a reopen instead.
+persist across turn boundaries automatically, and the Stop hook
+reminds you to audit open efforts only when something
+actually changed. Nothing flags a new "Fix …" task that belongs as a
+reopen — the redo hint lived on the deleted MCP `create_task` — so
+that judgement is yours.

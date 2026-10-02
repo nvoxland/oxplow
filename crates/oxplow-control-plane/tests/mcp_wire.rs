@@ -111,7 +111,7 @@ async fn mcp_session_initializes_lists_and_calls_tools_over_http() {
     // Our hand-rolled list_tools stamps read-only hints (tsk203) …
     assert_eq!(tool("ping")["annotations"]["readOnlyHint"], true);
     // … and leaves mutating tools gated.
-    assert_ne!(tool("create_task")["annotations"]["readOnlyHint"], true);
+    assert_ne!(tool("run_command")["annotations"]["readOnlyHint"], true);
 
     let (_, call) = post(
         &client,

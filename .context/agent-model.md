@@ -786,8 +786,10 @@ unaffected.
 **The Stop audit walks the stream's open efforts** (P2.7):
 `open_efforts_in_stream` lists them (`list_open_for_stream`) as
 `[eff12] tsk42 — <title>`, or `[eff12] linear:ENG-12` for another
-provider's item, and the directive says to `complete_task` an oxplow
-task or `effort.close` a foreign item. Its dedupe signature is over the
+provider's item, and the directive says to close an oxplow task with
+`run_command command.sequence [work_item.transition → done,
+effort.report]` (or `work_item.transition` it to todo/blocked/canceled)
+and to `effort.close` a foreign item. Its dedupe signature is over the
 effort ids plus each task's `updated_at` + note count, so touching a
 task re-arms it. An `in_progress` row with no effort doesn't hold the
 turn open.
@@ -853,7 +855,8 @@ The pipeline runs in priority order:
    directive built by `buildInProgressAuditStopReason` — lists every
    `in_progress` item on the thread (id + title) and instructs the agent
    to reconcile each: still active → leave alone; work complete
-   → `complete_task` (status `done`);
+   → the `command.sequence` of `work_item.transition` (`to: done`) and
+   `effort.report`;
    stuck → `blocked`; paused → `ready`; obsolete → `canceled`. Tasks
    persist across turn boundaries; without this audit step stale
    `in_progress` rows pile up because nothing forces a settle.
@@ -861,8 +864,8 @@ The pipeline runs in priority order:
    (`lastAuditSignatureByThread`, signature = sorted
    `id|updated_at` over the in_progress set) of the last set
    it audited. On the next Stop, if the current signature matches the
-   recorded one — same items, no `update_task` /
-   `complete_task` (which bumps `updated_at`) — the directive is
+   recorded one — same items, no `work_item.update` /
+   `work_item.transition` (which bumps `updated_at`) — the directive is
    suppressed. Any
    change re-arms the audit. This stops the tight ack-loop where the
    agent answers "still in progress" → Stop fires → identical audit
@@ -928,8 +931,9 @@ that, the orchestrator has two modes:
 2. **Subagent dispatch for bigger work.** For multi-file/multi-step/
    risky changes, the orchestrator calls `oxplow__read_work_options`,
    launches one `general-purpose` subagent with the brief, and
-   closes the item via `complete_task` (whose `summary` lands on the
-   matching `effort.summary` row). Subagents run in isolated
+   closes the item via the `command.sequence` of `work_item.transition`
+   (done) and `effort.report` (whose `summary` lands on the matching
+   `effort.summary` row). Subagents run in isolated
    context windows — their tokens don't count against the orchestrator,
    so main context stays flat regardless of queue depth.
 
@@ -979,9 +983,9 @@ rule live in [commands.md](./commands.md).
 tool surface. Internally each `ToolDef.name` carries an `oxplow__`
 prefix (historical), but `crates/oxplow-mcp/src/lib.rs` strips that prefix at the
 `tools/list` boundary via `exposedToolName` so the harness sees clean
-names like `create_task`. With the harness's own `mcp__oxplow__`
-namespace on top, the agent calls `mcp__oxplow__create_task` —
-not the legacy `mcp__oxplow__oxplow__create_task`. The long form
+names like `run_command`. With the harness's own `mcp__oxplow__`
+namespace on top, the agent calls `mcp__oxplow__run_command` —
+not the legacy `mcp__oxplow__oxplow__run_command`. The long form
 still resolves on `tools/call` for back-compat.
 
 ### The ServerHandler is hand-rolled — re-diff it on every rmcp bump
@@ -1072,11 +1076,11 @@ fed by the `Indexer` service; optional `stream_id` scopes file hits).
 Still `AgentTodo` (see the backlog): composed snapshot DTOs, git
 mutations/extra reads, `checkout_stream_branch`.
 
-The default `kind` for `create_task` is `"task"` — omit it
 The `kind` discriminator (`epic`/`task`/`subtask`/`bug`/`note`) was
-removed end-to-end — `create_task` no longer accepts one and a task
-row no longer carries one. An "epic" is now just any task that has
-children; the bucketing is computed on read.
+removed end-to-end — `work_item.create` takes none and a task row no
+longer carries one. An "epic" is just any task that has children
+(create the epic, then each child with `parent_ref`); the bucketing is
+computed on read.
 
 **Id-prefix validation at the boundary.** Every tool that takes a
 string id (`thread_id`, `stream_id`, `note_id`, `followup_id`, …) calls
@@ -1100,23 +1104,29 @@ the top of any new tool handler — see `IdPrefix` and the
 parameter validator is the separate `parse_task_id` helper (digits
 only, returns `Some(TaskId)` or an `invalid_params` error).
 
-`update_task` accepts `blocked → in_progress` directly (deliberate
-unblock gesture; no separate hop through `ready` required). Only
-terminal states (`done`/`canceled`/`archived`) still require an
-intermediate `ready` step.
+`work_item.transition { ref, to, native_state? }` moves an item
+between canonical states directly — `blocked → in_progress` (unblock)
+and `done → in_progress` (reopen) need no hop through `todo`; archive
+is `{ to: done|canceled, native_state: archived }`.
 
-- `get_batch_context`, `list_batch_work`,
-  `list_ready_work`, `read_task_options`, `create_task`, `update_task`,
-  `get_task`, `reorder_tasks` (one `work_item.reorder` per item, run as
-  the agent; there is no `delete_task` — `work_item.delete` is
-  destructive, and an agent never confirms one: cancel or archive instead),
-  `list_recent_file_changes` (links and task comments are
-  `run_command work_item.link` / `work_item.comment`),
-  `dispatch_task`, `file_epic_with_children`, `complete_task` (the
-  `command.sequence [work_item.transition, effort.report]`, one audited
-  run — P8.A7), `transition_tasks`; correcting an effort afterwards is
-  `run_command effort.amend`
-- `complete_task` returns `{ task, file_review }`. The "changed"
+- Task reads are MCP tools (`list_thread_work`, `list_tasks`,
+  `read_task_options`, `get_task`, `get_open_effort`, …); every task
+  write is `run_command` (P8.A10 deleted the MCP task-write tools —
+  `create_task`, `update_task`, `complete_task`, `upsert_task`,
+  `transition_tasks`, `reorder_tasks`, `file_epic_with_children`):
+  `work_item.create { title, body?, parent_ref?, state?, native?: {
+  thread?, priority? } }` (`state` defaults to `todo` = oxplow `ready`;
+  `in_progress` opens the effort in the same run; no `native.thread`
+  files onto the backlog; the result carries `ref`), `work_item.update`,
+  `work_item.transition`, `work_item.reorder { ref, before?, after? }`,
+  `work_item.link` / `work_item.comment`. There is no agent delete —
+  `work_item.delete` is destructive, and an agent never confirms one:
+  cancel or archive instead. `dispatch_task` is read-only (it composes
+  the brief). Closing is `command.sequence [work_item.transition → done,
+  effort.report]` — one audited run (P8.A7/A10); correcting an effort
+  afterwards is `run_command effort.amend`
+- `effort.report` returns `{ effort, file_review, link_warnings,
+  decision_hint }`. The "changed"
   set is a **content diff between the effort's start and end
   snapshots** — `SqliteSnapshotStore::diff_snapshots(start, end)`,
   which reconstructs each path's content as-of each boundary
@@ -1133,7 +1143,7 @@ intermediate `ready` step.
      `DEFAULT_PREDRAIN_DELAY` (300 ms) before draining the dirty
      set so the fs-watch debouncer (250 ms in `workspace_watch`)
      has time to deliver in-flight events; without that wait, an
-     edit followed immediately by `complete_task` collapses the
+     edit followed immediately by the close (`effort.report`) collapses the
      bracket to zero-width.
   2. There is **one `SnapshotCaptureService` per stream**
      (`SnapshotCaptureRegistry`), each watching its own worktree.
@@ -1160,7 +1170,7 @@ intermediate `ready` step.
   truncated) so the agent isn't asked to triage a wall of paths
   from parallel efforts or formatters. The review names each row by its
   **canonical ids** — `[tsk42] title (effort eff313)` — because those are
-  what `update_task` / `effort.amend` parse; a bare `313` is rejected
+  what `work_item.*` / `effort.amend` parse; a bare `313` is rejected
   (tsk341; pinned by the `stop_effort_review_*` goldens). `effort.amend
   { effort, add_files, remove_files, claim_runs, disclaim_runs }` (External,
   `commands/effort_report.rs`; an agent amends only its own thread's
@@ -1183,7 +1193,7 @@ intermediate `ready` step.
   three claim boundaries filter: `record_effort` (the boundary
   `touched_files`), `claim_open_effort_file` (the PostToolUse auto-claim,
   which returns `Ok(false)`), and `effort.amend`'s `add_files`;
-  `complete_task` filters once up front so the review sees the same list
+  `effort.report` filters once up front so the review sees the same list
   it recorded. The reverse direction needs nothing — an excluded path
   can't appear in the diff, so it is never `changed_but_not_claimed`.
   With no capture service reachable for the thread (bare `TaskService`,
@@ -1231,7 +1241,7 @@ intermediate `ready` step.
   parent's PostToolUse hook**, so a sub-agent's `cargo test` is invisible to
   passive collection. The fix isn't to spy on sub-agents — it's that a
   dispatched sub-agent **names its task**: `run_command test.record_run` takes
-  an optional `work_item` (P8.A8), and `complete_task`/`update_task` take
+  an optional `work_item` (P8.A8), and `effort.report`/`effort.amend` take
   `claim_runs`/`disclaim_runs`. A run is attributed (1) EXACTLY when a `task_id`
   is named — resolved via `find_open_for_work_item`, correct even under concurrency,
   with no "which sub-agent" visibility; naming a task is **exact-or-nothing**
@@ -1246,8 +1256,8 @@ intermediate `ready` step.
   exactly this reason.
 - The Stop hook also surfaces unresolved reviews as a one-shot **EFFORT
   REVIEW** directive (priority: between stale-epic-children and
-  in-progress audit), covering BOTH file and run discrepancies. MCP
-  `complete_task` stashes the effort id in
+  in-progress audit), covering BOTH file and run discrepancies.
+  `effort.report` stashes the effort id in
   `ThreadRuntimeRegistry::pending_effort_reviews` on either a file
   discrepancy OR ledger run residue; the Stop hook drains it via
   `take_pending_effort_reviews`, recomputes the file diff fresh against
@@ -1257,20 +1267,23 @@ intermediate `ready` step.
   (files or runs) reconciles in a single round-trip — the Stop hook won't
   re-flag the same disclaimed path/run on the next recompute. Drained =
   one-shot regardless.
-- `dispatch_task({ threadId, itemId, extraContext?, autoStart? })` composes
-  a subagent brief server-side (preamble + item fields + children + last notes
-  + optional extra context) so the orchestrator doesn't have to Read the item
-  description/AC/notes into chat context. Default `autoStart=true` atomically
-  transitions `ready`/`blocked` items to `in_progress`; other statuses are
-  left alone. Callers pass the returned `prompt` directly to Agent(prompt=…).
-  Pure composition lives in `composeDispatchBrief` (same file) so tests can
-  exercise it without spinning up MCP.
+- `dispatch_task({ thread_id?, item_id?, extra_context? })` composes
+  a subagent brief server-side (item fields + description + optional extra
+  context + the protocol preamble) so the orchestrator doesn't have to Read
+  the item description/AC/notes into chat context. Without `item_id` it
+  picks the thread's first ready non-epic item. It is **read-only** (P8.A10
+  dropped its old `autoStart` transition): the brief tells the sub-agent to
+  `work_item.transition` the item to `in_progress` itself on entry, and to
+  close with the `command.sequence` of `work_item.transition` (done) and
+  `effort.report`. Callers pass the returned `prompt` directly to
+  Agent(prompt=…). Pure composition lives in `compose_dispatch_brief`
+  (same file) so tests can exercise it without spinning up MCP.
 - `add_followup({ threadId, note })` / `remove_followup({ threadId, id })` /
   `list_followups({ threadId })` — orchestrator-only, in-memory transient
   follow-up reminders. No DB row, lost on runtime restart. Surfaces as
   italic muted "↳ follow-up: …" lines at the top of the To Do section
   in the Work panel. Use when you defer a sub-ask mid-turn that doesn't
-  warrant a full `create_task`. Always call `remove_followup` in
+  warrant a full `work_item.create`. Always call `remove_followup` in
   the same turn you handle it. Never file both a follow-up and a real
   task for the same concern. NOT exposed to subagents — the dispatch
   brief deliberately omits any mention of follow-ups so subagents can't
@@ -1428,14 +1441,14 @@ paths out of `[[ ]]` because the bracket characters fall outside its
 lookbehind,
 so backlinks/freshness work without parser changes. The
 
-**Link checker (MCP write-tool feedback).** The MCP write tools
-`create_task`, `update_task` and `complete_task` (and the
-`knowledge.add_note` / `update_note` commands, through `check_links_in`) run
-`oxplow_app::link_check::check_links` over
-the body/summary they just persisted and return a `link_warnings` array
-(omitted when empty) naming each invalid `[[…]]` — unrecognized syntax
-or a dangling target — so the authoring agent self-corrects in the same
-turn. `knowledge.write_page` refuses instead, through the same
+**Link checker (write-command feedback).** `effort.report` (over its
+`summary`) and the `knowledge.add_note` / `update_note` commands (through
+`check_links_in`) run `oxplow_app::link_check` over the text they just
+persisted and return a `link_warnings` array naming each invalid `[[…]]`
+— unrecognized syntax or a dangling target — so the authoring agent
+self-corrects in the same turn. Task descriptions get no check: the
+deleted MCP `create_task` / `update_task` returned one, and
+`work_item.create` / `work_item.update` don't. `knowledge.write_page` refuses instead, through the same
 synchronous core (`check_links_in`). The shared classifier is `oxplow_domain::refs::classify_wikilinks`
 (the single source of truth for "is this interior a real ref"), and
 existence probes reuse the `ref_resolver` store/git/fs surfaces. The
@@ -1770,7 +1783,7 @@ are guesses for the reviewer, never presented to the agent as its own.
   is the point: agents otherwise forget their own choices across
   compaction.
 
-**In the `complete_task` response**
+**In the `effort.report` result**
 
 - `decision_hint` is set when the effort touched 8 or more files and
   recorded no decisions, asking the agent to record the forks it
@@ -1963,9 +1976,9 @@ when takes happen.
   snapshot the turn ended at. **What the turn changed is
   `agent_turn.start_snapshot_id → snapshot_id`** — the start is recorded
   in the turn's open transaction (the stream's current snapshot). Not the
-  take's op parent: other takes during the turn (`complete_task`'s
+  take's op parent: other takes during the turn (the close's
   `effort_end`, a commit's `git_refs`, another thread's turn end) move
-  that, and the usual flow — edit, `complete_task`, Stop — would read as
+  that, and the usual flow — edit, close the task, Stop — would read as
   a turn that changed nothing (V99, tsk438).
 - **Order and cost (tsk441).** The Stop/interrupt handler closes the
   turn, sets the agent status (so the UI isn't held on "running"), then
@@ -2048,29 +2061,30 @@ snapshot reconciliation. The same event feeds two sync consumers:
 watcher hasn't indexed yet is skipped rather than dead-lettered, as the
 inline write used to warn and skip).
 
-**Agent-declared payload (now confirm/amend).** When calling
-`update_task` or `complete_task` to close an effort, the agent passes
-`touchedFiles: string[]` — the repo-relative paths it wrote or edited
-during this effort. Because structured edits already auto-claimed in
-real time, this payload now merely confirms/amends rather than
-enumerating from scratch. `applyStatusTransition` (in `crates/oxplow-runtime/src/lib.rs`) captures
-the open effort id, flushes the task-end snapshot, closes the effort,
-and then inserts `effort_file` rows for each deduped path
-via `INSERT OR IGNORE`. Payloads larger than `TOUCHED_FILES_CAP` (100
-paths) drop all rows, so the "assume all" fallback engages in
-`computeEffortFiles`.
+**Agent-declared payload (now confirm/amend).** When closing an
+effort, the agent's `effort.report` (the second call of the close's
+`command.sequence`) passes `touched_files: string[]` — the repo-relative
+paths it wrote or edited during this effort. Because structured edits
+already auto-claimed in real time, this payload merely confirms/amends
+rather than enumerating from scratch. The report runs after the
+transition has closed the effort: `TaskService::record_effort` drops
+paths the project never snapshots (`claimable_paths`), then records the
+files, impacts and summary onto the item's most recent effort in one
+transaction (`record_effort_atomic`).
 
 **Close-time reconciliation (unattributed residue).** On every
-snapshot-bracketed effort close — `TaskService::update` out of
-`in_progress`, so IPC `update_task`, MCP `update_task`, and the close
-half of `complete_task` — `reconcile_unattributed_on_close`
+snapshot-bracketed effort close — whatever moved the task out of
+`in_progress` (a desktop edit, `work_item.transition` / `work_item.update`,
+the close half of the agent's close sequence), the effort-lifecycle
+consumer of `effort.closed` (`TaskService::on_effort_closed`) runs
+`reconcile_unattributed_on_close`
 (`crates/oxplow-app/src/task_service.rs`) diffs the effort's snapshot
 bracket against its claims and records the `changed_but_not_claimed`
 delta into `effort_unattributed_file` (see data-model.md). This is the
 AUDIT layer of claim-first attribution: an out-of-band close (UI, weaker
 agent) can't leave a parallel/external write looking like the agent's
 authored work. Best-effort, never blocks the close; the existing
-`complete_task` nudge (`compute_effort_file_review`) is unaffected
+`effort.report` file review (`compute_effort_file_review`) is unaffected
 because it reads claims, not the residue table. Claiming a path later
 (`record_file`) clears its residue, so the two sets never overlap.
 Restart-recovery orphan closes are reconciled too: `RecoveryService`
@@ -2085,45 +2099,21 @@ silently attributing it. Best-effort and never blocks recovery: an effort
 with no start snapshot (or any capture failure) keeps the legacy
 `finish(None, None)` close.
 
-Attach only fires on the `in_progress → done` and
-`in_progress → blocked` transitions, and only when an effort is
-currently open for the item. A `touchedFiles` payload on a plain
-metadata update or on an already-closed item is accepted by the
-schema but silently ignored — there's no effort row to attach it to.
+**File-and-close shortcut.** An item that was never `in_progress` has
+no effort; `effort.report` on it (after a `work_item.transition` straight
+to `done`, or a `work_item.create` with `state: done`) makes
+`record_effort` SYNTHESIZE one — opened and closed `retroactive`, with no
+snapshot pin — so the attribution still lands (tsk172). A report with no
+`summary`, `touched_files` or `impacts` records nothing (a pure
+record row, or the agent explicitly declining attribution).
 
-**File-and-close shortcut.** `create_task` also accepts
-`touchedFiles`. When the caller asks for `status: "done"` or
-`"blocked"` AND passes `touchedFiles`, the MCP handler files the row
-at `ready`, then runs `ready → in_progress → <target>` under the
-covers so the normal effort-open/close path fires and attribution
-lands just like a conventional close. Passing `status: "done"`
-*without* `touchedFiles` is still legal (pure note/record row, or
-agent explicitly declining attribution) — no effort is synthesized in
-that case.
-
-**Recent-done reminder (UserPromptSubmit).** When the agent just
-closed an item to `done` on the thread that's submitting a new
-prompt, the UserPromptSubmit hook injects a `<recent-done-reminder>`
-block into `additionalContext` pointing at the item and spelling out
-the reopen flow (`update_task → in_progress → redo →
-complete_task`). This fires even when the agent never touches
-`create_task` next turn — the most reliable failure mode was the
-agent investigating/reverting in-place on a correction without
-recording a new effort. See `buildRecentDoneReminder` in
-`crates/oxplow-app/src/lib.rs` and the wiring in `handleHookEnvelope`'s
-`UserPromptSubmit` branch. Window is 15 minutes by default.
-
-**Redo-hint on `create_task`.** When the caller files a new row
-on a thread that has an agent-authored `done` item closed within the
-last 10 minutes, the response carries a `redoHint` field pointing at
-that item and telling the agent to consider reopening
-(`update_task → in_progress`) instead of filing the new task.
-This is a soft nudge — the create still succeeds, because a
-genuinely separate concern *should* get its own row. The heuristic
-just makes the reopen path impossible to miss when the most common
-trap (user rejects the last effort → agent reflexively files a
-"Fix …" task) is most likely to be tripped. See
-`findRecentDoneItem` in `crates/oxplow-mcp/src/lib.rs`.
+**Redo nudges are gone.** The UserPromptSubmit `<recent-done-reminder>`
+and the MCP `create_task` `redoHint` (a soft warning when a new row was
+filed on a thread with an agent-authored `done` item closed in the last
+10 minutes) no longer exist — the latter went with the MCP task tools
+(P8.A10), and `work_item.create` carries no such check. What remains is
+the PreToolUse filing directive, whose second door is "fix/redo of a
+recently-closed done item → `work_item.transition` it to `in_progress`".
 
 **1-vs-many rendering rule.** The Local History panel renders one row
 per effort ending at a snapshot, *not* one row per snapshot. For a
@@ -2137,8 +2127,8 @@ snapshot `S`:
 - ≥2 efforts end at S → one row per effort, each labelled with its
   task title; detail panes call `getEffortFiles(effortId)`. If
   the effort has ≥1 `effort_file` row the pair-diff is
-  filtered to those paths; if it has 0 rows (agent skipped the
-  `touchedFiles` payload, or list exceeded the cap) we fall back to
+  filtered to those paths; if it has 0 rows (the agent's
+  `effort.report` named no `touched_files` and nothing auto-claimed) we fall back to
   the raw pair-diff — better to over-report than silently show empty.
 
 `get_effort_files` is implemented in
@@ -2185,15 +2175,16 @@ task-shaped branch on the writer thread:
   stream, the runtime emits `build_open_effort_audit_reason` listing
   each (`[eff12] tsk42 — title`, or a foreign item's label) and
   instructing the agent to reconcile: still active → leave alone;
-  criteria met → `complete_task` (or `effort.close` for a foreign
-  item); stuck → `blocked`; paused → `ready`; obsolete → `canceled`
+  criteria met → `command.sequence [work_item.transition → done,
+  effort.report]` (or `effort.close` for a foreign item); stuck →
+  `blocked`; paused → `todo`; obsolete → `canceled`
   (P2.7).
 
 There is intentionally no ready-work branch — cross-turn queue
 progression is user-driven (a plain prompt, or `/work-next` shipped
 via the plugin). If a turn spawns real follow-up work, the agent
-calls `mcp__oxplow__create_task` /
-`file_epic_with_children`.
+files it with `mcp__oxplow__run_command` `work_item.create` (an epic:
+the parent, then each child with `parent_ref`).
 
 ## Related
 

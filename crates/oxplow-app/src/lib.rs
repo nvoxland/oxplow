@@ -112,7 +112,6 @@ pub mod sql_gateway;
 mod stream_service_tests;
 pub mod symbol_collector;
 pub mod task_service;
-pub mod task_writes;
 pub mod terminal_sessions;
 #[cfg(test)]
 pub(crate) mod test_fixtures;

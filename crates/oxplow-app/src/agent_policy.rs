@@ -189,7 +189,7 @@ impl AgentPolicy {
             .copied()
             .unwrap_or(false);
 
-        // Drain any pending effort review ids the MCP `complete_task`
+        // Drain any pending effort review ids `effort.report`
         // handler stashed for this thread. For each, recompute the
         // review against the live `effort_file` rows so an agent
         // that already amended doesn't get a stale prompt. Drop the ones
@@ -498,9 +498,11 @@ fn build_open_effort_audit_reason(efforts: &[OpenEffort]) -> String {
     format!(
         "AUDIT: this turn is closing with {} effort(s) still open in this stream:\n{}\n\n\
          Before stopping, walk each one:\n\
-         - An oxplow task (tsk…) done? → `mcp__oxplow__complete_task` with `touchedFiles`. \
-           Stale or no longer the right shape? → `mcp__oxplow__update_task` to ready/blocked/done.\n\
-         - Another provider's work item? → `mcp__oxplow__run_command` `effort.close` with \
+         - An oxplow task (tsk…) done? → `mcp__oxplow__run_command` `command.sequence` of \
+           `work_item.transition` (`\"to\": \"done\"`) and `effort.report` (`summary`, \
+           `touched_files`). Stale or no longer the right shape? → `work_item.transition` to \
+           todo/blocked/canceled.\n\
+         - Another provider's work item? → `run_command` `effort.close` with \
            `{{\"effort\": \"eff…\"}}` when it's done.\n\
          - Waiting on the user? → `mcp__oxplow__await_user`.\n\n\
          An open effort with finished work parked in it looks stuck to the user.",
@@ -611,7 +613,7 @@ fn build_effort_file_review_reason(reviews: &[PendingEffortReview]) -> String {
          the test/coverage/analysis runs that happened during your effort. For each:\n\n",
     );
     for r in reviews {
-        // Canonical ids (`tsk42`, `eff313`): what `update_task` /
+        // Canonical ids (`tsk42`, `eff313`): what `work_item.*` /
         // `effort.amend` parse, so the agent can paste them back (tsk341).
         if r.work_item.is_empty() {
             out.push_str(&format!("  • {} (effort {})\n", r.task_title, r.effort_id));
@@ -979,7 +981,7 @@ mod tests {
             "WebFetch",
             "WebSearch",
             "TodoWrite",
-            "mcp__oxplow__create_task",
+            "mcp__oxplow__run_command",
             "",
         ] {
             assert!(

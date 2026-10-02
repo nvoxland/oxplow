@@ -76,11 +76,12 @@ selectors; screenshot when looks matter, and read the image.
 3. **Work concurrently while it runs.** Explore other surfaces, file
    bugs, test features (comments, search, dashboards), brief a second
    thread, or run a second stream in parallel. Useful IPC for
-   inspection: `get_thread_work_state` (`{"threadId":"thr1"}`),
-   `list_threads` (`{"streamId":"str1"}`), `list_work_item_efforts`
-   (`{"workItem":"work_item:oxplow:tskNN"}`), `list_effort_observations`
-   (`{"effortId":"effNN"}`), `create_task`
-   (`{"req":{"threadId":...,"input":{"title","description","parent_id":null,"status","priority","author":null}}}`).
+   inspection: `query_sql` over `v_work_item` / `v_effort` (a thread's
+   work, an item's efforts), `list_threads` (`{"streamId":"str1"}`),
+   `list_effort_observations`
+   (`{"effortId":"effNN"}`), `run_command` to file a task
+   (`{"name":"work_item.create","input":{"title":…,"body":…,"state":"todo","native":{"thread":"thr1"}},"confirmed":false}`;
+   no `native.thread` = backlog).
 4. **Review what landed** through oxplow itself: Git Dashboard →
    commit pages (zones/treemap/co-change), the Tasks page, per-effort
    "Coverage & tests"/static-analysis panels. Read the driver's final
@@ -122,7 +123,9 @@ selectors; screenshot when looks matter, and read the image.
   blaming the product.)
 - **IPC arg shapes.** Wire fields are **camelCase** (`streamId`,
   `itemId`, `effortId`, `targetKind`, `targetId`); command args wrap
-  under their param name (`create_task` → `{"req":{...}}`). A
+  under their param name (`select_thread` → `{"req":{...}}`); `run_command`
+  takes `{name, input, confirmed}`, and a command's own `input` is
+  snake_case. A
   missing/misnamed **Optional** field silently becomes `None` — e.g. a
   stream-scoped git op with the wrong `streamId` casing silently runs
   on the PRIMARY worktree and returns a misleading "success". Error
@@ -162,7 +165,8 @@ Drive these like a user would, not just the agent terminal:
   page; verify it saved (`.oxplow/wiki/<slug>.md`) and that **⌘K BM25
   search** surfaces it across tasks/comments/wiki/files.
 - **The claim-first effort model.** Agents claim the files they touch
-  (`complete_task touched_files`; structured edits also auto-claim via
+  (`effort.report touched_files`, run with the close's
+  `work_item.transition`; structured edits also auto-claim via
   the hook); the snapshot is the audit that reconciles claims
   (`changed_but_not_claimed` / `claimed_but_not_changed`). NOTE: a file
   YOU (navigator) or another writer touch in the worktree during an
@@ -187,7 +191,8 @@ Drive these like a user would, not just the agent terminal:
 ## Task discipline
 
 - **Every bug/feature you find → an oxplow task** (UI: ⇧⌘N anywhere,
-  or "Save and Another" for batches; or `create_task` IPC). Title =
+  or "Save and Another" for batches; or `run_command work_item.create`
+  over IPC). Title =
   symptom; description = repro + root-cause notes from your own
   source reading + `## Acceptance criteria` including tests. Tasks
   you file are the driver's queue — write them so a fresh session

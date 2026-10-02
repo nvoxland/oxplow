@@ -31,6 +31,8 @@ command):
 | hook ingest, ACP prompt / cancel / permission answers, terminal input, `await_user` | agent-session activity, born as `agent.*` events (§5.1 of target-architecture.md); oxplow never synthesizes agent input |
 | terminal / ACP session open and close, LSP restart and requests | process control and protocol passthrough |
 | workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |
+| a change's analysis (`ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized model — not an intent |
+| a model call's record (`ai_call`, `ai_result`) | the computation as it happened (`AiCompute`), like a test run's capture — the run that asked for it is what's audited |
 | AI providers and roles, credentials, approving a program or source | secrets and consent: unreachable from `run_command`, so no invoker list can ever open them to an agent, and no audit row holds a secret |
 
 **Guards** (`crates/oxplow-app/src/source_guards.rs`):

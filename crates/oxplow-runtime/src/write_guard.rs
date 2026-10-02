@@ -237,7 +237,7 @@ mod tests {
         let t = read_only_thread();
         let result = build_write_guard_response(
             Some(&t),
-            "mcp__oxplow__create_task",
+            "mcp__oxplow__run_command",
             WriteGuardContext::default(),
         );
         assert!(result.is_none());

@@ -40,7 +40,7 @@ pub fn format_decisions_block(decisions: &[DecisionLine]) -> Option<String> {
     Some(out)
 }
 
-/// The `complete_task` nudge for an effort that touched `files` files and
+/// The the close (`effort.report`) nudge for an effort that touched `files` files and
 /// recorded `decisions` decisions; `None` when it isn't warranted.
 pub fn format_missing_decisions_hint(files: i64, decisions: i64) -> Option<String> {
     (files >= NUDGE_FILE_THRESHOLD && decisions == 0).then(|| {
@@ -90,7 +90,7 @@ pub async fn effort_decisions_block(
     format_decisions_block(&lines)
 }
 
-/// The `complete_task` nudge for `effort_id` (see
+/// The the close (`effort.report`) nudge for `effort_id` (see
 /// [`format_missing_decisions_hint`]).
 pub async fn missing_decisions_hint(
     layer: &crate::sql_gateway::SqlGateway,
