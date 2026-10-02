@@ -897,7 +897,8 @@ oxplow-analytics change cards) only read them.
     `change_function` — `(1 + log2(1+lines)) × (1 + 0.6·Σcomplexity↑) ×
     (1 + 0.4·Σparams↑) × (1 + (longest new fn − 60)/40)` — using SQLite's
     math functions (`LIBSQLITE3_FLAGS = -DSQLITE_ENABLE_MATH_FUNCTIONS`
-    in `.cargo/config.toml`);
+    in `.cargo/config.toml`; every database open probes them and refuses
+    a build without, tsk726);
   - functions: added / deleted / modified (signature and/or body), deltas,
     churn and churn share; unchanged ones aren't stored;
   - imports: added/removed with zones, `cross_zone` for new boundary

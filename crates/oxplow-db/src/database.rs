@@ -106,6 +106,25 @@ fn init_connection(c: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Refuse a SQLite built without its math functions (`log2`, `ln`, `pow`,
+/// …): SQL models and lenses may use them (P7.B5: oxplow-analytics'
+/// `change_interest` scores with `log2`), and without them such a model
+/// only surfaces as an extension's compile error. The bundled SQLite gets
+/// them from `LIBSQLITE3_FLAGS = -DSQLITE_ENABLE_MATH_FUNCTIONS` in
+/// `.cargo/config.toml`, which a build from outside this tree doesn't
+/// read — so every open checks, and says how to build (tsk726).
+fn require_math_functions(c: &Connection) -> Result<(), DbInitError> {
+    c.query_row("SELECT log2(8)", [], |r| r.get::<_, f64>(0))
+        .map(|_| ())
+        .map_err(|e| {
+            DbInitError::Build(format!(
+                "this oxplow's SQLite has no math functions ({e}); build it with \
+                 LIBSQLITE3_FLAGS=-DSQLITE_ENABLE_MATH_FUNCTIONS (the repo's .cargo/config.toml \
+                 sets it)"
+            ))
+        })
+}
+
 impl Database {
     /// Open an existing project database **read-only**, without migrating
     /// or writing anything — for a tool (the `oxplow plugin check` CLI)
@@ -124,6 +143,7 @@ impl Database {
                 |r| r.get(0),
             )
             .map_err(DbInitError::Sqlite)?;
+        require_math_functions(&probe)?;
         drop(probe);
         let want = embedded::migrations::runner()
             .get_migrations()
@@ -171,6 +191,7 @@ impl Database {
         setup
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(DbInitError::Sqlite)?;
+        require_math_functions(&setup)?;
         drop(setup);
 
         let changes = Arc::new(crate::changes::Changes::default());
@@ -213,6 +234,7 @@ impl Database {
             .build(manager)
             .expect("in-memory sqlite pool builds");
         let mut conn = pool.get().expect("in-memory sqlite connection");
+        require_math_functions(&conn).expect("SQLite has its math functions");
         load_migrated(&mut conn).expect("in-memory migrations and models");
         let permits = pool.max_size() as usize;
         Self {
@@ -529,6 +551,9 @@ pub enum DbInitError {
     Sqlite(rusqlite::Error),
     #[error("models: {0}")]
     Models(String),
+    /// This build of oxplow lacks something the database needs.
+    #[error("build: {0}")]
+    Build(String),
 }
 
 /// Migrate `conn` up to `version` only — a migration test's "before".
@@ -949,6 +974,18 @@ mod tests {
             )
             .unwrap();
         assert_eq!(kept, 0, "rolled back");
+    }
+
+    #[test]
+    fn every_connection_has_sqlite_math_functions() {
+        let conn = Connection::open_in_memory().unwrap();
+        require_math_functions(&conn).unwrap();
+        let (log2, pow): (f64, f64) = conn
+            .query_row("SELECT log2(8), pow(2, 10)", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((log2, pow), (3.0, 1024.0));
     }
 
     #[test]

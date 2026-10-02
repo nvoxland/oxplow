@@ -110,6 +110,12 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   delegates into `oxplow-rpc`).
 - Old top-level `src/` (the Electron/Node backend) is gone; nothing
   TS lives at the repo root anymore.
+- **Build from inside the tree.** `.cargo/config.toml` sets
+  `LIBSQLITE3_FLAGS = -DSQLITE_ENABLE_MATH_FUNCTIONS` so the bundled
+  SQLite has `log2`, `pow`, … (SQL models use them). A build that
+  doesn't read that file (a packager outside the tree) must set it
+  itself: every `Database` open probes `log2` and refuses to start
+  without it (`DbInitError::Build`, tsk726).
 
 ## Tests
 
