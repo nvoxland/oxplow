@@ -1,0 +1,28 @@
+[package]
+name = "oxplow-provider-linear"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "oxplow's reference work-items provider: Linear issues over its GraphQL API"
+
+[[bin]]
+name = "oxplow-provider-linear"
+path = "src/main.rs"
+
+[dependencies]
+oxplow-provider-protocol = { workspace = true }
+oxplow-domain = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+oxplow-app = { workspace = true }
+oxplow-sdk = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

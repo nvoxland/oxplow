@@ -1457,6 +1457,19 @@ sentence. The Extensions empty state and Explore Data's intro offer the
 same button, and getting-started's "Your first stream" has a "Build your
 own view" step.
 
+## Example extensions (`examples/extensions/`)
+
+Each loads clean (`documented_examples_load_without_errors`):
+
+- **`github`** — an `exec` collector bringing pull requests in as the
+  entity `v_github_pr`, with a lens joining them to streams and tasks.
+- **`linear`** (P7.A5) — the reference external **provider**: Linear
+  issues as work items, through `crates/oxplow-provider-linear`
+  (private, since `providers:` is experimental). `tests/kit.rs` in that
+  crate runs it through `oxplow plugin test`; `scripts/install-linear.sh`
+  installs it into a project. See [providers.md](./providers.md) →
+  "The Linear provider".
+
 ## The `oxplow-analytics` example extension
 
 What moves out of core, and what it becomes:

@@ -291,6 +291,8 @@ names the file and line and says what to change.
    intended — commit it), and the work-items conformance suite must pass.
    A person approves the provider in Settings → Data → Programs and
    enables it in Settings → Integrations; you can't do either.
+   `examples/extensions/linear/` in the oxplow repo (the Linear provider,
+   `crates/oxplow-provider-linear`) is a complete one: copy its shape.
 5. **`oxplow plugin test <name>`** runs every intent example on a
    throwaway oxplow (empty data, your extension's entities published
    empty and its models and commands loaded — never the project's

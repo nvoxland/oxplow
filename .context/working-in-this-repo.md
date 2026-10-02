@@ -239,6 +239,15 @@ commits. The durable fix is a PostToolUse hook on `Edit`/`Write` that
 runs `rustfmt` + `cargo clippy --fix` against the touched crate.
 Until that's installed, run both manually each turn.
 
+## Installing the Linear provider (`scripts/install-linear.sh`)
+
+`scripts/install-linear.sh <project>` builds `oxplow-provider-linear`
+(release) and copies `examples/extensions/linear` into the project's
+`oxplow/extensions/linear` with the binary at its entry. The binary must
+live in the extension folder: consent hashes the folder, so what a person
+approves is exactly what runs, and a rebuild shows up unapproved again
+(P7.A5, [providers.md](./providers.md) → "The Linear provider").
+
 ## Recording a fresh agent (`scripts/record-just-works.sh`)
 
 `scripts/record-just-works.sh <kind>` records a fresh `claude -p` agent

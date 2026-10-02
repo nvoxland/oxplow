@@ -332,6 +332,8 @@ fn provider_declarations(name: &str) -> oxplow_provider_protocol::model::Initial
         undoable: false,
     };
     let str_prop = serde_json::json!({ "type": "string" });
+    let state = serde_json::json!({ "type": "string",
+                                    "enum": ["todo", "in_progress", "blocked", "done", "canceled"] });
     InitializeResult {
         protocol_version: PROTOCOL_VERSION.into(),
         provider: Party {
@@ -344,24 +346,32 @@ fn provider_declarations(name: &str) -> oxplow_provider_protocol::model::Initial
                 "hierarchy": false,
                 "comments": false,
                 "links": false,
+                "delete": false,
                 "in_progress_opens_effort": false,
             }),
         }],
+        // The work-items contract's verbs (`.context/work-items.md`); declare
+        // `link` / `comment` / `delete` with their features.
         commands: vec![
             command(
                 "create",
                 "Create a work item.",
-                serde_json::json!({ "type": "object", "required": ["title"], "properties": { "title": str_prop, "body": str_prop } }),
+                serde_json::json!({ "type": "object", "required": ["title"], "additionalProperties": false,
+                                    "properties": { "title": str_prop, "body": str_prop,
+                                                    "state": state, "native_state": str_prop } }),
             ),
             command(
                 "update",
-                "Change a work item's title or body.",
-                serde_json::json!({ "type": "object", "required": ["ref"], "properties": { "ref": str_prop, "title": str_prop, "body": str_prop } }),
+                "Change a work item's title, body or state.",
+                serde_json::json!({ "type": "object", "required": ["ref"], "additionalProperties": false,
+                                    "properties": { "ref": str_prop, "title": str_prop, "body": str_prop,
+                                                    "state": state, "native_state": str_prop } }),
             ),
             command(
                 "transition",
-                "Move a work item to a canonical or native state.",
-                serde_json::json!({ "type": "object", "required": ["ref", "to"], "properties": { "ref": str_prop, "to": str_prop } }),
+                "Move a work item to a canonical state, optionally naming a native one.",
+                serde_json::json!({ "type": "object", "required": ["ref", "to"], "additionalProperties": false,
+                                    "properties": { "ref": str_prop, "to": state, "native_state": str_prop } }),
             ),
         ],
         event_types: vec![EventTypeDecl {

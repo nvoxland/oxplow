@@ -1,0 +1,3 @@
+# The instance config `oxplow plugin test` checks the provider with: your
+# team's key (and LINEAR_API_KEY in the environment).
+config: { team: ENG }

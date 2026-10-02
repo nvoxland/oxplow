@@ -4751,6 +4751,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-provider-linear"
+version = "0.7.0"
+dependencies = [
+ "oxplow-app",
+ "oxplow-domain",
+ "oxplow-provider-protocol",
+ "oxplow-sdk",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "oxplow-provider-protocol"
 version = "0.7.0"
 dependencies = [

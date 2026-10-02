@@ -1,0 +1,4 @@
+# The `create` example from extension.yaml, for `oxplow plugin test`.
+name: create
+input: { command: create, input: { title: Try oxplow on Linear } }
+expect: { ref: $any }

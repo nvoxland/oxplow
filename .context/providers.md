@@ -4,8 +4,9 @@ A provider is a program oxplow talks to — an issue tracker's bridge, a
 docs system's — that implements one of oxplow's capabilities (work items
 first) outside the app (P5.D, `target-architecture.md` §10). This doc
 covers the protocol (D1), the fake provider (D2) and the host with its
-consent and spawn rules (D3), instances with health (D4) and the
-conformance kit with `oxplow plugin test` (D5).
+consent and spawn rules (D3), instances with health (D4), the
+conformance kit with `oxplow plugin test` (D5) and the reference Linear
+provider (P7.A5).
 
 ## The protocol (`crates/oxplow-provider-protocol`)
 
@@ -94,6 +95,83 @@ streams another provider's item), `rate-limit:<ms>` (its next invoke or
 read is refused `RateLimited`).
 `tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
 notifications against the goldens.
+
+## The Linear provider (`crates/oxplow-provider-linear`)
+
+The reference external provider (P7.A5): a native program, lib + bin in
+the fake's layout, speaking the protocol on stdio and Linear's GraphQL
+API over reqwest (`graphql.rs`: one POST per operation with its
+`operationName`, `Authorization: <LINEAR_API_KEY>`, `LINEAR_API_URL`
+overriding `https://api.linear.app/graphql`). Its example extension is
+`examples/extensions/linear` (`sharing: private`; `network:
+[api.linear.app]`, `credentials: [LINEAR_API_KEY]`, `env:
+[LINEAR_API_URL]`).
+
+- **An instance is one team**, optionally one project. `config_schema`
+  is `{ team, project?, blocked_state? }` with `additionalProperties:
+  false` — **the key is never config**: it is the credential, set on
+  Settings → Integrations into the keychain and handed over as env.
+  `check` needs the credential named and present (a problem at `""`
+  otherwise, or when Linear refuses the key), resolves the team by key
+  (`/team`), its workflow states, the blocked state (`/blocked_state`,
+  default "Blocked") and the project by name (`/project`); an unknown
+  config key is a problem at its path. The handle is `linear:<team>` or
+  `linear:<team>/<project>`, kept in the process (the host re-checks on
+  every start).
+- **Items**: `work_item:linear:<identifier>` (`ENG-12`), the issue's
+  uuid, url and priority under `native`, the description as `body`, the
+  parent's identifier as `parent_ref`, a trashed issue `deleted`.
+- **States** (`states.rs`): by type — triage, backlog, unstarted →
+  todo; started → in_progress; completed → done; canceled → canceled —
+  except the team state named by `blocked_state`, which is blocked. A
+  move to a canonical state lands on its first state by position (todo:
+  unstarted, then backlog, then triage); a `native_state` must be one of
+  the canonical state's (`/native_state` otherwise).
+- **Verbs** (all features: hierarchy, comments, links, delete):
+  `create` → `issueCreate` (the team, the project, `native.priority`);
+  `update` → `issueUpdate` (`parent_ref: ""` detaches); `transition` →
+  the issue's current state (for the inverse) then `issueUpdate`;
+  `link` → `issueRelationCreate` (`blocks`, `relates_to` → `related`,
+  `duplicates` → `duplicate`; other link types refused); `comment` →
+  `commentCreate`; `delete` → the issue then `issueDelete` (Linear's
+  trash). Each records the issue as it now stands; a missing issue is
+  `InvalidInput` at the ref.
+- **Collector `issues`**: the team's (and project's) issues with
+  `updatedAt` after `state.since`, `includeArchived`, 50 a page from
+  `state.after`. Each page sends `$/progress` (`issues: page N`), its
+  records, then the checkpoint `{ since, after, until }` (`until`: the
+  latest update seen); the last page's is `{ since: until }`, so the next
+  read starts after everything this one saw.
+- **Errors**: HTTP 429 or GraphQL `RATELIMITED` → `RateLimited` with
+  `Retry-After` (else `X-RateLimit-Requests-Reset`); 401 or
+  `AUTHENTICATION_ERROR` → `Auth`; `INVALID_INPUT` → `InvalidInput`.
+
+**Tested against a simulator, not cassettes** — a deliberate change from
+the plan's recorded cassettes: there was no Linear workspace to record
+from, and a hand-written "recording" would claim a fidelity it doesn't
+have. `sim.rs` (`LinearSim`) is an HTTP server on localhost that
+answers the operations this provider sends, by `operationName`, over an
+in-memory team `ENG` (Linear's default workflow plus `Blocked`) and
+project `Roadmap`; it logs every request, checks the key and can refuse
+the next request as rate limited. `tests/linear.rs` pins what each verb
+sends (operation and variables) and records, `check`'s problems, the
+paging read and its cursor, and a rate limit; `tests/kit.rs` runs the
+example through `oxplow plugin test` — handshake, check, its `create`
+example, the read-back and the work-items suite through a throwaway host
+— with the copied manifest's `network` widened to the simulator's
+`localhost` (`OXPLOW_BLESS=1` rewrites the golden transcript). **What
+Linear actually accepts is checked by a person against a real
+workspace** (the P7 walk): the simulator encodes this provider's
+reading of Linear's schema (issue ids accept the identifier, `trashed`
+marks a deleted issue), not Linear.
+
+**Try it**: `scripts/install-linear.sh <project>` builds the binary into
+the project's copy of the example (consent hashes the folder, so the
+binary must live in it); enable the extension, approve its program on
+Settings → Data → Programs, then on Settings → Integrations set
+`LINEAR_API_KEY` and the team, Check and Enable. Two `providers:` entries
+with different ids give two instances (two teams); several instances of
+one provider are P8.
 
 ## The host (`crates/oxplow-app/src/providers/`)
 

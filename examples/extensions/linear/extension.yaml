@@ -1,0 +1,29 @@
+manifest: 2
+name: linear
+description: Linear issues as oxplow work items — on the Board, filed by agents, moved and commented on.
+# `providers:` is an experimental kind: only a private extension's load.
+sharing: private
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Make a Linear team's issues work items: they sync into v_work_item, and
+    work_item.create / update / transition / link / comment / delete write
+    them back through Linear's API, so the Board and the agent's filing can
+    run on Linear instead of oxplow's own tasks.
+  origin: null
+  examples:
+    - name: create
+      input: { command: create, input: { title: Try oxplow on Linear } }
+      expect: the new issue's ref (work_item:linear:<TEAM>-<n>)
+providers:
+  - id: linear
+    capability: work_items
+    # The built provider (scripts/install-linear.sh puts it here).
+    entry: bin/oxplow-provider-linear
+    # Only for pointing it somewhere other than api.linear.app (tests).
+    env: [LINEAR_API_URL]
+    # A personal API key (Linear → Settings → API), kept in your keychain:
+    # set it on Settings → Integrations.
+    credentials: [LINEAR_API_KEY]
+    network: [api.linear.app]
+    declarations: provider.json
