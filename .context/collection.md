@@ -120,8 +120,8 @@ hook + MCP wiring):
   (findings + per-severity counts). All `observed`, no agent step.
   **Attribution (tsk347):** the run is pinned to its effort via the `"run"`
   ledger. An agent forces EXACT attribution by prefixing the command with
-  `OXPLOW_TASK=<task id>` — `parse_task_token` reads it and `record_test_run`
-  claims the run for that task's open effort (`find_open_for_work_item`), correct even
+  `OXPLOW_TASK=<task id>` — `parse_task_token` reads it and
+  `CollectionService::record_test_run` claims the run for that task's open effort (`find_open_for_work_item`), correct even
   under concurrent efforts. Without the token, resolution is, in order:
   **single open effort** → **target overlap** (tsk169: score each open effort by
   what the command names — `-p <crate>`, path args — against the files it has
@@ -194,8 +194,9 @@ hook + MCP wiring):
   `test.run.recorded` (subject `run:<capture>`, anchored to the tool's turn,
   caused by the tool event) and each coverage capture `test.coverage.recorded`
   in the capture's transaction (`SqliteFactStore::record_facts_logged`); the
-  MCP `record_test_run` / `ingest_coverage` paths log them too, anchored to
-  the thread. The hook waits ≤2.5 s for the `collection` and
+  `test.record_run` / `test.ingest_coverage` commands log them too, anchored
+  to the thread (in the collector's transaction: they're `External`, so their
+  events aren't caused by the run's `command.executed`). The hook waits ≤2.5 s for the `collection` and
   `advisories.post_tool` consumers (`EventPump::settle`; the advisories
   consumer declares `after: [collection]`, so it sees a run only once
   collection has recorded it — an advisory reading `v_effort_observation`
@@ -232,11 +233,12 @@ hook + MCP wiring):
   the analyzer-ran record: when an analyzer is detected but regenerated no
   parseable report, it's stored command-only (no findings, no metric), the
   same way a `test-run` records command-only when no JUnit report is fresh.
-- **Active (MCP)** — `ingest_coverage` and `ingest_analysis` are thin
-  explicit entry points (same registry parse path) for on-demand or
+- **Active (commands, P8.A8)** — `test.ingest_coverage` and
+  `test.ingest_analysis` (`commands/test_runs.rs`, `External`, audited to the
+  actor; an agent's go on its own thread) are thin explicit entry points (same registry parse path) for on-demand or
   non-standard-location reports. Both pass `skip_if_stale = false`, so they
-  ingest regardless of mtime — the caller explicitly asked. `ingest_analysis`
-  is the on-demand counterpart to `ingest_coverage`: it resolves `format` via
+  ingest regardless of mtime — the caller explicitly asked. `test.ingest_analysis`
+  is the on-demand counterpart to `test.ingest_coverage`: it resolves `format` via
   the registry, parses as `CollectorKind::Analysis`, and records a
   `static-analysis` observation against the open effort via the same private
   `record_static_analysis` the passive ride-along uses (provenance `observed`,
@@ -247,14 +249,14 @@ hook + MCP wiring):
   `parse_error`). **No baseline gate**: unlike coverage (which intersects with
   the effort's changed lines and therefore *needs* a start snapshot),
   analysis findings are *absolute* — current-file findings, not diff-relative —
-  so `ingest_analysis` stores even when the open effort has no start snapshot
-  (pin = `None`). This keeps the active MCP path in agreement with the passive
+  so `test.ingest_analysis` stores even when the open effort has no start snapshot
+  (pin = `None`). This keeps the active path in agreement with the passive
   ride-along, which already records with no baseline (tsk86). It exists because
   analysis had no active
   path — only the passive PostToolUse hook — so the eslint/TS format could
   never be exercised end-to-end in a repo that runs no eslint; the active
   entry closes that symmetry gap (and serves on-demand / odd-location
-  reports). `record_test_run` is the one `asserted` writer, for richer
+  reports). `test.record_run` is the one `asserted` writer, for richer
   pass/fail counts the exit code alone can't give; its counts also become
   status-sliced `oxplow.test_case` facts (no case identity) so the
   `oxplow.tests.*` specs read them, and it returns the capture id (the run
@@ -303,7 +305,7 @@ NOT try to recover it by reading sub-agent transcripts / `SubagentStop` /
 `agent_id` (all agent-specific and version-fragile). Instead, attribution rides
 the two cross-agent-stable surfaces oxplow owns: the filesystem snapshot (which
 runs don't touch) and the **MCP contract**. So a sub-agent records its runs
-through `record_test_run`, passing `task_id` so the run attributes EXACTLY to
+through `test.record_run`, passing `work_item` so the run attributes EXACTLY to
 its effort even under concurrency (resolved via `find_open_for_work_item`); the
 `dispatch_task` brief instructs this. Without a named task, a run attributes
 automatically when one effort is open, else is left unclaimed for the close

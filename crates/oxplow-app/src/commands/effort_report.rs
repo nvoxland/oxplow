@@ -33,6 +33,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::thread::parse_thread_ref;
 use super::{Command, Handler, HandlerOutput};
 use crate::file_ref_version::ResolvedFileVersion;
 use crate::sql_gateway::SqlGateway;
@@ -122,18 +123,6 @@ fn failed(e: impl std::fmt::Display) -> CommandError {
     }
 }
 
-fn parse_thread(value: &str) -> Result<ThreadId, CommandError> {
-    value
-        .strip_prefix("thread:")
-        .and_then(|id| id.parse().ok())
-        .ok_or_else(|| {
-            invalid(
-                "/thread",
-                format!("`{value}` isn't a thread ref (thread:<id>)"),
-            )
-        })
-}
-
 /// The agent's own thread; an agent without one, or naming another, is
 /// refused. `None` for a person.
 fn agents_thread(actor: &Actor, named: Option<ThreadId>) -> Result<Option<ThreadId>, CommandError> {
@@ -217,7 +206,7 @@ async fn report(
     // The report reads the settled effort: a transition just before it
     // (`complete_task`'s) has its snapshot bracket pinned.
     deps.tasks.settle_lifecycle().await;
-    let named = input.thread.as_deref().map(parse_thread).transpose()?;
+    let named = input.thread.as_deref().map(parse_thread_ref).transpose()?;
     let last = deps
         .efforts
         .most_recent_for_work_item(&input.work_item)

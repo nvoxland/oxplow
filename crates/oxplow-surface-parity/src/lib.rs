@@ -233,9 +233,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("await_user"),
     agent("wiki_ref_drift"),
     // ---- collection (effort-scoped observations) ----
-    agent("ingest_coverage"),
-    agent("ingest_analysis"),
-    agent("record_test_run"),
     agent("get_open_effort"),
     agent("code_definition"),
     agent("code_hover"),

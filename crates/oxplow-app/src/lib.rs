@@ -1211,6 +1211,9 @@ impl Services {
         )
         .with_approvals(approvals.clone())
         .with_event_schemas(event_schemas.clone());
+        for command in commands::test_runs::commands(collection.clone()) {
+            commands.register(command).expect("test commands register");
+        }
         let token_usage_store = Arc::new(SqliteTokenUsageStore::new(db.clone()));
         let token_usage = token_usage::TokenUsageService::new(
             token_usage_store.clone(),
@@ -1582,6 +1585,11 @@ mod tests {
                 "stream.adopt_worktree",
                 "stream.archive",
                 "stream.create_worktree",
+                // Report files and the stream's worktree, through the
+                // collector (P8.A8).
+                "test.ingest_analysis",
+                "test.ingest_coverage",
+                "test.record_run",
                 "vcs.checkout_branch",
                 "vcs.commit",
                 "vcs.delete_branch",

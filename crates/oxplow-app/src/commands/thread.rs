@@ -154,28 +154,34 @@ pub(super) fn agent_scope(ctx: &TxCtx<'_>) -> Result<Option<(ThreadId, StreamId)
     }
 }
 
-/// The thread an agent's record goes on — a note, a decision, a claim: an
-/// agent's own (naming another is refused), else the one a person names
-/// (`thread:thr3`).
-pub(super) fn acting_thread(
-    ctx: &TxCtx<'_>,
+/// A `thread:<id>` ref named in an input.
+pub(super) fn parse_thread_ref(value: &str) -> Result<ThreadId, CommandError> {
+    value
+        .strip_prefix("thread:")
+        .and_then(|id| id.parse().ok())
+        .ok_or_else(|| {
+            invalid(
+                "/thread",
+                format!("`{value}` isn't a thread ref (thread:<id>)"),
+            )
+        })
+}
+
+/// The thread an actor's record goes on — a note, a decision, a claim, a
+/// test run: an agent's own (naming another, or having none, is refused),
+/// else the one a person names. `own` is the agent's thread, when the
+/// actor is one (`Actor::agent_thread`).
+fn record_thread(
+    own: Option<Option<ThreadId>>,
     named: Option<&str>,
 ) -> Result<ThreadId, CommandError> {
-    let named = named
-        .map(|value| {
-            value
-                .strip_prefix("thread:")
-                .and_then(|id| id.parse().ok())
-                .ok_or_else(|| {
-                    invalid(
-                        "/thread",
-                        format!("`{value}` isn't a thread ref (thread:<id>)"),
-                    )
-                })
-        })
-        .transpose()?;
-    match agent_scope(ctx)? {
-        Some((own, _)) => match named {
+    let named = named.map(parse_thread_ref).transpose()?;
+    match own {
+        None => named.ok_or_else(|| invalid("/thread", "name the thread".into())),
+        Some(None) => Err(CommandError::Denied {
+            reason: "an agent without a thread can't record on one".into(),
+        }),
+        Some(Some(own)) => match named {
             Some(t) if t != own => Err(CommandError::Denied {
                 reason: format!(
                     "an agent writes only in its own thread (`{}`)",
@@ -184,8 +190,25 @@ pub(super) fn acting_thread(
             }),
             _ => Ok(own),
         },
-        None => named.ok_or_else(|| invalid("/thread", "name the thread".into())),
     }
+}
+
+/// [`record_thread`] in the bus's transaction: the agent's thread must
+/// exist.
+pub(super) fn acting_thread(
+    ctx: &TxCtx<'_>,
+    named: Option<&str>,
+) -> Result<ThreadId, CommandError> {
+    let own = agent_scope(ctx)?.map(|(own, _)| Some(own));
+    record_thread(own, named)
+}
+
+/// [`record_thread`] for a command that runs outside the transaction.
+pub(super) fn acting_thread_of(
+    actor: &oxplow_domain::Actor,
+    named: Option<&str>,
+) -> Result<ThreadId, CommandError> {
+    record_thread(actor.agent_thread(), named)
 }
 
 /// An agent acts only on its own stream.

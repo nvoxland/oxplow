@@ -1228,8 +1228,8 @@ intermediate `ready` step.
   versions). Concretely: Claude/Codex **sub-agent tool calls don't fire the
   parent's PostToolUse hook**, so a sub-agent's `cargo test` is invisible to
   passive collection. The fix isn't to spy on sub-agents — it's that a
-  dispatched sub-agent **names its task** through MCP: `record_test_run` takes
-  an optional `task_id`, and `complete_task`/`update_task` take
+  dispatched sub-agent **names its task**: `run_command test.record_run` takes
+  an optional `work_item` (P8.A8), and `complete_task`/`update_task` take
   `claim_runs`/`disclaim_runs`. A run is attributed (1) EXACTLY when a `task_id`
   is named — resolved via `find_open_for_work_item`, correct even under concurrency,
   with no "which sub-agent" visibility; naming a task is **exact-or-nothing**
@@ -1240,7 +1240,7 @@ intermediate `ready` step.
   (`find_single_open_for_thread`); (3) else COARSELY to the thread's
   open-effort *set* (the time-window OBSERVE puts it in every overlapping
   effort's residue) — less exact, never wrong-exact. The `dispatch_task` brief
-  instructs sub-agents to call `record_test_run` with their `task_id` for
+  instructs sub-agents to run `test.record_run` with their `work_item` for
   exactly this reason.
 - The Stop hook also surfaces unresolved reviews as a one-shot **EFFORT
   REVIEW** directive (priority: between stale-epic-children and
@@ -1453,11 +1453,11 @@ before completing (so a report exists) and — critically — to **never parse
 or report coverage numbers itself**, because oxplow parses the report
 deterministically (`observed`). Both are wired in `write_plugin`
 (`crates/oxplow-plugin/src/lib.rs`). The ingestion side (PostToolUse test
-detector, coverage + static-analysis ride-alongs, the `ingest_coverage` /
-`ingest_analysis` / `record_test_run` / `list_effort_observations` /
-`get_open_effort` MCP tools)
-is documented in `.context/collection.md`. `ingest_analysis` is the on-demand
-counterpart to `ingest_coverage` for static-analysis reports (e.g.
+detector, coverage + static-analysis ride-alongs, the `test.ingest_coverage` /
+`test.ingest_analysis` / `test.record_run` commands and the
+`list_effort_observations` / `get_open_effort` MCP reads)
+is documented in `.context/collection.md`. `test.ingest_analysis` is the on-demand
+counterpart to `test.ingest_coverage` for static-analysis reports (e.g.
 `eslint-json`, `clippy-json`) — analysis previously had only the passive
 PostToolUse path. `get_open_effort({ thread_id })` answers "what is this
 thread's currently-open effort?" — returns `{ open, effortId, taskId,

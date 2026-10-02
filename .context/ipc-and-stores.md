@@ -580,8 +580,8 @@ The collection subsystem (`.context/collection.md`) follows the same
 - **One read IPC, one event.** `list_effort_observations(effortId,
   kind?)` (`crates/oxplow-tauri-ipc/src/commands/effort.rs`, over
   `Services.observation_store`) is `Both` in the surface-parity manifest
-  — same name on IPC and MCP. Mutations are agent-only (MCP
-  `ingest_coverage` / `record_test_run`) since the UI never writes
+  — same name on IPC and MCP. Mutations are the `test.ingest_coverage` /
+  `test.record_run` commands (agents run them; P8.A8) since the UI never writes
   observations. A view of them re-runs on `ModelsChanged` (P8.A2: the
   bespoke `EffortObservationsChanged` had no listener and is gone).
 - **The engine lives in `oxplow-app`, not a store.** `CollectionService`

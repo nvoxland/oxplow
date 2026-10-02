@@ -638,7 +638,7 @@ globally exclusive per `(kind, ref)`** (tsk267): `set_state` for a claim
 first deletes any *other* effort's row for that ref, so a run has at most
 one owning effort and can't double-count across two efforts' rollups
 (`unattributed`/`acknowledged` stay per-effort). Runs auto-attribute to a
-`claimed` row at `record_test_run` time only when
+`claimed` row at `test.record_run` time only when
 `find_single_open_for_thread` resolves exactly one open effort (or the
 caller named a `task_id` — exact even under concurrency); the unclaimed
 concurrent case stays observed-only until the close reconciliation writes

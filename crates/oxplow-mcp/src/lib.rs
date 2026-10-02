@@ -203,44 +203,6 @@ pub struct UpsertTaskParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IngestCoverageParams {
-    pub thread_id: String,
-    /// Repo-relative path to the coverage report. Omit to use the
-    /// project's configured `collection.coverageReportPath`.
-    pub report_path: Option<String>,
-    /// `cobertura` | `lcov` | `jacoco-xml`. Omit to use the configured
-    /// `collection.coverageFormat`.
-    pub format: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IngestAnalysisParams {
-    pub thread_id: String,
-    /// Repo-relative path to the analysis report. Omit to use the first
-    /// analysis report configured in the project's `collection` profile.
-    pub report_path: Option<String>,
-    /// Analysis format, e.g. `eslint-json` | `clippy-json`. Omit to use the
-    /// configured report's format.
-    pub format: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RecordTestRunParams {
-    pub thread_id: String,
-    pub command: String,
-    pub passed: Option<i64>,
-    pub failed: Option<i64>,
-    pub total: Option<i64>,
-    pub duration_ms: Option<i64>,
-    /// The task this run belongs to (e.g. `tsk42`), for EXACT attribution. A
-    /// dispatched sub-agent should pass the task id from its brief: oxplow then
-    /// credits the run to that task's effort even when other efforts are open
-    /// on the thread — no guessing. Omit when you're the only effort in flight;
-    /// oxplow attributes it automatically (single open) or coarsely (concurrent).
-    pub task_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ListEffortObservationsParams {
     /// Effort id to read directly. Omit to use the open effort on
     /// `thread_id`.
@@ -2339,117 +2301,10 @@ impl OxplowMcp {
     // ---------- collection (test runs + diff coverage) ----------
 
     #[tool(
-        description = "Ingest a coverage report into the thread's open effort as diff coverage \
-            over the lines that effort changed. oxplow parses it deterministically (cobertura / \
-            lcov / jacoco-xml) — point at the report, NEVER report numbers yourself (keeps the \
-            result `observed`/trustworthy). `report_path`/`format` default to the project's \
-            `collection` profile (.oxplow/project.yaml). Returns a status: stored (with summaryPct) or \
-            why nothing landed (no_open_effort / not_configured / report_missing / no_baseline / \
-            no_changed_coverage)."
-    )]
-    async fn ingest_coverage(
-        &self,
-        params: Parameters<IngestCoverageParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "ingest_coverage",
-            "thread_id",
-            &params.0.thread_id,
-            ID_THREAD,
-        )?;
-        let tid = parse_thread_id(&params.0.thread_id)?;
-        let outcome = self
-            .services
-            .collection
-            .ingest_coverage(&tid, params.0.report_path, params.0.format, false)
-            .await
-            .map_err(internal)?;
-        json_result(&ingest_outcome_json(&outcome))
-    }
-
-    #[tool(
-        description = "Ingest a static-analysis report (linter/analyzer findings) into the \
-            thread's open effort — the on-demand counterpart to `ingest_coverage`. oxplow parses \
-            it deterministically via the collector registry (e.g. `eslint-json`, `clippy-json`) \
-            and records a `static-analysis` observation (`observed`) — point at the report, NEVER \
-            report counts yourself. `report_path`/`format` default to the first analysis report \
-            in the `collection` profile (.oxplow/project.yaml). Returns a status: stored (per-severity \
-            counts) or why nothing landed (no_open_effort / not_configured / report_missing / \
-            parse_error). Findings are absolute, so no baseline is needed."
-    )]
-    async fn ingest_analysis(
-        &self,
-        params: Parameters<IngestAnalysisParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "ingest_analysis",
-            "thread_id",
-            &params.0.thread_id,
-            ID_THREAD,
-        )?;
-        let tid = parse_thread_id(&params.0.thread_id)?;
-        let outcome = self
-            .services
-            .collection
-            .ingest_analysis(&tid, params.0.report_path, params.0.format, false)
-            .await
-            .map_err(internal)?;
-        json_result(&analysis_ingest_json(&outcome))
-    }
-
-    #[tool(
-        description = "Record a test run with pass/fail counts the Bash-hook exit code can't \
-            capture. Marked `asserted` (agent-reported). oxplow already records `observed` test \
-            runs automatically from the Bash hook for the MAIN agent — but a dispatched sub-agent's \
-            runs are invisible to that hook, so a sub-agent SHOULD call this for its test runs. \
-            Pass `task_id` (from your brief) so the run is attributed exactly to your task's \
-            effort even when sibling efforts are open; omit it when you're the only effort in \
-            flight and oxplow will attribute it automatically."
-    )]
-    async fn record_test_run(
-        &self,
-        params: Parameters<RecordTestRunParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "record_test_run",
-            "thread_id",
-            &params.0.thread_id,
-            ID_THREAD,
-        )?;
-        let tid = parse_thread_id(&params.0.thread_id)?;
-        let task = match params.0.task_id.as_deref() {
-            Some(raw) => Some(parse_task_id("record_test_run", "task_id", raw)?),
-            None => None,
-        };
-        let id = self
-            .services
-            .collection
-            .record_test_run(
-                &tid,
-                &params.0.command,
-                None,
-                params.0.duration_ms,
-                params.0.passed,
-                params.0.failed,
-                params.0.total,
-                "asserted",
-                "agent",
-                None,
-                task,
-            )
-            .await
-            .map_err(internal)?;
-        json_result(&serde_json::json!({
-            "recorded": id.is_some(),
-            "observationId": id,
-        }))
-    }
-
-    #[tool(
         description = "Discover the thread's currently-open effort. Returns `{ open, effortId, \
             taskId, startedAt, hasStartSnapshot }` — `open:false` (with null ids) when no effort \
             is open. Use this to find the `effortId` for `effort.amend`, to confirm an effort is \
-            open before `ingest_coverage` / `ingest_analysis` / `record_test_run`, and to debug a \
+            open before `test.ingest_coverage` / `test.ingest_analysis` / `test.record_run`, and to debug a \
             `no_open_effort` / `no_baseline` outcome (`hasStartSnapshot:false` ⇒ no baseline)."
     )]
     async fn get_open_effort(
@@ -3640,9 +3495,6 @@ const WRITE_TOOLS: &[&str] = &[
     "switch_stream",
     "reorder_tasks",
     "upsert_task",
-    "ingest_coverage",
-    "ingest_analysis",
-    "record_test_run",
     "add_followup",
     "remove_followup",
     "create_task",
@@ -3779,65 +3631,6 @@ fn compute_error(e: oxplow_app::ai_compute::AiComputeError) -> McpError {
 
 fn internal<E: std::fmt::Display>(e: E) -> McpError {
     McpError::internal_error(e.to_string(), None)
-}
-
-/// Map a coverage-ingest outcome to a JSON status the agent can act on.
-fn ingest_outcome_json(outcome: &oxplow_app::collection::CoverageIngest) -> serde_json::Value {
-    use oxplow_app::collection::CoverageIngest as C;
-    match outcome {
-        C::NoOpenEffort => serde_json::json!({ "status": "no_open_effort" }),
-        C::NotConfigured => serde_json::json!({
-            "status": "not_configured",
-            "hint": "set collection.coverageReportPath + coverageFormat in .oxplow/project.yaml (run /oxplow:configure)",
-        }),
-        C::ReportMissing(path) => serde_json::json!({ "status": "report_missing", "path": path }),
-        C::StaleReport(path) => serde_json::json!({ "status": "stale_report", "path": path }),
-        C::ParseError(err) => serde_json::json!({ "status": "parse_error", "error": err }),
-        C::NoBaseline => serde_json::json!({ "status": "no_baseline" }),
-        C::NoChangedCoverage => serde_json::json!({ "status": "no_changed_coverage" }),
-        C::Stored {
-            observation_id,
-            summary_pct,
-            changed_lines,
-            covered_lines,
-        } => serde_json::json!({
-            "status": "stored",
-            "observationId": observation_id,
-            "summaryPct": summary_pct,
-            "changedLines": changed_lines,
-            "coveredLines": covered_lines,
-        }),
-    }
-}
-
-fn analysis_ingest_json(outcome: &oxplow_app::collection::AnalysisIngest) -> serde_json::Value {
-    use oxplow_app::collection::AnalysisIngest as A;
-    match outcome {
-        A::NoOpenEffort => serde_json::json!({ "status": "no_open_effort" }),
-        A::NotConfigured => serde_json::json!({
-            "status": "not_configured",
-            "hint": "add an analysis report (e.g. format eslint-json / clippy-json) to collection.reports in .oxplow/project.yaml, or pass report_path + format explicitly",
-        }),
-        A::ReportMissing(path) => serde_json::json!({ "status": "report_missing", "path": path }),
-        A::StaleReport(path) => serde_json::json!({ "status": "stale_report", "path": path }),
-        A::ParseError(err) => serde_json::json!({ "status": "parse_error", "error": err }),
-        A::Stored {
-            observation_id,
-            error_count,
-            warning_count,
-            info_count,
-            note_count,
-            findings,
-        } => serde_json::json!({
-            "status": "stored",
-            "observationId": observation_id,
-            "errorCount": error_count,
-            "warningCount": warning_count,
-            "infoCount": info_count,
-            "noteCount": note_count,
-            "findings": findings,
-        }),
-    }
 }
 
 /// Map an extension install/update error to an MCP error.
@@ -4096,10 +3889,10 @@ fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> St
         "Follow the `oxplow-subagent-work-protocol` skill: mark in_progress on entry; \
          done on exit. Return ONE line: `oxplow-result: {{\"ok\":true,\"itemId\":\"<id>\",…}}`. \
          Pass `touched_files` to `complete_task` so Local History attributes the writes. \
-         If you run tests, call `record_test_run` with `task_id: \"{}\"` — your runs are \
-         invisible to oxplow's passive Bash-hook collection, and naming your task attributes \
+         If you run tests, run `test.record_run` with `work_item: \"{}\"` — your runs are \
+         invisible to oxplow's passive Bash-hook collection, and naming your item attributes \
          them exactly even while sibling efforts are open.",
-        item.id.value()
+        work_item_ref(item.id)
     ));
     out.join("\n")
 }

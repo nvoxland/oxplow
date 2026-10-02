@@ -79,8 +79,8 @@ Run it three specific ways:
 - **A stack isn't emitting a report** (its path isn't in
   `collection.reports`, or no `collection:` block exists yet) → run
   `/oxplow:configure`, which wires **every** test stack in the repo.
-- **Report is at a non-standard location for this run** → call
-  `mcp__oxplow__ingest_coverage` with the path/format to ingest it
+- **Report is at a non-standard location for this run** → run
+  `test.ingest_coverage { report_path, format }` (`mcp__oxplow__run_command`) to ingest it
   explicitly (it goes through the same deterministic parse path).
 
 Do not file a follow-up to "add coverage later" — either it's

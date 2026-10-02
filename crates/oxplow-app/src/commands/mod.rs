@@ -28,6 +28,7 @@ pub mod reasoning;
 pub mod review;
 mod steps;
 pub mod stream;
+pub mod test_runs;
 pub mod thread;
 pub mod vcs;
 pub mod work_item;
