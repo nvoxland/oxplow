@@ -396,6 +396,23 @@ welded to collection.
   > same daily `boot.rs` loop as the prune, but independently of it — the loop
   > used to be gated on `metricRetentionDays > 0`, which would have disabled
   > compaction for everyone.
+  >
+  > **Per-case test facts keep a rolling window (tsk514), on by default.**
+  > `testCaseRetentionDays` (default **7**, `0` keeps everything) runs
+  > `prune_aged_test_cases` in the same daily loop: a run's facts on a
+  > per-subject measure (`oxplow.test_case`, `oxplow.test_duration`) go once
+  > the run is older than the window and not in an open effort — **except
+  > each test's latest result per `(stream, branch, producer)`**, which every
+  > current number and a new branch's seed stand on. Captures (the run
+  > records `v_test_run` reads) and every other measure stay. It works in
+  > chunks of 20 runs, each chunk invalidating only the per-subject measures'
+  > cube for its stream in the same transaction. The trade, chosen by Nathan
+  > (2026-10-02): trend points older than the window recompute from fewer
+  > facts once that cube rebuilds; a closed effort loses nothing (its outcome
+  > facts are computed at close). Known limit: a branch that never re-ran a
+  > test reads it from its fork's history, and once that history is older
+  > than the window and superseded on its own branch, the branch's value for
+  > that test falls back to whatever older result remains visible.
   > **Stamp `closest_vcs_rev` on every capture you add (tsk95).** Use
   > `file_ref_version::resolve(store, dir, snap)`: a snapshot with its own commit
   > reads `vcs_rev_exact = true`, otherwise it falls back to HEAD with

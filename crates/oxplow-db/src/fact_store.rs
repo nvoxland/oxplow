@@ -2672,6 +2672,128 @@ impl SqliteFactStore {
             .await
     }
 
+    /// Prune **per-case test facts** older than `cutoff` — the rolling window
+    /// (`testCaseRetentionDays`, tsk514). A run's facts on a per-subject
+    /// measure (`oxplow.test_case`, `oxplow.test_duration`) go when the run
+    /// is older than the cutoff and not in an open effort, **except each
+    /// test's latest result** per `(measure, stream, branch, producer,
+    /// subject)` — every fact of that latest run under that subject — which
+    /// every current number and a new branch's seed stand on. The captures
+    /// (the run records `v_test_run` reads) and every other measure stay.
+    ///
+    /// Trend points older than the window recompute from fewer facts once
+    /// the cube rebuilds: that is the trade the window buys. A closed effort
+    /// loses nothing it shows (its outcome facts were computed at close).
+    ///
+    /// Works in chunks so a first pass over millions of facts never holds one
+    /// giant transaction: the latest run per test is computed once, then old
+    /// runs are deleted a few at a time, each chunk invalidating its stream's
+    /// cube **for the per-subject measures** in the same transaction when it
+    /// deleted something (the tsk100 rule, scoped: no other measure's cube
+    /// row reads these facts). Returns the facts deleted.
+    pub async fn prune_aged_test_cases(&self, cutoff: Timestamp) -> Result<u64, DomainError> {
+        /// Old runs per transaction (~2,500 facts each for a real suite).
+        const CHUNK: usize = 20;
+        let cutoff = ts_to_string(cutoff);
+        self.db
+            .call_mut(move |conn| {
+                conn.execute_batch(
+                    "DROP TABLE IF EXISTS temp.test_case_latest;
+                     CREATE TEMP TABLE test_case_latest (
+                       measure_id INTEGER NOT NULL,
+                       capture_id INTEGER NOT NULL,
+                       subject_key TEXT NOT NULL,
+                       PRIMARY KEY (measure_id, capture_id, subject_key)
+                     ) WITHOUT ROWID;
+                     INSERT OR IGNORE INTO temp.test_case_latest
+                       SELECT measure_id, capture_id, subject_key FROM (
+                         SELECT f.measure_id, f.capture_id,
+                                COALESCE(f.subject_ref, f.path, '') AS subject_key,
+                                DENSE_RANK() OVER (
+                                  PARTITION BY f.measure_id, c.stream_id, COALESCE(c.branch, ''),
+                                               c.producer, COALESCE(f.subject_ref, f.path, '')
+                                  ORDER BY c.captured_at DESC, c.id DESC
+                                ) AS latest
+                           FROM fact f
+                           JOIN metric_capture c ON c.id = f.capture_id
+                           JOIN measure m ON m.id = f.measure_id
+                          WHERE m.capture_scope = 'per-subject' AND c.status = 'done'
+                       ) WHERE latest = 1;",
+                )
+                .map_err(map_sql_err)?;
+                let old: Vec<(i64, i64)> = {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT c.id, c.stream_id FROM metric_capture c
+                              WHERE c.captured_at < ?1 AND c.status = 'done'
+                                AND (c.effort_id IS NULL OR c.effort_id NOT IN
+                                       (SELECT id FROM effort WHERE ended_at IS NULL))
+                                AND EXISTS (SELECT 1 FROM fact f JOIN measure m ON m.id = f.measure_id
+                                             WHERE f.capture_id = c.id
+                                               AND m.capture_scope = 'per-subject')
+                              ORDER BY c.captured_at, c.id",
+                        )
+                        .map_err(map_sql_err)?;
+                    let rows = stmt
+                        .query_map(params![cutoff], |r| Ok((r.get(0)?, r.get(1)?)))
+                        .map_err(map_sql_err)?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .map_err(map_sql_err)?;
+                    rows
+                };
+                let mut deleted: u64 = 0;
+                for chunk in old.chunks(CHUNK) {
+                    let tx = conn.transaction().map_err(map_sql_err)?;
+                    let ids = serde_json::to_string(&chunk.iter().map(|(id, _)| *id).collect::<Vec<_>>())
+                        .unwrap_or_else(|_| "[]".into());
+                    let n = tx
+                        .execute(
+                            "DELETE FROM fact
+                              WHERE capture_id IN (SELECT value FROM json_each(?1))
+                                AND measure_id IN (SELECT id FROM measure WHERE capture_scope = 'per-subject')
+                                AND NOT EXISTS (
+                                  SELECT 1 FROM temp.test_case_latest l
+                                   WHERE l.measure_id = fact.measure_id
+                                     AND l.capture_id = fact.capture_id
+                                     AND l.subject_key = COALESCE(fact.subject_ref, fact.path, ''))",
+                            params![ids],
+                        )
+                        .map_err(map_sql_err)?;
+                    if n > 0 {
+                        // Only the per-subject measures' cube describes the
+                        // deleted facts; every other measure's stays built.
+                        let mut streams: Vec<i64> = chunk.iter().map(|(_, s)| *s).collect();
+                        streams.sort_unstable();
+                        streams.dedup();
+                        for stream_id in streams {
+                            for sql in [
+                                "DELETE FROM metric_cube
+                                  WHERE measure_id IN (SELECT id FROM measure WHERE capture_scope = 'per-subject')
+                                    AND capture_id IN (SELECT id FROM metric_capture WHERE stream_id = ?1)",
+                                "DELETE FROM metric_live_fact
+                                  WHERE stream_id = ?1
+                                    AND measure_id IN (SELECT id FROM measure WHERE capture_scope = 'per-subject')",
+                                "DELETE FROM metric_cube_state
+                                  WHERE stream_id = ?1
+                                    AND measure_id IN (SELECT id FROM measure WHERE capture_scope = 'per-subject')",
+                            ] {
+                                tx.execute(sql, params![stream_id]).map_err(map_sql_err)?;
+                            }
+                        }
+                        // Fence any build already in flight (tsk103).
+                        tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
+                            .map_err(map_sql_err)?;
+                    }
+                    tx.commit().map_err(map_sql_err)?;
+                    deleted += n as u64;
+                }
+                conn.execute_batch("DROP TABLE IF EXISTS temp.test_case_latest")
+                    .map_err(map_sql_err)?;
+                Ok(deleted)
+            })
+            .await
+    }
+
     /// Prune metric captures older than `cutoff` — the OPT-IN retention knob
     /// (`metricRetentionDays`, tsk93; the default 0 means this is never
     /// called). Deletes ONLY history no current value stands on; kept
@@ -3921,6 +4043,194 @@ mod tests {
         want.sort();
         assert_eq!(seed, want);
         let _ = c4;
+    }
+
+    /// tsk514: per-case test facts keep a rolling window. Older than the
+    /// cutoff, a run's per-subject facts go — except each test's latest
+    /// result per (stream, branch, producer), which every current number and
+    /// a new branch's seed stand on, and the runs of an open effort. Other
+    /// measures, and the captures themselves (the run records), stay. A pass
+    /// that deletes invalidates the cube; one that deletes nothing doesn't.
+    #[tokio::test]
+    async fn test_case_retention_keeps_each_tests_latest_result_and_the_window() {
+        let store = fixture().await;
+        let db = store.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|c| {
+                c.execute(
+                    "INSERT INTO effort (id, work_item, thread_id, started_at, ended_at)
+                     VALUES (2, 'work_item:oxplow:tsk9', 1, '2026-06-01T00:00:00.000000Z', NULL)",
+                    [],
+                )
+                .map(|_| ())
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        let cases = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-subject".into(),
+                ..NewMeasure::new("acme.test_case", "acme.test_case")
+            })
+            .await
+            .unwrap();
+        let other = store
+            .upsert_measure(NewMeasure::new("acme.other", "acme.other"))
+            .await
+            .unwrap();
+        let case = |s: &str| NewFact {
+            subject_ref: Some(s.into()),
+            ..NewFact::new(cases, 1.0)
+        };
+        let run = |branch: &str, when: &str, effort: Option<i64>| NewMetricCapture {
+            captured_at: Some(at(when)),
+            branch: Some(branch.into()),
+            effort_id: effort,
+            ..NewMetricCapture::done(1, "tests", "t")
+        };
+        let old1 = store
+            .record_facts(
+                run("main", "2026-06-01T08:00:00.000000Z", None),
+                vec![case("A"), case("B"), NewFact::new(other, 5.0)],
+            )
+            .await
+            .unwrap();
+        let old2 = store
+            .record_facts(
+                run("main", "2026-06-02T08:00:00.000000Z", None),
+                vec![case("A")],
+            )
+            .await
+            .unwrap();
+        let recent = store
+            .record_facts(
+                run("main", "2026-06-20T08:00:00.000000Z", None),
+                vec![case("B")],
+            )
+            .await
+            .unwrap();
+        let feat = store
+            .record_facts(
+                run("feat", "2026-06-01T09:00:00.000000Z", None),
+                vec![case("A")],
+            )
+            .await
+            .unwrap();
+        let open = store
+            .record_facts(
+                run("main", "2026-06-01T10:00:00.000000Z", Some(2)),
+                vec![case("C"), case("C")],
+            )
+            .await
+            .unwrap();
+        let closed = store
+            .record_facts(
+                run("main", "2026-06-01T11:00:00.000000Z", Some(1)),
+                vec![case("D")],
+            )
+            .await
+            .unwrap();
+        let later_d = store
+            .record_facts(
+                run("main", "2026-06-03T11:00:00.000000Z", None),
+                vec![case("D")],
+            )
+            .await
+            .unwrap();
+        store
+            .write_cube_rows(
+                cases,
+                1,
+                Some("main".into()),
+                recent,
+                at("2026-06-20T08:00:00.000000Z"),
+                vec![],
+                store.cube_epoch().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        store
+            .write_cube_rows(
+                other,
+                1,
+                Some("main".into()),
+                old1,
+                at("2026-06-01T08:00:00.000000Z"),
+                vec![],
+                store.cube_epoch().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let cutoff = at("2026-06-10T00:00:00.000000Z");
+        let deleted = store.prune_aged_test_cases(cutoff).await.unwrap();
+        assert_eq!(
+            deleted, 3,
+            "old1's A and B, and the closed effort's superseded D"
+        );
+        let left = |id: i64, measure: i64| {
+            let store = &store;
+            async move {
+                store
+                    .facts_for_captures(measure, vec![id])
+                    .await
+                    .unwrap()
+                    .len()
+            }
+        };
+        assert_eq!(
+            left(old1, cases).await,
+            0,
+            "superseded on its branch, older than the window"
+        );
+        assert_eq!(left(old1, other).await, 1, "another measure is untouched");
+        assert_eq!(left(old2, cases).await, 1, "main's latest A stays");
+        assert_eq!(left(recent, cases).await, 1, "inside the window");
+        assert_eq!(left(feat, cases).await, 1, "feat's latest A stays");
+        assert_eq!(left(open, cases).await, 2, "an open effort's runs stay");
+        assert_eq!(
+            left(closed, cases).await,
+            0,
+            "a closed effort's superseded result goes"
+        );
+        assert_eq!(left(later_d, cases).await, 1);
+        assert!(
+            store
+                .captures_for_producers(vec!["tests".into()])
+                .await
+                .unwrap()
+                .iter()
+                .any(|c| c.id == old1),
+            "the run record stays"
+        );
+        assert!(
+            store.cube_watermark(cases, 1).await.unwrap().is_none(),
+            "a pass that deleted facts invalidates their measure's cube"
+        );
+        assert!(
+            store.cube_watermark(other, 1).await.unwrap().is_some(),
+            "another measure's cube stays built"
+        );
+
+        store
+            .write_cube_rows(
+                cases,
+                1,
+                Some("main".into()),
+                recent,
+                at("2026-06-20T08:00:00.000000Z"),
+                vec![],
+                store.cube_epoch().await.unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(store.prune_aged_test_cases(cutoff).await.unwrap(), 0);
+        assert!(
+            store.cube_watermark(cases, 1).await.unwrap().is_some(),
+            "a pass that deleted nothing leaves the cube built"
+        );
     }
 
     #[tokio::test]

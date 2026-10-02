@@ -168,7 +168,24 @@ per-case facts** (tsk514), not the fold.
 87.5% of all facts (the `fact` table is 1.9 GB, its indexes another
 1.4 GB). 1,979 of the 2,044 `tests` captures are effort-stamped, which the
 opt-in `metricRetentionDays` keeps unconditionally — so no retention
-setting today can reclaim them.
+setting reclaimed them before `testCaseRetentionDays` (tsk514).
+
+**The per-case window, measured** on the same copy (`cube_burst
+--prune-test-cases <days>`):
+
+| | |
+|---|---|
+| First pass at 7 days | 2.18 M facts pruned in 52 s; runs older than the window keep only each test's latest result per branch (8,351 facts) |
+| … what's left | **3.9 M `oxplow.test_case` facts inside the last 7 days** — ~210 test runs a day here, ~2,600 cases each |
+| A pass at 3 days (the next days, compressed) | 3.57 M more pruned in 54 s; per-case facts down to 2.1 M each, all facts 11.3 M → 5.6 M |
+| The re-fold a pass causes | **35 s**, for the two per-case measures only (the invalidation is scoped to per-subject measures; the whole stream's cube was 87 s) |
+
+So the window bounds the history, but **the volume inside it follows how
+often tests run**: at this pace a 7-day window holds ~8 M per-case facts
+across the two measures, and the daily pass costs a minute of background
+work (the prune, then the per-case measures' re-fold). Each seed reads
+what the window holds.
+
 
 ## Zero-splice producer discovery (tsk239)
 

@@ -172,7 +172,9 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // Open efforts' evidence, an asset over the tables it reads (P7.B6).
     crate::effort_evidence::register(state);
 
-    // Metric retention loop (tsk93) — OPT-IN: `metricRetentionDays` defaults
+    // Metric retention loop (tsk93): the opt-in capture prune, the per-case
+    // test fact window (tsk514, on by default) and detail compaction. The
+    // capture prune is OPT-IN: `metricRetentionDays` defaults
     // to 0 = keep everything (per-test history is what makes the substrate
     // worth having). When enabled, a daily pass prunes captures older than
     // the window that no current value stands on — effort-stamped captures,
@@ -197,6 +199,25 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
                         }
                         Ok(_) => {}
                         Err(e) => tracing::warn!(error = %e, "metric retention pass failed"),
+                    }
+                }
+                // Per-case test facts keep a rolling window (tsk514), on by
+                // default (7 days): each test's latest result per branch and
+                // open efforts' runs always stay, so no current number moves.
+                let case_days = config
+                    .read()
+                    .map(|c| c.test_case_retention_days)
+                    .unwrap_or(0);
+                if case_days > 0 {
+                    let cutoff = oxplow_domain::Timestamp::from_unix_ms(
+                        oxplow_domain::Timestamp::now().unix_ms() - (case_days as i64) * 86_400_000,
+                    );
+                    match facts.prune_aged_test_cases(cutoff).await {
+                        Ok(n) if n > 0 => {
+                            tracing::info!(pruned = n, days = case_days, "test case retention pass")
+                        }
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!(error = %e, "test case retention pass failed"),
                     }
                 }
                 // Detail compaction (tsk211) runs INDEPENDENTLY of the prune

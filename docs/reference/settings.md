@@ -134,6 +134,7 @@ Everything else `.oxplow/project.yaml` accepts, with its default:
 | `metricRetentionDays` | `0` | Days to keep raw metric facts. `0` means **keep everything** — pruning is opt-in. |
 | `metricDetailMaxPerProducer` | `100` | Keep each run's drill-in payload (`detail_json`) for only the newest N runs *per producer*. `0` disables the cap. |
 | `metricDetailRetentionDays` | `30` | Also drop drill-in payloads older than this many days. `0` disables. |
+| `testCaseRetentionDays` | `7` | Days to keep each test run's per-case results. Older runs' cases are dropped, except each test's latest result on each branch and the runs of an open effort. `0` keeps everything. |
 | `snapshotMaxFileBytes` | `5242880` (5 MiB) | Files larger than this are recorded but their bytes aren't stored. |
 | `injectSessionContext` | `true` | Whether oxplow prepends the session-context block (stream / worktree / branch / thread) to the agent's prompt. |
 | `agentPromptAppend` | *empty* | Free text appended to every agent system prompt for this project. |
@@ -172,6 +173,14 @@ These two do different things, which is why their defaults differ.
 them — so a metric's history gets shorter. That's a real trade
 (per-test drill-down, flakiness horizon), so it defaults to `0` = keep
 everything and you opt in.
+
+`testCaseRetentionDays` **deletes** per-case test results older than the
+window, but never a test's latest result on a branch, so every current
+number (passing, failing, total, slowest) stays the same. What shortens is
+history: the tests trend before the window is computed from fewer runs.
+Test runs themselves, with their counts, are kept. A busy project runs
+its suite hundreds of times a day, and those results were most of the
+database.
 
 `metricDetailMaxPerProducer` / `metricDetailRetentionDays` only
 **compact**: they null out a run's `detail_json` — the verbatim payload
