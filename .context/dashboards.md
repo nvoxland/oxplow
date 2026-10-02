@@ -47,23 +47,36 @@ COALESCE(MAX(sort_index), -1) + 1`; `reorder_items` rewrites `0..N` in one
 `conn.transaction()` (the `task_store` reorder pattern). Registered on `Services`
 as `dashboard_store` (`oxplow-app/src/lib.rs`).
 
-**Gotcha:** the `call_mut` closures return `Result<_, DomainError>` (no auto
-`From<rusqlite::Error>`), so every `query_row` inside them needs an explicit
-`.map_err(map_sql_err)?`.
+**Writes are `_tx` cores** (`create_tx`, `rename_tx`, `delete_tx`,
+`add_item_tx` — at a `position`, later tiles moving down — `update_item_tx`,
+`remove_item_tx`, `reorder_items_tx`) run on a command's connection; the
+store's async methods only read (P8.A5).
 
-## Surface — the 11-layer flow
+## Surface — commands and reads
 
-Follows `.context/ipc-and-stores.md`. Cores in
-`oxplow-rpc/src/commands/dashboards.rs` (9: `list_dashboards`, `get_dashboard`,
-`create_dashboard` → returns the `Dashboard`, `rename_dashboard`,
-`delete_dashboard`, `add_dashboard_item` → returns the new `DashboardItemId`,
-`update_dashboard_item`, `remove_dashboard_item`, `reorder_dashboard_items`).
-**Every write emits `OxplowEvent::DashboardsChanged`** (fieldless — dashboards
-are project-global) so agent- and UI-driven edits both live-refresh.
+**Every write is a `dashboard.*` command** (`oxplow-app/src/commands/
+dashboard.rs`, P8.A5), for the desktop (`runCommand`), an agent
+(`run_command`) and a lens alike:
 
-Tauri delegates in `oxplow-tauri-ipc/src/commands/dashboards.rs`; frontend
-wrappers + `subscribeDashboardEvents` in `apps/desktop/src/api.ts` (filter
-`event.kind === "dashboardsChanged"`).
+- `Tx`: `dashboard.create { title }` (not undoable), `dashboard.rename
+  { dashboard, title }`, `dashboard.remove_item { item }` (undone by adding
+  it back at its position), `dashboard.reorder_items { dashboard, order }`,
+  `dashboard.delete { dashboard }` (a person's or a lens's,
+  `Confirm::Destructive`; the page's Delete `InlineConfirm` is the
+  confirmation, so the desktop runs it confirmed; not undoable).
+- `External`: `dashboard.add_item { dashboard, kind, sql?, display?,
+  lens_id?, options_json?, position? }` and `dashboard.update_item { item,
+  options_json? }` — a query tile's SQL is checked by the semantic engine
+  first (`dashboard_tiles::new_tile` / `SqlGateway::check`: the read
+  contract, `MEASURE()` resolved), which is async and can't run inside the
+  bus's transaction; the write that follows is one statement. Both undo
+  (remove the tile; restore the old options).
+
+Dashboards and tiles are named by id (`dsh3`, `dti7`). The reads stay
+IPC cores in `oxplow-rpc/src/commands/dashboards.rs` (`list_dashboards`,
+`get_dashboard`); views re-read when `ModelsChanged` names `v_dashboard`
+or `v_dashboard_item` (`subscribeDashboardEvents` in
+`apps/desktop/src/api.ts`) — whoever wrote it.
 
 **Response types serialize snake_case** (`sort_index`,
 `dashboard_id`) — no `rename_all`, matching the codebase's read-type convention
@@ -71,22 +84,14 @@ wrappers + `subscribeDashboardEvents` in `apps/desktop/src/api.ts` (filter
 (`#[serde(rename = "metricId")]` etc.). The generated bindings capture both
 correctly; frontend field access is snake_case.
 
-## MCP — agent authoring (tsk140)
+## Agent authoring (tsk140)
 
-Reads + create/populate are agent-authorable so the agent can build a dashboard
-on request ("make me a dashboard of the coverage metrics"), matching the
-agent-authoring direction. In `oxplow-mcp/src/lib.rs`:
-
-- `list_dashboards`, `get_dashboard` — reads.
-- `create_dashboard {title}` → returns the new dashboard.
-- `add_dashboard_item {dashboard_id, kind, sql?, display?, options_json?}` →
-  returns the new tile id. A `query` tile's `sql` is checked through the SQL
-  gateway before it is stored (`oxplow-app/src/dashboard_tiles.rs`
-  `new_tile`, shared with the IPC command), so a tile that saves runs.
-
-These four are **`both(...)`** in `oxplow-surface-parity/src/lib.rs`; the pure-UI
-edits (`rename` / `delete` / `update_item` / `remove_item` / `reorder_items`)
-stay **`ui(...)`**. Every MCP write also emits `DashboardsChanged`.
+An agent builds a dashboard on request ("make me a dashboard of the
+coverage metrics") with `run_command dashboard.create` then
+`dashboard.add_item` (P8.A5: the `create_dashboard` / `add_dashboard_item`
+MCP tools are gone). It reads with the `list_dashboards` / `get_dashboard`
+MCP tools. A query tile's `sql` is checked before it is stored, so a tile
+that saves runs; deleting a dashboard is a person's.
 
 ## UI (tsk141 — Phase 3)
 
@@ -105,8 +110,8 @@ checklist:
   **+ Add metric** and a **Delete** `InlineConfirm` on the right. Body is a
   responsive flow grid
   (`grid-template-columns: repeat(auto-fill, minmax(320px, 1fr))`) of tiles;
-  empty state is a dashed drop-zone card. Live-refreshes on `dashboardsChanged`
-  (structure); the metric specs and catalog re-read when their models change
+  empty state is a dashed drop-zone card. Live-refreshes when `v_dashboard`
+  / `v_dashboard_item` change (structure); the metric specs and catalog re-read when their models change
   (`useRerunOnChange`).
 - **`dashboards`** — a literal-id index kind (**in `INDEX_KINDS`**,
   `dashboardsRef()`): `DashboardsIndexPage` lists the user's dashboards (rows via
@@ -261,5 +266,5 @@ at rather than a default. Picking an **existing** dashboard keeps you on the
 metric and shows an **undo toast** (undo removes the tile just added); **New
 dashboard…** creates, adds, and navigates to it (a brand-new dashboard is worth
 showing). The picker list is kept live via `subscribeDashboardEvents`, so a
-dashboard the agent creates over MCP appears without a reload. The block hides
+dashboard the agent creates appears without a reload. The block hides
 for a disabled metric (no spec ⇒ nothing to chart).

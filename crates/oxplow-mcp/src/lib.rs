@@ -267,38 +267,9 @@ pub struct ListEffortObservationsParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CreateDashboardParams {
-    /// Display title for the new dashboard.
-    pub title: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct GetDashboardParams {
     /// Dashboard id (`dsh<n>`).
     pub id: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AddDashboardItemParams {
-    /// Dashboard id (`dsh<n>`) to add the tile to.
-    pub dashboard_id: String,
-    /// `query` (pinned SQL over the published models, e.g. a
-    /// `metric_grid()` read) | `lens` (a lens's current result; see
-    /// `list_lenses`) | `text` (a heading).
-    pub kind: String,
-    /// A `query` tile's SQL (checked like `query_sql`).
-    pub sql: Option<String>,
-    /// A `query` tile's display: `table` (default), `list`, `number`,
-    /// `markdown`, `bar`, `line`, `treemap`, or `metric` (the metric card —
-    /// set the metric key as `metric` in `options_json`). A chart names its
-    /// columns in `options_json`'s `chart`: `bar`/`line` `{ x, y, series? }`,
-    /// `treemap` `{ label, size, group? }`.
-    pub display: Option<String>,
-    /// Lens id (`<extension>/<slug>`) for a `lens` tile.
-    pub lens_id: Option<String>,
-    /// Optional per-tile options JSON (size, title; a `text` tile's
-    /// `{"text":"…"}`).
-    pub options_json: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1130,72 +1101,6 @@ impl OxplowMcp {
             .await
             .map_err(internal)?;
         json_result(&got)
-    }
-
-    #[tool(
-        description = "Create a new empty dashboard (a grid of metric tiles). Returns it (id + \
-                       title). Then populate it with `add_dashboard_item` — e.g. build a \
-                       'Coverage' dashboard of the coverage metrics."
-    )]
-    async fn create_dashboard(
-        &self,
-        params: Parameters<CreateDashboardParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let id = self
-            .services
-            .dashboard_store
-            .create(params.0.title)
-            .await
-            .map_err(internal)?;
-        let created = self
-            .services
-            .dashboard_store
-            .get(id)
-            .await
-            .map_err(internal)?
-            .map(|d| d.dashboard);
-        self.services.events.emit(OxplowEvent::DashboardsChanged);
-        json_result(&created)
-    }
-
-    #[tool(
-        description = "Add a tile to a dashboard. `kind` is `query` (pinned SQL — `sql`, checked \
-                       like query_sql — shown per `display`: a lens viz, or `metric` for the metric \
-                       card over a `metric_grid('capture')` read with the metric key as `metric` in \
-                       `options_json`), `lens` (set `lens_id`) or `text` (put the text in \
-                       `options_json` as `{\"text\":\"…\"}`). `options_json` may also set the tile's \
-                       size and title. Returns the new tile id."
-    )]
-    async fn add_dashboard_item(
-        &self,
-        params: Parameters<AddDashboardItemParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let dash = oxplow_domain::DashboardId::try_from_str(&p.dashboard_id)
-            .ok_or_else(|| McpError::invalid_params("expected a dashboard id (dsh…)", None))?;
-        let tile = oxplow_app::dashboard_tiles::new_tile(
-            &self.services.sql,
-            oxplow_app::dashboard_tiles::TileInput {
-                kind: p.kind,
-                sql: p.sql,
-                display: p.display,
-                lens_id: p.lens_id,
-                options_json: p.options_json,
-            },
-        )
-        .await
-        .map_err(|e| match e {
-            oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
-            other => internal(other),
-        })?;
-        let id = self
-            .services
-            .dashboard_store
-            .add_item(dash, tile)
-            .await
-            .map_err(internal)?;
-        self.services.events.emit(OxplowEvent::DashboardsChanged);
-        json_result(&serde_json::json!({ "id": id }))
     }
 
     #[tool(
@@ -4455,8 +4360,6 @@ const WRITE_TOOLS: &[&str] = &[
     "run_collector",
     "install_extension",
     "update_extension",
-    "create_dashboard",
-    "add_dashboard_item",
     "restore_file_snapshot",
     "create_comment",
     "set_comment_intent",
@@ -7698,142 +7601,6 @@ mod tests {
         // The exact value is part of the MCP contract; a regression
         // here changes how much data clients receive by default.
         assert_eq!(default_limit(), 20);
-    }
-
-    #[tokio::test]
-    async fn dashboard_create_add_tile_and_read_back() {
-        let (_project, _services, server) = boot();
-
-        // create_dashboard returns the new dashboard (id + title).
-        let created: serde_json::Value = serde_json::from_str(&text_payload(
-            server
-                .create_dashboard(Parameters(CreateDashboardParams {
-                    title: "Coverage".into(),
-                }))
-                .await
-                .unwrap(),
-        ))
-        .unwrap();
-        let dash_id = created["id"].as_str().unwrap().to_string();
-        assert!(dash_id.starts_with("dsh"), "id should be a dsh<n> id");
-        assert_eq!(created["title"], "Coverage");
-
-        // add_dashboard_item returns the new tile id.
-        let added: serde_json::Value = serde_json::from_str(&text_payload(
-            server
-                .add_dashboard_item(Parameters(AddDashboardItemParams {
-                    dashboard_id: dash_id.clone(),
-                    kind: "query".into(),
-                    sql: Some("SELECT count(*) FROM v_task".into()),
-                    display: Some("number".into()),
-                    lens_id: None,
-                    options_json: None,
-                }))
-                .await
-                .unwrap(),
-        ))
-        .unwrap();
-        assert!(added["id"].as_str().unwrap().starts_with("dti"));
-
-        // get_dashboard reads back the dashboard with its one tile.
-        let got: serde_json::Value = serde_json::from_str(&text_payload(
-            server
-                .get_dashboard(Parameters(GetDashboardParams {
-                    id: dash_id.clone(),
-                }))
-                .await
-                .unwrap(),
-        ))
-        .unwrap();
-        assert_eq!(got["dashboard"]["id"], dash_id);
-        let items = got["items"].as_array().unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0]["kind"], "query");
-        let opts: serde_json::Value =
-            serde_json::from_str(items[0]["options_json"].as_str().unwrap()).unwrap();
-        assert_eq!(opts["sql"], "SELECT count(*) FROM v_task");
-        assert_eq!(opts["display"], "number");
-
-        // list_dashboards surfaces it.
-        let listed: serde_json::Value =
-            serde_json::from_str(&text_payload(server.list_dashboards().await.unwrap())).unwrap();
-        assert_eq!(listed.as_array().unwrap().len(), 1);
-        assert_eq!(listed[0]["id"], dash_id);
-    }
-
-    #[tokio::test]
-    async fn add_dashboard_item_accepts_lens_tiles() {
-        let (_project, services, server) = boot();
-        let dash_id = services
-            .dashboard_store
-            .create("Mine".into())
-            .await
-            .unwrap();
-        let did = dash_id.to_string();
-        server
-            .add_dashboard_item(Parameters(AddDashboardItemParams {
-                dashboard_id: did.clone(),
-                kind: "lens".into(),
-                sql: None,
-                display: None,
-                lens_id: Some("review/waiting".into()),
-                options_json: Some(r#"{"size":"wide"}"#.into()),
-            }))
-            .await
-            .unwrap();
-        let got = services
-            .dashboard_store
-            .get(dash_id)
-            .await
-            .unwrap()
-            .unwrap();
-        let item = &got.items[0];
-        assert_eq!(item.kind, "lens");
-        let opts: serde_json::Value =
-            serde_json::from_str(item.options_json.as_deref().unwrap()).unwrap();
-        assert_eq!(opts["lensId"], "review/waiting");
-        assert_eq!(opts["size"], "wide");
-
-        let err = server
-            .add_dashboard_item(Parameters(AddDashboardItemParams {
-                dashboard_id: did.clone(),
-                kind: "lens".into(),
-                sql: None,
-                display: None,
-                lens_id: None,
-                options_json: None,
-            }))
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("lens id"), "{err:?}");
-        let err = server
-            .add_dashboard_item(Parameters(AddDashboardItemParams {
-                dashboard_id: did,
-                kind: "chart".into(),
-                sql: None,
-                display: None,
-                lens_id: None,
-                options_json: None,
-            }))
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("kind"), "{err:?}");
-    }
-
-    #[tokio::test]
-    async fn add_dashboard_item_rejects_a_bad_dashboard_id() {
-        let (_project, _services, server) = boot();
-        let result = server
-            .add_dashboard_item(Parameters(AddDashboardItemParams {
-                dashboard_id: "not-an-id".into(),
-                kind: "metric".into(),
-                sql: None,
-                display: None,
-                lens_id: None,
-                options_json: None,
-            }))
-            .await;
-        assert!(result.is_err(), "a malformed dashboard id must be rejected");
     }
 
     /// Point the in-memory services' `role` at a mock provider at `base`.

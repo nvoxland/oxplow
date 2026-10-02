@@ -1637,14 +1637,17 @@ export async function listDashboards(): Promise<Dashboard[]> {
 export async function getDashboard(id: string): Promise<DashboardWithItems | null> {
   return unwrap(await commands.getDashboard(id));
 }
+// Writes are the `dashboard.*` commands (P8.A5).
 export async function createDashboard(title: string): Promise<Dashboard> {
-  return unwrap(await commands.createDashboard(title));
+  return (await runCommand("dashboard.create", { title })).result as Dashboard;
 }
 export async function renameDashboard(id: string, title: string): Promise<void> {
-  unwrap(await commands.renameDashboard({ id, title }));
+  await runCommand("dashboard.rename", { dashboard: id, title });
 }
+/** The page's delete button sits behind an `InlineConfirm`, the person's
+ *  confirmation (`dashboard.delete` is destructive). */
 export async function deleteDashboard(id: string): Promise<void> {
-  unwrap(await commands.deleteDashboard(id));
+  await runCommand("dashboard.delete", { dashboard: id }, true);
 }
 /** Add a tile: `query` (pinned `sql` shown per `display`), `lens` or `text`. */
 export async function addDashboardItem(req: {
@@ -1655,30 +1658,37 @@ export async function addDashboardItem(req: {
   lensId?: string | null;
   optionsJson?: string | null;
 }): Promise<string> {
-  return unwrap(
-    await commands.addDashboardItem({
-      dashboardId: req.dashboardId,
-      kind: req.kind,
-      sql: req.sql ?? null,
-      display: req.display ?? null,
-      lensId: req.lensId ?? null,
-      optionsJson: req.optionsJson ?? null,
-    }),
-  );
+  const outcome = await runCommand("dashboard.add_item", {
+    dashboard: req.dashboardId,
+    kind: req.kind,
+    ...(req.sql ? { sql: req.sql } : {}),
+    ...(req.display ? { display: req.display } : {}),
+    ...(req.lensId ? { lens_id: req.lensId } : {}),
+    ...(req.optionsJson ? { options_json: req.optionsJson } : {}),
+  });
+  return (outcome.result as { id: string }).id;
 }
 export async function updateDashboardItem(id: string, optionsJson: string | null): Promise<void> {
-  unwrap(await commands.updateDashboardItem({ id, optionsJson }));
+  await runCommand("dashboard.update_item", { item: id, ...(optionsJson ? { options_json: optionsJson } : {}) });
 }
 export async function removeDashboardItem(id: string): Promise<void> {
-  unwrap(await commands.removeDashboardItem(id));
+  await runCommand("dashboard.remove_item", { item: id });
 }
 export async function reorderDashboardItems(dashboardId: string, order: string[]): Promise<void> {
-  unwrap(await commands.reorderDashboardItems({ dashboardId, order }));
+  await runCommand("dashboard.reorder_items", { dashboard: dashboardId, order });
 }
-/** Fires on any dashboard/tile create/edit/reorder/delete (project-global). */
+/** Fires when a commit touched a dashboard or a tile (`v_dashboard`,
+ *  `v_dashboard_item`) — whoever wrote it. */
 export function subscribeDashboardEvents(fn: () => void): () => void {
   return subscribeOxplowEvents((event) => {
-    if (event.kind === "dashboardsChanged") fn();
+    const models = (event as { models?: unknown }).models;
+    if (
+      event.kind === "modelsChanged" &&
+      Array.isArray(models) &&
+      models.some((m) => m === "v_dashboard" || m === "v_dashboard_item")
+    ) {
+      fn();
+    }
   });
 }
 

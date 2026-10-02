@@ -4,7 +4,7 @@
 //! rewrites the whole tile list to dense `0..N` sort indices in one
 //! transaction (the task-reorder pattern). See migration `V70__dashboard.sql`.
 
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -147,154 +147,164 @@ impl SqliteDashboardStore {
             })
             .await
     }
+}
 
-    /// Create an empty dashboard appended at the end. Returns its id.
-    pub async fn create(&self, title: String) -> Result<DashboardId, DomainError> {
-        self.db
-            .call_mut(move |conn| {
-                let now = ts_to_string(Timestamp::now());
-                let next: i64 = conn
-                    .query_row(
-                        "SELECT COALESCE(MAX(sort_index), -1) + 1 FROM dashboard",
-                        [],
-                        |r| r.get(0),
-                    )
-                    .map_err(map_sql_err)?;
-                conn.execute(
-                    "INSERT INTO dashboard (title, sort_index, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?3)",
-                    params![title, next, now],
-                )
-                .map_err(map_sql_err)?;
-                Ok(DashboardId::new(conn.last_insert_rowid()))
-            })
-            .await
+fn now() -> String {
+    ts_to_string(Timestamp::now())
+}
+
+/// A new, empty dashboard at the end of the list, on `conn` — a command's
+/// transaction (every write is a `dashboard.*` command, P8.A5).
+pub fn create_tx(conn: &Connection, title: &str) -> Result<DashboardId, DomainError> {
+    let next: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(sort_index), -1) + 1 FROM dashboard",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(map_sql_err)?;
+    conn.execute(
+        "INSERT INTO dashboard (title, sort_index, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?3)",
+        params![title, next, now()],
+    )
+    .map_err(map_sql_err)?;
+    Ok(DashboardId::new(conn.last_insert_rowid()))
+}
+
+/// Dashboard `id`, without its tiles.
+pub fn dashboard_tx(conn: &Connection, id: DashboardId) -> Result<Option<Dashboard>, DomainError> {
+    let sql = format!("SELECT {DASH_COLS} FROM dashboard WHERE id = ?1");
+    let mut stmt = conn.prepare(&sql).map_err(map_sql_err)?;
+    let mut rows = stmt
+        .query_map(params![id.value()], row_to_dashboard)
+        .map_err(map_sql_err)?;
+    rows.next().transpose().map_err(map_sql_err)
+}
+
+/// A dashboard's tiles in their order.
+pub fn items_tx(conn: &Connection, id: DashboardId) -> Result<Vec<DashboardItem>, DomainError> {
+    let sql = format!(
+        "SELECT {ITEM_COLS} FROM dashboard_item
+          WHERE dashboard_id = ?1 ORDER BY sort_index ASC, id ASC"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(map_sql_err)?;
+    let rows = stmt
+        .query_map(params![id.value()], row_to_item)
+        .map_err(map_sql_err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_sql_err)
+}
+
+/// Tile `id`.
+pub fn item_tx(
+    conn: &Connection,
+    id: DashboardItemId,
+) -> Result<Option<DashboardItem>, DomainError> {
+    let sql = format!("SELECT {ITEM_COLS} FROM dashboard_item WHERE id = ?1");
+    let mut stmt = conn.prepare(&sql).map_err(map_sql_err)?;
+    let mut rows = stmt
+        .query_map(params![id.value()], row_to_item)
+        .map_err(map_sql_err)?;
+    rows.next().transpose().map_err(map_sql_err)
+}
+
+pub fn rename_tx(conn: &Connection, id: DashboardId, title: &str) -> Result<(), DomainError> {
+    conn.execute(
+        "UPDATE dashboard SET title = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id.value(), title, now()],
+    )
+    .map(|_| ())
+    .map_err(map_sql_err)
+}
+
+/// Delete a dashboard; its tiles go with it (FK cascade).
+pub fn delete_tx(conn: &Connection, id: DashboardId) -> Result<(), DomainError> {
+    conn.execute("DELETE FROM dashboard WHERE id = ?1", params![id.value()])
+        .map(|_| ())
+        .map_err(map_sql_err)
+}
+
+/// Add a tile — at `position` (later tiles move down one), or at the end.
+pub fn add_item_tx(
+    conn: &Connection,
+    dashboard: DashboardId,
+    item: &NewDashboardItem,
+    position: Option<i64>,
+) -> Result<DashboardItemId, DomainError> {
+    if !TILE_KINDS.contains(&item.kind.as_str()) {
+        return Err(DomainError::Invalid(format!(
+            "unknown tile kind `{}` ({})",
+            item.kind,
+            TILE_KINDS.join(" | ")
+        )));
     }
-
-    /// Rename a dashboard. No-op if it doesn't exist.
-    pub async fn rename(&self, id: DashboardId, title: String) -> Result<(), DomainError> {
-        let id_val = id.value();
-        self.db
-            .call_mut(move |conn| {
-                let now = ts_to_string(Timestamp::now());
-                conn.execute(
-                    "UPDATE dashboard SET title = ?2, updated_at = ?3 WHERE id = ?1",
-                    params![id_val, title, now],
-                )
-                .map_err(map_sql_err)?;
-                Ok(())
-            })
-            .await
-    }
-
-    /// Delete a dashboard and (via ON DELETE CASCADE) its tiles.
-    pub async fn delete(&self, id: DashboardId) -> Result<(), DomainError> {
-        let id_val = id.value();
-        self.db
-            .call_mut(move |conn| {
-                conn.execute("DELETE FROM dashboard WHERE id = ?1", params![id_val])
-                    .map_err(map_sql_err)?;
-                Ok(())
-            })
-            .await
-    }
-
-    /// Add a tile to a dashboard, appended at the end. Returns its id.
-    pub async fn add_item(
-        &self,
-        dashboard_id: DashboardId,
-        item: NewDashboardItem,
-    ) -> Result<DashboardItemId, DomainError> {
-        if !TILE_KINDS.contains(&item.kind.as_str()) {
-            return Err(DomainError::Invalid(format!(
-                "unknown tile kind `{}` ({})",
-                item.kind,
-                TILE_KINDS.join(" | ")
-            )));
+    let at = match position {
+        Some(at) => {
+            conn.execute(
+                "UPDATE dashboard_item SET sort_index = sort_index + 1
+                  WHERE dashboard_id = ?1 AND sort_index >= ?2",
+                params![dashboard.value(), at],
+            )
+            .map_err(map_sql_err)?;
+            at
         }
-        let dash_val = dashboard_id.value();
-        self.db
-            .call_mut(move |conn| {
-                let now = ts_to_string(Timestamp::now());
-                let next: i64 = conn
-                    .query_row(
-                        "SELECT COALESCE(MAX(sort_index), -1) + 1 FROM dashboard_item WHERE dashboard_id = ?1",
-                        params![dash_val],
-                        |r| r.get(0),
-                    )
-                    .map_err(map_sql_err)?;
-                conn.execute(
-                    "INSERT INTO dashboard_item
-                       (dashboard_id, sort_index, kind, options_json, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-                    params![dash_val, next, item.kind, item.options_json, now],
-                )
-                .map_err(map_sql_err)?;
-                Ok(DashboardItemId::new(conn.last_insert_rowid()))
-            })
-            .await
-    }
+        None => conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_index), -1) + 1 FROM dashboard_item WHERE dashboard_id = ?1",
+                params![dashboard.value()],
+                |r| r.get(0),
+            )
+            .map_err(map_sql_err)?,
+    };
+    conn.execute(
+        "INSERT INTO dashboard_item
+           (dashboard_id, sort_index, kind, options_json, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+        params![dashboard.value(), at, item.kind, item.options_json, now()],
+    )
+    .map_err(map_sql_err)?;
+    Ok(DashboardItemId::new(conn.last_insert_rowid()))
+}
 
-    /// Update a tile's options. No-op if it doesn't exist.
-    pub async fn update_item(
-        &self,
-        id: DashboardItemId,
-        options_json: Option<String>,
-    ) -> Result<(), DomainError> {
-        let id_val = id.value();
-        self.db
-            .call_mut(move |conn| {
-                let now = ts_to_string(Timestamp::now());
-                conn.execute(
-                    "UPDATE dashboard_item
-                        SET options_json = ?2, updated_at = ?3
-                      WHERE id = ?1",
-                    params![id_val, options_json, now],
-                )
-                .map_err(map_sql_err)?;
-                Ok(())
-            })
-            .await
-    }
+pub fn update_item_tx(
+    conn: &Connection,
+    id: DashboardItemId,
+    options_json: Option<&str>,
+) -> Result<(), DomainError> {
+    conn.execute(
+        "UPDATE dashboard_item SET options_json = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id.value(), options_json, now()],
+    )
+    .map(|_| ())
+    .map_err(map_sql_err)
+}
 
-    /// Remove a tile.
-    pub async fn remove_item(&self, id: DashboardItemId) -> Result<(), DomainError> {
-        let id_val = id.value();
-        self.db
-            .call_mut(move |conn| {
-                conn.execute("DELETE FROM dashboard_item WHERE id = ?1", params![id_val])
-                    .map_err(map_sql_err)?;
-                Ok(())
-            })
-            .await
-    }
+pub fn remove_item_tx(conn: &Connection, id: DashboardItemId) -> Result<(), DomainError> {
+    conn.execute(
+        "DELETE FROM dashboard_item WHERE id = ?1",
+        params![id.value()],
+    )
+    .map(|_| ())
+    .map_err(map_sql_err)
+}
 
-    /// Reorder a dashboard's tiles: rewrite `sort_index` to the position of each
-    /// id in `order` (dense `0..N`), in one transaction. Ids not belonging to
-    /// the dashboard are skipped (scope guard).
-    pub async fn reorder_items(
-        &self,
-        dashboard_id: DashboardId,
-        order: Vec<DashboardItemId>,
-    ) -> Result<(), DomainError> {
-        let dash_val = dashboard_id.value();
-        self.db
-            .call_mut(move |conn| {
-                let now = ts_to_string(Timestamp::now());
-                let tx = conn.transaction().map_err(map_sql_err)?;
-                for (idx, id) in order.iter().enumerate() {
-                    tx.execute(
-                        "UPDATE dashboard_item SET sort_index = ?2, updated_at = ?3
-                          WHERE id = ?1 AND dashboard_id = ?4",
-                        params![id.value(), idx as i64, now, dash_val],
-                    )
-                    .map_err(map_sql_err)?;
-                }
-                tx.commit().map_err(map_sql_err)?;
-                Ok(())
-            })
-            .await
+/// The named tiles take the positions they're listed in.
+pub fn reorder_items_tx(
+    conn: &Connection,
+    dashboard: DashboardId,
+    order: &[DashboardItemId],
+) -> Result<(), DomainError> {
+    let now = now();
+    for (idx, id) in order.iter().enumerate() {
+        conn.execute(
+            "UPDATE dashboard_item SET sort_index = ?2, updated_at = ?3
+              WHERE id = ?1 AND dashboard_id = ?4",
+            params![id.value(), idx as i64, now, dashboard.value()],
+        )
+        .map_err(map_sql_err)?;
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -303,6 +313,14 @@ mod tests {
 
     fn store() -> SqliteDashboardStore {
         SqliteDashboardStore::new(Database::in_memory())
+    }
+
+    /// Run a `_tx` core in its own transaction.
+    async fn tx<T: Send + 'static>(
+        s: &SqliteDashboardStore,
+        f: impl Fn(&Connection) -> Result<T, DomainError> + Send + 'static,
+    ) -> Result<T, DomainError> {
+        s.db.transaction(move |c| f(c)).await
     }
 
     fn query_tile(sql: &str) -> NewDashboardItem {
@@ -315,17 +333,20 @@ mod tests {
     #[tokio::test]
     async fn an_unknown_tile_kind_is_refused() {
         let s = store();
-        let d = s.create("D".into()).await.unwrap();
-        let err = s
-            .add_item(
+        let d = tx(&s, |c| create_tx(c, "D")).await.unwrap();
+        let err = tx(&s, move |c| {
+            create_tx(c, "x").and(add_item_tx(
+                c,
                 d,
-                NewDashboardItem {
+                &NewDashboardItem {
                     kind: "metric".into(),
                     options_json: None,
                 },
-            )
-            .await
-            .unwrap_err();
+                None,
+            ))
+        })
+        .await
+        .unwrap_err();
         assert!(
             err.to_string().contains("unknown tile kind `metric`"),
             "{err}"
@@ -429,8 +450,8 @@ mod tests {
     #[tokio::test]
     async fn create_list_get_round_trip() {
         let s = store();
-        let a = s.create("Coverage".into()).await.unwrap();
-        let b = s.create("Complexity".into()).await.unwrap();
+        let a = tx(&s, |c| create_tx(c, "Coverage")).await.unwrap();
+        let b = tx(&s, |c| create_tx(c, "Complexity")).await.unwrap();
         let list = s.list().await.unwrap();
         assert_eq!(list.len(), 2);
         // Ordered by sort_index (creation order): a then b.
@@ -447,19 +468,27 @@ mod tests {
     #[tokio::test]
     async fn rename_and_delete() {
         let s = store();
-        let a = s.create("Old".into()).await.unwrap();
-        s.rename(a, "New".into()).await.unwrap();
+        let a = tx(&s, |c| create_tx(c, "Old")).await.unwrap();
+        tx(&s, move |c| rename_tx(c, a, "New")).await.unwrap();
         assert_eq!(s.get(a).await.unwrap().unwrap().dashboard.title, "New");
-        s.delete(a).await.unwrap();
+        tx(&s, move |c| delete_tx(c, a)).await.unwrap();
         assert!(s.get(a).await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn items_append_and_cascade_on_delete() {
         let s = store();
-        let d = s.create("D".into()).await.unwrap();
-        let t1 = s.add_item(d, query_tile("SELECT 1")).await.unwrap();
-        let t2 = s.add_item(d, query_tile("SELECT 2")).await.unwrap();
+        let d = tx(&s, |c| create_tx(c, "D")).await.unwrap();
+        let t1 = tx(&s, move |c| {
+            add_item_tx(c, d, &query_tile("SELECT 1"), None)
+        })
+        .await
+        .unwrap();
+        let t2 = tx(&s, move |c| {
+            add_item_tx(c, d, &query_tile("SELECT 2"), None)
+        })
+        .await
+        .unwrap();
         let got = s.get(d).await.unwrap().unwrap();
         assert_eq!(got.items.len(), 2);
         assert_eq!(got.items[0].id, t1);
@@ -469,36 +498,56 @@ mod tests {
         assert_eq!(got.items[0].kind, "query");
 
         // Deleting the dashboard cascades to its tiles.
-        s.delete(d).await.unwrap();
+        tx(&s, move |c| delete_tx(c, d)).await.unwrap();
         assert!(s.get(d).await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn update_and_remove_item() {
         let s = store();
-        let d = s.create("D".into()).await.unwrap();
-        let t = s.add_item(d, query_tile("SELECT 1")).await.unwrap();
-        s.update_item(t, Some(r#"{"viz":"number"}"#.into()))
-            .await
-            .unwrap();
+        let d = tx(&s, |c| create_tx(c, "D")).await.unwrap();
+        let t = tx(&s, move |c| {
+            add_item_tx(c, d, &query_tile("SELECT 1"), None)
+        })
+        .await
+        .unwrap();
+        tx(&s, move |c| {
+            update_item_tx(c, t, Some(r#"{"viz":"number"}"#))
+        })
+        .await
+        .unwrap();
         let got = s.get(d).await.unwrap().unwrap();
         assert_eq!(
             got.items[0].options_json.as_deref(),
             Some(r#"{"viz":"number"}"#)
         );
-        s.remove_item(t).await.unwrap();
+        tx(&s, move |c| remove_item_tx(c, t)).await.unwrap();
         assert!(s.get(d).await.unwrap().unwrap().items.is_empty());
     }
 
     #[tokio::test]
     async fn reorder_items_rewrites_sort_index() {
         let s = store();
-        let d = s.create("D".into()).await.unwrap();
-        let t1 = s.add_item(d, query_tile("SELECT 1")).await.unwrap();
-        let t2 = s.add_item(d, query_tile("SELECT 2")).await.unwrap();
-        let t3 = s.add_item(d, query_tile("SELECT 3")).await.unwrap();
+        let d = tx(&s, |c| create_tx(c, "D")).await.unwrap();
+        let t1 = tx(&s, move |c| {
+            add_item_tx(c, d, &query_tile("SELECT 1"), None)
+        })
+        .await
+        .unwrap();
+        let t2 = tx(&s, move |c| {
+            add_item_tx(c, d, &query_tile("SELECT 2"), None)
+        })
+        .await
+        .unwrap();
+        let t3 = tx(&s, move |c| {
+            add_item_tx(c, d, &query_tile("SELECT 3"), None)
+        })
+        .await
+        .unwrap();
         // Move t3 to the front.
-        s.reorder_items(d, vec![t3, t1, t2]).await.unwrap();
+        tx(&s, move |c| reorder_items_tx(c, d, &[t3, t1, t2]))
+            .await
+            .unwrap();
         let got = s.get(d).await.unwrap().unwrap();
         assert_eq!(
             got.items.iter().map(|i| i.id).collect::<Vec<_>>(),

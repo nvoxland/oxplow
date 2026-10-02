@@ -110,13 +110,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // tasks
             commands::generated::list_dashboards,
             commands::generated::get_dashboard,
-            commands::generated::create_dashboard,
-            commands::generated::rename_dashboard,
-            commands::generated::delete_dashboard,
-            commands::generated::add_dashboard_item,
-            commands::generated::update_dashboard_item,
-            commands::generated::remove_dashboard_item,
-            commands::generated::reorder_dashboard_items,
             // backlog
             // search
             commands::generated::search,

@@ -13,7 +13,7 @@ import { EmptyState } from "../components/Prompts/EmptyState.js";
  * dashboards, with a "New dashboard" action that creates-then-opens (the
  * NewStreamPage create→navigate pattern, no form). Each row navigates to the
  * dashboard's page; rows go through `RouteLink` so plain-click is in-tab and
- * modifier-click opens a new tab. Live-refreshes on `dashboardsChanged`.
+ * modifier-click opens a new tab. Live-refreshes when `v_dashboard` changes.
  */
 export function DashboardsIndexPage({
   onOpenPage,

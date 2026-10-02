@@ -135,41 +135,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	createDashboard: (title: string) => typedError<Dashboard, IpcError>(__TAURI_INVOKE("create_dashboard", { title })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	renameDashboard: (req: RenameDashboardRequest) => typedError<null, IpcError>(__TAURI_INVOKE("rename_dashboard", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	deleteDashboard: (id: DashboardId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_dashboard", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	addDashboardItem: (req: AddDashboardItemRequest) => typedError<DashboardItemId, IpcError>(__TAURI_INVOKE("add_dashboard_item", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	updateDashboardItem: (req: UpdateDashboardItemRequest) => typedError<null, IpcError>(__TAURI_INVOKE("update_dashboard_item", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	removeDashboardItem: (id: DashboardItemId) => typedError<null, IpcError>(__TAURI_INVOKE("remove_dashboard_item", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	reorderDashboardItems: (req: ReorderDashboardItemsRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_dashboard_items", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	search: (query: string, streamId: string | null, kinds: string[] | null, limit: number | null) => typedError<SearchHit[], IpcError>(__TAURI_INVOKE("search", { query, streamId, kinds, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1186,19 +1151,6 @@ export type AdapterSpec = {
 	mapping: string,
 	// The pinned tools (`[{ name, description, inputSchema }]`, JSON).
 	tools: string,
-};
-
-export type AddDashboardItemRequest = {
-	dashboardId: DashboardId,
-	// `query` | `lens` | `text`.
-	kind: string,
-	// A `query` tile's SQL.
-	sql: string | null,
-	// A `query` tile's display: a lens viz, or `metric` (the metric card).
-	display: string | null,
-	// A `lens` tile's lens id.
-	lensId: string | null,
-	optionsJson: string | null,
 };
 
 /**
@@ -4006,12 +3958,6 @@ detail: string | null } |
  */
 { kind: "configChanged" } | 
 /**
- *  A user dashboard or one of its tiles was created / edited / reordered /
- *  deleted (tsk138). Project-global (dashboards aren't stream-scoped), so
- *  fieldless — the renderer refetches the affected dashboard(s).
- */
-{ kind: "dashboardsChanged" } | 
-/**
  *  `.git` directory appeared/disappeared at the project root —
  *  "is this a git workspace" flipped. Renderer hides/restores the
  *  git-aware UI on receipt.
@@ -4319,16 +4265,6 @@ export type RemoteBranchEntry = {
 	short_name: string,
 	last_commit_at: number,
 	last_commit_subject: string,
-};
-
-export type RenameDashboardRequest = {
-	id: DashboardId,
-	title: string,
-};
-
-export type ReorderDashboardItemsRequest = {
-	dashboardId: DashboardId,
-	order: DashboardItemId[],
 };
 
 /**
@@ -4851,11 +4787,6 @@ export type UiPlacement =
 "menu" | 
 // A row's right-click menu, for the row's ref.
 "context";
-
-export type UpdateDashboardItemRequest = {
-	id: DashboardItemId,
-	optionsJson: string | null,
-};
 
 export type UsageEvent = {
 	id: string,

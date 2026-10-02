@@ -43,9 +43,8 @@ language, or anything a tile can't show, ask your agent for a
 
 ## Letting the agent build one
 
-Dashboards have an MCP surface (`list_dashboards`, `get_dashboard`,
-`create_dashboard`, `add_dashboard_item`), so you can ask for one
-instead of assembling it by hand:
+The agent can build dashboards too (the `dashboard.*` commands), so you
+can ask for one instead of assembling it by hand:
 
 > Make me a dashboard with test duration, coverage, and tokens per
 > effort, as numbers.

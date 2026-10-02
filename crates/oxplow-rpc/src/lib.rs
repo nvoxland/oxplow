@@ -217,13 +217,6 @@ macro_rules! oxplow_command_table {
                 // dashboards (tsk138)
                 list_dashboards => $crate::commands::dashboards::list_dashboards {} -> Vec<::oxplow_db::Dashboard>,
                 get_dashboard => $crate::commands::dashboards::get_dashboard { id: ::oxplow_domain::DashboardId } -> Option<::oxplow_db::DashboardWithItems>,
-                create_dashboard => $crate::commands::dashboards::create_dashboard { title: String } -> ::oxplow_db::Dashboard,
-                rename_dashboard => $crate::commands::dashboards::rename_dashboard { req: $crate::commands::dashboards::RenameDashboardRequest } -> (),
-                delete_dashboard => $crate::commands::dashboards::delete_dashboard { id: ::oxplow_domain::DashboardId } -> (),
-                add_dashboard_item => $crate::commands::dashboards::add_dashboard_item { req: $crate::commands::dashboards::AddDashboardItemRequest } -> ::oxplow_domain::DashboardItemId,
-                update_dashboard_item => $crate::commands::dashboards::update_dashboard_item { req: $crate::commands::dashboards::UpdateDashboardItemRequest } -> (),
-                remove_dashboard_item => $crate::commands::dashboards::remove_dashboard_item { id: ::oxplow_domain::DashboardItemId } -> (),
-                reorder_dashboard_items => $crate::commands::dashboards::reorder_dashboard_items { req: $crate::commands::dashboards::ReorderDashboardItemsRequest } -> (),
                 // effort
                 list_efforts_in_window => $crate::commands::effort::list_efforts_in_window { window_start: ::oxplow_domain::Timestamp, window_end: ::oxplow_domain::Timestamp } -> Vec<::oxplow_db::Effort>,
                 get_effort_files => $crate::commands::effort::get_effort_files { effort_id: ::oxplow_domain::EffortId } -> Vec<::oxplow_db::EffortFile>,

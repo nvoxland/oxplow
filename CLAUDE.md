@@ -90,7 +90,7 @@ or exact mechanics.
 | AI providers & roles — API model access, role→model mapping, keychain, recorded computations (`AiCompute`, `ai_result`), the `ai_*` collector builtins, inferred decisions | `.context/ai-providers.md` |
 | Fact substrate (measure/dimension/metric_spec/capture/fact, cube, fact collectors, MCP/IPC reads, Metrics page) | `.context/metrics.md` |
 | Profiling (the `cube_equivalence` harness, samply traps), what's already optimized, what measurement ruled out | `.context/performance.md` |
-| User-created dashboards (dashboard/dashboard_item stores, DashboardsChanged event, MCP authoring tools, custom-dashboard page + tile grid) | `.context/dashboards.md` |
+| User-created dashboards (dashboard/dashboard_item stores, the `dashboard.*` commands, custom-dashboard page + tile grid) | `.context/dashboards.md` |
 | Tab store, page chrome, rail HUD, page kinds + tab id format | `.context/pages-and-tabs.md` |
 | External URL tabs, sandboxed webview, allowlist, partition policy | `.context/external-url-tabs.md` |
 | Remote daemon mode (oxplow-rpc dispatch, oxplow-daemon, transport switch, connect flow, reconnect banner) | `.context/remote-daemon.md` |

@@ -17,6 +17,7 @@
 
 pub mod compose;
 pub mod config_commands;
+pub mod dashboard;
 pub mod effort;
 pub mod lens;
 pub mod metric;

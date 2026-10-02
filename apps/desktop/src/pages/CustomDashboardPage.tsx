@@ -13,7 +13,7 @@ import {
   removeDashboardItem,
   renameDashboard,
   reorderDashboardItems,
-  subscribeOxplowEvents,
+  subscribeDashboardEvents,
   updateDashboardItem,
 } from "../api.js";
 import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
@@ -68,7 +68,7 @@ const buttonStyle: React.CSSProperties = {
  * **dashboard filter** (time range + branch) that every tile inherits unless it
  * overrides it. Tiles flow in a responsive grid, reorder by drag-and-drop, and
  * are added via the header button, the empty state, or a right-click menu.
- * Live-refreshes on `dashboardsChanged` (structure); the metric specs and
+ * Live-refreshes when `v_dashboard` / `v_dashboard_item` change (structure); the metric specs and
  * catalog re-read when their models change.
  */
 export function CustomDashboardPage({
@@ -111,9 +111,7 @@ export function CustomDashboardPage({
       });
     };
     refresh();
-    const off = subscribeOxplowEvents((e) => {
-      if (e.kind === "dashboardsChanged") refresh();
-    });
+    const off = subscribeDashboardEvents(refresh);
     return () => {
       cancelled = true;
       off();

@@ -337,8 +337,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - Explore Data's **Save as Lens** (`save_lens` RPC) uses the lens's
       title as a new extension's `intent.purpose`.
   - **Lens tiles.** A lens can be pinned to a dashboard: "Pin to
-    Dashboard" on a lens page, or MCP `add_dashboard_item(kind: "lens",
-    lens_id)`.
+    Dashboard" on a lens page, or `dashboard.add_item { kind: "lens",
+    lens_id }`.
     - The tile is kind `lens`, with `lensId` stored in `options_json`.
     - `LensTile` renders it with the shared `LensResultView`, capped at 8
       rows, against the primary stream, since dashboards are

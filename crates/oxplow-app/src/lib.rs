@@ -1078,6 +1078,7 @@ impl Services {
         .into_iter()
         .chain(commands::review::commands())
         .chain(commands::thread::commands(config_arc.clone(), acp.clone()))
+        .chain(commands::dashboard::commands(db.clone(), sql.clone()))
         .chain(commands::stream::commands(commands::stream::StreamDeps {
             streams: streams.clone(),
             snapshot_captures: snapshot_captures.clone(),
@@ -1538,6 +1539,9 @@ mod tests {
             [
                 // The collector's own program or script (P7.B3).
                 "collector.sync",
+                // A tile's SQL is checked by the semantic engine first (P8.A5).
+                "dashboard.add_item",
+                "dashboard.update_item",
                 "git.cherry_pick",
                 "git.ignore",
                 "git.rebase",

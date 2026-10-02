@@ -323,13 +323,6 @@ pub const MANIFEST: &[Capability] = &[
     // (both); the rest are pure-UI edits (tsk140). ----
     both("list_dashboards"),
     both("get_dashboard"),
-    both("create_dashboard"),
-    both("add_dashboard_item"),
-    ui("rename_dashboard"),
-    ui("delete_dashboard"),
-    ui("update_dashboard_item"),
-    ui("remove_dashboard_item"),
-    ui("reorder_dashboard_items"),
     // ---- ui-only: comments (anchor management / destructive) ----
     ui("list_comments_for_target"),
     ui("set_comment_anchor"),

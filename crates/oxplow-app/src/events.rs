@@ -155,10 +155,6 @@ pub enum OxplowEvent {
     /// running `/oxplow:configure`). The in-memory config has been swapped;
     /// the renderer refetches `get_config`.
     ConfigChanged,
-    /// A user dashboard or one of its tiles was created / edited / reordered /
-    /// deleted (tsk138). Project-global (dashboards aren't stream-scoped), so
-    /// fieldless — the renderer refetches the affected dashboard(s).
-    DashboardsChanged,
     /// `.git` directory appeared/disappeared at the project root —
     /// "is this a git workspace" flipped. Renderer hides/restores the
     /// git-aware UI on receipt.

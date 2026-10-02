@@ -10,7 +10,6 @@ pub mod background;
 pub mod branch;
 pub mod comments;
 pub mod config;
-pub mod dashboards;
 pub mod effort;
 pub mod followup;
 pub mod generated;
