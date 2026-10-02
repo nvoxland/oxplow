@@ -559,7 +559,7 @@ ui:                  # what it adds to the core UI
     - { slot: effort.review.details, lens: change-review }
   commands: …        # its commands in core menus (stable; P6b)
   decorators: …      # experimental: a private extension only
-  replacements: …    # experimental, parsed as data only (P7)
+  replacements: …    # experimental, parsed as data only (P8)
 advisories:  [...]   # see "Advisories"
 launcher:            # entries for non-lens targets; a lens uses its own launcher: block
   - { label: …, category: Data, target: { ref: page:… } }        # a page (a ref of a kind that opens as one)
@@ -861,7 +861,7 @@ manifest still using top-level `slot_mounts:` / `decorators:` /
 | `vcs.status.header` | UncommittedChangesPage, a strip above everything | `stream_id` |
 | `vcs.status.details` | UncommittedChangesPage | `change_id` |
 | `vcs.history.sidebar` | GitHistoryPage, a side column shown only when something mounts there (`useSlotMounted`) | `stream_id` |
-| (`diff.file.header`, a file diff's header strip, was planned and cut: the diff pane is Monaco's, with no region for a lens; it waits for a page that needs it) | | |
+| (`diff.file.header`, a file diff's header strip, isn't a slot yet — P8: the file diff has a header strip above Monaco (the path, the base, Prev / Next, Open File) a lens could mount in; it waits for a lens that needs it) | | |
 | `settings.section` | Settings: a section per mounting extension, titled with its name, before AI (tsk330; `SettingsSlotSections`, `slotRuns(…, extension)`) | none |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
