@@ -48,6 +48,22 @@ pub struct PluginHealth {
     schemas: Arc<EventSchemaRegistry>,
 }
 
+/// How late a scheduled run may start: the collector and provider
+/// schedulers each tick once a minute.
+pub const SCHEDULER_TICK_MS: i64 = 60_000;
+
+/// When a scheduled contribution should have run again by: its last run —
+/// or now, when it's due and runs now — plus its interval, plus one
+/// scheduler tick. Past it, `v_plugin_health.fresh` says it missed its
+/// schedule.
+pub fn next_due_ms(last_ms: Option<i64>, every_ms: i64, now_ms: i64) -> i64 {
+    let ran = match last_ms {
+        Some(last) if now_ms - last < every_ms => last,
+        _ => now_ms,
+    };
+    ran + every_ms + SCHEDULER_TICK_MS
+}
+
 fn now() -> String {
     oxplow_domain::Timestamp::now().to_string()
 }
@@ -155,6 +171,25 @@ impl PluginHealth {
                 )
                 .with_subject([plugin_ref(&key.plugin)]);
                 oxplow_db::event_log_store::append_tx(tx, &schemas, &event).map(|_| ())
+            })
+            .await
+    }
+
+    /// What a scheduler planned, in one transaction: each contribution's
+    /// [`next_due_ms`], `None` for one that doesn't run on a schedule now
+    /// (manual, not approved, disabled).
+    pub async fn set_next_due(
+        &self,
+        plans: Vec<(PluginKey, Option<i64>)>,
+    ) -> Result<(), DomainError> {
+        self.db
+            .transaction(move |tx| {
+                let now = now();
+                for (key, due) in &plans {
+                    let due = due.map(|ms| oxplow_domain::Timestamp::from_unix_ms(ms).to_string());
+                    store::set_next_due_tx(tx, key, due.as_deref(), &now)?;
+                }
+                Ok(())
             })
             .await
     }
@@ -383,5 +418,24 @@ mod tests {
             ("collector", "failing", 1)
         );
         assert_eq!(h.disabled_reason(&collector).await.unwrap(), None);
+    }
+
+    /// A run due now is planned from now; one not yet due from its last
+    /// run — either way plus its interval and one scheduler tick.
+    #[test]
+    fn next_due_is_the_run_plus_its_interval_and_a_tick() {
+        let (every, now) = (600_000, 10_000_000);
+        assert_eq!(
+            next_due_ms(None, every, now),
+            now + every + SCHEDULER_TICK_MS
+        );
+        assert_eq!(
+            next_due_ms(Some(now - every), every, now),
+            now + every + SCHEDULER_TICK_MS
+        );
+        assert_eq!(
+            next_due_ms(Some(now - 1_000), every, now),
+            now - 1_000 + every + SCHEDULER_TICK_MS
+        );
     }
 }

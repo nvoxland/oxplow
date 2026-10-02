@@ -238,22 +238,31 @@ pub async fn list_collectors(ctx: &Collectors<'_>) -> Result<Vec<CollectorListin
 pub fn due_collectors(listings: &[CollectorListing], now_ms: i64) -> Vec<(String, String)> {
     listings
         .iter()
-        .filter(|l| l.approved && l.disabled.is_none())
-        .filter(|l| match l.spec.trigger {
-            Trigger::Manual | Trigger::On { .. } => false,
-            Trigger::Every { minutes } => {
-                let last_ms = l.run.as_ref().and_then(|s| {
-                    serde_json::from_value::<oxplow_domain::Timestamp>(serde_json::Value::String(
-                        s.last_run_at.clone(),
-                    ))
-                    .ok()
-                    .map(|t| t.unix_ms())
-                });
-                last_ms.is_none_or(|last| now_ms - last >= i64::from(minutes) * 60_000)
-            }
+        .filter(|l| {
+            scheduled_every_ms(l)
+                .is_some_and(|every| last_run_ms(l).is_none_or(|last| now_ms - last >= every))
         })
         .map(|l| (l.owner.clone(), l.spec.id.clone()))
         .collect()
+}
+
+/// Its interval, when the schedule runs it: approved, not disabled,
+/// `every:`.
+fn scheduled_every_ms(l: &CollectorListing) -> Option<i64> {
+    match l.spec.trigger {
+        Trigger::Every { minutes } if l.approved && l.disabled.is_none() => {
+            Some(i64::from(minutes) * 60_000)
+        }
+        _ => None,
+    }
+}
+
+fn last_run_ms(l: &CollectorListing) -> Option<i64> {
+    l.run.as_ref().and_then(|s| {
+        oxplow_domain::Timestamp::parse(&s.last_run_at)
+            .ok()
+            .map(|t| t.unix_ms())
+    })
 }
 
 /// Run every due collector (see [`due_collectors`]) from the primary
@@ -269,6 +278,20 @@ pub async fn run_due_collectors(state: &crate::Services) -> Vec<(String, String)
     };
     let now = oxplow_domain::Timestamp::now().unix_ms();
     let due = due_collectors(&listings, now);
+    // When each is next due, so one that misses its run reads unfresh.
+    let plans = listings
+        .iter()
+        .map(|l| {
+            let due = scheduled_every_ms(l)
+                .map(|every| crate::plugin_health::next_due_ms(last_run_ms(l), every, now));
+            (plugin_key(&l.owner, &l.spec.id), due)
+        })
+        .collect();
+    let health =
+        crate::plugin_health::PluginHealth::new(state.db.clone(), state.event_schemas.clone());
+    if let Err(e) = health.set_next_due(plans).await {
+        tracing::warn!(error = ?e, "recording the collectors' next due times failed");
+    }
     for (owner, id) in &due {
         let input = serde_json::json!({ "owner": owner, "id": id });
         if let Err(e) = state
@@ -1656,7 +1679,7 @@ fn coerce_keys(entity: &EntityDecl, keys: Vec<serde_json::Value>) -> Result<Vec<
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     /// An `AiCompute` with no roles assigned (these sources don't call
     /// models).
     fn no_ai() -> std::sync::Arc<crate::ai_compute::AiCompute> {
@@ -2282,6 +2305,38 @@ mod tests {
             .unwrap();
         assert_eq!(trigger, "every");
         assert!(run_due_collectors(&fx.svc).await.is_empty());
+
+        // P7 review (tsk722): the schedule says when it's next due — its
+        // run plus ten minutes plus the scheduler's tick — so a missed run
+        // reads unfresh.
+        let (due, fresh) = due_and_fresh(&fx.svc, "work", "star").await;
+        let due = oxplow_domain::Timestamp::parse(&due.expect("next_due_at is set"))
+            .unwrap()
+            .unix_ms();
+        let expected = oxplow_domain::Timestamp::now().unix_ms() + 11 * 60_000;
+        assert!((expected - due).abs() < 30_000, "{due} vs {expected}");
+        assert!(fresh);
+    }
+
+    /// `v_plugin_health`'s `next_due_at` and `fresh` for a contribution.
+    pub(crate) async fn due_and_fresh(
+        svc: &crate::Services,
+        plugin: &str,
+        contribution: &str,
+    ) -> (Option<String>, bool) {
+        let (plugin, contribution) = (plugin.to_string(), contribution.to_string());
+        svc.db
+            .read(move |c| {
+                c.query_row(
+                    "SELECT next_due_at, fresh FROM v_plugin_health
+                     WHERE plugin = ?1 AND contribution = ?2",
+                    [plugin, contribution],
+                    |r| Ok((r.get(0)?, r.get::<_, i64>(1)? == 1)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap()
     }
 
     #[tokio::test]

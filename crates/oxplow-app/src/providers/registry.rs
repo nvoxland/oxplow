@@ -525,11 +525,11 @@ pub struct ProviderRegistry {
     /// before a disable doesn't register what the disable stopped.
     disables: parking_lot::Mutex<BTreeMap<String, u64>>,
     /// The failure policy instances share with every plugin contribution.
-    plugins: crate::plugin_health::PluginHealth,
+    pub(super) plugins: crate::plugin_health::PluginHealth,
 }
 
 /// An instance's `plugin_health` key: `<extension>/<provider id>`.
-fn plugin_key(instance: &str) -> PluginKey {
+pub(super) fn plugin_key(instance: &str) -> PluginKey {
     let (plugin, contribution) = instance.split_once('/').unwrap_or((instance, ""));
     PluginKey {
         plugin: plugin.to_string(),

@@ -1614,6 +1614,16 @@ async fn scheduled_syncs_run_due_collectors_as_the_system() {
         .await
         .unwrap();
     assert_eq!(fx.svc.providers.sync_due().await, 1);
+    // P7 review (tsk722): the schedule says when the instance is next due:
+    // its read plus five minutes plus the scheduler's tick.
+    let (due, fresh) =
+        crate::collector_runner::tests::due_and_fresh(&fx.svc, "tracker", "fake").await;
+    let due = oxplow_domain::Timestamp::parse(&due.expect("next_due_at is set"))
+        .unwrap()
+        .unix_ms();
+    let expected = oxplow_domain::Timestamp::now().unix_ms() + 6 * 60_000;
+    assert!((expected - due).abs() < 30_000, "{due} vs {expected}");
+    assert!(fresh);
     let audits = fx.svc.commands.audit_store().list_recent(10).await.unwrap();
     let syncs: Vec<_> = audits.iter().filter(|r| r.command == sync::SYNC).collect();
     assert!(syncs.len() >= 2, "{audits:?}");
@@ -1642,6 +1652,8 @@ async fn scheduled_syncs_run_due_collectors_as_the_system() {
         .await
         .unwrap();
     assert_eq!(fx.svc.providers.sync_due().await, 0);
+    let (due, _) = crate::collector_runner::tests::due_and_fresh(&fx.svc, "tracker", "fake").await;
+    assert_eq!(due, None, "read only on request: never late");
 }
 
 /// Send the running fake new script hooks.

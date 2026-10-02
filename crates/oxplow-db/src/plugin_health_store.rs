@@ -194,14 +194,17 @@ pub fn enable_tx(c: &Connection, key: &PluginKey, now: &str) -> Result<(), Domai
     .map_err(map_sql_err)
 }
 
-/// When it should next run (`None`: it doesn't run on a schedule).
+/// When it should have run again by (`None`: it doesn't run on a
+/// schedule — then a contribution without a row gets none).
 pub fn set_next_due_tx(
     c: &Connection,
     key: &PluginKey,
     next_due_at: Option<&str>,
     now: &str,
 ) -> Result<(), DomainError> {
-    ensure(c, key, now)?;
+    if next_due_at.is_some() {
+        ensure(c, key, now)?;
+    }
     c.execute(
         &format!("UPDATE plugin_health SET next_due_at = :due WHERE {KEY}"),
         named_params! {

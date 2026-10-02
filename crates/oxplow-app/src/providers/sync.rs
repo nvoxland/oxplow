@@ -388,14 +388,19 @@ impl ProviderRegistry {
         let store = oxplow_db::SqliteProviderCollectorStore::new(self.deps.db.clone());
         let now = oxplow_domain::Timestamp::now();
         let mut started = 0;
+        let mut plans = Vec::new();
         for instance in running {
-            // Its service asked it to wait: the schedule does.
+            // Its service asked it to wait: the schedule does (and its
+            // next due time stays what it was).
             if self.is_rate_limited(&instance.name) {
                 continue;
             }
             let Some(every) = configured.get(&instance.name).and_then(|c| c.sync_every()) else {
+                plans.push((super::registry::plugin_key(&instance.name), None));
                 continue;
             };
+            let every_ms = every.as_millis() as i64;
+            let mut next_due: Option<i64> = None;
             for c in &instance.declared.collectors {
                 let last = store
                     .get(&instance.name, &c.name)
@@ -404,6 +409,12 @@ impl ProviderRegistry {
                     .flatten()
                     .and_then(|s| s.last_read_at)
                     .and_then(|t| oxplow_domain::Timestamp::parse(&t).ok());
+                let planned = crate::plugin_health::next_due_ms(
+                    last.as_ref().map(|t| t.unix_ms()),
+                    every_ms,
+                    now.unix_ms(),
+                );
+                next_due = Some(next_due.map_or(planned, |d| d.min(planned)));
                 let due = last.is_none_or(|t| {
                     now.unix_ms().saturating_sub(t.unix_ms()) >= every.as_millis() as i64
                 });
@@ -423,6 +434,12 @@ impl ProviderRegistry {
                     tracing::warn!(instance = %instance.name, collector = %c.name, error = %e, "a scheduled sync failed");
                 }
             }
+            plans.push((super::registry::plugin_key(&instance.name), next_due));
+        }
+        // When each instance is next due, so one that misses its read
+        // reads unfresh.
+        if let Err(e) = self.plugins.set_next_due(plans).await {
+            tracing::warn!(error = ?e, "recording the instances' next due times failed");
         }
         started
     }

@@ -1756,8 +1756,15 @@ V135 (P7.C1). Each plugin contribution's health on this machine, keyed
 the key, since a provider and a collector may share an id (tsk721):
 `state` (`ok` / `failing` /
 `disabled`), `reason`, `consecutive_failures`, `last_ok_at`,
-`last_error`, `mean_ms` (a moving average), `next_due_at` (a schedule's
-next slot), `updated_at`. The policy is `oxplow-app/src/plugin_health.rs`:
+`last_error`, `mean_ms` (a moving average), `next_due_at`, `updated_at`.
+`next_due_at` is when a scheduled contribution should have run again by
+— written each minute by the schedulers (`run_due_collectors` for an
+approved, enabled `every:` collector; `ProviderRegistry::sync_due` for a
+running instance, its earliest collector): the last run (or now, when it
+runs now) plus the interval plus one scheduler tick
+(`plugin_health::next_due_ms`); `NULL` for one off any schedule (manual,
+`on:`, unapproved, disabled, `syncMinutes: 0`). A rate-limited instance
+keeps its last plan (tsk722). The policy is `oxplow-app/src/plugin_health.rs`:
 three failures in a row disable it, the row and `plugin.disabled@1` in
 one transaction; `plugin.enable` clears it (`plugin.enabled@1`).
 `v_plugin_health` adds `dead_letters` (pending dead letters of its
