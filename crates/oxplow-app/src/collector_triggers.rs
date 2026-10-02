@@ -63,16 +63,25 @@ pub fn matches_where(trigger: &Trigger, event: &StoredEvent) -> bool {
     let Trigger::On { filter, .. } = trigger else {
         return false;
     };
-    filter
-        .iter()
-        .all(|(field, want)| match event.envelope.payload.get(field) {
-            Some(serde_json::Value::String(s)) => s == want,
-            Some(serde_json::Value::Bool(b)) => want.parse::<bool>().ok() == Some(*b),
-            Some(serde_json::Value::Number(n)) => {
-                want.parse::<serde_json::Number>().ok().as_ref() == Some(n)
-            }
-            _ => false,
-        })
+    payload_matches(filter, &event.envelope.payload)
+}
+
+/// Whether `payload` has each `filter` field equal to its value. The value
+/// is the YAML text: a string matches exactly, a boolean by `true`/`false`, a
+/// number by value (`1` matches `1.0`). A field the payload lacks, or holds
+/// as an object, list or null, never matches.
+pub fn payload_matches(
+    filter: &std::collections::BTreeMap<String, String>,
+    payload: &serde_json::Value,
+) -> bool {
+    filter.iter().all(|(field, want)| match payload.get(field) {
+        Some(serde_json::Value::String(s)) => s == want,
+        Some(serde_json::Value::Bool(b)) => want.parse::<bool>().ok() == Some(*b),
+        Some(serde_json::Value::Number(n)) => {
+            matches!((n.as_f64(), want.parse::<f64>()), (Some(a), Ok(b)) if a == b)
+        }
+        _ => false,
+    })
 }
 
 /// Hand `event` to the fact engine, which runs the fact collectors it
@@ -256,6 +265,36 @@ mod tests {
         let id = env.id.clone();
         svc.event_log_store.append(env).await.unwrap();
         svc.event_log_store.get(id).await.unwrap().unwrap()
+    }
+
+    /// A `where` value names the payload's field as written in YAML (always
+    /// a string); a number matches by value whatever its JSON spelling, and a
+    /// field the payload lacks never matches.
+    #[test]
+    fn a_where_filter_compares_by_value_and_a_missing_field_never_matches() {
+        let filter = |pairs: &[(&str, &str)]| -> std::collections::BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let payload = json!({ "file_count": 1.0, "unchanged": false, "trigger": "git_refs" });
+        assert!(payload_matches(&filter(&[("file_count", "1")]), &payload));
+        assert!(payload_matches(&filter(&[("file_count", "1.0")]), &payload));
+        assert!(!payload_matches(&filter(&[("file_count", "2")]), &payload));
+        assert!(payload_matches(
+            &filter(&[("unchanged", "false")]),
+            &payload
+        ));
+        assert!(payload_matches(
+            &filter(&[("trigger", "git_refs")]),
+            &payload
+        ));
+        assert!(!payload_matches(&filter(&[("missing", "x")]), &payload));
+        assert!(
+            payload_matches(&filter(&[]), &payload),
+            "no filter matches every event"
+        );
     }
 
     async fn rows(svc: &Services, sql: &str) -> serde_json::Value {

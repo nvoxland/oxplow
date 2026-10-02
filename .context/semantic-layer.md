@@ -672,7 +672,11 @@ a lens over its view warns that its rows aren't refreshing.
 async pump consumer). When an event an enabled collector's `on:` names is
 logged — and each `where` field of its payload equals its value — the
 consumer runs that collector for it (`collector_runner::run_for_event`),
-serially, as the system:
+serially, as the system. `where` values are YAML text compared by kind
+(`payload_matches`): a string exactly, a boolean as `true`/`false`, a
+number by value (`file_count: 1` matches `1.0`); **a field the payload
+lacks never matches**, so `where: { trigger: git_refs }` skips every event
+type without a `trigger` field:
 
 - **Input.** The `input` SQL binds the event's anchors by name
   (`:stream_id`, `:snapshot_id`, `:effort_id`, `:thread_id`, `:turn_id`,
