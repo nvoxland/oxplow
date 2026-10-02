@@ -136,7 +136,8 @@ in the background. `DuplicationRecorder::record`
   built-in whole-tree collector's (P7.B5, closes tsk388): the
   `duplicate_blocks(min_lines)` Starlark builtin over the whole tree on
   every ref move (`snapshot.taken`, `trigger: git_refs`), an empty capture
-  clearing the metric after a refactor (tsk44) —
+  clearing the metric after a refactor (tsk44); those restates are history,
+  never baselines the dominated-capture prune acts on (tsk709) —
   [metrics.md](./metrics.md) → "built-in";
 - a status-bar background task. Its rows' commits announce it
   (`ModelsChanged` on `v_code_quality_scan`); the `CodeQualityScanned`

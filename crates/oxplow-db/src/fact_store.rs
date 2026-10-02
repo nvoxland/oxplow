@@ -2425,7 +2425,11 @@ impl SqliteFactStore {
     ///
     /// Trade-off, accepted deliberately: a per-path measure's TREND loses its
     /// pre-baseline points (the current fold and every effort window at/after
-    /// the baseline are unaffected). Runs after each successful full sweep.
+    /// the baseline are unaffected). Runs after each successful baseline
+    /// sweep. Only a producer whose facts land on a per-path measure is a
+    /// baseline producer: a whole-tree restate of a complete-scope measure
+    /// (`oxplow.duplicate_lines`, empty on a clean tree) is history and is
+    /// never dominated (tsk709).
     ///
     /// **Invalidates that stream's cube when it drops anything** (tsk100). Deleted
     /// captures' facts cascade, and `metric_live_fact` cascades with them — but
@@ -2459,6 +2463,18 @@ impl SqliteFactStore {
                               ) WHERE rn = 1
                           ) lf ON lf.stream_id = c.stream_id AND lf.producer = c.producer
                          WHERE c.stream_id = ?1
+                           -- A baseline producer: its facts land on a per-path
+                           -- measure somewhere. A whole-tree restate of a
+                           -- complete-scope measure (empty on a clean tree)
+                           -- has no fact at all and is history, not a baseline.
+                           AND EXISTS (
+                             SELECT 1 FROM metric_capture pc
+                               JOIN fact pf ON pf.capture_id = pc.id
+                               JOIN measure pm ON pm.id = pf.measure_id
+                              WHERE pc.stream_id = lf.stream_id
+                                AND pc.producer = lf.producer
+                                AND pm.capture_scope = 'per-path'
+                           )
                            AND c.effort_id IS NULL
                            AND c.status = 'done'
                            AND c.scan_kind IN ('delta', 'full')
@@ -3667,6 +3683,98 @@ mod tests {
         assert!(
             rows.is_empty(),
             "stale cube rows must not survive the prune"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_whole_tree_restate_is_not_a_baseline_that_prunes() {
+        // P7 review (tsk709): a whole-tree collector on a complete-scope
+        // measure (`oxplow.duplicate_lines`) restates the tree on every ref
+        // move, and a clean tree's restate is an EMPTY full capture. Empty
+        // captures carry no fact at all, so the "carries a non-per-path fact"
+        // guard can't tell them from a per-path baseline — and the previous
+        // empty restate was pruned on every commit, wiping the stream's cube
+        // each time. The prune is about per-path baselines: a producer with
+        // no per-path fact anywhere is not one.
+        let store = fixture().await;
+        let complete = store
+            .upsert_measure(NewMeasure::new("acme.dups", "acme.dups"))
+            .await
+            .unwrap();
+        let per_path = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-path".into(),
+                ..NewMeasure::new("acme.hits", "acme.hits")
+            })
+            .await
+            .unwrap();
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+        let first = full_capture(
+            &store,
+            "dup",
+            1,
+            "2026-06-30T09:00:00.000000Z",
+            complete,
+            &[],
+        )
+        .await;
+        let second = full_capture(
+            &store,
+            "dup",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            complete,
+            &[],
+        )
+        .await;
+        // A real per-path baseline beside it, so the cube has something built.
+        let hits = full_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T09:30:00.000000Z",
+            per_path,
+            &[("a.rs", 8.0)],
+        )
+        .await;
+        store
+            .write_cube_rows(
+                per_path,
+                1,
+                None,
+                hits,
+                at("2026-06-30T09:30:00.000000Z"),
+                vec![NewCubeRow {
+                    producer: "g".into(),
+                    dims_key: "{}".into(),
+                    fact_count: 1,
+                    value_sum: 8.0,
+                    value_min: Some(8.0),
+                    value_max: Some(8.0),
+                    numerator: 0.0,
+                    denominator: 0.0,
+                }],
+                store.cube_epoch().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let pruned = store.prune_dominated_tree_captures(1).await.unwrap();
+        assert_eq!(
+            pruned, 0,
+            "an empty restate of a complete measure dominates nothing"
+        );
+        let alive: Vec<i64> = store
+            .captures_for_producers(vec!["dup".into()])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(alive, vec![first, second], "the metric's history stands");
+        assert!(
+            store.cube_watermark(per_path, 1).await.unwrap().is_some(),
+            "the stream's cube survives a clean tree's restate"
         );
     }
 

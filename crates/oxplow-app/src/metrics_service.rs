@@ -1561,15 +1561,19 @@ impl MetricsService {
                 .await;
             ctx.scan_kind = "full";
             ctx.event = event.clone();
+            // Whole-tree collectors restate the tree on every qualifying
+            // take; only the `needing` ones are baselines (tsk709).
+            let baselined = full_gauges.iter().any(|g| needing.contains(&g.key));
             let r = self.run_collector_sweep(&full_gauges, &ctx, files).await;
             let full_ok = r.failed.is_empty();
             report.ran += r.ran;
             report.failed.extend(r.failed);
             // A fresh baseline makes every older effort-less tree capture dead
             // weight (tsk75 — their facts were ~69% of the table and every
-            // full-history read paid for them). Prune only on a clean sweep:
-            // a failed gauge wrote no baseline, so its history must survive.
-            if full_ok {
+            // full-history read paid for them). Prune only on a clean baseline
+            // sweep: a failed gauge wrote no baseline, so its history must
+            // survive, and a whole-tree restate alone baselines nothing.
+            if full_ok && baselined {
                 if let Some(facts) = self.fact_store.as_ref() {
                     match facts.prune_dominated_tree_captures(stream_id.value()).await {
                         Ok(n) if n > 0 => {
@@ -3317,6 +3321,43 @@ mod tests {
             .unwrap();
         assert!(current().await.is_empty(), "an empty capture clears it");
         assert_eq!(captures().await, 2);
+
+        // P7 review (tsk709): a second clean restate is another empty
+        // capture. It is history, not a baseline: the earlier captures and
+        // the stream's cube stay.
+        let measure_id = measure.id;
+        svc.db
+            .transaction(move |c| {
+                c.execute(
+                    "INSERT INTO metric_cube_state (measure_id, stream_id, branch, last_capture_id, last_captured_at)
+                     VALUES (?1, 1, '', 1, '2026-01-01T00:00:00.000000Z')",
+                    [measure_id],
+                )
+                .map(|_| ())
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let fourth =
+            snapshot_with_content(&svc, &[("src/other.rs", Some("fn other() {}\n"))]).await;
+        consumer
+            .handle(&log_take(&svc, fourth, SnapshotTrigger::GitRefs, true, 0).await)
+            .await
+            .unwrap();
+        assert_eq!(captures().await, 3, "a clean restate prunes nothing");
+        let cube_states: i64 = svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT count(*) FROM metric_cube_state WHERE stream_id = 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(cube_states, 1, "the stream's cube survives a clean restate");
     }
 
     fn starlark_gauge(key: &str, entry_file: &str) -> FactCollector {

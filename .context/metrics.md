@@ -158,7 +158,12 @@ welded to collection.
 > deletes them (facts CASCADE) after each clean full sweep and once per boot.
 > Deliberately narrow: effort-stamped captures survive (attribution history),
 > captures carrying any non-per-path-measure fact survive, producers with no
-> baseline survive, asserted/failed captures survive. Accepted trade-off: a
+> baseline survive, asserted/failed captures survive, and so does a producer
+> with no per-path fact anywhere — a whole-tree restate of a complete-scope
+> measure (`oxplow.duplicate_lines`, empty on a clean tree) is history, not a
+> baseline (tsk709; before that rule each commit pruned the previous empty
+> restate and wiped the stream's cube). The post-sweep prune runs only when
+> the sweep baselined a `needing` collector. Accepted trade-off: a
 > per-path measure's TREND loses pre-baseline points; the current fold and every
 > effort window at/after the baseline are unaffected. Read paths are also
 > bounded SQL-side now (`facts_for_measure_in_stream`, `pathless_scalar_facts`,
