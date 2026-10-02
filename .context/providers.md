@@ -88,9 +88,10 @@ checkpoint (opaque to the host), then `{ records }`.
 `Cancelled`), `slow-check:<ms>` (check waits first), `crash` (the next request drops the connection; the binary
 exits 3) and `bad-declarations` (`initialize` answers something other
 than `declarations()`, for the host's handshake check), `progress` (a
-read sends `$/progress` before each record), `read-fail-after:<n>` (a
+read sends `$/progress` before each record, then takes 100 ms over it), `read-fail-after:<n>` (a
 read fails after `n` checkpointed records) and `bad-record` (a read
-streams another provider's item).
+streams another provider's item), `rate-limit:<ms>` (its next invoke or
+read is refused `RateLimited`).
 `tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
 notifications against the goldens.
 
@@ -230,8 +231,21 @@ through it reconcile, `provider.enable` or `set_instance`). `Peer::start`
 refuses once the other side's stream has closed, instead of leaving a
 waiter that nothing resolves.
 
+**Rate limits** (P7.A4). A `RateLimited` reply (`data.retry_after_ms`)
+never counts toward disable, and never resets the count either. A wait of
+at most `RATE_LIMIT_WAIT_MAX` (10 s) is slept through and the call
+retried once — a read retries from its last checkpoint; a longer one, a
+second, or one with no `retry_after_ms` fails the call honestly ("is
+rate limited (…); try again in Ns"). Either way the instance's
+`rate_limited_until` is set (cleared by the next success), and the
+schedule skips the instance until then. **Progress**: a read's
+`$/progress` is the instance's `activity` (`issues: page 2 (40%)`) while
+it runs, cleared when it ends. Settings → Integrations appends both to
+the instance's status (neither is a problem colour). The fake's
+`rate-limit:<ms>` hook refuses its next `invoke` or `read` that way.
+
 **Health** (`InstanceHealth { state, consecutive_failures, last_ok_at,
-mean_invoke_ms }`, per machine, in memory): `state` is `off`,
+mean_invoke_ms, rate_limited_until, activity }`, per machine, in memory): `state` is `off`,
 `missing` (configured, but no enabled extension declares it),
 `unapproved`, `unconfigured { problems }`, `checking`, `ready`,
 `failing { errors }` (the last five) or `disabled { reason }`. A failed

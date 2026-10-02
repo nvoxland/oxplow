@@ -53,6 +53,8 @@ pub struct CollectorRead {
 struct ReadFailure {
     error: CommandError,
     counts: bool,
+    /// The provider's service said to wait: its message and how long.
+    rate_limit: Option<(String, Option<u64>)>,
 }
 
 impl ReadFailure {
@@ -60,6 +62,15 @@ impl ReadFailure {
         Self {
             error: CommandError::Failed { message },
             counts: true,
+            rate_limit: None,
+        }
+    }
+
+    fn uncounted(error: CommandError) -> Self {
+        Self {
+            error,
+            counts: false,
+            rate_limit: None,
         }
     }
 }
@@ -96,23 +107,42 @@ impl Instance {
                 ),
             })?;
         let store = oxplow_db::SqliteProviderCollectorStore::new(self.deps.db.clone());
-        let resume = store
-            .get(&self.name, collector)
-            .await?
-            .and_then(|s| s.state);
         let started = Instant::now();
-        let outcome = match self.connection().await {
-            Ok((peer, handle)) => {
-                let outcome = self.stream(actor, &peer, handle, &decl, resume).await;
-                self.forget_if_closed(&peer).await;
-                outcome
+        let mut retried = false;
+        let outcome = loop {
+            // From the last checkpoint — a retry resumes where the
+            // rate-limited read's last batch landed.
+            let resume = store
+                .get(&self.name, collector)
+                .await?
+                .and_then(|s| s.state);
+            let outcome = match self.connection().await {
+                Ok((peer, handle)) => {
+                    let outcome = self.stream(actor, &peer, handle, &decl, resume).await;
+                    self.forget_if_closed(&peer).await;
+                    outcome
+                }
+                // A start that failed was counted as it failed.
+                Err(error) => Err(ReadFailure::uncounted(error)),
+            };
+            if let Err(ReadFailure {
+                rate_limit: Some((message, retry_after_ms)),
+                ..
+            }) = &outcome
+            {
+                match self.rate_limited(message, *retry_after_ms, retried).await {
+                    None => {
+                        retried = true;
+                        continue;
+                    }
+                    Some(error) => break Err(ReadFailure::uncounted(error)),
+                }
             }
-            // A start that failed was counted as it failed.
-            Err(error) => Err(ReadFailure {
-                error,
-                counts: false,
-            }),
+            break outcome;
         };
+        if let Some(r) = self.registry.upgrade() {
+            r.set_activity(&self.name, None);
+        }
         let registry = self.registry.upgrade();
         let (finished, result) = match outcome {
             Ok(records) => {
@@ -127,7 +157,7 @@ impl Instance {
                     }),
                 )
             }
-            Err(ReadFailure { error, counts }) => {
+            Err(ReadFailure { error, counts, .. }) => {
                 if let (true, Some(r)) = (counts, &registry) {
                     r.failed(&self.name, error.to_string()).await;
                 }
@@ -195,13 +225,33 @@ impl Instance {
                         .await
                         .map_err(|e| ReadFailure::counted(e.to_string()))?;
                 }
-                // Progress is shown while a read runs (P7.A4).
+                // What it's doing, shown while the read runs (P7.A4).
+                notify::PROGRESS => {
+                    if let (Ok(p), Some(r)) = (
+                        serde_json::from_value::<notify::Progress>(params),
+                        self.registry.upgrade(),
+                    ) {
+                        r.set_activity(&self.name, Some(activity_of(&decl.name, &p)));
+                    }
+                }
                 _ => {}
             }
         }
         let result: ReadResult = match call.reply().await {
             Ok(v) => serde_json::from_value(v)
                 .map_err(|e| ReadFailure::counted(format!("its read result: {e}")))?,
+            Err(ProtocolError::RateLimited {
+                message,
+                retry_after_ms,
+            }) => {
+                return Err(ReadFailure {
+                    error: CommandError::Failed {
+                        message: message.clone(),
+                    },
+                    counts: false,
+                    rate_limit: Some((message, retry_after_ms)),
+                });
+            }
             Err(e) => {
                 let counts = !matches!(
                     e,
@@ -210,6 +260,7 @@ impl Instance {
                 return Err(ReadFailure {
                     error: self.command_error(e),
                     counts,
+                    rate_limit: None,
                 });
             }
         };
@@ -299,6 +350,17 @@ impl Instance {
     }
 }
 
+/// A `$/progress` as a line on the instance: `issues: page 2 (40%)`.
+fn activity_of(collector: &str, p: &notify::Progress) -> String {
+    let percent = p.fraction.map(|f| format!(" ({:.0}%)", f * 100.0));
+    match (&p.message, percent) {
+        (Some(m), Some(pc)) => format!("{collector}: {m}{pc}"),
+        (Some(m), None) => format!("{collector}: {m}"),
+        (None, Some(pc)) => format!("{collector}: reading{pc}"),
+        (None, None) => format!("{collector}: reading"),
+    }
+}
+
 impl ProviderRegistry {
     /// Read every collector of `instance` that is due on its schedule
     /// (`syncMinutes`), as the system, through `provider.sync` so each is
@@ -313,6 +375,10 @@ impl ProviderRegistry {
         let now = oxplow_domain::Timestamp::now();
         let mut started = 0;
         for instance in running {
+            // Its service asked it to wait: the schedule does.
+            if self.is_rate_limited(&instance.name) {
+                continue;
+            }
             let Some(every) = configured.get(&instance.name).and_then(|c| c.sync_every()) else {
                 continue;
             };

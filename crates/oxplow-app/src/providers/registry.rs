@@ -55,6 +55,9 @@ pub const FAILURES_TO_DISABLE: u32 = 3;
 pub const MAX_BACKOFF: Duration = Duration::from_secs(60);
 /// The errors an instance's health keeps.
 const ERRORS_KEPT: usize = 5;
+/// The longest rate-limit wait a call or read sits through (then retries
+/// once); a longer one fails the call — never counted as a failure.
+pub const RATE_LIMIT_WAIT_MAX: Duration = Duration::from_secs(10);
 /// The command a person runs to (re-)enable an instance.
 pub const ENABLE: &str = "provider.enable";
 
@@ -128,6 +131,13 @@ pub struct InstanceHealth {
     pub last_ok_at: Option<String>,
     /// A moving average of its successful calls.
     pub mean_invoke_ms: Option<f64>,
+    /// The provider's service said to wait until then (RFC 3339): a rate
+    /// limit, which never counts as a failure. Cleared by the next
+    /// success.
+    pub rate_limited_until: Option<String>,
+    /// What a read in progress last said (`$/progress`); `None` between
+    /// reads.
+    pub activity: Option<String>,
 }
 
 impl InstanceHealth {
@@ -137,6 +147,8 @@ impl InstanceHealth {
             consecutive_failures: 0,
             last_ok_at: None,
             mean_invoke_ms: None,
+            rate_limited_until: None,
+            activity: None,
         }
     }
 }
@@ -339,21 +351,76 @@ impl Instance {
 
     /// Run one of its declared commands.
     pub async fn invoke(&self, command: &str, input: Value) -> Result<InvokeResult, CommandError> {
-        let (peer, handle) = self.connection().await?;
-        let started = Instant::now();
-        let result = call_within::<_, InvokeResult>(
-            &peer,
-            method::INVOKE,
-            &InvokeParams {
-                handle,
-                command: command.into(),
-                input,
-            },
-            self.deps.call_timeout,
-        )
-        .await;
-        // It died under the call: the next one restarts it.
-        self.forget_if_closed(&peer).await;
+        let mut retried = false;
+        loop {
+            let (peer, handle) = self.connection().await?;
+            let started = Instant::now();
+            let result = call_within::<_, InvokeResult>(
+                &peer,
+                method::INVOKE,
+                &InvokeParams {
+                    handle,
+                    command: command.into(),
+                    input: input.clone(),
+                },
+                self.deps.call_timeout,
+            )
+            .await;
+            // It died under the call: the next one restarts it.
+            self.forget_if_closed(&peer).await;
+            if let Err(ProtocolError::RateLimited {
+                message,
+                retry_after_ms,
+            }) = &result
+            {
+                match self.rate_limited(message, *retry_after_ms, retried).await {
+                    Some(err) => return Err(err),
+                    None => {
+                        retried = true;
+                        continue;
+                    }
+                }
+            }
+            return self.after_call(result, started).await;
+        }
+    }
+
+    /// A rate limit: noted on its health (never counted as a failure).
+    /// `None` when it was short enough to have been waited out — retry,
+    /// once; else the error that says when to try again.
+    pub(super) async fn rate_limited(
+        &self,
+        message: &str,
+        retry_after_ms: Option<u64>,
+        retried: bool,
+    ) -> Option<CommandError> {
+        let wait = retry_after_ms.map(Duration::from_millis);
+        if let Some(r) = self.registry.upgrade() {
+            r.note_rate_limit(&self.name, wait);
+        }
+        match wait {
+            Some(wait) if !retried && wait <= RATE_LIMIT_WAIT_MAX => {
+                tokio::time::sleep(wait).await;
+                None
+            }
+            _ => Some(CommandError::Failed {
+                message: format!(
+                    "provider `{}` is rate limited ({message}){}",
+                    self.name,
+                    match wait {
+                        Some(w) => format!("; try again in {}s", w.as_secs().max(1)),
+                        None => String::new(),
+                    }
+                ),
+            }),
+        }
+    }
+
+    async fn after_call(
+        &self,
+        result: Result<InvokeResult, ProtocolError>,
+        started: Instant,
+    ) -> Result<InvokeResult, CommandError> {
         let registry = self.registry.upgrade();
         match result {
             Ok(out) => {
@@ -1183,6 +1250,35 @@ impl ProviderRegistry {
         }
     }
 
+    /// Its service said to wait (`wait`, when it said how long).
+    pub(super) fn note_rate_limit(&self, instance: &str, wait: Option<Duration>) {
+        let until = oxplow_domain::Timestamp::from_unix_ms(
+            oxplow_domain::Timestamp::now().unix_ms()
+                + wait.unwrap_or(RATE_LIMIT_WAIT_MAX).as_millis() as i64,
+        );
+        if let Some(h) = self.health.lock().get_mut(instance) {
+            h.rate_limited_until = Some(until.to_string());
+        }
+    }
+
+    /// What a read in progress says it's doing; `None` when it ends.
+    pub(super) fn set_activity(&self, instance: &str, activity: Option<String>) {
+        if let Some(h) = self.health.lock().get_mut(instance) {
+            h.activity = activity;
+        }
+    }
+
+    /// Whether its service asked it to wait past now.
+    pub(super) fn is_rate_limited(&self, instance: &str) -> bool {
+        let now = oxplow_domain::Timestamp::now().unix_ms();
+        self.health
+            .lock()
+            .get(instance)
+            .and_then(|h| h.rate_limited_until.as_deref())
+            .and_then(|t| oxplow_domain::Timestamp::parse(t).ok())
+            .is_some_and(|t| t.unix_ms() > now)
+    }
+
     pub(super) fn call_succeeded(&self, instance: &str, took: Duration) {
         let ms = took.as_secs_f64() * 1000.0;
         let mut health = self.health.lock();
@@ -1192,6 +1288,7 @@ impl ProviderRegistry {
         h.state = InstanceState::Ready;
         h.consecutive_failures = 0;
         h.last_ok_at = Some(now());
+        h.rate_limited_until = None;
         h.mean_invoke_ms = Some(match h.mean_invoke_ms {
             None => ms,
             Some(mean) => mean + (ms - mean) / 10.0,

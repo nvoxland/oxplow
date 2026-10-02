@@ -17,7 +17,7 @@ export interface IntegrationRowModel {
   problem: boolean;
 }
 
-export function integrationRow(v: ProviderInstanceView): IntegrationRowModel {
+export function integrationRow(v: ProviderInstanceView, now: Date = new Date()): IntegrationRowModel {
   const s = v.health.state;
   let status: string;
   switch (s.state) {
@@ -47,6 +47,13 @@ export function integrationRow(v: ProviderInstanceView): IntegrationRowModel {
       status = `Disabled: ${s.reason}`;
       break;
   }
+  // A rate limit says until when, and a read in progress what it's
+  // doing — neither is a problem (P7.A4).
+  const limited = v.health.rateLimitedUntil;
+  if (limited && new Date(limited).getTime() > now.getTime()) {
+    status = `${status} · rate limited until ${new Date(limited).toLocaleTimeString()}`;
+  }
+  if (v.health.activity) status = `${status} · ${v.health.activity}`;
   const enableLabel = s.state === "disabled" ? "Enable again" : v.enabled ? "Disable" : "Enable";
   return {
     key: v.instance,

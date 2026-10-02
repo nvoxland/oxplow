@@ -2854,6 +2854,17 @@ export type InstanceHealth = {
 	lastOkAt: string | null,
 	// A moving average of its successful calls.
 	meanInvokeMs: number | null,
+	/**
+	 *  The provider's service said to wait until then (RFC 3339): a rate
+	 *  limit, which never counts as a failure. Cleared by the next
+	 *  success.
+	 */
+	rateLimitedUntil: string | null,
+	/**
+	 *  What a read in progress last said (`$/progress`); `None` between
+	 *  reads.
+	 */
+	activity: string | null,
 };
 
 // Where an instance stands on this machine.

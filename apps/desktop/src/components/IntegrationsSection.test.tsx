@@ -18,7 +18,7 @@ const instance = {
   configSchema: { type: "object", properties: { team: { type: "string" } } },
   approved: true,
   credentials: [],
-  health: { state: { state: "ready" }, consecutiveFailures: 0, lastOkAt: null, meanInvokeMs: null },
+  health: { state: { state: "ready" }, consecutiveFailures: 0, lastOkAt: null, meanInvokeMs: null, rateLimitedUntil: null, activity: null },
   collectors: [{ name: "work_items", entity: "work_item", status: "ok", error: null, lastReadAt: "2026-10-01T00:00:00Z", records: 3 }],
 };
 mock.module("../api.js", () => ({

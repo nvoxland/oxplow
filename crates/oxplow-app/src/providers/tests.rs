@@ -1416,3 +1416,148 @@ async fn set_hooks(fx: &EffortFixture, hooks: &str) {
     let instance = fx.svc.providers.get(INSTANCE).await.expect("running");
     instance.hook(hooks).await;
 }
+
+/// Run `work_item.create` on the fake as the person.
+async fn create_on_fake(
+    fx: &EffortFixture,
+) -> Result<oxplow_domain::CommandOutcome, oxplow_domain::CommandError> {
+    fx.svc
+        .commands
+        .run(
+            &Actor::Human,
+            "work_item.create",
+            json!({ "provider": "fake", "title": "x" }),
+            false,
+        )
+        .await
+}
+
+async fn enabled_fake() -> (EffortFixture, Extension) {
+    let (fx, ext) = approved("").await;
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    (fx, ext)
+}
+
+/// P7.A4: a short rate limit is waited out and the call retried once; it
+/// never counts as a failure.
+#[tokio::test]
+async fn a_short_rate_limit_is_waited_out_and_doesnt_count() {
+    let (fx, _ext) = enabled_fake().await;
+    set_hooks(&fx, "rate-limit:200").await;
+    let started = std::time::Instant::now();
+    create_on_fake(&fx).await.unwrap();
+    assert!(started.elapsed() >= std::time::Duration::from_millis(200));
+    let health = fx.svc.providers.health(INSTANCE).unwrap();
+    assert_eq!(health.consecutive_failures, 0);
+    assert_eq!(health.rate_limited_until, None, "the success clears it");
+
+    // A read is retried the same way, from its last checkpoint.
+    set_hooks(&fx, "rate-limit:100").await;
+    let out = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            sync::SYNC,
+            json!({ "instance": INSTANCE }),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.result["reads"][0]["records"], 1);
+}
+
+/// P7.A4: a long rate limit fails the call honestly, without counting,
+/// and the schedule waits it out.
+#[tokio::test]
+async fn a_long_rate_limit_fails_without_counting_and_defers_the_schedule() {
+    let (fx, _ext) = enabled_fake().await;
+    set_hooks(&fx, "rate-limit:60000").await;
+    let err = create_on_fake(&fx).await.unwrap_err().to_string();
+    assert!(
+        err.contains("rate limited") && err.contains("try again in 60s"),
+        "{err}"
+    );
+    let health = fx.svc.providers.health(INSTANCE).unwrap();
+    assert_eq!(health.consecutive_failures, 0);
+    assert!(health.rate_limited_until.is_some());
+    fx.svc
+        .db
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE provider_collector_state SET last_read_at = '2020-01-01T00:00:00.000000Z'",
+                [],
+            )
+            .map(|_| ())
+            .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+        })
+        .await
+        .unwrap();
+    configure(&fx, true, json!({ "team": "core" }));
+    assert_eq!(fx.svc.providers.sync_due().await, 0, "it waits");
+}
+
+/// P7.A4: what a read in progress says shows on the instance while it
+/// runs, and goes when it ends.
+#[tokio::test]
+async fn progress_shows_on_the_instance_while_a_read_runs() {
+    let (fx, _ext) = enabled_fake().await;
+    three_items(&fx).await;
+    set_hooks(&fx, "progress").await;
+    let svc = fx.svc.clone();
+    let reading = tokio::spawn(async move {
+        svc.commands
+            .run(
+                &Actor::Human,
+                sync::SYNC,
+                json!({ "instance": INSTANCE }),
+                false,
+            )
+            .await
+    });
+    let mut seen = Vec::new();
+    while !reading.is_finished() {
+        if let Some(a) = fx.svc.providers.health(INSTANCE).unwrap().activity {
+            if !seen.contains(&a) {
+                seen.push(a);
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    reading.await.unwrap().unwrap();
+    assert!(
+        seen.contains(&"work_items: record 1 of 3 (33%)".to_string()),
+        "{seen:?}"
+    );
+    assert_eq!(fx.svc.providers.health(INSTANCE).unwrap().activity, None);
+}
+
+/// P7.A4: rate limits interleaved with failures neither count nor reset
+/// the count: three real failures still disable the instance.
+#[tokio::test]
+async fn three_failures_disable_it_with_rate_limits_interleaved() {
+    let (fx, _ext) = enabled_fake().await;
+    set_hooks(&fx, "fail-next:1").await;
+    assert!(create_on_fake(&fx).await.is_err());
+    set_hooks(&fx, "rate-limit:60000").await;
+    assert!(create_on_fake(&fx).await.is_err());
+    assert_eq!(
+        fx.svc
+            .providers
+            .health(INSTANCE)
+            .unwrap()
+            .consecutive_failures,
+        1
+    );
+    set_hooks(&fx, "fail-next:2").await;
+    assert!(create_on_fake(&fx).await.is_err());
+    assert!(create_on_fake(&fx).await.is_err());
+    assert!(matches!(
+        fx.svc.providers.health(INSTANCE).unwrap().state,
+        InstanceState::Disabled { .. }
+    ));
+}

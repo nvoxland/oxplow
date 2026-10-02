@@ -13,7 +13,7 @@ const view = (over: Partial<ProviderInstanceView>): ProviderInstanceView => ({
   configSchema: null,
   approved: true,
   credentials: [],
-  health: { state: { state: "off" }, consecutiveFailures: 0, lastOkAt: null, meanInvokeMs: null },
+  health: { state: { state: "off" }, consecutiveFailures: 0, lastOkAt: null, meanInvokeMs: null, rateLimitedUntil: null, activity: null },
   collectors: [],
   ...over,
 });
@@ -77,4 +77,17 @@ test("collectorLine says what a collector's reads delivered", async () => {
   const failed = collectorLine({ ...base, status: "error", error: "timed out" });
   expect(failed.problem).toBe(true);
   expect(failed.text).toContain("its last read failed (timed out)");
+});
+
+// P7.A4: a running read says what it's doing, and a rate limit until
+// when; once that time has passed it isn't mentioned.
+test("integrationRow shows a read's progress and a rate limit", () => {
+  const now = new Date("2026-10-01T12:00:00Z");
+  const ready = (health: Partial<ProviderInstanceView["health"]>) =>
+    integrationRow(view({ enabled: true, health: { ...view({}).health, state: { state: "ready" }, ...health } }), now);
+  expect(ready({ activity: "issues: page 2 (40%)" }).status).toBe("Ready · issues: page 2 (40%)");
+  const limited = ready({ rateLimitedUntil: "2026-10-01T12:05:00Z" });
+  expect(limited.status).toContain("Ready · rate limited until");
+  expect(limited.problem).toBe(false);
+  expect(ready({ rateLimitedUntil: "2026-10-01T11:00:00Z" }).status).toBe("Ready");
 });

@@ -28,7 +28,10 @@
 //!   with status 3);
 //! - `bad-declarations` — `initialize` declares an extra command the
 //!   checked-in declarations don't have;
-//! - `progress` — a `read` sends `$/progress` before each record;
+//! - `progress` — a `read` sends `$/progress` before each record, then
+//!   takes 100 ms over it (as a long read would);
+//! - `rate-limit:<ms>` — the next `invoke` or `read` is refused
+//!   `RateLimited` with `retry_after_ms: <ms>`;
 //! - `read-fail-after:<n>` — a `read` fails (`Internal`) after streaming
 //!   (and checkpointing) `n` records;
 //! - `bad-record` — a `read` streams a record of another provider's item.
@@ -57,6 +60,7 @@ pub struct Hooks {
     pub crash: bool,
     pub bad_declarations: bool,
     pub progress: bool,
+    pub rate_limit_ms: Option<u64>,
     pub read_fail_after: Option<u64>,
     pub bad_record: bool,
 }
@@ -75,6 +79,7 @@ impl Hooks {
                 Some(("slow", ms)) => self.slow_ms = ms.parse().unwrap_or(0),
                 Some(("slow-check", ms)) => self.slow_check_ms = ms.parse().unwrap_or(0),
                 Some(("read-fail-after", n)) => self.read_fail_after = n.parse().ok(),
+                Some(("rate-limit", ms)) => self.rate_limit_ms = ms.parse().ok(),
                 None if part == "fail-next" => self.fail_next = 1,
                 None if part == "crash" => self.crash = true,
                 None if part == "bad-declarations" => self.bad_declarations = true,
@@ -301,6 +306,17 @@ where
     Served::Ended
 }
 
+/// The `rate-limit` hook, once: an `invoke` or `read` refused.
+async fn take_rate_limit(world: &Shared) -> Result<(), ProtocolError> {
+    match world.lock().await.hooks.rate_limit_ms.take() {
+        Some(ms) => Err(ProtocolError::RateLimited {
+            message: "scripted rate limit (rate-limit)".into(),
+            retry_after_ms: Some(ms),
+        }),
+        None => Ok(()),
+    }
+}
+
 async fn take_failure(world: &Shared) -> Result<(), ProtocolError> {
     let mut w = world.lock().await;
     if w.hooks.fail_next > 0 {
@@ -397,6 +413,7 @@ async fn handle(
             .expect("discover result serializes"))
         }
         method::INVOKE => {
+            take_rate_limit(world).await?;
             take_failure(world).await?;
             let p: InvokeParams = parse(params)?;
             require_handle(&p.handle)?;
@@ -404,6 +421,7 @@ async fn handle(
             invoke(world, &p.command, p.input).await
         }
         method::READ => {
+            take_rate_limit(world).await?;
             take_failure(world).await?;
             let p: ReadParams = parse(params)?;
             require_handle(&p.handle)?;
@@ -463,6 +481,7 @@ async fn handle(
                                 "fraction": (i + 1) as f64 / total as f64 }),
                     )
                     .await?;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
                 peer.notify(
                     notify::RECORD,
