@@ -245,7 +245,11 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
         json!({ "ref": "work_item:notes:N-9", "title": "x" }),
     )
     .await;
-    assert!(missing.is_err(), "the server's refusal is the call's");
+    assert!(
+        matches!(&missing, Err(ProtocolError::InvalidInput { field, message })
+            if field == "/ref" && message.contains("no note `N-9`")),
+        "a tool error reaches the mapping, which refuses it: {missing:?}"
+    );
 
     let (streamed, result) = read(&peer, &handle, None).await;
     assert_eq!(result, json!({ "records": 2 }));
@@ -314,5 +318,89 @@ async fn a_mapping_may_not_return_an_undeclared_event_or_a_foreign_ref() {
     assert!(
         read_back.is_err(),
         "a foreign record is refused too: {read_back:?}"
+    );
+}
+
+/// P7 review (tsk719): a tool error the mapping doesn't refuse is still a
+/// refusal of the input — never a provider failure that counts.
+#[tokio::test]
+async fn a_tool_error_the_mapping_passes_over_is_an_invalid_input() {
+    let (_ext, _child, peer, handle) =
+        with_mapping("    if x.get(\"error\"):\n", "    if False:\n").await;
+    let missing = invoke(
+        &peer,
+        &handle,
+        "update",
+        json!({ "ref": "work_item:notes:N-9", "title": "x" }),
+    )
+    .await;
+    assert!(
+        matches!(&missing, Err(ProtocolError::InvalidInput { message, .. })
+            if message.contains("no note `N-9`")),
+        "{missing:?}"
+    );
+}
+
+/// P7 review (tsk719): a read answer without a `state` is the mapping's
+/// error, never a `null` checkpoint that restarts every read.
+#[tokio::test]
+async fn a_read_answer_without_a_state_is_refused() {
+    let (_ext, _child, peer, handle) =
+        with_mapping("\"state\": {\"cursor\": x[\"output\"][\"cursor\"]},", "").await;
+    let params = serde_json::to_value(ReadParams {
+        handle,
+        collector: "items".into(),
+        state: None,
+    })
+    .unwrap();
+    let read = peer.request(method::READ, params).await;
+    assert!(
+        matches!(&read, Err(e) if e.to_string().contains("`state`")),
+        "{read:?}"
+    );
+}
+
+/// The pinned tools, changed by `edit`, in a fresh extension copy: the
+/// `check` problems.
+async fn check_with_pins(edit: impl FnOnce(&mut Vec<Value>)) -> Vec<Problem> {
+    let ext = extension();
+    let tools = ext.path().join("mcp/tools.json");
+    let mut pins: Vec<Value> =
+        serde_json::from_str(&std::fs::read_to_string(&tools).unwrap()).unwrap();
+    edit(&mut pins);
+    std::fs::write(&tools, serde_json::to_string(&pins).unwrap()).unwrap();
+    let (_child, peer) = spawn(ext.path());
+    let checked = check(&peer).await;
+    assert_eq!(checked.handle, None, "{:?}", checked.problems);
+    checked.problems
+}
+
+/// P7 review (tsk719): the pin is the whole tool — its annotations, title
+/// and output schema too — and a tool pinned twice is refused.
+#[tokio::test]
+async fn the_pin_covers_the_whole_tool_and_each_name_once() {
+    let at = |pins: &Vec<Value>| {
+        pins.iter()
+            .position(|t| t["name"] == "create_item")
+            .unwrap()
+    };
+    let hinted = check_with_pins(|pins| {
+        let i = at(pins);
+        pins[i]["annotations"] = json!({ "destructiveHint": true });
+    })
+    .await;
+    assert!(
+        hinted[0].message.contains("`create_item` annotations"),
+        "{hinted:?}"
+    );
+    let twice = check_with_pins(|pins| {
+        let i = at(pins);
+        let copy = pins[i].clone();
+        pins.push(copy);
+    })
+    .await;
+    assert!(
+        twice[0].message.contains("`create_item` twice"),
+        "{twice:?}"
     );
 }

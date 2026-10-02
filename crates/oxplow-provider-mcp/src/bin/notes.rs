@@ -70,8 +70,11 @@ struct UpdateParams {
     parent: Option<String>,
 }
 
-fn invalid(message: String) -> ErrorData {
-    ErrorData::invalid_params(message, None)
+/// A request the notes can't take: a tool error (`isError`), its output
+/// naming the argument at fault — data for the mapping to turn into a
+/// refusal, not a protocol failure.
+fn refused(field: &str, message: String) -> CallToolResult {
+    CallToolResult::structured_error(json!({ "error": message, "field": field }))
 }
 
 impl Notes {
@@ -80,23 +83,20 @@ impl Notes {
     }
 }
 
-fn check_state(state: &str) -> Result<(), ErrorData> {
-    if STATES.contains(&state) {
-        Ok(())
-    } else {
-        Err(invalid(format!(
-            "`{state}` isn't a state ({})",
-            STATES.join(", ")
-        )))
-    }
+/// The refusal of a state that isn't a note state.
+fn bad_state(state: &str) -> Option<CallToolResult> {
+    (!STATES.contains(&state)).then(|| {
+        refused(
+            "state",
+            format!("`{state}` isn't a state ({})", STATES.join(", ")),
+        )
+    })
 }
 
-fn check_parent(book: &Book, parent: &str) -> Result<(), ErrorData> {
-    if book.notes.iter().any(|n| n.id == parent) {
-        Ok(())
-    } else {
-        Err(invalid(format!("no note `{parent}`")))
-    }
+/// The refusal of a parent that isn't a note.
+fn bad_parent(book: &Book, parent: &str) -> Option<CallToolResult> {
+    (!book.notes.iter().any(|n| n.id == parent))
+        .then(|| refused("parent", format!("no note `{parent}`")))
 }
 
 #[tool_router]
@@ -132,9 +132,13 @@ impl Notes {
         let p = params.0;
         let mut book = self.lock();
         let state = p.state.unwrap_or_else(|| "open".into());
-        check_state(&state)?;
-        if let Some(parent) = &p.parent {
-            check_parent(&book, parent)?;
+        let refusal = bad_state(&state).or_else(|| {
+            p.parent
+                .as_deref()
+                .and_then(|parent| bad_parent(&book, parent))
+        });
+        if let Some(refusal) = refusal {
+            return Ok(refusal);
         }
         book.rev += 1;
         let note = Note {
@@ -157,19 +161,21 @@ impl Notes {
     ) -> Result<CallToolResult, ErrorData> {
         let p = params.0;
         let mut book = self.lock();
-        if let Some(state) = &p.state {
-            check_state(state)?;
+        let refusal = p.state.as_deref().and_then(bad_state).or_else(|| {
+            p.parent
+                .as_deref()
+                .filter(|p| !p.is_empty())
+                .and_then(|parent| bad_parent(&book, parent))
+        });
+        if let Some(refusal) = refusal {
+            return Ok(refusal);
         }
-        if let Some(parent) = p.parent.as_deref().filter(|p| !p.is_empty()) {
-            check_parent(&book, parent)?;
-        }
+        let Some(at) = book.notes.iter().position(|n| n.id == p.id) else {
+            return Ok(refused("id", format!("no note `{}`", p.id)));
+        };
         book.rev += 1;
         let rev = book.rev;
-        let note = book
-            .notes
-            .iter_mut()
-            .find(|n| n.id == p.id)
-            .ok_or_else(|| invalid(format!("no note `{}`", p.id)))?;
+        let note = &mut book.notes[at];
         if let Some(t) = p.title {
             note.title = t;
         }

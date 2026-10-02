@@ -73,10 +73,15 @@ def tool_call(x):
         args["state"] = state
     return {"tool": "create_item" if x["command"] == "create" else "update_item", "arguments": args}
 
+# The note argument a tool error names, as the verb's input field.
+FIELDS = {"id": "/ref", "parent": "/parent_ref", "state": "/native_state"}
+
 def transform(x):
     phase = x["phase"]
     if phase == "invoke":
         return tool_call(x)
+    if x.get("error"):
+        return refuse(FIELDS.get(x["output"]["field"], ""), x["output"]["error"])
     if phase == "invoked":
         item = record(x, x["output"])
         return {

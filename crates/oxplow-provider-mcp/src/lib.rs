@@ -10,8 +10,8 @@
 //!
 //! It answers `initialize` with the checked-in declarations, and starts
 //! the server (an MCP client over its stdio) at `check`, refusing it when
-//! its tools — each one's name, description and input schema — aren't
-//! exactly the pinned `tools.json`. `invoke` and `read` run the mapping, a
+//! its tools — each one whole: name, description, schemas, annotations —
+//! aren't exactly the pinned `tools.json`. `invoke` and `read` run the mapping, a
 //! Starlark `transform(x)` under the sandbox (5 s), twice: once to turn
 //! the request into a tool call (`x.phase` `invoke` / `read`), once to
 //! turn the tool's output into the answer (`invoked` / `records`). Tool
@@ -47,7 +47,7 @@ pub struct Adapter {
     pub declarations: InitializeResult,
     /// The mapping's Starlark source.
     pub mapping: String,
-    /// The pinned tools (`tools.json`): `[{ name, description, inputSchema }]`.
+    /// The pinned tools (`tools.json`): each whole, as the server lists it.
     pub tools: Vec<Value>,
     /// The MCP server's command, its program in the extension folder.
     pub server: Vec<String>,
@@ -103,13 +103,11 @@ impl Adapter {
     }
 }
 
-/// A tool as `tools.json` pins it.
+/// A tool as `tools.json` pins it: the whole tool as the server lists it
+/// — description, schemas, annotations (`destructiveHint`), title — so
+/// nothing about it changes under the pin.
 pub fn pinned(tool: &rmcp::model::Tool) -> Value {
-    json!({
-        "name": tool.name,
-        "description": tool.description,
-        "inputSchema": Value::Object((*tool.input_schema).clone()),
-    })
+    serde_json::to_value(tool).unwrap_or(Value::Null)
 }
 
 /// The first way `live` (the server's tools) differs from `pins`, or `None`.
@@ -123,6 +121,11 @@ pub fn pin_difference(pins: &[Value], live: &[Value]) -> Option<String> {
         n
     };
     let (want, got) = (names(pins), names(live));
+    for (tools, whose) in [(&want, "tools.json pins"), (&got, "the server has")] {
+        if let Some(twice) = tools.windows(2).find(|w| w[0] == w[1]) {
+            return Some(format!("{whose} `{}` twice", twice[0]));
+        }
+    }
     if let Some(extra) = got.iter().find(|n| !want.contains(n)) {
         return Some(format!(
             "the server has a tool `{extra}` tools.json doesn't pin"
@@ -138,8 +141,16 @@ pub fn pin_difference(pins: &[Value], live: &[Value]) -> Option<String> {
         let Some(tool) = live.iter().find(|t| t["name"] == name) else {
             continue;
         };
-        for field in ["description", "inputSchema"] {
-            if pin.get(field).unwrap_or(&Value::Null) != tool.get(field).unwrap_or(&Value::Null) {
+        let mut fields: Vec<&String> = pin
+            .as_object()
+            .into_iter()
+            .chain(tool.as_object())
+            .flat_map(|o| o.keys())
+            .collect();
+        fields.sort();
+        fields.dedup();
+        for field in fields {
+            if pin.get(field) != tool.get(field) {
                 return Some(format!(
                     "the server's `{name}` {field} isn't the pinned one"
                 ));
@@ -292,15 +303,59 @@ fn output_of(result: &CallToolResult) -> Value {
     serde_json::from_str(&text).unwrap_or(Value::String(text))
 }
 
-/// Call the tool a mapping's answer names (`{ tool, arguments }`), or the
-/// refusal it returned instead (`{ refuse: { field, message } }`).
-async fn call(client: &Client, call: &Value) -> Result<Value, ProtocolError> {
-    if let Some(refuse) = call.get("refuse") {
-        return Err(ProtocolError::InvalidInput {
-            field: refuse["field"].as_str().unwrap_or_default().to_string(),
-            message: refuse["message"].as_str().unwrap_or("refused").to_string(),
-        });
+/// The refusal a mapping's answer is (`{ refuse: { field, message } }`).
+fn refusal(answer: &Value) -> Option<ProtocolError> {
+    let refuse = answer.get("refuse")?;
+    Some(ProtocolError::InvalidInput {
+        field: refuse["field"].as_str().unwrap_or_default().to_string(),
+        message: refuse["message"].as_str().unwrap_or("refused").to_string(),
+    })
+}
+
+/// Run the request through the mapping and the server: `x` (phase
+/// `first`) becomes a tool call, the tool's output (phase `then`) the
+/// answer. A tool error (`isError`) is the server refusing the request:
+/// the mapping sees it as `x.error` with the output and may refuse with
+/// its field; one it passes over is still a refusal, never a failure that
+/// counts toward disabling the provider — even when the mapping trips
+/// over the error's output.
+async fn run(
+    adapter: &Adapter,
+    client: &Client,
+    mut x: Value,
+    then: &str,
+) -> Result<Value, ProtocolError> {
+    let tool_call = map(&adapter.mapping, x.clone()).await?;
+    if let Some(refused) = refusal(&tool_call) {
+        return Err(refused);
     }
+    let (tool, output, failed) = call(client, &tool_call).await?;
+    x["phase"] = json!(then);
+    x["output"] = output.clone();
+    if failed {
+        x["error"] = json!(true);
+    }
+    let answer = map(&adapter.mapping, x).await;
+    if failed {
+        // Whatever the mapping made of the error, short of its own
+        // refusal, the request was refused.
+        return Err(answer.ok().as_ref().and_then(refusal).unwrap_or_else(|| {
+            ProtocolError::InvalidInput {
+                field: String::new(),
+                message: format!("tool `{tool}` refused: {output}"),
+            }
+        }));
+    }
+    let answer = answer?;
+    match refusal(&answer) {
+        Some(refused) => Err(refused),
+        None => Ok(answer),
+    }
+}
+
+/// Call the tool a mapping's answer names (`{ tool, arguments }`): its
+/// name, its output and whether it's a tool error.
+async fn call(client: &Client, call: &Value) -> Result<(String, Value, bool), ProtocolError> {
     let tool = call["tool"]
         .as_str()
         .ok_or_else(|| internal("the mapping named no `tool`"))?
@@ -311,10 +366,7 @@ async fn call(client: &Client, call: &Value) -> Result<Value, ProtocolError> {
         .await
         .map_err(|e| internal(format!("tool `{tool}`: {e}")))?;
     let output = output_of(&result);
-    if result.is_error == Some(true) {
-        return Err(internal(format!("tool `{tool}` failed: {output}")));
-    }
-    Ok(output)
+    Ok((tool, output, result.is_error == Some(true)))
 }
 
 /// Refuse what isn't this provider's: a ref outside its prefix.
@@ -419,12 +471,9 @@ async fn handle(
             let p: InvokeParams = parse(params)?;
             let config = config(world, &p.handle).await?;
             let client = running(world).await?;
-            let mut x = json!({ "phase": "invoke", "command": p.command, "input": p.input,
-                                "config": config, "provider": adapter.provider_id });
-            let tool_call = map(&adapter.mapping, x.clone()).await?;
-            x["phase"] = json!("invoked");
-            x["output"] = call(&client, &tool_call).await?;
-            let answer = map(&adapter.mapping, x).await?;
+            let x = json!({ "phase": "invoke", "command": p.command, "input": p.input,
+                            "config": config, "provider": adapter.provider_id });
+            let answer = run(&adapter, &client, x, "invoked").await?;
             Ok(to_value(invoke_result(&adapter, answer)?))
         }
         method::READ => {
@@ -441,12 +490,16 @@ async fn handle(
                     message: format!("no collector `{}`", p.collector),
                 })?;
             let client = running(world).await?;
-            let mut x = json!({ "phase": "read", "collector": p.collector, "state": p.state,
-                                "config": config, "provider": adapter.provider_id });
-            let tool_call = map(&adapter.mapping, x.clone()).await?;
-            x["phase"] = json!("records");
-            x["output"] = call(&client, &tool_call).await?;
-            let answer = map(&adapter.mapping, x).await?;
+            let x = json!({ "phase": "read", "collector": p.collector, "state": p.state,
+                            "config": config, "provider": adapter.provider_id });
+            let answer = run(&adapter, &client, x, "records").await?;
+            // The checkpoint the next read starts from: a missing one
+            // would restart every read from nothing.
+            let state = answer
+                .get("state")
+                .filter(|s| !s.is_null())
+                .cloned()
+                .ok_or_else(|| internal("the mapping's records answer has no `state`"))?;
             let prefix = adapter.prefix();
             let rows = answer["records"].as_array().cloned().unwrap_or_default();
             for row in &rows {
@@ -459,7 +512,7 @@ async fn handle(
                 )
                 .await?;
             }
-            peer.notify(notify::STATE, json!({ "id": id, "state": answer["state"] }))
+            peer.notify(notify::STATE, json!({ "id": id, "state": state }))
                 .await?;
             Ok(json!({ "records": rows.len() }))
         }

@@ -218,8 +218,11 @@ added, removed or changed (`ProviderEffect.tools`).
 - **`initialize`** answers the checked-in declarations (the handshake
   checks them like any provider's).
 - **`check`** starts the server and runs `tools/list`: a server whose
-  tools differ from `tools.json` in any name, description or input
-  schema — §6.8's pin — is a problem at `""` naming the first difference,
+  tools differ from `tools.json` in anything — each tool is pinned whole
+  as the server lists it: name, title, description, input and output
+  schemas, annotations (`destructiveHint`), so no hint changes under the
+  pin (§6.8; tsk719) — or that lists a tool twice, is a problem at `""`
+  naming the first difference,
   and no handle (a changed server needs its pins updated and a person's
   approval). A clean check keeps the config under a handle.
 - **`invoke` and `read`** run the mapping's `transform(x)` twice, each
@@ -234,7 +237,15 @@ added, removed or changed (`ProviderEffect.tools`).
   runs it. **What the mapping returns is checked**: an event type the
   declarations don't list, or a subject, item or record that isn't this
   provider's (`work_item:<id>:…`, the id from `OXPLOW_PROVIDER_ID`) fails
-  the call. A tool that reports an error fails it too.
+  the call; so does a `records` answer without a `state` (a missing
+  checkpoint would restart every read from nothing). **A tool error**
+  (`isError`) is the server refusing the request, not a failure: the
+  mapping runs with `x.error = true` and the error's output and may
+  answer `{ refuse: { field, message } }`; an error it passes over (or
+  trips on) is an `InvalidInput` naming the tool. Either way it never
+  counts toward disabling the provider (tsk719). The notes server reports
+  a missing note, parent or bad state as a tool error naming its
+  argument.
 
 **Tests**: `tests/adapter.rs` drives the adapter over stdio in a copy of
 the fixture extension `tests/fixtures/notes/` in front of the test server
