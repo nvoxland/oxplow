@@ -264,6 +264,8 @@ export function App() {
   // Mirror of threadStates for subscription callbacks that need the
   // latest map without re-subscribing when it changes (see
   // useBackendSubscriptions). Kept current on every render.
+  const threadStatesRef = useRef(threadStates);
+  threadStatesRef.current = threadStates;
 
   useEffect(() => {
     let cancelled = false;
@@ -1152,6 +1154,7 @@ export function App() {
   // in this hook so App doesn't carry ~10 inline subscription effects.
   useBackendSubscriptions({
     threadWorkStatesRef,
+    threadStatesRef,
     setWorkspaceContext,
     setBacklogState,
     setThreadWorkStates,

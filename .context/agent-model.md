@@ -452,7 +452,7 @@ resolved path (`agent_path::resolve_program`). Presets may always start;
 a project entry needs a person's approval in Settings → Data → Programs
 (`exec_consent`, `ProgramKind::AcpAgent`).
 
-**Creating threads.** `create_thread` takes `acpAgent`. It's required for
+**Creating threads.** `thread.create` takes `acp_agent`. It's required for
 `agent: acp`, refused otherwise, and must name a known agent. The
 new-thread picker lists "ACP · <name>" per agent when ACP is enabled in
 `agents:`, flagged "not installed" or "needs approval" (`agentChoices` in
@@ -513,7 +513,7 @@ the same JSON.
   - `open` reserves the thread's slot under one lock before spawning anything, so concurrent opens start one agent.
   - `close` marks the handle closed at once.
   - A closed session still winding down is replaced and marked not current; its actor then records no Interrupt over the new session's status.
-- **Thread lifecycle (tsk360).** Closing an ACP thread (`thread_lifecycle::close_thread`, shared by RPC and MCP) stops its session and agent process. `fork_thread` keeps the parent's `acp_agent`.
+- **Thread lifecycle (tsk360, P8.A3).** Closing an ACP thread (`thread.close`) stops its session and agent process once the close commits. A fork (`thread.create { from }`) keeps the source's `acp_agent`.
 - The agent runs via `tokio::process` with `kill_on_drop` and an augmented `PATH`; its stderr's last lines are kept for a failed start.
 
 **Host.** `acp/host.rs` `AcpHost` is the seam (tests use a recording double). `ServicesAcpHost` holds `Weak<Services>` (sessions live in Services) and records exactly what a hooked turn records:
@@ -902,32 +902,13 @@ mid-`Task` produces a visual loop where the parent acks each Stop with
 "still actively being worked by background subagent" while still
 waiting on the subagent.
 
-### fork_thread
+### Forking a thread
 
-The runtime exposes `mcp__oxplow__fork_thread({ sourceThreadId, title,
-summary, moveItemIds? })` — one transaction that:
-
-1. Creates a new thread on the same stream, status `queued` (never
-   auto-writer — promote explicitly if you want it to commit).
-2. Seeds the new thread with a single `note`-kind task titled
-   "Context from fork" whose description is the caller-supplied
-   `summary` (no schema change — the `note` kind already exists on
-   `tasks`).
-3. Optionally moves each `moveItemIds` entry over via
-   `taskstore.moveItemToThread`. Items must currently be `ready` or
-   `blocked` on the source thread; `in_progress` / terminal items are
-   rejected with an error listing the offenders so
-   the caller can settle them first.
-4. For each moved item, copies its last 3 notes (by `created_at DESC`,
-   re-inserted in chronological order) as fresh rows on the same item
-   id via `taskstore.copyLastItemNotes`. Source rows are untouched.
-   Items with fewer than 3 notes copy all; items with none are no-ops.
-   The user landing in the forked thread sees decisions/rationale
-   carried over rather than a bare title.
-
-Returns `{ newThreadId }`. Implementation lives on
-`Services.forkThread` (`crates/oxplow-app/src/lib.rs`); the MCP tool
-is just a thin surface.
+An agent forks its thread with `run_command thread.create { stream,
+title, from: "thread:<id>" }` (P8.A3): a new thread on the same stream,
+`queued` behind the writer, running the source's agent (and ACP agent).
+An agent creates threads only on its own stream; moving work across is
+`work_item.move`.
 
 ## Orchestrator pattern
 
@@ -1081,9 +1062,9 @@ checkout — P2.9, tsk433);
 **code quality** (`run_code_quality_scan`, `list_code_quality_scans`,
 `list_code_quality_findings` — the scan orchestration is shared via
 `Services::run_code_quality_scan`); **comments + lifecycle**
-(`create_comment`, `set_comment_intent`, `rename_thread`,
-`close_thread`, `reopen_thread`, `select_thread`, `promote_thread`,
-`switch_stream`, `rename_stream`); and **site-wide search** (`search` —
+(`create_comment`, `set_comment_intent`, `select_thread`,
+`switch_stream`, `rename_stream`; a thread's lifecycle is the `thread.*`
+commands through `run_command`, P8.A3); and **site-wide search** (`search` —
 BM25 over tasks/comments/notes/wiki/file-contents via the unified FTS index,
 fed by the `Indexer` service; optional `stream_id` scopes file hits).
 Still `AgentTodo` (see the backlog): composed snapshot DTOs, git
@@ -1293,10 +1274,8 @@ intermediate `ready` step.
   `crates/oxplow-app/src/followup.rs`; runtime publishes the bus event
   `followup.changed` so the UI re-reads that thread's work
   (`workItems.readThreadWork`).
-- `fork_thread({ sourceThreadId, title, summary, moveItemIds? })` — see
-  "fork_thread" above. Creates a new queued thread on the same stream,
-  seeds a note item, optionally moves ready / blocked items across in
-  one transaction.
+- Forking a thread is `run_command thread.create { from }` — see
+  "Forking a thread" above.
 - `list_comments({ id, scope?, status? })` / `respond_to_comment({
   comment_id, body })` / `resolve_comment({ comment_id })` — the user's
   threaded annotations anchored to text in pages (wiki / file / task).

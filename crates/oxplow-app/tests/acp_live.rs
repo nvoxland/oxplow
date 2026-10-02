@@ -34,18 +34,30 @@ async fn a_real_adapter_answers_a_prompt() {
     let root = dir.path().canonicalize().unwrap();
     let svc = Arc::new(Services::in_memory(&root).unwrap());
     let stream = svc.streams.ensure_primary().await.unwrap();
-    let thread = svc
-        .threads
-        .create_with_acp(
-            &stream.id,
-            "live",
-            "working",
-            oxplow_domain::AgentKind::Acp,
-            Some("live".into()),
+    // An ACP thread names a known ACP agent; the session below launches the
+    // adapter under test whatever the thread names.
+    svc.config
+        .write()
+        .unwrap()
+        .agents
+        .push(oxplow_domain::AgentKind::Acp);
+    let created = svc
+        .commands
+        .run(
+            &oxplow_domain::Actor::Human,
+            oxplow_app::commands::thread::CREATE,
+            serde_json::json!({
+                "stream": oxplow_domain::refs::build::stream_ref(stream.id),
+                "title": "live",
+                "agent": "acp",
+                "acp_agent": "claude",
+            }),
+            false,
         )
         .await
-        .unwrap()
-        .id;
+        .unwrap();
+    let thread: oxplow_domain::ThreadId =
+        serde_json::from_value(created.result["id"].clone()).unwrap();
 
     let host = Arc::new(ServicesAcpHost::new(&svc, Some(stream.id)));
     svc.acp

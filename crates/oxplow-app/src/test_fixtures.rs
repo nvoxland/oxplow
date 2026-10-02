@@ -93,3 +93,25 @@ pub async fn services_with_effort() -> EffortFixture {
         effort,
     }
 }
+
+/// A new thread on `stream`, made as a person through `thread.create`.
+pub async fn new_thread(
+    svc: &crate::Services,
+    stream: oxplow_domain::StreamId,
+    title: &str,
+) -> oxplow_domain::Thread {
+    let out = svc
+        .commands
+        .run(
+            &oxplow_domain::Actor::Human,
+            crate::commands::thread::CREATE,
+            serde_json::json!({
+                "stream": oxplow_domain::refs::build::stream_ref(stream),
+                "title": title,
+            }),
+            false,
+        )
+        .await
+        .unwrap();
+    serde_json::from_value(out.result).unwrap()
+}

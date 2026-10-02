@@ -18,6 +18,7 @@ const readThreadWork = mock(async () => taskReads);
 const readBacklog = mock(async () => taskReads);
 const listAgentStatuses = mock(async () => []);
 const getConfig = mock(async () => ({ generated: { exclude: [], include: [] } }));
+const getThreadState = mock(async () => ({ selectedThreadId: null, activeThreadId: null, threads: [] }));
 
 function makeApi(): BackendSubscriptionApi {
   const noopSub = () => () => {
@@ -40,7 +41,7 @@ function makeApi(): BackendSubscriptionApi {
       };
     }) as never,
     readBacklog: readBacklog as never,
-    getThreadState: (async () => ({})) as never,
+    getThreadState: getThreadState as never,
     readThreadWork: readThreadWork as never,
     listStreams: (async () => []) as never,
     listAgentStatuses: listAgentStatuses as never,
@@ -54,6 +55,8 @@ function makeHandlers(threadWorkStatesRef: { current: WorkStates }) {
   const noop = () => {};
   return {
     threadWorkStatesRef: threadWorkStatesRef as never,
+    // Two streams' thread state is loaded.
+    threadStatesRef: { current: { str1: {}, str2: {} } } as never,
     setWorkspaceContext: noop,
     setBacklogState: noop,
     setThreadWorkStates: mock(noop) as never,
@@ -92,7 +95,7 @@ afterEach(cleanup);
 
 test("subscribes to the oxplow event bus on mount", () => {
   render(<Harness workStates={{}} />);
-  // tasks (models + followups), threadsChanged, streamsChanged,
+  // tasks (models + followups), threads (v_thread), streamsChanged,
   // streamOrphaned, configChanged = 5 subscriptions.
   expect(oxplowHandlers.length).toBe(5);
 });
@@ -166,4 +169,19 @@ test("a change to a model the reads read re-reads the backlog and every loaded t
   });
   expect(readBacklog).toHaveBeenCalledTimes(0);
   expect(readThreadWork.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["thr3"]);
+});
+
+test("a change to v_thread re-reads every loaded stream's thread state, and nothing else does", async () => {
+  render(<Harness workStates={{}} />);
+  getThreadState.mockClear();
+  await act(async () => {
+    for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_commit"] });
+    await Promise.resolve();
+  });
+  expect(getThreadState).toHaveBeenCalledTimes(0);
+  await act(async () => {
+    for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_thread"] });
+    await Promise.resolve();
+  });
+  expect(getThreadState.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["str1", "str2"]);
 });

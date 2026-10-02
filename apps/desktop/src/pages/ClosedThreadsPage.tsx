@@ -3,6 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import type { Stream, Thread } from "../tauri-bridge/index.js";
 import { readThreadWork, type Task } from "../workItems.js";
+import { readsChanged, readsOf } from "../lens/lensRerun.js";
+
+const THREAD_READS = readsOf("v_thread");
 import {
   listClosedThreads,
   reopenThread,
@@ -55,11 +58,8 @@ export function ClosedThreadsPage({ stream, onAfterReopen }: ClosedThreadsPagePr
   useEffect(() => {
     void refresh();
     const unsub = subscribeOxplowEvents((event) => {
-      // `threadsChanged` is the coarse signal for a close/reopen (status flip)
-      // on this page's stream — re-list the closed threads.
-      if (event.kind !== "threadsChanged") return;
-      const streamId = (event as { streamId?: string }).streamId;
-      if (stream && streamId !== stream.id) return;
+      // A close or reopen commits to `v_thread`: re-list the closed threads.
+      if (!readsChanged(event as Record<string, unknown>, THREAD_READS)) return;
       void refresh();
     });
     return unsub;

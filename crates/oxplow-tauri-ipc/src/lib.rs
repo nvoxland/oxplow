@@ -109,15 +109,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::reorder_streams,
             // threads
             commands::generated::list_threads,
-            commands::generated::create_thread,
             commands::generated::list_acp_agents,
-            commands::generated::rename_thread,
-            commands::generated::set_thread_prompt,
-            commands::generated::promote_thread,
-            commands::generated::close_thread,
-            commands::generated::reopen_thread,
             commands::generated::list_closed_threads,
-            commands::generated::reorder_thread_queue,
             commands::generated::select_thread,
             commands::generated::get_thread_state,
             // tasks

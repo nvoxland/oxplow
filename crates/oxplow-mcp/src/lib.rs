@@ -552,12 +552,6 @@ pub struct DispatchTaskParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ForkThreadParams {
-    pub source_thread_id: String,
-    pub title: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FindNotesForNoteParams {
     pub slug: String,
     #[serde(default = "default_limit")]
@@ -1017,12 +1011,6 @@ pub struct SetCommentIntentParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RenameThreadMcpParams {
-    pub thread_id: String,
-    pub title: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SelectThreadMcpParams {
     pub stream_id: String,
     /// Thread to select, or omit/null to clear the selection.
@@ -1054,14 +1042,6 @@ impl OxplowMcp {
             services,
             tool_router: Self::tool_router(),
         }
-    }
-
-    /// Emit `ThreadsChanged` so the renderer (separate process) refetches a
-    /// stream's threads after an agent-driven lifecycle change.
-    fn emit_threads_changed(&self, stream_id: oxplow_domain::StreamId) {
-        self.services
-            .events
-            .emit(OxplowEvent::ThreadsChanged { stream_id });
     }
 
     /// Renderer is a separate process; emit so it refetches the page's
@@ -2463,66 +2443,6 @@ impl OxplowMcp {
         if let Some(t) = &thread {
             self.emit_comments_changed(&t.comment);
         }
-        json_result(&thread)
-    }
-
-    #[tool(description = "Rename a thread.")]
-    async fn rename_thread(
-        &self,
-        params: Parameters<RenameThreadMcpParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind("rename_thread", "thread_id", &params.0.thread_id, ID_THREAD)?;
-        let id = parse_thread_id(&params.0.thread_id)?;
-        let thread = self
-            .services
-            .threads
-            .rename(&id, params.0.title)
-            .await
-            .map_err(internal)?;
-        self.emit_threads_changed(thread.stream_id);
-        json_result(&thread)
-    }
-
-    #[tool(description = "Promote a thread to the top of its stream's working queue.")]
-    async fn promote_thread(
-        &self,
-        params: Parameters<ThreadIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "promote_thread",
-            "thread_id",
-            &params.0.thread_id,
-            ID_THREAD,
-        )?;
-        let id = parse_thread_id(&params.0.thread_id)?;
-        let thread = self.services.threads.promote(&id).await.map_err(internal)?;
-        self.emit_threads_changed(thread.stream_id);
-        json_result(&thread)
-    }
-
-    #[tool(description = "Close a thread (soft — reopenable).")]
-    async fn close_thread(
-        &self,
-        params: Parameters<ThreadIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind("close_thread", "thread_id", &params.0.thread_id, ID_THREAD)?;
-        let id = parse_thread_id(&params.0.thread_id)?;
-        let thread = oxplow_app::thread_lifecycle::close_thread(&self.services, &id)
-            .await
-            .map_err(internal)?;
-        self.emit_threads_changed(thread.stream_id);
-        json_result(&thread)
-    }
-
-    #[tool(description = "Reopen a closed thread.")]
-    async fn reopen_thread(
-        &self,
-        params: Parameters<ThreadIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind("reopen_thread", "thread_id", &params.0.thread_id, ID_THREAD)?;
-        let id = parse_thread_id(&params.0.thread_id)?;
-        let thread = self.services.threads.reopen(&id).await.map_err(internal)?;
-        self.emit_threads_changed(thread.stream_id);
         json_result(&thread)
     }
 
@@ -4058,43 +3978,6 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Branch a new thread off an existing one (shared stream, fresh thread row)."
-    )]
-    async fn fork_thread(
-        &self,
-        params: Parameters<ForkThreadParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "fork_thread",
-            "source_thread_id",
-            &params.0.source_thread_id,
-            ID_THREAD,
-        )?;
-        let source = parse_thread_id(&params.0.source_thread_id)?;
-        let parent = self
-            .services
-            .thread_store
-            .get(&source)
-            .await
-            .map_err(internal)?
-            .ok_or_else(|| McpError::invalid_params("source thread not found", None))?;
-        let child = self
-            .services
-            .threads
-            // Same agent, and for an ACP thread the same ACP agent.
-            .create_with_acp(
-                &parent.stream_id,
-                params.0.title,
-                parent.pane_target,
-                parent.agent,
-                parent.acp_agent.clone(),
-            )
-            .await
-            .map_err(|e| internal(e.to_string()))?;
-        json_result(&child)
-    }
-
-    #[tool(
         description = "Unified backlinks: every page (wiki, task, commit, finding, \
                        …) that points AT the given target page. The target is identified \
                        by its ref `kind` (\"file\", \"wiki\", \"work_item\", \"commit\", \
@@ -4600,10 +4483,6 @@ const WRITE_TOOLS: &[&str] = &[
     "restore_file_snapshot",
     "create_comment",
     "set_comment_intent",
-    "rename_thread",
-    "promote_thread",
-    "close_thread",
-    "reopen_thread",
     "select_thread",
     "switch_stream",
     "rename_stream",
@@ -4627,7 +4506,6 @@ const WRITE_TOOLS: &[&str] = &[
     "await_user",
     "file_epic_with_children",
     "dispatch_task",
-    "fork_thread",
     "lsp_install_server",
 ];
 
@@ -7076,31 +6954,26 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn forking_an_acp_thread_keeps_its_agent() {
-        use oxplow_domain::stores::StreamStore as _;
-        let (_proj, services, server) = boot();
-        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-        let parent = services
-            .threads
-            .create_with_acp(
-                &stream.id,
-                "acp",
-                "working",
-                oxplow_domain::AgentKind::Acp,
-                Some("gemini".into()),
+    /// A thread on `stream`, made as a person through `thread.create`.
+    async fn new_thread(
+        services: &oxplow_app::Services,
+        stream: oxplow_domain::StreamId,
+        title: &str,
+    ) -> oxplow_domain::Thread {
+        let out = services
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                oxplow_app::commands::thread::CREATE,
+                serde_json::json!({
+                    "stream": oxplow_domain::refs::build::stream_ref(stream),
+                    "title": title,
+                }),
+                false,
             )
             .await
             .unwrap();
-        let out = server
-            .fork_thread(Parameters(ForkThreadParams {
-                source_thread_id: parent.id.to_string(),
-                title: "fork".into(),
-            }))
-            .await
-            .unwrap();
-        let text = format!("{:?}", out.content);
-        assert!(text.contains("gemini"), "{text}");
+        serde_json::from_value(out.result).unwrap()
     }
 
     #[tokio::test]
@@ -7123,16 +6996,7 @@ mod tests {
         other_stream.kind = oxplow_domain::StreamKind::Worktree;
         other_stream.worktree_path = "/elsewhere".into();
         let other_stream_id = services.stream_store.upsert(&other_stream).await.unwrap();
-        let other_thread = services
-            .threads
-            .create(
-                &other_stream_id,
-                "t",
-                "working",
-                oxplow_domain::AgentKind::Claude,
-            )
-            .await
-            .unwrap();
+        let other_thread = new_thread(&services, other_stream_id, "t").await;
         let foreign = services
             .task_store
             .insert(&make_task(Some(other_thread.id), "not yours"))
@@ -7168,11 +7032,7 @@ mod tests {
         other.kind = oxplow_domain::StreamKind::Worktree;
         other.worktree_path = elsewhere.path().to_string_lossy().into_owned();
         let other_id = services.stream_store.upsert(&other).await.unwrap();
-        let thread = services
-            .threads
-            .create(&other_id, "t", "working", oxplow_domain::AgentKind::Claude)
-            .await
-            .unwrap();
+        let thread = new_thread(&services, other_id, "t").await;
         let caller = McpCaller {
             thread_id: Some(thread.id),
             stream_id: None,
@@ -7211,11 +7071,7 @@ mod tests {
         other.kind = oxplow_domain::StreamKind::Worktree;
         other.worktree_path = elsewhere.path().to_string_lossy().into_owned();
         let other_id = services.stream_store.upsert(&other).await.unwrap();
-        let thread = services
-            .threads
-            .create(&other_id, "t", "working", oxplow_domain::AgentKind::Claude)
-            .await
-            .unwrap();
+        let thread = new_thread(&services, other_id, "t").await;
         let caller = || {
             extensions_for(parts_with(
                 &[("x-oxplow-thread", &thread.id.to_string())],

@@ -21,7 +21,10 @@ import {
 } from "./api.js";
 import { showToast } from "./components/toastStore.js";
 import { readBacklog, readThreadWork } from "./workItems.js";
-import { NO_READS, readsChanged, unionReads } from "./lens/lensRerun.js";
+import { NO_READS, readsChanged, readsOf, unionReads } from "./lens/lensRerun.js";
+
+/** The thread state each stream shows is read from `v_thread`. */
+const THREAD_READS = readsOf("v_thread");
 import type { Reads } from "./tauri-bridge/generated/bindings.js";
 import { logUi } from "./logger.js";
 
@@ -39,6 +42,8 @@ import { logUi } from "./logger.js";
  */
 export interface BackendSubscriptionHandlers {
   threadWorkStatesRef: RefObject<Record<string, ThreadWorkState>>;
+  /** Which streams' thread state is loaded, to re-read when `v_thread` changes. */
+  threadStatesRef: RefObject<Record<string, ThreadState>>;
   setWorkspaceContext: (next: WorkspaceContext) => void;
   setBacklogState: (next: BacklogState) => void;
   setThreadWorkStates: Dispatch<SetStateAction<Record<string, ThreadWorkState>>>;
@@ -91,6 +96,7 @@ export function useBackendSubscriptions(
 ): void {
   const {
     threadWorkStatesRef,
+    threadStatesRef,
     setWorkspaceContext,
     setBacklogState,
     setThreadWorkStates,
@@ -163,23 +169,27 @@ export function useBackendSubscriptions(
     };
   }, [threadWorkStatesRef, setBacklogState, setThreadWorkStates]);
 
+  // A thread changed (created, renamed, promoted, closed, reordered — the
+  // `thread.*` commands): re-read each loaded stream's thread state when a
+  // commit touched `v_thread`.
   useEffect(() => {
     const unsubscribe = subscribeOxplowEvents((event) => {
-      if (event.kind !== "threadsChanged") return;
-      void getThreadState(event.streamId)
-        .then((state) => {
-          setThreadStates((prev) => ({ ...prev, [event.streamId]: state }));
-        })
-        .catch((error) => {
-          logUi("warn", "failed to refresh thread state after change event", {
-            streamId: event.streamId,
-            kind: event.kind,
-            error: String(error),
+      if (!readsChanged(event as Record<string, unknown>, THREAD_READS)) return;
+      for (const streamId of Object.keys(threadStatesRef.current ?? {})) {
+        void getThreadState(streamId)
+          .then((state) => {
+            setThreadStates((latest) => ({ ...latest, [streamId]: state }));
+          })
+          .catch((error) => {
+            logUi("warn", "failed to refresh thread state after a change", {
+              streamId,
+              error: String(error),
+            });
           });
-        });
+      }
     });
     return unsubscribe;
-  }, [setThreadStates]);
+  }, [threadStatesRef, setThreadStates]);
 
   // Refresh the stream list whenever the cross-store bus signals a
   // `streamsChanged` (creation, archive via Remove…, rename, reorder,

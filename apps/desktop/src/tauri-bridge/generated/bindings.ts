@@ -132,47 +132,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	createThread: (req: CreateThreadRequest) => typedError<Thread, IpcError>(__TAURI_INVOKE("create_thread", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listAcpAgents: () => typedError<AcpAgentListing[], IpcError>(__TAURI_INVOKE("list_acp_agents")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	renameThread: (req: RenameThreadRequest) => typedError<Thread, IpcError>(__TAURI_INVOKE("rename_thread", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setThreadPrompt: (req: SetThreadPromptRequest) => typedError<Thread, IpcError>(__TAURI_INVOKE("set_thread_prompt", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	promoteThread: (id: ThreadId) => typedError<Thread, IpcError>(__TAURI_INVOKE("promote_thread", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	closeThread: (id: ThreadId) => typedError<Thread, IpcError>(__TAURI_INVOKE("close_thread", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	reopenThread: (id: ThreadId) => typedError<Thread, IpcError>(__TAURI_INVOKE("reopen_thread", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listClosedThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_closed_threads", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	reorderThreadQueue: (req: ReorderThreadQueueRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_thread_queue", { req })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2063,15 +2028,6 @@ export type CreateCommentRequest = {
 	intent: CommentIntent,
 	author: string,
 	body: string,
-};
-
-export type CreateThreadRequest = {
-	streamId: StreamId,
-	title: string,
-	paneTarget: string | null,
-	agent: AgentKind | null,
-	// For an ACP thread, which ACP agent (see `list_acp_agents`).
-	acpAgent?: string | null,
 };
 
 export type CreateWorktreeRequest = {
@@ -4016,8 +3972,6 @@ export type OxplowEvent =
  *  updated). Renderer refetches `list_streams`.
  */
 { kind: "streamsChanged" } | 
-// Threads on `stream_id` changed (created, status flipped, etc.).
-{ kind: "threadsChanged"; streamId: StreamId } | 
 /**
  *  A comment (or one of its messages) changed on `target_kind` /
  *  `target_id` within `stream_id`. Renderer refetches the affected
@@ -4424,19 +4378,9 @@ export type RenameStreamRequest = {
 	title: string,
 };
 
-export type RenameThreadRequest = {
-	id: ThreadId,
-	title: string,
-};
-
 export type ReorderDashboardItemsRequest = {
 	dashboardId: DashboardId,
 	order: DashboardItemId[],
-};
-
-export type ReorderThreadQueueRequest = {
-	streamId: StreamId,
-	order: ThreadId[],
 };
 
 /**
@@ -4534,11 +4478,6 @@ export type SelectThreadRequest = {
 
 export type SetStreamPromptRequest = {
 	id: StreamId,
-	prompt: string | null,
-};
-
-export type SetThreadPromptRequest = {
-	id: ThreadId,
 	prompt: string | null,
 };
 

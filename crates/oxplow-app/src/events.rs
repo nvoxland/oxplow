@@ -69,8 +69,6 @@ pub enum OxplowEvent {
     /// Any stream row changed (created, renamed, deleted, panes
     /// updated). Renderer refetches `list_streams`.
     StreamsChanged,
-    /// Threads on `stream_id` changed (created, status flipped, etc.).
-    ThreadsChanged { stream_id: StreamId },
     /// A comment (or one of its messages) changed on `target_kind` /
     /// `target_id` within `stream_id`. Renderer refetches the affected
     /// page's comments + the Comments inbox.

@@ -193,12 +193,16 @@ mod tests {
         let (ctx, _dir) = crate::test_support::services();
         let stream = ctx.streams.ensure_primary().await.unwrap();
         let t = crate::dispatch(
-            "create_thread",
-            json!({"req": {"streamId": stream.id.to_string(), "title": "c", "agent": "claude"}}),
+            "run_command",
+            json!({"name": "thread.create", "input": {
+                "stream": oxplow_domain::refs::build::stream_ref(stream.id),
+                "title": "c", "agent": "claude",
+            }, "confirmed": false}),
             &ctx,
         )
         .await
-        .unwrap();
+        .unwrap()["result"]
+            .clone();
         let err = crate::dispatch("acp_open_session", json!({"threadId": t["id"]}), &ctx)
             .await
             .unwrap_err();

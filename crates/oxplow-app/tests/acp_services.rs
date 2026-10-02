@@ -380,7 +380,13 @@ async fn closing_an_acp_thread_stops_its_session() {
     let thread = seed(&svc, &root, ThreadStatus::Queued).await;
     open_in_process(&svc, thread, &root).await;
     assert!(svc.acp.is_open(&thread));
-    oxplow_app::thread_lifecycle::close_thread(&svc, &thread)
+    svc.commands
+        .run(
+            &oxplow_domain::Actor::Human,
+            oxplow_app::commands::thread::CLOSE,
+            serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(thread) }),
+            false,
+        )
         .await
         .unwrap();
     assert!(

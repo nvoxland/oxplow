@@ -247,7 +247,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("delegate_query"),
     agent("record_query_finding"),
     agent("await_user"),
-    agent("fork_thread"),
     agent("wiki_ref_drift"),
     // ---- collection (effort-scoped observations) ----
     agent("ingest_coverage"),
@@ -296,11 +295,7 @@ pub const MANIFEST: &[Capability] = &[
     // ---- comments + stream/thread lifecycle mirrored to MCP (Child 5) ----
     both("create_comment"),
     both("set_comment_intent"),
-    both("rename_thread"),
-    both("close_thread"),
-    both("reopen_thread"),
     both("select_thread"),
-    both("promote_thread"),
     both("switch_stream"),
     both("rename_stream"),
     // checkout stays on Bash — subprocess logic lives in the IPC command layer.
@@ -315,7 +310,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("set_stream_prompt"),
     ui("reorder_streams"),
     // ---- ui-only: threads ----
-    ui("create_thread"),
     // The thread picker's ACP agents (tsk335).
     ui("list_acp_agents"),
     // ACP sessions: the prompt box, permission cards and banners. Never
@@ -327,10 +321,8 @@ pub const MANIFEST: &[Capability] = &[
     ui("acp_transcript"),
     ui("acp_dismiss_directive"),
     ui("acp_close_session"),
-    ui("set_thread_prompt"),
     ui("set_agents"),
     ui("list_closed_threads"),
-    ui("reorder_thread_queue"),
     ui("get_thread_state"),
     // ---- ui-only: tasks / backlog ----
     // ---- dashboards (tsk138) — reads + create/add-tile are agent-authorable

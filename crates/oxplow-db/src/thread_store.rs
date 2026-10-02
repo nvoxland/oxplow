@@ -102,90 +102,97 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
     })
 }
 
+/// `stream`'s live threads in their order, on `conn` — a command's
+/// transaction.
+pub fn list_for_stream_tx(
+    conn: &rusqlite::Connection,
+    stream: StreamId,
+) -> rusqlite::Result<Vec<Thread>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT * FROM threads \
+         WHERE stream_id = ?1 AND archived_at IS NULL \
+         ORDER BY sort_index ASC, created_at ASC",
+    )?;
+    let rows = stmt.query_map(params![stream.value()], row_to_thread)?;
+    rows.collect()
+}
+
+/// Thread `id`, on `conn`.
+pub fn get_tx(conn: &rusqlite::Connection, id: ThreadId) -> rusqlite::Result<Option<Thread>> {
+    let mut stmt = conn.prepare_cached("SELECT * FROM threads WHERE id = ?1")?;
+    let mut rows = stmt.query_map(params![id.value()], row_to_thread)?;
+    rows.next().transpose()
+}
+
+/// Insert `thread` (a placeholder id allocates one) or update it in place,
+/// on `conn`; the effective id.
+pub fn upsert_tx(conn: &rusqlite::Connection, thread: &Thread) -> rusqlite::Result<ThreadId> {
+    let id_param: Option<i64> = if thread.id.is_placeholder() {
+        None
+    } else {
+        Some(thread.id.value())
+    };
+    conn.execute(
+        "INSERT INTO threads (
+            id, stream_id, title, status, sort_index, pane_target, agent,
+            resume_session_id, summary, summary_updated_at, closed_at,
+            custom_prompt, created_at, updated_at, acp_agent
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+         ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            status = excluded.status,
+            sort_index = excluded.sort_index,
+            pane_target = excluded.pane_target,
+            agent = excluded.agent,
+            acp_agent = excluded.acp_agent,
+            resume_session_id = excluded.resume_session_id,
+            summary = excluded.summary,
+            summary_updated_at = excluded.summary_updated_at,
+            closed_at = excluded.closed_at,
+            custom_prompt = excluded.custom_prompt,
+            updated_at = excluded.updated_at",
+        params![
+            id_param,
+            thread.stream_id.value(),
+            thread.title,
+            status_to_str(thread.status),
+            thread.sort_index,
+            thread.pane_target,
+            agent_to_str(thread.agent),
+            thread.resume_session_id,
+            thread.summary,
+            thread.summary_updated_at.map(ts_to_string),
+            thread.closed_at.map(ts_to_string),
+            thread.custom_prompt,
+            ts_to_string(thread.created_at),
+            ts_to_string(thread.updated_at),
+            thread.acp_agent,
+        ],
+    )?;
+    Ok(if thread.id.is_placeholder() {
+        ThreadId::new(conn.last_insert_rowid())
+    } else {
+        thread.id
+    })
+}
+
 #[async_trait]
 impl ThreadStore for SqliteThreadStore {
     async fn list_for_stream(&self, stream: &StreamId) -> Result<Vec<Thread>, DomainError> {
         let stream = *stream;
         self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM threads \
-                     WHERE stream_id = ?1 AND archived_at IS NULL \
-                     ORDER BY sort_index ASC, created_at ASC",
-                )?;
-                let rows = stmt.query_map(params![stream.value()], row_to_thread)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
+            .call(move |conn| list_for_stream_tx(conn, stream))
             .await
     }
 
     async fn get(&self, id: &ThreadId) -> Result<Option<Thread>, DomainError> {
         let id = *id;
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare("SELECT * FROM threads WHERE id = ?1")?;
-                let mut rows = stmt.query_map(params![id.value()], row_to_thread)?;
-                match rows.next() {
-                    Some(r) => Ok(Some(r?)),
-                    None => Ok(None),
-                }
-            })
-            .await
+        self.db.call(move |conn| get_tx(conn, id)).await
     }
 
     async fn upsert(&self, thread: &Thread) -> Result<ThreadId, DomainError> {
         let thread = thread.clone();
-        self.db
-            .call(move |conn| {
-                let id_param: Option<i64> = if thread.id.is_placeholder() {
-                    None
-                } else {
-                    Some(thread.id.value())
-                };
-                conn.execute(
-                    "INSERT INTO threads (
-                        id, stream_id, title, status, sort_index, pane_target, agent,
-                        resume_session_id, summary, summary_updated_at, closed_at,
-                        custom_prompt, created_at, updated_at, acp_agent
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-                     ON CONFLICT(id) DO UPDATE SET
-                        title = excluded.title,
-                        status = excluded.status,
-                        sort_index = excluded.sort_index,
-                        pane_target = excluded.pane_target,
-                        agent = excluded.agent,
-                        acp_agent = excluded.acp_agent,
-                        resume_session_id = excluded.resume_session_id,
-                        summary = excluded.summary,
-                        summary_updated_at = excluded.summary_updated_at,
-                        closed_at = excluded.closed_at,
-                        custom_prompt = excluded.custom_prompt,
-                        updated_at = excluded.updated_at",
-                    params![
-                        id_param,
-                        thread.stream_id.value(),
-                        thread.title,
-                        status_to_str(thread.status),
-                        thread.sort_index,
-                        thread.pane_target,
-                        agent_to_str(thread.agent),
-                        thread.resume_session_id,
-                        thread.summary,
-                        thread.summary_updated_at.map(ts_to_string),
-                        thread.closed_at.map(ts_to_string),
-                        thread.custom_prompt,
-                        ts_to_string(thread.created_at),
-                        ts_to_string(thread.updated_at),
-                        thread.acp_agent,
-                    ],
-                )?;
-                Ok(if thread.id.is_placeholder() {
-                    ThreadId::new(conn.last_insert_rowid())
-                } else {
-                    thread.id
-                })
-            })
-            .await
+        self.db.call(move |conn| upsert_tx(conn, &thread)).await
     }
 
     async fn delete(&self, id: &ThreadId) -> Result<(), DomainError> {

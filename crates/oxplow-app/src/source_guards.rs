@@ -90,79 +90,39 @@ fn emitters() -> BTreeSet<(String, String)> {
 /// UI-only signal with no durable fact behind it (its reason in
 /// `.context/ipc-and-stores.md` → "Event bus"). Rows marked `P8.A` go as
 /// their writes move onto the command bus and the desktop reads the model.
+#[rustfmt::skip]
 const EMITTERS: &[(&str, &str)] = &[
-    (
-        "AgentStallAlert",
-        "crates/oxplow-app/src/agent_stall_watch.rs",
-    ),
-    (
-        "AgentStatusChanged",
-        "crates/oxplow-app/src/agent_stall_watch.rs",
-    ),
+    ("AgentStallAlert", "crates/oxplow-app/src/agent_stall_watch.rs"),
+    ("AgentStatusChanged", "crates/oxplow-app/src/agent_stall_watch.rs"),
     ("AgentStatusChanged", "crates/oxplow-app/src/hook_ingest.rs"),
     ("AgentTurnsChanged", "crates/oxplow-app/src/hook_ingest.rs"), // P8.A10
     ("BackgroundTasksChanged", "crates/oxplow-app/src/lib.rs"),
     ("CommentsChanged", "crates/oxplow-mcp/src/lib.rs"), // P8.A6
-    (
-        "CommentsChanged",
-        "crates/oxplow-rpc/src/commands/comments.rs",
-    ), // P8.A6
-    (
-        "ConfigChanged",
-        "crates/oxplow-app/src/commands/config_commands.rs",
-    ),
+    ("CommentsChanged", "crates/oxplow-rpc/src/commands/comments.rs"), // P8.A6
+    ("ConfigChanged", "crates/oxplow-app/src/commands/config_commands.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/lib.rs"),
     ("ConfigChanged", "crates/oxplow-rpc/src/commands/ai.rs"),
     ("DashboardsChanged", "crates/oxplow-mcp/src/lib.rs"), // P8.A5
-    (
-        "DashboardsChanged",
-        "crates/oxplow-rpc/src/commands/dashboards.rs",
-    ), // P8.A5
+    ("DashboardsChanged", "crates/oxplow-rpc/src/commands/dashboards.rs"), // P8.A5
     ("HookEventsChanged", "crates/oxplow-app/src/hook_ingest.rs"), // P8.A10
     ("HookEventsChanged", "crates/oxplow-app/src/recovery.rs"), // P8.A10
     ("LspServersChanged", "crates/oxplow-mcp/src/lib.rs"), // P8.A9
     ("LspServersChanged", "crates/oxplow-rpc/src/commands/lsp.rs"), // P8.A9
-    (
-        "MetricSamplesChanged",
-        "crates/oxplow-app/src/models_changed.rs",
-    ),
+    ("MetricSamplesChanged", "crates/oxplow-app/src/models_changed.rs"),
     ("ModelsChanged", "crates/oxplow-app/src/models_changed.rs"),
-    (
-        "PageVisitChanged",
-        "crates/oxplow-rpc/src/commands/page_visit.rs",
-    ), // P8.A10
+    ("PageVisitChanged", "crates/oxplow-rpc/src/commands/page_visit.rs"), // P8.A10
     ("SnapshotTaken", "crates/oxplow-app/src/ui_push.rs"),
     ("StreamOrphaned", "crates/oxplow-app/src/workspace_watch.rs"),
-    (
-        "StreamsChanged",
-        "crates/oxplow-app/src/branch_reconciler.rs",
-    ), // P8.A4
+    ("StreamsChanged", "crates/oxplow-app/src/branch_reconciler.rs"), // P8.A4
     ("StreamsChanged", "crates/oxplow-app/src/workspace_watch.rs"), // P8.A4
-    ("StreamsChanged", "crates/oxplow-mcp/src/lib.rs"),             // P8.A4
-    (
-        "StreamsChanged",
-        "crates/oxplow-rpc/src/commands/streams.rs",
-    ), // P8.A4
-    ("ThreadsChanged", "crates/oxplow-mcp/src/lib.rs"),             // P8.A3
-    (
-        "ThreadsChanged",
-        "crates/oxplow-rpc/src/commands/threads.rs",
-    ), // P8.A3
-    ("UsageRecorded", "crates/oxplow-rpc/src/commands/usage.rs"),   // P8.A10
+    ("StreamsChanged", "crates/oxplow-mcp/src/lib.rs"), // P8.A4
+    ("StreamsChanged", "crates/oxplow-rpc/src/commands/streams.rs"), // P8.A4
+    ("UsageRecorded", "crates/oxplow-rpc/src/commands/usage.rs"), // P8.A10
     ("VcsRefsChanged", "crates/oxplow-app/src/ref_moves.rs"),
     ("WorkspaceChanged", "crates/oxplow-app/src/commands/vcs.rs"),
-    (
-        "WorkspaceChanged",
-        "crates/oxplow-app/src/workspace_files.rs",
-    ),
-    (
-        "WorkspaceChanged",
-        "crates/oxplow-app/src/workspace_watch.rs",
-    ),
-    (
-        "WorkspaceContextChanged",
-        "crates/oxplow-app/src/workspace_watch.rs",
-    ),
+    ("WorkspaceChanged", "crates/oxplow-app/src/workspace_files.rs"),
+    ("WorkspaceChanged", "crates/oxplow-app/src/workspace_watch.rs"),
+    ("WorkspaceContextChanged", "crates/oxplow-app/src/workspace_watch.rs"),
 ];
 
 /// P8.A1: each UI event has the sources pinned in [`EMITTERS`] — a new

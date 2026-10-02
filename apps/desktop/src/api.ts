@@ -1198,22 +1198,30 @@ export async function getThreadState(streamId: string): Promise<ThreadState> {
   return unwrap(await commands.getThreadState(streamId)) as unknown as ThreadState;
 }
 
+/** A thread command's input names threads and streams by ref. */
+const threadRef = (id: string) => `thread:${id}`;
+const streamRef = (id: string) => `stream:${id}`;
+
 export async function createThread(
   streamId: string,
   title: string,
   agent?: AgentKind,
   acpAgent?: string | null,
 ): Promise<ThreadState> {
-  unwrap(
-    await commands.createThread({ streamId, title, paneTarget: null, agent: agent ?? null, acpAgent: acpAgent ?? null }),
-  );
+  await runCommand("thread.create", {
+    stream: streamRef(streamId),
+    title,
+    ...(agent ? { agent } : {}),
+    ...(acpAgent ? { acp_agent: acpAgent } : {}),
+  });
   return getThreadState(streamId);
 }
 
 export async function reorderThreads(streamId: string, orderedThreadIds: string[]): Promise<void> {
-  unwrap(
-    await commands.reorderThreadQueue({ streamId, order: orderedThreadIds }),
-  );
+  await runCommand("thread.reorder", {
+    stream: streamRef(streamId),
+    order: orderedThreadIds.map(threadRef),
+  });
 }
 
 export async function reorderStreams(orderedStreamIds: string[]): Promise<void> {
@@ -1226,17 +1234,17 @@ export async function selectThread(streamId: string, threadId: string): Promise<
 }
 
 export async function promoteThread(streamId: string, threadId: string): Promise<ThreadState> {
-  unwrap(await commands.promoteThread(threadId));
+  await runCommand("thread.promote", { thread: threadRef(threadId) });
   return getThreadState(streamId);
 }
 
 export async function closeThread(streamId: string, threadId: string): Promise<ThreadState> {
-  unwrap(await commands.closeThread(threadId));
+  await runCommand("thread.close", { thread: threadRef(threadId) });
   return getThreadState(streamId);
 }
 
 export async function reopenThread(streamId: string, threadId: string): Promise<ThreadState> {
-  unwrap(await commands.reopenThread(threadId));
+  await runCommand("thread.reopen", { thread: threadRef(threadId) });
   return getThreadState(streamId);
 }
 
@@ -1245,7 +1253,7 @@ export async function listClosedThreads(streamId: string): Promise<Thread[]> {
 }
 
 export async function renameThread(_streamId: string, threadId: string, title: string): Promise<Thread> {
-  return unwrap(await commands.renameThread({ id: threadId, title }));
+  return (await runCommand("thread.rename", { thread: threadRef(threadId), title })).result as Thread;
 }
 
 export async function setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]> {
@@ -1258,7 +1266,7 @@ export async function setThreadPrompt(
   threadId: string,
   prompt: string | null,
 ): Promise<Thread[]> {
-  unwrap(await commands.setThreadPrompt({ id: threadId, prompt }));
+  await runCommand("thread.set_prompt", { thread: threadRef(threadId), ...(prompt ? { prompt } : {}) });
   return [];
 }
 
@@ -1541,19 +1549,6 @@ export function subscribeUsageEvents(
       threadId: (event.threadId as string | null | undefined) ?? null,
     });
   });
-}
-
-export async function reorderThreadQueue(
-  streamId: string,
-  _threadId: string,
-  entries: Array<{ id: string }>,
-): Promise<void> {
-  unwrap(
-    await commands.reorderThreadQueue({
-      streamId,
-      order: entries.map((e) => e.id),
-    }),
-  );
 }
 
 export async function removeFollowup(_threadId: string, id: string): Promise<void> {

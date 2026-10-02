@@ -198,7 +198,6 @@ macro_rules! oxplow_command_table {
                 // branch
                 // threads
                 list_threads => $crate::commands::threads::list_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
-                create_thread => $crate::commands::threads::create_thread { req: $crate::commands::threads::CreateThreadRequest } -> ::oxplow_domain::Thread,
                 list_acp_agents => $crate::commands::threads::list_acp_agents {} -> Vec<::oxplow_app::acp::agents::AcpAgentListing>,
                 // acp sessions (tsk281) — UI-only; acp_prompt is the prompt box's Enter
                 acp_prompt => $crate::commands::acp::acp_prompt { thread_id: ::oxplow_domain::ThreadId, text: String } -> (),
@@ -207,13 +206,7 @@ macro_rules! oxplow_command_table {
                 acp_transcript => $crate::commands::acp::acp_transcript { thread_id: ::oxplow_domain::ThreadId, since_seq: u64 } -> Option<::oxplow_app::acp::manager::AcpSnapshot>,
                 acp_dismiss_directive => $crate::commands::acp::acp_dismiss_directive { thread_id: ::oxplow_domain::ThreadId } -> (),
                 acp_close_session => $crate::commands::acp::acp_close_session { thread_id: ::oxplow_domain::ThreadId } -> (),
-                rename_thread => $crate::commands::threads::rename_thread { req: $crate::commands::threads::RenameThreadRequest } -> ::oxplow_domain::Thread,
-                set_thread_prompt => $crate::commands::threads::set_thread_prompt { req: $crate::commands::threads::SetThreadPromptRequest } -> ::oxplow_domain::Thread,
-                promote_thread => $crate::commands::threads::promote_thread { id: ::oxplow_domain::ThreadId } -> ::oxplow_domain::Thread,
-                close_thread => $crate::commands::threads::close_thread { id: ::oxplow_domain::ThreadId } -> ::oxplow_domain::Thread,
-                reopen_thread => $crate::commands::threads::reopen_thread { id: ::oxplow_domain::ThreadId } -> ::oxplow_domain::Thread,
                 list_closed_threads => $crate::commands::threads::list_closed_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
-                reorder_thread_queue => $crate::commands::threads::reorder_thread_queue { req: $crate::commands::threads::ReorderThreadQueueRequest } -> (),
                 get_thread_state => $crate::commands::threads::get_thread_state { stream_id: ::oxplow_domain::StreamId } -> $crate::commands::threads::ThreadState,
                 select_thread => $crate::commands::threads::select_thread { req: $crate::commands::threads::SelectThreadRequest } -> (),
                 // backlog

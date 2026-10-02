@@ -118,7 +118,6 @@ pub mod terminal_sessions;
 pub(crate) mod test_fixtures;
 pub mod test_outcome;
 pub mod test_signals;
-pub mod thread_lifecycle;
 pub mod thread_runtime;
 pub mod token_usage;
 pub mod tool_call_reactors;
@@ -1064,6 +1063,7 @@ impl Services {
         }) {
             commands.register(command).expect("vcs commands register");
         }
+        let acp = Arc::new(acp::manager::AcpManager::new());
         for command in [
             commands::work_item::command(work_items.clone()),
             commands::work_item::update_command(work_items.clone()),
@@ -1078,6 +1078,7 @@ impl Services {
         ]
         .into_iter()
         .chain(commands::review::commands())
+        .chain(commands::thread::commands(config_arc.clone(), acp.clone()))
         {
             commands.register(command).expect("core commands register");
         }
@@ -1306,7 +1307,7 @@ impl Services {
             lsp_sessions: lsp,
             agent_policy,
             agent_context: Arc::new(agent_context::AgentContext::default()),
-            acp: Arc::new(acp::manager::AcpManager::new()),
+            acp,
             approvals,
             lsp_installer: lsp_installer_svc,
             terminal_sessions,

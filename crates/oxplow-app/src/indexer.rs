@@ -457,11 +457,7 @@ mod tests {
         let (svc, _dir) = services().await;
         register(&svc);
         let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = svc
-            .threads
-            .create(&stream.id, "T", "working", oxplow_domain::AgentKind::Claude)
-            .await
-            .unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         let sid = stream.id.to_string();
         let found = |q: &'static str| {
             let svc = svc.clone();
@@ -562,11 +558,7 @@ mod tests {
         let (svc, _dir) = services().await;
         register(&svc);
         let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = svc
-            .threads
-            .create(&stream.id, "T", "working", oxplow_domain::AgentKind::Claude)
-            .await
-            .unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         let task = svc
             .tasks
             .create(
@@ -623,11 +615,7 @@ mod tests {
         let (svc, _dir) = services().await;
         // Seed a stream + thread so task/note/comment scoping resolves.
         let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = svc
-            .threads
-            .create(&stream.id, "T", "working", oxplow_domain::AgentKind::Claude)
-            .await
-            .unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
 
         let task = svc
             .tasks
@@ -696,11 +684,7 @@ mod tests {
         let (svc, _dir) = services().await;
         register(&svc);
         let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = svc
-            .threads
-            .create(&stream.id, "T", "working", oxplow_domain::AgentKind::Claude)
-            .await
-            .unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         let sid = stream.id.to_string();
         let found = |q: &'static str, kind: &'static str| {
             let svc = svc.clone();
@@ -779,11 +763,7 @@ mod tests {
         // even when neither the title nor the description mentions it.
         let (svc, _dir) = services().await;
         let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = svc
-            .threads
-            .create(&stream.id, "T", "working", oxplow_domain::AgentKind::Claude)
-            .await
-            .unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         let task = svc
             .tasks
             .create(
@@ -891,11 +871,7 @@ mod tests {
     async fn task_event_reindexes_incrementally() {
         let (svc, _dir) = services().await;
         let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = svc
-            .threads
-            .create(&stream.id, "T", "working", oxplow_domain::AgentKind::Claude)
-            .await
-            .unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         let indexer = Indexer::new(svc.clone());
 
         svc.tasks

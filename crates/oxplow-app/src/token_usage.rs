@@ -1104,11 +1104,7 @@ mod tests {
         // on `measure_has_active_spec` (tsk31), so the specs must exist.
         svc.metrics.seed_catalog().await;
         let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = svc
-            .threads
-            .create(&stream.id, "T", "working", AgentKind::Claude)
-            .await
-            .unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         (svc, dir, thread.id)
     }
 

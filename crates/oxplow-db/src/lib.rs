@@ -44,7 +44,7 @@ pub mod symbol_store;
 pub mod task_satellite;
 pub mod task_store;
 pub mod thread_answer_store;
-mod thread_store;
+pub mod thread_store;
 pub mod token_usage_store;
 pub mod tool_call_store;
 pub mod wiki_page_store;

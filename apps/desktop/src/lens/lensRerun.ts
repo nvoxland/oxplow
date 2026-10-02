@@ -11,6 +11,12 @@ import type { Reads } from "../tauri-bridge/generated/bindings.js";
 
 export const NO_READS: Reads = { models: [], tables: [], measures: [] };
 
+/** What a read of `models` (by their view names) depends on — for a view
+ *  loaded through a bespoke IPC that still re-reads on `ModelsChanged`. */
+export function readsOf(...models: string[]): Reads {
+  return { models, tables: [], measures: [] };
+}
+
 /** A file under `oxplow/extensions/` changed: a lens's own definition. */
 export function lensDefinitionChanged(event: Readonly<Record<string, unknown>>): boolean {
   return (
