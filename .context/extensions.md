@@ -1482,9 +1482,12 @@ its model `change_interest` (`v_oxplow_analytics_change_interest`, over
 effort's churn is its fact collector `oxplow_analytics.effort_churn`
 (`on: [effort.finished]`, `after: [change.analyze]`, reading the
 effort's change files) recording `oxplow_analytics.effort_churn_lines`.
-What needs two revisions' trees — files,
-functions, imports, test signals, per-function churn, the scoped
-duplicate scan — stays in core's change analysis.
+Full-tree duplicated lines (tsk388) read the tree, not tables, so they
+are a core built-in collector, `oxplow.duplicate_lines`, over the
+public `duplicate_blocks(min_lines)` builtin — what any extension could
+write. What needs two revisions' trees — files, functions, imports, test
+signals, per-function churn, the scoped duplicate scan — stays in core's
+change analysis.
 
 **Stays in core, deliberately simple:** a basic **metrics explorer** and
 **simple dashboards** (Nathan, 2026-09-27). The base version must let

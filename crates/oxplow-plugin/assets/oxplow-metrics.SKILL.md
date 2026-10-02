@@ -166,6 +166,9 @@ the return (an old `samples` / `findings` shape) is refused.
   `rust`/`typescript`/`tsx`/`javascript`/`python`/`go`/`java`/`c`/`cpp`/`clojure`.
 - `code_metrics(text, language)` → per-function `[{name, complexity, length,
   parameter_count, start_line, end_line, visibility}]`.
+- `duplicate_blocks(min_lines)` → every duplicated block pair among the
+  snapshot files `[{a_path, a_start_line, a_end_line, b_path, b_start_line,
+  b_end_line, line_count}]` (see the built-in `oxplow.duplicate_lines`).
 - plus `regex_find`, `parse_json`, `parse_xml`, `lines`, `lcov_records`, `xpath`.
 - A fact collector can't call the `ai_*` builtins (those are for entity
   collectors, which in turn get no `files()`).

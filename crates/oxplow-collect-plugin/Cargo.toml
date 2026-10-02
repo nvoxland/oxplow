@@ -11,6 +11,8 @@ license.workspace = true
 oxplow-coverage = { workspace = true }
 # Tree-sitter AST engine behind the `ast_query` gauge host capability.
 oxplow-code-metrics = { workspace = true }
+# The duplicate-block detector behind the `duplicate_blocks` host capability.
+oxplow-code-dup = { workspace = true }
 # Glob matching for the `files(glob)` snapshot host capability.
 globset = { workspace = true }
 serde = { workspace = true }

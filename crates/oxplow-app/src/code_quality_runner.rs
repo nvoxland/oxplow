@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use oxplow_code_dup::{detect_duplicates, detect_duplicates_scoped, DupOptions};
+use oxplow_code_dup::{detect_duplicates_scoped, DupOptions};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
@@ -61,7 +61,7 @@ pub struct RunOptions {
     /// Wall-clock budget. `None` uses [`DEFAULT_SCAN_TIMEOUT`].
     pub timeout: Option<std::time::Duration>,
     /// Override the duplicate-detector tunables. `None` uses
-    /// `DupOptions::default()` (production: min_lines=10).
+    /// `DupOptions::default()` (min_lines 5).
     pub dup_options: Option<DupOptions>,
 }
 
@@ -69,18 +69,17 @@ pub struct RunOptions {
 /// caller from whichever revision it means (`crate::trees::Trees::corpus`).
 /// Files the metrics layer can't parse are dropped.
 ///
-/// Without `scope`, every pair of documents is matched, same-file
-/// matches included. With `scope`, the whole corpus still takes part as
-/// match targets (a copy of an unchanged file is found), but a block is
-/// kept only when a side is in `scope`, that side is reported first, and
-/// same-file pairs — almost always shifted-by-one winnowing artifacts —
-/// are dropped. That's the change-analysis mode.
+/// The whole corpus takes part as match targets (a copy of an unchanged
+/// file is found), but a block is kept only when a side is in `scope`,
+/// that side is reported first, and same-file pairs — almost always
+/// shifted-by-one winnowing artifacts — are dropped. A whole-tree scan is
+/// the built-in `oxplow.duplicate_lines` collector's (`duplicate_blocks`).
 ///
 /// Runs on the blocking pool (tree-sitter is CPU-bound) under the
 /// `opts.timeout` budget.
 pub async fn scan_duplicates(
     corpus: Vec<(String, String)>,
-    scope: Option<BTreeSet<String>>,
+    scope: BTreeSet<String>,
     opts: RunOptions,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
     let timeout = opts.timeout.unwrap_or(DEFAULT_SCAN_TIMEOUT);
@@ -90,11 +89,7 @@ pub async fn scan_duplicates(
             .into_iter()
             .filter(|(p, _)| oxplow_code_metrics::is_supported_path(Path::new(p)))
             .collect();
-        let blocks = match scope {
-            None => detect_duplicates(inputs, dup_opts),
-            Some(scope) => detect_duplicates_scoped(inputs, &scope, dup_opts),
-        };
-        blocks_to_findings(blocks)
+        blocks_to_findings(detect_duplicates_scoped(inputs, &scope, dup_opts))
     });
     match tokio::time::timeout(timeout, task).await {
         Ok(Ok(findings)) => Ok(findings),
@@ -187,7 +182,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
     async fn duplicates_are_paired_with_their_peers() {
         let findings = scan_duplicates(
             corpus(&[("a.rs", BODY), ("b.rs", BODY), ("README.md", BODY)]),
-            None,
+            BTreeSet::from(["a.rs".to_string(), "README.md".to_string()]),
             small(),
         )
         .await
@@ -210,7 +205,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
                 ("a.rs", "fn add(a: i32, b: i32) -> i32 { a + b }"),
                 ("b.rs", "fn unrelated() { println!(\"hi\"); }"),
             ]),
-            None,
+            BTreeSet::from(["a.rs".to_string(), "b.rs".to_string()]),
             RunOptions::default(),
         )
         .await
@@ -224,7 +219,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
     async fn a_scoped_scan_finds_copies_in_unchanged_peers() {
         let findings = scan_duplicates(
             corpus(&[("changed.rs", BODY), ("untouched.rs", BODY)]),
-            Some(BTreeSet::from(["changed.rs".to_string()])),
+            BTreeSet::from(["changed.rs".to_string()]),
             small(),
         )
         .await
@@ -243,7 +238,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
         let twice = format!("{BODY}\n{}", BODY.replace("helper", "helper_two"));
         let findings = scan_duplicates(
             corpus(&[("only.rs", &twice)]),
-            Some(BTreeSet::from(["only.rs".to_string()])),
+            BTreeSet::from(["only.rs".to_string()]),
             small(),
         )
         .await

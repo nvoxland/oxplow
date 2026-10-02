@@ -76,18 +76,14 @@ pub fn matches_where(trigger: &Trigger, event: &StoredEvent) -> bool {
 }
 
 /// Hand `event` to the fact engine, which runs the fact collectors it
-/// triggers over one corpus: a snapshot's files (only a take that recorded
-/// some), an effort's end snapshot, or else the stream's latest snapshot.
+/// triggers over one corpus: a snapshot's files (its whole tree for a
+/// whole-tree collector, which alone runs on a take that recorded none),
+/// an effort's end snapshot, or else the stream's latest snapshot.
 async fn run_fact_collectors(svc: &Services, event: Arc<StoredEvent>) -> Result<(), DomainError> {
     let anchors = &event.envelope.anchors;
     match event.envelope.event_type.as_str() {
         "snapshot.taken" => {
-            let payload = &event.envelope.payload;
-            let recorded = !payload["unchanged"].as_bool().unwrap_or(false)
-                && payload["file_count"].as_u64().unwrap_or(0) > 0;
-            if let (true, Some(stream), Some(snapshot)) =
-                (recorded, anchors.stream_id, anchors.snapshot_id)
-            {
+            if let (Some(stream), Some(snapshot)) = (anchors.stream_id, anchors.snapshot_id) {
                 svc.metrics
                     .run_snapshot_collectors(stream, snapshot, false, Some(event.clone()))
                     .await;

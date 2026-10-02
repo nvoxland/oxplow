@@ -24,7 +24,13 @@ pub struct BuiltinMetric {
     pub language: &'static str,
     pub dimensions: &'static [&'static str],
     pub target: Option<f64>,
-    pub trigger: &'static str,
+    /// The event types that run it.
+    pub on: &'static [&'static str],
+    /// Payload fields each of those events must have, with these values.
+    pub filter: &'static [(&'static str, &'static str)],
+    /// It reads the whole tree as of the snapshot, never only the files
+    /// the snapshot recorded: its capture restates every file.
+    pub whole_tree: bool,
     pub runtime: &'static str,
     pub input: &'static str,
     pub script: &'static str,
@@ -42,7 +48,9 @@ const RUST: &[BuiltinMetric] = &[
         language: "rust",
         dimensions: &["package", "language", "vcs_rev"],
         target: Some(0.0),
-        trigger: "on-snapshot",
+        on: &["snapshot.taken"],
+        filter: &[],
+        whole_tree: false,
         runtime: "starlark",
         input: "text",
         script: include_str!("plugins/metrics/rust/unsafe_blocks.star"),
@@ -58,7 +66,9 @@ const RUST: &[BuiltinMetric] = &[
         language: "rust",
         dimensions: &["package", "language", "vcs_rev"],
         target: None,
-        trigger: "on-snapshot",
+        on: &["snapshot.taken"],
+        filter: &[],
+        whole_tree: false,
         runtime: "starlark",
         input: "text",
         script: include_str!("plugins/metrics/rust/unwrap_expect_calls.star"),
@@ -74,7 +84,9 @@ const RUST: &[BuiltinMetric] = &[
         language: "rust",
         dimensions: &["package", "language", "vcs_rev"],
         target: None,
-        trigger: "on-snapshot",
+        on: &["snapshot.taken"],
+        filter: &[],
+        whole_tree: false,
         runtime: "starlark",
         input: "text",
         script: include_str!("plugins/metrics/rust/panic_macros.star"),
@@ -128,7 +140,9 @@ const CODE: &[BuiltinMetric] = &[
         language: "",
         dimensions: &["package", "language", "vcs_rev"],
         target: None,
-        trigger: "on-snapshot",
+        on: &["snapshot.taken"],
+        filter: &[],
+        whole_tree: false,
         runtime: "starlark",
         input: "text",
         script: include_str!("plugins/metrics/code/doc_coverage.star"),
@@ -137,6 +151,28 @@ const CODE: &[BuiltinMetric] = &[
 
 /// A language-agnostic tree gauge (the unified code metrics). Like `ast_metric`
 /// but `language: ""` (no single language — it sweeps `source_files()` itself).
+/// Whole-tree scans: they restate the tree, so they read all of it — on a
+/// ref move (`snapshot.taken` with `trigger: git_refs`, logged for every
+/// ref move, an unchanged tree included) rather than every save.
+const TREE: &[BuiltinMetric] = &[BuiltinMetric {
+    key: "oxplow.duplicate_lines",
+    kind: "findings",
+    title: "Duplicated lines",
+    description: "Lines in blocks duplicated elsewhere in the tree, both sides of each copy.",
+    unit: "lines",
+    direction: "lower-better",
+    grain: "tree",
+    language: "",
+    dimensions: &["vcs_rev"],
+    target: None,
+    on: &["snapshot.taken"],
+    filter: &[("trigger", "git_refs")],
+    whole_tree: true,
+    runtime: "starlark",
+    input: "text",
+    script: include_str!("plugins/metrics/code/duplicate_lines.star"),
+}];
+
 const fn code_metric(
     key: &'static str,
     title: &'static str,
@@ -155,7 +191,9 @@ const fn code_metric(
         language: "",
         dimensions: &["package", "language", "vcs_rev"],
         target: None,
-        trigger: "on-snapshot",
+        on: &["snapshot.taken"],
+        filter: &[],
+        whole_tree: false,
         runtime: "starlark",
         input: "text",
         script,
@@ -184,7 +222,9 @@ const fn ast_metric(
         language,
         dimensions: &["package", "language", "vcs_rev"],
         target,
-        trigger: "on-snapshot",
+        on: &["snapshot.taken"],
+        filter: &[],
+        whole_tree: false,
         runtime: "starlark",
         input: "text",
         script,
@@ -261,10 +301,10 @@ const CSHARP: &[BuiltinMetric] = &[
     ),
 ];
 
-/// Every bundled built-in metric: language-idiom metrics per language, plus the
-/// language-agnostic code metrics (`CODE`).
+/// Every bundled built-in metric: language-idiom metrics per language, the
+/// language-agnostic code metrics (`CODE`) and the whole-tree scans (`TREE`).
 pub fn builtin_metrics() -> Vec<BuiltinMetric> {
-    [RUST, TS, CLOJURE, CSHARP, CODE].concat()
+    [RUST, TS, CLOJURE, CSHARP, CODE, TREE].concat()
 }
 
 #[cfg(test)]
@@ -656,6 +696,80 @@ namespace Acme {
         assert_eq!(
             run_over("oxplow.csharp.blocking_async_calls", cs_corpus()),
             2.0
+        );
+    }
+
+    /// Two files sharing a ten-line function body, and one that shares
+    /// nothing.
+    fn dup_corpus() -> HashMap<String, String> {
+        let body = "pub fn compute(input: &[i64]) -> i64 {\n\
+            \x20   let mut total = 0;\n\
+            \x20   for value in input {\n\
+            \x20       if *value > 0 {\n\
+            \x20           total += *value;\n\
+            \x20       } else {\n\
+            \x20           total -= *value;\n\
+            \x20       }\n\
+            \x20   }\n\
+            \x20   total * 2 + 1\n\
+            }\n";
+        HashMap::from([
+            ("src/a.rs".to_string(), body.to_string()),
+            ("src/b.rs".to_string(), format!("// a copy\n{body}")),
+            ("src/c.rs".to_string(), "fn other() {}\n".to_string()),
+        ])
+    }
+
+    #[test]
+    fn duplicate_lines_restates_both_sides_of_every_duplicate_block() {
+        let files = dup_corpus();
+        let mut want: Vec<(String, f64, Option<String>, Option<i64>)> =
+            oxplow_code_dup::detect_duplicates(
+                files.clone(),
+                oxplow_code_dup::DupOptions::default(),
+            )
+            .into_iter()
+            .flat_map(|b| {
+                [
+                    (b.a_path, b.a_start_line, b.a_end_line),
+                    (b.b_path, b.b_start_line, b.b_end_line),
+                ]
+                .map(|(path, start, end)| {
+                    (
+                        "oxplow.duplicate_lines".to_string(),
+                        b.line_count as f64,
+                        Some(format!("block:{path}:{start}-{end}")),
+                        Some(start as i64),
+                    )
+                })
+            })
+            .collect();
+        assert!(!want.is_empty(), "the corpus has a duplicate");
+        let mut got: Vec<(String, f64, Option<String>, Option<i64>)> =
+            report_over("oxplow.duplicate_lines", files)
+                .into_iter()
+                .map(|f| (f.measure, f.value, f.subject, f.line))
+                .collect();
+        want.sort_by(|a, b| a.2.cmp(&b.2));
+        got.sort_by(|a, b| a.2.cmp(&b.2));
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn duplicate_lines_runs_over_the_whole_tree_after_a_ref_move() {
+        let m = builtin_metrics()
+            .into_iter()
+            .find(|m| m.key == "oxplow.duplicate_lines")
+            .expect("a built-in");
+        assert_eq!(m.on, &["snapshot.taken"]);
+        assert_eq!(m.filter, &[("trigger", "git_refs")]);
+        assert!(m.whole_tree, "a slice of the tree can't restate it");
+        assert!(
+            builtin_metrics()
+                .iter()
+                .filter(|o| o.key != m.key)
+                .all(|o| o.on == ["snapshot.taken"] && o.filter.is_empty() && !o.whole_tree),
+            "the code metrics run on every snapshot over its delta"
         );
     }
 

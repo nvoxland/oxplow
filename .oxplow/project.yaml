@@ -380,6 +380,7 @@ metrics:
 - use: oxplow.fn_count
 - use: oxplow.high_complexity_fns
 - use: oxplow.long_functions
+- use: oxplow.duplicate_lines
 - use: oxplow.tests.failed
   target: 0.0
 - use: oxplow.tests.duration_ms

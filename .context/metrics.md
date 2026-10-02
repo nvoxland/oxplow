@@ -995,7 +995,7 @@ open window for a run to land in.
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr). **Branch + function coverage (tsk123)** ride the SAME capture as extra per-file facts on `oxplow.coverage.branch` / `oxplow.coverage.function` (num/den=hit/found), emitted only for files whose report carried the counts (`*_found > 0`) and only when their spec is enabled (per-measure gate via `active_coverage_measure`). Specs: `oxplow.coverage.branch_pct` / `oxplow.coverage.function_pct` (ratio %, higher-better). **Untested files (tsk124)** is a read-only spec `oxplow.coverage.untested_files` — a `count` over `oxplow.coverage` filtered `max_value: 0` (the new upper-bound `FactFilter` field, cube-ineligible like `min_value`), `findings` display so the drill-in lists which files, lower-better — no new collection |
 | test cases | `collection.rs::record_test_run` | one `oxplow.test_case` fact per case, status as the `oxplow.status` dim (+ `oxplow.test_suite`). MCP-asserted counts (no report) synthesize status-sliced facts (no case identity). A report-less, count-less run records its capture under the **`test-run`** producer — a run RECORD, not a measurement: an empty `tests` capture would read as "found 0 tests" to the zero-fill/currency logic and collapse the semi-additive `oxplow.tests.*` timeline |
-| duplication | `oxplow-app/src/duplication_scan.rs::DuplicationRecorder::record` — facts from **full-tree** scans only; the change analyzer's scoped scans record findings but no facts (tsk365) | one `oxplow.duplicate_lines` fact per duplicate block (value=line count, subject=`path:start-end`, peer side in `detail`); capture stamped with the **primary stream** (a scan has no natural stream) + tree `basis_ref`. A zero-hit scan still writes its EMPTY capture (tsk44 currency) — else the last non-empty scan's blocks stay "current" forever |
+| duplication | the built-in collector `oxplow.duplicate_lines` (P7.B5, tsk388) — whole tree, on every ref move; the change analyzer's scoped scans record findings but no facts (tsk365) | one `oxplow.duplicate_lines` fact per side of each duplicate block (value=line count, subject=`block:path:start-end`); a `full` capture on the snapshot's stream. A zero-hit scan still writes its EMPTY capture (tsk44 currency) — else the last non-empty scan's blocks stay "current" forever |
 | built-in code collectors | `metrics_service.rs::run_one_collector` → `record_collector_facts` (tsk23) | the bundled code collectors return `facts`: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders |
 | per-language idiom collectors | same path (tsk30) | the ~10 idiom collectors (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug, dims carrying the conformed `oxplow.language`); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`) |
 
@@ -1758,7 +1758,8 @@ metrics:                              # the read SPEC (the chartable metric)
 - The **fact collector**'s script gets `input = {report?, rows?, event?}` (the
   parsed `report:`, the `input:` query's rows, the trigger event) and the
   snapshot tree through the `TreeHost` builtins `files(glob)` /
-  `source_files()` / `ast_query(text, language, sexpr)` (see
+  `source_files()` / `ast_query(text, language, sexpr)` /
+  `duplicate_blocks(min_lines)` (see
   [collection.md](./collection.md)); it can't call the `ai_*` builtins (an
   entity collector can, and has no `files()`). It returns `{ "facts": [
   {measure, value, subject?, path?, line?, rule?, num?, den?, dims?} ] }` —
@@ -1775,7 +1776,9 @@ metrics:                              # the read SPEC (the chartable metric)
     a golden test over a fixture corpus. A project activates one with
     `metrics: - use: oxplow.<lang>.<name>`; that enables its `built-in`-owned
     fact collector (`FactCollector::builtin`), which runs the embedded script,
-    never a project-disk file. Two families:
+    never a project-disk file. Its trigger is the catalog's (`on` +
+    `filter` on `BuiltinMetric`; the Catalog shows it as `on snapshot.taken`).
+    Three families:
     - **Language-agnostic code metrics** (tsk314) — one metric, all languages —
       `oxplow.todos`, `oxplow.fn_count`, `oxplow.high_complexity_fns`,
       `oxplow.long_functions`, plus **`oxplow.doc_coverage`** (tsk125 — a per-file
@@ -1800,6 +1803,17 @@ metrics:                              # the read SPEC (the chartable metric)
       `panic_macros`), **TypeScript** (`any_usage`, `non_null_assertions`,
       `console_calls`, `ts_ignore`), **Clojure** (`defn_count`), **C#**
       (`empty_catch`, `blocking_async_calls`).
+    - **Whole-tree scans** (`TREE`) — **`oxplow.duplicate_lines`** (P7.B5,
+      tsk388): `duplicate_blocks(min_lines)` (the host builtin over
+      `oxplow_code_dup::detect_duplicates`) and one fact per side of each
+      block (value = its line count, subject `block:<path>:<start>-<end>`);
+      the spec is a `sum`. It runs on `snapshot.taken` with
+      `where: { trigger: git_refs }` — every ref move logs one, an unchanged
+      tree included — and is `whole_tree`: it always reads the
+      reconstructed tree (`build_full_file_map`, `scan_kind = full`), and it
+      alone runs on a take that recorded no files (a delta collector has no
+      delta there). A clean tree records an empty capture, which clears the
+      metric (tsk44).
 
     This repo dogfoods the language-idiom Rust/TS sets + all four unified code
     metrics in its own `.oxplow/project.yaml`. The

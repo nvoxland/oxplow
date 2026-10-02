@@ -636,7 +636,7 @@ fn spawn_duplicates(
         while let Some(job) = analyzer.dup_queue.next(change_id) {
             let scope = format!("change {change_id}");
             let findings = match recorder
-                .record(job.root, job.revision, Some(job.changed.clone()), scope)
+                .record(job.root, job.revision, job.changed.clone(), scope)
                 .await
             {
                 Ok(f) => f,

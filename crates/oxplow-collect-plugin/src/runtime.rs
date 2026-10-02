@@ -442,6 +442,47 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         Ok(eval.heap().alloc(serde_json::Value::Array(arr)))
     }
 
+    /// The duplicate-block capability: every pair of duplicated blocks of
+    /// at least `min_lines` lines among the host's files —
+    /// `[{a_path, a_start_line, a_end_line, b_path, b_start_line,
+    /// b_end_line, line_count}]`, from `oxplow_code_dup::detect_duplicates`.
+    /// Files in no supported language are skipped; no host, no blocks.
+    fn duplicate_blocks<'v>(
+        min_lines: u32,
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let arr: Vec<serde_json::Value> =
+            match eval.extra.and_then(|e| e.downcast_ref::<TreeHost>()) {
+                Some(host) => {
+                    let mut files: Vec<(&String, &String)> = host.files.iter().collect();
+                    files.sort_by(|a, b| a.0.cmp(b.0));
+                    let opts = oxplow_code_dup::DupOptions {
+                        min_lines,
+                        ..Default::default()
+                    };
+                    oxplow_code_dup::detect_duplicates(
+                        files.into_iter().map(|(p, t)| (p.clone(), t)),
+                        opts,
+                    )
+                    .into_iter()
+                    .map(|b| {
+                        serde_json::json!({
+                            "a_path": b.a_path,
+                            "a_start_line": b.a_start_line,
+                            "a_end_line": b.a_end_line,
+                            "b_path": b.b_path,
+                            "b_start_line": b.b_start_line,
+                            "b_end_line": b.b_end_line,
+                            "line_count": b.line_count,
+                        })
+                    })
+                    .collect()
+                }
+                None => Vec::new(),
+            };
+        Ok(eval.heap().alloc(serde_json::Value::Array(arr)))
+    }
+
     /// The comment-marker capability: `[{line, kind, text}]` for the
     /// TODO/FIXME/HACK/XXX/BUG markers in `text`, comment-aware via the
     /// language grammar. Dispatches into `oxplow_code_metrics::markers`.

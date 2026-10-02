@@ -899,7 +899,8 @@ oxplow-analytics change cards) only read them.
   the change's latest (`change.events_to` unchanged). The same scan is
   recorded as a code-quality scan (`v_code_quality_scan` /
   `v_code_quality_finding`). It writes **no** `oxplow.duplicate_lines`
-  facts: only a full-tree scan may restate that metric (tsk365,
+  facts: only a full-tree scan may restate that metric (tsk365) — the
+  built-in collector's, on every ref move (P7.B5,
   [code-quality.md](./code-quality.md)).
   Closed efforts and turns scan their end snapshot: `Trees` reads any
   revision (P5.B2).

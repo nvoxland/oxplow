@@ -130,14 +130,14 @@ in the background. `DuplicationRecorder::record`
   path-list fingerprint) and its findings, read through
   `v_code_quality_scan` / `v_code_quality_finding` (the oxplow-analytics
   `findings` and `duplicate-blocks` lenses);
-- for a **full-tree** scan only (`paths = None`), `oxplow.duplicate_lines`
-  facts under one `complete` capture stamped with the primary stream; an
-  **empty** capture when nothing is found, so the metric's current state
-  clears after a refactor (tsk44). A change scan anchors only its changed
-  files, so a capture from it would restate the whole tree from a slice
-  and zero out every untouched file's duplicates (tsk365). Change scans
-  therefore write no facts, and the metric has **no production producer**
-  until a full-tree scan runs somewhere;
+- **no facts**: a change scan anchors only its changed files, so a capture
+  from it would restate the whole tree from a slice and zero out every
+  untouched file's duplicates (tsk365). `oxplow.duplicate_lines` is the
+  built-in whole-tree collector's (P7.B5, closes tsk388): the
+  `duplicate_blocks(min_lines)` Starlark builtin over the whole tree on
+  every ref move (`snapshot.taken`, `trigger: git_refs`), an empty capture
+  clearing the metric after a refactor (tsk44) —
+  [metrics.md](./metrics.md) → "built-in";
 - a status-bar background task. Its rows' commits announce it
   (`ModelsChanged` on `v_code_quality_scan`); the `CodeQualityScanned`
   bus event is gone (P7.B4).
@@ -319,9 +319,9 @@ also render in the core changed-files tree (`ChangedFilesTree`).
 
 Code/quality signals are now authored as **metrics** (bundled or project
 `.oxplow/project.yaml` `metrics:` entries) over the `code_metrics()` / `ast_query()` host
-builtins — see [metrics.md](./metrics.md). Duplication is the lone exception:
-cross-file token matching has no Starlark equivalent, so it stays an inherent
-in-process scan here.
+builtins — see [metrics.md](./metrics.md), duplicated lines included (the
+`duplicate_blocks` builtin). The change analyzer's scoped scan stays an
+in-process scan here: it needs the change's files as its scope.
 
 ## Performance notes
 

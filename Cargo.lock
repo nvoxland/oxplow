@@ -4458,6 +4458,7 @@ dependencies = [
  "jaq-core",
  "jaq-json",
  "jaq-std",
+ "oxplow-code-dup",
  "oxplow-code-metrics",
  "oxplow-coverage",
  "quick-xml 0.42.0",

@@ -21,7 +21,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use oxplow_collect_plugin::{builtin_metrics, CollectedFact, SandboxBudget, TreeHost};
+use oxplow_collect_plugin::{
+    builtin_metrics, BuiltinMetric, CollectedFact, SandboxBudget, TreeHost,
+};
 use oxplow_config::collectors::{CollectorRuntime, CollectorSpec, ReportInput, Trigger};
 use oxplow_config::{
     global_config_dir, load_global_dimension_entries, load_global_measure_entries,
@@ -93,6 +95,9 @@ pub struct FactCollector {
     /// With an `on:` trigger: the pump consumers that must have handled the
     /// event first.
     pub after: Vec<String>,
+    /// It reads the whole tree as of the snapshot on every run, so its
+    /// capture restates every file (a built-in whole-tree scan).
+    pub whole_tree: bool,
 }
 
 impl FactCollector {
@@ -109,17 +114,22 @@ impl FactCollector {
             report: spec.report.clone(),
             input: spec.input.clone(),
             after: spec.after.clone(),
+            whole_tree: false,
         })
     }
 
-    /// A bundled code metric's collector, run on every snapshot.
-    fn builtin(key: &str) -> Self {
+    /// A bundled metric's collector, on the trigger the catalog gives it.
+    fn builtin(m: &BuiltinMetric) -> Self {
         FactCollector {
-            key: key.to_string(),
+            key: m.key.to_string(),
             owner: oxplow_config::collectors::BUILT_IN.to_string(),
             trigger: Trigger::On {
-                events: vec![SNAPSHOT_TAKEN.into()],
-                filter: Default::default(),
+                events: m.on.iter().map(|e| e.to_string()).collect(),
+                filter: m
+                    .filter
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
             },
             facts: Vec::new(),
             runtime: CollectorRuntime::Starlark,
@@ -127,6 +137,7 @@ impl FactCollector {
             report: None,
             input: None,
             after: Vec::new(),
+            whole_tree: m.whole_tree,
         }
     }
 
@@ -147,6 +158,24 @@ impl FactCollector {
             }
             ext => oxplow_config::extension_scope(ext),
         }
+    }
+}
+
+/// Whether the `snapshot.taken` `event` recorded files (it isn't an
+/// unchanged take).
+pub(crate) fn take_recorded(event: &oxplow_domain::StoredEvent) -> bool {
+    let payload = &event.envelope.payload;
+    !payload["unchanged"].as_bool().unwrap_or(false)
+        && payload["file_count"].as_u64().unwrap_or(0) > 0
+}
+
+/// A built-in's trigger as the catalog shows it: `on snapshot.taken`,
+/// with its payload filter when it has one.
+fn trigger_label(m: &BuiltinMetric) -> String {
+    let filter: Vec<String> = m.filter.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+    match filter.is_empty() {
+        true => format!("on {}", m.on.join(", ")),
+        false => format!("on {} where {}", m.on.join(", "), filter.join(", ")),
     }
 }
 
@@ -514,7 +543,7 @@ impl MetricsService {
         let builtin: Vec<FactCollector> = builtin_metrics()
             .iter()
             .filter(|m| enabled.contains(m.key))
-            .map(|m| FactCollector::builtin(m.key))
+            .map(FactCollector::builtin)
             .collect();
         let project: Vec<FactCollector> = self
             .config
@@ -869,7 +898,7 @@ impl MetricsService {
                 scope: "built-in".to_string(),
                 enabled: r.is_some_and(|m| m.enabled),
                 target: r.map_or(b.target, |m| m.target),
-                trigger: b.trigger.to_string(),
+                trigger: trigger_label(&b),
                 toggleable: true,
                 // Match the seeded spec's category (builtin_metric_specs /
                 // builtin_ast_specs seed "static-quality"), letting a resolved
@@ -1480,10 +1509,15 @@ impl MetricsService {
         force_full: bool,
         event: Option<Arc<oxplow_domain::StoredEvent>>,
     ) -> SweepReport {
+        // A take that recorded no files (a ref move on a clean tree) has
+        // no delta: only the whole-tree collectors have the moved revision
+        // to restate.
+        let recorded = event.as_ref().is_none_or(|e| take_recorded(e));
         let gauges: Vec<FactCollector> = self
             .fact_collectors()
             .into_iter()
             .filter(|g| g.runs_on(SNAPSHOT_TAKEN))
+            .filter(|g| recorded || g.whole_tree)
             .filter(|g| {
                 event
                     .as_ref()
@@ -1502,8 +1536,9 @@ impl MetricsService {
                 .into_iter()
                 .collect()
         };
-        let (full_gauges, delta_gauges): (Vec<FactCollector>, Vec<FactCollector>) =
-            gauges.into_iter().partition(|g| needing.contains(&g.key));
+        let (full_gauges, delta_gauges): (Vec<FactCollector>, Vec<FactCollector>) = gauges
+            .into_iter()
+            .partition(|g| g.whole_tree || needing.contains(&g.key));
 
         let mut report = SweepReport::default();
         if !delta_gauges.is_empty() {
@@ -2643,6 +2678,24 @@ fn builtin_metric_specs() -> Vec<NewMetricSpec> {
             );
             s
         },
+        // Duplicated lines (tsk388): the sum over the whole-tree scan's
+        // facts, one per side of each duplicate block.
+        {
+            let mut s = NewMetricSpec::base(
+                "oxplow.duplicate_lines",
+                "Duplicated lines",
+                "oxplow.duplicate_lines",
+                "sum",
+            );
+            s.unit = Some("lines".into());
+            s.direction = "lower-better".into();
+            s.display_kind = "findings".into();
+            s.category = Some("static-quality".into());
+            s.description = Some(
+                "Lines in blocks duplicated elsewhere in the tree — sum over oxplow.duplicate_lines facts.".into(),
+            );
+            s
+        },
     ]
 }
 
@@ -3079,28 +3132,7 @@ mod tests {
         svc.config.write().unwrap().collectors = specs;
         let snap =
             snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
-        let env = oxplow_domain::Envelope::typed::<oxplow_domain::events::schema::SnapshotTaken>(
-            "system",
-            &oxplow_domain::events::schema::SnapshotTakenV1 {
-                stream: "stream:1".into(),
-                snapshot: format!("snapshot:{snap}"),
-                parent: None,
-                trigger: oxplow_domain::snapshot::SnapshotTrigger::TurnEnd,
-                unchanged: false,
-                file_count: 1,
-                elapsed_ms: 1,
-                budget_ms: None,
-                over_budget: false,
-            },
-        )
-        .with_anchors(oxplow_domain::events::Anchors {
-            stream_id: Some(StreamId::new(1)),
-            snapshot_id: Some(snap),
-            ..Default::default()
-        });
-        let id = env.id.clone();
-        svc.event_log_store.append(env).await.unwrap();
-        let event = svc.event_log_store.get(id).await.unwrap().unwrap();
+        let event = log_take(&svc, snap, SnapshotTrigger::TurnEnd, false, 1).await;
         let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
         use crate::event_pump::AsyncEventConsumer as _;
         assert!(consumer.handles("snapshot.taken"));
@@ -3120,6 +3152,171 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(counts, (1, 1), "one capture and one run for one snapshot");
+    }
+
+    use oxplow_domain::snapshot::SnapshotTrigger;
+
+    /// Log `snapshot.taken` for snapshot `snap` on stream 1, as the take
+    /// that recorded it (or didn't) would.
+    async fn log_take(
+        svc: &crate::Services,
+        snap: i64,
+        trigger: SnapshotTrigger,
+        unchanged: bool,
+        file_count: u32,
+    ) -> oxplow_domain::StoredEvent {
+        let env = oxplow_domain::Envelope::typed::<oxplow_domain::events::schema::SnapshotTaken>(
+            "system",
+            &oxplow_domain::events::schema::SnapshotTakenV1 {
+                stream: "stream:1".into(),
+                snapshot: format!("snapshot:{snap}"),
+                parent: None,
+                trigger,
+                unchanged,
+                file_count,
+                elapsed_ms: 1,
+                budget_ms: None,
+                over_budget: false,
+            },
+        )
+        .with_anchors(oxplow_domain::events::Anchors {
+            stream_id: Some(StreamId::new(1)),
+            snapshot_id: Some(snap),
+            ..Default::default()
+        });
+        let id = env.id.clone();
+        svc.event_log_store.append(env).await.unwrap();
+        svc.event_log_store.get(id).await.unwrap().unwrap()
+    }
+
+    /// A snapshot on stream 1 recording `files` with their content (`None`
+    /// deletes the path).
+    async fn snapshot_with_content(svc: &crate::Services, files: &[(&str, Option<&str>)]) -> i64 {
+        let snap = svc
+            .snapshot_store
+            .create_snapshot(StreamId::new(1))
+            .await
+            .unwrap();
+        let rows = files
+            .iter()
+            .map(|(path, text)| oxplow_db::FileSnapshot {
+                id: 0,
+                stream_id: StreamId::new(1),
+                path: (*path).to_string(),
+                blob_hash: text.map(|t| svc.blobs.write(t.as_bytes()).unwrap()),
+                size_bytes: text.map_or(0, |t| t.len() as i64),
+                captured_at: oxplow_domain::Timestamp::now(),
+                storage: match text {
+                    Some(_) => oxplow_db::SnapshotStorage::Oxplow,
+                    None => oxplow_db::SnapshotStorage::Deleted,
+                },
+                snapshot_id: Some(snap),
+                mtime_ms: None,
+                content_hash: None,
+            })
+            .collect();
+        svc.snapshot_store.capture_batch(rows).await.unwrap();
+        snap
+    }
+
+    /// P7.B5 (tsk388): `oxplow.duplicate_lines` is restated over the whole
+    /// tree on every ref move — a take that recorded nothing included —
+    /// and a clean tree clears it.
+    #[tokio::test]
+    async fn a_ref_move_restates_duplicate_lines_over_the_whole_tree() {
+        const BODY: &str = "pub fn compute(input: &[i64]) -> i64 {\n\
+            \x20   let mut total = 0;\n\
+            \x20   for value in input {\n\
+            \x20       if *value > 0 {\n\
+            \x20           total += *value;\n\
+            \x20       } else {\n\
+            \x20           total -= *value;\n\
+            \x20       }\n\
+            \x20   }\n\
+            \x20   total * 2 + 1\n\
+            }\n";
+        let (svc, _dir) = fixture().await;
+        svc.config.write().unwrap().metrics.push(MetricEntry {
+            use_key: Some("oxplow.duplicate_lines".into()),
+            ..Default::default()
+        });
+        let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
+        use crate::event_pump::AsyncEventConsumer as _;
+        let measure = svc
+            .fact_store
+            .get_measure("oxplow.duplicate_lines")
+            .await
+            .unwrap()
+            .unwrap();
+        let current = || async {
+            let mut subjects: Vec<String> = svc
+                .metric_engine
+                .current_facts(&measure)
+                .await
+                .unwrap()
+                .into_iter()
+                .filter_map(|f| f.subject_ref)
+                .collect();
+            subjects.sort();
+            subjects
+        };
+        let captures = || async {
+            svc.db
+                .read(|c| {
+                    c.query_row(
+                        "SELECT count(*) FROM metric_capture WHERE producer = 'oxplow.duplicate_lines'",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+        };
+
+        // The copy lands in one take, then a second take records only one
+        // side: neither is a ref move.
+        let first = snapshot_with_content(
+            &svc,
+            &[
+                ("src/a.rs", Some(BODY)),
+                ("src/other.rs", Some("fn other() {}\n")),
+            ],
+        )
+        .await;
+        let second = snapshot_with_content(&svc, &[("src/b.rs", Some(BODY))]).await;
+        for (snap, trigger) in [
+            (first, SnapshotTrigger::Startup),
+            (second, SnapshotTrigger::TurnEnd),
+        ] {
+            consumer
+                .handle(&log_take(&svc, snap, trigger, false, 1).await)
+                .await
+                .unwrap();
+        }
+        assert_eq!(captures().await, 0, "only a ref move runs it");
+
+        // A ref move on the unchanged tree reads all of it, not the
+        // second take's one file.
+        let moved = log_take(&svc, second, SnapshotTrigger::GitRefs, true, 0).await;
+        consumer.handle(&moved).await.unwrap();
+        let both = current().await;
+        assert_eq!(both.len(), 2, "both sides of the copy: {both:?}");
+        assert!(both[0].starts_with("src/a.rs:") && both[1].starts_with("src/b.rs:"));
+
+        // The copy goes; the next ref move clears the metric.
+        let third = snapshot_with_content(&svc, &[("src/b.rs", None)]).await;
+        consumer
+            .handle(&log_take(&svc, third, SnapshotTrigger::Quiet, false, 1).await)
+            .await
+            .unwrap();
+        assert_eq!(current().await.len(), 2, "a save doesn't restate it");
+        consumer
+            .handle(&log_take(&svc, third, SnapshotTrigger::GitRefs, true, 0).await)
+            .await
+            .unwrap();
+        assert!(current().await.is_empty(), "an empty capture clears it");
+        assert_eq!(captures().await, 2);
     }
 
     fn starlark_gauge(key: &str, entry_file: &str) -> FactCollector {
@@ -3142,6 +3339,7 @@ mod tests {
             report: None,
             input: None,
             after: Vec::new(),
+            whole_tree: false,
         }
     }
 
@@ -4002,7 +4200,12 @@ def transform(input):
     /// A built-in fact collector — `run_one_collector` runs its embedded
     /// script (never a project-disk file).
     fn builtin_gauge_fixture(key: &str) -> FactCollector {
-        FactCollector::builtin(key)
+        FactCollector::builtin(
+            &builtin_metrics()
+                .into_iter()
+                .find(|m| m.key == key)
+                .expect("a built-in"),
+        )
     }
 
     /// A mixed-language corpus: a high-complexity + long Rust fn, a TS fn with a
@@ -4503,6 +4706,23 @@ def transform(input):
                 assert_eq!(spec.language, None, "{key} is language-agnostic");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn duplicate_lines_is_a_sum_over_its_facts() {
+        let (svc, _dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        let spec = svc
+            .fact_store
+            .get_spec("oxplow.duplicate_lines")
+            .await
+            .unwrap()
+            .expect("seeded");
+        assert_eq!(
+            (spec.source_measure.as_deref(), spec.aggregation.as_str()),
+            (Some("oxplow.duplicate_lines"), "sum")
+        );
+        assert_eq!(spec.direction, "lower-better");
     }
 
     #[tokio::test]
