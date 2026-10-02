@@ -7,8 +7,9 @@
 //! | Namespace | Payload | Large content |
 //! |---|---|---|
 //! | `agent` | 30 days | 14 days |
-//! | `test`, `code` | 90 days | 30 days |
-//! | everything else (state: `snapshot`, `vcs`, `effort`, `work_item`, `command`, `config`, `effect`, …) | kept | kept |
+//! | `test`, `code`, `collector`, `effect` | 90 days | 30 days |
+//! | a plugin's (any namespace core doesn't own) | 30 days | 14 days |
+//! | core's state (`snapshot`, `vcs`, `effort`, `work_item`, `command`, `config`, …) | kept | kept |
 //!
 //! An expired payload is replaced by `{}` and stamped `payload_expired_at`
 //! (the column is NOT NULL); an expired body's row is deleted, and a
@@ -16,14 +17,81 @@
 //! for these windows are a later phase; these are the spec's defaults.
 
 use oxplow_domain::{DomainError, Timestamp};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use crate::database::{map_sql_err, ts_to_string, Database};
 
 pub const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
-/// `(namespace, payload days, large-content days)`.
-pub const POLICY: &[(&str, i64, i64)] = &[("agent", 30, 14), ("test", 90, 30), ("code", 90, 30)];
+/// Core's windows: `(namespace, payload days, large-content days)`. A
+/// core namespace not listed is state, kept whole.
+pub const POLICY: &[(&str, i64, i64)] = &[
+    ("agent", 30, 14),
+    ("test", 90, 30),
+    ("code", 90, 30),
+    ("collector", 90, 30),
+    ("effect", 90, 30),
+];
+
+/// Every plugin namespace's window (§5.4): payloads 30 days, large
+/// content 14. A plugin's own, shorter window comes with its declared
+/// event types (P8).
+pub const PLUGIN_DEFAULT: (i64, i64) = (30, 14);
+
+/// The namespaces the sweep expires and their windows: core's
+/// [`POLICY`], then every namespace in the log or the content store
+/// that core doesn't own, at [`PLUGIN_DEFAULT`].
+async fn windows(db: &Database) -> Result<Vec<(String, i64, i64)>, DomainError> {
+    let mut out: Vec<(String, i64, i64)> = POLICY
+        .iter()
+        .map(|(ns, p, c)| (ns.to_string(), *p, *c))
+        .collect();
+    for ns in plugin_namespaces(db).await? {
+        out.push((ns, PLUGIN_DEFAULT.0, PLUGIN_DEFAULT.1));
+    }
+    Ok(out)
+}
+
+/// The namespaces with live payloads or stored bodies that core doesn't
+/// own. The log's are found by skipping through the live-payload index a
+/// namespace at a time (one probe each), never by scanning it.
+async fn plugin_namespaces(db: &Database) -> Result<Vec<String>, DomainError> {
+    db.read(|tx| {
+        let mut found = std::collections::BTreeSet::new();
+        let mut after = String::new();
+        loop {
+            let next: Option<String> = tx
+                .query_row(
+                    "SELECT type FROM event_log INDEXED BY event_log_live_payload
+                      WHERE payload_expired_at IS NULL AND type > ?1
+                      ORDER BY type LIMIT 1",
+                    [&after],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(map_sql_err)?;
+            let Some(t) = next else { break };
+            let ns = t.split('.').next().unwrap_or_default().to_string();
+            // Past every `<ns>.` type: `/` is the byte after `.`.
+            after = format!("{ns}/");
+            found.insert(ns);
+        }
+        let mut st = tx
+            .prepare("SELECT DISTINCT namespace FROM event_content")
+            .map_err(map_sql_err)?;
+        for ns in st
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(map_sql_err)?
+        {
+            found.insert(ns.map_err(map_sql_err)?);
+        }
+        Ok(found
+            .into_iter()
+            .filter(|ns| !oxplow_domain::events::schema::CORE_NAMESPACES.contains(&ns.as_str()))
+            .collect())
+    })
+    .await
+}
 
 /// What one sweep removed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -36,7 +104,8 @@ pub struct SweepReport {
 /// the writer lock waits milliseconds, not the whole backlog.
 pub const BATCH: i64 = 5000;
 
-/// Apply [`POLICY`] as of `now`, in transactions of at most [`BATCH`]
+/// Apply [`POLICY`] and the plugin default as of `now`, in transactions
+/// of at most [`BATCH`]
 /// rows, so the first sweep over a large old log never holds the writer
 /// lock for long. Idempotent: an already-expired payload or an
 /// already-deleted body is not counted again.
@@ -52,8 +121,8 @@ async fn sweep_in_batches(
     let mut report = SweepReport::default();
     let stamp = ts_to_string(now);
     let before = |days: i64| ts_to_string(Timestamp::from_unix_ms(now.unix_ms() - days * DAY_MS));
-    for (ns, payload_days, content_days) in POLICY {
-        let (ns, cutoff) = (ns.to_string(), before(*content_days));
+    for (ns, payload_days, content_days) in windows(db).await? {
+        let (ns, cutoff) = (ns.to_string(), before(content_days));
         loop {
             let (ns, cutoff) = (ns.clone(), cutoff.clone());
             let n = db
@@ -74,7 +143,7 @@ async fn sweep_in_batches(
         }
         // `<ns>.` up to `<ns>/` (the next byte after `.`) is exactly the
         // namespace's types, as an index range.
-        let (lo, hi, cutoff) = (format!("{ns}."), format!("{ns}/"), before(*payload_days));
+        let (lo, hi, cutoff) = (format!("{ns}."), format!("{ns}/"), before(payload_days));
         loop {
             let (lo, hi, cutoff, stamp) = (lo.clone(), hi.clone(), cutoff.clone(), stamp.clone());
             let n = db
@@ -141,11 +210,15 @@ mod tests {
                 )
                 .map_err(crate::map_sql_err)?;
             }
-            // `agentx.` sorts inside `agent%` but is another namespace.
+            // `agentx.` sorts inside `agent%` but is another namespace — a
+            // plugin's, whose 29-day-old payload is within its 30 days.
+            let young = crate::database::ts_to_string(oxplow_domain::Timestamp::from_unix_ms(
+                now.unix_ms() - 29 * DAY_MS,
+            ));
             tx.execute(
                 "INSERT INTO event_log (id, type, v, at, source, subject, payload)
                    VALUES ('x', 'agentx.thing', 1, ?1, 'test', '[]', '{\"a\":1}')",
-                [&old],
+                [&young],
             )
             .map_err(crate::map_sql_err)?;
             Ok(())
@@ -301,5 +374,84 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(left, vec!["h-new", "h-test"], "test bodies keep 30 days");
+    }
+
+    /// P7.B7: a plugin's namespace expires on the plugin default (payload
+    /// 30 days, body 14); `collector` and `effect` payloads keep 90 days;
+    /// core's state namespaces are still kept whole.
+    #[tokio::test]
+    async fn plugin_namespaces_expire_on_the_default_and_collectors_keep_90_days() {
+        let db = Database::in_memory();
+        let now = oxplow_domain::Timestamp::from_unix_ms(400 * DAY_MS);
+        let days_ago = |d: i64| {
+            crate::database::ts_to_string(oxplow_domain::Timestamp::from_unix_ms(
+                now.unix_ms() - d * DAY_MS,
+            ))
+        };
+        let rows = [
+            ("p-old", "acme.thing.done", days_ago(31)),
+            ("p-new", "acme.thing.done", days_ago(29)),
+            ("c-old", "collector.synced", days_ago(91)),
+            ("c-new", "collector.synced", days_ago(89)),
+            ("s-old", "snapshot.taken", days_ago(300)),
+        ];
+        let bodies = [
+            ("b-old", "acme", days_ago(15)),
+            ("b-new", "acme", days_ago(13)),
+        ];
+        db.transaction(move |tx| {
+            for (id, ty, at) in &rows {
+                tx.execute(
+                    "INSERT INTO event_log (id, type, v, at, source, subject, payload)
+                       VALUES (?1, ?2, 1, ?3, 'test', '[]', '{\"x\":1}')",
+                    rusqlite::params![id, ty, at],
+                )
+                .map_err(crate::map_sql_err)?;
+            }
+            for (hash, ns, at) in &bodies {
+                tx.execute(
+                    "INSERT INTO event_content (hash, namespace, bytes, size, created_at)
+                       VALUES (?1, ?2, x'00', 1, ?3)",
+                    rusqlite::params![hash, ns, at],
+                )
+                .map_err(crate::map_sql_err)?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        sweep(&db, now).await.unwrap();
+        let expired: Vec<String> = db
+            .read(|tx| {
+                let mut st = tx
+                    .prepare(
+                        "SELECT id FROM event_log WHERE payload_expired_at IS NOT NULL ORDER BY id",
+                    )
+                    .map_err(crate::map_sql_err)?;
+                let r = st
+                    .query_map([], |r| r.get(0))
+                    .map_err(crate::map_sql_err)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(crate::map_sql_err)?;
+                Ok(r)
+            })
+            .await
+            .unwrap();
+        assert_eq!(expired, vec!["c-old", "p-old"]);
+        let bodies_left: Vec<String> = db
+            .read(|tx| {
+                let mut st = tx
+                    .prepare("SELECT hash FROM event_content ORDER BY hash")
+                    .map_err(crate::map_sql_err)?;
+                let r = st
+                    .query_map([], |r| r.get(0))
+                    .map_err(crate::map_sql_err)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(crate::map_sql_err)?;
+                Ok(r)
+            })
+            .await
+            .unwrap();
+        assert_eq!(bodies_left, vec!["b-new"]);
     }
 }

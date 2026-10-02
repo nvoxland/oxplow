@@ -1193,7 +1193,10 @@ ten minutes after boot, then daily; batches of 5,000 rows per transaction
 through the partial index `event_log_live_payload (type, at) WHERE
 payload_expired_at IS NULL`, V103, read as a `type` range because a `LIKE`
 can't use a BINARY index; windows in its `POLICY`: `agent` 30 d payload / 14 d body,
-`test` and `code` 90 / 30, everything else kept). **An expired event is
+`test`, `code`, `collector` and `effect` 90 / 30, and every namespace core
+doesn't own — a plugin's, found by skipping through that index one
+namespace per probe, and in `event_content` — `PLUGIN_DEFAULT` 30 / 14
+(P7.B7); core's state namespaces are kept). **An expired event is
 history only** (tsk501): `StoredEvent.payload_expired_at` carries the
 stamp; the pump checkpoints past it without calling any consumer (a new or
 renamed consumer replaying the log never sees `{}`); `retry_dead_letter`
