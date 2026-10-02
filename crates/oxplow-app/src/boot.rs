@@ -437,14 +437,9 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         tokio::spawn(async move {
             let n = crate::commit_indexer::refresh(&state).await;
             tracing::info!(indexed = n, "commit indexer initial scan done");
-            loop {
-                match rx.recv().await {
-                    Ok(_) => {
-                        crate::commit_indexer::refresh(&state).await;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                }
+            // Any move, a missed one included: the refresh is idempotent.
+            while rx.recv().await.is_some() {
+                crate::commit_indexer::refresh(&state).await;
             }
         });
     }

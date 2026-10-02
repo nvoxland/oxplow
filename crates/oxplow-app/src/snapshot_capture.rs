@@ -591,18 +591,13 @@ impl SnapshotCaptureService {
         let mut rx = moves.subscribe();
         let this = self.clone();
         tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(stream_id) if stream_id == this.inner.stream_id => {
-                        if let Err(e) = this.request_snapshot_for_git_refs().await {
-                            debug!(error = %e, "snapshot: git-refs trigger failed");
-                        }
+            // A missed move may have been this stream's: the take is
+            // idempotent, so it takes.
+            while let Some(moved) = rx.recv().await {
+                if moved.may_concern(this.inner.stream_id) {
+                    if let Err(e) = this.request_snapshot_for_git_refs().await {
+                        debug!(error = %e, "snapshot: git-refs trigger failed");
                     }
-                    Ok(_) => {}
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        warn!(skipped = n, "snapshot capture: git-refs bus lagged");
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         })
@@ -2454,6 +2449,58 @@ mod tests {
             store.get_snapshot_revision(with_ignored).await.unwrap(),
             Some(Revision::git(head_oid2.to_string()))
         );
+    }
+
+    /// P7 review (tsk724): a git-refs listener that fell behind the ref
+    /// moves (its own among the dropped) still takes: a missed move may
+    /// have been its stream's.
+    #[tokio::test]
+    async fn a_lagged_git_refs_listener_still_takes() {
+        let project = tempdir().unwrap();
+        let repo = git2::Repository::init(project.path()).unwrap();
+        let mut cfg = repo.config().unwrap();
+        cfg.set_str("user.name", "t").unwrap();
+        cfg.set_str("user.email", "t@example.com").unwrap();
+        std::fs::write(project.path().join(".gitignore"), ".oxplow\n").unwrap();
+        let tracked = project.path().join("tracked.txt");
+        std::fs::write(&tracked, "v1").unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("tracked.txt")).unwrap();
+        idx.add_path(std::path::Path::new(".gitignore")).unwrap();
+        idx.write().unwrap();
+        let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+        let sig = repo.signature().unwrap();
+        let head1 = repo
+            .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        let (svc, store) = svc_for(project.path()).await;
+        svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
+        let first = svc
+            .request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap()
+            .unwrap();
+        let parent = repo.find_commit(head1).unwrap();
+        let head2 = repo
+            .commit(Some("HEAD"), &sig, &sig, "2", &tree, &[&parent])
+            .unwrap();
+
+        let moves = crate::ref_moves::RefMoves::new(crate::events::EventBus::new());
+        let _listener = svc.spawn_git_refs_listener(&moves);
+        // Its move, then more than the channel holds of another stream's,
+        // before the listener runs: its own is dropped.
+        moves.moved(TEST_STREAM);
+        for _ in 0..300 {
+            moves.moved(StreamId::new(99));
+        }
+        let want = Some(Revision::git(head2.to_string()));
+        for _ in 0..100 {
+            if store.get_snapshot_revision(first).await.unwrap() == want {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!("the lagged listener never took");
     }
 
     #[tokio::test]

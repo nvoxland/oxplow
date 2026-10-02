@@ -43,7 +43,11 @@ provider stays testable against a tempdir.
   when refs move until the returned guard drops (the workspace watch
   registry turns it into a **ref move**: `RefMoves::moved(stream)`,
   `ref_moves.rs` — the backend's listeners hear it on that channel, the
-  renderer as `VcsRefsChanged`, P7.B6); `revision_graph(ws)` is a
+  renderer as `VcsRefsChanged`, P7.B6). The channel is bounded (256): a
+  listener that falls behind hears `Moved::Missed` — any stream may have
+  moved — and does its idempotent work as if its stream(s) did (the
+  git-refs take takes, the reconciler reconciles every stream, the commit
+  indexer refreshes; tsk724). `revision_graph(ws)` is a
   synchronous `RevisionGraph` (ancestry, a revision's time) that metric
   visibility caches over.
 

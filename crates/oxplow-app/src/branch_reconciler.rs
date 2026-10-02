@@ -16,6 +16,7 @@ use oxplow_domain::StreamId;
 use tracing::{debug, warn};
 
 use crate::events::{EventBus, OxplowEvent};
+use crate::ref_moves::Moved;
 use crate::worktrees::WorktreeRouter;
 
 pub struct BranchReconciler {
@@ -50,25 +51,29 @@ impl BranchReconciler {
     pub fn spawn(self: Arc<Self>) {
         let mut rx = self.ref_moves.subscribe();
         tokio::spawn(async move {
-            match self.router.all().await {
-                Ok(all) => {
-                    for (id, path) in all {
-                        self.reconcile(&id, &path).await;
-                    }
-                }
-                Err(error) => warn!(%error, "couldn't list the streams to reconcile"),
-            }
-            loop {
-                match rx.recv().await {
-                    Ok(stream_id) => {
+            self.reconcile_all().await;
+            while let Some(moved) = rx.recv().await {
+                match moved {
+                    Moved::Stream(stream_id) => {
                         let path = self.router.resolve(Some(&stream_id.to_string())).await;
                         self.reconcile(&stream_id, &path).await;
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    // Any stream may have moved.
+                    Moved::Missed => self.reconcile_all().await,
                 }
             }
         });
+    }
+
+    async fn reconcile_all(&self) {
+        match self.router.all().await {
+            Ok(all) => {
+                for (id, path) in all {
+                    self.reconcile(&id, &path).await;
+                }
+            }
+            Err(error) => warn!(%error, "couldn't list the streams to reconcile"),
+        }
     }
 
     /// Persist the branch `worktree` has checked out onto `stream_id`'s
