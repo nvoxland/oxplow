@@ -1,0 +1,98 @@
+[
+  {
+    "name": "create_item",
+    "description": "Create a note.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "required": [
+        "title"
+      ],
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "description": "One of open, doing, stuck, closed, dropped (default open).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent": {
+          "description": "The parent note's id.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "list_items",
+    "description": "List the notes changed after a revision, with the latest revision.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "since": {
+          "description": "Only notes changed after this revision.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "update_item",
+    "description": "Change a note's title, body, state or parent.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "required": [
+        "id"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent": {
+          "description": "The parent note's id; \"\" detaches it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+]

@@ -5,8 +5,8 @@ docs system's — that implements one of oxplow's capabilities (work items
 first) outside the app (P5.D, `target-architecture.md` §10). This doc
 covers the protocol (D1), the fake provider (D2) and the host with its
 consent and spawn rules (D3), instances with health (D4), the
-conformance kit with `oxplow plugin test` (D5) and the reference Linear
-provider (P7.A5).
+conformance kit with `oxplow plugin test` (D5), the reference Linear
+provider (P7.A5) and the MCP adapter (P7.A6).
 
 ## The protocol (`crates/oxplow-provider-protocol`)
 
@@ -173,9 +173,76 @@ Settings → Data → Programs, then on Settings → Integrations set
 with different ids give two instances (two teams); several instances of
 one provider are P8.
 
+## The MCP adapter (`crates/oxplow-provider-mcp`)
+
+A provider can be an **MCP server** instead of a program speaking the
+protocol (P7.A6). Its manifest entry names the server, a mapping and the
+pinned tools instead of an `entry` (exactly one of the two):
+
+```yaml
+providers:
+  - id: notes
+    capability: work_items
+    adapter:
+      mcp: { command: [bin/notes-server, --stdio] }  # a program in the folder
+      mapping: mcp/notes.star                        # Starlark transform(x)
+      tools: mcp/tools.json                          # the server's tools/list, pinned
+    declarations: provider.json
+```
+
+**What runs** is oxplow's own adapter, `oxplow-provider-mcp`, shipped
+beside oxplow (a Tauri sidecar staged by `stage-sidecars.sh`; dev and
+test builds find it in `target/<profile>`: `host::adapter_bin`), started
+like any provider — the scrubbed env, the sandbox and egress proxy, the
+verified copy as its cwd — with `--declarations … --mapping … --tools …
+-- <command>` (`ProviderSpec::launch`). It runs the server's command as
+the folder's file (never a name looked up on `PATH`), as an MCP client
+over the server's stdio; the server inherits the sandbox and the
+credentials. The loader refuses an adapter whose server, mapping or tools
+isn't inside the folder (or doesn't exist), an `args:` beside it, tools
+that aren't a JSON list of named tools, and a server by `url` (not yet,
+P8). **The approval covers it all**: the program hashed is the server's
+file, the mapping and tools are named in its args, and the tree hash
+covers the folder, so changing the mapping, a pin or the server needs
+approving again; the approval row lists the server and each pinned tool
+added, removed or changed (`ProviderEffect.tools`).
+
+- **`initialize`** answers the checked-in declarations (the handshake
+  checks them like any provider's).
+- **`check`** starts the server and runs `tools/list`: a server whose
+  tools differ from `tools.json` in any name, description or input
+  schema — §6.8's pin — is a problem at `""` naming the first difference,
+  and no handle (a changed server needs its pins updated and a person's
+  approval). A clean check keeps the config under a handle.
+- **`invoke` and `read`** run the mapping's `transform(x)` twice, each
+  under the sandbox with a 5 s budget: `x = { phase, command, input,
+  config, provider }` with `phase: invoke` → `{ tool, arguments }` (or
+  `{ refuse: { field, message } }`, an `InvalidInput`); the tool's output
+  (its structured content, else its text, as JSON when it parses) comes
+  back as `x.output` with `phase: invoked` → `{ result, events, inverse? }`.
+  A read: `phase: read` (`x.state` the checkpoint) → a tool call; `phase:
+  records` → `{ records, state }`, streamed as `$/record`s then one
+  `$/state`. **Tool output is data**: the mapping reads it and nothing
+  runs it. **What the mapping returns is checked**: an event type the
+  declarations don't list, or a subject, item or record that isn't this
+  provider's (`work_item:<id>:…`, the id from `OXPLOW_PROVIDER_ID`) fails
+  the call. A tool that reports an error fails it too.
+
+**Tests**: `tests/adapter.rs` drives the adapter over stdio in a copy of
+the fixture extension `tests/fixtures/notes/` in front of the test server
+`oxplow-provider-mcp-notes` (an rmcp stdio server: `list_items`,
+`create_item`, `update_item` over notes `open | doing | stuck | closed |
+dropped`) — the pin (an edited `tools.json` is refused), the mapping's
+calls and outcomes, the read and its cursor, an undeclared event and a
+foreign ref refused; `the_pinned_tools_are_the_servers` checks the pin
+(`OXPLOW_BLESS=1` re-pins). `tests/kit.rs` runs the fixture through
+`oxplow plugin test`, the work-items suite through a throwaway host over
+the adapter included.
+
 ## The host (`crates/oxplow-app/src/providers/`)
 
-**The manifest kind** (`spec.rs`): `providers:` is an experimental kind,
+**The manifest kind** (`spec.rs`; an MCP server's form is in "The MCP
+adapter" above): `providers:` is an experimental kind,
 so only a private extension's are loaded (onto `Extension.providers`; a
 disabled extension has none):
 

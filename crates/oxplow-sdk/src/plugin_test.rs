@@ -456,10 +456,19 @@ async fn test_provider(
     let client = match ReferenceClient::start(&launch).await {
         Ok(c) => c,
         Err(e) => {
-            report.errors.push(format!(
-                "{manifest}:1: {e} — fix: make `{}` an executable that speaks the provider protocol",
-                spec.entry
-            ));
+            let fix = match &spec.adapter {
+                Some(_) => format!(
+                    "make `{}` an MCP server whose tools are the pinned ones",
+                    spec.program().0
+                ),
+                None => format!(
+                    "make `{}` an executable that speaks the provider protocol",
+                    spec.program().0
+                ),
+            };
+            report
+                .errors
+                .push(format!("{manifest}:1: {e} — fix: {fix}"));
             return;
         }
     };

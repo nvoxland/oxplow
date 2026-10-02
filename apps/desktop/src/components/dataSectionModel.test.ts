@@ -110,6 +110,7 @@ test("a provider's declaration diff reads as lines", () => {
       { name: "create", change: "added", before: null, after: { confirm: "never" } },
       { name: "delete", change: "added", before: null, after: { confirm: "destructive" } },
     ],
+    tools: [],
     featuresBefore: null,
     featuresAfter: { comments: true },
     firstDifference: null,

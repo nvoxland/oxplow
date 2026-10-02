@@ -124,13 +124,24 @@ pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
         name: launch.name.clone(),
         message,
     };
-    let entry = launch.ext_dir.join(&launch.spec.entry);
-    if !entry.is_file() {
+    let (own, _) = launch.spec.program();
+    if !launch.ext_dir.join(&own).is_file() {
         return Err(failed(format!(
-            "entry `{}` doesn't exist in the extension folder",
-            launch.spec.entry
+            "`{own}` doesn't exist in the extension folder"
         )));
     }
+    let adapter = adapter_bin();
+    let (runs, args) = launch.spec.launch(&adapter);
+    let entry = match runs {
+        Some(adapter) if !adapter.is_file() => {
+            return Err(failed(format!(
+                "oxplow's MCP adapter isn't installed beside it ({})",
+                adapter.display()
+            )))
+        }
+        Some(adapter) => adapter,
+        None => launch.ext_dir.join(&own),
+    };
     let proxy = if crate::net_sandbox::enforced() {
         Some(
             crate::net_sandbox::EgressProxy::start(launch.spec.network.clone())
@@ -148,7 +159,7 @@ pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
             c
         }
     };
-    cmd.args(&launch.spec.args)
+    cmd.args(&args)
         .current_dir(&launch.ext_dir)
         .env_clear()
         .stdin(Stdio::piped())
@@ -176,7 +187,7 @@ pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
     }
     let mut child = cmd
         .spawn()
-        .map_err(|e| failed(format!("couldn't start `{}`: {e}", launch.spec.entry)))?;
+        .map_err(|e| failed(format!("couldn't start `{own}`: {e}")))?;
     let stdout = child
         .stdout
         .take()
@@ -348,7 +359,7 @@ pub fn last_approved(
     copies: &Path,
     ext: &crate::extensions::Extension,
     spec: &ProviderSpec,
-) -> Option<(ProviderSpec, InitializeResult)> {
+) -> Option<super::spec::DeclaredProvider> {
     let rel = ext.path.trim_end_matches('/');
     let entries = std::fs::read_dir(copies.join(&ext.name).join(&spec.id)).ok()?;
     entries.flatten().find_map(|entry| {
@@ -364,11 +375,10 @@ pub fn last_approved(
             return None;
         }
         let dir = root.join(rel);
-        let declared = super::spec::read_declarations(copied_spec, &|f| {
+        let declared = super::spec::DeclaredProvider::read(copied_spec, &|f| {
             std::fs::read_to_string(dir.join(f)).ok()
-        })
-        .ok()?;
-        Some((copied_spec.clone(), declared))
+        });
+        declared.declarations.is_some().then_some(declared)
     })
 }
 
@@ -392,6 +402,26 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// oxplow's MCP adapter (`oxplow-provider-mcp`, P7.A6): shipped beside
+/// the running executable (the bundle's sidecar, a dev `target/<profile>`),
+/// or one directory up from a test binary in `target/<profile>/deps`.
+pub fn adapter_bin() -> PathBuf {
+    let name = if cfg!(windows) {
+        "oxplow-provider-mcp.exe"
+    } else {
+        "oxplow-provider-mcp"
+    };
+    let exe = std::env::current_exe().unwrap_or_default();
+    let beside = exe.parent().map(|d| d.join(name));
+    let above = exe.parent().and_then(Path::parent).map(|d| d.join(name));
+    beside
+        .clone()
+        .filter(|p| p.is_file())
+        .or(above.filter(|p| p.is_file()))
+        .or(beside)
+        .unwrap_or_else(|| PathBuf::from(name))
 }
 
 /// The provider's extension folder under `root`.

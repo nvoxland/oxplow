@@ -293,6 +293,13 @@ names the file and line and says what to change.
    enables it in Settings → Integrations; you can't do either.
    `examples/extensions/linear/` in the oxplow repo (the Linear provider,
    `crates/oxplow-provider-linear`) is a complete one: copy its shape.
+   An existing **MCP server** can be the provider instead of a program:
+   `adapter: { mcp: { command: [bin/server] }, mapping: mcp/x.star,
+   tools: mcp/tools.json }` in place of `entry` — oxplow's adapter runs
+   the server, `check` refuses it unless its tools equal the pinned
+   `tools.json`, and `transform(x)` in the mapping turns each verb into a
+   tool call (`x.phase` `invoke`) and the tool's output into the answer
+   (`invoked`; `read` / `records` for a collector).
 5. **`oxplow plugin test <name>`** runs every intent example on a
    throwaway oxplow (empty data, your extension's entities published
    empty and its models and commands loaded — never the project's

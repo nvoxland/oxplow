@@ -251,6 +251,7 @@ describe("reviewModel", () => {
               { name: "delete", change: "added", before: null, after: { name: "delete", confirm: "destructive" } },
               { name: "create", change: "unchanged", before: {}, after: {} },
             ],
+            tools: [],
             featuresBefore: { comments: false },
             featuresAfter: { comments: false },
           },

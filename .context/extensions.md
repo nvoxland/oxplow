@@ -570,7 +570,7 @@ pages: …  panels: …  # running (P6.G1/G2): see "Panels" and "Pages"
 commands:  [...]   # Starlark scripts composing core commands (see "Commands")
 config: …          # parsed as data
 # experimental kinds — a PRIVATE extension only
-providers: [...]    # external providers over the provider protocol (providers.md); the others below are parsed as data only
+providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md); the others below are parsed as data only
 effects: … event_types: … ref_kinds: … custom_components: …   # and ui.decorators / ui.replacements
 ```
 

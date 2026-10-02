@@ -11,6 +11,7 @@ const base: ProviderEffect = {
   before: grants([]),
   after: grants([]),
   commands: [],
+  tools: [],
   featuresBefore: null,
   featuresAfter: null,
   firstDifference: null,
@@ -51,4 +52,34 @@ test("a change no grant, command or feature shows names its first difference", (
     "`/declarations/version` was 1, now 2",
   ]);
   expect(providerChanges({ ...base, change: "unchanged" })).toEqual([]);
+});
+
+test("an MCP adapter provider names its pinned tools, and each that changed", () => {
+  const tool = (name: string) => ({ name, description: name, inputSchema: { type: "object" } });
+  expect(
+    providerChanges({
+      ...base,
+      change: "added",
+      before: null,
+      after: { ...grants([]), entry: "bin/server", args: ["--stdio"] },
+      tools: [
+        { name: "create_item", change: "added", before: null, after: tool("create_item") },
+        { name: "list_items", change: "added", before: null, after: tool("list_items") },
+      ],
+    }),
+  ).toEqual([
+    "added — runs bin/server --stdio · reaches none · reads token",
+    "commands: none",
+    "MCP tools: create_item, list_items",
+  ]);
+  expect(
+    providerChanges({
+      ...base,
+      tools: [
+        { name: "list_items", change: "changed", before: tool("list_items"), after: tool("list_all") },
+        { name: "drop_all", change: "added", before: null, after: tool("drop_all") },
+        { name: "create_item", change: "unchanged", before: tool("create_item"), after: tool("create_item") },
+      ],
+    }),
+  ).toEqual(["MCP tool `list_items` changed", "MCP tool `drop_all` added"]);
 });

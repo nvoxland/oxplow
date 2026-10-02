@@ -28,19 +28,25 @@ const destructive = (c: { after: unknown }) =>
   (c.after as { confirm?: string } | null)?.confirm === "destructive" ? " (destructive)" : "";
 
 /** A provider's changes as phrases: everything it declares when it's new,
- *  else its grants, commands and features that differ — and, when none of
+ *  else its grants, commands, MCP tools and features that differ — and, when none of
  *  those shows a change, where its declarations first differ. */
 export function providerChanges(e: ProviderEffect): string[] {
   if (e.change === "added") {
-    return [
+    const out = [
       `added — ${e.after ? grantsLine(e.after) : "no grants"}`,
       `commands: ${listed(e.commands.map((c) => `${c.name}${destructive(c)}`))}`,
     ];
+    // Behind oxplow's MCP adapter: the server's tools, as pinned.
+    if (e.tools.length > 0) out.push(`MCP tools: ${listed(e.tools.map((t) => t.name))}`);
+    return out;
   }
   if (e.change === "removed") return ["removed"];
   const out = grantChanges(e.before, e.after);
   for (const c of e.commands.filter((c) => c.change !== "unchanged")) {
     out.push(`command \`${c.name}\` ${c.change}${c.change === "removed" ? "" : destructive(c)}`);
+  }
+  for (const t of e.tools.filter((t) => t.change !== "unchanged")) {
+    out.push(`MCP tool \`${t.name}\` ${t.change}`);
   }
   if (JSON.stringify(e.featuresBefore) !== JSON.stringify(e.featuresAfter)) {
     out.push(`features now ${JSON.stringify(e.featuresAfter)} (were ${JSON.stringify(e.featuresBefore)})`);

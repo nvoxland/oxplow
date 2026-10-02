@@ -1,0 +1,23 @@
+manifest: 2
+name: notes
+description: Notes from the oxplow-provider-mcp-notes MCP server, as work items, through oxplow's MCP adapter.
+sharing: private
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Prove the MCP adapter: an MCP server's notes become work items, and
+    work_item.create / update / transition reach it as tool calls through
+    a Starlark mapping.
+  origin: null
+  examples:
+    - name: create
+      input: { command: create, input: { title: First note } }
+      expect: the new note's ref (work_item:notes:N-<n>)
+providers:
+  - id: notes
+    capability: work_items
+    adapter:
+      mcp: { command: [bin/notes-server] }
+      mapping: mcp/notes.star
+      tools: mcp/tools.json
+    declarations: provider.json

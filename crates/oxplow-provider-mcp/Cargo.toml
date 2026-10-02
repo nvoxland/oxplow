@@ -1,0 +1,34 @@
+[package]
+name = "oxplow-provider-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "oxplow's MCP adapter: an MCP server plus a Starlark mapping, as a provider"
+
+[[bin]]
+name = "oxplow-provider-mcp"
+path = "src/main.rs"
+
+# The test MCP server the adapter's tests and the notes fixture run.
+[[bin]]
+name = "oxplow-provider-mcp-notes"
+path = "src/bin/notes.rs"
+
+[dependencies]
+oxplow-provider-protocol = { workspace = true }
+oxplow-collect-plugin = { workspace = true }
+rmcp = { workspace = true, features = ["client", "transport-child-process"] }
+schemars = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+oxplow-app = { workspace = true }
+oxplow-sdk = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

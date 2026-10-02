@@ -10,7 +10,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use oxplow_db::models::{contract_change, extension_view, ModelSource};
-use oxplow_provider_protocol::model::InitializeResult;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -87,7 +86,7 @@ pub struct CollectorEffect {
     pub entities: Vec<String>,
 }
 
-/// One of a provider's declared commands.
+/// One of a provider's declared commands, or of its pinned MCP tools.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandChange {
@@ -108,6 +107,8 @@ pub struct ProviderEffect {
     pub before: Option<Grants>,
     pub after: Option<Grants>,
     pub commands: Vec<CommandChange>,
+    /// Behind the MCP adapter (P7.A6): each pinned tool of its server.
+    pub tools: Vec<CommandChange>,
     #[specta(type = Option<oxplow_domain::Json>)]
     pub features_before: Option<Value>,
     #[specta(type = Option<oxplow_domain::Json>)]
@@ -241,10 +242,11 @@ pub fn collectors_diff(before: &[CollectorSpec], after: &[CollectorSpec]) -> Vec
 }
 
 fn provider_grants(p: &ProviderSpec) -> Grants {
+    let (entry, args) = p.program();
     Grants {
-        entry: p.entry.clone(),
+        entry,
         runtime: CollectorRuntime::Exec,
-        args: p.args.clone(),
+        args,
         hosts: p.network.clone(),
         credentials: p.credentials.clone(),
         env: p.env.clone(),
@@ -253,15 +255,36 @@ fn provider_grants(p: &ProviderSpec) -> Grants {
 
 /// A provider as declared: its spec and its checked-in declarations (`None`
 /// when they can't be read).
-pub type DeclaredProvider = (ProviderSpec, Option<InitializeResult>);
+pub use crate::providers::spec::DeclaredProvider;
 
 fn features_of(p: &DeclaredProvider) -> Option<Value> {
-    p.1.as_ref().and_then(|d| {
+    p.declarations.as_ref().and_then(|d| {
         d.capabilities
             .iter()
-            .find(|c| c.capability == p.0.capability)
+            .find(|c| c.capability == p.spec.capability)
             .map(|c| c.features.clone())
     })
+}
+
+/// Named things before and after (a provider's commands, its tools), by
+/// name: each added, removed, changed or not.
+fn named_changes(before: Vec<(String, Value)>, after: Vec<(String, Value)>) -> Vec<CommandChange> {
+    let names: BTreeSet<&String> = before.iter().chain(after.iter()).map(|(n, _)| n).collect();
+    names
+        .into_iter()
+        .map(|name| {
+            let find = |list: &[(String, Value)]| {
+                list.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone())
+            };
+            let (b, a) = (find(&before), find(&after));
+            CommandChange {
+                name: name.clone(),
+                change: change_of(b.as_ref(), a.as_ref()),
+                before: b,
+                after: a,
+            }
+        })
+        .collect()
 }
 
 /// Providers before and after, by id: grants, each declared command, and
@@ -270,11 +293,11 @@ pub fn providers_diff(
     before: &[DeclaredProvider],
     after: &[DeclaredProvider],
 ) -> Vec<ProviderEffect> {
-    pair_by(before, after, |p| p.0.id.clone())
+    pair_by(before, after, |p| p.spec.id.clone())
         .into_iter()
         .map(|(id, b, a)| {
             let commands = |p: Option<&DeclaredProvider>| -> Vec<(String, Value)> {
-                p.and_then(|p| p.1.as_ref())
+                p.and_then(|p| p.declarations.as_ref())
                     .map(|d| {
                         d.commands
                             .iter()
@@ -288,28 +311,26 @@ pub fn providers_diff(
                     })
                     .unwrap_or_default()
             };
-            let (cb, ca) = (commands(b), commands(a));
-            let names: BTreeSet<&String> = cb.iter().chain(ca.iter()).map(|(n, _)| n).collect();
-            let commands = names
-                .into_iter()
-                .map(|name| {
-                    let find = |list: &[(String, Value)]| {
-                        list.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone())
-                    };
-                    let (before, after) = (find(&cb), find(&ca));
-                    CommandChange {
-                        name: name.clone(),
-                        change: change_of(before.as_ref(), after.as_ref()),
-                        before,
-                        after,
-                    }
+            let tools = |p: Option<&DeclaredProvider>| -> Vec<(String, Value)> {
+                p.map(|p| {
+                    p.tools
+                        .iter()
+                        .map(|t| {
+                            (
+                                t["name"].as_str().unwrap_or_default().to_string(),
+                                t.clone(),
+                            )
+                        })
+                        .collect()
                 })
-                .collect();
+                .unwrap_or_default()
+            };
             let declared = |p: &DeclaredProvider| {
                 json!({
-                    "spec": serde_json::to_value(&p.0).unwrap_or(Value::Null),
-                    "declarations": p.1.as_ref()
+                    "spec": serde_json::to_value(&p.spec).unwrap_or(Value::Null),
+                    "declarations": p.declarations.as_ref()
                         .map(|d| serde_json::to_value(d).unwrap_or(Value::Null)),
+                    "tools": p.tools,
                 })
             };
             let (db, da) = (b.map(declared), a.map(declared));
@@ -319,15 +340,16 @@ pub fn providers_diff(
             };
             ProviderEffect {
                 id,
-                capability: a.or(b).map(|p| p.0.capability.clone()).unwrap_or_default(),
-                change: change_of(
-                    b.map(|p| (&p.0, &p.1)).as_ref(),
-                    a.map(|p| (&p.0, &p.1)).as_ref(),
-                ),
+                capability: a
+                    .or(b)
+                    .map(|p| p.spec.capability.clone())
+                    .unwrap_or_default(),
+                change: change_of(b, a),
                 first_difference,
-                before: b.map(|p| provider_grants(&p.0)),
-                after: a.map(|p| provider_grants(&p.0)),
-                commands,
+                before: b.map(|p| provider_grants(&p.spec)),
+                after: a.map(|p| provider_grants(&p.spec)),
+                commands: named_changes(commands(b), commands(a)),
+                tools: named_changes(tools(b), tools(a)),
                 features_before: b.and_then(features_of),
                 features_after: a.and_then(features_of),
             }
@@ -528,12 +550,7 @@ pub async fn effects(
         v.extension
             .providers
             .iter()
-            .map(|p| {
-                (
-                    p.clone(),
-                    crate::providers::spec::read_declarations(p, v.read).ok(),
-                )
-            })
+            .map(|p| DeclaredProvider::read(p, v.read))
             .collect()
     };
     let providers = providers_diff(
@@ -659,7 +676,61 @@ mod tests {
         declared
             .commands
             .retain(|c| commands.contains(&c.name.as_str()));
-        (spec, Some(declared))
+        DeclaredProvider {
+            spec,
+            declarations: Some(declared),
+            tools: Vec::new(),
+        }
+    }
+
+    /// P7.A6: an adapter provider's approval shows its server and each
+    /// pinned tool added, removed or changed.
+    #[test]
+    fn an_adapter_providers_effects_show_its_server_and_pinned_tools() {
+        let adapter = |tools: Value| {
+            let spec: ProviderSpec = serde_json::from_value(json!({
+                "id": "notes", "capability": "work_items", "declarations": "provider.json",
+                "adapter": { "mcp": { "command": ["bin/server", "--stdio"] },
+                             "mapping": "mcp/x.star", "tools": "mcp/tools.json" }
+            }))
+            .unwrap();
+            DeclaredProvider {
+                spec,
+                declarations: Some(oxplow_provider_fake::declarations()),
+                tools: tools.as_array().unwrap().clone(),
+            }
+        };
+        let tool = |name: &str, description: &str| json!({ "name": name, "description": description, "inputSchema": { "type": "object" } });
+        let effects = providers_diff(
+            &[adapter(json!([
+                tool("list_items", "List."),
+                tool("drop_all", "Drop.")
+            ]))],
+            &[adapter(json!([
+                tool("list_items", "List them all."),
+                tool("create_item", "Create.")
+            ]))],
+        );
+        let p = &effects[0];
+        assert_eq!(p.change, Change::Changed);
+        let grants = p.after.as_ref().unwrap();
+        assert_eq!(
+            (grants.entry.as_str(), grants.args.clone()),
+            ("bin/server", vec!["--stdio".to_string()])
+        );
+        let tools: Vec<(&str, Change)> = p
+            .tools
+            .iter()
+            .map(|t| (t.name.as_str(), t.change))
+            .collect();
+        assert_eq!(
+            tools,
+            [
+                ("create_item", Change::Added),
+                ("drop_all", Change::Removed),
+                ("list_items", Change::Changed)
+            ]
+        );
     }
 
     #[test]
@@ -723,7 +794,7 @@ mod tests {
     fn a_provider_change_names_its_first_difference() {
         let before = provider("fake", &[], true, &["create"]);
         let mut after = before.clone();
-        after.1.as_mut().unwrap().capabilities[0].capability = "work_items_v2".into();
+        after.declarations.as_mut().unwrap().capabilities[0].capability = "work_items_v2".into();
         let effect = providers_diff(std::slice::from_ref(&before), &[after]).remove(0);
         assert_eq!(effect.change, Change::Changed);
         assert!(effect

@@ -6,7 +6,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "bun run --cwd .. dev",
-    "beforeBuildCommand": "bun run --cwd .. build && bash src-tauri/scripts/stage-daemon.sh"
+    "beforeBuildCommand": "bun run --cwd .. build && bash src-tauri/scripts/stage-sidecars.sh"
   },
   "app": {
     "windows": [],
@@ -18,7 +18,7 @@
   },
   "bundle": {
     "active": true,
-    "externalBin": ["binaries/oxplow-daemon"],
+    "externalBin": ["binaries/oxplow-daemon", "binaries/oxplow-provider-mcp"],
     "targets": "all",
     "icon": [
       "icons/32x32.png",

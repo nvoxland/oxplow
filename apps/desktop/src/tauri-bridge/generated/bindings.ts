@@ -1240,6 +1240,19 @@ export type AcpSnapshot = {
 
 export type AcpStatus = "starting" | "idle" | "running" | "awaiting_permission" | "stopped";
 
+/**
+ *  An MCP server as a provider (P7.A6): oxplow's adapter runs `mcp`'s
+ *  server and translates through `mapping`, refusing a server whose tools
+ *  aren't `tools`.
+ */
+export type AdapterSpec = {
+	mcp: McpServerSpec,
+	// The Starlark mapping (`transform(x)`), relative to the folder.
+	mapping: string,
+	// The pinned tools (`[{ name, description, inputSchema }]`, JSON).
+	tools: string,
+};
+
 export type AddDashboardItemRequest = {
 	dashboardId: DashboardId,
 	// `query` | `lens` | `text`.
@@ -1824,7 +1837,7 @@ export type CommandCall = {
 	input: unknown,
 };
 
-// One of a provider's declared commands.
+// One of a provider's declared commands, or of its pinned MCP tools.
 export type CommandChange = {
 	name: string,
 	change: Change,
@@ -3594,6 +3607,15 @@ export type Materialize =
 "on_change";
 
 /**
+ *  How the adapter reaches the MCP server: a command in the folder (a
+ *  server by `url` isn't supported yet).
+ */
+export type McpServerSpec = {
+	command?: string[],
+	url?: string | null,
+};
+
+/**
  *  One entry in the top-level `measures:` block — the **measure catalog**
  *  authoring surface (epic tsk12, workstream E). A measure is a *type of atomic
  *  fact* a collector may emit (`oxplow.complexity`, `acme.api_latency`, …); the
@@ -4290,6 +4312,8 @@ export type ProviderEffect = {
 	before: Grants | null,
 	after: Grants | null,
 	commands: CommandChange[],
+	// Behind the MCP adapter (P7.A6): each pinned tool of its server.
+	tools: CommandChange[],
 	featuresBefore: unknown | null,
 	featuresAfter: unknown | null,
 	/**
@@ -4349,9 +4373,11 @@ export type ProviderSpec = {
 	 */
 	id: string,
 	capability: string,
-	// The program, relative to the extension folder.
-	entry: string,
+	// The program, relative to the extension folder — or `adapter`.
+	entry?: string | null,
 	args?: string[],
+	// An MCP server run through oxplow's adapter, instead of an `entry`.
+	adapter?: AdapterSpec | null,
 	// Host environment variables passed through by name.
 	env?: string[],
 	// Credentials it gets from the keychain, as environment variables.

@@ -529,11 +529,21 @@ pub fn provider_program(
     spec: &crate::providers::ProviderSpec,
 ) -> ProjectProgram {
     let dir = ext.path.trim_end_matches('/');
+    let (program, args) = spec.program();
+    // An adapter's mapping and pinned tools are files of the folder (the
+    // tree hash covers them); naming them here also pins which they are.
+    let args = match &spec.adapter {
+        Some(a) => [a.mapping.clone(), a.tools.clone()]
+            .into_iter()
+            .chain(args)
+            .collect(),
+        None => args,
+    };
     ProjectProgram {
         kind: ProgramKind::Provider,
         name: spec.approval_name(&ext.name),
-        program: format!("{dir}/{}", spec.entry),
-        args: spec.args.clone(),
+        program: format!("{dir}/{program}"),
+        args,
         env: spec.env.clone(),
         credentials: spec.credentials.clone(),
         network: spec.network.clone(),

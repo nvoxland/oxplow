@@ -820,6 +820,102 @@ async fn provider_args_stay_inside_the_approved_folder() {
     assert!(!program(&fx, &ext).approved);
 }
 
+const ADAPTER_MANIFEST: &str = "manifest: 2\nname: tracker\nsharing: private\nintent:\n  purpose: notes over MCP\n  examples: [{ name: a }]\nproviders:\n  - id: notes\n    capability: work_items\n    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    declarations: provider.json\n";
+
+/// A private extension whose provider is an MCP server behind oxplow's
+/// adapter: the server, its mapping and its pinned tools.
+fn write_adapter_extension(project: &Path) -> PathBuf {
+    let dir = project.join("oxplow/extensions").join(EXT);
+    std::fs::create_dir_all(dir.join("bin")).unwrap();
+    std::fs::create_dir_all(dir.join("mcp")).unwrap();
+    std::fs::write(dir.join("extension.yaml"), ADAPTER_MANIFEST).unwrap();
+    std::fs::write(dir.join("bin/server"), "#!/bin/sh\n").unwrap();
+    std::fs::write(dir.join("mcp/x.star"), "def transform(x):\n    return {}\n").unwrap();
+    std::fs::write(
+        dir.join("mcp/tools.json"),
+        r#"[{ "name": "list_items", "description": "List.", "inputSchema": { "type": "object" } }]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("provider.json"),
+        serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
+    )
+    .unwrap();
+    dir
+}
+
+/// P7.A6: an adapter provider names its MCP server (a command), its
+/// mapping and its pinned tools, each inside the folder — instead of an
+/// `entry`, never with one.
+#[tokio::test]
+async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folder() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    let dir = write_adapter_extension(&project);
+    let ext = extension(&project);
+    let adapter = ext.providers[0]
+        .adapter
+        .as_ref()
+        .expect("an adapter provider");
+    assert_eq!(adapter.mcp.command, ["bin/server", "--stdio"]);
+    for (from, to, says) in [
+        ("    adapter:\n", "    entry: bin/server\n    adapter:\n", "either `entry` or `adapter`"),
+        ("    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n", "", "either `entry` or `adapter`"),
+        ("mapping: mcp/x.star", "mapping: ../x.star", "../x.star"),
+        ("tools: mcp/tools.json", "tools: /tmp/tools.json", "/tmp/tools.json"),
+        ("tools: mcp/tools.json", "tools: mcp/missing.json", "mcp/missing.json"),
+        ("command: [bin/server, --stdio]", "command: [/usr/local/bin/npx, server]", "/usr/local/bin/npx"),
+        ("command: [bin/server, --stdio]", "command: [bin/server, ../../x.js]", "../../x.js"),
+        ("mcp: { command: [bin/server, --stdio] }", "mcp: { url: \"https://mcp.example.com\" }", "url"),
+    ] {
+        assert!(ADAPTER_MANIFEST.contains(from), "{from}");
+        std::fs::write(dir.join("extension.yaml"), ADAPTER_MANIFEST.replace(from, to)).unwrap();
+        let loaded = crate::extensions::load_extensions(&project)
+            .into_iter()
+            .find(|e| e.name == EXT)
+            .unwrap();
+        assert!(loaded.providers.is_empty(), "{to}");
+        assert!(
+            loaded.errors.iter().any(|e| e.contains(says)),
+            "{to}: {:?}",
+            loaded.errors
+        );
+    }
+    std::fs::write(dir.join("mcp/tools.json"), "{}").unwrap();
+    std::fs::write(dir.join("extension.yaml"), ADAPTER_MANIFEST).unwrap();
+    let loaded = crate::extensions::load_extensions(&project)
+        .into_iter()
+        .find(|e| e.name == EXT)
+        .unwrap();
+    assert!(
+        loaded.errors.iter().any(|e| e.contains("mcp/tools.json")),
+        "pinned tools are a list: {:?}",
+        loaded.errors
+    );
+}
+
+/// P7.A6: approving an adapter provider approves its mapping, its pinned
+/// tools and its server: changing any of them needs approving again.
+#[tokio::test]
+async fn an_adapter_providers_approval_covers_its_mapping_pins_and_server() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    let dir = write_adapter_extension(&project);
+    for file in ["mcp/x.star", "mcp/tools.json", "bin/server"] {
+        let ext = extension(&project);
+        approve(&fx, &ext);
+        assert!(program(&fx, &ext).approved);
+        let path = dir.join(file);
+        let text = std::fs::read_to_string(&path).unwrap();
+        let edited = match file {
+            "mcp/tools.json" => text.replace("List.", "List them all."),
+            _ => format!("{text}# changed\n"),
+        };
+        std::fs::write(&path, edited).unwrap();
+        assert!(!program(&fx, &extension(&project)).approved, "{file}");
+    }
+}
+
 /// tsk547: a provider runs from a verified copy of its approved folder,
 /// outside the repo — not from the live tree — and a tampered copy is
 /// replaced before it runs.

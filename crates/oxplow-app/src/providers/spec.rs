@@ -14,6 +14,17 @@
 //!     declarations: provider.json  # the InitializeResult, checked in
 //! ```
 //!
+//! Or, instead of an `entry`, an MCP server behind oxplow's adapter
+//! (P7.A6) — its command, the Starlark mapping and the pinned tools, all
+//! in the folder:
+//!
+//! ```yaml
+//!     adapter:
+//!       mcp: { command: [bin/notes-server, --stdio] }
+//!       mapping: mcp/notes.star
+//!       tools: mcp/tools.json
+//! ```
+//!
 //! The declarations file is what a person approves (with the program):
 //! the live `initialize` must equal it.
 
@@ -48,10 +59,14 @@ pub struct ProviderSpec {
     /// commands' namespace (`<id>.create`).
     pub id: String,
     pub capability: String,
-    /// The program, relative to the extension folder.
-    pub entry: String,
+    /// The program, relative to the extension folder — or `adapter`.
+    #[serde(default)]
+    pub entry: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
+    /// An MCP server run through oxplow's adapter, instead of an `entry`.
+    #[serde(default)]
+    pub adapter: Option<AdapterSpec>,
     /// Host environment variables passed through by name.
     #[serde(default)]
     pub env: Vec<String>,
@@ -65,10 +80,191 @@ pub struct ProviderSpec {
     pub declarations: String,
 }
 
+/// An MCP server as a provider (P7.A6): oxplow's adapter runs `mcp`'s
+/// server and translates through `mapping`, refusing a server whose tools
+/// aren't `tools`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AdapterSpec {
+    pub mcp: McpServerSpec,
+    /// The Starlark mapping (`transform(x)`), relative to the folder.
+    pub mapping: String,
+    /// The pinned tools (`[{ name, description, inputSchema }]`, JSON).
+    pub tools: String,
+}
+
+/// How the adapter reaches the MCP server: a command in the folder (a
+/// server by `url` isn't supported yet).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct McpServerSpec {
+    #[serde(default)]
+    pub command: Vec<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
 impl ProviderSpec {
     /// Its approval key: `provider:<extension>/<id>`.
     pub fn approval_name(&self, extension: &str) -> String {
         format!("{extension}/{}", self.id)
+    }
+
+    /// The program of its own it runs, relative to the folder, and its
+    /// arguments: its `entry` and `args`, or its MCP server's command —
+    /// what its approval names.
+    pub fn program(&self) -> (String, Vec<String>) {
+        match &self.adapter {
+            Some(a) => {
+                let (server, args) = a.mcp.command.split_first().map_or_else(
+                    || (String::new(), Vec::new()),
+                    |(s, rest)| (s.clone(), rest.to_vec()),
+                );
+                (server, args)
+            }
+            None => (self.entry.clone().unwrap_or_default(), self.args.clone()),
+        }
+    }
+
+    /// What the host executes in the folder: its `entry` with `args`, or
+    /// `adapter_bin` (oxplow's MCP adapter) with the adapter's files and
+    /// the server's command — every path relative to the folder.
+    pub fn launch(
+        &self,
+        adapter_bin: &std::path::Path,
+    ) -> (Option<std::path::PathBuf>, Vec<String>) {
+        match &self.adapter {
+            Some(a) => {
+                let mut args: Vec<String> = [
+                    "--declarations",
+                    &self.declarations,
+                    "--mapping",
+                    &a.mapping,
+                    "--tools",
+                    &a.tools,
+                    "--",
+                ]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+                args.extend(a.mcp.command.iter().cloned());
+                (Some(adapter_bin.to_path_buf()), args)
+            }
+            None => (None, self.args.clone()),
+        }
+    }
+}
+
+/// A provider as declared: its spec, its checked-in declarations (`None`
+/// when they can't be read) and, behind the MCP adapter, its pinned tools.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclaredProvider {
+    pub spec: ProviderSpec,
+    pub declarations: Option<InitializeResult>,
+    pub tools: Vec<serde_json::Value>,
+}
+
+impl DeclaredProvider {
+    /// `spec` as the files `read` reads declare it.
+    pub fn read(spec: &ProviderSpec, read: &dyn Fn(&str) -> Option<String>) -> DeclaredProvider {
+        DeclaredProvider {
+            spec: spec.clone(),
+            declarations: read_declarations(spec, read).ok(),
+            tools: read_pinned_tools(spec, read).unwrap_or_default(),
+        }
+    }
+}
+
+/// An adapter provider's pinned tools: a JSON list, each with a `name`.
+/// Empty for a provider with an `entry`.
+pub fn read_pinned_tools(
+    spec: &ProviderSpec,
+    read: &dyn Fn(&str) -> Option<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let Some(adapter) = &spec.adapter else {
+        return Ok(Vec::new());
+    };
+    let id = &spec.id;
+    let text = read(&adapter.tools).ok_or_else(|| {
+        format!(
+            "provider `{id}`: tools `{}` doesn't exist in the extension",
+            adapter.tools
+        )
+    })?;
+    let tools: Vec<serde_json::Value> = serde_json::from_str(&text)
+        .ok()
+        .filter(|t: &Vec<serde_json::Value>| t.iter().all(|t| t["name"].is_string()))
+        .ok_or_else(|| {
+            format!(
+                "provider `{id}`: tools `{}` must be a JSON list of `{{ name, description, \
+                 inputSchema }}` — the server's tools/list, pinned",
+                adapter.tools
+            )
+        })?;
+    Ok(tools)
+}
+
+/// What's wrong with how `spec` names what runs: exactly one of `entry`
+/// and `adapter`, and every file it names inside the folder.
+fn program_problem(spec: &ProviderSpec, read: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    let id = &spec.id;
+    match (&spec.entry, &spec.adapter) {
+        (Some(_), Some(_)) | (None, None) => Some(format!(
+            "provider `{id}`: name either `entry` or `adapter` (a program, or an MCP server behind oxplow's adapter), not both or neither"
+        )),
+        (Some(entry), None) => {
+            if !inside(entry) {
+                Some(format!(
+                    "provider `{id}`: entry `{entry}` must be a path inside the extension folder"
+                ))
+            } else {
+                spec.args.iter().find(|a| !arg_inside(a)).map(|bad| {
+                    format!(
+                        "provider `{id}`: arg `{bad}` names a path outside the extension folder (or its \
+                         manifest or lenses); a provider runs only what its approval covers"
+                    )
+                })
+            }
+        }
+        (None, Some(adapter)) => {
+            if adapter.mcp.url.is_some() {
+                return Some(format!(
+                    "provider `{id}`: an MCP server by `url` isn't supported yet; run it with `command`"
+                ));
+            }
+            if !spec.args.is_empty() {
+                return Some(format!(
+                    "provider `{id}`: `args` go with an `entry`; an adapter's server takes them in `command`"
+                ));
+            }
+            let Some((server, args)) = adapter.mcp.command.split_first() else {
+                return Some(format!("provider `{id}`: adapter `mcp.command` is empty"));
+            };
+            if !inside(server) {
+                return Some(format!(
+                    "provider `{id}`: the MCP server `{server}` must be a program inside the extension \
+                     folder (its approval covers what runs)"
+                ));
+            }
+            if let Some(bad) = args.iter().find(|a| !arg_inside(a)) {
+                return Some(format!(
+                    "provider `{id}`: server arg `{bad}` names a path outside the extension folder"
+                ));
+            }
+            for (what, path) in [("mapping", &adapter.mapping), ("tools", &adapter.tools)] {
+                if !inside(path) {
+                    return Some(format!(
+                        "provider `{id}`: {what} `{path}` must be a file inside the extension folder"
+                    ));
+                }
+                if read(path).is_none() {
+                    return Some(format!(
+                        "provider `{id}`: {what} `{path}` doesn't exist in the extension"
+                    ));
+                }
+            }
+            read_pinned_tools(spec, read).err()
+        }
     }
 }
 
@@ -257,16 +453,8 @@ pub fn parse_providers(
                 spec.capability,
                 CAPABILITIES.join(", ")
             ))
-        } else if !inside(&spec.entry) {
-            Some(format!(
-                "provider `{id}`: entry `{}` must be a path inside the extension folder",
-                spec.entry
-            ))
-        } else if let Some(bad) = spec.args.iter().find(|a| !arg_inside(a)) {
-            Some(format!(
-                "provider `{id}`: arg `{bad}` names a path outside the extension folder (or its \
-                 manifest or lenses); a provider runs only what its approval covers"
-            ))
+        } else if let Some(problem) = program_problem(&spec, read) {
+            Some(problem)
         } else if !inside(&spec.declarations) {
             Some(format!(
                 "provider `{id}`: declarations `{}` must be a file inside the extension folder",

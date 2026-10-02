@@ -32,6 +32,7 @@ members = [
     "crates/oxplow-provider-protocol",
     "crates/oxplow-provider-fake",
     "crates/oxplow-provider-linear",
+    "crates/oxplow-provider-mcp",
 ]
 
 [workspace.package]
@@ -168,6 +169,7 @@ oxplow-acp-fake = { path = "crates/oxplow-acp-fake" }
 oxplow-provider-protocol = { path = "crates/oxplow-provider-protocol" }
 oxplow-provider-fake = { path = "crates/oxplow-provider-fake" }
 oxplow-provider-linear = { path = "crates/oxplow-provider-linear" }
+oxplow-provider-mcp = { path = "crates/oxplow-provider-mcp" }
 oxplow-config = { path = "crates/oxplow-config" }
 oxplow-fs-watch = { path = "crates/oxplow-fs-watch" }
 oxplow-git = { path = "crates/oxplow-git" }

@@ -602,19 +602,17 @@ impl ProviderRegistry {
     ) -> Result<crate::extension_effects::ProviderEffect, DomainError> {
         let (ext, spec) = self.find(instance).ok_or(DomainError::NotFound)?;
         let dir = host::ext_dir(&self.deps.project_dir, &ext);
-        let on_disk =
-            spec::read_declarations(&spec, &|rel| std::fs::read_to_string(dir.join(rel)).ok())
-                .map_err(DomainError::Invalid)?;
+        let read = |rel: &str| std::fs::read_to_string(dir.join(rel)).ok();
+        spec::read_declarations(&spec, &read).map_err(DomainError::Invalid)?;
+        let on_disk = spec::DeclaredProvider::read(&spec, &read);
         let (copies, ext_c, spec_c) = (self.deps.copies.clone(), ext.clone(), spec.clone());
-        let approved = tokio::task::spawn_blocking(move || {
-            host::last_approved(&copies, &ext_c, &spec_c)
-                .map(|(spec, declared)| (spec, Some(declared)))
-        })
-        .await
-        .map_err(|e| DomainError::Invariant(format!("reading the approved copy: {e}")))?;
+        let approved =
+            tokio::task::spawn_blocking(move || host::last_approved(&copies, &ext_c, &spec_c))
+                .await
+                .map_err(|e| DomainError::Invariant(format!("reading the approved copy: {e}")))?;
         crate::extension_effects::providers_diff(
             &approved.into_iter().collect::<Vec<_>>(),
-            &[(spec, Some(on_disk))],
+            &[on_disk],
         )
         .into_iter()
         .next()

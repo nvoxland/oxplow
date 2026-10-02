@@ -75,7 +75,7 @@ jobs:
       # dependency build with the test run below, so it costs almost
       # nothing here.
       - name: Stage the daemon sidecar
-        run: bash apps/desktop/src-tauri/scripts/stage-daemon.sh debug
+        run: bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug
 
       - name: Cargo test
         run: cargo test --workspace --all-features
@@ -213,7 +213,7 @@ jobs:
       # every job that COMPILES the workspace needs it staged first —
       # not just the ones that bundle (tsk266).
       - name: Stage the daemon sidecar
-        run: bash apps/desktop/src-tauri/scripts/stage-daemon.sh debug
+        run: bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug
 
       # Surfaces line/region coverage per crate. Workspace floor is
       # set to 62% lines — current baseline ~65%. The thinnest

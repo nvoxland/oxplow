@@ -297,13 +297,16 @@ Runs Vite + cargo to produce platform installers in
 - Windows: `.msi` / `.exe`
 - Linux: `.deb` + `.AppImage`
 
-**The bundle carries two binaries.** Every project window is backed by
+**The bundle carries three binaries.** Every project window is backed by
 an `oxplow-daemon` child, so the daemon ships beside the shell as a
-Tauri **sidecar** (`bundle.externalBin`): `beforeBuildCommand` runs
-`src-tauri/scripts/stage-daemon.sh`, which builds it and copies it to
-`src-tauri/binaries/oxplow-daemon-<target-triple>` (gitignored). Tauri
-then places it next to the shell — `Oxplow.app/Contents/MacOS/` on
-macOS — which is exactly where `BundledDaemon::binary_path()` looks.
+Tauri **sidecar** (`bundle.externalBin`), and so does oxplow's MCP
+adapter, `oxplow-provider-mcp`, which the daemon runs for a provider
+declared with `adapter:` (P7.A6). `beforeBuildCommand` runs
+`src-tauri/scripts/stage-sidecars.sh`, which builds both and copies them
+to `src-tauri/binaries/<name>-<target-triple>` (gitignored). Tauri then
+places them next to the shell — `Oxplow.app/Contents/MacOS/` on macOS —
+which is exactly where `BundledDaemon::binary_path()` and
+`providers::host::adapter_bin()` look.
 
 A bundle without it can't open any project, and the shell says so
 ("no oxplow-daemon next to the app"). Note the script path is relative
@@ -323,7 +326,7 @@ resource path `binaries/oxplow-daemon-<triple>` doesn't exist
 Run it once and everything compiles (tsk266):
 
 ```
-bash apps/desktop/src-tauri/scripts/stage-daemon.sh debug
+bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug
 ```
 
 `debug` is enough to satisfy the build script and shares the dependency
