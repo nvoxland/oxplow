@@ -1053,7 +1053,10 @@ impl Services {
             commands::work_item::delete_command(work_items.clone()),
             commands::effort::open_command(work_items.clone()),
             commands::effort::close_command(work_items.clone()),
-        ] {
+        ]
+        .into_iter()
+        .chain(commands::review::commands())
+        {
             commands.register(command).expect("core commands register");
         }
         let providers = providers::ProviderRegistry::new(

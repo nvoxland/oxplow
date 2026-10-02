@@ -129,6 +129,10 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<EffortOpened>().expect("core type registers");
         r.register::<EffortClosed>().expect("core type registers");
+        r.register::<EffortClaimVerified>()
+            .expect("core type registers");
+        r.register::<EffortDecisionReviewed>()
+            .expect("core type registers");
         r.register::<EffortFinished>().expect("core type registers");
         r.register::<WorkItemEdited>().expect("core type registers");
         r.register::<WorkItemCreated>()
@@ -947,6 +951,49 @@ pub struct EffortClosedV1 {
     pub retroactive: bool,
 }
 
+/// `effort.claim_verified@1` (P7.C4): a reviewer verified one of an
+/// effort's claims (`effort.verify_claim`), naming what backs it — or
+/// took that back (`effort.unverify_claim`, `evidence` absent).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EffortClaimVerifiedV1 {
+    /// `claim:<id>`.
+    pub claim: String,
+    /// `effort:<id>`, when the claim was made in one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// What backs it now (`reviewer`, `run:12`); absent once unverified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+}
+
+pub struct EffortClaimVerified;
+impl EventType for EffortClaimVerified {
+    const TYPE: &'static str = "effort.claim_verified";
+    const V: u32 = 1;
+    type Payload = EffortClaimVerifiedV1;
+}
+
+/// `effort.decision_reviewed@1` (P7.C4): a reviewer confirmed or
+/// dismissed an inferred decision, or reopened one they had reviewed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EffortDecisionReviewedV1 {
+    /// `decision:<id>`.
+    pub decision: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// `confirmed`, `dismissed` or `inferred` (reopened).
+    pub outcome: String,
+}
+
+pub struct EffortDecisionReviewed;
+impl EventType for EffortDecisionReviewed {
+    const TYPE: &'static str = "effort.decision_reviewed";
+    const V: u32 = 1;
+    type Payload = EffortDecisionReviewedV1;
+}
+
 pub struct EffortClosed;
 impl EventType for EffortClosed {
     const TYPE: &'static str = "effort.closed";
@@ -1257,7 +1304,9 @@ mod tests {
                 ("command.proposed", 1),
                 ("config.changed", 1),
                 ("effect.result", 1),
+                ("effort.claim_verified", 1),
                 ("effort.closed", 1),
+                ("effort.decision_reviewed", 1),
                 ("effort.finished", 1),
                 ("effort.opened", 1),
                 ("knowledge.page.deleted", 1),

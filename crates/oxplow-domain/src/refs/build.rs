@@ -24,6 +24,16 @@ pub fn proposal_ref(id: i64) -> String {
     format!("proposal:{id}")
 }
 
+/// A claim an agent made about its work (`claim.id`).
+pub fn claim_ref(id: i64) -> String {
+    format!("claim:{id}")
+}
+
+/// A decision an agent recorded or oxplow inferred (`decision.id`).
+pub fn decision_ref(id: i64) -> String {
+    format!("decision:{id}")
+}
+
 /// An agent's answer in a thread (`thread_answer.id`).
 pub fn answer_ref(id: i64) -> String {
     format!("answer:{id}")

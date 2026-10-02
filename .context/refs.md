@@ -72,7 +72,10 @@ two shapes, so a `.` appears only in `ext.<extension>.<page>`.
 registered with a numeric id; `build::answer_ref` and `build::lens_ref`
 (`lens:<extension>/<slug>`) build them. `proposal` (a command waiting for
 a person's decision, `proposal:12`, P6b) has a numeric id too;
-`build::proposal_ref` builds it.
+`build::proposal_ref` builds it. So do `claim` (an agent's claim about its
+work, `claim:7`) and `decision` (one it recorded or oxplow inferred,
+`decision:3`) — what the review commands name (P7.C4); `build::claim_ref`
+and `build::decision_ref`.
 
 ## Building refs in Rust (built, P2.4b)
 

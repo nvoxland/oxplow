@@ -214,7 +214,7 @@
     - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
     - { name: "statement", type: "TEXT", doc: "The claim in words." }
     - { name: "kind", type: "TEXT", doc: "`tests_pass`, `no_behavior_change`, `handles_case` or `other`." }
-    - { name: "evidence_ref", type: "TEXT", doc: "What backs it (`run:<id>`, a test, a file); NULL if nothing was cited." }
+    - { name: "evidence_ref", type: "TEXT", doc: "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `effort.verify_claim`); NULL if nothing was cited." }
     - { name: "verified", type: "", doc: "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
 - name: code_quality_finding
@@ -345,7 +345,7 @@
     - { name: "alternatives", type: "TEXT", doc: "Options not taken, as a JSON array of strings." }
     - { name: "confidence", type: "TEXT", doc: "`low`, `medium` or `high`." }
     - { name: "why", type: "TEXT", doc: "The reasoning." }
-    - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent recorded it) or `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed)." }
+    - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`)." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
   tests:
     - { not_null: id }

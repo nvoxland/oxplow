@@ -195,6 +195,10 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new("run", r"^\d+$"),
         // A command waiting for a person's decision (`command_proposal.id`, P6b).
         KindSpec::new("proposal", r"^[0-9]+$"),
+        // An agent's claim about its work and a decision it made or oxplow
+        // inferred (`claim.id`, `decision.id`; P7.C4 reviews them).
+        KindSpec::new("claim", r"^[0-9]+$"),
+        KindSpec::new("decision", r"^[0-9]+$"),
     ];
     for spec in specs {
         reg.register(spec.expect("core kind spec is valid"))
