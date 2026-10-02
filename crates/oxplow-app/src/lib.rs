@@ -623,6 +623,16 @@ pub struct Services {
 }
 
 impl Services {
+    /// Reading and restoring captured files (`snapshot_files`).
+    pub fn snapshot_files(&self) -> snapshot_files::SnapshotFiles {
+        snapshot_files::SnapshotFiles {
+            snapshots: self.snapshot_store.clone(),
+            streams: self.stream_store.clone(),
+            content: self.snapshot_content.clone(),
+            project_dir: self.layout.project_dir.clone(),
+        }
+    }
+
     /// The `work_item.*` commands, typed (`work_items::WorkItems`): the
     /// one write surface for every provider's items.
     pub fn work_items_client(&self) -> work_items::WorkItems {
@@ -1211,8 +1221,29 @@ impl Services {
         )
         .with_approvals(approvals.clone())
         .with_event_schemas(event_schemas.clone());
-        for command in commands::test_runs::commands(collection.clone()) {
-            commands.register(command).expect("test commands register");
+        for command in commands::test_runs::commands(collection.clone())
+            .into_iter()
+            .chain(commands::extension_install::commands(
+                commands::extension_install::InstallDeps {
+                    worktrees: worktrees.clone(),
+                    threads: thread_store.clone(),
+                },
+            ))
+            .chain([commands::snapshot::restore_file_command(
+                snapshot_files::SnapshotFiles {
+                    snapshots: snapshot_store.clone(),
+                    streams: stream_store.clone(),
+                    content: snapshot_content.clone(),
+                    project_dir: layout.project_dir.clone(),
+                },
+            )])
+            .chain(commands::lsp::commands(commands::lsp::LspDeps {
+                installer: lsp_installer_svc.clone(),
+                background: background_tasks.clone(),
+                events: event_bus.clone(),
+            }))
+        {
+            commands.register(command).expect("core commands register");
         }
         let token_usage_store = Arc::new(SqliteTokenUsageStore::new(db.clone()));
         let token_usage = token_usage::TokenUsageService::new(
@@ -1568,6 +1599,9 @@ mod tests {
                 // against (P8.A7).
                 "effort.amend",
                 "effort.report",
+                // A clone into a stream's worktree, a person's call (P8.A9).
+                "extension.install",
+                "extension.update",
                 "git.cherry_pick",
                 "git.ignore",
                 "git.rebase",
@@ -1576,11 +1610,16 @@ mod tests {
                 // run twice, and a retried file write strands the first.
                 "lens.keep",
                 "lens.share",
+                // A download into .oxplow/lsp/, a person's call (P8.A9).
+                "lsp.install_server",
+                "lsp.remove_server",
                 "metric.rebuild",
                 // A provider's process restarts (P7.C1; was provider.enable).
                 "plugin.enable",
                 // The provider process's collectors (P7.A3).
                 "provider.sync",
+                // Overwrites a worktree file (P8.A9).
+                "snapshot.restore_file",
                 // A stream's worktree and its capture service (P8.A4).
                 "stream.adopt_worktree",
                 "stream.archive",

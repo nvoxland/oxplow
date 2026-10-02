@@ -271,8 +271,6 @@ macro_rules! oxplow_command_table {
                 lens_text => $crate::commands::extensions::lens_text { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> String,
                 validate_extension => $crate::commands::extensions::validate_extension { name: String, stream_id: Option<String> } -> ::oxplow_sdk::CheckReport,
                 review_extension => $crate::commands::extensions::review_extension { git_url: Option<String>, git_ref: Option<String>, name: Option<String>, stream_id: Option<String> } -> ::oxplow_app::extensions::ExtensionReview,
-                install_extension => $crate::commands::extensions::install_extension { git_url: String, git_ref: Option<String>, reviewed_sha: String, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
-                update_extension => $crate::commands::extensions::update_extension { name: String, reviewed_sha: String, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
                 set_extension_enabled => $crate::commands::extensions::set_extension_enabled { name: String, enabled: bool } -> Vec<::oxplow_app::extensions::Extension>,
                 list_collectors => $crate::commands::collectors::list_collectors {} -> Vec<::oxplow_app::collector_runner::CollectorListing>,
                 ensure_change => $crate::commands::changes::ensure_change { target: ::oxplow_app::change_analysis::ChangeTarget } -> ::oxplow_db::ChangeRow,
@@ -341,13 +339,11 @@ macro_rules! oxplow_command_table {
                 set_agent_model => $crate::commands::config::set_agent_model { agent: ::oxplow_config::AgentKind, model: Option<String> } -> ::oxplow_config::OxplowConfig,
                 get_workspace_context => $crate::commands::config::get_workspace_context {} -> $crate::commands::config::WorkspaceContext,
                 // lsp
-                install_lsp_package => $crate::commands::lsp::install_lsp_package { package_name: String } -> $crate::commands::lsp::InstalledLspPackage,
                 list_installed_lsp_packages => $crate::commands::lsp::list_installed_lsp_packages {} -> Vec<$crate::commands::lsp::InstalledLspPackage>,
                 lsp_request => $crate::commands::lsp::lsp_request { stream_id: String, language_id: String, method: String, params_json: String } -> String,
                 lsp_notify => $crate::commands::lsp::lsp_notify { stream_id: String, language_id: String, method: String, params_json: String } -> (),
                 list_lsp_servers => $crate::commands::lsp::list_lsp_servers {} -> Vec<::oxplow_app::lsp_sessions::LspServerListing>,
                 restart_lsp_server => $crate::commands::lsp::restart_lsp_server { stream_id: String, language_id: String } -> (),
-                remove_lsp_package => $crate::commands::lsp::remove_lsp_package { package_name: String } -> (),
                 respond_lsp_apply_edit => $crate::commands::lsp::respond_lsp_apply_edit { token: u32, applied: bool, failure_reason: Option<String> } -> (),
                 // terminal (open_terminal_session stays Tauri-only: PluginRuntimeState)
                 forward_terminal_input => $crate::commands::terminal::forward_terminal_input { session_id: String, message: String } -> (),
@@ -365,7 +361,6 @@ macro_rules! oxplow_command_table {
                 list_files_for_snapshot => $crate::commands::snapshot::list_files_for_snapshot { snapshot_id: i64 } -> Vec<::oxplow_db::FileSnapshot>,
                 get_file_snapshot => $crate::commands::snapshot::get_file_snapshot { file_snapshot_id: i64 } -> Option<::oxplow_db::FileSnapshot>,
                 diff => $crate::commands::trees::diff { stream_id: Option<String>, from: Option<::oxplow_domain::vcs::Revision>, to: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::trees::DiffEntry>,
-                restore_file_snapshot => $crate::commands::snapshot::restore_file_snapshot { file_snapshot_id: i64 } -> (),
                 // background
                 list_background_tasks => $crate::commands::background::list_background_tasks {} -> Vec<::oxplow_app::BackgroundTask>,
                 get_background_task => $crate::commands::background::get_background_task { id: String } -> Option<::oxplow_app::BackgroundTask>,

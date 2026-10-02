@@ -3,7 +3,6 @@
 use oxplow_app::lsp_installer::InstalledManifestEntry;
 use oxplow_app::lsp_sessions::LspServerListing;
 use oxplow_app::Services;
-use oxplow_app::{BackgroundTaskKind, OxplowEvent, StartInput};
 use serde::Serialize;
 use serde_json::Value;
 use specta::Type;
@@ -42,34 +41,6 @@ impl From<InstalledManifestEntry> for InstalledLspPackage {
             version: value.version,
             language_ids: value.language_ids,
             binary: value.binary.to_string_lossy().to_string(),
-        }
-    }
-}
-
-/// Download + install a Mason package by name, register the resulting
-/// binary with `LspSessionManager`, and persist it to the manifest so
-/// subsequent boots pick it up. Blocks for the duration of the
-/// download — the renderer should surface a progress affordance.
-pub async fn install_lsp_package(
-    svc: &Services,
-    package_name: String,
-) -> Result<InstalledLspPackage, IpcError> {
-    let task = svc.background_tasks.start(StartInput {
-        kind: BackgroundTaskKind::Lsp,
-        label: format!("Install language server: {package_name}"),
-        detail: Some("downloading from mason-registry".into()),
-        progress: None,
-    });
-    match svc.lsp_installer.install(&package_name).await {
-        Ok(entry) => {
-            svc.background_tasks.complete(&task.id, None);
-            svc.events.emit(OxplowEvent::LspServersChanged);
-            Ok(entry.into())
-        }
-        Err(e) => {
-            let msg = e.to_string();
-            svc.background_tasks.fail(&task.id, msg.clone(), None);
-            Err(e.into())
         }
     }
 }
@@ -161,14 +132,6 @@ pub async fn respond_lsp_apply_edit(
     Ok(())
 }
 
-/// Uninstall a Mason package: delete its files, manifest entry, and
-/// language-server registrations.
-pub async fn remove_lsp_package(svc: &Services, package_name: String) -> Result<(), IpcError> {
-    svc.lsp_installer.remove(&package_name).await?;
-    svc.events.emit(OxplowEvent::LspServersChanged);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -215,7 +178,7 @@ mod tests {
             err.message
         );
         assert!(
-            err.message.contains("lsp_install_server"),
+            err.message.contains("lsp.install_server"),
             "got: {}",
             err.message
         );
@@ -227,18 +190,6 @@ mod tests {
         crate::dispatch(
             "respond_lsp_apply_edit",
             json!({ "token": 42, "applied": true, "failureReason": null }),
-            &svc,
-        )
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn remove_lsp_package_is_idempotent() {
-        let (svc, _dir) = services();
-        crate::dispatch(
-            "remove_lsp_package",
-            json!({ "packageName": "not-installed" }),
             &svc,
         )
         .await

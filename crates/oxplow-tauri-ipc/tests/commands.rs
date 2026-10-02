@@ -463,7 +463,6 @@ async fn snapshot_reads_empty_for_fresh_project() {
         .await
         .unwrap();
     let _ = commands::generated::get_snapshot_stats(app.state(), 999).await;
-    let _ = commands::generated::restore_file_snapshot(app.state(), 999).await;
 }
 
 // ---- workspace reads + file round-trip ----

@@ -102,8 +102,7 @@ const EMITTERS: &[(&str, &str)] = &[
     ("ConfigChanged", "crates/oxplow-rpc/src/commands/ai.rs"),
     ("HookEventsChanged", "crates/oxplow-app/src/hook_ingest.rs"), // P8.A10
     ("HookEventsChanged", "crates/oxplow-app/src/recovery.rs"), // P8.A10
-    ("LspServersChanged", "crates/oxplow-mcp/src/lib.rs"), // P8.A9
-    ("LspServersChanged", "crates/oxplow-rpc/src/commands/lsp.rs"), // P8.A9
+    ("LspServersChanged", "crates/oxplow-app/src/commands/lsp.rs"),
     ("MetricSamplesChanged", "crates/oxplow-app/src/models_changed.rs"),
     ("ModelsChanged", "crates/oxplow-app/src/models_changed.rs"),
     ("PageVisitChanged", "crates/oxplow-rpc/src/commands/page_visit.rs"), // P8.A10

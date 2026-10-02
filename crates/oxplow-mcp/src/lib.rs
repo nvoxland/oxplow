@@ -454,13 +454,6 @@ pub struct ListDeadLettersParams {
     pub all: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LspInstallParams {
-    /// Mason-registry package name (e.g. "rust-analyzer", "gopls",
-    /// "typescript-language-server").
-    pub package_name: String,
-}
-
 /// A place in a stream's file (`code_*` tools). Line and column are
 /// 1-based, like editors and `v_diagnostic`.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -720,19 +713,6 @@ pub struct PreviewCollectorParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstallExtensionParams {
-    /// Git URL of a repo whose root holds `extension.yaml` (a published
-    /// oxplow extension).
-    pub git_url: String,
-    /// Branch, tag or commit to install; omit for the default branch.
-    pub git_ref: Option<String>,
-    /// The `sha` from `review_extension`: only that commit is installed.
-    pub reviewed_sha: String,
-    /// Stream whose worktree to install into; omit for your own.
-    pub stream_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ReviewExtensionParams {
     /// Git URL to review for an install (a repo whose root holds
     /// `extension.yaml`). Pass this or `name`.
@@ -743,16 +723,6 @@ pub struct ReviewExtensionParams {
     /// `git_url`.
     pub name: Option<String>,
     /// Stream whose worktree it goes into; omit for your own.
-    pub stream_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpdateExtensionParams {
-    /// Installed extension's folder name under `oxplow/extensions/`.
-    pub name: String,
-    /// The `sha` from `review_extension(name)`: only that commit is installed.
-    pub reviewed_sha: String,
-    /// Stream whose worktree to update in; omit for your own.
     pub stream_id: Option<String>,
 }
 
@@ -1246,7 +1216,8 @@ impl OxplowMcp {
                        reach and the credentials they read, advisories, collectors; `errors` block \
                        the install), the commit `sha`, and `problems` a dry run of its lenses \
                        found. Show the person what it declares and get their go-ahead, then \
-                       pass `sha` as `reviewed_sha` to install_extension / update_extension."
+                       pass `sha` as `reviewed_sha` to the `extension.install` / `extension.update` commands \
+                       (a person approves them)."
     )]
     async fn review_extension(
         &self,
@@ -1294,77 +1265,6 @@ impl OxplowMcp {
         }
         .map_err(extension_error)?;
         json_result(&review)
-    }
-
-    #[tool(
-        description = "Install a published extension from a git repo (its root holds \
-                       `extension.yaml`) into `oxplow/extensions/<name>/` of a stream's \
-                       worktree, recording the source URL, ref and commit. Only do this when \
-                       the user asks, after review_extension and their go-ahead; only the \
-                       reviewed commit is installed. The installed files are ordinary project \
-                       files: offer to commit them so the team gets them. Refuses to overwrite; \
-                       use `update_extension` for that."
-    )]
-    async fn install_extension(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<InstallExtensionParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("install_extension", p.stream_id.as_deref())?;
-        // Omitted: the caller's own stream (tsk574).
-        let stream = self
-            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
-            .await;
-        let root = self.services.worktrees.resolve(stream.as_deref()).await;
-        let ext = tokio::task::spawn_blocking(move || {
-            oxplow_app::extensions::install_extension(
-                &root,
-                &p.git_url,
-                p.git_ref.as_deref(),
-                &p.reviewed_sha,
-            )
-        })
-        .await
-        .map_err(internal)?
-        .map_err(extension_error)?;
-        json_result(&ext)
-    }
-
-    #[tool(
-        description = "Update an installed extension to the latest commit of the git URL and ref \
-                       it was installed from. Only for extensions installed with \
-                       `install_extension`; ones written in this repo are edited in place."
-    )]
-    async fn update_extension(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<UpdateExtensionParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("update_extension", p.stream_id.as_deref())?;
-        // Omitted: the caller's own stream (tsk574).
-        let stream = self
-            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
-            .await;
-        let root = self.services.worktrees.resolve(stream.as_deref()).await;
-        let name = p.name.clone();
-        let ext = tokio::task::spawn_blocking(move || {
-            oxplow_app::extensions::update_extension(&root, &name, &p.reviewed_sha)
-        })
-        .await
-        .map_err(internal)?
-        .map_err(|e| match e {
-            oxplow_domain::DomainError::NotFound => McpError::invalid_params(
-                format!(
-                    "no extension `{}` under oxplow/extensions/ in that stream",
-                    p.name
-                ),
-                None,
-            ),
-            other => extension_error(other),
-        })?;
-        json_result(&ext)
     }
 
     #[tool(
@@ -1932,13 +1832,13 @@ impl OxplowMcp {
         &self,
         params: Parameters<FileSnapshotIdParams>,
     ) -> Result<CallToolResult, McpError> {
-        let content = oxplow_app::snapshot_files::read_file_snapshot(
-            &self.services,
-            params.0.file_snapshot_id,
-        )
-        .await
-        .ok()
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+        let content = self
+            .services
+            .snapshot_files()
+            .read_file_snapshot(params.0.file_snapshot_id)
+            .await
+            .ok()
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
         json_result(&content)
     }
 
@@ -1983,33 +1883,14 @@ impl OxplowMcp {
         params: Parameters<FileAtSnapshotParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let content = oxplow_app::snapshot_files::read_file_at_snapshot(
-            &self.services,
-            p.snapshot_id,
-            &p.path,
-        )
-        .await
-        .map_err(snapshot_file_error)?
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+        let content = self
+            .services
+            .snapshot_files()
+            .read_file_at_snapshot(p.snapshot_id, &p.path)
+            .await
+            .map_err(snapshot_file_error)?
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
         json_result(&content)
-    }
-
-    #[tool(
-        description = "Restore a captured file row (file_snapshot id) into its stream's \
-                          worktree, writing its bytes back to its path. Errors if the row is gone \
-                          or has no content."
-    )]
-    async fn restore_file_snapshot(
-        &self,
-        params: Parameters<FileSnapshotIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let restored = oxplow_app::snapshot_files::restore_file_snapshot(
-            &self.services,
-            params.0.file_snapshot_id,
-        )
-        .await
-        .map_err(snapshot_file_error)?;
-        json_result(&serde_json::json!({ "restored": restored }))
     }
 
     // ---------- code quality (duplication) ----------
@@ -3278,35 +3159,11 @@ impl OxplowMcp {
         description = "List every configured language server (.oxplow/project.yaml + Mason-installed): \
                        languageId, command, source, binary presence, running streams. Use to \
                        check what LSP coverage exists before code_hover/definition/references, \
-                       and to verify an lsp_install_server took effect."
+                       and to verify an `lsp.install_server` took effect."
     )]
     async fn lsp_list_servers(&self) -> Result<CallToolResult, McpError> {
         let listings = self.services.lsp_sessions.list_servers().await;
         json_result(&listings)
-    }
-
-    #[tool(
-        description = "Install a language server from the Mason registry (mason-org/\
-                       mason-registry package name, e.g. \"rust-analyzer\"). Downloads the \
-                       binary into .oxplow/lsp/<name>/ and registers it for its languages — \
-                       the lsp_* tools and the editor pick it up immediately. Use when an \
-                       lsp_* tool errors with `no language server configured`."
-    )]
-    async fn lsp_install_server(
-        &self,
-        params: Parameters<LspInstallParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let package_name = params.0.package_name;
-        let entry = self
-            .services
-            .lsp_installer
-            .install(&package_name)
-            .await
-            .map_err(|e| internal(e.to_string()))?;
-        self.services
-            .events
-            .emit(oxplow_app::OxplowEvent::LspServersChanged);
-        json_result(&entry)
     }
 }
 
@@ -3488,9 +3345,6 @@ const WRITE_TOOLS: &[&str] = &[
     "ai_decide",
     "ai_summarize",
     "run_collector",
-    "install_extension",
-    "update_extension",
-    "restore_file_snapshot",
     "select_thread",
     "switch_stream",
     "reorder_tasks",
@@ -3504,7 +3358,6 @@ const WRITE_TOOLS: &[&str] = &[
     "await_user",
     "file_epic_with_children",
     "dispatch_task",
-    "lsp_install_server",
 ];
 
 /// Stamp `read_only_hint = true` on tools in [`READ_ONLY_TOOLS`], leaving any
@@ -4327,120 +4180,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn install_and_update_extension_tools() {
-        let (proj, _services, server) = boot();
-        let repo = tempfile::tempdir().unwrap();
-        let w = |root: &std::path::Path, rel: &str, body: &str| {
-            let p = root.join(rel);
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(p, body).unwrap();
-        };
-        let git = |args: &[&str]| {
-            assert!(std::process::Command::new("git")
-                .args(["-c", "user.email=t@t", "-c", "user.name=t"])
-                .args(args)
-                .current_dir(repo.path())
-                .status()
-                .unwrap()
-                .success());
-        };
-        w(repo.path(), "extension.yaml", "name: shared\n");
-        w(
-            repo.path(),
-            "lenses/one.yaml",
-            "title: One\nquery: SELECT 1\n",
-        );
-        git(&["init", "-q", "-b", "main"]);
-        git(&["add", "."]);
-        git(&["commit", "-q", "-m", "init"]);
-        let url = repo.path().to_string_lossy().to_string();
-        let review = |git_url: Option<String>, name: Option<String>| {
-            let server = &server;
-            async move {
-                let v: serde_json::Value = serde_json::from_str(&text_payload(
-                    server
-                        .review_extension(
-                            rmcp::model::Extensions::new(),
-                            Parameters(ReviewExtensionParams {
-                                git_url,
-                                git_ref: None,
-                                name,
-                                stream_id: None,
-                            }),
-                        )
-                        .await
-                        .unwrap(),
-                ))
-                .unwrap();
-                v["sha"].as_str().unwrap().to_string()
-            }
-        };
-        let sha = review(Some(url.clone()), None).await;
-        assert!(
-            !proj.path().join("oxplow/extensions").exists(),
-            "a review installs nothing"
-        );
-
-        let ext: serde_json::Value = serde_json::from_str(&text_payload(
-            server
-                .install_extension(
-                    rmcp::model::Extensions::new(),
-                    Parameters(InstallExtensionParams {
-                        git_url: url.clone(),
-                        git_ref: None,
-                        reviewed_sha: sha.clone(),
-                        stream_id: None,
-                    }),
-                )
-                .await
-                .unwrap(),
-        ))
-        .unwrap();
-        assert_eq!(ext["name"], "shared");
-        assert!(proj
-            .path()
-            .join("oxplow/extensions/shared/lenses/one.yaml")
-            .is_file());
-
-        let err = server
-            .install_extension(
-                rmcp::model::Extensions::new(),
-                Parameters(InstallExtensionParams {
-                    git_url: url,
-                    git_ref: None,
-                    reviewed_sha: sha,
-                    stream_id: None,
-                }),
-            )
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("already installed"), "{err:?}");
-
-        w(
-            repo.path(),
-            "lenses/one.yaml",
-            "title: One v2\nquery: SELECT 1\n",
-        );
-        git(&["commit", "-q", "-am", "v2"]);
-        let sha = review(None, Some("shared".into())).await;
-        let ext: serde_json::Value = serde_json::from_str(&text_payload(
-            server
-                .update_extension(
-                    rmcp::model::Extensions::new(),
-                    Parameters(UpdateExtensionParams {
-                        name: "shared".into(),
-                        reviewed_sha: sha,
-                        stream_id: None,
-                    }),
-                )
-                .await
-                .unwrap(),
-        ))
-        .unwrap();
-        assert_eq!(ext["lenses"][0]["title"], "One v2");
-    }
-
-    #[tokio::test]
     async fn get_open_page_reports_what_the_human_sees() {
         use oxplow_domain::stores::ThreadStore;
         let (proj, services, server) = boot();
@@ -4823,7 +4562,7 @@ mod tests {
             .unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("rust-analyzer"), "got: {msg}");
-        assert!(msg.contains("lsp_install_server"), "got: {msg}");
+        assert!(msg.contains("lsp.install_server"), "got: {msg}");
         assert!(msg.contains("project.yaml"), "got: {msg}");
     }
 

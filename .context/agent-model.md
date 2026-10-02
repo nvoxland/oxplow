@@ -1053,10 +1053,11 @@ revisions are `working`, `snap:<id>` or `git:<rev>` — and
 mutations stay on Bash); **snapshots / local history**
 (`list_snapshots_for_stream`, `list_files_for_snapshot`,
 `get_snapshot_stats`, `list_snapshot_change_entries` take a `snapshot_id`
-— a whole capture; `get_file_snapshot`, `read_file_snapshot`,
-`restore_file_snapshot` take a `file_snapshot_id` — one captured file
-row; `read_file_at_snapshot { snapshot_id, path }` reads a path as of a
-capture. Reads and restore share `oxplow_app::snapshot_files`, and a
+— a whole capture; `get_file_snapshot` and `read_file_snapshot` take a
+`file_snapshot_id` — one captured file row; `read_file_at_snapshot
+{ snapshot_id, path }` reads a path as of a capture. Restoring is the
+destructive `snapshot.restore_file` command (an agent's is a proposal —
+P8.A9). Reads and restore share `oxplow_app::snapshot_files::SnapshotFiles`, and a
 restore writes into the row's stream's worktree, not the primary
 checkout — P2.9, tsk433);
 **code quality** (`run_code_quality_scan`, `list_code_quality_scans`,
@@ -1334,8 +1335,10 @@ typed answers from the code-intelligence capability, over the same
 shared language-server sessions the editor uses (`.context/lsp.md`). When no
 server is configured for a language, the error is self-describing — it
 names the suggested Mason package and both fix paths. The agent can fix
-it itself: `lsp_install_server({ package_name })` installs from the
-Mason registry (picked up immediately by editor + tools), and
+it: `run_command lsp.install_server { package }` installs from the
+Mason registry (picked up immediately by editor + tools) once a person
+approves the proposal — what binaries oxplow downloads and runs is their
+call (P8.A9) — and
 `lsp_list_servers` shows what's configured/installed/running. Adding an
 `lsp.servers` entry to `.oxplow/project.yaml` is the manual alternative for
 servers not in Mason.

@@ -133,8 +133,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::invoke_component_command,
             commands::generated::validate_extension,
             commands::generated::review_extension,
-            commands::generated::install_extension,
-            commands::generated::update_extension,
             commands::generated::save_lens,
             commands::generated::report_open_page,
             commands::generated::set_extension_enabled,
@@ -187,7 +185,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::diff,
             commands::generated::get_snapshot_stats,
             commands::generated::get_blob_storage_bytes,
-            commands::generated::restore_file_snapshot,
             // branch
             // git
             commands::generated::git_resolve_commit_ref_labels,
@@ -258,13 +255,11 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::webview::open_external_url,
             commands::webview::clipboard_read_text,
             // lsp
-            commands::generated::install_lsp_package,
             commands::generated::list_installed_lsp_packages,
             commands::generated::lsp_request,
             commands::generated::lsp_notify,
             commands::generated::list_lsp_servers,
             commands::generated::restart_lsp_server,
-            commands::generated::remove_lsp_package,
             commands::generated::respond_lsp_apply_edit,
             // terminal
             commands::terminal::open_terminal_session,

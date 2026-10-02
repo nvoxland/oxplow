@@ -114,7 +114,7 @@ happens once per generation, so a top-level directory created *afterwards*
 is covered by nothing: the root reports the `mkdir` itself and then never
 reports a single write inside it. Everything under it goes unsnapshotted
 until restart — absent from Local History, unrecoverable by
-`restore_file_snapshot`, invisible to effort attribution. It was found
+`snapshot.restore_file`, invisible to effort attribution. It was found
 via that last symptom, and only after the differ and the review logic had
 both been wrongly accused; the giveaway was that this repo's own
 `tests-e2e/` had **0** `file_snapshot` rows while every pre-existing

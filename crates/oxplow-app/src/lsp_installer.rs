@@ -3,7 +3,7 @@
 //! Wraps `oxplow_lsp_installer::{Registry, Installer}` and keeps a
 //! small JSON manifest at `<state>/lsp/installed.json` so installed
 //! servers re-register with `LspSessionManager` on boot — otherwise
-//! the renderer would have to call `install_lsp_package` again every
+//! the renderer would have to run `lsp.install_server` again every
 //! time the runtime restarts.
 //!
 //! Design notes:

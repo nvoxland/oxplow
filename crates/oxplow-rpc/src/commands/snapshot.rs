@@ -132,20 +132,6 @@ pub async fn get_file_snapshot(
     Ok(svc.snapshot_store.get(file_snapshot_id).await?)
 }
 
-/// Restore a captured file (`file_snapshot` id) into its stream's
-/// worktree (`oxplow_app::snapshot_files`).
-pub async fn restore_file_snapshot(svc: &Services, file_snapshot_id: i64) -> Result<(), IpcError> {
-    use oxplow_app::snapshot_files::{restore_file_snapshot, SnapshotFileError as E};
-    restore_file_snapshot(svc, file_snapshot_id)
-        .await
-        .map(|_| ())
-        .map_err(|e| match e {
-            E::NotFound => IpcError::not_found(),
-            E::NoContent | E::Expired => IpcError::invalid(e.to_string()),
-            E::Other(m) => IpcError::internal(m),
-        })
-}
-
 #[cfg(test)]
 mod tests {
     #[tokio::test]

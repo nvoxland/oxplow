@@ -305,43 +305,6 @@ pub async fn review_extension(
     })
 }
 
-/// Install an extension from a git repo into this stream's worktree
-/// (`oxplow/extensions/<name>/`), at the commit the person reviewed. The
-/// files are then ordinary project files: commit them to share with the
-/// team.
-pub async fn install_extension(
-    svc: &Services,
-    git_url: String,
-    git_ref: Option<String>,
-    reviewed_sha: String,
-    stream_id: Option<String>,
-) -> Result<Extension, IpcError> {
-    let root = root(svc, stream_id.as_deref()).await;
-    // git clone + file copy: blocking work off the async runtime.
-    let ext = tokio::task::spawn_blocking(move || {
-        extensions::install_extension(&root, &git_url, git_ref.as_deref(), &reviewed_sha)
-    })
-    .await
-    .map_err(|e| IpcError::internal(format!("install task panicked: {e}")))??;
-    Ok(ext)
-}
-
-/// Re-install an installed extension from its recorded git source.
-pub async fn update_extension(
-    svc: &Services,
-    name: String,
-    reviewed_sha: String,
-    stream_id: Option<String>,
-) -> Result<Extension, IpcError> {
-    let root = root(svc, stream_id.as_deref()).await;
-    let ext = tokio::task::spawn_blocking(move || {
-        extensions::update_extension(&root, &name, &reviewed_sha)
-    })
-    .await
-    .map_err(|e| IpcError::internal(format!("update task panicked: {e}")))??;
-    Ok(ext)
-}
-
 /// Save a query from Explore Data as a new lens file in this stream's
 /// worktree. UI-only: agents write lens files with their Edit tool.
 pub async fn save_lens(
@@ -473,24 +436,32 @@ mod tests {
             .unwrap();
         assert_eq!(review["extension"]["name"], "shared");
         let sha = review["sha"].clone();
-        let ext = crate::dispatch(
-            "install_extension",
-            json!({ "gitUrl": url, "reviewedSha": sha }),
-            &svc,
+        // The install itself is the person's confirmed `extension.install`.
+        let run = |name: &'static str, input: serde_json::Value| {
+            let svc = svc.clone();
+            async move {
+                svc.commands
+                    .run(&oxplow_domain::Actor::Human, name, input, true)
+                    .await
+            }
+        };
+        let ext = run(
+            "extension.install",
+            json!({ "git_url": url, "reviewed_sha": sha }),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .result;
         assert_eq!(ext["name"], "shared");
         assert_eq!(ext["source"]["git"], json!(url));
 
-        let err = crate::dispatch(
-            "install_extension",
-            json!({ "gitUrl": url, "reviewedSha": sha }),
-            &svc,
+        let err = run(
+            "extension.install",
+            json!({ "git_url": url, "reviewed_sha": sha }),
         )
         .await
         .unwrap_err();
-        assert_eq!(err.code, "INVALID");
+        assert!(err.to_string().contains("already installed"), "{err}");
 
         write(
             repo.path(),
@@ -501,13 +472,13 @@ mod tests {
         let review = crate::dispatch("review_extension", json!({ "name": "shared" }), &svc)
             .await
             .unwrap();
-        let ext = crate::dispatch(
-            "update_extension",
-            json!({ "name": "shared", "reviewedSha": review["sha"] }),
-            &svc,
+        let ext = run(
+            "extension.update",
+            json!({ "name": "shared", "reviewed_sha": review["sha"] }),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .result;
         assert_eq!(ext["lenses"][0]["title"], "One v2");
     }
 

@@ -560,9 +560,10 @@ oxplow keeps each provider's and collector's health on this machine in
   user asks**: call `review_extension(git_url, git_ref?, stream_id)`, show
   the user what it declares (the programs its collectors run, the hosts they
   reach, the credentials they read, advisories) and any `errors` /
-  `problems`, and when they say go, call `install_extension(git_url,
-  git_ref?, reviewed_sha: <its sha>, stream_id)`. It records the source in
+  `problems`, and when they say go, run `extension.install { git_url,
+  git_ref?, reviewed_sha: <its sha> }` (`mcp__oxplow__run_command`) — it
+  comes back as a proposal the user approves. It records the source in
   `source.yaml`. Updating is the same: `review_extension(name)`, then
-  `update_extension(name, reviewed_sha)`. Never
+  `extension.update { name, reviewed_sha }`. Never
   hand-edit an installed extension's files; they're overwritten on update.
   Copy it into a new extension instead.

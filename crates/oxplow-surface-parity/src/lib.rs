@@ -185,8 +185,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("invoke_component_command"),
     both("validate_extension"),
     both("review_extension"),
-    both("install_extension"),
-    both("update_extension"),
     ui("save_lens"),
     ui("report_open_page"),
     // Turning extensions on/off is the person's call.
@@ -242,7 +240,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("code_call_hierarchy"),
     agent("code_diagnostics"),
     agent("lsp_list_servers"),
-    agent("lsp_install_server"),
     // ---- code analysis: generic per-language unit listing (tree-sitter) ----
     agent("list_code_units"),
     // ---- git: read tools mirrored to MCP (Child 2) ----
@@ -264,7 +261,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("read_file_snapshot"),
     agent("read_file_at_snapshot"),
     both("read_event_content"),
-    both("restore_file_snapshot"),
     // Endpoint diff for the diff view page (effort / local-history) — UI-only.
     // Per-file content at an endpoint, feeding the diff view's function
     // analysis (base + head). UI-only.
@@ -371,13 +367,11 @@ pub const MANIFEST: &[Capability] = &[
     ui("open_external_url"),
     ui("clipboard_read_text"),
     // ---- ui-only: lsp (shared sessions + installer) ----
-    ui("install_lsp_package"),
     ui("list_installed_lsp_packages"),
     ui("lsp_request"),
     ui("lsp_notify"),
     ui("list_lsp_servers"),
     ui("restart_lsp_server"),
-    ui("remove_lsp_package"),
     ui("respond_lsp_apply_edit"),
     // ---- ui-only: terminal ----
     // `forward_terminal_input` is UI-ONLY by design and must never reach

@@ -11,8 +11,8 @@ the bundled `oxplow-analytics` example extension.
 >   - running and validating lenses over IPC and MCP;
 >   - the `oxplow-extension` agent skill;
 >   - the lens page and the launcher's "Lenses" section;
->   - sharing: team via the repo, world via `install_extension` /
->     `update_extension` and Settings → Extensions;
+>   - sharing: team via the repo, world via the `extension.install` /
+>     `extension.update` commands and Settings → Extensions;
 >   - the core explorer: the Explore Data page (with Save as Lens) and
 >     lens tiles on dashboards;
 >   - **bundled extensions** (compiled in, read-only, reserved names) and
@@ -88,7 +88,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     caller's own stream (its header, else its thread's; the primary only
     for an anonymous caller), so an agent in a worktree sees the
     extension it just wrote — the same for `preview_collector`,
-    `review_extension`, `install_extension`, `update_extension`,
+    `review_extension`, `extension.install`, `extension.update`,
     `run_lens_action` and `ensure_change` (tsk574). `site_search` is the
     exception by design: omitted, it searches every stream. The UI
     (IPC) names its stream.
@@ -223,8 +223,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `oxplow/extensions/`.
   - **The world.** Publish an extension as a git repo with
     `extension.yaml` at its root. Others run `review_extension(git_url,
-    git_ref?)` then `install_extension(git_url, git_ref?, reviewed_sha)`
-    (IPC and MCP, or the install box in Settings → Extensions).
+    git_ref?)` then the `extension.install { git_url, git_ref?,
+    reviewed_sha, stream? }` command (`commands/extension_install.rs`,
+    P8.A9: `External`, `Confirm::Always` — an agent's run becomes a
+    proposal a person approves; Settings → Extensions' install box runs it
+    confirmed, the review being the confirmation).
     - **Review first (tsk378).** `review_extension` (or `(name)` for an
       update) clones into `.oxplow/tmp/` and returns `ExtensionReview`:
       the extension as it would load (`errors` = load errors), its commit
@@ -233,7 +236,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       yet). Settings shows it as an inline panel spelling out each exec
       source's program, hosts and credentials, derived sources,
       advisories, fact collectors and slots (`reviewModel`); Install/Update
-      confirms. `install_extension` / `update_extension` take the
+      confirms. `extension.install` / `extension.update` take the
       `reviewed_sha` and refuse a clone at any other commit, or one with
       load errors.
     - The repo is cloned inside `.oxplow/tmp/`, because workspace
@@ -245,7 +248,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       The loader surfaces it as `Extension.source`.
     - Installing never overwrites an existing folder, and a name must be
       lowercase letters, digits and single dashes.
-    - `update_extension(name)` re-clones from the recorded source. The old
+    - `extension.update { name, reviewed_sha }` re-clones from the recorded source. The old
       folder is replaced only after the new clone validates, and only for
       git-installed extensions.
     - Installing is a write tool on MCP. The skill says to do it only when
@@ -361,7 +364,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - Their names are reserved:
     - a project folder with that name is listed with an error and never
       shadows the bundled one;
-    - `install_extension` refuses the name;
+    - `extension.install` refuses the name;
     - `save_lens` refuses to write into a bundled extension.
 - **Slots (current: see "Slots" below).**
   - `extension.yaml` declares `ui: { slots: [{slot, lens}] }` (v1:

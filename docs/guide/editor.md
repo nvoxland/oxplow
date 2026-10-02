@@ -94,7 +94,7 @@ to the stream's worktree. Hover, go-to-definition, and
 find-references work against the workspace root.
 
 Servers are installed explicitly — from Settings → **Language
-Servers**, or by the agent via `lsp_install_server`. They land in
+Servers**, or by the agent's `lsp.install_server`, which you approve. They land in
 `.oxplow/lsp/` and the proxy hands the right binary to whichever
 stream asked. Nothing installs merely because you opened a file.
 See [Settings](../reference/settings.md#lsp-servers).

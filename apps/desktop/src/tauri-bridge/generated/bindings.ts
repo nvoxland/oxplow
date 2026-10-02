@@ -230,16 +230,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	installExtension: (gitUrl: string, gitRef: string | null, reviewedSha: string, streamId: string | null) => typedError<Extension_Serialize, IpcError>(__TAURI_INVOKE("install_extension", { gitUrl, gitRef, reviewedSha, streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	updateExtension: (name: string, reviewedSha: string, streamId: string | null) => typedError<Extension_Serialize, IpcError>(__TAURI_INVOKE("update_extension", { name, reviewedSha, streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	saveLens: (extension: string, slug: string, lens: LensSpec_Deserialize, streamId: string | null) => typedError<Lens_Serialize, IpcError>(__TAURI_INVOKE("save_lens", { extension, slug, lens, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -490,11 +480,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	getBlobStorageBytes: () => typedError<number, IpcError>(__TAURI_INVOKE("get_blob_storage_bytes")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	restoreFileSnapshot: (fileSnapshotId: number) => typedError<null, IpcError>(__TAURI_INVOKE("restore_file_snapshot", { fileSnapshotId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -864,11 +849,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	installLspPackage: (packageName: string) => typedError<InstalledLspPackage, IpcError>(__TAURI_INVOKE("install_lsp_package", { packageName })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listInstalledLspPackages: () => typedError<InstalledLspPackage[], IpcError>(__TAURI_INVOKE("list_installed_lsp_packages")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -890,11 +870,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	restartLspServer: (streamId: string, languageId: string) => typedError<null, IpcError>(__TAURI_INVOKE("restart_lsp_server", { streamId, languageId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	removeLspPackage: (packageName: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_lsp_package", { packageName })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.

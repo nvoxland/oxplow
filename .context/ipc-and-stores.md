@@ -329,9 +329,10 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
   baseline excluded, each with `label`/`label_kind`.
 - `listFileSnapshotsForPath(path)` (RPC `list_file_snapshots { path }`)
   — every captured row of one file, newest first.
-- `restoreFileSnapshot(fileSnapshotId)` (RPC `restore_file_snapshot`)
-  — writes a captured file row's bytes back into its stream's worktree
-  (`oxplow_app::snapshot_files`, shared with MCP). Ids are honest
+- Restoring a captured file is the `snapshot.restore_file { file_snapshot }`
+  command (P8.A9; destructive, so a person confirms and an agent's run is
+  a proposal) — it writes the row's bytes back into its stream's worktree
+  (`oxplow_app::snapshot_files::SnapshotFiles`, shared with the reads). Ids are honest
   (P2.9): a `snapshot_id` is a whole capture, a `file_snapshot_id` one
   captured file row. The old `get_snapshot_summary` /
   `get_snapshot_pair_diff` RPCs had no caller and are gone; diffs go
@@ -409,11 +410,11 @@ UI). Active producers:
   optional `onInitializeStart` / `onInitializeEnd` hooks. The runtime
   wires them to `start`/`complete`. Indeterminate.
 - **LSP install** — `crates/oxplow-app/src/lsp_installer.rs` wraps
-  `crates/oxplow-lsp-installer/` (Mason-registry-backed). `install_lsp_package`
-  IPC downloads a release asset, drops it under `.oxplow/lsp/<name>/`,
+  `crates/oxplow-lsp-installer/` (Mason-registry-backed). The
+  `lsp.install_server` command (P8.A9, `Confirm::Always`) downloads a release asset, drops it under `.oxplow/lsp/<name>/`,
   and registers the binary with `LspSessionManager`'s
   `InstalledServers` overlay. Manifest at `.oxplow/lsp/installed.json`
-  replays into the session manager on boot. `remove_lsp_package`
+  replays into the session manager on boot. `lsp.remove_server`
   reverses all of that. Both emit `LspServersChanged` on the oxplow
   event bus so the renderer refetches `list_lsp_servers`. The shared
   session surface (`lsp_request` / `lsp_notify` / `list_lsp_servers` /

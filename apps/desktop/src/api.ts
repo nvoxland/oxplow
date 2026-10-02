@@ -822,7 +822,19 @@ export async function installExtension(
   reviewedSha: string,
   streamId: string | null,
 ): Promise<Extension> {
-  return unwrap(await commands.installExtension(gitUrl, gitRef, reviewedSha, streamId));
+  // The install review is the person's confirmation (`extension.install`
+  // always asks).
+  const outcome = await runCommand(
+    "extension.install",
+    {
+      git_url: gitUrl,
+      ...(gitRef ? { git_ref: gitRef } : {}),
+      reviewed_sha: reviewedSha,
+      ...(streamId ? { stream: `stream:${streamId}` } : {}),
+    },
+    true,
+  );
+  return outcome.result as Extension;
 }
 
 /// Re-install a git-installed extension from its recorded source, at the
@@ -832,7 +844,12 @@ export async function updateExtension(
   reviewedSha: string,
   streamId: string | null,
 ): Promise<Extension> {
-  return unwrap(await commands.updateExtension(name, reviewedSha, streamId));
+  const outcome = await runCommand(
+    "extension.update",
+    { name, reviewed_sha: reviewedSha, ...(streamId ? { stream: `stream:${streamId}` } : {}) },
+    true,
+  );
+  return outcome.result as Extension;
 }
 
 /// Programs the project's config would run, and whether each is approved.
@@ -2079,12 +2096,6 @@ export async function listEffortsOverlappingRange(
   return rows.map(toOverlappingEffort);
 }
 
-/** Restore a captured file (a `file_snapshot` id) into its stream's
- *  worktree. */
-export async function restoreFileSnapshot(fileSnapshotId: number): Promise<void> {
-  unwrap(await commands.restoreFileSnapshot(fileSnapshotId));
-}
-
 export interface SnapshotTakenEventPayload {
   streamId: string;
   snapshotId: string;
@@ -2587,14 +2598,11 @@ export function desktopBridge(): DesktopBridge {
   return cachedBridge;
 }
 
-/**
- * Open an http(s) URL in the user's OS browser. The main process
- * re-validates the URL against the same scheme allowlist as the
- * renderer; non-allowed URLs return `{ ok: false }` so callers can
- * show a refusal toast.
- */
+/** Install a language server (a Mason package): `lsp.install_server`. */
 export async function installLspPackage(packageName: string): Promise<InstalledLspPackage> {
-  return unwrap(await commands.installLspPackage(packageName));
+  // The person's click (or the install prompt) is the confirmation.
+  return (await runCommand("lsp.install_server", { package: packageName }, true))
+    .result as InstalledLspPackage;
 }
 
 export async function listInstalledLspPackages(): Promise<InstalledLspPackage[]> {
@@ -2635,7 +2643,7 @@ export async function restartLspServer(streamId: string, languageId: string): Pr
 }
 
 export async function removeLspPackage(packageName: string): Promise<void> {
-  unwrap(await commands.removeLspPackage(packageName));
+  await runCommand("lsp.remove_server", { package: packageName }, true);
 }
 
 /// Answer a server-initiated workspace/applyEdit forwarded over the

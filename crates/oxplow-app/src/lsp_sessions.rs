@@ -61,12 +61,13 @@ fn no_config_message(language: &str) -> String {
     match mason_suggestion(language) {
         Some(pkg) => format!(
             "no language server configured for `{language}` — install one via \
-             lsp_install_server (suggested Mason package: \"{pkg}\") or add an \
+             the `lsp.install_server` command (a person approves it; suggested Mason \
+             package: \"{pkg}\") or add an \
              lsp.servers entry to .oxplow/project.yaml"
         ),
         None => format!(
             "no language server configured for `{language}` — install one via \
-             lsp_install_server (see mason-registry for package names) or add \
+             the `lsp.install_server` command (see mason-registry for package names) or add \
              an lsp.servers entry to .oxplow/project.yaml"
         ),
     }
@@ -951,7 +952,7 @@ mod tests {
         let err = LspSessionError::NoConfig("rust".into());
         let msg = err.to_string();
         assert!(msg.contains("rust-analyzer"), "got: {msg}");
-        assert!(msg.contains("lsp_install_server"), "got: {msg}");
+        assert!(msg.contains("lsp.install_server"), "got: {msg}");
         assert!(msg.contains("project.yaml"), "got: {msg}");
     }
 
