@@ -224,7 +224,10 @@ added, removed or changed (`ProviderEffect.tools`).
   pin (§6.8; tsk719) — or that lists a tool twice, is a problem at `""`
   naming the first difference,
   and no handle (a changed server needs its pins updated and a person's
-  approval). A clean check keeps the config under a handle.
+  approval). A clean check keeps the config under a handle. Starting the
+  server holds nothing else, so a server that hangs starting never stops
+  the adapter answering `$/cancel` or `shutdown`; `shutdown` stops the
+  calls in flight first, then the server (tsk720).
 - **`invoke` and `read`** run the mapping's `transform(x)` twice, each
   under the sandbox with a 5 s budget: `x = { phase, command, input,
   config, provider }` with `phase: invoke` → `{ tool, arguments }` (or

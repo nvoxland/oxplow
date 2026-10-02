@@ -404,3 +404,77 @@ async fn the_pin_covers_the_whole_tool_and_each_name_once() {
         "{twice:?}"
     );
 }
+
+/// A copy of the fixture whose server never answers MCP's `initialize`,
+/// writing its pid to `server.pid`.
+fn hanging_extension() -> tempfile::TempDir {
+    let ext = extension();
+    let server = ext.path().join("bin/notes-server");
+    std::fs::write(&server, "#!/bin/sh\necho $$ > server.pid\nexec sleep 60\n").unwrap();
+    ext
+}
+
+/// P7 review (tsk720): a server stuck starting holds nothing the adapter
+/// needs to answer `$/cancel`.
+#[tokio::test]
+async fn a_check_is_cancelled_while_the_server_hangs_starting() {
+    let ext = hanging_extension();
+    let (_child, peer) = spawn(ext.path());
+    let params = serde_json::to_value(CheckParams {
+        config: json!({}),
+        credentials: vec![],
+    })
+    .unwrap();
+    let call = peer.start(method::CHECK, params).await.unwrap();
+    let pid_file = ext.path().join("server.pid");
+    while !std::fs::read_to_string(&pid_file).is_ok_and(|p| p.ends_with('\n')) {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    peer.cancel(call.id).await.unwrap();
+    let reply = tokio::time::timeout(std::time::Duration::from_secs(5), call.reply())
+        .await
+        .expect("the cancel is answered");
+    assert!(matches!(reply, Err(ProtocolError::Cancelled)), "{reply:?}");
+}
+
+/// P7 review (tsk720): `shutdown` with a call in flight stops the call and
+/// the server, and the adapter exits.
+#[tokio::test]
+async fn shutdown_with_a_call_in_flight_stops_the_server() {
+    let ext = hanging_extension();
+    let (mut child, peer) = spawn(ext.path());
+    let params = serde_json::to_value(CheckParams {
+        config: json!({}),
+        credentials: vec![],
+    })
+    .unwrap();
+    let _call = peer.start(method::CHECK, params).await.unwrap();
+    let pid_file = ext.path().join("server.pid");
+    let pid = loop {
+        if let Some(pid) = std::fs::read_to_string(&pid_file)
+            .ok()
+            .filter(|p| p.ends_with('\n'))
+        {
+            break pid.trim().to_string();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+    peer.request(method::SHUTDOWN, Value::Null).await.unwrap();
+    let exited = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
+    assert!(exited.is_ok(), "the adapter exits");
+    let alive = || {
+        std::process::Command::new("kill")
+            .args(["-0", &pid])
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    };
+    for _ in 0..40 {
+        if !alive() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("the server {pid} is still running");
+}

@@ -36,7 +36,8 @@ use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
 use rmcp::{RoleClient, ServiceExt};
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex, OnceCell};
+use tokio::task::JoinSet;
 
 /// How long one run of the mapping may take.
 pub const MAPPING_TIMEOUT: Duration = Duration::from_secs(5);
@@ -164,13 +165,22 @@ type Client = RunningService<RoleClient, ()>;
 
 struct World {
     adapter: Adapter,
-    client: Option<Arc<Client>>,
+    /// The server, started (and its tools checked against the pin) by the
+    /// first call that needs it. Starting holds only this cell — never the
+    /// state lock — so a server that hangs starting can't stop the adapter
+    /// answering `$/cancel` or `shutdown`.
+    client: OnceCell<Arc<Client>>,
+    state: Mutex<State>,
+}
+
+#[derive(Default)]
+struct State {
     /// Checked instances: handle → config.
     configs: HashMap<String, Value>,
     in_flight: HashMap<Id, oneshot::Sender<()>>,
 }
 
-type Shared = Arc<Mutex<World>>;
+type Shared = Arc<World>;
 
 /// Serve the protocol on `reader` / `writer` until the stream ends or a
 /// `shutdown`; the server stops with it.
@@ -180,17 +190,18 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
 {
     let (peer, mut incoming) = Peer::spawn(reader, writer);
-    let world: Shared = Arc::new(Mutex::new(World {
+    let world: Shared = Arc::new(World {
         adapter,
-        client: None,
-        configs: HashMap::new(),
-        in_flight: HashMap::new(),
-    }));
+        client: OnceCell::new(),
+        state: Mutex::default(),
+    });
+    let mut calls = JoinSet::new();
     while let Some(message) = incoming.recv().await {
+        while calls.try_join_next().is_some() {}
         match message {
             Incoming::Notification { method, params } if method == notify::CANCEL => {
                 if let Some(id) = params.get("id").and_then(Value::as_u64) {
-                    if let Some(stop) = world.lock().await.in_flight.remove(&id) {
+                    if let Some(stop) = world.state.lock().await.in_flight.remove(&id) {
                         let _ = stop.send(());
                     }
                 }
@@ -202,21 +213,29 @@ where
                     break;
                 }
                 let (stop_tx, stop_rx) = oneshot::channel();
-                world.lock().await.in_flight.insert(id, stop_tx);
+                world.state.lock().await.in_flight.insert(id, stop_tx);
                 let (peer, world) = (peer.clone(), world.clone());
-                tokio::spawn(async move {
+                calls.spawn(async move {
                     let result = tokio::select! {
                         r = handle(&peer, &world, id, &method, params) => r,
                         _ = stop_rx => Err(ProtocolError::Cancelled),
                     };
-                    world.lock().await.in_flight.remove(&id);
+                    world.state.lock().await.in_flight.remove(&id);
                     let _ = peer.respond(id, result).await;
                 });
             }
         }
     }
-    let client = world.lock().await.client.take();
-    if let Some(client) = client.and_then(|c| Arc::try_unwrap(c).ok()) {
+    // The calls in flight hold the server: stop them first (one still
+    // starting it drops the half-started server, which stops it), then
+    // stop the server.
+    calls.abort_all();
+    while calls.join_next().await.is_some() {}
+    let client = Arc::try_unwrap(world)
+        .ok()
+        .and_then(|w| w.client.into_inner())
+        .and_then(|c| Arc::try_unwrap(c).ok());
+    if let Some(client) = client {
         let _ = client.cancel().await;
     }
 }
@@ -233,15 +252,32 @@ fn internal(message: impl Into<String>) -> ProtocolError {
     ProtocolError::Internal(message.into())
 }
 
-/// The running server, started (and its tools checked against the pin)
-/// the first time.
-async fn client(world: &Shared) -> Result<Result<Arc<Client>, String>, ProtocolError> {
-    let mut w = world.lock().await;
-    if let Some(c) = &w.client {
-        return Ok(Ok(c.clone()));
+/// Why the server didn't start: its tools aren't the pinned ones (a
+/// `check` problem), or it failed.
+enum Unstarted {
+    Pin(String),
+    Failed(ProtocolError),
+}
+
+impl From<ProtocolError> for Unstarted {
+    fn from(e: ProtocolError) -> Self {
+        Unstarted::Failed(e)
     }
-    let (program, args) = w
-        .adapter
+}
+
+/// The running server, started (and its tools checked against the pin)
+/// the first time; `Err` inside is the pin's difference.
+async fn client(world: &Shared) -> Result<Result<Arc<Client>, String>, ProtocolError> {
+    match world.client.get_or_try_init(|| start(&world.adapter)).await {
+        Ok(c) => Ok(Ok(c.clone())),
+        Err(Unstarted::Pin(difference)) => Ok(Err(difference)),
+        Err(Unstarted::Failed(e)) => Err(e),
+    }
+}
+
+/// Start the server and check its tools against the pin.
+async fn start(adapter: &Adapter) -> Result<Arc<Client>, Unstarted> {
+    let (program, args) = adapter
         .server
         .split_first()
         .ok_or_else(|| internal("no server"))?;
@@ -261,15 +297,13 @@ async fn client(world: &Shared) -> Result<Result<Arc<Client>, String>, ProtocolE
         .iter()
         .map(pinned)
         .collect();
-    if let Some(difference) = pin_difference(&w.adapter.tools, &live) {
+    if let Some(difference) = pin_difference(&adapter.tools, &live) {
         let _ = client.cancel().await;
-        return Ok(Err(format!(
+        return Err(Unstarted::Pin(format!(
             "{difference}: a changed server needs its tools.json updated, and a person's approval"
         )));
     }
-    let client = Arc::new(client);
-    w.client = Some(client.clone());
-    Ok(Ok(client))
+    Ok(Arc::new(client))
 }
 
 /// Run the mapping's `transform(x)` under the sandbox budget.
@@ -418,7 +452,7 @@ async fn handle(
     method: &str,
     params: Value,
 ) -> Result<Value, ProtocolError> {
-    let adapter = world.lock().await.adapter.clone();
+    let adapter = world.adapter.clone();
     match method {
         method::INITIALIZE => {
             let p: InitializeParams = parse(params)?;
@@ -441,7 +475,7 @@ async fn handle(
                     handle: None,
                 },
                 Ok(_) => {
-                    let mut w = world.lock().await;
+                    let mut w = world.state.lock().await;
                     let handle = format!("{}:{}", adapter.provider_id, w.configs.len() + 1);
                     w.configs.insert(handle.clone(), p.config);
                     CheckResult {
@@ -522,6 +556,7 @@ async fn handle(
 
 async fn config(world: &Shared, handle: &Handle) -> Result<Value, ProtocolError> {
     world
+        .state
         .lock()
         .await
         .configs
