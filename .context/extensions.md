@@ -660,7 +660,9 @@ and one calling MCP read identical `file:line: what — fix` lines.
   <kind>/`): `scripts/record-just-works.sh <kind>` gives `prompt.md` to
   `claude -p` in an empty git project — `--safe-mode`, so nothing but
   the oxplow-extension skill (appended to its system prompt) and the
-  `oxplow` CLI built from the checkout — and keeps `run.json`, the
+  `oxplow` CLI built from the checkout — and keeps `run.json` (without
+  the denied commands, which carry local paths, the session id or the
+  cost — `recorded_runs_carry_no_local_paths_session_or_cost`), the
   extension it wrote (`produced/`), and `check.txt` / `test.txt`;
   `notes.md` is written by hand. `recorded_agent_runs_still_check_and_
   test_clean` replays every `produced/` against today's oxplow. Recorded

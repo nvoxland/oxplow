@@ -9,7 +9,9 @@
 # plugins, hooks, memory or MCP: only the skill, appended to its system
 # prompt, and the `oxplow` CLI built from this checkout — then writes, next
 # to the prompt:
-#   run.json   the agent's run (claude --output-format json)
+#   run.json   the agent's run (claude --output-format json), without
+#              what's of this machine or session: the denied commands
+#              (local paths), the session id and the cost
 #   produced/  the extension folder(s) it wrote
 #   check.txt  `oxplow plugin check` on each, after the run
 #   test.txt   `oxplow plugin test` on each
@@ -40,7 +42,8 @@ git -C "$project" -c user.name=record -c user.email=record@localhost commit -q -
     --permission-mode acceptEdits \
     --allowedTools Read Write Edit Glob Grep "Bash(oxplow plugin:*)" "Bash(ls:*)" "Bash(cat:*)" "Bash(mkdir:*)" \
     --output-format json
-) > "$fixture/run.json"
+) | jq -c 'del(.permission_denials, .session_id, .uuid, .total_cost_usd, .modelUsage)' \
+  > "$fixture/run.json"
 
 rm -rf "$fixture/produced"
 mkdir -p "$fixture/produced"

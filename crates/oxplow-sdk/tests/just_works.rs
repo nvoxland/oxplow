@@ -249,6 +249,37 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
     );
 }
 
+/// The fields `scripts/record-just-works.sh` strips from a recorded
+/// `run.json`: the author's machine (denied commands carry local paths),
+/// the session and the cost.
+const SCRUBBED: [&str; 5] = [
+    "permission_denials",
+    "session_id",
+    "uuid",
+    "total_cost_usd",
+    "modelUsage",
+];
+
+/// P7 review (tsk723): a recorded run carries nothing of the machine or
+/// session it was recorded on.
+#[test]
+fn recorded_runs_carry_no_local_paths_session_or_cost() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/just-works");
+    for kind in std::fs::read_dir(&fixtures).unwrap() {
+        let run = kind.unwrap().path().join("run.json");
+        let Ok(text) = std::fs::read_to_string(&run) else {
+            continue;
+        };
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        for field in SCRUBBED {
+            assert!(json.get(field).is_none(), "{}: {field}", run.display());
+        }
+        for local in ["/Users/", "/home/", "/private/", "/var/folders/"] {
+            assert!(!text.contains(local), "{}: {local}", run.display());
+        }
+    }
+}
+
 /// P7.C6: what a fresh agent built with nothing but the skill (recorded
 /// once by `scripts/record-just-works.sh <kind>`, see its notes.md) still
 /// checks and tests clean against this oxplow.
