@@ -580,6 +580,86 @@ mod tests {
         );
     }
 
+    /// P7 review (tsk727): a contract change on an unchanged query (its
+    /// input's column changed type underneath it) recreates the model's
+    /// table — empty — and the model is refilled, not left empty until an
+    /// input moves.
+    #[tokio::test]
+    async fn a_contract_change_alone_refills_a_materialized_model() {
+        use oxplow_db::models::{ColumnDecl, ExtensionModels, Materialize, ModelDecl, ModelSource};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let model =
+            |name: &str, version: u32, sql: &str, title_type: &str, on_change: bool| ModelSource {
+                decl: ModelDecl {
+                    name: name.into(),
+                    version,
+                    description: format!("{name}."),
+                    columns: [("id", "INTEGER"), ("title", title_type)]
+                        .iter()
+                        .map(|(n, t)| ColumnDecl {
+                            name: (*n).into(),
+                            sql_type: (*t).into(),
+                            doc: "d".into(),
+                        })
+                        .collect(),
+                    tests: Vec::new(),
+                    deprecated: Vec::new(),
+                    materialize: on_change.then_some(Materialize::OnChange),
+                },
+                file: format!("models/{name}.sql"),
+                sql: sql.into(),
+                twin: None,
+            };
+        // `titles` reads `base`; v2 of `base` changes `title`'s type, so
+        // `titles`' contract changes with its SELECT untouched.
+        let compile = |version: u32, base_sql: &str, title_type: &str| {
+            let db = f.svc.db.clone();
+            let sources = vec![
+                model("base", version, base_sql, title_type, false),
+                model(
+                    "titles",
+                    version,
+                    "SELECT id, title FROM ref('base')",
+                    title_type,
+                    true,
+                ),
+            ];
+            async move {
+                let errors = db
+                    .compile_extension_models(vec![ExtensionModels {
+                        extension: "acme".into(),
+                        sources,
+                    }])
+                    .await
+                    .unwrap();
+                assert_eq!(errors["acme"], Vec::<String>::new());
+            }
+        };
+        let rows = || async {
+            f.svc
+                .db
+                .read(|tx| {
+                    tx.query_row("SELECT count(*) FROM v_acme_titles", [], |r| {
+                        r.get::<_, i64>(0)
+                    })
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+        };
+        compile(1, "SELECT id, title FROM ref('task')", "TEXT").await;
+        let assets =
+            crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(50));
+        assets.sync_models().await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(rows().await, 1);
+
+        compile(2, "SELECT id, title || '' AS title FROM ref('task')", "").await;
+        assets.sync_models().await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(rows().await, 1, "the recreated table is refilled");
+    }
+
     /// P7.B1: the change loop is the one place `MetricSamplesChanged` is
     /// made — a recording site that emitted its own could drift from what
     /// landed.

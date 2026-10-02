@@ -266,7 +266,10 @@ after the extensions' pass (`drop_orphaned_tables`).
 keeps one `SqlModelMaterializer` per materialized model — its inputs are
 its `model_input` followed through live models down to tables (and to a
 materialized input's own table) — re-run when the registry (`model`,
-`model_input`) changes. A recompute refills the table, whole, in one
+`model_input`) changes. One whose SELECT, contract or input tables
+changed is re-registered, so its first recompute fills it: a contract
+can change under an unchanged SELECT (an input's column changed type),
+and the compiler then recreates the table empty (tsk727). A recompute refills the table, whole, in one
 transaction (`DELETE`, then `INSERT … SELECT`), after its inputs have
 been quiet for the coalesce window, and is recorded in `asset_state`.
 **Lineage for subscriptions** routes through the table: a materialized

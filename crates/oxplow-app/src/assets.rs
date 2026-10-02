@@ -55,11 +55,15 @@ struct Entry {
     task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
-/// A materialized model as the registry has it: its compiled SELECT and
-/// the tables it reads, transitively.
+/// A materialized model as the registry has it: its compiled SELECT, its
+/// contract (the columns its table is made of) and the tables it reads,
+/// transitively. Any of them changing re-registers it, so a table the
+/// compiler recreated — its contract changed though its SELECT didn't (an
+/// input's column changed type) — gets its first build.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ModelAsset {
     sql: String,
+    contract: Option<String>,
     tables: Vec<String>,
 }
 
@@ -189,10 +193,13 @@ impl Assets {
 async fn materialized_models(db: &Database) -> Result<BTreeMap<String, ModelAsset>, DomainError> {
     db.read(|tx| {
         let mut st = tx
-            .prepare("SELECT view, sql, materialize FROM model")
+            .prepare(
+                "SELECT m.view, m.sql, m.materialize, c.columns_json FROM model m
+                 LEFT JOIN model_contract c ON c.view = m.view AND c.version = m.version",
+            )
             .map_err(oxplow_db::map_sql_err)?;
-        let models: BTreeMap<String, (String, Option<String>)> = st
-            .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))
+        let models: BTreeMap<String, (String, Option<String>, Option<String>)> = st
+            .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?))))
             .map_err(oxplow_db::map_sql_err)?
             .collect::<rusqlite::Result<_>>()
             .map_err(oxplow_db::map_sql_err)?;
@@ -208,7 +215,7 @@ async fn materialized_models(db: &Database) -> Result<BTreeMap<String, ModelAsse
             inputs.entry(view).or_default().push(input);
         }
         let mut out = BTreeMap::new();
-        for (view, (sql, materialize)) in &models {
+        for (view, (sql, materialize, contract)) in &models {
             if materialize.is_none() {
                 continue;
             }
@@ -220,10 +227,10 @@ async fn materialized_models(db: &Database) -> Result<BTreeMap<String, ModelAsse
                     continue;
                 }
                 match models.get(input) {
-                    Some((_, Some(_))) => {
+                    Some((_, Some(_), _)) => {
                         tables.insert(oxplow_db::models::materialized_table(input));
                     }
-                    Some((_, None)) => todo.extend(inputs.get(input).into_iter().flatten()),
+                    Some((_, None, _)) => todo.extend(inputs.get(input).into_iter().flatten()),
                     None => {
                         tables.insert(input.clone());
                     }
@@ -233,6 +240,7 @@ async fn materialized_models(db: &Database) -> Result<BTreeMap<String, ModelAsse
                 view.clone(),
                 ModelAsset {
                     sql: sql.clone(),
+                    contract: contract.clone(),
                     tables: tables.into_iter().collect(),
                 },
             );
