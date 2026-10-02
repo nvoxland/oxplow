@@ -1034,7 +1034,7 @@ impl ProviderRegistry {
 
     /// A person's Check / Enable / Disable on Settings → Integrations:
     /// write `extensionInstances.<instance>` through `config.set` and, to
-    /// enable, run `provider.enable`. Enabling checks first: an
+    /// enable, run `plugin.enable`. Enabling checks first: an
     /// unapproved or unconfigured instance is refused and nothing is
     /// written.
     pub async fn set_instance(

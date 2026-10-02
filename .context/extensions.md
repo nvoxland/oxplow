@@ -446,8 +446,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   each unverified claim, inferred decision, file outside the area, and
   the note — then transitions to `todo`. Both read one `input` query
   (`v_effort` + `json_group_array`s over `v_claim`, `v_decision`,
-  `v_oxplow_review_deviation`), compose the dispatching `work_item.*`
-  (so any provider's item), are `confirm: always`, and are a person's or
+  `v_oxplow_review_deviation`), compose `work_item.comment` and
+  `work_item.transition` in their transaction — so on oxplow's own items:
+  an external provider's item routes outside the transaction and is
+  refused (an open question, tsk713) — are `confirm: always`, and are a person's or
   a lens's — never an agent's. `questions.yaml` + `README.md` (its skill)
   say what an agent can read of the packet; a bundled extension's
   questions are checked against a running registry by

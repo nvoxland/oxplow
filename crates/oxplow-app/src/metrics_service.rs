@@ -14,8 +14,9 @@
 //!
 //! Best-effort, like the other producers (`token_usage.rs` / `collection.rs`):
 //! a compute/write error is logged via `tracing::warn!`, never propagated, and
-//! never blocks the host path. Successful runs emit
-//! `OxplowEvent::MetricSamplesChanged { stream_id }`.
+//! never blocks the host path. A recorded capture is announced by the change
+//! loop (`models_changed.rs`, the one maker of `MetricSamplesChanged`), not
+//! here.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

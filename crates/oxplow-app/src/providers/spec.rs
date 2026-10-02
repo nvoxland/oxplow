@@ -37,7 +37,7 @@ pub const WORK_ITEMS: &str = "work_items";
 
 /// The event types a provider of each capability may declare (and emit):
 /// its capability's projection event, nothing else — no other core type
-/// (`provider.enabled` would clear another instance's disable), and no
+/// (`plugin.enabled` would clear another contribution's disable), and no
 /// types of its own yet.
 pub fn allowed_event_types(capability: &str) -> &'static [(&'static str, u32)] {
     match capability {

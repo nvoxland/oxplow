@@ -31,6 +31,9 @@ On an effort's page, **Commands**:
   each file outside the area, and the note — and moves the item back to
   todo (an oxplow task: ready).
 
+Both work on oxplow's own work items; an item from an external provider
+(Linear, …) is refused for now.
+
 On the packet's rows: **Mark Verified** on an unverified claim
 (`effort.verify_claim`), **Confirm** / **Dismiss** on an inferred
 decision (`effort.confirm_decision`, `effort.dismiss_decision`), and the

@@ -134,8 +134,11 @@ overriding `https://api.linear.app/graphql`). Its example extension is
   `link` → `issueRelationCreate` (`blocks`, `relates_to` → `related`,
   `duplicates` → `duplicate`; other link types refused); `comment` →
   `commentCreate`; `delete` → the issue then `issueDelete` (Linear's
-  trash). Each records the issue as it now stands; a missing issue is
-  `InvalidInput` at the ref. A top-level `id` argument takes the
+  trash). Each records the issue as it now stands. A missing issue named
+  in an input object (looked up first, below) is `InvalidInput` at its
+  field; one named by a top-level `id` is whatever Linear answers —
+  `InvalidInput` only if it tags the error `INVALID_INPUT` (to verify
+  against a real workspace in the GUI walk, tsk469). A top-level `id` argument takes the
   identifier, but **an input object's issue field takes the uuid**
   (`parentId`, `issueId`, `relatedIssueId`), so a parent, a link's two
   ends and a commented issue are looked up first (`uuid_of`, one `Issue`
@@ -207,7 +210,8 @@ verified copy as its cwd — with `--declarations … --mapping … --tools …
 the folder's file (never a name looked up on `PATH`), as an MCP client
 over the server's stdio; the server inherits the sandbox and the
 credentials. The loader refuses an adapter whose server, mapping or tools
-isn't inside the folder (or doesn't exist), an `args:` beside it, tools
+isn't inside the folder (a path check: a server that doesn't exist fails
+when the adapter spawns it, at `check`), an `args:` beside it, tools
 that aren't a JSON list of named tools, and a server by `url` (not yet,
 P8). **The approval covers it all**: the program hashed is the server's
 file, the mapping and tools are named in its args, and the tree hash

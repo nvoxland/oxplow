@@ -634,8 +634,9 @@ baseline.
 
 **Running.** `on:` collectors, entity and fact alike, run from the
 `collector.triggers` consumer (below). For a fact collector:
-`snapshot.taken` runs it only when the take recorded files (not
-`unchanged`, `file_count > 0`); `effort.finished` runs it over the
+`snapshot.taken` runs a delta collector only when the take recorded
+files (not `unchanged`, `file_count > 0`) and a whole-tree one on every
+take — an unchanged take after a ref move has a new revision to restate; `effort.finished` runs it over the
 effort's end snapshot; any other type over the stream's latest snapshot.
 `every:` collectors run from the scheduler as the system through
 `collector.sync`. **`collector.sync { owner, id }` is the one manual run
