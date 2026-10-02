@@ -1252,13 +1252,18 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `page_ref.work_item` | sync | `work_item.created` / `edited` | re-projects a task's body-mention edges | boot |
 | `tool_call.project` | sync | `agent.tool.finished` | the `agent_tool_call` row (one per event) | boot |
 | `wiki.attribution` | sync | `agent.tool.finished` | marks an edited, indexed wiki page touched by the thread | boot |
+| `ui.push` | sync | `snapshot.taken` (that recorded files), `vcs.head.moved` | the renderer's `SnapshotTaken` on the UI bus (P7.B6) | boot |
+| `metrics.entity_states` | async | `work_item.*`, `snapshot.taken`, `collector.synced` | re-captures state entity metrics, throttled per metric (P7.B6) | boot |
+| `config.workspace_filter` | async | `config.changed` (`generated`) | the snapshot captures' filter | boot |
 | `effort.lifecycle` | async | `effort.opened` / `closed` | snapshot pins, reconcile (after settling `effort.claim`), metrics; logs `effort.finished` | boot |
 | `effort.claim` | async | `agent.tool.finished` | claims an edited file for the effort it was edited in | boot |
 | `collection` | async | `agent.tool.finished` (Bash) | test / analysis / coverage captures, `test.*` events, nudges | boot |
 | `advisories.post_tool` | async | `agent.tool.finished` | post-tool-use advisories, persisted as nudges | boot |
 | `token_usage.turns` | async | `agent.turn.ended` | a turn's token rows (transcript tail or reported counts) | boot |
 | `effort.evidence` / `effort.decisions` | async | `effort.finished` | evidence rows, inferred decisions | boot.rs |
-| `search.index` | async | `work_item.*`, `snapshot.taken` | the search index for tasks and snapshot files | boot.rs |
+| `search.index` | async | `work_item.*`, `knowledge.page.*`, `knowledge.note.*`, `knowledge.comment.*`, `snapshot.taken` | the search index for tasks, wiki pages, thread notes, comments and snapshot files | boot.rs |
+| `config.extensions` / `config.providers` / `config.metrics` | async | `config.changed` (`extensions`; `extensionInstances`, `activeProviders`; any key) | after the in-memory swap: the extension catalog's change signal; the provider registry reconciles; the metric catalog reseeds (P7.B6) | boot.rs |
+| `extension_models.entities` | async | `collector.synced` | the extension models compile again (a new entity may let one) (P7.B6) | boot.rs |
 | `change.analyze` | async | `snapshot.taken` (that recorded files), `vcs.head.moved` | re-analyzes the stream's working change and open efforts' changes, skipping an event a newer one supersedes; dead-letters a failure naming the stream (P7.B4) | boot.rs |
 | `plugin.repair` | async | `plugin.disabled` | files the contribution's repair work item on the active provider as the system, or comments on its open one; records it in `plugin_health.repair_item` (P7.C2) | boot.rs |
 | `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event, once per event (`collector_run.last_event_id`): an entity collector's rows, or a fact collector through the fact engine (`snapshot.taken` only when the take recorded files; `effort.finished` over the effort's end snapshot; anything else over the stream's latest snapshot) — plus `collector_run` and `collector.synced@1` (P7.B3; replaced `effort.gauges` and the metrics bus `SnapshotTaken` arm) | boot.rs |

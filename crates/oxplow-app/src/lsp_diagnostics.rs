@@ -347,7 +347,7 @@ mod tests {
         git2::Repository::init(dir.path()).unwrap();
         let svc = std::sync::Arc::new(Services::in_memory(dir.path()).unwrap());
         let stream = svc.streams.ensure_primary().await.unwrap();
-        let mut events = svc.events.subscribe();
+        let mut events = svc.events.subscribe_ui();
         spawn(svc.clone());
         let uri =
             url::Url::from_file_path(std::path::Path::new(&stream.worktree_path).join("src/a.rs"))

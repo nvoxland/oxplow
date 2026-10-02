@@ -78,8 +78,6 @@ pub enum OxplowEvent {
         stream_id: StreamId,
         thread_id: Option<ThreadId>,
     },
-    /// tasks on `thread_id` (or backlog if `thread_id` is None).
-    TasksChanged { thread_id: Option<ThreadId> },
     /// A comment (or one of its messages) changed on `target_kind` /
     /// `target_id` within `stream_id`. Renderer refetches the affected
     /// page's comments + the Comments inbox.
@@ -242,7 +240,11 @@ impl EventBus {
         Self { sender }
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<OxplowEvent> {
+    /// Listen to the bus — the renderer's channel. Only the `/events`
+    /// forwarder (and tests) do; backend work listens to the event pump,
+    /// an asset, the ref moves or the extension catalog's signal
+    /// (`ui_push::tests::the_bus_has_one_listener`, P7.B6).
+    pub fn subscribe_ui(&self) -> broadcast::Receiver<OxplowEvent> {
         self.sender.subscribe()
     }
 
@@ -260,7 +262,7 @@ mod tests {
     #[tokio::test]
     async fn subscribers_receive_events() {
         let bus = EventBus::new();
-        let mut rx = bus.subscribe();
+        let mut rx = bus.subscribe_ui();
         bus.emit(OxplowEvent::StreamsChanged);
         let got = rx.recv().await.unwrap();
         assert!(matches!(got, OxplowEvent::StreamsChanged));

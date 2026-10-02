@@ -1056,17 +1056,6 @@ impl OxplowMcp {
         }
     }
 
-    /// Emit `TasksChanged` so the renderer (which is a separate
-    /// process from the MCP server) refetches and reflects the
-    /// mutation. The Tauri command layer emits its own events; MCP
-    /// has to do the same or UI state silently goes stale after every
-    /// agent-driven change.
-    fn emit_tasks_changed(&self, thread_id: Option<oxplow_domain::ThreadId>) {
-        self.services
-            .events
-            .emit(OxplowEvent::TasksChanged { thread_id });
-    }
-
     /// Emit `ThreadsChanged` so the renderer (separate process) refetches a
     /// stream's threads after an agent-driven lifecycle change.
     fn emit_threads_changed(&self, stream_id: oxplow_domain::StreamId) {
@@ -2762,7 +2751,6 @@ impl OxplowMcp {
                 .await
                 .map_err(command_error)?;
         }
-        self.emit_tasks_changed(thread);
         json_result(&serde_json::json!({ "ok": true }))
     }
 
@@ -2790,7 +2778,6 @@ impl OxplowMcp {
         item = oxplow_app::task_writes::upsert(&self.services, &actor, item)
             .await
             .map_err(command_error)?;
-        self.emit_tasks_changed(item.thread_id);
         json_result(&item)
     }
 
@@ -3429,7 +3416,6 @@ impl OxplowMcp {
                 }
             }
         }
-        self.emit_tasks_changed(item.thread_id);
         let link_warnings =
             oxplow_app::link_check::check_links(&self.services, &item.description).await;
         json_result(&WithLinkWarnings::new(item, link_warnings))
@@ -3533,7 +3519,6 @@ impl OxplowMcp {
                     .await?;
             }
         }
-        self.emit_tasks_changed(updated.thread_id);
         let link_warnings = if wrote_description {
             oxplow_app::link_check::check_links(&self.services, &updated.description).await
         } else {
@@ -3677,7 +3662,6 @@ impl OxplowMcp {
                 }
             }
         }
-        self.emit_tasks_changed(item.thread_id);
         let link_warnings = oxplow_app::link_check::check_links(&self.services, &p.summary).await;
         let decision_hint = match self
             .services
@@ -3872,14 +3856,6 @@ impl OxplowMcp {
                 .map_err(command_error)?;
             updated.push(row);
         }
-        let mut threads: std::collections::HashSet<Option<oxplow_domain::ThreadId>> =
-            std::collections::HashSet::new();
-        for row in &updated {
-            threads.insert(row.thread_id);
-        }
-        for tid in threads {
-            self.emit_tasks_changed(tid);
-        }
         json_result(&updated)
     }
 
@@ -3990,7 +3966,6 @@ impl OxplowMcp {
             .map_err(command_error)?;
             children_out.push(row);
         }
-        self.emit_tasks_changed(thread);
         let bundle = serde_json::json!({ "epic": epic, "children": children_out });
         Ok(CallToolResult::success(vec![ContentBlock::text(
             bundle.to_string(),
@@ -4082,7 +4057,6 @@ impl OxplowMcp {
 
         let prompt =
             compose_dispatch_brief(&updated, params.0.extra_context.as_deref().unwrap_or(""));
-        self.emit_tasks_changed(updated.thread_id);
         json_result(&serde_json::json!({
             "ok": true,
             "prompt": prompt,

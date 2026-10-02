@@ -206,13 +206,15 @@ impl CaptureListener {
     }
 }
 
-/// Follow the database's changes — models, metric samples and assets —
-/// for the life of the process.
+/// Follow the database's changes — models, metric samples, assets, and
+/// new events for the pump (a commit that logged one wakes it, whoever
+/// made it) — for the life of the process.
 pub fn spawn(
     db: Database,
     watermarks: Arc<ModelWatermarks>,
     events: EventBus,
     assets: crate::assets::Assets,
+    pump: Arc<crate::event_pump::EventPump>,
 ) {
     let mut rx = db.subscribe_changes();
     tokio::spawn(async move {
@@ -230,6 +232,9 @@ pub fn spawn(
         loop {
             let (models, samples) = match rx.recv().await {
                 Ok(tables) => {
+                    if tables.contains("event_log") {
+                        pump.wake();
+                    }
                     if tables.contains("model_input") || tables.contains("model") {
                         if let Ok(fresh) = Lineage::load(&db).await {
                             lineage = fresh;
@@ -246,6 +251,7 @@ pub fn spawn(
                 }
                 // Missed some: anything may have changed.
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    pump.wake();
                     assets.all_changed();
                     (lineage.all(), true)
                 }
@@ -298,12 +304,13 @@ mod tests {
 
         // End to end: a task edit is announced for v_task, with a watermark.
         let watermarks = Arc::new(ModelWatermarks::default());
-        let mut rx = f.svc.events.subscribe();
+        let mut rx = f.svc.events.subscribe_ui();
         spawn(
             f.svc.db.clone(),
             watermarks.clone(),
             f.svc.events.clone(),
             crate::assets::Assets::new(f.svc.db.clone(), crate::assets::COALESCE),
+            f.svc.event_pump.clone(),
         );
         tokio::task::yield_now().await;
         let mut task = f.svc.task_store.get(f.task).await.unwrap().unwrap();
@@ -390,12 +397,13 @@ mod tests {
         let f = crate::test_fixtures::services_with_effort().await;
         let assets =
             crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(20));
-        let mut rx = f.svc.events.subscribe();
+        let mut rx = f.svc.events.subscribe_ui();
         spawn(
             f.svc.db.clone(),
             Arc::new(ModelWatermarks::default()),
             f.svc.events.clone(),
             assets.clone(),
+            f.svc.event_pump.clone(),
         );
         assets.register(Arc::new(crate::metric_cube::MetricCubeBuilder::new(
             (*f.svc.fact_store).clone(),
@@ -514,12 +522,13 @@ mod tests {
 
         let assets =
             crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(50));
-        let mut rx = f.svc.events.subscribe();
+        let mut rx = f.svc.events.subscribe_ui();
         spawn(
             f.svc.db.clone(),
             Arc::new(ModelWatermarks::default()),
             f.svc.events.clone(),
             assets,
+            f.svc.event_pump.clone(),
         );
         let titles = || async {
             f.svc

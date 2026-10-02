@@ -372,13 +372,15 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         .clone()
         .spawn(state.extension_catalog.changes());
 
-    // The one change loop (P4.6, P7.B1): which models each commit
-    // changed, which metric samples landed, which assets went stale.
+    // The one change loop (P4.6, P7.B1, P7.B6): which models each commit
+    // changed, which metric samples landed, which assets went stale, and
+    // when the pump has a new event to read.
     crate::models_changed::spawn(
         state.db.clone(),
         state.model_watermarks.clone(),
         event_bus.clone(),
         state.assets.clone(),
+        state.event_pump.clone(),
     );
 
     // Event retention (P3.11): expire old agent/test payloads and bodies

@@ -19,7 +19,6 @@ use oxplow_domain::{Stream, StreamId};
 use oxplow_fs_watch::WorkspaceFilter;
 
 use crate::blob_store::BlobStore;
-use crate::events::EventBus;
 use crate::snapshot_capture::SnapshotCaptureService;
 
 /// Build parameters shared across every per-stream service. The
@@ -34,7 +33,6 @@ pub struct SnapshotCaptureRegistryConfig {
     pub vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     pub max_file_bytes: u64,
     pub workspace_filter: WorkspaceFilter,
-    pub events: EventBus,
     /// Lets each service's quiet trigger yield to an open agent turn.
     pub open_turn_probe: Option<crate::snapshot_capture::OpenTurnProbe>,
 }
@@ -101,8 +99,7 @@ impl SnapshotCaptureRegistry {
                 .read()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone(),
-        )
-        .with_events(self.config.events.clone());
+        );
         if let Some(probe) = &self.config.open_turn_probe {
             svc = svc.with_open_turn_probe(probe.clone());
         }
@@ -224,7 +221,6 @@ mod tests {
             blobs: BlobStore::new(project.join(".oxplow/snapshots")),
             max_file_bytes: 1_000_000,
             workspace_filter: WorkspaceFilter::default(),
-            events: EventBus::new(),
             open_turn_probe: None,
         }
     }

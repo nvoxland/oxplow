@@ -487,7 +487,6 @@ mod tests {
             blobs: BlobStore::new(project.path().join(".oxplow/snapshots")),
             max_file_bytes: 1_000_000,
             workspace_filter: WorkspaceFilter::default(),
-            events: EventBus::new(),
             open_turn_probe: None,
         });
         let capture = Arc::new(

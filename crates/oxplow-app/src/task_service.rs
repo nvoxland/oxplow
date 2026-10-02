@@ -1592,7 +1592,6 @@ mod tests {
                 blobs: blobs.clone(),
                 max_file_bytes: 1_000_000,
                 workspace_filter: oxplow_fs_watch::WorkspaceFilter::default(),
-                events: event_bus.clone(),
                 open_turn_probe: None,
             },
         );
@@ -3208,7 +3207,6 @@ mod tests {
                 blobs: blobs.clone(),
                 max_file_bytes: 1_000_000,
                 workspace_filter: oxplow_fs_watch::WorkspaceFilter::default(),
-                events: crate::events::EventBus::new(),
                 open_turn_probe: None,
             },
         );

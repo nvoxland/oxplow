@@ -14,8 +14,9 @@ confirmation, audit, undo and the `command.executed` event, so the
 RPC/MCP layers become thin callers of `CommandBus::run`. A write that
 must log a domain event appends it with `append_tx` in the same
 transaction as the state change ([data-model.md](./data-model.md)
-"event_log"); the in-memory `EventBus` broadcast stays the post-commit
-wake-up for the UI and the pump. A new write path that bypasses the bus
+"event_log"); a commit that logged one wakes the pump (the change loop
+in `models_changed.rs` sees `event_log` among its tables), and the
+in-memory `EventBus` is only the renderer's channel (see "Event bus"). A new write path that bypasses the bus
 needs a reason recorded here.
 
 **Then: is it a read of data a model can publish?** Reads are SQL
@@ -40,10 +41,10 @@ touches roughly seven files. They sit in this order:
    `Database` handle (`Database::open(...)`). Exposes typed read/write
    methods on the relevant `*Store` trait from `oxplow-domain`,
    validates inputs (kinds, statuses, length limits) before writing.
-   Cross-store change fan-out goes through the shared `EventBus`
-   (`crates/oxplow-app/src/events.rs`); stores call `events.emit(...)`
-   with the matching `OxplowEvent` variant rather than maintaining
-   their own subscriber list.
+   Cross-store reactions go through the event log (a domain event
+   appended in the write's transaction, read by pump consumers) or an
+   asset over the tables; the `EventBus` only tells the renderer (see
+   "Event bus").
 
 3. **Runtime method** — `crates/oxplow-app/src/lib.rs`. Adds a method to
    `Services` that resolves stream/thread as needed and delegates
@@ -140,6 +141,20 @@ caller narrows it. (The LSP RPCs still pass JSON strings from before;
 C5 moves them.)
 
 ## Event bus
+
+**The bus is the renderer's channel and nothing else** (P7.B6,
+`ui_push.rs`). It carries `ModelsChanged` (a model's tables committed,
+`models_changed.rs`), what the `ui.push` pump consumer derives from the
+event log (`snapshot.taken` / `vcs.head.moved` → `SnapshotTaken`), and the
+UI-only signals with no durable fact behind them (a toast, a stream
+orphaned, an agent's status, `ConfigChanged` for the Settings view).
+**Backend work never listens to it**: it runs on the event pump (a
+consumer of the log), an asset (tables → recompute), the VCS watcher's
+ref moves (`RefMoves`) or the extension catalog's change signal. Only
+the `/events` forwarder subscribes (`EventBus::subscribe_ui`); the
+source-tree test `ui_push::tests::the_bus_has_one_listener` fails on any
+other production caller. A new derived UI event goes in `ui.push` from
+the event that records the fact, not as an `emit` beside the write.
 
 `crates/oxplow-app/src/events.rs` defines the typed `OxplowEvent` discriminated
 union. To add an event:
@@ -275,9 +290,10 @@ Rows returned by `listSnapshotsForStream` carry their creating op's
 first-ever baseline (nothing to diff against). Efforts anchor to
 snapshots through `effort.start_snapshot_id` / `end_snapshot_id` and
 agent turns through `agent_turn.start_snapshot_id` / `snapshot_id`.
-Unlike other stores it doesn't expose a `subscribe()`; the capture
-service publishes `SnapshotTaken` on the EventBus after a take
-commits.
+Unlike other stores it doesn't expose a `subscribe()`; the renderer
+hears a take that recorded something as `SnapshotTaken`, which the
+`ui.push` consumer derives from the logged `snapshot.taken@1` (and a
+re-stamp from `vcs.head.moved@1`).
 
 IPC methods (all go through `ipc-contract.ts` → `main.ts` →
 `preload.ts` → `apps/desktop/src/api.ts`):

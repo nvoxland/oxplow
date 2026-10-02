@@ -43,7 +43,7 @@ mod tests {
     #[test]
     fn a_move_reaches_its_listeners_and_the_ui() {
         let bus = EventBus::new();
-        let mut ui = bus.subscribe();
+        let mut ui = bus.subscribe_ui();
         let moves = RefMoves::new(bus);
         let mut rx = moves.subscribe();
         moves.moved(StreamId::new(3));

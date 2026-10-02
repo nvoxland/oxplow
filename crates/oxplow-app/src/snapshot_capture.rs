@@ -137,7 +137,6 @@ use oxplow_domain::{StreamId, Timestamp};
 use oxplow_fs_watch::{FsWatcher, WatchEventKind, WorkspaceFilter};
 
 use crate::blob_store::BlobStore;
-use crate::events::{EventBus, OxplowEvent};
 
 /// Pre-computed metadata supplied to `mark_dirty_with_staging` by
 /// callers that already read + hashed the file (and wrote the blob).
@@ -197,10 +196,6 @@ struct Inner {
     /// IPC) can swap it at runtime via [`SnapshotCaptureService::set_workspace_filter`]
     /// without restarting the app.
     workspace_filter: RwLock<WorkspaceFilter>,
-    /// Optional event bus. When set, a take that recorded something new
-    /// fires `SnapshotTaken` after its transaction commits, so the
-    /// renderer and reactors refresh without polling.
-    events: RwLock<Option<EventBus>>,
     /// Paths that have changed since the last `request_snapshot()`.
     /// The watcher loop pushes into this map; `request_snapshot`
     /// drains it. Keyed by path so repeated edits between requests
@@ -288,7 +283,6 @@ impl SnapshotCaptureService {
                 stream_id,
                 max_file_bytes,
                 workspace_filter: RwLock::new(workspace_filter),
-                events: RwLock::new(None),
                 dirty: Mutex::new(HashMap::new()),
                 settle_duration: DEFAULT_SETTLE_DURATION,
                 predrain_delay: DEFAULT_PREDRAIN_DELAY,
@@ -403,13 +397,6 @@ impl SnapshotCaptureService {
         } else {
             warn!("with_predrain_delay called after the service was shared; ignoring");
         }
-        self
-    }
-
-    /// Attach an `EventBus` so a take that recorded something new emits
-    /// `SnapshotTaken` after its transaction commits.
-    pub fn with_events(self, events: EventBus) -> Self {
-        *self.inner.events.write().unwrap_or_else(|e| e.into_inner()) = Some(events);
         self
     }
 
@@ -660,7 +647,6 @@ impl SnapshotCaptureService {
         else {
             return Ok(after_drain);
         };
-        self.emit_taken(moved.snapshot_id, 0, SnapshotTrigger::HeadMoved.into());
         info!(
             snapshot_id = moved.snapshot_id,
             "snapshot: re-stamped the current snapshot with the new HEAD",
@@ -1749,9 +1735,6 @@ impl SnapshotCaptureService {
                 "snapshot take ran over its budget",
             );
         }
-        if !outcome.unchanged {
-            self.emit_taken(outcome.snapshot_id, outcome.file_count, req);
-        }
         info!(
             snapshot_id = outcome.snapshot_id,
             op = outcome.op_seq,
@@ -1762,22 +1745,6 @@ impl SnapshotCaptureService {
             "snapshot take recorded",
         );
         Ok(Some(outcome.snapshot_id))
-    }
-
-    /// Announce a take that recorded something (after its transaction).
-    fn emit_taken(&self, snapshot_id: i64, file_count: u32, req: TakeRequest) {
-        let guard = self.inner.events.read().unwrap_or_else(|e| e.into_inner());
-        if let Some(bus) = guard.as_ref() {
-            bus.emit(OxplowEvent::SnapshotTaken {
-                stream_id: self.inner.stream_id,
-                snapshot_id,
-                file_count,
-                trigger: req.trigger,
-                thread_id: req.thread_id,
-                turn_id: req.turn_id,
-                effort_id: req.effort_id,
-            });
-        }
     }
 }
 
@@ -2647,26 +2614,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn each_take_records_its_own_anchored_op_and_only_changes_are_announced() {
+    /// Each take records its own op, anchored to its trigger; what the
+    /// renderer hears of it is `ui.push`'s (from the logged event).
+    async fn each_take_records_its_own_anchored_op() {
         let project = tempdir().unwrap();
         let a = project.path().join("a.txt");
         std::fs::write(&a, "one").unwrap();
         let (svc, store) = svc_for(project.path()).await;
-        let bus = EventBus::new();
-        let mut rx = bus.subscribe();
-        let svc = svc.with_events(bus);
         svc.mark_dirty(a.clone(), WatchEventKind::Other);
         let first = svc
             .request_snapshot(SnapshotTrigger::Startup)
             .await
             .unwrap()
             .unwrap();
-        let announced = rx.try_recv().unwrap();
-        assert!(
-            matches!(announced, OxplowEvent::SnapshotTaken { snapshot_id, file_count: 1, trigger: SnapshotTrigger::Startup, .. } if snapshot_id == first),
-            "{announced:?}"
-        );
-        // Nothing dirty: an op on the same snapshot, no announcement.
+        // Nothing dirty: an op on the same snapshot.
         let again = svc
             .request_snapshot(TakeRequest {
                 trigger: SnapshotTrigger::EffortEnd,
@@ -2678,7 +2639,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(again, Some(first));
-        assert!(rx.try_recv().is_err(), "an unchanged take is not announced");
         let ops = store.list_ops(TEST_STREAM, 5).await.unwrap();
         assert_eq!(ops.len(), 2);
         assert_eq!(ops[0].trigger, SnapshotTrigger::EffortEnd);

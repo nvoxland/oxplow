@@ -216,7 +216,7 @@ async fn events_stream(socket: WebSocket, state: DaemonState) {
     // the Tauri shell, and the renderer's demux table can't drift.
     let [oxplow_key, lsp_key, terminal_key, acp_key] = ws_frame_keys();
     let forwarders = [
-        forward(state.ctx.events.subscribe(), tx.clone(), move |e| {
+        forward(state.ctx.events.subscribe_ui(), tx.clone(), move |e| {
             frame_json(oxplow_key, e)
         }),
         forward(state.ctx.lsp_sessions.subscribe(), tx.clone(), move |e| {

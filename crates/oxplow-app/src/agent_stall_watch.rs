@@ -348,7 +348,7 @@ mod tests {
         let f = fixture().await;
         seed_status(&f, AgentStatusState::Running).await;
         append(&f, HookKind::UserPromptSubmit, 1, "{}").await;
-        let mut rx = f.bus.subscribe();
+        let mut rx = f.bus.subscribe_ui();
         f.watch
             .check_once(Timestamp::from_unix_ms(1 + AGENT_STALL_AFTER_MS + 1))
             .await;
@@ -371,7 +371,7 @@ mod tests {
         seed_status(&f, AgentStatusState::Running).await;
         append(&f, HookKind::UserPromptSubmit, 1, "{}").await;
         seed_in_progress_task(&f).await;
-        let mut rx = f.bus.subscribe();
+        let mut rx = f.bus.subscribe_ui();
         f.watch.check_once(Timestamp::from_unix_ms(1000)).await;
         assert!(drain(&mut rx).is_empty());
     }
@@ -382,7 +382,7 @@ mod tests {
         seed_status(&f, AgentStatusState::Running).await;
         append(&f, HookKind::UserPromptSubmit, 1, "{}").await;
         seed_in_progress_task(&f).await;
-        let mut rx = f.bus.subscribe();
+        let mut rx = f.bus.subscribe_ui();
         let late = Timestamp::from_unix_ms(1 + AGENT_STALL_ALERT_AFTER_MS + 1);
         f.watch.check_once(late).await;
         f.watch.check_once(late).await;
@@ -414,7 +414,7 @@ mod tests {
         append(&f, HookKind::UserPromptSubmit, 1, "{}").await;
         append(&f, HookKind::Stop, 2, "{}").await;
         seed_in_progress_task(&f).await;
-        let mut rx = f.bus.subscribe();
+        let mut rx = f.bus.subscribe_ui();
         f.watch
             .check_once(Timestamp::from_unix_ms(2 + AGENT_STALL_ALERT_AFTER_MS + 1))
             .await;
@@ -431,7 +431,7 @@ mod tests {
         let f = fixture().await;
         seed_status(&f, AgentStatusState::Running).await;
         append(&f, HookKind::UserPromptSubmit, 1, "{}").await;
-        let mut rx = f.bus.subscribe();
+        let mut rx = f.bus.subscribe_ui();
         f.watch
             .check_once(Timestamp::from_unix_ms(1 + AGENT_STALL_ALERT_AFTER_MS + 1))
             .await;
@@ -460,7 +460,7 @@ mod tests {
         )
         .await;
         seed_in_progress_task(&f).await;
-        let mut rx = f.bus.subscribe();
+        let mut rx = f.bus.subscribe_ui();
         f.watch
             .check_once(Timestamp::from_unix_ms(2 + AGENT_STALL_ALERT_AFTER_MS * 10))
             .await;
@@ -482,7 +482,7 @@ mod tests {
         seed_status(&f, AgentStatusState::Running).await;
         append(&f, HookKind::UserPromptSubmit, 1, "{}").await;
         seed_in_progress_task(&f).await;
-        let mut rx = f.bus.subscribe();
+        let mut rx = f.bus.subscribe_ui();
         // Past the short death threshold but well under the long alert
         // window — the old code stayed quiet here.
         let dead_at = Timestamp::from_unix_ms(1 + AGENT_DEAD_AFTER_MS + 1);
@@ -506,7 +506,7 @@ mod tests {
         seed_status(&f, AgentStatusState::Running).await;
         append(&f, HookKind::UserPromptSubmit, 1, "{}").await;
         seed_in_progress_task(&f).await;
-        let mut rx = f.bus.subscribe();
+        let mut rx = f.bus.subscribe_ui();
         let now = Timestamp::from_unix_ms(1 + AGENT_STALL_ALERT_AFTER_MS + 1);
         // Output advancing right up to `now`.
         f.activity
@@ -535,7 +535,7 @@ mod tests {
         seed_in_progress_task(&f).await;
         // Output went quiet long ago, same as the hook log.
         f.activity.record(f.thread, Timestamp::from_unix_ms(2));
-        let mut rx = f.bus.subscribe();
+        let mut rx = f.bus.subscribe_ui();
         f.watch
             .check_once(Timestamp::from_unix_ms(2 + AGENT_STALL_AFTER_MS + 1))
             .await;
@@ -558,7 +558,7 @@ mod tests {
         seed_status(&f, AgentStatusState::Running).await;
         append(&f, HookKind::UserPromptSubmit, 1, "{}").await;
         seed_in_progress_task(&f).await;
-        let mut rx = f.bus.subscribe();
+        let mut rx = f.bus.subscribe_ui();
         let late = Timestamp::from_unix_ms(1 + AGENT_STALL_ALERT_AFTER_MS + 1);
         f.watch.check_once(late).await;
 

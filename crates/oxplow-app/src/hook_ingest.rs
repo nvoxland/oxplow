@@ -724,7 +724,7 @@ mod tests {
     #[tokio::test]
     async fn set_status_logs_once_and_refreshes_the_activity_log() {
         let (svc, tid) = fixture().await;
-        let mut rx = svc.events.subscribe();
+        let mut rx = svc.events.subscribe_ui();
         for _ in 0..2 {
             svc.set_status(&tid, AgentStatusState::AwaitingUser, Some("A?".into()))
                 .await
@@ -1025,7 +1025,7 @@ mod tests {
         // The Work panel renders open turns as live rows; it needs an
         // event on every open/close to refetch without polling.
         let (svc, tid) = fixture().await;
-        let mut rx = svc.events.subscribe();
+        let mut rx = svc.events.subscribe_ui();
         let drain_turns = |rx: &mut tokio::sync::broadcast::Receiver<OxplowEvent>| {
             let mut n = 0;
             while let Ok(ev) = rx.try_recv() {
@@ -1427,7 +1427,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut rx = svc.events.subscribe();
+        let mut rx = svc.events.subscribe_ui();
         svc.ingest(HookEnvelope {
             kind: HookKind::PostToolUse,
             thread_id: Some(tid),

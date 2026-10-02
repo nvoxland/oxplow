@@ -353,7 +353,7 @@ mod tests {
         }
 
         let bus = EventBus::new();
-        let mut rx = bus.subscribe();
+        let mut rx = bus.subscribe_ui();
         let stream_id = oxplow_domain::StreamId::new(1);
         let on_orphan: OnOrphan = Box::new(|| Box::pin(async {}));
         // No .gitignore in the tempdir, so exclude the build dirs via the
@@ -473,7 +473,7 @@ mod tests {
         }
 
         let bus = EventBus::new();
-        let mut rx = bus.subscribe();
+        let mut rx = bus.subscribe_ui();
         let _registry = WorkspaceWatchRegistry::spawn(
             svc.clone(),
             Arc::new(crate::vcs::GitProvider),
@@ -564,7 +564,7 @@ mod tests {
         std::fs::write(seeded_dir.join("hello.txt"), b"hi").unwrap();
 
         let bus = EventBus::new();
-        let mut rx = bus.subscribe();
+        let mut rx = bus.subscribe_ui();
         let _registry = WorkspaceWatchRegistry::spawn(
             svc.clone(),
             Arc::new(crate::vcs::GitProvider),

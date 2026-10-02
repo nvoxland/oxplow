@@ -124,6 +124,7 @@ pub mod tool_call_reactors;
 pub mod tool_calls;
 pub mod trees;
 pub mod turn_snapshots;
+pub mod ui_push;
 pub mod vcs;
 #[cfg(test)]
 pub mod vcs_conformance;
@@ -714,6 +715,8 @@ impl Services {
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), event_schemas.clone()));
         let sql = sql_gateway::SqlGateway::new(db.clone());
+        let event_bus = EventBus::new();
+        let ref_moves = ref_moves::RefMoves::new(event_bus.clone());
         let event_pump = Arc::new(event_pump::EventPump::new(
             db.clone(),
             (*event_log_store).clone(),
@@ -722,6 +725,10 @@ impl Services {
                 Arc::new(work_items::WorkItemsProjection),
                 Arc::new(tool_call_reactors::ToolCallProjection),
                 Arc::new(knowledge::WikiAttribution),
+                // The log's facts the renderer hears (P7.B6).
+                Arc::new(ui_push::UiPush {
+                    events: event_bus.clone(),
+                }),
             ],
         ));
         let wiki_page_store = Arc::new(SqliteWikiPageStore::new(db.clone()));
@@ -791,8 +798,7 @@ impl Services {
         );
         let threads = ThreadService::new(thread_store.clone());
         let tasks = TaskService::new(task_store.clone()).with_event_pump(event_pump.clone());
-        let event_bus = EventBus::new();
-        let ref_moves = ref_moves::RefMoves::new(event_bus.clone());
+
         let hook_ingest = HookIngestService::new(
             db.clone(),
             event_schemas.clone(),
@@ -925,7 +931,6 @@ impl Services {
                 blobs: blobs.clone(),
                 max_file_bytes: max_bytes,
                 workspace_filter,
-                events: event_bus.clone(),
                 open_turn_probe: Some({
                     let turns = agent_turn_store.clone();
                     Arc::new(move |stream| {

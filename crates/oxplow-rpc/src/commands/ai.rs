@@ -128,7 +128,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut rx = svc.events.subscribe();
+        let mut rx = svc.events.subscribe_ui();
         crate::dispatch(
             "set_ai_role",
             json!({ "role": "summarize", "binding": { "provider": "or", "model": "m" } }),
