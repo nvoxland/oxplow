@@ -123,15 +123,6 @@
   tests:
     - { not_null: id }
     - { unique: id }
-- name: change_co_change
-  version: 1
-  description: "Files in a change that history says are surprising: their usual co-changers aren't in this change, or they haven't been touched in a long time."
-  columns:
-    - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
-    - { name: "path", type: "TEXT", doc: "The surprising file." }
-    - { name: "reason", type: "TEXT", doc: "`usual-co-changers-absent` or `dormant`." }
-    - { name: "expected", type: "TEXT", doc: "The files that usually change with it, `, `-separated." }
-    - { name: "dormant_days", type: "INTEGER", doc: "Days since it was last touched, for `dormant`." }
 - name: change_duplicate
   version: 1
   description: "Blocks in a change's files that duplicate code elsewhere in the tree. Arrives after the rest of the analysis (a whole-tree scan); none for closed efforts yet."

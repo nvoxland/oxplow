@@ -9,7 +9,7 @@ query: |
            ELSE x.reason
          END AS why,
          x.expected, c.base_revision, c.head_revision
-  FROM v_change_co_change x JOIN v_change c ON c.id = x.change_id
+  FROM v_oxplow_analytics_change_co_change x JOIN v_change c ON c.id = x.change_id
   WHERE x.change_id = :change_id
   ORDER BY x.reason, x.path
 columns:

@@ -78,14 +78,6 @@ pub struct ChangeImportRow {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct ChangeCoChangeRow {
-    pub path: String,
-    pub reason: String,
-    pub expected: Option<String>,
-    pub dormant_days: Option<i64>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ChangeDuplicateRow {
     pub path: String,
     pub start_line: i64,
@@ -114,7 +106,6 @@ pub struct ChangeResults {
     pub files: Vec<ChangeFileRow>,
     pub functions: Vec<ChangeFunctionRow>,
     pub imports: Vec<ChangeImportRow>,
-    pub co_changes: Vec<ChangeCoChangeRow>,
     pub test_files: Vec<ChangeTestFileRow>,
 }
 
@@ -251,7 +242,6 @@ impl SqliteChangeStore {
                     "change_file",
                     "change_function",
                     "change_import",
-                    "change_co_change",
                     "change_test_file",
                 ] {
                     tx.execute(&format!("DELETE FROM {t} WHERE change_id = ?1"), [id])
@@ -290,14 +280,6 @@ impl SqliteChangeStore {
                             id, i.path, i.module, i.direction, i.start_line, i.from_zone, i.to_zone,
                             i64::from(i.cross_zone)
                         ],
-                    )
-                    .map_err(map_sql_err)?;
-                }
-                for c in &results.co_changes {
-                    tx.execute(
-                        "INSERT OR REPLACE INTO change_co_change (change_id, path, reason, expected, dormant_days)
-                         VALUES (?1, ?2, ?3, ?4, ?5)",
-                        rusqlite::params![id, c.path, c.reason, c.expected, c.dormant_days],
                     )
                     .map_err(map_sql_err)?;
                 }
@@ -449,12 +431,6 @@ mod tests {
                 cross_zone: true,
                 ..Default::default()
             }],
-            co_changes: vec![ChangeCoChangeRow {
-                path: path.into(),
-                reason: "dormant".into(),
-                dormant_days: Some(120),
-                ..Default::default()
-            }],
             test_files: Vec::new(),
         };
         store
@@ -503,10 +479,6 @@ mod tests {
         assert_eq!(
             q("SELECT module, cross_zone FROM v_change_import").await,
             json!([["crate::db", 1]])
-        );
-        assert_eq!(
-            q("SELECT reason, dormant_days FROM v_change_co_change").await,
-            json!([["dormant", 120]])
         );
         assert_eq!(
             q("SELECT peer_path, lines FROM v_change_duplicate").await,

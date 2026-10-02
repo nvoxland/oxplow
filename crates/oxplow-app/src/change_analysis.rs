@@ -99,14 +99,6 @@ fn qualified(f: &AnalyzedFunction) -> String {
 /// One function's base and head versions (either may be absent).
 type BaseHead<'a> = (Option<&'a AnalyzedFunction>, Option<&'a AnalyzedFunction>);
 
-/// Co-change history cached for the commit index it was built from
-/// (its size and newest commit).
-type CachedHistory = (
-    usize,
-    String,
-    std::sync::Arc<crate::co_change::CoChangeHistory>,
-);
-
 /// Build the stored rows from the diff and the function analysis.
 pub fn build_results(
     files: &[ChangedFile],
@@ -232,7 +224,6 @@ pub fn build_results(
         files,
         functions,
         imports,
-        co_changes: Vec::new(),
         test_files: Vec::new(),
     }
 }
@@ -285,32 +276,6 @@ pub fn test_file_rows(
 }
 
 /// Stored rows for the surprising files (normal ones are left out).
-pub fn co_change_rows(
-    surprises: Vec<crate::co_change::FileSurprise>,
-) -> Vec<oxplow_db::ChangeCoChangeRow> {
-    use crate::co_change::SurpriseReason;
-    surprises
-        .into_iter()
-        .filter_map(|s| match s.reason {
-            SurpriseReason::Normal => None,
-            SurpriseReason::UsualCoChangersAbsent { expected } => {
-                Some(oxplow_db::ChangeCoChangeRow {
-                    path: s.path,
-                    reason: "usual-co-changers-absent".into(),
-                    expected: Some(expected.join(", ")),
-                    dormant_days: None,
-                })
-            }
-            SurpriseReason::Dormant { last_touched_days } => Some(oxplow_db::ChangeCoChangeRow {
-                path: s.path,
-                reason: "dormant".into(),
-                expected: None,
-                dormant_days: Some(last_touched_days),
-            }),
-        })
-        .collect()
-}
-
 /// What to analyze.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -341,16 +306,12 @@ pub enum ChangeTarget {
     },
 }
 
-/// Which changes are being computed, the duplicate-scan queue and the
-/// co-change history cache.
+/// Which changes are being computed and the duplicate-scan queue.
 #[derive(Default)]
 pub struct ChangeAnalyzer {
     state: std::sync::Mutex<AnalyzerState>,
     /// Duplicate scans: one worker per change at a time.
     dup_queue: DupQueue,
-    /// Co-change history over the commit index's window, reused until
-    /// the index changes.
-    history: std::sync::Mutex<Option<CachedHistory>>,
 }
 
 /// One duplicate scan to run for a change.
@@ -415,42 +376,6 @@ impl Drop for RunningGuard<'_> {
 #[derive(Default)]
 struct AnalyzerState {
     running: std::collections::HashSet<i64>,
-}
-
-impl ChangeAnalyzer {
-    /// The co-change history over the last `DEFAULT_WINDOW_DAYS` of the
-    /// commit index (`v_commit_file`, every stream's head), rebuilt only
-    /// when the index has changed.
-    async fn history(
-        &self,
-        commits: &oxplow_db::SqliteGitStore,
-    ) -> std::sync::Arc<crate::co_change::CoChangeHistory> {
-        use crate::co_change::{CoChangeHistory, DEFAULT_WINDOW_DAYS};
-        let now = oxplow_domain::Timestamp::now().unix_ms() / 1000;
-        let sets = match commits
-            .changesets_since(now - DEFAULT_WINDOW_DAYS * 86_400)
-            .await
-        {
-            Ok(sets) => sets,
-            Err(e) => {
-                tracing::warn!(error = %e, "couldn't read the commit index for co-change");
-                Vec::new()
-            }
-        };
-        let newest = sets.first().map(|s| s.sha.clone()).unwrap_or_default();
-        if let Ok(cache) = self.history.lock() {
-            if let Some((len, sha, hist)) = cache.as_ref() {
-                if *len == sets.len() && *sha == newest {
-                    return hist.clone();
-                }
-            }
-        }
-        let hist = std::sync::Arc::new(CoChangeHistory::from_changesets(&sets, now));
-        if let Ok(mut cache) = self.history.lock() {
-            *cache = Some((sets.len(), newest, hist.clone()));
-        }
-        hist
-    }
 }
 
 /// Analyze `target` if it hasn't been (or its head moved — an effort
@@ -790,7 +715,6 @@ async fn compute(
                 .map_err(|e| e.to_string())?,
         ));
     }
-    let history = svc.change_analyzer.history(&svc.git_store).await;
     tokio::task::spawn_blocking(move || -> Result<ChangeResults, String> {
         let specs: Vec<AnalyzeFileSpec> = analyzed
             .iter()
@@ -815,12 +739,6 @@ async fn compute(
             .collect();
         let mut results = build_results(&files, &analysis, &zones);
         results.test_files = test_file_rows(&analyzed, &base_contents, &head_contents, &analysis);
-        let paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
-        results.co_changes = co_change_rows(crate::co_change::analyze_surprise(
-            &history,
-            &paths,
-            crate::co_change::DEFAULT_DORMANT_DAYS,
-        ));
         Ok(results)
     })
     .await
@@ -1318,46 +1236,6 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.to_string().contains("start snapshot"), "{err}");
-    }
-
-    #[test]
-    fn only_surprising_files_become_co_change_rows() {
-        use crate::co_change::{FileSurprise, SurpriseReason};
-        let rows = co_change_rows(vec![
-            FileSurprise {
-                path: "a.rs".into(),
-                reason: SurpriseReason::Normal,
-            },
-            FileSurprise {
-                path: "b.rs".into(),
-                reason: SurpriseReason::UsualCoChangersAbsent {
-                    expected: vec!["c.rs".into(), "d.rs".into()],
-                },
-            },
-            FileSurprise {
-                path: "e.rs".into(),
-                reason: SurpriseReason::Dormant {
-                    last_touched_days: 120,
-                },
-            },
-        ]);
-        assert_eq!(
-            rows,
-            vec![
-                oxplow_db::ChangeCoChangeRow {
-                    path: "b.rs".into(),
-                    reason: "usual-co-changers-absent".into(),
-                    expected: Some("c.rs, d.rs".into()),
-                    dormant_days: None,
-                },
-                oxplow_db::ChangeCoChangeRow {
-                    path: "e.rs".into(),
-                    reason: "dormant".into(),
-                    expected: None,
-                    dormant_days: Some(120),
-                },
-            ]
-        );
     }
 
     #[tokio::test]

@@ -758,7 +758,12 @@ fn drop_orphaned_tables(conn: &Connection) -> Result<(), DomainError> {
     Ok(())
 }
 
-/// What SQLite reports the view reading is what it declared.
+/// Everything SQLite reports the view reading is declared — a `ref()` or
+/// `source()` — so lineage is complete. The other way round needs no
+/// check: each declared input is one of those calls in the SQL itself,
+/// substituted into it, so it's read by construction (and SQLite can't
+/// always say so: a model made only of CTEs reports its reads under the
+/// CTEs' names, never its view's).
 fn check_lineage(conn: &Connection, m: &Resolved<'_>) -> Result<(), DomainError> {
     let session = crate::semantic_layer::ReadSession::open(
         conn,
@@ -769,34 +774,18 @@ fn check_lineage(conn: &Connection, m: &Resolved<'_>) -> Result<(), DomainError>
         .map_err(|e| invalid(format!("{}: {e}", m.source.file)))?;
     let (views, tables) = session.direct_inputs();
     drop(session);
-    if views == m.refs && tables == m.sources {
-        return Ok(());
-    }
     let undeclared: Vec<String> = views
         .difference(&m.refs)
         .chain(tables.difference(&m.sources))
         .cloned()
         .collect();
-    let unread: Vec<String> = m
-        .refs
-        .difference(&views)
-        .chain(m.sources.difference(&tables))
-        .cloned()
-        .collect();
-    let mut problems = Vec::new();
-    if !undeclared.is_empty() {
-        problems.push(format!(
-            "reads {} without ref()/source()",
-            undeclared.join(", ")
-        ));
-    }
-    if !unread.is_empty() {
-        problems.push(format!("declares {} but never reads it", unread.join(", ")));
+    if undeclared.is_empty() {
+        return Ok(());
     }
     Err(invalid(format!(
-        "{}: {}",
+        "{}: reads {} without ref()/source()",
         m.source.file,
-        problems.join("; ")
+        undeclared.join(", ")
     )))
 }
 

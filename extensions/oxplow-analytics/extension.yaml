@@ -101,3 +101,20 @@ models:
       - { name: path, type: TEXT, doc: "Repo-relative path." }
       - { name: interest, type: "", doc: "Review priority (a real number); higher means look here first." }
       - { name: reasons, type: "", doc: "Why it's high, `; `-separated ('' for a routine file)." }
+  - name: co_change_pair
+    version: 1
+    materialize: on_change
+    description: "Files usually committed together: each pair (both ways round) that shared at least 3 commits of 50 files or fewer in the last 180 days."
+    columns:
+      - { name: path, type: TEXT, doc: "A file." }
+      - { name: other, type: TEXT, doc: "A file committed with it." }
+      - { name: together, type: "", doc: "How many commits they shared." }
+  - name: change_co_change
+    version: 1
+    description: "Files in a change that history says are surprising: untouched for 90 days or more, or changed without any of their usual partners (top three co-changers)."
+    columns:
+      - { name: change_id, type: INTEGER, doc: "The change (v_change.id)." }
+      - { name: path, type: TEXT, doc: "The surprising file." }
+      - { name: reason, type: "", doc: "`dormant` or `usual-co-changers-absent`." }
+      - { name: expected, type: "", doc: "Its usual partners, `, `-separated (for `usual-co-changers-absent`)." }
+      - { name: dormant_days, type: "", doc: "Days since a commit last touched it (for `dormant`; 90 when never)." }

@@ -113,7 +113,7 @@ What core publishes, by where it comes from. Each row names its models
 |---|---|---|
 | work | `stream`, `thread`, `task`, `task_note`, `task_link`, `effort`, `effort_file`, `decision`, `claim`, `context_read`, `struggle` | cycle time, steering, lifecycle |
 | knowledge | `wiki_page`, `comment` | freshness |
-| git | `commit`, `commit_file`, `commit_task`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_co_change`, `change_duplicate`, `change_test_file`) | churn |
+| git | `commit`, `commit_file`, `commit_task`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |
 | snapshots | `snapshot`, `snapshot_op` | — |
 | lsp | `diagnostic` | diagnostic counts by severity |
 | tests & coverage | `test_run`, `test_case` | coverage, pass/fail |
@@ -147,9 +147,12 @@ one transaction:
 - orders the models so each is created after what it reads (a cycle is an
   error naming each model and where it wrote its first `ref()`);
 - drops the owner's previous views and creates the new ones;
-- checks **lineage**: what the authorizer reports the view reading
-  directly (`ReadSession::direct_inputs`) must be exactly its declared
-  `ref()`s and `source()`s — reading a table without `source()` fails;
+- checks **lineage**: everything the authorizer reports the view reading
+  directly (`ReadSession::direct_inputs`) must be a declared `ref()` or
+  `source()` — reading a table without `source()` fails. The converse
+  isn't checked: each declared input is a call in the SQL, substituted
+  into it, so it's read by construction (and SQLite can't always say so —
+  a model made only of CTEs reports its reads under the CTEs' names, P7.B5);
 - checks the **contract**: the view's `PRAGMA table_info` must equal the
   declared columns, and `model_contract` holds what each `(view, version)`
   promised — a changed contract at the same version fails naming the
@@ -435,7 +438,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_dashboard`, `v_dashboard_item` | user dashboards and their tiles (V80) |
 | `v_effort_metric_delta` | per effort, how each metric moved (baseline → current, `crossing`). **Stored, not a live query:** the metric engine computes it (`CollectionService::refresh_effort_evidence`) and `effort_evidence.rs` refreshes it on `effort.finished` (the `effort.evidence` pump consumer) and for every open effort as the **asset** `effort_evidence` (`OpenEffortEvidence`, P7.B6: its inputs `metric_capture`, `fact`, `effort_attribution`, `agent_token_usage`; its own tables aren't, so it can't loop); readers hear the rows move as `ModelsChanged` (V80) |
 | `v_effort_observation` | per effort, test runs / diff coverage / analysis rebuilt from its claimed captures; refreshed the same way (V80) |
-| `v_change`, `v_change_file`, `v_change_function`, `v_change_import`, `v_change_co_change`, `v_change_duplicate` | stored change analysis (see "Change analysis" below) (V81) |
+| `v_change`, `v_change_file`, `v_change_function`, `v_change_import`, `v_change_duplicate` | stored change analysis (see "Change analysis" below) (V81) |
 | `v_commit`, `v_commit_file`, `v_commit_task`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`) — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_task` reads the indexer's task-mention edges. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these models (`apps/desktop/src/vcsHistory.ts`) |
 | `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `effort_id` is the effort whose ledger claims `run:<id>` (kind `run`), else the capture's own. A run that only reported counts (MCP `record_test_run`) has no cases |
 | `v_thread_answer` | the lenses an agent showed on a thread (`show_lens`, V124, P6.C1): `ref` `answer:<id>`, `thread_id`, `turn_id` / `effort_id` open when it was shown, `title`, either `lens` (an existing lens id) or `spec` (the `LensSpec` as JSON), `params`, `created_at`, and `kept_lens` once someone kept it (extensions.md → "Thread answers") |
@@ -879,8 +882,11 @@ oxplow-analytics change cards) only read them.
     churn and churn share; unchanged ones aren't stored;
   - imports: added/removed with zones, `cross_zone` for new boundary
     crossings;
-  - co-change: `analyze_surprise` over the commit index's history
-    (`crate::co_change`), cached until the index changes;
+  - co-change left core (P7.B5, V138 dropped `change_co_change`):
+    oxplow-analytics' `co_change_pair` (materialized over the commit
+    index: pairs sharing ≥ 3 commits of ≤ 50 files in 180 days) and
+    `change_co_change` (a change's files dormant 90+ days, or whose top
+    three co-changers are all absent) compute it in SQL;
   - test files (`v_change_test_file`, V83): for each changed file that is
     a test file or has tests on either side (Rust's inline `mod tests`
     counts), test functions plus assertion calls and skip markers
@@ -921,8 +927,8 @@ oxplow-analytics change cards) only read them.
 
 Deleted / skipped tests and removed assertions are `v_change_function`
 (deleted `is_test` rows) plus `v_change_test_file`, read by the
-oxplow-review Tests Weakened lens. Missing co-change is
-`v_change_co_change`.
+oxplow-review Tests Weakened lens. Missing co-change is oxplow-analytics'
+`v_oxplow_analytics_change_co_change`.
 
 **Still target:** network enforcement off macOS; AI-role columns.
 (Extension-declared metrics and dimensions, fact and entity, are current:

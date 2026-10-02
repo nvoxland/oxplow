@@ -276,26 +276,18 @@ No IPC of its own — `zones` rides on `get_config`, and the config
 watcher hot-reloads file edits, so a write repaints an open
 changed-files tree without a restart.
 
-### Co-change (`crates/oxplow-app/src/co_change.rs`)
+### Co-change (oxplow-analytics, P7.B5)
 
-Aggregates the commit index (`git_commit_file`, every stream's head; see
-git-integration.md "Commit indexer") over the last 180 days, drops
-mega-commits (>50 files — mass renames / formatter sweeps drown the
-signal), and builds two maps:
-
-- `co_changers: file → Vec<(co_changer, count)>` filtered to pairs
-  with ≥ 3 co-occurrences, sorted descending.
-- `last_touched: file → seconds-since-epoch`.
-
-`analyze_surprise(history, commit_files, dormant_days) -> Vec<FileSurprise>`
-classifies each file as `Normal | UsualCoChangersAbsent { expected }
-| Dormant { last_touched_days }`. Dormancy fires before the
-co-changer check (cheaper, clearer signal); files never seen in the
-window are treated as dormant. `SurpriseReason` is specta-derived.
-
-The change analyzer caches `CoChangeHistory` until the commit index
-changes (its size or newest commit) — the API is pure once the history
-is built.
+No longer core. oxplow-analytics' `co_change_pair` model, materialized
+over the commit index (`v_commit_file`, every stream's head; see
+git-integration.md "Commit indexer"), holds each pair of files that
+shared at least 3 commits of 50 files or fewer (mass renames and
+formatter sweeps drown the signal) in the last 180 days; its
+`change_co_change` model flags a change's files that are dormant (no
+commit in 90 days; never touched counts as 90) — checked first — or whose
+top three co-changers are all absent from the change. Measured on this
+repo's history (2,351 commits, 19k file rows): the pairs compute in
+0.14 s ([performance.md](./performance.md)).
 
 ### Import deltas
 

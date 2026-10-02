@@ -60,7 +60,9 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-analytics", "lenses/tokens-by-day.yaml"),
             ext_file!("oxplow-analytics", "lenses/top-pages.yaml"),
             ext_file!("oxplow-analytics", "lenses/usage.yaml"),
+            ext_file!("oxplow-analytics", "models/change_co_change.sql"),
             ext_file!("oxplow-analytics", "models/change_interest.sql"),
+            ext_file!("oxplow-analytics", "models/co_change_pair.sql"),
         ],
     },
     BundledExtension {
@@ -1162,5 +1164,95 @@ mod tests {
             .query_sql("SELECT interest FROM v_change_file", vec![], None)
             .await;
         assert!(gone.is_err(), "v_change_file still has interest");
+    }
+
+    /// P7.B5: co-change surprises are oxplow-analytics' models over the
+    /// commit index — `co_change_pair` (materialized: files committed
+    /// together at least 3 times in 180 days, commits of 50 files or
+    /// fewer) and `change_co_change` (a change's files whose usual
+    /// partners are missing, or that were dormant 90 days or more) — and
+    /// core no longer computes them.
+    #[tokio::test]
+    async fn co_change_surprises_come_from_the_analytics_models() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        f.svc
+            .db
+            .transaction(|tx| {
+                let commit = |sha: &str, days_ago: i64, paths: &[&str]| -> rusqlite::Result<()> {
+                    tx.execute(
+                        "INSERT INTO git_commit (sha, author, email, committed_at, subject)
+                         VALUES (?1, 'a', 'a@x', strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?2), 's')",
+                        rusqlite::params![sha, format!("-{days_ago} days")],
+                    )?;
+                    for p in paths {
+                        tx.execute(
+                            "INSERT INTO git_commit_file (sha, path, status) VALUES (?1, ?2, 'modified')",
+                            rusqlite::params![sha, p],
+                        )?;
+                    }
+                    Ok(())
+                };
+                (|| {
+                    for (i, days) in [5, 10, 20].iter().enumerate() {
+                        commit(&format!("ab{i}"), *days, &["src/a.rs", "src/b.rs"])?;
+                        commit(&format!("ef{i}"), *days, &["src/e.rs", "src/f.rs"])?;
+                    }
+                    commit("old", 200, &["src/c.rs"])?;
+                    tx.execute_batch(
+                        "INSERT INTO change (id, stream_id, kind, target, status) VALUES (91, 1, 'working', '', 'done');
+                         INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test)
+                           VALUES (91, 'src/a.rs', 'modified', 1, 0, 'other', 0),
+                                  (91, 'src/c.rs', 'modified', 1, 0, 'other', 0),
+                                  (91, 'src/d.rs', 'added', 1, 0, 'other', 0),
+                                  (91, 'src/e.rs', 'modified', 1, 0, 'other', 0),
+                                  (91, 'src/f.rs', 'modified', 1, 0, 'other', 0);",
+                    )
+                })()
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        f.svc.extension_models.sync().await.unwrap();
+        f.svc.assets.sync_models().await.unwrap();
+        let read = || async {
+            f.svc
+                .sql
+                .query_sql(
+                    "SELECT path, reason, expected, dormant_days FROM v_oxplow_analytics_change_co_change
+                     WHERE change_id = 91 ORDER BY path",
+                    vec![],
+                    None,
+                )
+                .await
+                .map(|r| serde_json::to_value(&r.rows).unwrap())
+        };
+        // The pairs fill on the materialized model's first recompute.
+        let rows = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if let Ok(rows) = read().await {
+                    if rows.as_array().is_some_and(|r| r.len() == 3) {
+                        return rows;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("the co-change models filled");
+        assert_eq!(rows[0][0], "src/a.rs");
+        assert_eq!(rows[0][1], "usual-co-changers-absent");
+        assert_eq!(rows[0][2], "src/b.rs");
+        assert_eq!(rows[1][0], "src/c.rs");
+        assert_eq!(rows[1][1], "dormant");
+        assert!(rows[1][3].as_i64().unwrap() >= 199, "{rows}");
+        assert_eq!(rows[2][0], "src/d.rs", "never touched is dormant");
+        assert_eq!(rows[2][3], 90);
+
+        let gone = f
+            .svc
+            .sql
+            .query_sql("SELECT * FROM v_change_co_change", vec![], None)
+            .await;
+        assert!(gone.is_err(), "core still has v_change_co_change");
     }
 }

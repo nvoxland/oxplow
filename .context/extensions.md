@@ -1476,7 +1476,10 @@ What moves out of core, and what it becomes:
 core's rows is the extension's, as SQL: the "look here first" score is
 its model `change_interest` (`v_oxplow_analytics_change_interest`, over
 `ref('change_file')` and `ref('change_function')`), which the
-`change-look-here` lens reads. What needs two revisions' trees — files,
+`change-look-here` lens reads; co-change surprises are its models
+`co_change_pair` (`materialize: on_change` over the commit index) and
+`change_co_change`, which the `change-co-change` lens reads. What needs
+two revisions' trees — files,
 functions, imports, test signals, per-function churn, the scoped
 duplicate scan — stays in core's change analysis.
 

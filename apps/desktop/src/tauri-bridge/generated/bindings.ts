@@ -1543,7 +1543,10 @@ export type ChangeScopes = {
 	unstaged: BranchChangeEntry[],
 };
 
-// What to analyze.
+/**
+ *  Stored rows for the surprising files (normal ones are left out).
+ *  What to analyze.
+ */
 export type ChangeTarget = 
 // The stream's uncommitted work: HEAD → the working tree.
 { kind: "working"; streamId: string } | 

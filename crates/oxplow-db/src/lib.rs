@@ -65,8 +65,8 @@ pub use attribution_store::{
 };
 pub use capability_store::{CapabilityProvider, SqliteCapabilityStore};
 pub use change_store::{
-    ChangeCoChangeRow, ChangeDuplicateRow, ChangeFileRow, ChangeFunctionRow, ChangeImportRow,
-    ChangeResults, ChangeRow, ChangeTestFileRow, SqliteChangeStore,
+    ChangeDuplicateRow, ChangeFileRow, ChangeFunctionRow, ChangeImportRow, ChangeResults,
+    ChangeRow, ChangeTestFileRow, SqliteChangeStore,
 };
 pub use collector_store::{
     CollectorRun, EntityColumn, EntityTable, EntityWrite, SqliteCollectorStore, StoredType,
@@ -89,9 +89,7 @@ pub use fact_store::{
     Measure, MetricCapture, MetricSpec, NewCubeRow, NewDimension, NewFact, NewMeasure,
     NewMetricCapture, NewMetricSpec, SqliteFactStore,
 };
-pub use git_store::{
-    Changeset, GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore,
-};
+pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
 pub use observation_store::EffortObservation;
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};

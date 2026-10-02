@@ -30,7 +30,6 @@ pub mod capabilities;
 pub mod change_analysis;
 pub mod change_reactor;
 pub mod churn;
-pub mod co_change;
 pub mod code_analysis;
 pub mod code_intel;
 pub mod code_intel_conformance;

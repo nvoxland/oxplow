@@ -1531,7 +1531,10 @@ mod tests {
             .collect::<rusqlite::Result<_>>()
             .unwrap();
         assert_eq!(views.len(), 49);
-        for view in views {
+        // Retired since, on purpose: v_change_co_change moved into
+        // oxplow-analytics' models (P7.B5, V138).
+        const RETIRED: &[&str] = &["v_change_co_change"];
+        for view in views.into_iter().filter(|v| !RETIRED.contains(&v.as_str())) {
             let version: i64 = new
                 .query_row("SELECT version FROM model WHERE view = ?1", [&view], |r| {
                     r.get(0)

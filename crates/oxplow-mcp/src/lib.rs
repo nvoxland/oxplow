@@ -1389,9 +1389,10 @@ impl OxplowMcp {
                        analysis with query_sql: v_change_file (files, zones), \
                        v_oxplow_analytics_change_interest (look-here-first scores, when \
                        oxplow-analytics is on), v_change_function (added/deleted/modified functions, deltas, \
-                       churn), v_change_import (cross-zone imports), v_change_co_change (files whose \
-                       usual partners are missing), v_change_duplicate (copied blocks; arrives a \
-                       little later). Cached: commits and closed efforts are analyzed once."
+                       churn), v_change_import (cross-zone imports), \
+                       v_oxplow_analytics_change_co_change (files whose usual partners are missing, \
+                       or that were dormant; oxplow-analytics), v_change_duplicate (copied blocks; \
+                       arrives a little later). Cached: commits and closed efforts are analyzed once."
     )]
     async fn ensure_change(
         &self,
