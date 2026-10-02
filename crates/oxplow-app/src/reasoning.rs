@@ -47,7 +47,7 @@ pub fn format_missing_decisions_hint(files: i64, decisions: i64) -> Option<Strin
         format!(
             "This effort touched {files} files but recorded no decisions. If you resolved any \
              forks without asking (where something lives, which approach, what you left out), \
-             call record_decision for each now: the reviewer checks those first."
+             run `effort.record_decision` for each now: the reviewer checks those first."
         )
     })
 }
@@ -178,8 +178,11 @@ mod tests {
         let layer = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
         assert_eq!(effort_decisions_block(&layer, effort).await, None);
         f.svc
-            .reasoning_store
-            .record_decision(d("recorded"))
+            .db
+            .transaction({
+                let recorded = d("recorded");
+                move |tx| oxplow_db::record_decision_tx(tx, &recorded)
+            })
             .await
             .unwrap();
         let block = effort_decisions_block(&layer, effort).await.unwrap();

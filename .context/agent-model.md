@@ -1110,8 +1110,10 @@ intermediate `ready` step.
   destructive, and an agent never confirms one: cancel or archive instead),
   `list_recent_file_changes` (links and task comments are
   `run_command work_item.link` / `work_item.comment`),
-  `dispatch_task`, `file_epic_with_children`, `complete_task`,
-  `amend_effort`, `transition_tasks`
+  `dispatch_task`, `file_epic_with_children`, `complete_task` (the
+  `command.sequence [work_item.transition, effort.report]`, one audited
+  run — P8.A7), `transition_tasks`; correcting an effort afterwards is
+  `run_command effort.amend`
 - `complete_task` returns `{ task, file_review }`. The "changed"
   set is a **content diff between the effort's start and end
   snapshots** — `SqliteSnapshotStore::diff_snapshots(start, end)`,
@@ -1156,9 +1158,11 @@ intermediate `ready` step.
   truncated) so the agent isn't asked to triage a wall of paths
   from parallel efforts or formatters. The review names each row by its
   **canonical ids** — `[tsk42] title (effort eff313)` — because those are
-  what `update_task` / `amend_effort` parse; a bare `313` is rejected
-  (tsk341; pinned by the `stop_effort_review_*` goldens). `amend_effort(effort_id, add_files,
-  remove_files, claim_runs, disclaim_runs)` is the corrective tool —
+  what `update_task` / `effort.amend` parse; a bare `313` is rejected
+  (tsk341; pinned by the `stop_effort_review_*` goldens). `effort.amend
+  { effort, add_files, remove_files, claim_runs, disclaim_runs }` (External,
+  `commands/effort_report.rs`; an agent amends only its own thread's
+  efforts) is the corrective command —
   adds/removes `effort_file` rows AND, for every path in
   `remove_files`, records an acknowledgement row in
   `effort_acknowledged_path` so the Stop hook's recompute treats the
@@ -1176,7 +1180,7 @@ intermediate `ready` step.
   `generated/bindings.ts` hit it on every close that regenerated it. All
   three claim boundaries filter: `record_effort` (the boundary
   `touched_files`), `claim_open_effort_file` (the PostToolUse auto-claim,
-  which returns `Ok(false)`), and `amend_effort`'s `add_files`;
+  which returns `Ok(false)`), and `effort.amend`'s `add_files`;
   `complete_task` filters once up front so the review sees the same list
   it recorded. The reverse direction needs nothing — an excluded path
   can't appear in the diff, so it is never `changed_but_not_claimed`.
@@ -1204,7 +1208,7 @@ intermediate `ready` step.
   (exact even under concurrency); the concurrent case is left unattributed
   for the agent to claim. **`find_single_open_for_thread` is a Class-A
   auto-attribute optimization, never a drop-gate** — a producer never bails
-  for lack of a single effort; it records and defers attribution. `amend_effort`'s `claim_runs`/`disclaim_runs` are the run-kind
+  for lack of a single effort; it records and defers attribution. `effort.amend`'s `claim_runs`/`disclaim_runs` are the run-kind
   counterpart of `add_files`/`remove_files`: `claim_runs` writes a
   `claimed` ledger row, `disclaim_runs` an `acknowledged` one. A
   `(effort, kind, ref)` is in exactly one of {claimed, unattributed,
@@ -1247,7 +1251,7 @@ intermediate `ready` step.
   `take_pending_effort_reviews`, recomputes the file diff fresh against
   the current `effort_file` rows (minus `effort_acknowledged_path`)
   AND re-reads the ledger's `unattributed` runs, and fires the
-  directive only if something still remains. So a successful `amend_effort`
+  directive only if something still remains. So a successful `effort.amend`
   (files or runs) reconciles in a single round-trip — the Stop hook won't
   re-flag the same disclaimed path/run on the next recompute. Drained =
   one-shot regardless.
@@ -1459,7 +1463,7 @@ PostToolUse path. `get_open_effort({ thread_id })` answers "what is this
 thread's currently-open effort?" — returns `{ open, effortId, taskId,
 startedAt, hasStartSnapshot }` (`open:false` with null ids when none). It's
 the introspection counterpart to the implicit-open-effort tools above: find
-the `effortId` for `amend_effort`, confirm an effort is open before ingesting,
+the `effortId` for `effort.amend`, confirm an effort is open before ingesting,
 or debug a `no_open_effort` / `no_baseline` (`hasStartSnapshot:false`) outcome
 without inferring it from task state or the UI.
 Report parsing is **pluggable**: those tools resolve a report's `format`
@@ -1744,7 +1748,7 @@ The banner reaches the agent via two complementary injection points:
 
 ## Decisions fed back to the agent (tsk298)
 
-Decisions the agent records (`record_decision` → `v_decision`) are fed
+Decisions the agent records (`effort.record_decision` → `v_decision`) are fed
 back to it in two places. Only `provenance = 'recorded'` rows: decisions
 oxplow *inferred* after the fact ([ai-providers.md](./ai-providers.md))
 are guesses for the reviewer, never presented to the agent as its own.

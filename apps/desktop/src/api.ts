@@ -1940,7 +1940,7 @@ export async function getEffort(effortId: string): Promise<OverlappingEffort | n
 }
 
 /** Per-effort touched_files list — the canonical authorship list
- *  (LLM-declared via `complete_task` + any subsequent `amend_effort`
+ *  (LLM-declared via `complete_task` + any subsequent `effort.amend`
  *  corrections).  */
 export async function listEffortFiles(
   effortId: string,

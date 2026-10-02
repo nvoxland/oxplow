@@ -144,7 +144,7 @@ pub struct TaskNote {
 /// owning task. Distinct from `touched_files` (which only covers
 /// the file kind) — impacts cover wiki pages, tasks, commits,
 /// findings, directories, and files alike.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type, schemars::JsonSchema)]
 pub struct TaskImpact {
     /// Page kind being impacted — `wiki | task | file | directory
     /// | git_commit | finding`. Stored snake-case on the wire,

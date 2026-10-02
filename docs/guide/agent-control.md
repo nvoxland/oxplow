@@ -49,7 +49,7 @@ priority order:
    diffs the agent's declared `touched_files` against the
    snapshot bracket the effort actually ran against. If the
    sets disagree, a one-shot directive fires asking the agent
-   to either `amend_effort` to reconcile or silently agree (the
+   to either `effort.amend` to reconcile or silently agree (the
    prompt won't repeat after agreement).
 6. **Otherwise.** Allow stop.
 

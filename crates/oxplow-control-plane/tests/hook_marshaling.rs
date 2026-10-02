@@ -504,16 +504,21 @@ async fn prompts_carry_the_efforts_decisions_once_per_session() {
         .start(&work_item_ref(task_id), &tid, None)
         .await
         .unwrap();
-    svc.reasoning_store
-        .record_decision(oxplow_db::NewDecision {
-            thread_id: tid.value(),
-            task_id: Some(task_id.value()),
-            effort_id: Some(effort.id.value()),
-            question: "Storage?".into(),
-            choice: "main DB".into(),
-            alternatives: vec!["attached DB".into()],
-            confidence: "high".into(),
-            why: "cache".into(),
+    svc.db
+        .transaction(move |tx| {
+            oxplow_db::record_decision_tx(
+                tx,
+                &oxplow_db::NewDecision {
+                    thread_id: tid.value(),
+                    task_id: Some(task_id.value()),
+                    effort_id: Some(effort.id.value()),
+                    question: "Storage?".into(),
+                    choice: "main DB".into(),
+                    alternatives: vec!["attached DB".into()],
+                    confidence: "high".into(),
+                    why: "cache".into(),
+                },
+            )
         })
         .await
         .unwrap();

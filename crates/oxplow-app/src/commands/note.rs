@@ -15,14 +15,14 @@ use oxplow_domain::refs::build::thread_ref;
 use oxplow_domain::vcs::Vcs;
 use oxplow_domain::{
     Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
-    NoteId, ThreadId,
+    NoteId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::comment::author_of;
-use super::thread::agent_scope;
+use super::thread::{acting_thread, agent_scope};
 use super::{Command, Handler, HandlerOutput, TxCtx};
 use crate::link_check::{check_links_in, LinkWorld};
 
@@ -69,36 +69,6 @@ fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError
         field: None,
         message: e.to_string(),
     })
-}
-
-/// The thread a note goes on: an agent's own (naming another is refused),
-/// else the one named.
-fn own_thread(ctx: &TxCtx<'_>, named: Option<&str>) -> Result<ThreadId, CommandError> {
-    let named = named
-        .map(|value| {
-            value
-                .strip_prefix("thread:")
-                .and_then(|id| id.parse().ok())
-                .ok_or_else(|| {
-                    invalid(
-                        "/thread",
-                        format!("`{value}` isn't a thread ref (thread:<id>)"),
-                    )
-                })
-        })
-        .transpose()?;
-    match agent_scope(ctx)? {
-        Some((own, _)) => match named {
-            Some(t) if t != own => Err(CommandError::Denied {
-                reason: format!(
-                    "an agent takes notes in its own thread (`{}`)",
-                    thread_ref(own)
-                ),
-            }),
-            _ => Ok(own),
-        },
-        None => named.ok_or_else(|| invalid("/thread", "name the thread".into())),
-    }
 }
 
 /// The note and the links in its body that don't resolve.
@@ -148,7 +118,7 @@ pub fn add_command(deps: NoteDeps) -> Command {
         ),
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: AddInput = parse(input)?;
-            let thread = own_thread(ctx, input.thread.as_deref())?;
+            let thread = acting_thread(ctx, input.thread.as_deref())?;
             let (note, event) =
                 add_thread_note_tx(ctx.conn, thread, &input.body, author_of(ctx.actor))?;
             let note = serde_json::to_value(note).expect("a note serializes");

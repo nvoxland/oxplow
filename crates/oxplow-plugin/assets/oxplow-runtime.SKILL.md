@@ -172,7 +172,7 @@ task tools above remain the usual way to file and close your own work.
 The human reviewing your work checks your **decisions** and **claims**
 first, so record them as data rather than burying them in a summary.
 
-**`record_decision`**
+**`run_command effort.record_decision { question, choice, alternatives?, confidence?, why? }`**
 
 - Use it when you resolve a real fork without asking: where something
   lives, which approach, what you left out, how you read an ambiguous
@@ -181,7 +181,7 @@ first, so record them as data rather than burying them in a summary.
   you didn't take and why.
 - Skip trivia (naming a local variable).
 
-**`record_claim`**
+**`run_command effort.record_claim { statement, kind, evidence_ref? }`**
 
 - Use it for statements like "tests pass", "no behavior change" or
   "handles empty input", before you report the work done.
@@ -189,8 +189,9 @@ first, so record them as data rather than burying them in a summary.
 - Unbacked claims are shown to the human as **unverified**. Don't claim
   what you didn't check.
 
-Both attach to your open effort automatically. Pass `task_id` if you're
-a sub-agent working a specific task. They land in `v_decision` and
+Both go on your own thread and attach to your open effort automatically.
+Pass `work_item` (`work_item:oxplow:tsk42`) if you're a sub-agent working
+a specific task. They land in `v_decision` and
 `v_claim`, which review lenses read.
 
 

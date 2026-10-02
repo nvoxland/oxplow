@@ -73,24 +73,39 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
 /// [`check_links_in`] over the app's services, for the tools that report
 /// warnings rather than refuse (task and note bodies).
 pub async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {
-    let project_dir = services.layout.project_dir.clone();
-    let graph = services.vcs.revision_graph(&project_dir);
+    check_links_at(
+        &services.db,
+        &services.layout.project_dir,
+        &*services.vcs,
+        body,
+    )
+    .await
+}
+
+/// [`check_links_in`] against a project's database and VCS, for a command
+/// run outside the bus's transaction (`effort.report`).
+pub async fn check_links_at(
+    db: &oxplow_db::Database,
+    project_dir: &std::path::Path,
+    vcs: &dyn oxplow_domain::vcs::Vcs,
+    body: &str,
+) -> Vec<LinkWarning> {
+    let project_dir = project_dir.to_path_buf();
+    let graph = vcs.revision_graph(&project_dir);
     let body = body.to_string();
-    services
-        .db
-        .read(move |conn| {
-            Ok(check_links_in(
-                &LinkWorld {
-                    conn,
-                    project_dir: &project_dir,
-                    graph: &*graph,
-                    this_page: None,
-                },
-                &body,
-            ))
-        })
-        .await
-        .unwrap_or_default()
+    db.read(move |conn| {
+        Ok(check_links_in(
+            &LinkWorld {
+                conn,
+                project_dir: &project_dir,
+                graph: &*graph,
+                this_page: None,
+            },
+            &body,
+        ))
+    })
+    .await
+    .unwrap_or_default()
 }
 
 fn exists(conn: &rusqlite::Connection, sql: &str, param: &dyn rusqlite::ToSql) -> bool {

@@ -47,38 +47,6 @@ impl SqliteReasoningStore {
         Self { db }
     }
 
-    pub async fn record_decision(&self, d: NewDecision) -> Result<i64, DomainError> {
-        if !["low", "medium", "high"].contains(&d.confidence.as_str()) {
-            return Err(DomainError::Invalid(format!(
-                "confidence `{}` must be low, medium or high",
-                d.confidence
-            )));
-        }
-        if d.question.trim().is_empty() || d.choice.trim().is_empty() {
-            return Err(DomainError::Invalid(
-                "a decision needs a question and a choice".into(),
-            ));
-        }
-        let alternatives = serde_json::to_string(&d.alternatives)
-            .map_err(|e| DomainError::Storage(format!("alternatives: {e}")))?;
-        let now = now_string();
-        self.db
-            .call(move |c| {
-                c.execute(
-                    // Made in the thread's open turn, when one is open.
-                    "INSERT INTO decision (thread_id, task_id, effort_id, question, choice, alternatives_json, confidence, why, created_at, turn_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, (SELECT id FROM agent_turn
-                        WHERE thread_id = ?1 AND ended_at IS NULL ORDER BY started_at DESC, id DESC LIMIT 1))",
-                    rusqlite::params![
-                        d.thread_id, d.task_id, d.effort_id, d.question, d.choice,
-                        alternatives, d.confidence, d.why, now
-                    ],
-                )?;
-                Ok(c.last_insert_rowid())
-            })
-            .await
-    }
-
     /// Replace `effort_id`'s inferred decisions (provenance `inferred`:
     /// proposed by a model from the effort's activity, not recorded by the
     /// agent) with `decisions`. Recorded decisions are untouched. Their
@@ -130,30 +98,74 @@ impl SqliteReasoningStore {
             })
             .await
     }
+}
 
-    pub async fn record_claim(&self, c: NewClaim) -> Result<i64, DomainError> {
-        if !["tests_pass", "no_behavior_change", "handles_case", "other"].contains(&c.kind.as_str())
-        {
-            return Err(DomainError::Invalid(format!(
-                "claim kind `{}` must be tests_pass, no_behavior_change, handles_case or other",
-                c.kind
-            )));
-        }
-        if c.statement.trim().is_empty() {
-            return Err(DomainError::Invalid("a claim needs a statement".into()));
-        }
-        let now = now_string();
+/// Record a decision the agent made, in the caller's transaction (the
+/// `effort.record_decision` command). Made in the thread's open turn, when
+/// one is open.
+pub fn record_decision_tx(
+    conn: &rusqlite::Connection,
+    d: &NewDecision,
+) -> Result<i64, DomainError> {
+    if !["low", "medium", "high"].contains(&d.confidence.as_str()) {
+        return Err(DomainError::Invalid(format!(
+            "confidence `{}` must be low, medium or high",
+            d.confidence
+        )));
+    }
+    if d.question.trim().is_empty() || d.choice.trim().is_empty() {
+        return Err(DomainError::Invalid(
+            "a decision needs a question and a choice".into(),
+        ));
+    }
+    let alternatives = serde_json::to_string(&d.alternatives)
+        .map_err(|e| DomainError::Storage(format!("alternatives: {e}")))?;
+    conn.execute(
+        "INSERT INTO decision (thread_id, task_id, effort_id, question, choice, alternatives_json, confidence, why, created_at, turn_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, (SELECT id FROM agent_turn
+            WHERE thread_id = ?1 AND ended_at IS NULL ORDER BY started_at DESC, id DESC LIMIT 1))",
+        rusqlite::params![
+            d.thread_id, d.task_id, d.effort_id, d.question, d.choice,
+            alternatives, d.confidence, d.why, now_string()
+        ],
+    )
+    .map_err(map_sql_err)?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Record a claim about the agent's work, in the caller's transaction (the
+/// `effort.record_claim` command).
+pub fn record_claim_tx(conn: &rusqlite::Connection, c: &NewClaim) -> Result<i64, DomainError> {
+    if !["tests_pass", "no_behavior_change", "handles_case", "other"].contains(&c.kind.as_str()) {
+        return Err(DomainError::Invalid(format!(
+            "claim kind `{}` must be tests_pass, no_behavior_change, handles_case or other",
+            c.kind
+        )));
+    }
+    if c.statement.trim().is_empty() {
+        return Err(DomainError::Invalid("a claim needs a statement".into()));
+    }
+    conn.execute(
+        "INSERT INTO claim (thread_id, task_id, effort_id, statement, kind, evidence_ref, created_at, turn_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT id FROM agent_turn
+            WHERE thread_id = ?1 AND ended_at IS NULL ORDER BY started_at DESC, id DESC LIMIT 1))",
+        rusqlite::params![c.thread_id, c.task_id, c.effort_id, c.statement, c.kind, c.evidence_ref, now_string()],
+    )
+    .map_err(map_sql_err)?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// The cores, run on the store's own database — for this module's tests.
+#[cfg(test)]
+impl SqliteReasoningStore {
+    async fn record_decision(&self, d: NewDecision) -> Result<i64, DomainError> {
         self.db
-            .call(move |conn| {
-                conn.execute(
-                    "INSERT INTO claim (thread_id, task_id, effort_id, statement, kind, evidence_ref, created_at, turn_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT id FROM agent_turn
-                        WHERE thread_id = ?1 AND ended_at IS NULL ORDER BY started_at DESC, id DESC LIMIT 1))",
-                    rusqlite::params![c.thread_id, c.task_id, c.effort_id, c.statement, c.kind, c.evidence_ref, now],
-                )?;
-                Ok(conn.last_insert_rowid())
-            })
+            .transaction(move |tx| record_decision_tx(tx, &d))
             .await
+    }
+
+    async fn record_claim(&self, c: NewClaim) -> Result<i64, DomainError> {
+        self.db.transaction(move |tx| record_claim_tx(tx, &c)).await
     }
 }
 

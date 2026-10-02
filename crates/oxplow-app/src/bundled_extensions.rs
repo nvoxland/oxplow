@@ -675,29 +675,39 @@ mod tests {
     async fn review_starters_read_the_viewers_stream() {
         let f = crate::test_fixtures::services_with_effort().await;
         let thread = f.thread.value();
-        let store = &f.svc.reasoning_store;
+        let store = &f.svc.db;
         store
-            .record_decision(oxplow_db::NewDecision {
-                thread_id: thread,
-                task_id: Some(f.task.value()),
-                effort_id: Some(f.effort.value()),
-                question: "Where does export live?".into(),
-                choice: "src/export".into(),
-                alternatives: vec![],
-                confidence: "high".into(),
-                why: String::new(),
+            .transaction(move |tx| {
+                oxplow_db::record_decision_tx(
+                    tx,
+                    &oxplow_db::NewDecision {
+                        thread_id: thread,
+                        task_id: Some(f.task.value()),
+                        effort_id: Some(f.effort.value()),
+                        question: "Where does export live?".into(),
+                        choice: "src/export".into(),
+                        alternatives: vec![],
+                        confidence: "high".into(),
+                        why: String::new(),
+                    },
+                )
             })
             .await
             .unwrap();
         for (statement, evidence) in [("tests pass", None), ("handles empty", Some("test:empty"))] {
             store
-                .record_claim(oxplow_db::NewClaim {
-                    thread_id: thread,
-                    task_id: Some(f.task.value()),
-                    effort_id: Some(f.effort.value()),
-                    statement: statement.into(),
-                    kind: "tests_pass".into(),
-                    evidence_ref: evidence.map(str::to_string),
+                .transaction(move |tx| {
+                    oxplow_db::record_claim_tx(
+                        tx,
+                        &oxplow_db::NewClaim {
+                            thread_id: thread,
+                            task_id: Some(f.task.value()),
+                            effort_id: Some(f.effort.value()),
+                            statement: statement.into(),
+                            kind: "tests_pass".into(),
+                            evidence_ref: evidence.map(str::to_string),
+                        },
+                    )
                 })
                 .await
                 .unwrap();
@@ -808,14 +818,19 @@ mod tests {
                 .unwrap();
         }
         f.svc
-            .reasoning_store
-            .record_claim(oxplow_db::NewClaim {
-                thread_id: f.thread.value(),
-                task_id: Some(f.task.value()),
-                effort_id: Some(f.effort.value()),
-                statement: "no behavior change".into(),
-                kind: "no_behavior_change".into(),
-                evidence_ref: None,
+            .db
+            .transaction(move |tx| {
+                oxplow_db::record_claim_tx(
+                    tx,
+                    &oxplow_db::NewClaim {
+                        thread_id: f.thread.value(),
+                        task_id: Some(f.task.value()),
+                        effort_id: Some(f.effort.value()),
+                        statement: "no behavior change".into(),
+                        kind: "no_behavior_change".into(),
+                        evidence_ref: None,
+                    },
+                )
             })
             .await
             .unwrap();

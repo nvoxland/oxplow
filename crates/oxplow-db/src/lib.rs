@@ -96,7 +96,9 @@ pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};
 pub use plugin_health_store::{PluginHealthRow, PluginKey, SqlitePluginHealthStore};
 pub use proposal_store::{NewProposal, Proposal, ProposalDecision, SqliteProposalStore};
 pub use provider_collector_store::{CollectorState, SqliteProviderCollectorStore};
-pub use reasoning_store::{NewClaim, NewDecision, SqliteReasoningStore};
+pub use reasoning_store::{
+    record_claim_tx, record_decision_tx, NewClaim, NewDecision, SqliteReasoningStore,
+};
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use semantic_layer::{
     ModelFreshness, Reads, SemanticLayer, SqlCell, SqlParams, SqlQuery, SqlQueryResult, TempTable,

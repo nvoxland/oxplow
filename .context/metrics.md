@@ -1363,7 +1363,7 @@ envelope `{"kind": "test-detail"|"coverage-detail"|"analysis-detail", "payload":
 named a `task_id` (exact) or exactly one effort is open — stamps
 `capture.effort_id`, and writes a `claimed` ledger row for **`run:<capture_id>`**;
 the concurrent-unnamed case is left for the agent to claim at close (`claim_runs`
-on `complete_task`/`update_task`/`amend_effort` — the ids in those refs are
+on `complete_task`/`update_task`/`effort.amend` — the ids in those refs are
 capture ids now). `RunKind` OBSERVES via `captures_in_window_by_trigger`; the
 EFFORT REVIEW's `describe_run` reads the claimed capture + its envelope. The
 `effort_observations_from_metrics` read joins the ledger (claimed capture ids →

@@ -62,6 +62,38 @@ pub async fn set_status(
     task_of(outcome.result, work_item::NAME)
 }
 
+/// Close `id` as `actor` and report on its effort, as one run: the
+/// `command.sequence [work_item.transition → done, effort.report]` with one
+/// audit row. `report` is `effort.report`'s input but its `work_item`.
+/// Returns the task and the report's result.
+pub async fn complete(
+    svc: &Services,
+    actor: &Actor,
+    id: TaskId,
+    mut report: serde_json::Value,
+) -> Result<(Task, serde_json::Value), CommandError> {
+    let (state, native_state) = pair_for(svc, id, TaskStatus::Done).await?;
+    let item = work_item_ref(id);
+    report["work_item"] = item.clone().into();
+    let outcome = svc
+        .commands
+        .run(
+            actor,
+            crate::commands::compose::SEQUENCE,
+            json!({ "calls": [
+                { "name": work_item::NAME,
+                  "input": { "ref": item, "to": state, "native_state": native_state } },
+                { "name": crate::commands::effort_report::REPORT, "input": report },
+            ] }),
+            false,
+        )
+        .await?;
+    svc.tasks.settle_lifecycle().await;
+    let children = &outcome.result["children"];
+    let task = task_of(children[0]["result"].clone(), work_item::NAME)?;
+    Ok((task, children[1]["result"].clone()))
+}
+
 /// File a task as `actor` (`work_item.create` on oxplow): audited, and
 /// filed straight into `in_progress` it opens the effort in the same run
 /// — then settles the pump so the effort's start snapshot is pinned.

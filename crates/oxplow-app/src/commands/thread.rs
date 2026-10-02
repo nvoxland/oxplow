@@ -154,6 +154,40 @@ pub(super) fn agent_scope(ctx: &TxCtx<'_>) -> Result<Option<(ThreadId, StreamId)
     }
 }
 
+/// The thread an agent's record goes on — a note, a decision, a claim: an
+/// agent's own (naming another is refused), else the one a person names
+/// (`thread:thr3`).
+pub(super) fn acting_thread(
+    ctx: &TxCtx<'_>,
+    named: Option<&str>,
+) -> Result<ThreadId, CommandError> {
+    let named = named
+        .map(|value| {
+            value
+                .strip_prefix("thread:")
+                .and_then(|id| id.parse().ok())
+                .ok_or_else(|| {
+                    invalid(
+                        "/thread",
+                        format!("`{value}` isn't a thread ref (thread:<id>)"),
+                    )
+                })
+        })
+        .transpose()?;
+    match agent_scope(ctx)? {
+        Some((own, _)) => match named {
+            Some(t) if t != own => Err(CommandError::Denied {
+                reason: format!(
+                    "an agent writes only in its own thread (`{}`)",
+                    thread_ref(own)
+                ),
+            }),
+            _ => Ok(own),
+        },
+        None => named.ok_or_else(|| invalid("/thread", "name the thread".into())),
+    }
+}
+
 /// An agent acts only on its own stream.
 fn on_own_stream(ctx: &TxCtx<'_>, stream: StreamId) -> Result<(), CommandError> {
     match agent_scope(ctx)? {

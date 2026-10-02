@@ -612,7 +612,7 @@ fn build_effort_file_review_reason(reviews: &[PendingEffortReview]) -> String {
     );
     for r in reviews {
         // Canonical ids (`tsk42`, `eff313`): what `update_task` /
-        // `amend_effort` parse, so the agent can paste them back (tsk341).
+        // `effort.amend` parse, so the agent can paste them back (tsk341).
         if r.work_item.is_empty() {
             out.push_str(&format!("  • {} (effort {})\n", r.task_title, r.effort_id));
         } else {
@@ -656,9 +656,9 @@ fn build_effort_file_review_reason(reviews: &[PendingEffortReview]) -> String {
         }
     }
     out.push_str(
-        "\nIf any are wrong, call `mcp__oxplow__amend_effort(effort_id, add_files, \
-         remove_files, claim_runs, disclaim_runs)` to correct — `claim_runs` for runs \
-         that were yours, `disclaim_runs` for ones that weren't. If your original \
+        "\nIf any are wrong, run `effort.amend { effort, add_files, remove_files, \
+         claim_runs, disclaim_runs }` (`mcp__oxplow__run_command`) to correct — \
+         `claim_runs` for runs that were yours, `disclaim_runs` for ones that weren't. If your original \
          declaration was right (you reverted an edit, or another actor/effort produced \
          those changes/runs), no amend is needed — silent agreement is fine and the \
          prompt won't repeat.",

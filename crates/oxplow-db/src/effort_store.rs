@@ -519,20 +519,20 @@ pub trait EffortStore: Send + Sync {
         id: &EffortId,
     ) -> Result<EffortChangedPaths, DomainError>;
     /// Remove specific `effort_file` rows. Companion to
-    /// `record_file`. Used by the `amend_effort` MCP tool when the
+    /// `record_file`. Used by the `effort.amend` command when the
     /// agent disclaims a path that the auto-diff thought was theirs.
     async fn remove_file(&self, id: &EffortId, path: &str) -> Result<(), DomainError>;
     /// Record that the agent explicitly disclaimed `path` for this
     /// effort. Survives Stop-hook recomputes so the same
     /// `changed_but_not_claimed` discrepancy doesn't re-fire the
-    /// directive after a successful `amend_effort`. Idempotent.
+    /// directive after a successful `effort.amend`. Idempotent.
     async fn acknowledge_unclaimed_path(
         &self,
         id: &EffortId,
         path: &str,
     ) -> Result<(), DomainError>;
     /// Drop a prior acknowledgement. Called when the agent re-claims
-    /// a path via `amend_effort(add_files=…)` after having previously
+    /// a path via `effort.amend { add_files }` after having previously
     /// disclaimed it.
     async fn forget_acknowledged_path(&self, id: &EffortId, path: &str) -> Result<(), DomainError>;
     /// All paths the agent has explicitly acknowledged as

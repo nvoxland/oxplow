@@ -13,7 +13,7 @@ and agents query.
 > - **Current (tsk289):** extension `exec` sources that bring external
 >   entities in (see "User and extension sources").
 > - **Current:** decisions and claims (`v_decision`, `v_claim`, MCP
->   `record_decision` / `record_claim`), the agent-activity views, stored
+>   `effort.record_decision` / `effort.record_claim` commands), the agent-activity views, stored
 >   change analysis (`v_change*`), and extension-declared measures,
 >   metrics and fact collectors (tsk311, see extensions.md).
 > - **Current (tsk277):** git, LSP-diagnostic and test-run views
@@ -438,7 +438,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_event_content` | large event bodies (tool input/output, prompts) by content hash, without the bytes (V102) |
 | `v_event_dead_letter` | events a consumer failed on, parked with the error; `pending` ones need `retry_dead_letter` / `discard_dead_letter` (V94) |
 | `v_event_checkpoint` | how far each event consumer has read (V94) |
-| `v_decision` | forks the agent resolved (question, choice, alternatives, confidence, why). `provenance`: `recorded` via MCP `record_decision` (V76), or `inferred` when the effort closed (V79) — a recorded `extract` computation on the `main` role (`AiCompute`, so an unchanged effort doesn't call again) — and a reviewer's verdict on an inferred one: `confirmed` or `dismissed` (V132, `effort.confirm_decision` / `effort.dismiss_decision`; a re-inference replaces only the still-`inferred` ones) |
+| `v_decision` | forks the agent resolved (question, choice, alternatives, confidence, why). `provenance`: `recorded` via the `effort.record_decision` command (V76; P8.A7), or `inferred` when the effort closed (V79) — a recorded `extract` computation on the `main` role (`AiCompute`, so an unchanged effort doesn't call again) — and a reviewer's verdict on an inferred one: `confirmed` or `dismissed` (V132, `effort.confirm_decision` / `effort.dismiss_decision`; a re-inference replaces only the still-`inferred` ones) |
 | `v_claim` | agent claims ("tests pass") with `verified` (cited evidence — `reviewer` when a person verified it with `effort.verify_claim` — or a `tests_pass` claim whose effort's **latest** `v_test_run` — its own or one claimed through attribution — has `failed = 0 AND total > 0`) (V76; latest-run rule V91, tsk366) |
 | `v_tool_call` | every agent tool call: the `tool_call.project` pump consumer's projection of `agent.tool.finished` (one row per event; the ingest parses the payload with `oxplow-app/src/tool_calls.rs`; paths worktree-relative; Bash `ok` is NULL when Claude reports no exit code) (V77; `turn_id`, `event_id` since V102) |
 | `v_context_read` | `Read`s of `.context/*.md` (V77) |

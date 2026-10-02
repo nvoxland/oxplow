@@ -103,7 +103,7 @@ mod tests {
             .tasks
             .record_effort(
                 &f.svc.effort_store,
-                never_opened,
+                &oxplow_domain::refs::build::work_item_ref(never_opened),
                 &f.thread,
                 &[],
                 Some("did it without opening".into()),

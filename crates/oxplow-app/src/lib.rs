@@ -519,7 +519,7 @@ pub struct Services {
     /// disagree on what a branch sees.
     pub metric_visibility: Arc<metric_visibility::VisibilityResolver>,
     /// Kind-agnostic attribution ledger (tsk262/263) — run claim/acknowledge
-    /// state; the agent claims/disclaims runs via `amend_effort`.
+    /// state; the agent claims/disclaims runs via `effort.amend`.
     pub attribution_store: Arc<oxplow_db::SqliteAttributionStore>,
     /// Runs config-declared `metrics:` gauges into the substrate (tsk213, P3):
     /// seeds definitions, runs on-snapshot/on-effort-complete/manual triggers.
@@ -1080,6 +1080,20 @@ impl Services {
         .chain(commands::thread::commands(config_arc.clone(), acp.clone()))
         .chain(commands::dashboard::commands(db.clone(), sql.clone()))
         .chain(commands::comment::commands())
+        .chain(commands::reasoning::commands())
+        .chain(commands::effort_report::commands(
+            commands::effort_report::EffortDeps {
+                tasks: tasks.clone(),
+                efforts: effort_store.clone(),
+                snapshots: snapshot_store.clone(),
+                attribution: attribution_store.clone(),
+                runtime: thread_runtime.clone(),
+                sql: sql.clone(),
+                db: db.clone(),
+                project_dir: layout.project_dir.clone(),
+                vcs: vcs.clone(),
+            },
+        ))
         .chain(commands::note::commands(commands::note::NoteDeps {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),
@@ -1547,6 +1561,10 @@ mod tests {
                 // A tile's SQL is checked by the semantic engine first (P8.A5).
                 "dashboard.add_item",
                 "dashboard.update_item",
+                // The worktree and the snapshot diff a report is checked
+                // against (P8.A7).
+                "effort.amend",
+                "effort.report",
                 "git.cherry_pick",
                 "git.ignore",
                 "git.rebase",

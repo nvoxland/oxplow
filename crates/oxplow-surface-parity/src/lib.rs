@@ -192,8 +192,6 @@ pub const MANIFEST: &[Capability] = &[
     // Turning extensions on/off is the person's call.
     ui("set_extension_enabled"),
     both("list_collectors"),
-    agent("record_decision"),
-    agent("record_claim"),
     // The `collector.sync` command: the UI runs it through `run_command`,
     // an agent through this tool (as itself, so it never approves).
     agent("run_collector"),
@@ -228,7 +226,6 @@ pub const MANIFEST: &[Capability] = &[
     // ---- agent-only (orchestration / agent affordances) ----
     agent("read_task_options"),
     agent("complete_task"),
-    agent("amend_effort"),
     agent("transition_tasks"),
     agent("dispatch_task"),
     agent("get_thread_context"),

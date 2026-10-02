@@ -21,9 +21,7 @@ use oxplow_app::ref_resolver::{self, RefSummary};
 use oxplow_app::{CreateTaskInput, Services, UpdateTaskChanges};
 use oxplow_domain::comment::CommentThread;
 use oxplow_domain::stores::{CommentStore, TaskNoteStore, TaskStore, ThreadStore};
-use oxplow_domain::{
-    CommentStatus, EffortId, StreamId, Task, TaskId, TaskPriority, TaskStatus, ThreadId,
-};
+use oxplow_domain::{CommentStatus, StreamId, Task, TaskId, TaskPriority, TaskStatus, ThreadId};
 
 mod lenient_params;
 // Drop-in for rmcp's `Parameters` that tolerates camelCase/kebab aliases
@@ -414,29 +412,6 @@ pub struct CompleteTaskParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AmendEffortParams {
-    /// Effort id (the `id` returned on `effort` rows). Find it
-    /// via `get_task` → `efforts[].id` or by inspecting the
-    /// reconciliation payload returned from `complete_task`.
-    pub effort_id: String,
-    /// Repo-relative paths to ADD to the effort's touched_files
-    /// list. Use these to claim files the auto-diff missed.
-    pub add_files: Option<Vec<String>>,
-    /// Repo-relative paths to REMOVE from the effort's touched_files
-    /// list. Use these to disclaim files the auto-diff thought were
-    /// yours but actually came from another actor (formatter, parallel
-    /// effort, the user, etc.).
-    pub remove_files: Option<Vec<String>>,
-    /// Run refs (`run:<id>`, as shown in the EFFORT REVIEW) to CLAIM for this
-    /// effort — use when an observed test run that wasn't auto-attributed (the
-    /// concurrent-effort case) was in fact yours.
-    pub claim_runs: Option<Vec<String>>,
-    /// Run refs to DISCLAIM (acknowledge as not yours) so they stop being
-    /// flagged — another effort's, the user's, or CI's.
-    pub disclaim_runs: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct TransitiontasksParams {
     pub ids: Vec<String>,
     pub status: String,
@@ -718,36 +693,6 @@ pub struct RunLensActionParams {
     /// For a row action (`row: true` in `get_lens` → `actions`): the row
     /// it runs on, column → value, as `run_lens` returned it.
     pub row: Option<std::collections::BTreeMap<String, serde_json::Value>>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RecordDecisionParams {
-    pub thread_id: String,
-    /// Task it belongs to (`tsk42`); omit to use the thread's open effort.
-    pub task_id: Option<String>,
-    /// The fork: what had to be decided.
-    pub question: String,
-    /// What you chose.
-    pub choice: String,
-    /// The options you didn't take.
-    pub alternatives: Option<Vec<String>>,
-    /// `low`, `medium` (default) or `high`.
-    pub confidence: Option<String>,
-    /// Why, in a sentence or two.
-    pub why: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RecordClaimParams {
-    pub thread_id: String,
-    /// Task it belongs to (`tsk42`); omit to use the thread's open effort.
-    pub task_id: Option<String>,
-    /// The claim in words, e.g. "all oxplow-db tests pass".
-    pub statement: String,
-    /// `tests_pass`, `no_behavior_change`, `handles_case` or `other`.
-    pub kind: String,
-    /// What backs it: `run:<id>`, a test name, a file. Omit if nothing does.
-    pub evidence_ref: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1330,77 +1275,6 @@ impl OxplowMcp {
         Ok(CallToolResult::success(vec![ContentBlock::text(
             summary.value,
         )]))
-    }
-
-    #[tool(
-        description = "Record a DECISION you made while working: a fork where you picked one \
-                       approach over others without asking (where to put something, which \
-                       library, what to leave out, how to interpret an ambiguous ask). Humans \
-                       review these first, so record the non-obvious ones as you make them — \
-                       not trivia. Attaches to the open effort (or `task_id`'s)."
-    )]
-    async fn record_decision(
-        &self,
-        params: Parameters<RecordDecisionParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let (thread, task, effort) = resolve_effort(
-            &self.services,
-            "record_decision",
-            &p.thread_id,
-            p.task_id.as_deref(),
-        )
-        .await?;
-        let id = self
-            .services
-            .reasoning_store
-            .record_decision(oxplow_db::NewDecision {
-                thread_id: thread,
-                task_id: task,
-                effort_id: effort,
-                question: p.question,
-                choice: p.choice,
-                alternatives: p.alternatives.unwrap_or_default(),
-                confidence: p.confidence.unwrap_or_else(|| "medium".into()),
-                why: p.why.unwrap_or_default(),
-            })
-            .await
-            .map_err(reasoning_error)?;
-        json_result(&serde_json::json!({ "id": id, "effortId": effort }))
-    }
-
-    #[tool(
-        description = "Record a CLAIM about your work before you report it done: \"tests pass\", \
-                       \"no behavior change\", \"handles empty input\". Cite `evidence_ref` \
-                       (`run:<id>`, a test name) when you have it. Unbacked claims show up as \
-                       unverified for the human to check, so don't claim what you didn't verify."
-    )]
-    async fn record_claim(
-        &self,
-        params: Parameters<RecordClaimParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let (thread, task, effort) = resolve_effort(
-            &self.services,
-            "record_claim",
-            &p.thread_id,
-            p.task_id.as_deref(),
-        )
-        .await?;
-        let id = self
-            .services
-            .reasoning_store
-            .record_claim(oxplow_db::NewClaim {
-                thread_id: thread,
-                task_id: task,
-                effort_id: effort,
-                statement: p.statement,
-                kind: p.kind,
-                evidence_ref: p.evidence_ref,
-            })
-            .await
-            .map_err(reasoning_error)?;
-        json_result(&serde_json::json!({ "id": id, "effortId": effort }))
     }
 
     #[tool(
@@ -2574,7 +2448,7 @@ impl OxplowMcp {
     #[tool(
         description = "Discover the thread's currently-open effort. Returns `{ open, effortId, \
             taskId, startedAt, hasStartSnapshot }` — `open:false` (with null ids) when no effort \
-            is open. Use this to find the `effortId` for `amend_effort`, to confirm an effort is \
+            is open. Use this to find the `effortId` for `effort.amend`, to confirm an effort is \
             open before `ingest_coverage` / `ingest_analysis` / `record_test_run`, and to debug a \
             `no_open_effort` / `no_baseline` outcome (`hasStartSnapshot:false` ⇒ no baseline)."
     )]
@@ -2880,34 +2754,19 @@ impl OxplowMcp {
         .await
         .map_err(command_error)?;
 
-        // Synthesize the in_progress→target effort when the row was
-        // filed directly into a closing state with touched files.
-        // Mirrors main: a `done`/`blocked` create with `touchedFiles`
-        // is the "file and close in one call" shortcut for retroactive
-        // splits, and Local History needs the effort row to attribute
-        // the writes to this item.
+        // Filed straight into a closing state with touched files — the
+        // "file and close in one call" shortcut for retroactive splits:
+        // report the effort so Local History attributes the writes to it.
         let touched = p.touched_files.unwrap_or_default();
         if !touched.is_empty() && matches!(item.status, TaskStatus::Done | TaskStatus::Blocked) {
-            let thread_for_effort = thread.or(item.thread_id);
-            if let Some(tid) = thread_for_effort {
-                let worktree = worktree_for_thread(&self.services, &tid).await;
-                if let Err(err) = self
-                    .services
-                    .tasks
-                    .record_effort(
-                        &self.services.effort_store,
-                        item.id,
-                        &tid,
-                        &touched,
-                        None,
-                        &[],
-                        worktree.as_deref(),
-                    )
-                    .await
-                {
-                    tracing::warn!(?err, "create_task: effort record failed");
-                }
-            }
+            self.report_effort(
+                &actor,
+                serde_json::json!({
+                    "work_item": work_item_ref(item.id),
+                    "touched_files": touched,
+                }),
+            )
+            .await?;
         }
         let link_warnings =
             oxplow_app::link_check::check_links(&self.services, &item.description).await;
@@ -2971,46 +2830,23 @@ impl OxplowMcp {
         .await
         .map_err(command_error)?;
 
+        // Closing with files or runs to attribute: report the effort (the
+        // run claims are the run-kind counterpart of `touched_files`, tsk268).
         let touched = p.touched_files.unwrap_or_default();
         let claim_runs = p.claim_runs.unwrap_or_default();
         let disclaim_runs = p.disclaim_runs.unwrap_or_default();
         let closing = matches!(updated.status, TaskStatus::Done | TaskStatus::Blocked);
-        if !touched.is_empty() && closing {
-            if let Some(tid) = updated.thread_id {
-                let worktree = worktree_for_thread(&self.services, &tid).await;
-                if let Err(err) = self
-                    .services
-                    .tasks
-                    .record_effort(
-                        &self.services.effort_store,
-                        updated.id,
-                        &tid,
-                        &touched,
-                        None,
-                        &[],
-                        worktree.as_deref(),
-                    )
-                    .await
-                {
-                    tracing::warn!(?err, "update_task: effort record failed");
-                }
-            }
-        }
-        // Run claims/disclaims at the close boundary (tsk268) — the run-kind
-        // counterpart of `touched_files`, keyed to the just-closed effort.
-        if closing && (!claim_runs.is_empty() || !disclaim_runs.is_empty()) {
-            use oxplow_db::EffortStore as _;
-            if let Some(effort) = self
-                .services
-                .effort_store
-                .most_recent_for_work_item(&work_item_ref(updated.id))
-                .await
-                .ok()
-                .flatten()
-            {
-                self.apply_run_claims(&effort.id, &claim_runs, &disclaim_runs)
-                    .await?;
-            }
+        if closing && !(touched.is_empty() && claim_runs.is_empty() && disclaim_runs.is_empty()) {
+            self.report_effort(
+                &actor,
+                serde_json::json!({
+                    "work_item": work_item_ref(updated.id),
+                    "touched_files": touched,
+                    "claim_runs": claim_runs,
+                    "disclaim_runs": disclaim_runs,
+                }),
+            )
+            .await?;
         }
         let link_warnings = if wrote_description {
             oxplow_app::link_check::check_links(&self.services, &updated.description).await
@@ -3021,14 +2857,15 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Append `summary` to a task and mark it `done`. Pass `touched_files` and \
-                       `impacts` (see param docs) to attribute writes and cross-page outcomes. \
-                       Returns `{ task, file_review }`: when `file_review` is non-null the \
-                       snapshot diff disagreed with your `touched_files` — \
+        description = "Append `summary` to a task and mark it `done`, reporting its effort: the \
+                       `command.sequence [work_item.transition, effort.report]`, one audited run. \
+                       Pass `touched_files` and `impacts` (see param docs) to attribute writes and \
+                       cross-page outcomes. Returns `{ task, file_review }`: when `file_review` is \
+                       non-null the snapshot diff disagreed with your `touched_files` — \
                        `claimed_but_not_changed` / `changed_but_not_claimed` list the \
-                       mismatches; call `amend_effort(effort_id, add_files, remove_files)` to \
-                       fix, or leave it if your list was right (edited then reverted, or \
-                       another actor changed them). A non-empty `link_warnings` array flags \
+                       mismatches; fix them with `run_command effort.amend { effort, add_files, \
+                       remove_files }`, or leave it if your list was right (edited then reverted, \
+                       or another actor changed them). A non-empty `link_warnings` array flags \
                        invalid `[[…]]` wikilinks in the summary (unrecognized syntax or \
                        dangling target) — fix the summary so they resolve."
     )]
@@ -3037,291 +2874,33 @@ impl OxplowMcp {
         extensions: rmcp::model::Extensions,
         params: Parameters<CompleteTaskParams>,
     ) -> Result<CallToolResult, McpError> {
-        use oxplow_db::EffortStore as _;
         let p = params.0;
         let id = parse_task_id("complete_task", "id", &p.id)?;
         let _ = p.author; // legacy field — kept on the wire, no longer attributed
-        let item = self
-            .transition_as(&extensions, id, TaskStatus::Done)
-            .await?;
-
-        let touched = p.touched_files.unwrap_or_default();
-        let claim_runs = p.claim_runs.unwrap_or_default();
-        let disclaim_runs = p.disclaim_runs.unwrap_or_default();
-        let impacts: Vec<oxplow_domain::TaskImpact> = p
-            .impacts
-            .unwrap_or_default()
-            .into_iter()
-            .map(|i| oxplow_domain::TaskImpact {
-                kind: i.kind,
-                id: i.id,
-                action: i.action,
-            })
-            .collect();
-        let summary_has_body = !p.summary.trim().is_empty();
-        let mut review: Option<oxplow_app::task_service::EffortFileReview> = None;
-        if (summary_has_body || !touched.is_empty() || !impacts.is_empty())
-            && item.thread_id.is_some()
-        {
-            let tid = item
-                .thread_id
-                .expect("thread_id present — guarded by is_some() above");
-            let summary = if summary_has_body {
-                Some(p.summary.clone())
-            } else {
-                None
-            };
-            let worktree = worktree_for_thread(&self.services, &tid).await;
-            // Drop claims on paths the project never snapshots (tsk249)
-            // BEFORE both the record and the review, so a generated file
-            // is neither tracked nor flagged as "claimed but not
-            // changed" — the diff could never confirm it either way.
-            let touched = self.services.tasks.claimable_paths(&tid, &touched).await;
-            if let Err(err) = self
-                .services
-                .tasks
-                .record_effort(
-                    &self.services.effort_store,
-                    item.id,
-                    &tid,
-                    &touched,
-                    summary,
-                    &impacts,
-                    worktree.as_deref(),
-                )
-                .await
-            {
-                // Attribution is one atomic transaction now, so a
-                // failure means NOTHING landed (summary, files,
-                // impacts). Surface it instead of warn-and-swallow —
-                // the agent can simply retry complete_task; the
-                // status flip above is idempotent and the atomic op
-                // re-merges into the same effort.
-                tracing::warn!(?err, "complete_task: effort record failed");
-                return Err(internal(format!(
-                    "task {} was marked done, but recording the summary/files \
-                     attribution failed: {err}. Retry complete_task — the \
-                     attribution commits atomically, so nothing partial landed.",
-                    item.id
-                )));
-            } else {
-                review = oxplow_app::task_service::compute_effort_file_review(
-                    &self.services.effort_store,
-                    &self.services.snapshot_store,
-                    item.id,
-                    &touched,
-                )
-                .await;
-                // Stash the effort id so the Stop hook can fire a
-                // one-shot directive prompting the agent to amend
-                // (or silently agree). Recomputed at stop time so a
-                // subsequent amend_effort that already reconciled
-                // the discrepancy doesn't trigger a stale prompt.
-                //
-                // Stash on EITHER a file discrepancy OR run-ledger residue:
-                // `record_effort` already ran the run reconciliation, so any
-                // unattributed test runs (the concurrent-effort case) are in
-                // the ledger now and want the agent's claim/disclaim too.
-                if let Some(tid) = item.thread_id {
-                    let effort_for_review = match review.as_ref() {
-                        Some(r) => Some(parse_effort_id(&r.effort_id)?),
-                        None => self
-                            .services
-                            .effort_store
-                            .most_recent_for_work_item(&work_item_ref(item.id))
-                            .await
-                            .ok()
-                            .flatten()
-                            .map(|e| e.id),
-                    };
-                    if let Some(eid) = effort_for_review {
-                        // Apply the agent's close-time run claims/disclaims FIRST
-                        // (tsk268), so a fully-reconciled effort doesn't then nag.
-                        self.apply_run_claims(&eid, &claim_runs, &disclaim_runs)
-                            .await?;
-                        let has_run_residue = !self
-                            .services
-                            .attribution_store
-                            .list_refs(&eid, "run", oxplow_db::STATE_UNATTRIBUTED)
-                            .await
-                            .unwrap_or_default()
-                            .is_empty();
-                        if review.is_some() || has_run_residue {
-                            self.services
-                                .thread_runtime
-                                .record_pending_effort_review(&tid, eid);
-                        }
-                    }
-                }
+        let actor = self.verified_actor(&caller_of(&extensions)).await?;
+        let (task, report) = oxplow_app::task_writes::complete(
+            &self.services,
+            &actor,
+            id,
+            serde_json::json!({
+                "summary": p.summary,
+                "touched_files": p.touched_files.unwrap_or_default(),
+                "impacts": p.impacts.unwrap_or_default(),
+                "claim_runs": p.claim_runs.unwrap_or_default(),
+                "disclaim_runs": p.disclaim_runs.unwrap_or_default(),
+            }),
+        )
+        .await
+        .map_err(command_error)?;
+        let mut out = serde_json::json!({ "task": task, "file_review": report["file_review"] });
+        for key in ["link_warnings", "decision_hint"] {
+            let value = &report[key];
+            let empty = value.is_null() || value.as_array().is_some_and(Vec::is_empty);
+            if !empty {
+                out[key] = value.clone();
             }
         }
-        let link_warnings = oxplow_app::link_check::check_links(&self.services, &p.summary).await;
-        let decision_hint = match self
-            .services
-            .effort_store
-            .most_recent_for_work_item(&work_item_ref(item.id))
-            .await
-        {
-            Ok(Some(effort)) => {
-                oxplow_app::reasoning::missing_decisions_hint(&self.services.sql, effort.id.value())
-                    .await
-            }
-            _ => None,
-        };
-        let payload = CompleteTaskResult {
-            task: item,
-            file_review: review,
-            link_warnings,
-            decision_hint,
-        };
-        json_result(&payload)
-    }
-
-    /// Apply run claims/disclaims to the `effort_attribution` ledger for
-    /// `effort_id` — the run-kind counterpart of file add/remove, shared by
-    /// `complete_task`/`update_task` (claim at the close boundary, tsk268) and
-    /// `amend_effort` (claim after the fact). `claim_runs` → `claimed`,
-    /// `disclaim_runs` → `acknowledged`; empty refs are skipped.
-    async fn apply_run_claims(
-        &self,
-        effort_id: &oxplow_domain::EffortId,
-        claim_runs: &[String],
-        disclaim_runs: &[String],
-    ) -> Result<(), McpError> {
-        for ref_ in claim_runs {
-            if ref_.is_empty() {
-                continue;
-            }
-            self.services
-                .attribution_store
-                .set_state(effort_id, "run", ref_, oxplow_db::STATE_CLAIMED, None)
-                .await
-                .map_err(|e| internal(e.to_string()))?;
-        }
-        for ref_ in disclaim_runs {
-            if ref_.is_empty() {
-                continue;
-            }
-            self.services
-                .attribution_store
-                .set_state(effort_id, "run", ref_, oxplow_db::STATE_ACKNOWLEDGED, None)
-                .await
-                .map_err(|e| internal(e.to_string()))?;
-        }
-        Ok(())
-    }
-
-    #[tool(
-        description = "Reconcile an effort's attribution after the fact — fix the file list \
-                       (`add_files`/`remove_files`) when the auto-diff disagreed with your \
-                       `touched_files`, and/or claim or disclaim observed test runs \
-                       (`claim_runs`/`disclaim_runs`, using the `run:<id>` refs shown in the \
-                       EFFORT REVIEW). Passing all empty is a no-op."
-    )]
-    async fn amend_effort(
-        &self,
-        params: Parameters<AmendEffortParams>,
-    ) -> Result<CallToolResult, McpError> {
-        use oxplow_db::EffortStore as _;
-        let p = params.0;
-        let effort_id = parse_effort_id(&p.effort_id)?;
-        let add = p.add_files.unwrap_or_default();
-        let remove = p.remove_files.unwrap_or_default();
-        for path in &remove {
-            if path.is_empty() {
-                continue;
-            }
-            self.services
-                .effort_store
-                .remove_file(&effort_id, path)
-                .await
-                .map_err(|e| internal(e.to_string()))?;
-            // Record the disclaim as an explicit acknowledgement so
-            // the Stop hook's recompute doesn't re-flag the same
-            // `changed_but_not_claimed` discrepancy. Survives across
-            // turns; cleared if the agent later re-claims the path
-            // via `add_files`.
-            self.services
-                .effort_store
-                .acknowledge_unclaimed_path(&effort_id, path)
-                .await
-                .map_err(|e| internal(e.to_string()))?;
-        }
-        // Compute the snapshot-version pin once for this effort —
-        // every added path inherits the same triple. Falls back to a
-        // 0 snapshot id when the effort has no snapshot pin (rare),
-        // matching the policy used by `record_effort`.
-        let effort = self
-            .services
-            .effort_store
-            .get_effort(&effort_id)
-            .await
-            .map_err(|e| internal(e.to_string()))?;
-        let version = if let Some(effort) = effort.as_ref() {
-            self.services
-                .tasks
-                .resolve_effort_file_version(effort)
-                .await
-        } else {
-            oxplow_app::file_ref_version::ResolvedFileVersion {
-                local_snapshot_id: 0,
-                closest_vcs_rev: None,
-                vcs_rev_exact: false,
-            }
-        };
-        // Same tsk249 filter the close-time claim uses: a path the
-        // project never snapshots is silently dropped rather than
-        // recorded as a claim nothing can ever confirm.
-        let add = match effort.as_ref() {
-            Some(e) => {
-                self.services
-                    .tasks
-                    .claimable_paths(&e.thread_id, &add)
-                    .await
-            }
-            None => add,
-        };
-        for path in &add {
-            if path.is_empty() {
-                continue;
-            }
-            // change_kind defaults to Updated — the agent's amend
-            // doesn't carry stat info, and the per-file change kind
-            // is informational only (UI shows it; backlinks don't
-            // discriminate).
-            self.services
-                .effort_store
-                .record_file(
-                    &effort_id,
-                    path,
-                    oxplow_db::EffortFileChange::Updated,
-                    version.as_ref(),
-                )
-                .await
-                .map_err(|e| internal(e.to_string()))?;
-            // If this path was previously acknowledged-as-not-mine
-            // (i.e. disclaimed), clear that acknowledgement now that
-            // the agent has changed their mind and is claiming it.
-            self.services
-                .effort_store
-                .forget_acknowledged_path(&effort_id, path)
-                .await
-                .map_err(|e| internal(e.to_string()))?;
-        }
-        // Run claims/disclaims ride the generic attribution ledger
-        // (`effort_attribution`), the same claim→reconcile rails as files but
-        // keyed by `(effort, "run", ref)`.
-        let claim_runs = p.claim_runs.unwrap_or_default();
-        let disclaim_runs = p.disclaim_runs.unwrap_or_default();
-        self.apply_run_claims(&effort_id, &claim_runs, &disclaim_runs)
-            .await?;
-        json_result(&serde_json::json!({
-            "effort_id": effort_id.to_string(),
-            "added": add,
-            "removed": remove,
-            "claimed_runs": claim_runs,
-            "disclaimed_runs": disclaim_runs,
-        }))
+        json_result(&out)
     }
 
     #[tool(description = "Transition a batch of tasks to the same status.")]
@@ -4053,8 +3632,6 @@ const WRITE_TOOLS: &[&str] = &[
     // Call an outside model provider and record an `ai_call` row.
     "ai_decide",
     "ai_summarize",
-    "record_decision",
-    "record_claim",
     "run_collector",
     "install_extension",
     "update_extension",
@@ -4071,7 +3648,6 @@ const WRITE_TOOLS: &[&str] = &[
     "create_task",
     "update_task",
     "complete_task",
-    "amend_effort",
     "transition_tasks",
     "await_user",
     "file_epic_with_children",
@@ -4264,71 +3840,6 @@ fn analysis_ingest_json(outcome: &oxplow_app::collection::AnalysisIngest) -> ser
     }
 }
 
-/// Thread + (task, effort) ids for something recorded "on the current
-/// work": the given task's open effort, else the thread's open effort. A
-/// given task must be in the calling thread's stream (as filing claims
-/// are), so an agent can't file decisions or claims onto another stream's
-/// work.
-async fn resolve_effort(
-    services: &Services,
-    tool: &str,
-    thread_id: &str,
-    task_id: Option<&str>,
-) -> Result<(i64, Option<i64>, Option<i64>), McpError> {
-    use oxplow_db::EffortStore as _;
-    expect_id_kind(tool, "thread_id", thread_id, ID_THREAD)?;
-    let tid = parse_thread_id(thread_id)?;
-    let effort = match task_id {
-        Some(raw) => {
-            use oxplow_domain::stores::{TaskStore as _, ThreadStore as _};
-            let task = parse_task_id(tool, "task_id", raw)?;
-            let stream_of = |t: Option<oxplow_domain::Thread>| t.map(|t| t.stream_id);
-            let caller_stream = stream_of(services.thread_store.get(&tid).await.map_err(internal)?);
-            let task_thread = services
-                .task_store
-                .get(task)
-                .await
-                .map_err(internal)?
-                .ok_or_else(|| McpError::invalid_params(format!("{tool}: no task {raw}"), None))?
-                .thread_id;
-            let task_stream = match task_thread {
-                Some(t) => stream_of(services.thread_store.get(&t).await.map_err(internal)?),
-                None => None,
-            };
-            if task_stream.is_some() && task_stream != caller_stream {
-                return Err(McpError::invalid_params(
-                    format!("{tool}: task {raw} belongs to another stream's work"),
-                    None,
-                ));
-            }
-            let e = services
-                .effort_store
-                .find_open_for_work_item(&work_item_ref(task))
-                .await
-                .map_err(internal)?;
-            return Ok((tid.value(), Some(task.value()), e.map(|e| e.id.value())));
-        }
-        None => services
-            .effort_store
-            .find_open_for_thread(&tid)
-            .await
-            .map_err(internal)?,
-    };
-    Ok((
-        tid.value(),
-        effort.as_ref().and_then(|e| e.task_id()).map(|t| t.value()),
-        effort.map(|e| e.id.value()),
-    ))
-}
-
-/// Map a decision/claim validation error to an MCP error.
-fn reasoning_error(e: oxplow_domain::DomainError) -> McpError {
-    match e {
-        oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
-        other => internal(other),
-    }
-}
-
 /// Map an extension install/update error to an MCP error.
 fn extension_error(e: oxplow_domain::DomainError) -> McpError {
     match e {
@@ -4479,10 +3990,6 @@ fn parse_thread_id(value: &str) -> Result<ThreadId, McpError> {
     ThreadId::try_from_str(value)
         .ok_or_else(|| McpError::invalid_params(format!("invalid thread id `{value}`"), None))
 }
-fn parse_effort_id(value: &str) -> Result<EffortId, McpError> {
-    EffortId::try_from_str(value)
-        .ok_or_else(|| McpError::invalid_params(format!("invalid effort id `{value}`"), None))
-}
 
 /// String-id prefix validator. Every external id is now a
 /// `<3-letter-prefix><int>` string (e.g. `thr21`); this helper confirms
@@ -4595,23 +4102,6 @@ fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> St
         item.id.value()
     ));
     out.join("\n")
-}
-
-/// `complete_task` wire shape — the task plus an optional review
-/// payload when the agent's `touched_files` claim disagreed with
-/// the snapshot bracket diff.
-#[derive(Debug, serde::Serialize)]
-pub struct CompleteTaskResult {
-    pub task: oxplow_domain::Task,
-    pub file_review: Option<oxplow_app::task_service::EffortFileReview>,
-    /// Invalid `[[…]]` wikilinks in the summary (unrecognized syntax or
-    /// dangling target). Omitted when the summary's links all resolve.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub link_warnings: Vec<oxplow_app::link_check::LinkWarning>,
-    /// Set when the effort touched many files but recorded no decisions:
-    /// a prompt to record the forks it resolved (see `record_decision`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub decision_hint: Option<String>,
 }
 
 /// Wraps a write-tool result with wikilink-validity warnings for the
@@ -4773,6 +4263,25 @@ impl OxplowMcp {
     /// command (audited to the agent's thread, the transition and effort
     /// events caused by its `command.executed`), then settle the pump so the
     /// effort's snapshot pin is in place for whatever this tool reads next.
+    /// Run `effort.report` as `actor`.
+    async fn report_effort(
+        &self,
+        actor: &oxplow_domain::Actor,
+        input: serde_json::Value,
+    ) -> Result<(), McpError> {
+        self.services
+            .commands
+            .run(
+                actor,
+                oxplow_app::commands::effort_report::REPORT,
+                input,
+                false,
+            )
+            .await
+            .map(drop)
+            .map_err(command_error)
+    }
+
     async fn transition_as(
         &self,
         extensions: &rmcp::model::Extensions,
@@ -6048,97 +5557,6 @@ mod tests {
         assert!(!yaml.contains("be brief"), "nothing written: {yaml}");
     }
 
-    #[tokio::test]
-    async fn amend_effort_adds_and_removes_files() {
-        use oxplow_db::{EffortFileChange, EffortStore as _};
-        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot();
-        // Reuse the writer thread that boot's primary stream created.
-        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-        let thread = services
-            .thread_store
-            .list_for_stream(&stream.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .expect("primary stream must have a writer thread");
-        let mut item = make_task(Some(thread.id), "amend test");
-        let task_id = services.task_store.insert(&item).await.unwrap();
-        item.id = task_id;
-        // Open an effort for this task with a pre-recorded file.
-        let effort = services
-            .effort_store
-            .start(&work_item_ref(task_id), &thread.id, None)
-            .await
-            .unwrap();
-        let v = oxplow_db::FileRefVersion {
-            local_snapshot_id: 0,
-            closest_vcs_rev: None,
-            vcs_rev_exact: false,
-        };
-        services
-            .effort_store
-            .record_file(&effort.id, "src/keep.rs", EffortFileChange::Updated, v)
-            .await
-            .unwrap();
-        services
-            .effort_store
-            .record_file(&effort.id, "src/disclaim.rs", EffortFileChange::Updated, v)
-            .await
-            .unwrap();
-
-        // Disclaim disclaim.rs, claim a new file.
-        server
-            .amend_effort(Parameters(AmendEffortParams {
-                effort_id: effort.id.to_string(),
-                add_files: Some(vec!["src/added.rs".into()]),
-                remove_files: Some(vec!["src/disclaim.rs".into()]),
-                claim_runs: None,
-                disclaim_runs: None,
-            }))
-            .await
-            .unwrap();
-
-        let files = services.effort_store.list_files(&effort.id).await.unwrap();
-        let paths: std::collections::BTreeSet<_> = files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(
-            paths,
-            ["src/added.rs", "src/keep.rs"]
-                .into_iter()
-                .collect::<std::collections::BTreeSet<_>>()
-        );
-        // Disclaimed paths land in the acknowledgement table so
-        // the Stop hook's recompute treats them as resolved
-        // discrepancies and stops re-firing the directive.
-        let acks = services
-            .effort_store
-            .list_acknowledged_paths(&effort.id)
-            .await
-            .unwrap();
-        assert_eq!(acks, vec!["src/disclaim.rs".to_string()]);
-        // Re-claiming an acknowledged path should clear its ack.
-        server
-            .amend_effort(Parameters(AmendEffortParams {
-                effort_id: effort.id.to_string(),
-                add_files: Some(vec!["src/disclaim.rs".into()]),
-                remove_files: None,
-                claim_runs: None,
-                disclaim_runs: None,
-            }))
-            .await
-            .unwrap();
-        let acks_after = services
-            .effort_store
-            .list_acknowledged_paths(&effort.id)
-            .await
-            .unwrap();
-        assert!(
-            acks_after.is_empty(),
-            "re-claiming the path should clear its acknowledgement, got {acks_after:?}",
-        );
-    }
-
     /// tsk249: `complete_task` must silently ignore a claimed path the
     /// workspace filter excludes (project `generated.exclude` /
     /// `.gitignore`). Such a path is never snapshotted, so it can't be
@@ -6248,78 +5666,6 @@ mod tests {
             paths,
             vec!["src/authored.rs"],
             "the generated path should be dropped from the claim, not tracked"
-        );
-    }
-
-    #[tokio::test]
-    async fn amend_effort_claims_and_disclaims_runs() {
-        use oxplow_db::EffortStore as _;
-        use oxplow_db::{STATE_ACKNOWLEDGED, STATE_CLAIMED, STATE_UNATTRIBUTED};
-        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot();
-        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-        let thread = services
-            .thread_store
-            .list_for_stream(&stream.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .expect("primary stream must have a writer thread");
-        let mut item = make_task(Some(thread.id), "run amend test");
-        let task_id = services.task_store.insert(&item).await.unwrap();
-        item.id = task_id;
-        let effort = services
-            .effort_store
-            .start(&work_item_ref(task_id), &thread.id, None)
-            .await
-            .unwrap();
-        // Seed two unattributed runs in the ledger, as the reconcile would.
-        for r in ["run:1", "run:2"] {
-            services
-                .attribution_store
-                .set_state(&effort.id, "run", r, STATE_UNATTRIBUTED, None)
-                .await
-                .unwrap();
-        }
-
-        // Claim run:1 as mine, disclaim run:2 as someone else's.
-        server
-            .amend_effort(Parameters(AmendEffortParams {
-                effort_id: effort.id.to_string(),
-                add_files: None,
-                remove_files: None,
-                claim_runs: Some(vec!["run:1".into()]),
-                disclaim_runs: Some(vec!["run:2".into()]),
-            }))
-            .await
-            .unwrap();
-
-        // Neither remains unattributed; each moved to its declared state.
-        let unattributed = services
-            .attribution_store
-            .list_refs(&effort.id, "run", STATE_UNATTRIBUTED)
-            .await
-            .unwrap();
-        assert!(
-            unattributed.is_empty(),
-            "claim/disclaim should clear the residue, got {unattributed:?}",
-        );
-        assert_eq!(
-            services
-                .attribution_store
-                .list_refs(&effort.id, "run", STATE_CLAIMED)
-                .await
-                .unwrap(),
-            vec!["run:1".to_string()],
-        );
-        assert_eq!(
-            services
-                .attribution_store
-                .list_refs(&effort.id, "run", STATE_ACKNOWLEDGED)
-                .await
-                .unwrap(),
-            vec!["run:2".to_string()],
         );
     }
 
@@ -6466,45 +5812,6 @@ mod tests {
         serde_json::from_value(out.result).unwrap()
     }
 
-    #[tokio::test]
-    async fn a_claim_on_another_streams_task_is_refused() {
-        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot();
-        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-        let caller = services
-            .thread_store
-            .list_for_stream(&stream.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap();
-        let mut other_stream = stream.clone();
-        other_stream.id = oxplow_domain::StreamId::placeholder();
-        other_stream.title = "other".into();
-        other_stream.branch = "other".into();
-        other_stream.kind = oxplow_domain::StreamKind::Worktree;
-        other_stream.worktree_path = "/elsewhere".into();
-        let other_stream_id = services.stream_store.upsert(&other_stream).await.unwrap();
-        let other_thread = new_thread(&services, other_stream_id, "t").await;
-        let foreign = services
-            .task_store
-            .insert(&make_task(Some(other_thread.id), "not yours"))
-            .await
-            .unwrap();
-        let err = server
-            .record_claim(Parameters(RecordClaimParams {
-                thread_id: caller.id.to_string(),
-                task_id: Some(foreign.to_string()),
-                statement: "All tests pass".into(),
-                kind: "tests_pass".into(),
-                evidence_ref: None,
-            }))
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("another stream"), "{}", err.message);
-    }
-
     /// tsk555: `read_at` / `diff` without a `stream_id` read the calling
     /// thread's stream, not the primary's.
     #[tokio::test]
@@ -6644,84 +5951,6 @@ mod tests {
             .await
             .unwrap_err();
         assert!(!err.message.is_empty());
-    }
-
-    #[tokio::test]
-    async fn record_decision_and_claim_attach_to_the_open_effort() {
-        use oxplow_db::EffortStore as _;
-        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot();
-        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-        let thread = services
-            .thread_store
-            .list_for_stream(&stream.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap();
-        let task_id = services
-            .task_store
-            .insert(&make_task(Some(thread.id), "reasoning task"))
-            .await
-            .unwrap();
-        let effort = services
-            .effort_store
-            .start(&work_item_ref(task_id), &thread.id, None)
-            .await
-            .unwrap();
-
-        server
-            .record_decision(Parameters(RecordDecisionParams {
-                thread_id: thread.id.to_string(),
-                task_id: None,
-                question: "Store source data where?".into(),
-                choice: "main DB".into(),
-                alternatives: Some(vec!["attached DB per extension".into()]),
-                confidence: Some("medium".into()),
-                why: Some("re-syncable cache".into()),
-            }))
-            .await
-            .unwrap();
-        server
-            .record_claim(Parameters(RecordClaimParams {
-                thread_id: thread.id.to_string(),
-                task_id: Some(task_id.to_string()),
-                statement: "All tests pass".into(),
-                kind: "tests_pass".into(),
-                evidence_ref: None,
-            }))
-            .await
-            .unwrap();
-
-        let q = |sql: &'static str| {
-            let sl = oxplow_db::SemanticLayer::new(services.db.clone());
-            async move {
-                serde_json::to_value(sl.query_sql(sql, vec![], None).await.unwrap().rows).unwrap()
-            }
-        };
-        let e = effort.id.value();
-        let t = task_id.value();
-        assert_eq!(
-            q("SELECT effort_id, task_id, confidence FROM v_decision").await,
-            serde_json::json!([[e, t, "medium"]])
-        );
-        assert_eq!(
-            q("SELECT effort_id, kind, verified FROM v_claim").await,
-            serde_json::json!([[e, "tests_pass", 0]])
-        );
-
-        let err = server
-            .record_claim(Parameters(RecordClaimParams {
-                thread_id: thread.id.to_string(),
-                task_id: None,
-                statement: "x".into(),
-                kind: "vibes".into(),
-                evidence_ref: None,
-            }))
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("kind"), "{err:?}");
     }
 
     #[tokio::test]

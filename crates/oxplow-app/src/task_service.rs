@@ -11,7 +11,6 @@
 //! independent of the tauri-specta layering and lets the MCP surface
 //! reuse the same service without paying for renderer notifications.
 
-use oxplow_domain::refs::build::work_item_ref;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -874,7 +873,8 @@ impl TaskService {
         Ok(self.store.list_for_thread(thread).await?)
     }
 
-    /// Open + record + close an effort for `item` against `thread`.
+    /// Open + record + close an effort for `work_item` (a canonical
+    /// `work_item:…` ref) against `thread`.
     /// Declared `impacts` are persisted before finish so the
     /// page_ref projection runs once with the full payload.
     ///
@@ -893,7 +893,7 @@ impl TaskService {
     pub async fn record_effort(
         &self,
         effort_store: &SqliteEffortStore,
-        item: TaskId,
+        work_item: &str,
         thread: &ThreadId,
         touched_files: &[String],
         summary: Option<String>,
@@ -910,9 +910,7 @@ impl TaskService {
         // `effort.opened` / `closed` are logged `retroactive`, and the
         // effort-lifecycle consumer projects its metrics — otherwise the work
         // is invisible to exactly the metrics that measure the pairing.
-        let prior = effort_store
-            .most_recent_for_work_item(&work_item_ref(item))
-            .await?;
+        let prior = effort_store.most_recent_for_work_item(work_item).await?;
         let version = match prior {
             Some(e) => self.resolve_effort_file_version(&e).await,
             // No effort yet — the atomic op will open one with no
@@ -935,7 +933,7 @@ impl TaskService {
             .collect();
         effort_store
             .record_effort_atomic(oxplow_db::RecordEffortAtomic {
-                work_item: work_item_ref(item),
+                work_item: work_item.to_string(),
                 thread: *thread,
                 files,
                 version: oxplow_db::OwnedFileRefVersion {
@@ -1139,7 +1137,7 @@ pub struct EffortFileReview {
     /// The effort's work item (`work_item:oxplow:tsk42`).
     pub work_item: String,
     /// Paths the agent claimed but the auto-diff doesn't see as
-    /// changed. Disclaim via `amend_effort(remove_files=…)` if not
+    /// changed. Disclaim via `effort.amend { remove_files }` if not
     /// actually touched.
     pub claimed_but_not_changed: Vec<String>,
     /// Paths the auto-diff sees as changed but the agent didn't
@@ -1158,7 +1156,7 @@ pub struct EffortFileReview {
 /// and the agent can't be expected to triage a wall of paths.
 pub const MAX_UNCLAIMED_FOR_REVIEW: usize = crate::attribution::MAX_UNCLAIMED_FOR_REVIEW;
 
-/// Compare the agent's declared `touched_files` for a task's
+/// Compare the agent's declared `touched_files` for a work item's
 /// most-recent effort against the auto-diff between
 /// start_snapshot_id and end_snapshot_id. Returns `None` when
 /// nothing's worth showing the agent — claim and diff agree, or no
@@ -1166,11 +1164,11 @@ pub const MAX_UNCLAIMED_FOR_REVIEW: usize = crate::attribution::MAX_UNCLAIMED_FO
 pub async fn compute_effort_file_review(
     effort_store: &SqliteEffortStore,
     snapshot_store: &SqliteSnapshotStore,
-    task_id: TaskId,
+    work_item: &str,
     claimed: &[String],
 ) -> Option<EffortFileReview> {
     let effort = effort_store
-        .most_recent_for_work_item(&work_item_ref(task_id))
+        .most_recent_for_work_item(work_item)
         .await
         .ok()
         .flatten()?;
@@ -1208,7 +1206,7 @@ async fn effort_changed_paths(
 
 /// Recompute a review for a specific effort id. The Stop hook
 /// uses this to refresh a stale review after the agent may have
-/// called `amend_effort`. Returns `None` when the effort no longer
+/// run `effort.amend`. Returns `None` when the effort no longer
 /// has a discrepancy (or doesn't exist / has no snapshot bracket).
 pub async fn recompute_effort_file_review(
     effort_store: &SqliteEffortStore,
@@ -1398,6 +1396,7 @@ fn close_end_snapshot(captured: Option<i64>, effort_start: Option<i64>) -> Optio
 mod tests {
     use super::*;
     use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore};
+    use oxplow_domain::refs::build::work_item_ref;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
 
@@ -1890,7 +1889,7 @@ mod tests {
 
         svc.record_effort(
             &effort_store,
-            item.id,
+            &work_item_ref(item.id),
             &tid,
             &["src/a.rs".to_string()],
             Some("done".into()),
@@ -2507,7 +2506,7 @@ mod tests {
         // NOT create a second row.
         svc.record_effort(
             &effort_store,
-            item.id,
+            &work_item_ref(item.id),
             &tid,
             &["src/x.rs".to_string()],
             Some("did the thing".into()),
@@ -2552,7 +2551,7 @@ mod tests {
             .unwrap();
         svc.record_effort(
             &effort_store,
-            item.id,
+            &work_item_ref(item.id),
             &tid,
             &[
                 "src/authored.rs".to_string(),
@@ -2638,7 +2637,7 @@ mod tests {
         // No lifecycle ran — task filed directly as done.
         svc.record_effort(
             &effort_store,
-            item.id,
+            &work_item_ref(item.id),
             &tid,
             &["a.rs".to_string()],
             Some("retro".into()),

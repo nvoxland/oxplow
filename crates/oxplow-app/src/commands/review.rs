@@ -363,14 +363,19 @@ mod tests {
         let effort = fx.effort.value();
         let claim = fx
             .svc
-            .reasoning_store
-            .record_claim(NewClaim {
-                thread_id: fx.thread.value(),
-                task_id: Some(fx.task.value()),
-                effort_id: Some(effort),
-                statement: "no behavior change".into(),
-                kind: "no_behavior_change".into(),
-                evidence_ref: None,
+            .db
+            .transaction(move |tx| {
+                oxplow_db::record_claim_tx(
+                    tx,
+                    &NewClaim {
+                        thread_id: fx.thread.value(),
+                        task_id: Some(fx.task.value()),
+                        effort_id: Some(effort),
+                        statement: "no behavior change".into(),
+                        kind: "no_behavior_change".into(),
+                        evidence_ref: None,
+                    },
+                )
             })
             .await
             .unwrap();

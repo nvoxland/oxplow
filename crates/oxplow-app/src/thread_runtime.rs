@@ -13,7 +13,7 @@ struct ThreadRuntime {
     /// Effort ids whose touched_files claim disagreed with the auto-
     /// diff at complete_task time. Drained by the Stop hook to fire
     /// a one-shot directive prompting the agent to call
-    /// `amend_effort` (or silently agree). Cleared after the
+    /// `effort.amend` (or silently agree). Cleared after the
     /// directive fires so a single review never repeats.
     pending_effort_reviews: HashSet<EffortId>,
     /// The page the human currently has open in this thread, as the UI

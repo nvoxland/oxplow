@@ -51,7 +51,7 @@ were in-flight or just completed in each snapshot's window.
 
 When the agent closes an effort it passes its declared
 `touched_files`. The runtime cross-checks that list against
-the snapshot bracket diff and asks the agent to `amend_effort`
+the snapshot bracket diff and asks the agent to `effort.amend`
 if the two disagree — see
 [Agent control](agent-control.md#stop-hook).
 

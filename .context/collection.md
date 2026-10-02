@@ -309,7 +309,7 @@ its effort even under concurrency (resolved via `find_open_for_work_item`); the
 automatically when one effort is open, else is left unclaimed for the close
 reconcile + window-dominance + the agent's claim — never guessed onto one.
 `claim_runs`/`disclaim_runs` on `complete_task`/`update_task` let the agent fix
-attribution at the close boundary; `amend_effort` does it after the fact. See
+attribution at the close boundary; `effort.amend` does it after the fact. See
 [agent-model.md](./agent-model.md) for the full claim→reconcile loop.
 
 Both paths resolve `format` → collector via the registry and **classify by the

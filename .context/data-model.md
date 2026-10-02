@@ -582,8 +582,8 @@ in `effort_file`.
 `effort_acknowledged_path` (V21) records the agent's explicit
 disclaim of a path that the auto-diff thought belonged to the
 effort. Columns: `effort_id`, `path`, `acknowledged_at`. Written by
-`amend_effort(remove_files=…)` (one row per path, idempotent via
-`INSERT OR IGNORE`); cleared by `amend_effort(add_files=…)` when
+`effort.amend { remove_files }` (one row per path, idempotent via
+`INSERT OR IGNORE`); cleared by `effort.amend { add_files }` when
 the agent re-claims a previously-disclaimed path. Consumed by
 `recompute_effort_file_review` in `oxplow_app::task_service`: paths
 present here are subtracted from `changed_but_not_claimed` before
@@ -643,7 +643,7 @@ one owning effort and can't double-count across two efforts' rollups
 caller named a `task_id` — exact even under concurrency); the unclaimed
 concurrent case stays observed-only until the close reconciliation writes
 an `unattributed` row, which the agent resolves via
-`amend_effort`/`complete_task`/`update_task` `claim_runs`/`disclaim_runs`.
+`effort.amend`/`effort.report` (`complete_task`, `update_task`) `claim_runs`/`disclaim_runs`.
 **Window-dominance** keeps that residue from over-surfacing: at reconcile a
 run that falls inside a strictly-nested sibling effort's time window
 (`SqliteEffortStore::nested_efforts`) is the *narrower* effort's to
