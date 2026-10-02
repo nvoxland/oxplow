@@ -32,6 +32,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::database::{map_sql_err, ts_to_string};
+use crate::semantic_layer::TempView;
 use crate::sql_tokens::{calls, line_col, string_literal};
 
 /// The core models, embedded from `crates/oxplow-db/models/` by the build
@@ -1048,7 +1049,7 @@ pub fn compile_extensions(
         [CORE],
     )
     .map_err(map_sql_err)?;
-    let errors = pass(&tx, extensions, Pass::Publish)?;
+    let errors = pass(&tx, extensions, &[], Pass::Publish)?.errors;
     // Every model is registered now (core's compiled at the open): a
     // materialized table no published model reads goes.
     drop_orphaned_tables(&tx)?;
@@ -1056,16 +1057,40 @@ pub fn compile_extensions(
     Ok(errors)
 }
 
+/// A declared entity a check stands in for before its collector ever
+/// ran (P7.C6): an empty view with its declared columns, which a model's
+/// `ref()` and a lens can read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityStub {
+    /// The extension that declares it.
+    pub owner: String,
+    pub name: String,
+    /// `v_<owner>_<entity>`.
+    pub view: String,
+    pub columns: Vec<(String, crate::collector_store::StoredType)>,
+}
+
+/// What a check pass found: each extension's errors, and the temp views
+/// it compiled — the entity stand-ins and the models, in the order they
+/// were created — for the check's queries to read (`SqlQuery::temp_views`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CheckedModels {
+    pub errors: BTreeMap<String, Vec<String>>,
+    pub views: Vec<TempView>,
+}
+
 /// Check the extensions' models without publishing anything — what
 /// `oxplow plugin check` runs, on a read-only database: the same
 /// resolution, lineage and contract checks as [`compile_extensions`] (a
 /// changed contract at a published version fails), against temp views.
-/// Run it inside a transaction that's rolled back (`Database::read`).
+/// An entity in `stubs` with no view yet gets an empty one first. Run it
+/// inside a transaction that's rolled back (`Database::read`).
 pub fn check_extensions(
     conn: &Connection,
     extensions: &[ExtensionModels],
-) -> Result<BTreeMap<String, Vec<String>>, DomainError> {
-    pass(conn, extensions, Pass::Check)
+    stubs: &[EntityStub],
+) -> Result<CheckedModels, DomainError> {
+    pass(conn, extensions, stubs, Pass::Check)
 }
 
 /// What a pass over the extensions' models does.
@@ -1081,8 +1106,9 @@ enum Pass {
 fn pass(
     tx: &Connection,
     extensions: &[ExtensionModels],
+    stubs: &[EntityStub],
     mode: Pass,
-) -> Result<BTreeMap<String, Vec<String>>, DomainError> {
+) -> Result<CheckedModels, DomainError> {
     let mut errors: BTreeMap<String, Vec<String>> = extensions
         .iter()
         .map(|e| (e.extension.clone(), Vec::new()))
@@ -1124,6 +1150,47 @@ fn pass(
         .map(|(o, n, v)| ((o.clone(), n.clone()), v.clone()))
         .collect();
     let existing: BTreeSet<String> = registered.into_iter().map(|(_, _, v)| v).collect();
+    // What a check created, for its queries to recreate.
+    let mut views: Vec<TempView> = Vec::new();
+    for stub in stubs.iter().filter(|_| mode == Pass::Check) {
+        let key = (stub.owner.clone(), stub.name.clone());
+        if known.contains_key(&key) {
+            continue; // it has synced: its view is real
+        }
+        // Here, a typed empty table under the view, as a synced entity has
+        // (so a model's lineage and contract check as they will); for the
+        // check's queries, which only read its columns, an empty SELECT.
+        let table = format!(
+            "ext__{}__{}",
+            stub.owner.replace('-', "_"),
+            stub.name.replace('-', "_")
+        );
+        let typed: Vec<String> = stub
+            .columns
+            .iter()
+            .map(|(name, t)| format!("{} {}", quote(name), t.sql()))
+            .collect();
+        let names: Vec<String> = stub.columns.iter().map(|(name, _)| quote(name)).collect();
+        tx.execute_batch(&format!(
+            "CREATE TEMP TABLE {table} ({typed});
+             CREATE TEMP VIEW {view} AS SELECT {names} FROM temp.{table};",
+            table = quote(&table),
+            typed = typed.join(", "),
+            view = quote(&stub.view),
+            names = names.join(", "),
+        ))
+        .map_err(map_sql_err)?;
+        let empty: Vec<String> = stub
+            .columns
+            .iter()
+            .map(|(name, t)| format!("CAST(NULL AS {}) AS {}", t.sql(), quote(name)))
+            .collect();
+        views.push(TempView {
+            name: stub.view.clone(),
+            sql: format!("SELECT {} WHERE 0", empty.join(", ")),
+        });
+        known.insert(key, stub.view.clone());
+    }
     let mut declared: BTreeMap<String, String> = BTreeMap::new();
     for e in extensions {
         for src in &e.sources {
@@ -1231,6 +1298,12 @@ fn pass(
                     Ok(()) => {
                         tx.execute_batch("RELEASE extension_model")
                             .map_err(map_sql_err)?;
+                        if mode == Pass::Check {
+                            views.push(TempView {
+                                name: m.view.clone(),
+                                sql: m.sql.clone(),
+                            });
+                        }
                         done.insert(m.view.clone());
                         published.push((ext.clone(), m.source));
                     }
@@ -1301,7 +1374,7 @@ fn pass(
             push(&mut errors, &e.extension, problem);
         }
     }
-    Ok(errors)
+    Ok(CheckedModels { errors, views })
 }
 
 fn push(errors: &mut BTreeMap<String, Vec<String>>, extension: &str, message: String) {
@@ -1745,7 +1818,7 @@ mod tests {
             ))],
         )];
         let tx = conn.transaction().unwrap();
-        let errors = check_extensions(&tx, &models).unwrap();
+        let errors = check_extensions(&tx, &models, &[]).unwrap().errors;
         assert_eq!(errors["acme"], Vec::<String>::new());
         assert!(!table_exists(&tx, "m_v_acme_busy"));
         drop(tx);
@@ -2066,20 +2139,28 @@ mod tests {
         }
         let ro = crate::Database::open_read_only(&path).unwrap();
         let errors = ro
-            .check_extension_models(vec![late(
-                "SELECT id FROM ref('task') WHERE status = 'done'",
-                &["id INTEGER"],
-            )])
+            .check_extension_models(
+                vec![late(
+                    "SELECT id FROM ref('task') WHERE status = 'done'",
+                    &["id INTEGER"],
+                )],
+                vec![],
+            )
             .await
-            .unwrap();
+            .unwrap()
+            .errors;
         assert!(errors["late-work"].is_empty(), "{errors:?}");
         let errors = ro
-            .check_extension_models(vec![late(
-                "SELECT id, title FROM ref('task')",
-                &["id INTEGER", "title TEXT"],
-            )])
+            .check_extension_models(
+                vec![late(
+                    "SELECT id, title FROM ref('task')",
+                    &["id INTEGER", "title TEXT"],
+                )],
+                vec![],
+            )
             .await
-            .unwrap();
+            .unwrap()
+            .errors;
         let joined = errors["late-work"].join("\n");
         assert!(joined.contains("column `title` added"), "{joined}");
         assert!(joined.contains("bump its version"), "{joined}");

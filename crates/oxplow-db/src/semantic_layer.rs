@@ -76,6 +76,17 @@ pub struct SqlQuery {
     /// before it runs and dropped after, on every path (the gateway's
     /// `metric_grid()` points, P4.5).
     pub temp: Vec<TempTable>,
+    /// Temp views this query reads, created in order on its connection
+    /// after its temp tables and dropped before them (a check's overlay:
+    /// an extension's models and entities that aren't published, P7.C6).
+    pub temp_views: Vec<TempView>,
+}
+
+/// A temp view a query reads: its name and `SELECT`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TempView {
+    pub name: String,
+    pub sql: String,
 }
 
 /// A temp table a query reads: its name, column names (untyped — SQLite
@@ -107,6 +118,7 @@ impl SqlQuery {
             raw: false,
             stream: None,
             temp: Vec::new(),
+            temp_views: Vec::new(),
         }
     }
 
@@ -241,8 +253,9 @@ impl SemanticLayer {
     pub async fn check_extension_models(
         &self,
         extensions: Vec<crate::models::ExtensionModels>,
-    ) -> Result<std::collections::BTreeMap<String, Vec<String>>, DomainError> {
-        self.db.check_extension_models(extensions).await
+        stubs: Vec<crate::models::EntityStub>,
+    ) -> Result<crate::models::CheckedModels, DomainError> {
+        self.db.check_extension_models(extensions, stubs).await
     }
 }
 
@@ -648,6 +661,43 @@ fn cell(v: rusqlite::types::ValueRef<'_>) -> SqlCell {
     }
 }
 
+/// A query's temp views on its connection, dropped (last first) with this
+/// guard.
+struct TempViews<'c> {
+    conn: &'c rusqlite::Connection,
+    names: Vec<String>,
+}
+
+impl<'c> TempViews<'c> {
+    fn create(conn: &'c rusqlite::Connection, views: &[TempView]) -> Result<Self, DomainError> {
+        let mut guard = Self {
+            conn,
+            names: Vec::new(),
+        };
+        for v in views {
+            conn.execute_batch(&format!(
+                "CREATE TEMP VIEW \"{}\" AS {}",
+                v.name.replace('"', "\"\""),
+                v.sql
+            ))
+            .map_err(|e| DomainError::Invalid(format!("query_sql: `{}`: {e}", v.name)))?;
+            guard.names.push(v.name.clone());
+        }
+        Ok(guard)
+    }
+}
+
+impl Drop for TempViews<'_> {
+    fn drop(&mut self) {
+        for name in self.names.iter().rev() {
+            let sql = format!("DROP VIEW IF EXISTS temp.\"{}\"", name.replace('"', "\"\""));
+            if let Err(e) = self.conn.execute_batch(&sql) {
+                tracing::error!(error = %e, "query_sql: could not drop a temp view");
+            }
+        }
+    }
+}
+
 /// A query's temp tables on its connection, dropped with this guard.
 struct TempTables<'c> {
     conn: &'c rusqlite::Connection,
@@ -717,6 +767,7 @@ fn run_read_only(
     // Temp tables first — creating them is a write — then the read
     // session; locals drop in reverse, so the session ends before they go.
     let _temp = TempTables::create(conn, &query.temp)?;
+    let _views = TempViews::create(conn, &query.temp_views)?;
     let access = if query.raw {
         Access::Record
     } else {
@@ -805,6 +856,7 @@ pub fn read_on(
 pub fn check_query_on(conn: &rusqlite::Connection, query: &SqlQuery) -> Result<Reads, DomainError> {
     crate::sql_tokens::check_single_read(&query.sql)?;
     let _temp = TempTables::create(conn, &query.temp)?;
+    let _views = TempViews::create(conn, &query.temp_views)?;
     let access = if query.raw {
         Access::Record
     } else {

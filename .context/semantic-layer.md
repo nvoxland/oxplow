@@ -181,6 +181,11 @@ underscores — the entity views' formula). Inside one:
 - `source()` reads only the extension's own `ext__<ext>__*` tables —
   oxplow's data comes through `ref()`.
 
+A check (`models::check_extensions`, P7.C6) runs the same pass with temp
+views, standing an empty view in for each declared entity that hasn't
+synced, and hands back what it created for the check's other queries to
+read (`SqlQuery::temp_views`) — see extensions.md "The SDK".
+
 `models::compile_extensions` compiles every enabled extension's models in
 one pass after the core ones: the last pass's extension views go, the
 rest publish in dependency order, each in a savepoint — a model that

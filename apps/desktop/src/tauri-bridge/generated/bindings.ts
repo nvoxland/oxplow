@@ -1574,8 +1574,8 @@ export type CheckReport_Deserialize = {
 	// `file:line: what — fix` lines.
 	errors: string[],
 	warnings: string[],
-	// Whether every lens and advisory was dry-run against a database.
-	sqlChecked: boolean,
+	// What its SQL was dry-run against.
+	dryRun: DryRun,
 	extension: Extension_Deserialize,
 };
 
@@ -1587,8 +1587,8 @@ export type CheckReport_Serialize = {
 	// `file:line: what — fix` lines.
 	errors: string[],
 	warnings: string[],
-	// Whether every lens and advisory was dry-run against a database.
-	sqlChecked: boolean,
+	// What its SQL was dry-run against.
+	dryRun: DryRun,
 	extension: Extension_Serialize,
 };
 
@@ -2243,6 +2243,16 @@ export type Divergence = {
 	overlapping_files: string[],
 	readiness: MergeReadiness,
 };
+
+/**
+ *  The database a check dry-runs an extension's SQL on. It always has one
+ *  (P7.C6): what it declares but hasn't published stands in either way.
+ */
+export type DryRun = 
+// The project's own (its synced data, read-only).
+"project" | 
+// A fresh, empty one: no usable project database.
+"emptyDatabase";
 
 // Everything installing or updating an extension would change.
 export type EffectReport = {

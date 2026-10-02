@@ -7,7 +7,9 @@
 //! app joins them — the metric functions (`metric_grid()`, P4.5;
 //! `metric_findings()`, P4.8) and model freshness (P4.6).
 
-use oxplow_db::{Database, Reads, SemanticLayer, SqlCell, SqlQuery, SqlQueryResult, TempTable};
+use oxplow_db::{
+    Database, Reads, SemanticLayer, SqlCell, SqlQuery, SqlQueryResult, TempTable, TempView,
+};
 use oxplow_domain::DomainError;
 
 #[derive(Clone)]
@@ -18,6 +20,9 @@ pub struct SqlGateway {
     engine: Option<std::sync::Arc<crate::metric_engine::MetricEngine>>,
     /// When each model last changed, for a result's `freshness` (P4.6).
     watermarks: Option<std::sync::Arc<crate::models_changed::ModelWatermarks>>,
+    /// Temp views every query recreates on its connection: a check's
+    /// overlay of what an extension declares but hasn't published (P7.C6).
+    overlay: std::sync::Arc<Vec<TempView>>,
 }
 
 impl SqlGateway {
@@ -26,7 +31,17 @@ impl SqlGateway {
             layer: SemanticLayer::new(db),
             engine: None,
             watermarks: None,
+            overlay: std::sync::Arc::new(Vec::new()),
         }
+    }
+
+    /// This gateway with `views` created (in order) for every query it
+    /// runs or checks — what a check reads an extension's unpublished
+    /// models and unsynced entities through.
+    pub fn with_overlay(&self, views: Vec<TempView>) -> Self {
+        let mut out = self.clone();
+        out.overlay = std::sync::Arc::new(views);
+        out
     }
 
     /// Say how fresh each read model is (P4.6).
@@ -62,6 +77,7 @@ impl SqlGateway {
             Box::pin(self.materialize(&query.sql, query.stream, true)).await?;
         query.sql = sql;
         query.temp.extend(temp);
+        query.temp_views.extend(self.overlay.iter().cloned());
         let mut out = self.layer.run(query).await?;
         out.reads.measures = measures;
         Ok(self.fresh(out))
@@ -125,22 +141,22 @@ impl SqlGateway {
         // The metrics are resolved (a dimension checked) but not read; the
         // query compiles against empty tables.
         let (rewritten, temp, measures) = Box::pin(self.materialize(sql, None, false)).await?;
-        if temp.is_empty() {
-            return self.layer.check(sql).await;
-        }
         let mut q = SqlQuery::new(rewritten).limit(Some(1));
         q.temp = temp;
+        q.temp_views = self.overlay.to_vec();
         let mut reads = self.layer.check_with(q).await?;
         reads.measures = measures;
         Ok(reads)
     }
 
-    /// Check extensions' models compile, publishing nothing (P4.9).
+    /// Check extensions' models compile, publishing nothing (P4.9); `stubs`
+    /// stand in for declared entities that haven't synced (P7.C6).
     pub async fn check_extension_models(
         &self,
         extensions: Vec<oxplow_db::models::ExtensionModels>,
-    ) -> Result<std::collections::BTreeMap<String, Vec<String>>, DomainError> {
-        self.layer.check_extension_models(extensions).await
+        stubs: Vec<oxplow_db::models::EntityStub>,
+    ) -> Result<oxplow_db::models::CheckedModels, DomainError> {
+        self.layer.check_extension_models(extensions, stubs).await
     }
 
     /// The name of every view in the database.

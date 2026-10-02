@@ -641,15 +641,26 @@ and one calling MCP read identical `file:line: what — fix` lines.
   future `plugin test`), and for a lens `lenses/<name>.yaml` (open tasks
   in the viewer's stream). It refuses an existing folder, a bad name and
   a non-ref origin; what it writes passes `check` with no warnings.
-- **`check(root, name, catalog, layer: Option<&SemanticLayer>)`** is
-  `catalog.named` (manifest shape, lifecycle, cross-refs, lens shape)
-  plus, with a layer, `extensions::validate_extension`'s dry run of the
-  extension's models (P4.9: compiled as temp views beside the other
-  enabled extensions', on the read-only database — resolution, lineage,
-  and the contract, so a changed contract at a published version fails
-  here before it publishes; `models::check_extensions`) and of every
-  lens and advisory. It returns a `CheckReport { ok, errors, warnings,
-  sql_checked, extension }`; `render_findings` prints it as text
+- **`check(root, name, catalog, layer: Option<&SqlGateway>)`** is
+  `catalog.named` (manifest shape, lifecycle, cross-refs, lens shape;
+  a Starlark collector's script must parse and define `transform`, an
+  error at the collector's line) plus `extensions::validate_extension`'s
+  dry run — **always** (P7.C6): on `layer` (the project's database,
+  read-only), else on a fresh `Database::in_memory()` (`DryRun::{Project,
+  EmptyDatabase}`). The dry run first compiles, in a rolled-back read,
+  the extension's models beside the other enabled extensions' (P4.9 —
+  resolution, lineage, and the contract, so a changed contract at a
+  published version fails here before it publishes) over **empty
+  stand-ins for every declared entity that hasn't synced**
+  (`models::EntityStub`: a typed temp table under the entity's view);
+  `models::check_extensions` returns those views (`CheckedModels.views`).
+  Every later query of the check — command inputs and examples,
+  advisories, lenses — reads through them as an **overlay**
+  (`SqlGateway::with_overlay`, `SqlQuery::temp_views`: recreated on the
+  query's own connection and dropped after), so a fresh collector →
+  model → lens checks clean before its first sync and a lens may read
+  its own unpublished model. It returns a `CheckReport { ok, errors,
+  warnings, dry_run, extension }`; `render_findings` prints it as text
   (`error: <file:line …>` lines then a one-line summary) or JSON.
 - **`migrate(root, name)`** writes `migrate_v1::migrate_v1_to_v2` to the
   file; `changed: false` when it was already v2.

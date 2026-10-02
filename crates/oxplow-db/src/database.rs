@@ -360,12 +360,14 @@ impl Database {
     }
 
     /// Check the extensions' models without publishing them — works on a
-    /// read-only database ([`crate::models::check_extensions`]).
+    /// read-only database ([`crate::models::check_extensions`]); `stubs`
+    /// stand in for declared entities that haven't synced.
     pub async fn check_extension_models(
         &self,
         extensions: Vec<crate::models::ExtensionModels>,
-    ) -> Result<std::collections::BTreeMap<String, Vec<String>>, oxplow_domain::DomainError> {
-        self.read(move |tx| crate::models::check_extensions(tx, &extensions))
+        stubs: Vec<crate::models::EntityStub>,
+    ) -> Result<crate::models::CheckedModels, oxplow_domain::DomainError> {
+        self.read(move |tx| crate::models::check_extensions(tx, &extensions, &stubs))
             .await
     }
 

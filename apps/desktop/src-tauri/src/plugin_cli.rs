@@ -319,7 +319,7 @@ mod tests {
         let (code, out, err) = cli(&["check", folder.to_str().unwrap()]);
         assert_eq!(code, 0, "{out}{err}");
         assert!(out.contains("demo: 0 errors, 0 warnings"), "{out}");
-        assert!(out.contains("lens SQL was not dry-run"), "{out}");
+        assert!(out.contains("dry-run on an empty database"), "{out}");
         // Same by name with --root, and as JSON.
         let (code, out, _) = cli(&["check", "demo", "--root", root, "--json"]);
         assert_eq!(code, 0);
@@ -394,7 +394,7 @@ mod tests {
         let (code, out, err) = cli(&["check", "demo", "--root", root]);
         assert_eq!(code, 0, "the manifest itself is fine: {out}{err}");
         assert!(err.contains("could not open the project database"), "{err}");
-        assert!(out.contains("lens SQL was not dry-run"), "{out}");
+        assert!(out.contains("dry-run on an empty database"), "{out}");
         assert_eq!(
             std::fs::read_to_string(dir.path().join(".oxplow/local.sqlite")).unwrap(),
             "not a database",

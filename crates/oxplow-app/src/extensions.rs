@@ -1283,17 +1283,31 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             let line = key_line(&manifest, "collectors");
             ext.errors
                 .extend(errors.into_iter().map(|e| at(&file, line, e)));
-            // A script or program the collector runs must be in the folder.
+            // A script or program the collector runs must be in the folder,
+            // and a Starlark script must parse and define `transform`.
             for c in collectors {
-                match c.entry.as_deref() {
-                    Some(entry) if files.read(entry).is_none() => ext.errors.push(at(
+                let c_line = entry_line(&manifest, "collectors", "id", &c.id).or(line);
+                match c.entry.as_deref().map(|entry| (entry, files.read(entry))) {
+                    Some((entry, None)) => ext.errors.push(at(
                         &file,
-                        line,
+                        c_line,
                         format!(
                             "collector `{}`: entry `{entry}` isn't in the extension",
                             c.id
                         ),
                     )),
+                    Some((entry, Some(script)))
+                        if c.runtime == oxplow_config::collectors::CollectorRuntime::Starlark =>
+                    {
+                        match oxplow_collect_plugin::runtime::check_starlark(entry, &script) {
+                            Ok(()) => ext.collectors.push(c),
+                            Err(e) => ext.errors.push(at(
+                                &file,
+                                c_line,
+                                format!("collector `{}`: `{entry}` {e}", c.id),
+                            )),
+                        }
+                    }
                     _ => ext.collectors.push(c),
                 }
             }
@@ -2449,8 +2463,30 @@ fn provider_command_schema(
         .map(|c| c.input_schema)
 }
 
-/// Dry-run a loaded extension's models, advisories and lenses, appending
-/// what's wrong to its `errors`. `root` names sources for an unsynced view.
+/// The empty stand-ins a check gives `ext`'s declared entities (P7.C6).
+fn entity_stubs(ext: &Extension) -> Vec<oxplow_db::models::EntityStub> {
+    ext.collectors
+        .iter()
+        .flat_map(|c| &c.entities)
+        .map(|e| oxplow_db::models::EntityStub {
+            owner: ext.name.clone(),
+            name: e.name.clone(),
+            view: e.view.clone(),
+            columns: e
+                .columns
+                .iter()
+                .map(|c| (c.name.clone(), crate::collector_runner::stored(c.col_type)))
+                .collect(),
+        })
+        .collect()
+}
+
+/// Dry-run a loaded extension's models, commands, advisories and lenses,
+/// appending what's wrong to its `errors`. `root` names sources for an
+/// unsynced view. What it declares but hasn't published — its collectors'
+/// entities (empty), its models, the other enabled extensions' — is an
+/// overlay of temp views every query reads through (P7.C6), so a fresh
+/// extension checks clean before its first sync.
 async fn check_extension(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
@@ -2460,30 +2496,39 @@ async fn check_extension(
 ) -> LensRuns {
     check_commands(ext, root, commands);
     check_components(ext, commands);
-    crate::extension_commands::check_extension_commands(layer, ext, commands).await;
-    // Its models, beside the other enabled extensions' (a ref() may name
-    // theirs): compiled as temp views, published nowhere (P4.9).
-    if !ext.models.is_empty() {
-        let mut models: Vec<oxplow_db::models::ExtensionModels> = catalog
-            .get(root)
-            .iter()
-            .filter(|e| e.enabled && e.name != ext.name && !e.models.is_empty())
-            .map(|e| oxplow_db::models::ExtensionModels {
-                extension: e.name.clone(),
-                sources: e.models.clone(),
-            })
-            .collect();
-        models.push(oxplow_db::models::ExtensionModels {
-            extension: ext.name.clone(),
-            sources: ext.models.clone(),
-        });
-        match layer.check_extension_models(models).await {
-            Ok(mut errors) => ext
-                .errors
-                .extend(errors.remove(&ext.name).unwrap_or_default()),
-            Err(e) => ext.errors.push(format!("models: {e}")),
+    let others: Vec<Extension> = catalog
+        .get(root)
+        .iter()
+        .filter(|e| e.enabled && e.name != ext.name)
+        .cloned()
+        .collect();
+    let models: Vec<oxplow_db::models::ExtensionModels> = others
+        .iter()
+        .chain(std::iter::once(&*ext))
+        .filter(|e| !e.models.is_empty())
+        .map(|e| oxplow_db::models::ExtensionModels {
+            extension: e.name.clone(),
+            sources: e.models.clone(),
+        })
+        .collect();
+    let stubs: Vec<oxplow_db::models::EntityStub> = others
+        .iter()
+        .chain(std::iter::once(&*ext))
+        .flat_map(entity_stubs)
+        .collect();
+    let overlay = match layer.check_extension_models(models, stubs).await {
+        Ok(mut checked) => {
+            ext.errors
+                .extend(checked.errors.remove(&ext.name).unwrap_or_default());
+            checked.views
         }
-    }
+        Err(e) => {
+            ext.errors.push(format!("models: {e}"));
+            Vec::new()
+        }
+    };
+    let layer = &layer.with_overlay(overlay);
+    crate::extension_commands::check_extension_commands(layer, ext, commands).await;
     for a in ext.advisories.clone() {
         let run = layer
             .run(
@@ -2519,7 +2564,7 @@ async fn check_extension(
     for lens in ext.lenses.clone() {
         let id = lens.id.clone();
         match &runs[&lens.slug] {
-            Err(e) => ext.errors.push(explain_unsynced(catalog, root, e)),
+            Err(e) => ext.errors.push(e.clone()),
             Ok(run) => {
                 let cols = &run.result.columns;
                 for (block, k) in run.lens.role_columns() {
@@ -4160,14 +4205,12 @@ empty: No tasks.
             msg.contains("v_gh_pr") && msg.contains("prs") && msg.contains("hasn't been collected"),
             "{msg}"
         );
+        // A check stands an empty view in for the entity (P7.C6): the
+        // lens is fine before its first sync.
         let e = validate_extension(&sl, &cat(), dir.path(), "gh", None)
             .await
             .unwrap();
-        assert!(
-            e.errors[0].contains("hasn't been collected"),
-            "{:?}",
-            e.errors
-        );
+        assert!(e.errors.is_empty(), "{:?}", e.errors);
     }
 
     /// P7.C2: a lens over a disabled collector's view says so — its rows
@@ -4476,6 +4519,109 @@ empty: No tasks.
         assert!(board.lenses.is_empty(), "the broken grid is dropped");
     }
 
+    /// The tally extension: a starlark collector declaring entity `thing`,
+    /// a model over it, lenses over both, and a command reading the model.
+    fn write_tally(root: &Path, script: &str) {
+        write(
+            root,
+            "oxplow/extensions/tally/extension.yaml",
+            "manifest: 2
+name: tally
+intent: { purpose: x, examples: [{ name: a }] }
+collectors:
+  - id: things
+    runtime: starlark
+    entry: collectors/things.star
+    input: \"SELECT id FROM v_task\"
+    entities:
+      - { name: thing, key: id, columns: { id: int, label: text } }
+models:
+  - name: labelled
+    version: 1
+    description: Labelled things.
+    columns:
+      - { name: id, type: INTEGER, doc: The thing. }
+      - { name: label, type: TEXT, doc: Its label. }
+commands:
+  - name: note
+    summary: Note a thing.
+    input_schema: { type: object, required: [id], properties: { id: { type: integer } } }
+    entry: handlers/note.star
+    input: \"SELECT id, label FROM v_tally_labelled WHERE id = :id\"
+",
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/collectors/things.star",
+            script,
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/models/labelled.sql",
+            "SELECT id, label FROM ref('thing') WHERE label IS NOT NULL\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/handlers/note.star",
+            "def transform(x):\n    return {\"commands\": []}\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/lenses/labelled.yaml",
+            "title: Labelled\nquery: SELECT id, label FROM v_tally_labelled\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/tally/lenses/things.yaml",
+            "title: Things\nquery: SELECT id, label FROM v_tally_thing\n",
+        );
+    }
+
+    /// P7.C6: a check sees what the extension declares before it ever ran
+    /// or published — its collectors' entities (empty stand-ins) and its
+    /// own models (compiled for the check) — from its lenses and command
+    /// inputs, on a database that has neither.
+    #[tokio::test]
+    async fn a_check_sees_the_extensions_own_models_and_unsynced_entities() {
+        let dir = tempfile::tempdir().unwrap();
+        write_tally(
+            dir.path(),
+            "def transform(x):\n    return {\"entities\": {\"thing\": []}}\n",
+        );
+        let v = validate_extension(&layer().await, &cat(), dir.path(), "tally", None)
+            .await
+            .unwrap();
+        assert!(v.errors.is_empty(), "{:?}", v.errors);
+
+        // Still a real check: a column the model doesn't have is an error.
+        write(
+            dir.path(),
+            "oxplow/extensions/tally/lenses/labelled.yaml",
+            "title: Labelled\nquery: SELECT id, colour FROM v_tally_labelled\n",
+        );
+        let v = validate_extension(&layer().await, &cat(), dir.path(), "tally", None)
+            .await
+            .unwrap();
+        let errs = v.errors.join("\n");
+        assert!(errs.contains("colour"), "{errs}");
+    }
+
+    /// P7.C6: a starlark collector's script is parsed at load — one that
+    /// doesn't define `transform` is an error at the collector's line.
+    #[test]
+    fn a_collector_script_without_transform_is_an_error_at_its_line() {
+        let dir = tempfile::tempdir().unwrap();
+        write_tally(dir.path(), "def other(x):\n    return {}\n");
+        let ext = only(dir.path(), "tally");
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("extension.yaml:5:")
+                && errs.contains("collector `things`")
+                && errs.contains("must define `transform`"),
+            "{errs}"
+        );
+    }
+
     #[tokio::test]
     async fn bundled_extensions_load_validate_and_mount_slots() {
         let dir = tempfile::tempdir().unwrap();
@@ -4517,19 +4663,9 @@ empty: No tasks.
             .await
             .unwrap();
         assert!(a.errors.is_empty(), "{:?}", a.errors);
-        // Every bundled lens's SQL runs against a real schema — with the
-        // extension's models published, as boot publishes them.
-        let db = Database::in_memory();
-        let published = db
-            .compile_extension_models(vec![oxplow_db::models::ExtensionModels {
-                extension: review.name.clone(),
-                sources: review.models.clone(),
-            }])
-            .await
-            .unwrap();
-        assert!(published.values().all(|e| e.is_empty()), "{published:?}");
-        let layer = crate::sql_gateway::SqlGateway::new(db);
-        let v = validate_extension(&layer, &cat(), dir.path(), "oxplow-review", None)
+        // Every bundled lens's SQL runs against a real schema — its own
+        // models compiled for the check, nothing published.
+        let v = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-review", None)
             .await
             .unwrap();
         assert!(v.errors.is_empty(), "{:?}", v.errors);

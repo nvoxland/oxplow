@@ -612,7 +612,7 @@ pub fn coerce_rows(
     Ok(out)
 }
 
-fn stored(t: ColumnType) -> StoredType {
+pub(crate) fn stored(t: ColumnType) -> StoredType {
     match t {
         ColumnType::Int | ColumnType::Bool => StoredType::Integer,
         ColumnType::Real => StoredType::Real,

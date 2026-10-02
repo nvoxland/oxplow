@@ -296,15 +296,27 @@ pub struct CheckReport {
     /// `file:line: what — fix` lines.
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
-    /// Whether every lens and advisory was dry-run against a database.
-    pub sql_checked: bool,
+    /// What its SQL was dry-run against.
+    pub dry_run: DryRun,
     pub extension: Extension,
+}
+
+/// The database a check dry-runs an extension's SQL on. It always has one
+/// (P7.C6): what it declares but hasn't published stands in either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DryRun {
+    /// The project's own (its synced data, read-only).
+    Project,
+    /// A fresh, empty one: no usable project database.
+    EmptyDatabase,
 }
 
 /// Load `name` under `root` and report everything wrong with it: the
 /// manifest's shape and lifecycle, every cross-reference, every lens's
-/// shape, and — with a `layer` — a dry run of every lens and advisory
-/// against the semantic layer. This is what `validate_extension` returns
+/// shape, and a dry run of its models, commands, lenses and advisories
+/// against the semantic layer — `layer` (the project's), else a fresh
+/// in-memory database. This is what `validate_extension` returns
 /// and what `oxplow plugin check` prints. `commands` (the running app's
 /// registry) checks launcher command entries; without it they're reported
 /// unchecked.
@@ -315,25 +327,26 @@ pub async fn check(
     layer: Option<&SqlGateway>,
     commands: Option<extensions::CommandSchemas<'_>>,
 ) -> Result<CheckReport, SdkError> {
-    let extension = match layer {
-        Some(layer) => extensions::validate_extension(layer, catalog, root, name, commands).await,
-        // No layer for a dry run, but launcher commands need none: check
-        // them against the registry, or report them unchecked.
-        None => catalog.named(root, name).map(|mut ext| {
-            extensions::check_commands(&mut ext, root, commands);
-            ext
-        }),
-    }
-    .map_err(|e| match e {
-        DomainError::NotFound => SdkError::NotFound(name.to_string()),
-        other => SdkError::Domain(other),
-    })?;
+    let empty;
+    let (layer, dry_run) = match layer {
+        Some(layer) => (layer, DryRun::Project),
+        None => {
+            empty = SqlGateway::new(oxplow_db::Database::in_memory());
+            (&empty, DryRun::EmptyDatabase)
+        }
+    };
+    let extension = extensions::validate_extension(layer, catalog, root, name, commands)
+        .await
+        .map_err(|e| match e {
+            DomainError::NotFound => SdkError::NotFound(name.to_string()),
+            other => SdkError::Domain(other),
+        })?;
     Ok(CheckReport {
         name: name.to_string(),
         ok: extension.errors.is_empty(),
         errors: extension.errors.clone(),
         warnings: extension.warnings.clone(),
-        sql_checked: layer.is_some(),
+        dry_run,
         extension,
     })
 }
@@ -372,10 +385,11 @@ pub fn render_findings(report: &CheckReport, format: Format) -> String {
                 out.push_str(w);
                 out.push('\n');
             }
-            let sql = if report.sql_checked {
-                "lenses and advisories dry-run against the project's database"
-            } else {
-                "lens SQL was not dry-run (no usable project database: open the project in oxplow, or use validate_extension)"
+            let sql = match report.dry_run {
+                DryRun::Project => "its SQL dry-run against the project's database",
+                DryRun::EmptyDatabase => {
+                    "its SQL dry-run on an empty database (no usable project database)"
+                }
             };
             out.push_str(&format!(
                 "{}: {} error{}, {} warning{}; {sql}\n",
@@ -484,7 +498,8 @@ mod tests {
             .unwrap();
         assert!(report.ok, "{}", render_findings(&report, Format::Text));
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
-        assert!(!report.sql_checked);
+        // No project database: the SQL still dry-runs, on an empty one.
+        assert_eq!(report.dry_run, DryRun::EmptyDatabase);
         assert_eq!(report.extension.manifest_version, 2);
         assert_eq!(
             report.extension.intent.as_ref().unwrap().origin.as_deref(),
@@ -494,6 +509,19 @@ mod tests {
         assert_eq!(report.extension.lenses[0].title, "Demo");
         let text = render_findings(&report, Format::Text);
         assert!(text.contains("demo: 0 errors, 0 warnings"), "{text}");
+        assert!(text.contains("dry-run on an empty database"), "{text}");
+        let lens = dir.path().join("oxplow/extensions/demo/lenses/demo.yaml");
+        let body = std::fs::read_to_string(&lens).unwrap();
+        std::fs::write(&lens, body.replace("FROM v_task", "FROM v_no_such_view")).unwrap();
+        let report = check(dir.path(), "demo", &ExtensionCatalog::new(), None, None)
+            .await
+            .unwrap();
+        assert!(
+            report.errors.join("\n").contains("v_no_such_view"),
+            "{:?}",
+            report.errors
+        );
+        std::fs::write(&lens, body).unwrap();
         // A second scaffold refuses to overwrite; bad names and origins refuse too.
         assert!(scaffold(dir.path(), Kind::Lens, "demo", None).is_err());
         assert!(scaffold(dir.path(), Kind::Lens, "Bad Name", None).is_err());

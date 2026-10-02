@@ -25,7 +25,7 @@ pub enum StoredType {
 }
 
 impl StoredType {
-    fn sql(self) -> &'static str {
+    pub fn sql(self) -> &'static str {
         match self {
             StoredType::Text => "TEXT",
             StoredType::Integer => "INTEGER",
