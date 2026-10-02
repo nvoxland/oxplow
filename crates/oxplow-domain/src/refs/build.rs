@@ -29,6 +29,11 @@ pub fn claim_ref(id: i64) -> String {
     format!("claim:{id}")
 }
 
+/// A collector, by its owner and id (`collector_run.owner`/`id`).
+pub fn collector_ref(owner: &str, id: &str) -> String {
+    format!("collector:{owner}/{id}")
+}
+
 /// A decision an agent recorded or oxplow inferred (`decision.id`).
 pub fn decision_ref(id: i64) -> String {
     format!("decision:{id}")

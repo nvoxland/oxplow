@@ -86,7 +86,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - All take an optional `stream_id`. Over MCP an omitted one is the
     caller's own stream (its header, else its thread's; the primary only
     for an anonymous caller), so an agent in a worktree sees the
-    extension it just wrote — the same for `preview_source`,
+    extension it just wrote — the same for `preview_collector`,
     `review_extension`, `install_extension`, `update_extension`,
     `run_lens_action` and `ensure_change` (tsk574). `site_search` is the
     exception by design: omitted, it searches every stream. The UI
@@ -177,17 +177,18 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       agent's input, never sent) — kit affordances, not declared. A
       compact strip and a grid's children (`toolbar={false}`) show no
       toolbar.
-    - Syncing a source is the command **`source.sync { extension, source }`**
-      (External, `Invokers::ALL`; `source_runner::SourceRunner::sync`,
+    - Running a collector is the command **`collector.sync { owner, id }`**
+      (External, `Invokers::ALL`; `collector_runner::CollectorRunner::sync`,
       which the scheduler uses too). It **never approves**: approving is
-      `source_runner::approve_reviewed` behind the UI-only
-      `approve_source` RPC (Settings → Data's Approve & Run approves, then
-      runs the command). MCP `run_source` runs the command as the agent.
+      `collector_runner::approve_reviewed` behind the UI-only
+      `approve_collector` RPC (Settings → Data's Approve & Run approves,
+      then runs the command). MCP `run_collector` runs the command as the
+      agent.
     - UI: `LensToolbar` and the row menu in `LensResultView.tsx`; logic in
       `lens/lensActions.ts` (`performLensAction`, `copyLens`,
       `addLensToContext`, `rowRecord`).
     - The GitHub example's PR lens has a Sync PRs action
-      (`command: source.sync`).
+      (`command: collector.sync`).
   - **Viz** (`LensResultView.tsx`): `table`, `list`, `number`, `markdown`,
     plus `bar` (`DailyBarChart`), `line` (`components/charts/TrendChart`,
     one chart per `chart.series`), `treemap` (two-level
@@ -253,7 +254,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       Data. Approvals are stored per machine outside the repo, MACed under
       a keychain key, and bound to a hash of that version of the program,
       so a changed script needs approving again (`exec_consent.rs`,
-      `source_runner.rs`; see [architecture.md](./architecture.md) → "A
+      `collector_runner.rs`; see [architecture.md](./architecture.md) → "A
       repo's config never runs a program without consent").
 - **Core explorer (stays in core, deliberately simple).**
   - **Explore Data** (`explore-data` page, `ExploreDataPage.tsx`):
@@ -1280,17 +1281,17 @@ tool list stable no matter how many extensions are installed.
   (tsk391).
 - `validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
-- `list_extensions`, `list_sources`, `run_source(extension, source_id)`
+- `list_extensions`, `list_collectors`, `run_collector(owner, id)`
   (never approves).
-- **Worktree streams: preview, don't run (tsk377).** Source data is
+- **Worktree streams: preview, don't run (tsk377).** Collected data is
   project-wide (one `ext__<ext>__<entity>` table), so a run (the
-  `source.sync` command over `SourceRunner::sync`, from any caller)
+  `collector.sync` command over `CollectorRunner::sync`, from any caller)
   always runs the **primary** worktree's copy. An agent
-  writing a source in a worktree stream checks it with MCP
-  `preview_source(extension, source_id, stream_id)`: `source_runner::
-  preview_source` runs that worktree's version through the same
-  `produce` step (same consent: an exec source needs a person's approval
-  of that exact hash; derived sources don't) and returns the coerced
+  writing a collector in a worktree stream checks it with MCP
+  `preview_collector(owner, id, stream_id)`: `collector_runner::
+  preview_collector` runs that worktree's version through the same
+  `produce` step (same consent: an exec collector needs a person's
+  approval of that exact hash; derived collectors don't) and returns the coerced
   rows per entity (first 50, plus totals), storing nothing and recording
   no run.
 

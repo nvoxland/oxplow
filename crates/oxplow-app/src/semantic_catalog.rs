@@ -66,8 +66,8 @@ pub async fn data_entities(
     }
     let published: BTreeSet<String> = out.iter().map(|e| e.name.clone()).collect();
     for ext in catalog.get(root).iter().filter(|e| e.enabled) {
-        for source in &ext.sources {
-            for e in &source.entities {
+        for collector in &ext.collectors {
+            for e in &collector.entities {
                 if published.contains(&e.view) {
                     continue;
                 }
@@ -77,8 +77,8 @@ pub async fn data_entities(
                     kind: "declared".into(),
                     description: if e.doc.is_empty() {
                         format!(
-                            "`{}` records from the `{}` source of extension `{}`.",
-                            e.name, source.id, ext.name
+                            "`{}` records from the `{}` collector of extension `{}`.",
+                            e.name, collector.id, ext.name
                         )
                     } else {
                         e.doc.clone()
@@ -94,7 +94,7 @@ pub async fn data_entities(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_db::{Database, EntityColumn, EntityTable, SqliteExtSourceStore, StoredType};
+    use oxplow_db::{Database, EntityColumn, EntityTable, SqliteCollectorStore, StoredType};
 
     /// tsk517: Settings → Data lists every published model with its count
     /// — a synced entity once, from the registry, with its doc — and a
@@ -129,7 +129,7 @@ mod tests {
         assert_eq!((pr[0].kind.as_str(), pr[0].rows), ("declared", None));
         assert_eq!(pr[0].description, "A pull request.");
 
-        SqliteExtSourceStore::new(db)
+        SqliteCollectorStore::new(db)
             .replace_rows(vec![(
                 EntityTable {
                     extension: "my-gh".into(),

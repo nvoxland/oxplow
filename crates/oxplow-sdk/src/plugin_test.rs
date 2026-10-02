@@ -503,11 +503,11 @@ async fn suite(
             &program.name,
             &version,
         )?;
-        let project = oxplow_app::source_runner::project_key(tmp.path());
+        let project = oxplow_app::collector_runner::project_key(tmp.path());
         for (name, value) in env_credentials(spec) {
             svc.secrets
                 .set(
-                    &oxplow_app::source_runner::credential_account(&project, &ext.name, &name),
+                    &oxplow_app::collector_runner::credential_account(&project, &ext.name, &name),
                     &value,
                 )
                 .map_err(|e| e.to_string())?;

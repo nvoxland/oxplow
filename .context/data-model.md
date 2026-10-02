@@ -1708,6 +1708,19 @@ the asset has one), `elapsed_ms`. Written by the runner after each
 recompute; read as `v_asset`. See [semantic-layer.md](./semantic-layer.md)
 "Assets".
 
+### `collector_run` — `SqliteCollectorStore` (`crates/oxplow-db/src/collector_store.rs`)
+
+V133 (P7.B3; replaced V75 `ext_source_state`, its rows copied). Each
+collector's last run: `owner` + `id` (the primary key; the owner is the
+declaring extension, `project` or `built-in`), `status` (`ok` / `error` /
+`needs_approval`), `last_run_at`, `error`, `row_counts_json` (rows per
+entity after the last good run), `cursor_json` (its opaque checkpoint)
+and `last_event_id` (the last trigger event it ran for; it never moves
+back). A failed run keeps the last good counts and cursor.
+`record_run_in` runs in the transaction that writes the run's rows and
+logs its `collector.synced@1`. Read as `v_collector_run`; see
+[semantic-layer.md](./semantic-layer.md) "Collectors".
+
 ### `provider_collector_state` — `SqliteProviderCollectorStore` (`crates/oxplow-db/src/provider_collector_store.rs`)
 
 V129 (P7.A3). Where each provider instance's collector left off:

@@ -9,7 +9,7 @@ let answer: () => Promise<unknown> = () => new Promise(() => {});
 mock.module("../api.js", () => ({
   ...realApi,
   listDataEntities: async () => [],
-  listSources: async () => [],
+  listCollectors: async () => [],
   listProjectPrograms: async () => [
     {
       kind: "provider",

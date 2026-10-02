@@ -149,7 +149,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     crate::indexer::register(state);
     crate::symbol_collector::register(state);
     state.event_pump.clone().spawn();
-    crate::source_runner::spawn_scheduler(state.clone());
+    crate::collector_runner::spawn_scheduler(state.clone());
     // Core's capability providers, before the registry publishes the
     // external ones it starts.
     if let Err(e) = crate::capabilities::publish_core(state).await {

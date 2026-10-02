@@ -35,6 +35,7 @@ pub mod code_intel;
 pub mod code_intel_conformance;
 pub mod code_quality_runner;
 pub mod collection;
+pub mod collector_runner;
 pub mod commands;
 pub mod commit_indexer;
 pub mod config_reactors;
@@ -57,7 +58,6 @@ pub mod extension_catalog;
 pub mod extension_commands;
 pub mod extension_effects;
 pub mod extension_models;
-pub mod extension_sources;
 pub mod extensions;
 pub mod file_ref_version;
 pub mod followup;
@@ -101,7 +101,6 @@ pub mod snapshot_capture_registry;
 pub mod snapshot_conformance;
 pub mod snapshot_content;
 pub mod snapshot_files;
-pub mod source_runner;
 pub mod sql_gateway;
 #[cfg(test)]
 mod stream_service_tests;
@@ -523,10 +522,10 @@ pub struct Services {
     pub nudge_store: Arc<SqliteAgentNudgeStore>,
     /// User-created dashboards (grids of metric tiles) — project-global (tsk138).
     pub dashboard_store: Arc<oxplow_db::SqliteDashboardStore>,
-    /// Extension-source entity data + run state (see `source_runner`).
-    pub ext_source_store: Arc<oxplow_db::SqliteExtSourceStore>,
-    /// Runs project sources (the `source.sync` command and the scheduler).
-    pub source_runner: source_runner::SourceRunner,
+    /// Extension-source entity data + run state (see `collector_runner`).
+    pub collector_store: Arc<oxplow_db::SqliteCollectorStore>,
+    /// Runs collectors (the `collector.sync` command and the scheduler).
+    pub collector_runner: collector_runner::CollectorRunner,
     /// An agent's answers in threads (`v_thread_answer`, `lens.show`).
     pub thread_answer_store: oxplow_db::SqliteThreadAnswerStore,
     /// The person's left-nav layout (P6.G1).
@@ -675,7 +674,7 @@ impl Services {
             provider_copies: oxplow_config::global_config_dir()
                 .unwrap_or_else(|| layout.state_dir.join("global-config"))
                 .join("provider-copies")
-                .join(source_runner::project_key(&layout.project_dir)),
+                .join(collector_runner::project_key(&layout.project_dir)),
             provider_call_timeout: std::time::Duration::from_secs(60),
             lsp_request_timeout: std::time::Duration::from_secs(30),
         };
@@ -764,7 +763,7 @@ impl Services {
         let attribution_store = Arc::new(oxplow_db::SqliteAttributionStore::new(db.clone()));
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let dashboard_store = Arc::new(oxplow_db::SqliteDashboardStore::new(db.clone()));
-        let ext_source_store = Arc::new(oxplow_db::SqliteExtSourceStore::new(db.clone()));
+        let collector_store = Arc::new(oxplow_db::SqliteCollectorStore::new(db.clone()));
         let reasoning_store = Arc::new(oxplow_db::SqliteReasoningStore::new(db.clone()));
         let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
         let git_store = Arc::new(oxplow_db::SqliteGitStore::new(db.clone()));
@@ -1062,7 +1061,7 @@ impl Services {
         let providers = providers::ProviderRegistry::new(
             providers::HostDeps {
                 project_dir: layout.project_dir.clone(),
-                project: source_runner::project_key(&layout.project_dir),
+                project: collector_runner::project_key(&layout.project_dir),
                 approvals: approvals.clone(),
                 secrets: machine.secrets.clone(),
                 config: config_arc.clone(),
@@ -1088,20 +1087,21 @@ impl Services {
             extension_catalog.clone(),
             layout.project_dir.clone(),
         ));
-        let source_runner = source_runner::SourceRunner {
+        let collector_runner = collector_runner::CollectorRunner {
             project_dir: layout.project_dir.clone(),
             approvals: approvals.clone(),
-            store: ext_source_store.clone(),
+            store: collector_store.clone(),
+            db: db.clone(),
+            schemas: event_log_store.schemas().clone(),
             secrets: machine.secrets.clone(),
             layer: sql.clone(),
             catalog: extension_catalog.clone(),
             ai: ai_compute.clone(),
             worktrees: worktrees.clone(),
-            events: event_bus.clone(),
         };
         commands
-            .register(source_runner::sync_command(source_runner.clone()))
-            .expect("source.sync registers");
+            .register(collector_runner::sync_command(collector_runner.clone()))
+            .expect("collector.sync registers");
         for command in commands::lens::commands(commands::lens::LensTarget {
             project_dir: layout.project_dir.clone(),
             catalog: extension_catalog.clone(),
@@ -1238,8 +1238,8 @@ impl Services {
             metrics,
             nudge_store,
             dashboard_store,
-            ext_source_store,
-            source_runner,
+            collector_store,
+            collector_runner,
             thread_answer_store,
             panel_layout_store,
             reasoning_store,
@@ -1492,6 +1492,8 @@ mod tests {
         assert_eq!(
             services.commands.external_commands(),
             [
+                // The collector's own program or script (P7.B3).
+                "collector.sync",
                 "git.cherry_pick",
                 "git.ignore",
                 "git.rebase",
@@ -1505,8 +1507,6 @@ mod tests {
                 "provider.enable",
                 // The provider process's collectors (P7.A3).
                 "provider.sync",
-                // The source's own program (P6.B1).
-                "source.sync",
                 "vcs.checkout_branch",
                 "vcs.commit",
                 "vcs.delete_branch",

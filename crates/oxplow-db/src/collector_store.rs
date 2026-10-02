@@ -68,26 +68,32 @@ pub enum EntityWrite {
     },
 }
 
-/// Last run of one source.
+/// Last run of one collector (`collector_run`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct SourceState {
-    pub extension: String,
-    pub source_id: String,
-    /// `ok` or `error`.
+pub struct CollectorRun {
+    /// The declaring extension, `project` or `built-in`.
+    pub owner: String,
+    pub id: String,
+    /// `ok`, `error` or `needs_approval`.
     pub status: String,
     pub last_run_at: String,
     pub error: Option<String>,
     /// Row counts per entity from the last successful run.
     pub row_counts: std::collections::BTreeMap<String, i64>,
+    /// The checkpoint the last successful run returned (opaque).
+    #[specta(type = Option<oxplow_domain::Json>)]
+    pub cursor: Option<serde_json::Value>,
+    /// The seq of the last trigger event it ran for.
+    pub last_event_id: Option<i64>,
 }
 
 #[derive(Clone)]
-pub struct SqliteExtSourceStore {
+pub struct SqliteCollectorStore {
     db: Database,
 }
 
-impl SqliteExtSourceStore {
+impl SqliteCollectorStore {
     pub fn new(db: Database) -> Self {
         Self { db }
     }
@@ -108,83 +114,40 @@ impl SqliteExtSourceStore {
         .map(|_| ())
     }
 
-    /// Write one source run's entities, atomically: on any error nothing
+    /// Write one run's entities, atomically: on any error nothing
     /// changes. Returns each entity's row count afterwards, in order.
     pub async fn write_rows(
         &self,
         entities: Vec<(EntityTable, EntityWrite)>,
     ) -> Result<Vec<i64>, DomainError> {
-        for (t, _) in &entities {
-            validate_table(t)?;
-        }
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(map_sql_err)?;
-                let mut counts = Vec::with_capacity(entities.len());
-                for (t, write) in &entities {
-                    write_entity(&tx, t, write)?;
-                    counts.push(
-                        tx.query_row(
-                            &format!("SELECT count(*) FROM {}", quote(&table_name(t))),
-                            [],
-                            |r| r.get(0),
-                        )
-                        .map_err(map_sql_err)?,
-                    );
-                }
-                tx.commit().map_err(map_sql_err)?;
-                Ok(counts)
-            })
+            .transaction(move |tx| write_rows_tx(tx, &entities))
             .await
     }
 
-    /// Record a source run's outcome.
-    pub async fn record_run(&self, state: SourceState) -> Result<(), DomainError> {
-        let counts = serde_json::to_string(&state.row_counts)
-            .map_err(|e| DomainError::Storage(format!("row counts: {e}")))?;
+    /// Record a collector run's outcome. A failed run keeps the last good
+    /// counts and checkpoint; `last_event_id` only moves forward.
+    pub async fn record_run(&self, run: CollectorRun) -> Result<(), DomainError> {
+        self.db.call(move |conn| record_run_in(conn, &run)).await
+    }
+
+    /// One collector's last run, if it has run.
+    pub async fn run_of(&self, owner: &str, id: &str) -> Result<Option<CollectorRun>, DomainError> {
+        let (owner, id) = (owner.to_string(), id.to_string());
         self.db
             .call(move |conn| {
-                conn.execute(
-                    "INSERT INTO ext_source_state (extension, source_id, status, last_run_at, error, row_counts_json)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                     ON CONFLICT (extension, source_id) DO UPDATE SET
-                       status = excluded.status, last_run_at = excluded.last_run_at,
-                       error = excluded.error,
-                       -- keep the last good counts when a run fails
-                       row_counts_json = CASE WHEN excluded.status = 'ok'
-                         THEN excluded.row_counts_json ELSE ext_source_state.row_counts_json END",
-                    rusqlite::params![
-                        state.extension,
-                        state.source_id,
-                        state.status,
-                        state.last_run_at,
-                        state.error,
-                        counts
-                    ],
-                )
-                .map(|_| ())
+                let mut st = conn.prepare(&format!("{RUN_SELECT} WHERE owner = ?1 AND id = ?2"))?;
+                let mut rows = st.query_map([&owner, &id], run_row)?;
+                rows.next().transpose()
             })
             .await
     }
 
-    pub async fn list_states(&self) -> Result<Vec<SourceState>, DomainError> {
+    pub async fn list_runs(&self) -> Result<Vec<CollectorRun>, DomainError> {
         self.db
             .call(|conn| {
-                let mut st = conn.prepare(
-                    "SELECT extension, source_id, status, last_run_at, error, row_counts_json
-                     FROM ext_source_state ORDER BY extension, source_id",
-                )?;
-                let rows = st.query_map([], |r| {
-                    let counts: String = r.get(5)?;
-                    Ok(SourceState {
-                        extension: r.get(0)?,
-                        source_id: r.get(1)?,
-                        status: r.get(2)?,
-                        last_run_at: r.get(3)?,
-                        error: r.get(4)?,
-                        row_counts: serde_json::from_str(&counts).unwrap_or_default(),
-                    })
-                })?;
+                let mut st = conn.prepare(&format!("{RUN_SELECT} ORDER BY owner, id"))?;
+                let rows = st.query_map([], run_row)?;
                 rows.collect()
             })
             .await
@@ -225,12 +188,87 @@ impl SqliteExtSourceStore {
                     tx.execute_batch(&format!("DROP TABLE IF EXISTS {}", quote(&table)))
                         .map_err(map_sql_err)?;
                 }
-                tx.execute("DELETE FROM ext_source_state WHERE extension = ?1", [&ext])
+                tx.execute("DELETE FROM collector_run WHERE owner = ?1", [&ext])
                     .map_err(map_sql_err)?;
                 tx.commit().map_err(map_sql_err)
             })
             .await
     }
+}
+
+/// Write entities on a caller's transaction (a collector run commits its
+/// rows, its run state and its `collector.synced` event together).
+/// Returns each entity's row count afterwards, in order.
+pub fn write_rows_tx(
+    tx: &rusqlite::Transaction<'_>,
+    entities: &[(EntityTable, EntityWrite)],
+) -> Result<Vec<i64>, DomainError> {
+    for (t, _) in entities {
+        validate_table(t)?;
+    }
+    let mut counts = Vec::with_capacity(entities.len());
+    for (t, write) in entities {
+        write_entity(tx, t, write)?;
+        counts.push(
+            tx.query_row(
+                &format!("SELECT count(*) FROM {}", quote(&table_name(t))),
+                [],
+                |r| r.get(0),
+            )
+            .map_err(map_sql_err)?,
+        );
+    }
+    Ok(counts)
+}
+
+const RUN_SELECT: &str =
+    "SELECT owner, id, status, last_run_at, error, row_counts_json, cursor_json, last_event_id
+     FROM collector_run";
+
+fn run_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CollectorRun> {
+    let counts: String = r.get(5)?;
+    let cursor: Option<String> = r.get(6)?;
+    Ok(CollectorRun {
+        owner: r.get(0)?,
+        id: r.get(1)?,
+        status: r.get(2)?,
+        last_run_at: r.get(3)?,
+        error: r.get(4)?,
+        row_counts: serde_json::from_str(&counts).unwrap_or_default(),
+        cursor: cursor.and_then(|c| serde_json::from_str(&c).ok()),
+        last_event_id: r.get(7)?,
+    })
+}
+
+/// Upsert one collector's run on `conn` — a caller's transaction when
+/// the run's event is logged with it.
+pub fn record_run_in(conn: &rusqlite::Connection, run: &CollectorRun) -> rusqlite::Result<()> {
+    let counts = serde_json::to_string(&run.row_counts).unwrap_or_else(|_| "{}".into());
+    let cursor = run.cursor.as_ref().map(|c| c.to_string());
+    conn.execute(
+        "INSERT INTO collector_run (owner, id, status, last_run_at, error, row_counts_json, cursor_json, last_event_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT (owner, id) DO UPDATE SET
+           status = excluded.status, last_run_at = excluded.last_run_at,
+           error = excluded.error,
+           -- a failed run keeps the last good counts and checkpoint
+           row_counts_json = CASE WHEN excluded.status = 'ok'
+             THEN excluded.row_counts_json ELSE collector_run.row_counts_json END,
+           cursor_json = CASE WHEN excluded.status = 'ok'
+             THEN coalesce(excluded.cursor_json, collector_run.cursor_json) ELSE collector_run.cursor_json END,
+           last_event_id = max(coalesce(excluded.last_event_id, 0), coalesce(collector_run.last_event_id, 0))",
+        rusqlite::params![
+            run.owner,
+            run.id,
+            run.status,
+            run.last_run_at,
+            run.error,
+            counts,
+            cursor,
+            run.last_event_id
+        ],
+    )
+    .map(|_| ())
 }
 
 /// `ext__<extension>__` with dashes as underscores.
@@ -545,7 +583,7 @@ mod tests {
     #[tokio::test]
     async fn an_entity_view_is_a_model_its_extension_owns() {
         let db = Database::in_memory();
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let t = pr_table(&[("number", StoredType::Integer), ("title", StoredType::Text)]);
         store
             .replace_rows(vec![(t.clone(), rows(json!([[1, "one"]])))])
@@ -678,7 +716,7 @@ mod tests {
     #[tokio::test]
     async fn upsert_adds_updates_and_tombstones_by_key() {
         let db = Database::in_memory();
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let sl = SemanticLayer::new(db);
         let t = pr_table(&[("number", StoredType::Integer), ("title", StoredType::Text)]);
         let counts = store
@@ -717,7 +755,7 @@ mod tests {
     #[tokio::test]
     async fn rows_are_queryable_through_the_view_and_replaced_on_each_run() {
         let db = Database::in_memory();
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let sl = SemanticLayer::new(db);
         let t = pr_table(&[("number", StoredType::Integer), ("title", StoredType::Text)]);
 
@@ -752,7 +790,7 @@ mod tests {
     #[tokio::test]
     async fn a_changed_column_set_rebuilds_the_table() {
         let db = Database::in_memory();
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let sl = SemanticLayer::new(db);
         store
             .replace_rows(vec![(
@@ -779,7 +817,7 @@ mod tests {
     #[tokio::test]
     async fn a_failed_write_changes_nothing() {
         let db = Database::in_memory();
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let sl = SemanticLayer::new(db);
         let t = pr_table(&[("number", StoredType::Integer), ("title", StoredType::Text)]);
         store
@@ -800,7 +838,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_unsafe_identifiers() {
-        let store = SqliteExtSourceStore::new(Database::in_memory());
+        let store = SqliteCollectorStore::new(Database::in_memory());
         let mut t = pr_table(&[("number", StoredType::Integer)]);
         t.columns[0].name = "x); DROP TABLE task; --".into();
         assert!(matches!(
@@ -812,7 +850,7 @@ mod tests {
     #[tokio::test]
     async fn records_state_and_drops_an_extension() {
         let db = Database::in_memory();
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let sl = SemanticLayer::new(db);
         store
             .replace_rows(vec![(
@@ -823,23 +861,57 @@ mod tests {
             .unwrap();
         let mut counts = std::collections::BTreeMap::new();
         counts.insert("pr".to_string(), 1);
-        let state = SourceState {
-            extension: "my-gh".into(),
-            source_id: "github".into(),
+        let state = CollectorRun {
+            owner: "my-gh".into(),
+            id: "github".into(),
             status: "ok".into(),
             last_run_at: "2026-09-27T00:00:00Z".into(),
             error: None,
             row_counts: counts,
+            cursor: None,
+            last_event_id: None,
         };
         store.record_run(state.clone()).await.unwrap();
-        assert_eq!(store.list_states().await.unwrap(), vec![state]);
+        assert_eq!(store.list_runs().await.unwrap(), vec![state]);
 
         store.drop_extension("my-gh").await.unwrap();
-        assert!(store.list_states().await.unwrap().is_empty());
+        assert!(store.list_runs().await.unwrap().is_empty());
         assert!(sl
             .query_sql("SELECT * FROM v_my_gh_pr", vec![], None)
             .await
             .is_err());
+    }
+
+    /// P7.B3: a run keeps its checkpoint — the cursor and the last event
+    /// it ran for. A failed run keeps the last good cursor and counts, and
+    /// the last event never moves back.
+    #[tokio::test]
+    async fn run_state_keeps_a_cursor_and_last_event() {
+        let store = SqliteCollectorStore::new(Database::in_memory());
+        let run = |status: &str, cursor: Option<serde_json::Value>, event: i64| CollectorRun {
+            owner: "project".into(),
+            id: "repo.scan".into(),
+            status: status.into(),
+            last_run_at: "2026-10-01T00:00:00Z".into(),
+            error: (status == "error").then(|| "boom".into()),
+            row_counts: [("pr".to_string(), 3)].into(),
+            cursor,
+            last_event_id: Some(event),
+        };
+        store
+            .record_run(run("ok", Some(json!({"since": "a"})), 7))
+            .await
+            .unwrap();
+        store
+            .record_run(run("error", Some(json!({"since": "b"})), 5))
+            .await
+            .unwrap();
+        let got = store.run_of("project", "repo.scan").await.unwrap().unwrap();
+        assert_eq!(got.status, "error");
+        assert_eq!(got.cursor, Some(json!({"since": "a"})));
+        assert_eq!(got.last_event_id, Some(7));
+        assert_eq!(got.error.as_deref(), Some("boom"));
+        assert!(store.run_of("project", "other").await.unwrap().is_none());
     }
 
     /// `_` is a LIKE wildcard: dropping `gh` must leave `gh-extra`'s view
@@ -847,7 +919,7 @@ mod tests {
     #[tokio::test]
     async fn dropping_an_extension_leaves_similar_names_alone() {
         let db = Database::in_memory();
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let sl = SemanticLayer::new(db);
         let table = |extension: &str, view: &str| EntityTable {
             extension: extension.into(),
@@ -876,7 +948,7 @@ mod tests {
     #[tokio::test]
     async fn never_replaces_a_core_view() {
         let db = Database::in_memory();
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         // extension `task` + entity `note` would be `v_task_note`, a core view.
         let t = EntityTable {
             extension: "task".into(),

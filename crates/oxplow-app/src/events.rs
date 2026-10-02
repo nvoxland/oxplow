@@ -210,13 +210,6 @@ pub enum OxplowEvent {
     /// deleted (tsk138). Project-global (dashboards aren't stream-scoped), so
     /// fieldless — the renderer refetches the affected dashboard(s).
     DashboardsChanged,
-    /// An extension source finished a run (ok or error): its entity data
-    /// and/or run state changed. Project-global; lenses re-run and the
-    /// Extensions settings refresh.
-    SourceSynced {
-        extension: String,
-        source_id: String,
-    },
     /// A language server published diagnostics (or restarted) for
     /// `stream_id`: `v_diagnostic` changed. Debounced; lenses re-run.
     DiagnosticsChanged { stream_id: i64 },

@@ -160,7 +160,7 @@ one transaction:
 **Who owns a view** is the registry's answer (P4.9, V109): `model.kind`
 is `sql` (compiled from a model file at every open — `drop_all` drops
 only these) or `entity` (an extension's synced entity, created by
-`ext_source_store::write_entity` when its source runs and kept across
+`collector_store::write_entity` when its collector runs and kept across
 opens). An entity view is registered with its extension as owner and its
 `ext__<ext>__<entity>` table as a `source` input, so lineage and
 subscriptions see it. `write_entity` replaces a view only when the
@@ -520,28 +520,32 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
 - The catalog is SQL: `v_model` (name, owner, kind, description) and
   `v_model_column` (each column's SQL type and doc). The MCP
   `describe_schema` tool and its IPC twin are gone (tsk517).
-- Lenses never call models or run sources on render; they read what sources
-  already produced.
+- Lenses never call models or run collectors on render; they read what
+  collectors already produced.
 - Everything an extension adds (entities, relations, dimensions, metrics)
   appears in the same models (`v_model`, `v_dimension`, `v_metric_spec`) and
   the same `query_sql` as core data. Agents never need
   an extension-specific tool. Full agent surface:
   [extensions.md](./extensions.md) → "Agents: the MCP surface".
 
-## User and extension sources (current)
+## Collectors (P7.B3)
 
-Extensions declare **sources**: code that pulls external records into the
-semantic layer as entities. The real, tested example is
-`examples/extensions/github/` (PRs from the GitHub API via `gh` or
+A **collector** brings data in: a program (`exec`), a sandboxed script
+(`starlark` / `jaq`) or a provider's read (`read`). It writes
+**entities** (rows a model can `ref()`) and/or **facts**. One
+declaration, `oxplow_config::collectors` (`CollectorSpec`,
+`parse_collectors`), serves `extension.yaml` (v1 `sources:` is migrated
+to it, each `schedule:` becoming a `trigger:`). The real, tested example
+is `examples/extensions/github/` (PRs from the GitHub API via `gh` or
 `GITHUB_TOKEN`); the user guide is `docs/guide/lenses.md`.
 
 ```yaml
-sources:
-  - id: prs
+collectors:
+  - id: prs                    # dotted ids are fine: repo.scan_clone
     doc: The repo's recent pull requests.
-    runtime: exec              # or starlark / jaq (derived, below)
+    runtime: exec              # or starlark / jaq (derived, below) / read
     entry: sync.sh             # relative, inside the extension folder
-    schedule: every 15m        # or manual; every <n>m | <n>h
+    trigger: { every: 15m }    # or manual; { on: [<event type>], where?: {field: value} }
     env: [GITHUB_REPOSITORY]   # host env vars passed through; nothing else is
     credentials: [GITHUB_TOKEN] # keychain secrets, set in Settings → Extensions
     entities:
@@ -557,7 +561,27 @@ sources:
 
 The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`.
 
-**Derived sources** (`runtime: starlark` or `jaq`, tsk323) compute
+**Parse rules.** `entry` for exec/starlark/jaq; `provider: { instance,
+collector }` (and nothing a script needs) for `read`, whose records land
+in the capability's model and which `provider.sync` runs; `env`,
+`credentials`, `network` only on exec; `input` only on starlark/jaq; at
+least one of `entities` / `facts`; `after` and `where` only with `on:`,
+whose types must be registered (`v_event_type`); `oxplow.` ids are
+oxplow's own.
+
+**A run** (`collector_runner::run_collector`) commits its rows, its
+`collector_run` row and its `collector.synced@1` event in **one
+transaction**; a failed run commits the failure the same way (no rows,
+the last good counts and checkpoint kept). The event's subject is
+`collector:<owner>/<id>` (ref kind `collector`), its `trigger` is
+`manual` (`collector.sync` by an actor), `every` (the scheduler, as the
+system) or `on`. `collector_run` (V133, `v_collector_run`; it replaced
+V75 `ext_source_state`) keeps `owner, id, status (ok | error |
+needs_approval), last_run_at, error, row_counts_json, cursor_json,
+last_event_id`. The UI refreshes when `v_collector_run` changes
+(`collectorRan`); the in-memory `SourceSynced` is gone.
+
+**Derived collectors** (`runtime: starlark` or `jaq`, tsk323) compute
 entities from data already in the semantic layer:
 
 ```yaml
@@ -575,15 +599,15 @@ entities from data already in the semantic layer:
 - **Sandbox.** It runs in the collector sandbox
   (`run_sandboxed_excluding` + `run_starlark_with_ai` / `run_jaq`), with
   no files, network, env or secrets. So there is **no approval**:
-  `list_sources` reports it as approved, and the scheduler runs it on its
-  `schedule`. Its one way out is oxplow's own: the `ai_*` builtins
+  `list_collectors` reports it as approved, and the scheduler runs it on
+  its `every:` trigger. Its one way out is oxplow's own: the `ai_*` builtins
   (`ai_classify` / `ai_score` / `ai_summarize` / `ai_extract`), recorded
-  computations on the project's AI roles as caller `source:<ext>/<id>`,
+  computations on the project's AI roles as caller `collector:<owner>/<id>`,
   whose wait is left out of the budget ([ai-providers.md](./ai-providers.md)
   "`ai_*` functions for sources").
-- **Refused at parse:** `env` / `credentials` on a derived source, `input`
-  on an exec source, and an `input` that names one of the source's own
-  views (a source can't feed on itself). Reading other extensions' views
+- **Refused at parse:** `env` / `credentials` on a derived collector,
+  `input` on an exec collector, and an `input` that names one of the
+  collector's own views (a collector can't feed on itself). Reading other extensions' views
   is fine.
 - **Scripts** are read with `extensions::read_extension_file`, so bundled
   extensions can ship them.
@@ -593,10 +617,10 @@ entities from data already in the semantic layer:
 - **What a run writes.** The output may add
   `"deleted": {"<name>": [key, …]}`. Each mentioned entity's rows are
   inserted or replaced by key and its tombstoned keys deleted, in the one
-  transaction (`ext_source_store::write_rows` with `EntityWrite::Upsert`).
-- **Unmentioned entities** are left alone. A `replace` source empties
+  transaction (`collector_store::write_rows_tx` with `EntityWrite::Upsert`).
+- **Unmentioned entities** are left alone. A `replace` collector empties
   them instead.
-- **Refused:** `deleted` from a `replace` source.
+- **Refused:** `deleted` from a `replace` collector.
 - **Schema changes.** A changed column set still rebuilds the table, so
   the first run after one holds only that run's rows.
 - **Row counts** are the entity's totals after the write.
@@ -605,13 +629,14 @@ entities from data already in the semantic layer:
 
 | Piece | Where |
 |---|---|
-| Parse/validate declarations | `crates/oxplow-app/src/extension_sources.rs` |
-| Consent (`approve_reviewed`), exec, coercion, `run_source`, `SourceRunner` + the `source.sync` command, scheduler | `crates/oxplow-app/src/source_runner.rs` |
-| Entity tables + views, run state (V75 `ext_source_state`) | `crates/oxplow-db/src/ext_source_store.rs` |
+| Parse/validate declarations (`CollectorSpec`, `Trigger`) | `crates/oxplow-config/src/collectors.rs` |
+| v1 `sources:` / `schedule:` → `collectors:` / `trigger:` | `crates/oxplow-app/src/extensions/migrate_v1.rs` |
+| Consent (`approve_reviewed`), exec, coercion, `run_collector`, `CollectorRunner` + the `collector.sync` command, scheduler | `crates/oxplow-app/src/collector_runner.rs` |
+| Entity tables + views, run state (V133 `collector_run`) | `crates/oxplow-db/src/collector_store.rs` |
 | Settings → Data read model (`data_entities`) | `crates/oxplow-app/src/semantic_catalog.rs` |
-| IPC `list_sources` / `approve_source` (UI only); running is `run_command source.sync` | `crates/oxplow-rpc/src/commands/sources.rs` |
-| MCP `list_sources` / `run_source` (the `source.sync` command as the agent; never approves) | `crates/oxplow-mcp/src/lib.rs` |
-| UI: Settings → Data (entities + counts, source rows, Run) | `apps/desktop/src/components/DataSection.tsx` |
+| IPC `list_collectors` / `approve_collector` / `set_credential` (UI only); running is `run_command collector.sync` | `crates/oxplow-rpc/src/commands/collectors.rs` |
+| MCP `list_collectors` / `run_collector` / `preview_collector` (the `collector.sync` command as the agent; never approves) | `crates/oxplow-mcp/src/lib.rs` |
+| UI: Settings → Data (entities + counts, collector rows, Run) | `apps/desktop/src/components/DataSection.tsx` |
 | UI: credentials per extension | `apps/desktop/src/components/ExtensionsSection.tsx` |
 | IPC `list_data_entities` (models + counts, unsynced entities) | `crates/oxplow-rpc/src/commands/semantic.rs` |
 
@@ -624,32 +649,33 @@ entities from data already in the semantic layer:
   - Oxplow does all the writing from the declared schema, and no
     extension SQL runs on writes, so isolation buys little.
   - One pool and plain views keep `query_sql` simple.
-  - Every run replaces all of a source's entities in **one transaction**,
+  - Every run writes all of a collector's entities in **one transaction**,
     so a failed run changes nothing.
   - A changed column set rebuilds the table.
   - The store refuses to replace a view it doesn't own: a core view, or
     one from another extension. Extension `task` plus entity `note` can't
     shadow `v_task_note`.
   - `drop_extension` removes an extension's tables, views and state.
-- **Consent.** A source runs code, so it runs only after a person
-  approves it.
+- **Consent.** An exec collector runs code, so it runs only after a
+  person approves it.
   - Approval is bound to the entry script's SHA-256 and stored per
     machine outside the repo, MACed under a keychain key (see
     [architecture.md](./architecture.md) → "A repo's config never runs a
     program without consent").
   - A teammate who pulls the repo approves it themselves, and a changed
     script needs re-approval.
-  - Approving is its own UI-only step (`approve_source`, the version the
-    person reviewed); running is the `source.sync` command, which never
-    approves — from the UI, a lens action, the scheduler or MCP
-    `run_source` alike — so an agent can't consent on a person's behalf.
+  - Approving is its own UI-only step (`approve_collector`, the version
+    the person reviewed); running is the `collector.sync { owner, id }`
+    command, which never approves — from the UI, a lens action, the
+    scheduler or MCP `run_collector` alike — so an agent can't consent on
+    a person's behalf. The approval key stays `<owner>/<id>`.
 - **Environment.** The entry gets `PATH`, `HOME`, its declared `env`
   names, its declared `credentials`, `OXPLOW_EXTENSION_DIR` and
-  `OXPLOW_SOURCE_ID`. It runs with a
+  `OXPLOW_COLLECTOR_ID`. It runs with a
   120 s timeout and a 64 MB stdout cap, and both pipes are drained so it
   can't deadlock.
 - **Network** (tsk324, `net_sandbox.rs`). `network: [api.github.com,
-  "*.githubusercontent.com"]` lists the hosts an exec source may reach:
+  "*.githubusercontent.com"]` lists the hosts an exec collector may reach:
   - **Pattern syntax.** Lowercase names; `*.` means subdomains only, not
     the bare domain.
   - **Part of the approval.** `approval_hash` is the entry hash plus the
@@ -676,7 +702,7 @@ entities from data already in the semantic layer:
     example sync through the proxy. The macOS-gated test
     `a_sandboxed_source_reaches_only_its_declared_hosts` pins
     declared → 200, undeclared → 403, and direct → blocked.
-  - **Derived sources** can't declare `network`.
+  - **Derived collectors** can't declare `network`.
 - **Credentials.** `credentials: [NAME]` declares secrets the entry gets
   as env vars. Values live in the OS keychain (`Services.secrets`, shared
   with AI provider keys) under account
@@ -685,8 +711,9 @@ entities from data already in the semantic layer:
   another extension nor a same-named extension in another repo can read
   one by declaring the same name. Credentials set before tsk348 (no
   project in the account) aren't read; set them again.
-  - Only a person sets them: IPC `set_source_credential` (UI-only in the
-    parity manifest; only names some source of that extension declares).
+  - Only a person sets them: IPC `set_credential` (UI-only in the parity
+    manifest; only names some collector or provider of that extension
+    declares).
     Listings carry `credentials: [{name, set}]`, never values.
   - An unset credential is simply not passed; the script decides (the
     GitHub example falls back to `gh`). A keychain error fails the run.
@@ -695,25 +722,25 @@ entities from data already in the semantic layer:
   - Changing `credentials` doesn't need re-approval: approval is bound to
     the entry script, and a secret reaches it only after the person sets
     that extension's value.
-  - `source_runner::Sources` bundles root, state dir, store and secrets,
-    the context every list/run/set call takes (`Sources::of(svc, root)`).
-- **Where it runs.** Sources run from the **primary** stream's worktree,
+  - `collector_runner::Collectors` bundles root, approvals, store, the
+    database and event schemas, secrets and the gateway — the context
+    every list/run/set call takes (`Collectors::of(svc, root)`).
+- **Where it runs.** Collectors run from the **primary** stream's worktree,
   and their data is project-global, like dashboards.
 - **Errors.**
-  - `RunSourceError` distinguishes `NotFound`, `NeedsApproval` (nothing
-    ran), `Failed` (it ran; recorded as the source's state, keeping the
-    last good row counts) and `Storage`.
-  - `SourceSynced` is emitted only when the source actually ran.
-  - A lens reading an unsynced entity gets "reads `v_x`, which hasn't
-    synced yet. Run source `ext/id`…" in place of SQLite's bare "no such
-    table".
+  - `RunCollectorError` distinguishes `NotFound`, `NeedsApproval`
+    (nothing ran, nothing recorded), `Failed` (it ran; recorded with its
+    event, keeping the last good row counts) and `Storage`.
+  - A lens reading an uncollected entity gets "reads `v_x`, which hasn't
+    been collected yet. Run collector `ext/id`…" in place of SQLite's
+    bare "no such table".
 - **Scheduling.** A background loop (`spawn_scheduler`, started from boot)
-  calls `run_due_sources` once a minute: every approved `every` source
-  that's due (`due_sources`, which is pure and tested) runs as the
-  `source.sync` command with `Actor::System` — the one way a source runs,
-  so a scheduled run is audited and logs `command.executed` like one from
-  the UI (tested: `the_scheduler_runs_source_sync_through_the_bus`).
-  Unapproved sources never run unattended: the command refuses them.
+  calls `run_due_collectors` once a minute: every approved collector with
+  an `every:` trigger that's due (`due_collectors`, which is pure and
+  tested) runs as the `collector.sync` command with `Actor::System` — so
+  a scheduled run is audited and logs `command.executed` like one from
+  the UI (tested: `the_scheduler_runs_collector_sync_through_the_bus`).
+  Unapproved collectors never run unattended: the command refuses them.
 - **Schema.** A synced entity is a model its extension owns: its
   description is its doc plus the joins it documents (`relations`), and
   its contract is its declared columns with their docs, refreshed when the

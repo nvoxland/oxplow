@@ -13,7 +13,7 @@ const review = (over: Partial<Extension> = {}): ExtensionReview => ({
     errors: [],
     lenses: [],
     source: null,
-    sources: [],
+    collectors: [],
     origin: "project",
     ui: { slots: [], commands: [], decorators: [] },
     enabled: true,

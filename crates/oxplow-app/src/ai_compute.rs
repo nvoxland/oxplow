@@ -361,7 +361,7 @@ impl AiCompute {
 }
 
 /// [`AiCompute`] as a collector's `ai_*` oracle (`oxplow_collect_plugin`),
-/// recording as `caller` (`source:<ext>/<id>`). The script runs on a
+/// recording as `caller` (`collector:<owner>/<id>`). The script runs on a
 /// worker thread outside the runtime; each call blocks it on the runtime
 /// the oracle was made on.
 pub struct CollectorOracle {

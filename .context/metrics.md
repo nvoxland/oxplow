@@ -906,7 +906,8 @@ The UI shows the entity aggregation (`specAggregation`).
 
 - **When it runs.** Forced at boot, on `ConfigChanged` and on an
   extension manifest change. Throttled, at most once per 10 minutes per
-  metric, on `TasksChanged`, `SourceSynced` and snapshot batches.
+  metric, on `TasksChanged`, a collector run (`ModelsChanged` naming
+  `v_collector_run`) and snapshot batches.
 - **What it writes.** One fact with the current value on the primary
   stream.
 - **When it skips.** When the value equals the last capture: the

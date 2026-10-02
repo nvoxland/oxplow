@@ -13,6 +13,7 @@ pub mod attribution_store;
 pub mod capability_store;
 pub mod change_store;
 pub mod changes;
+pub mod collector_store;
 pub mod command_audit_store;
 pub mod comment_store;
 pub mod dashboard_store;
@@ -23,7 +24,6 @@ pub mod effort_store;
 pub mod event_content_store;
 pub mod event_log_store;
 pub mod event_retention;
-pub mod ext_source_store;
 pub mod fact_store;
 pub mod git_store;
 pub mod models;
@@ -67,6 +67,9 @@ pub use change_store::{
     ChangeCoChangeRow, ChangeDuplicateRow, ChangeFileRow, ChangeFunctionRow, ChangeImportRow,
     ChangeResults, ChangeRow, ChangeTestFileRow, SqliteChangeStore,
 };
+pub use collector_store::{
+    CollectorRun, EntityColumn, EntityTable, EntityWrite, SqliteCollectorStore, StoredType,
+};
 pub use command_audit_store::{CommandAudit, NewCommandAudit, SqliteCommandAuditStore};
 pub use comment_store::SqliteCommentStore;
 pub use dashboard_store::{
@@ -80,9 +83,6 @@ pub use effort_store::{
     FileRefVersion, OwnedFileRefVersion, RecordEffortAtomic, SqliteEffortStore,
 };
 pub use event_log_store::{anchors_for_thread_tx, DeadLetter, EventCtx, SqliteEventLogStore};
-pub use ext_source_store::{
-    EntityColumn, EntityTable, EntityWrite, SourceState, SqliteExtSourceStore, StoredType,
-};
 pub use fact_store::{
     BatchApply, BatchRows, CubeReadRow, Dimension, EffortMetricDelta, FactRow, FactSliceKey,
     Measure, MetricCapture, MetricSpec, NewCubeRow, NewDimension, NewFact, NewMeasure,

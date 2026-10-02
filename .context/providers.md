@@ -309,7 +309,7 @@ of `extensionInstances` — to enable, `provider.enable` runs **first**, so
 a failed enable writes nothing and the config never says enabled for
 an instance that wasn't — then a reconcile). Each row
 shows its state, its credentials (set into the keychain through
-`set_source_credential`, which accepts a provider's credentials too),
+`set_credential`, which takes a collector's or a provider's),
 the config as a form from the provider's `config_schema`
 (`SchemaForm`, P6.B2: Escape resets an edit; a field's problem disables
 the actions), Check and Enable / Disable / Enable again, and each

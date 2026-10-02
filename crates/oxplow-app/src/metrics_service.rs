@@ -1209,14 +1209,19 @@ impl MetricsService {
         self.capture_entity_states(true).await;
         loop {
             let event = rx.recv().await;
-            // Anything that may move an entity's rows: re-capture state
-            // entity metrics, throttled per metric.
-            if matches!(
-                event,
-                Ok(OxplowEvent::TasksChanged { .. }
-                    | OxplowEvent::SourceSynced { .. }
-                    | OxplowEvent::SnapshotTaken { .. })
-            ) {
+            // Anything that may move an entity's rows — a task write, a
+            // snapshot, a collector run (its `collector_run` commit) —
+            // re-captures state entity metrics, throttled per metric.
+            let collector_ran = matches!(
+                &event,
+                Ok(OxplowEvent::ModelsChanged { models }) if models.iter().any(|m| m == "v_collector_run")
+            );
+            if collector_ran
+                || matches!(
+                    event,
+                    Ok(OxplowEvent::TasksChanged { .. } | OxplowEvent::SnapshotTaken { .. })
+                )
+            {
                 self.capture_entity_states(false).await;
             }
             match event {

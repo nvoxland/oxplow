@@ -15,7 +15,7 @@
 //! registers types only under its own name as namespace; registering
 //! into a core namespace, or under another plugin's, is refused.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use schemars::JsonSchema;
@@ -134,6 +134,8 @@ impl EventSchemaRegistry {
         r.register::<EffortDecisionReviewed>()
             .expect("core type registers");
         r.register::<EffortFinished>().expect("core type registers");
+        r.register::<CollectorSynced>()
+            .expect("core type registers");
         r.register::<WorkItemEdited>().expect("core type registers");
         r.register::<WorkItemCreated>()
             .expect("core type registers");
@@ -994,6 +996,42 @@ impl EventType for EffortDecisionReviewed {
     type Payload = EffortDecisionReviewedV1;
 }
 
+/// `collector.synced@1` (P7.B3): a collector ran — by hand
+/// (`collector.sync`), on its schedule, or for an event its `on:` trigger
+/// names (then the envelope's `cause` is that event). Logged in the
+/// transaction that wrote what it collected; a run that failed logs one
+/// too, with what went wrong.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CollectorSyncedV1 {
+    /// `collector:<owner>/<id>`.
+    pub collector: String,
+    /// What ran it: `manual`, `every` or `on`.
+    pub trigger: String,
+    /// `ok` or `error`.
+    pub status: String,
+    /// Rows per entity after the run (a failed run wrote none).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub entities: BTreeMap<String, i64>,
+    /// Facts it recorded.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub facts: i64,
+    pub elapsed_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+fn is_zero(n: &i64) -> bool {
+    *n == 0
+}
+
+pub struct CollectorSynced;
+impl EventType for CollectorSynced {
+    const TYPE: &'static str = "collector.synced";
+    const V: u32 = 1;
+    type Payload = CollectorSyncedV1;
+}
+
 pub struct EffortClosed;
 impl EventType for EffortClosed {
     const TYPE: &'static str = "effort.closed";
@@ -1275,6 +1313,21 @@ impl EventType for EffortFinished {
     type Payload = EffortFinishedV1;
 }
 
+/// Whether `event_type` is one of core's types (any version) — what a
+/// collector's `on:` trigger may name today. Built once.
+pub fn is_core_type(event_type: &str) -> bool {
+    static CORE: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+        std::sync::OnceLock::new();
+    CORE.get_or_init(|| {
+        EventSchemaRegistry::core()
+            .versions()
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect()
+    })
+    .contains(event_type)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1298,6 +1351,7 @@ mod tests {
                 ("agent.turn.ended", 2),
                 ("agent.turn.started", 1),
                 ("code.diagnostics.changed", 1),
+                ("collector.synced", 1),
                 ("command.approved", 1),
                 ("command.declined", 1),
                 ("command.executed", 1),

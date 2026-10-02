@@ -617,8 +617,8 @@ fn parse_actions(
             return Err(format!(
                 "actions: `{kind}` is the old fixed registry; an action is now a command \
                  (`{{ id, label, command, input }}`). Copy and Add to Agent Context are on \
-                 every lens; to sync a source use `command: source.sync` with \
-                 `input: {{ extension, source }}`"
+                 every lens; to sync a collector use `command: collector.sync` with \
+                 `input: {{ owner, id }}`"
             ));
         }
         let f = serde_yaml::from_value::<Full>(v).map_err(|e| format!("actions: {e}"))?;
@@ -912,8 +912,8 @@ pub struct Extension {
     /// Where it was installed from, for extensions added with
     /// `install_extension`; `None` for ones written in this repo.
     pub source: Option<ExtensionSource>,
-    /// Declared data sources (valid ones; invalid ones are in `errors`).
-    pub sources: Vec<crate::extension_sources::SourceSpec>,
+    /// Declared collectors (valid ones; invalid ones are in `errors`).
+    pub collectors: Vec<oxplow_config::collectors::CollectorSpec>,
     /// Declared providers (experimental: a private extension's only;
     /// valid ones — invalid ones are in `errors`).
     pub providers: Vec<crate::providers::ProviderSpec>,
@@ -1166,7 +1166,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         intent: None,
         lenses: Vec::new(),
         source: None,
-        sources: Vec::new(),
+        collectors: Vec::new(),
         providers: Vec::new(),
         custom_components: Vec::new(),
         origin: origin.to_string(),
@@ -1264,8 +1264,12 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     let page_files = m.pages.clone();
     let slot_files = {
         if let Some(v) = &m.collectors {
-            let (sources, errors) = crate::extension_sources::parse_sources(name, v);
-            ext.sources = sources;
+            let (collectors, errors) = oxplow_config::collectors::parse_collectors(
+                name,
+                v,
+                &oxplow_domain::events::schema::is_core_type,
+            );
+            ext.collectors = collectors;
             ext.errors.extend(
                 errors
                     .into_iter()
@@ -1974,7 +1978,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.enabled = false;
         ext.lenses.clear();
         ext.ui = ExtensionUi::default();
-        ext.sources.clear();
+        ext.collectors.clear();
         ext.providers.clear();
         ext.custom_components.clear();
         ext.advisories.clear();
@@ -2112,13 +2116,13 @@ fn explain_unsynced(
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
         .collect();
     for ext in catalog.get(root).iter() {
-        for source in &ext.sources {
-            if source.entities.iter().any(|e| e.view == view) {
+        for collector in &ext.collectors {
+            if collector.entities.iter().any(|e| e.view == view) {
                 let lens = message.split(':').next().unwrap_or("lens");
                 return format!(
-                    "{lens}: reads `{view}`, which hasn't synced yet. Run source `{}/{}` \
-                     (Settings → Extensions → Approve & Run, or Sync Now).",
-                    ext.name, source.id
+                    "{lens}: reads `{view}`, which hasn't been collected yet. Run collector \
+                     `{}/{}` (Settings → Extensions → Approve & Run, or Sync Now).",
+                    ext.name, collector.id
                 );
             }
         }
@@ -3749,7 +3753,7 @@ empty: No tasks.
         .unwrap();
         assert_eq!(review.extension.name, "shared");
         assert_eq!(review.sha, head(repo.path()));
-        let source = &review.extension.sources[0];
+        let source = &review.extension.collectors[0];
         assert_eq!(source.network, vec!["api.github.com".to_string()]);
         assert_eq!(source.credentials, vec!["TOKEN".to_string()]);
         assert!(
@@ -4072,8 +4076,8 @@ empty: No tasks.
             LENS,
         );
         let e = &project_extensions(dir.path())[0];
-        assert_eq!(e.sources.len(), 1);
-        assert_eq!(e.sources[0].entities[0].view, "v_review_pr");
+        assert_eq!(e.collectors.len(), 1);
+        assert_eq!(e.collectors[0].entities[0].view, "v_review_pr");
         assert_eq!(e.errors.len(), 1, "{:?}", e.errors);
         assert!(
             e.errors[0].contains("extension.yaml") && e.errors[0].contains("runtime"),
@@ -4084,7 +4088,7 @@ empty: No tasks.
     }
 
     #[tokio::test]
-    async fn an_unsynced_source_entity_gets_a_helpful_error() {
+    async fn an_uncollected_entity_gets_a_helpful_error() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -4109,13 +4113,17 @@ empty: No tasks.
         .unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("v_gh_pr") && msg.contains("prs") && msg.contains("hasn't synced"),
+            msg.contains("v_gh_pr") && msg.contains("prs") && msg.contains("hasn't been collected"),
             "{msg}"
         );
         let e = validate_extension(&sl, &cat(), dir.path(), "gh", None)
             .await
             .unwrap();
-        assert!(e.errors[0].contains("hasn't synced"), "{:?}", e.errors);
+        assert!(
+            e.errors[0].contains("hasn't been collected"),
+            "{:?}",
+            e.errors
+        );
     }
 
     const EXT_V2: &str = "manifest: 2\nname: review\ndescription: Review helpers\nintent:\n  purpose: Review agent work\n  examples:\n    - { name: one, input: {}, expect: {} }\n";
@@ -4294,7 +4302,8 @@ empty: No tasks.
         assert!(v1.errors.is_empty(), "{:?}", v1.errors);
         assert_eq!(v1.manifest_version, 1);
         let ext_dir = dir.path().join(ext_rel);
-        let source_hash_v1 = crate::source_runner::approval_hash(&ext_dir, &v1.sources[0]).unwrap();
+        let source_hash_v1 =
+            crate::collector_runner::approval_hash(&ext_dir, &v1.collectors[0]).unwrap();
         let advisory_hash_v1 = crate::exec_consent::advisory_program(&v1)
             .hash(Path::new(""))
             .unwrap();
@@ -4310,10 +4319,10 @@ empty: No tasks.
         assert!(v2.errors.is_empty(), "{:?}", v2.errors);
         assert!(v2.warnings.is_empty(), "{:?}", v2.warnings);
         assert_eq!(v2.manifest_version, 2);
-        assert_eq!(v2.sources, v1.sources);
+        assert_eq!(v2.collectors, v1.collectors);
         assert_eq!(v2.advisories, v1.advisories);
         assert_eq!(
-            crate::source_runner::approval_hash(&ext_dir, &v2.sources[0]).unwrap(),
+            crate::collector_runner::approval_hash(&ext_dir, &v2.collectors[0]).unwrap(),
             source_hash_v1
         );
         assert_eq!(
@@ -5170,7 +5179,7 @@ empty: No tasks.
         );
         for (slug, needle) in [
             ("b", "old fixed registry"),
-            ("c", "source.sync"),
+            ("c", "collector.sync"),
             ("d", "names no param"),
             ("e", "needs `row: true`"),
             ("f", "command name"),
@@ -5260,7 +5269,7 @@ empty: No tasks.
             let e = exts.iter().find(|e| e.name == name).unwrap();
             assert!(!e.enabled, "{name}");
             assert!(
-                e.lenses.is_empty() && e.ui.slots.is_empty() && e.sources.is_empty(),
+                e.lenses.is_empty() && e.ui.slots.is_empty() && e.collectors.is_empty(),
                 "{name}"
             );
         }

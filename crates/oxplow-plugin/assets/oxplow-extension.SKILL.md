@@ -216,14 +216,14 @@ empty: Nothing is waiting on you.
   right-click action), `"{{row.col}}"` binds that row's column —
   e.g. `{ id: finish, label: Finish, command: work_item.transition,
   row: true, input: { ref: "work_item:oxplow:tsk{{row.id}}", to: done } }`,
-  or `{ id: sync, label: Sync PRs, command: source.sync, input:
-  { extension: github, source: prs } }`. Copy and Add to Agent Context are
+  or `{ id: sync, label: Sync PRs, command: collector.sync, input:
+  { owner: github, id: prs } }`. Copy and Add to Agent Context are
   on every lens already — don't declare them.
 
   An action runs as the lens acting for whoever pressed it, so it can't do
   anything they couldn't: you can press one with `run_lens_action`, but a
   command you can't run (or that needs a person's confirmation, like
-  approving an exec source) is refused.
+  approving an exec collector) is refused.
 - **Unknown keys are errors.** Only the keys shown above exist today.
 
 ## 3. Check it
@@ -356,7 +356,7 @@ gauges:
 
 - `entryFile` is inside the extension folder.
 - Gauges run `starlark` or `jaq` only. `exec` is refused: running a
-  program needs the user's approval, which is what sources are for.
+  program needs the user's approval, which is what collectors are for.
 - Metrics are `key:` definitions and are on while the extension is
   enabled. A project can still turn one off or change its target with a
   `use:` entry in `.oxplow/project.yaml`. `use:` isn't allowed in an
@@ -368,15 +368,16 @@ gauges:
   slice entity metrics over the same view. `promote:` isn't allowed in an
   extension.
 
-## Bringing in outside data (sources)
+## Bringing in outside data (collectors)
 
 When the user wants data oxplow doesn't have (GitHub PRs, Linear issues,
-CI runs), add a **source** to the extension:
+CI runs), add a **collector** to the extension:
 
 - Write a script that prints
   `{"entities": {"<name>": [ {col: value, …} ]}}`.
 - Declare it under `collectors:` in `extension.yaml`, with its entities'
-  typed columns and key.
+  typed columns and key, and when it runs: `trigger: { every: 15m }` or
+  `trigger: manual` (the default).
 - `examples/extensions/github/` in the oxplow repo is a complete, working
   example; copy its shape.
 - The entity becomes `v_<extension>_<entity>`. Join it to core views in
@@ -387,26 +388,27 @@ Rules:
 - Declare secrets as `credentials: [NAME]`; the script reads them as
   environment variables. The user sets the values in Settings → Extensions
   (they go to the keychain). You can't set or read them, and never
-  hard-code them. `list_sources` shows which are set. Use `env: [NAME]`
+  hard-code them. `list_collectors` shows which are set. Use `env: [NAME]`
   only for non-secret settings from the user's environment.
 - Declare every host the script talks to: `network: [api.github.com]`
   (`*.example.com` for subdomains). On macOS nothing else is reachable
   (the script goes through a proxy; `curl`, `gh` and most HTTP clients
   pick it up from `HTTPS_PROXY`). A missing host shows up as a `403` from
   the proxy or a connection failure.
-- **You can't approve a source.** Tell the user to approve it in
-  Settings → Data → Approve & Run. After that, `run_source`
+- **You can't approve a collector.** Tell the user to approve it in
+  Settings → Data → Approve & Run. After that, `run_collector`
   (MCP) re-runs it.
-- `list_sources` shows each source's status and last error.
-- **Check a source before it's merged** with
-  `preview_source(extension, source_id, stream_id)`: it runs your
-  worktree's version and returns the rows it would store, storing
-  nothing. `run_source` always runs the primary's copy (source data is
+- `list_collectors` shows each collector's last run and error.
+- **Check a collector before it's merged** with
+  `preview_collector(owner, id, stream_id)`: it runs your worktree's
+  version and returns the rows it would store, storing nothing.
+  `run_collector` always runs the primary's copy (collected data is
   shared by the whole project), so in a worktree stream it won't see your
-  changes. An exec source still needs a person's approval for the preview.
-- A declared entity's view exists once its source first syncs.
+  changes. An exec collector still needs a person's approval for the
+  preview.
+- A declared entity's view exists once its collector first runs.
 
-**Deriving data you already have (starlark / jaq sources).** When the
+**Deriving data you already have (starlark / jaq collectors).** When the
 entity can be computed from views that already exist (reshaping tasks,
 combining two extensions' data), use `runtime: starlark` (a script
 defining `def transform(input): ...`) or `runtime: jaq`, with `input:` set
@@ -415,10 +417,10 @@ to a read-only SQL query:
 - **Input and output.** The script gets `{"rows": [...]}` and returns the
   same `{"entities": ...}` shape.
 - **Approval.** It runs sandboxed (no network, files, env or credentials),
-  so it needs no approval and you can `run_source` it yourself.
-- **Input limits.** `input` can't read the source's own views, and more
+  so it needs no approval and you can `run_collector` it yourself.
+- **Input limits.** `input` can't read the collector's own views, and more
   than 10,000 input rows fails the run.
-- **Asking a model.** A starlark source can call `ai_classify(text,
+- **Asking a model.** A starlark collector can call `ai_classify(text,
   labels)` → `{label, probabilities}`, `ai_score(text, levels)` →
   `{level, score, probabilities}` (levels lowest first),
   `ai_summarize(text, focus = None)` → text, and `ai_extract(text,
@@ -463,7 +465,7 @@ to a read-only SQL query:
 - **World:** to publish, put an extension in its own git repo with
   `extension.yaml` at the root. To use someone else's, **only when the
   user asks**: call `review_extension(git_url, git_ref?, stream_id)`, show
-  the user what it declares (the programs its sources run, the hosts they
+  the user what it declares (the programs its collectors run, the hosts they
   reach, the credentials they read, advisories) and any `errors` /
   `problems`, and when they say go, call `install_extension(git_url,
   git_ref?, reviewed_sha: <its sha>, stream_id)`. It records the source in

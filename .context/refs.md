@@ -75,7 +75,10 @@ a person's decision, `proposal:12`, P6b) has a numeric id too;
 `build::proposal_ref` builds it. So do `claim` (an agent's claim about its
 work, `claim:7`) and `decision` (one it recorded or oxplow inferred,
 `decision:3`) — what the review commands name (P7.C4); `build::claim_ref`
-and `build::decision_ref`.
+and `build::decision_ref`. `collector` (`collector:<owner>/<id>`, the
+owner an extension, `project` or `built-in`, the id dotted identifiers:
+`collector:project/repo.scan_clone`) names a collector — the subject of
+its `collector.synced@1` (P7.B3); `build::collector_ref`.
 
 ## Building refs in Rust (built, P2.4b)
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { Extension, SourceListing } from "../tauri-bridge/generated/bindings.js";
-import { extensionCredentials, extensionRowModel, reviewModel, sourceRowModel } from "./extensionRowModel.js";
+import type { CollectorListing, Extension } from "../tauri-bridge/generated/bindings.js";
+import { collectorRan, collectorRowModel, extensionCredentials, extensionRowModel, reviewModel } from "./extensionRowModel.js";
 
 const ext = (over: Partial<Extension> = {}): Extension => ({
   name: "review",
@@ -9,7 +9,7 @@ const ext = (over: Partial<Extension> = {}): Extension => ({
   errors: [],
   lenses: [],
   source: null,
-  sources: [],
+  collectors: [],
   origin: "project",
   ui: { slots: [], commands: [], decorators: [] },
   enabled: true,
@@ -54,52 +54,56 @@ describe("extensionRowModel", () => {
   });
 });
 
-describe("sourceRowModel", () => {
-  const listing = (over: Partial<SourceListing> = {}): SourceListing => ({
-    extension: "my-gh",
+describe("collectorRowModel", () => {
+  const listing = (over: Partial<CollectorListing> = {}): CollectorListing => ({
+    owner: "my-gh",
     spec: {
       id: "gh",
       doc: "",
       runtime: "exec",
       entry: "bin/sync.sh",
+      provider: null,
+      trigger: { kind: "every", minutes: 10 },
+      after: [],
       input: null,
+      report: null,
       sync: "replace",
-      schedule: { kind: "every", minutes: 10 },
       env: ["GITHUB_TOKEN"],
       network: [],
       credentials: [],
       entities: [],
+      facts: [],
     },
-    state: null,
+    run: null,
     approved: false,
     networkEnforced: true,
     credentials: [],
     ...over,
   });
 
-  test("an unapproved source asks for approval and says what it will run", () => {
-    const m = sourceRowModel(listing());
+  test("an unapproved collector asks for approval and says what it will run", () => {
+    const m = collectorRowModel(listing());
     expect(m.action).toBe("approve");
     expect(m.actionLabel).toBe("Approve & Run");
     expect(m.actionTitle).toContain("bin/sync.sh");
     expect(m.actionTitle).toContain("GITHUB_TOKEN");
     expect(m.status).toBe("Never run");
-    expect(m.schedule).toBe("every 10m");
+    expect(m.trigger).toBe("every 10m");
   });
 
-  test("the approval names the hosts a source may reach, and whether that's enforced", () => {
+  test("the approval names the hosts a collector may reach, and whether that's enforced", () => {
     const withHosts = (networkEnforced: boolean) =>
       listing({ networkEnforced, spec: { ...listing().spec, network: ["api.github.com"] } });
-    expect(sourceRowModel(withHosts(true)).actionTitle).toContain("reach only api.github.com");
-    expect(sourceRowModel(withHosts(false)).actionTitle).toContain("not enforced on this OS");
-    expect(sourceRowModel(listing()).actionTitle).toContain("no network access");
+    expect(collectorRowModel(withHosts(true)).actionTitle).toContain("reach only api.github.com");
+    expect(collectorRowModel(withHosts(false)).actionTitle).toContain("not enforced on this OS");
+    expect(collectorRowModel(listing()).actionTitle).toContain("no network access");
   });
 
-  test("an approved source syncs and summarizes its last run", () => {
-    const m = sourceRowModel(
+  test("an approved collector syncs and summarizes its last run", () => {
+    const m = collectorRowModel(
       listing({
         approved: true,
-        state: { extension: "my-gh", sourceId: "gh", status: "ok", lastRunAt: "2026-09-27T01:00:00Z", error: null, rowCounts: { pr: 12, review: 3 } },
+        run: { owner: "my-gh", id: "gh", status: "ok", lastRunAt: "2026-09-27T01:00:00Z", error: null, rowCounts: { pr: 12, review: 3 }, cursor: null, lastEventId: null },
       }),
     );
     expect(m.action).toBe("sync");
@@ -109,20 +113,25 @@ describe("sourceRowModel", () => {
   });
 
   test("a failed run surfaces the error", () => {
-    const m = sourceRowModel(
+    const m = collectorRowModel(
       listing({
         approved: true,
-        state: { extension: "my-gh", sourceId: "gh", status: "error", lastRunAt: "2026-09-27T01:00:00Z", error: "boom", rowCounts: {} },
+        run: { owner: "my-gh", id: "gh", status: "error", lastRunAt: "2026-09-27T01:00:00Z", error: "boom", rowCounts: {}, cursor: null, lastEventId: null },
       }),
     );
     expect(m.status).toBe("Failed");
     expect(m.error).toBe("boom");
-    expect(sourceRowModel(listing({ spec: { ...listing().spec, schedule: { kind: "manual" } } })).schedule).toBe("manual");
+    expect(collectorRowModel(listing({ spec: { ...listing().spec, trigger: { kind: "manual" } } })).trigger).toBe("manual");
+    expect(
+      collectorRowModel(
+        listing({ spec: { ...listing().spec, trigger: { kind: "on", events: ["snapshot.taken", "vcs.head.moved"], filter: {} } } }),
+      ).trigger,
+    ).toBe("on snapshot.taken, vcs.head.moved");
   });
   test("unset credentials are listed and flagged; the approval hover names them", () => {
-    const m = sourceRowModel(
+    const m = collectorRowModel(
       listing({
-        spec: { ...listing().spec, schedule: { kind: "manual" }, env: [], credentials: ["GH_PAT", "OTHER"] },
+        spec: { ...listing().spec, trigger: { kind: "manual" }, env: [], credentials: ["GH_PAT", "OTHER"] },
         credentials: [
           { name: "GH_PAT", set: true },
           { name: "OTHER", set: false },
@@ -140,7 +149,7 @@ describe("sourceRowModel", () => {
 
 test("extensionCredentials lists each declared credential once per extension", () => {
   const l = (extension: string, creds: { name: string; set: boolean }[]) =>
-    ({ extension, credentials: creds }) as unknown as SourceListing;
+    ({ owner: extension, credentials: creds }) as unknown as CollectorListing;
   expect(
     extensionCredentials(
       [
@@ -156,8 +165,14 @@ test("extensionCredentials lists each declared credential once per extension", (
   ]);
 });
 
+test("a collector run is a v_collector_run change", () => {
+  expect(collectorRan({ kind: "modelsChanged", models: ["v_task", "v_collector_run"] })).toBe(true);
+  expect(collectorRan({ kind: "modelsChanged", models: ["v_task"] })).toBe(false);
+  expect(collectorRan({ kind: "tasksChanged" })).toBe(false);
+});
+
 describe("reviewModel", () => {
-  const source = (over: Record<string, unknown> = {}) =>
+  const collector = (over: Record<string, unknown> = {}) =>
     ({
       id: "gh",
       doc: "",
@@ -165,13 +180,13 @@ describe("reviewModel", () => {
       entry: "sync.sh",
       input: null,
       sync: "replace",
-      schedule: "manual",
+      trigger: { kind: "manual" },
       env: [],
       network: ["api.github.com"],
       credentials: ["TOKEN"],
       entities: [],
       ...over,
-    }) as unknown as Extension["sources"][number];
+    }) as unknown as Extension["collectors"][number];
   const review = (over: Partial<Extension> = {}, problems: string[] = []) => ({
     extension: ext({ name: "shared", ...over }),
     git: "https://github.com/acme/lenses",
@@ -185,14 +200,14 @@ describe("reviewModel", () => {
     const m = reviewModel(
       review({
         lenses: [{} as Extension["lenses"][number], {} as Extension["lenses"][number]],
-        sources: [source(), source({ id: "hot", runtime: "starlark", entry: "hot.star", network: [], credentials: [] })],
+        collectors: [collector(), collector({ id: "hot", runtime: "starlark", entry: "hot.star", network: [], credentials: [] })],
       }),
     );
     expect(m.from).toBe("https://github.com/acme/lenses (0123456)");
     expect(m.declares).toEqual([
       "2 lenses",
-      "Source gh runs the program sync.sh · reaches api.github.com · reads TOKEN (you'll approve it before it runs)",
-      "Source hot runs hot.star (starlark, sandboxed: no network, files or credentials)",
+      "Collector gh runs the program sync.sh · reaches api.github.com · reads TOKEN (you'll approve it before it runs)",
+      "Collector hot runs hot.star (starlark, sandboxed: no network, files or credentials)",
     ]);
     expect(m.canInstall).toBe(true);
   });

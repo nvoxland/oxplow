@@ -249,10 +249,10 @@ mod tests {
                         .iter()
                         .map(|a| (format!("advisory {}", a.id), a.query.clone())),
                 )
-                .chain(ext.sources.iter().filter_map(|s| {
+                .chain(ext.collectors.iter().filter_map(|s| {
                     s.input
                         .clone()
-                        .map(|q| (format!("source {} input", s.id), q))
+                        .map(|q| (format!("collector {} input", s.id), q))
                 }));
             for (what, sql) in queries {
                 let reads = f

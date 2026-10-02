@@ -15,11 +15,11 @@ import {
   listDataEntities,
   providerDeclarationEffects,
   listProjectPrograms,
-  listSources,
-  approveSource,
-  syncSource,
+  listCollectors,
+  approveCollector,
+  syncCollector,
   subscribeOxplowEvents,
-  type SourceListing,
+  type CollectorListing,
 } from "../api.js";
 import type { ProjectProgram } from "../tauri-bridge/generated/bindings.js";
 import { indexRef } from "../tabs/pageRefs.js";
@@ -33,14 +33,14 @@ import {
   type EntityRowModel,
   type ProviderEffectState,
 } from "./dataSectionModel.js";
-import { sourceRowModel } from "./extensionRowModel.js";
+import { collectorRan, collectorRowModel } from "./extensionRowModel.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
 
 export function DataSection() {
   const nav = useOptionalPageNavigation();
   const [rows, setRows] = useState<EntityRowModel[] | null>(null);
-  const [sources, setSources] = useState<SourceListing[]>([]);
+  const [collectors, setCollectors] = useState<CollectorListing[]>([]);
   const [programs, setPrograms] = useState<ProjectProgram[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   // What approving each unapproved provider would change, by instance.
@@ -50,11 +50,11 @@ export function DataSection() {
     try {
       const [entities, listings, progs] = await Promise.all([
         listDataEntities(),
-        listSources(),
+        listCollectors(),
         listProjectPrograms(),
       ]);
       setRows(entityRows(entities));
-      setSources(listings);
+      setCollectors(listings);
       setPrograms(progs);
     } catch (e) {
       recordOpError({ label: "List data", message: String(e) });
@@ -64,9 +64,10 @@ export function DataSection() {
 
   useEffect(() => {
     void refresh();
-    // Scheduled and agent-triggered runs land here too.
+    // Scheduled and agent-triggered runs land here too: each commits its
+    // `collector_run` row.
     return subscribeOxplowEvents((event) => {
-      if (event.kind === "sourceSynced") void refresh();
+      if (collectorRan(event)) void refresh();
     });
   }, [refresh]);
 
@@ -95,23 +96,23 @@ export function DataSection() {
     };
   }, [pendingKey]);
 
-  async function run(l: SourceListing) {
-    const key = `${l.extension}/${l.spec.id}`;
+  async function run(l: CollectorListing) {
+    const key = `${l.owner}/${l.spec.id}`;
     setBusy(key);
     try {
       // Approve & Run approves exactly the version this listing showed,
-      // then runs it (`source.sync` itself never approves).
+      // then runs it (`collector.sync` itself never approves).
       if (!l.approved) {
         if (!l.version) throw new Error(`${key} can't be read, so it can't be approved`);
-        await approveSource(l.extension, l.spec.id, l.version);
+        await approveCollector(l.owner, l.spec.id, l.version);
       }
-      const report = await syncSource(l.extension, l.spec.id);
+      const report = await syncCollector(l.owner, l.spec.id);
       const counts = Object.entries(report.rowCounts)
         .map(([e, n]) => `${n} ${e}`)
         .join(", ");
       showToast({ message: `Synced ${key}: ${counts || "no rows"}.` });
     } catch (e) {
-      recordOpError({ label: `Run source ${key}`, message: String(e) });
+      recordOpError({ label: `Run collector ${key}`, message: String(e) });
     } finally {
       setBusy(null);
       await refresh();
@@ -168,29 +169,29 @@ export function DataSection() {
           ))}
         </tbody>
       </table>
-      <h3 style={subheadStyle}>Sources</h3>
-      {sources.length === 0 ? (
-        <div style={mutedStyle} data-testid="data-sources-empty">
-          No sources. An extension can declare one to bring in outside data.
+      <h3 style={subheadStyle}>Collectors</h3>
+      {collectors.length === 0 ? (
+        <div style={mutedStyle} data-testid="data-collectors-empty">
+          No collectors. An extension can declare one to bring in outside data.
         </div>
       ) : (
-        sources.map((l) => {
-          const s = sourceRowModel(l);
-          const key = `${l.extension}/${s.id}`;
+        collectors.map((l) => {
+          const s = collectorRowModel(l);
+          const key = `${l.owner}/${s.id}`;
           return (
-            <div key={key} data-testid={`source-row-${key}`} style={rowStyle}>
+            <div key={key} data-testid={`collector-row-${key}`} style={rowStyle}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span>
                   <code>{key}</code>
                 </span>
                 <span style={mutedStyle}>
-                  {l.spec.runtime} · {s.schedule} · {s.status}
+                  {l.spec.runtime} · {s.trigger} · {s.status}
                   {s.lastRunAt ? ` · last run ${new Date(s.lastRunAt).toLocaleString()}` : ""}
                 </span>
                 <span style={{ flex: 1 }} />
                 <button
                   type="button"
-                  data-testid={`source-run-${key}`}
+                  data-testid={`collector-run-${key}`}
                   title={s.actionTitle}
                   disabled={busy !== null}
                   onClick={() => void run(l)}

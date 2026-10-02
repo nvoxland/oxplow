@@ -1,5 +1,6 @@
 /** Pure row presentation for the Settings → Extensions list. */
-import type { EffectReport, Extension, ExtensionReview, SourceListing } from "../tauri-bridge/generated/bindings.js";
+import type { CollectorListing, EffectReport, Extension, ExtensionReview, Trigger } from "../tauri-bridge/generated/bindings.js";
+import { readsChanged } from "../lens/lensRerun.js";
 import { grantChanges, grantsLine, providerChanges } from "./providerEffectText.js";
 
 export interface ExtensionRowModel {
@@ -41,15 +42,15 @@ export function extensionRowModel(ext: Extension): ExtensionRowModel {
   };
 }
 
-export interface SourceRowModel {
+export interface CollectorRowModel {
   id: string;
-  /** `manual` or `every <n>m`. */
-  schedule: string;
+  /** `manual`, `every <n>m` or `on <event types>`. */
+  trigger: string;
   /** "Never run", "Failed", or row counts ("12 pr · 3 review"). */
   status: string;
   lastRunAt: string | null;
   error: string | null;
-  /** Unapproved sources need a person to approve the script first. */
+  /** Unapproved collectors need a person to approve the script first. */
   action: "approve" | "sync";
   actionLabel: string;
   /** Hover text saying exactly what running it does. */
@@ -60,8 +61,26 @@ export interface SourceRowModel {
   missingCredentials: string | null;
 }
 
-export function sourceRowModel(l: SourceListing): SourceRowModel {
-  const st = l.state;
+/** A collector ran — by hand, on its schedule or for an event: each run
+ *  commits its `collector_run` row, so `v_collector_run` changed. */
+export function collectorRan(event: Readonly<Record<string, unknown>>): boolean {
+  return readsChanged(event, { models: ["v_collector_run"], tables: [], measures: [] });
+}
+
+/** A collector's trigger as a short phrase. */
+export function triggerLabel(t: Trigger): string {
+  switch (t.kind) {
+    case "manual":
+      return "manual";
+    case "every":
+      return `every ${t.minutes}m`;
+    case "on":
+      return `on ${t.events.join(", ")}`;
+  }
+}
+
+export function collectorRowModel(l: CollectorListing): CollectorRowModel {
+  const st = l.run;
   const status = !st
     ? "Never run"
     : st.status === "error"
@@ -86,29 +105,29 @@ export function sourceRowModel(l: SourceListing): SourceRowModel {
   const missing = l.credentials.filter((c) => !c.set).map((c) => c.name);
   return {
     id: l.spec.id,
-    schedule: l.spec.schedule.kind === "manual" ? "manual" : `every ${l.spec.schedule.minutes}m`,
+    trigger: triggerLabel(l.spec.trigger),
     status,
     lastRunAt: st?.lastRunAt ?? null,
     error: st?.status === "error" ? (st.error ?? "Unknown error") : null,
     action: l.approved ? "sync" : "approve",
     actionLabel: l.approved ? "Sync Now" : "Approve & Run",
     actionTitle: l.approved
-      ? `Run ${l.spec.entry} now`
-      : `Runs ${l.extension}/${l.spec.entry} on this machine${env}.${network} Approve only if you trust this extension; a changed script or host list needs approval again.`,
+      ? `Run ${l.spec.entry ?? l.spec.id} now`
+      : `Runs ${l.owner}/${l.spec.entry ?? l.spec.id} on this machine${env}.${network} Approve only if you trust this extension; a changed script or host list needs approval again.`,
     credentials: l.credentials,
     missingCredentials: missing.length > 0 ? `Needs ${missing.join(", ")} (set it under Extensions).` : null,
   };
 }
 
-/// The credentials an extension's sources declare, each once, with whether
+/// The credentials an extension's collectors declare, each once, with whether
 /// it has a value (Settings → Extensions; values live in the keychain).
 export function extensionCredentials(
-  listings: SourceListing[],
+  listings: CollectorListing[],
   extension: string,
 ): { name: string; set: boolean }[] {
   const out = new Map<string, boolean>();
   for (const l of listings) {
-    if (l.extension !== extension) continue;
+    if (l.owner !== extension) continue;
     for (const c of l.credentials) out.set(c.name, (out.get(c.name) ?? false) || c.set);
   }
   return [...out].map(([name, set]) => ({ name, set })).sort((a, b) => a.name.localeCompare(b.name));
@@ -169,15 +188,17 @@ export function reviewModel(review: ExtensionReview): ReviewModel {
   const ext = review.extension;
   const declares: string[] = [];
   if (ext.lenses.length > 0) declares.push(plural(ext.lenses.length, "lens", "lenses"));
-  for (const s of ext.sources) {
-    if (s.runtime === "exec") {
-      const parts = [`Source ${s.id} runs the program ${s.entry}`];
+  for (const s of ext.collectors) {
+    if (s.runtime === "read") {
+      declares.push(`Collector ${s.id} reads ${s.provider?.instance}'s ${s.provider?.collector}`);
+    } else if (s.runtime === "exec") {
+      const parts = [`Collector ${s.id} runs the program ${s.entry}`];
       parts.push(s.network.length > 0 ? `reaches ${s.network.join(", ")}` : "no network");
       if (s.credentials.length > 0) parts.push(`reads ${s.credentials.join(", ")}`);
       if (s.env.length > 0) parts.push(`reads env ${s.env.join(", ")}`);
       declares.push(`${parts.join(" · ")} (you'll approve it before it runs)`);
     } else {
-      declares.push(`Source ${s.id} runs ${s.entry} (${s.runtime}, sandboxed: no network, files or credentials)`);
+      declares.push(`Collector ${s.id} runs ${s.entry} (${s.runtime}, sandboxed: no network, files or credentials)`);
     }
   }
   const advisories = ext.advisories ?? [];

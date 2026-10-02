@@ -172,7 +172,7 @@ pub struct ProviderInstanceView {
     /// This machine approved it as it is now.
     pub approved: bool,
     /// Each credential it declares and whether this machine has a value.
-    pub credentials: Vec<crate::source_runner::CredentialStatus>,
+    pub credentials: Vec<crate::collector_runner::CredentialStatus>,
     pub health: InstanceHealth,
     /// Each collector it declares and where its reads stand (P7.A3).
     pub collectors: Vec<CollectorView>,
@@ -230,8 +230,11 @@ impl Instance {
         let (dir, declared) = (copy.ext_dir, copy.declared);
         let mut credentials = BTreeMap::new();
         for name in &self.spec.credentials {
-            let account =
-                crate::source_runner::credential_account(&self.deps.project, &self.ext.name, name);
+            let account = crate::collector_runner::credential_account(
+                &self.deps.project,
+                &self.ext.name,
+                name,
+            );
             match self.deps.secrets.get(&account) {
                 Ok(Some(v)) => {
                     credentials.insert(name.clone(), v);
@@ -657,12 +660,12 @@ impl ProviderRegistry {
                         credentials: spec
                             .credentials
                             .iter()
-                            .map(|name| crate::source_runner::CredentialStatus {
+                            .map(|name| crate::collector_runner::CredentialStatus {
                                 name: name.clone(),
                                 set: self
                                     .deps
                                     .secrets
-                                    .get(&crate::source_runner::credential_account(
+                                    .get(&crate::collector_runner::credential_account(
                                         &self.deps.project,
                                         &ext.name,
                                         name,

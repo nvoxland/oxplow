@@ -109,7 +109,7 @@ pub const MANIFEST: &[Capability] = &[
     // Skills for agents that can't load skill files (ACP); the UI has no use for them.
     agent("get_skill"),
     // A dry run for an agent writing a source in its worktree.
-    agent("preview_source"),
+    agent("preview_collector"),
     both("list_streams"),
     agent("get_task"),
     agent("create_task"),
@@ -192,16 +192,16 @@ pub const MANIFEST: &[Capability] = &[
     ui("report_open_page"),
     // Turning extensions on/off is the person's call.
     ui("set_extension_enabled"),
-    both("list_sources"),
+    both("list_collectors"),
     agent("record_decision"),
     agent("record_claim"),
-    // The `source.sync` command: the UI runs it through `run_command`,
+    // The `collector.sync` command: the UI runs it through `run_command`,
     // an agent through this tool (as itself, so it never approves).
-    agent("run_source"),
-    // Consent to run a source's program is a person's.
-    ui("approve_source"),
+    agent("run_collector"),
+    // Consent to run a collector's program is a person's.
+    ui("approve_collector"),
     // Secrets are the person's to set; agents only see whether one is set.
-    ui("set_source_credential"),
+    ui("set_credential"),
     // Consent to run a program from the repo is a person's (tsk331); an
     // agent learns an unapproved one from the run's error.
     ui("list_project_programs"),

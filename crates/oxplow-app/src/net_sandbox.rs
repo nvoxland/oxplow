@@ -36,19 +36,7 @@ pub fn enforced() -> bool {
     cfg!(target_os = "macos") && Path::new(SANDBOX_EXEC).exists()
 }
 
-/// A `network` entry: a lowercase host name, optionally `*.`-prefixed to
-/// allow its subdomains. No scheme, port or path.
-pub fn valid_host_pattern(p: &str) -> bool {
-    let host = p.strip_prefix("*.").unwrap_or(p);
-    !host.is_empty()
-        && (host.contains('.') || host == "localhost")
-        && host.split('.').all(|label| {
-            !label.is_empty()
-                && label
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        })
-}
+pub use oxplow_config::collectors::valid_host_pattern;
 
 /// Whether `host` is allowed by `patterns`: an exact match, or a subdomain
 /// of a `*.` pattern (not the bare domain itself).

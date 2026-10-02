@@ -1,0 +1,8 @@
+{
+  "collector": "collector:project/repo.scan_clone",
+  "trigger": "on",
+  "status": "ok",
+  "entities": { "pr": 3 },
+  "facts": 12,
+  "elapsed_ms": 40
+}

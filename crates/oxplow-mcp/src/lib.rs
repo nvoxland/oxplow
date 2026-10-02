@@ -866,19 +866,19 @@ pub struct AiSummarizeParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RunSourceParams {
-    /// Extension folder name under `oxplow/extensions/`.
-    pub extension: String,
-    /// The source's `id` in that extension's `extension.yaml`.
-    pub source_id: String,
+pub struct RunCollectorParams {
+    /// The extension that declares it (its folder under `oxplow/extensions/`).
+    pub owner: String,
+    /// The collector's `id` in its `collectors:`.
+    pub id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct PreviewSourceParams {
-    /// Extension folder name under `oxplow/extensions/`.
-    pub extension: String,
-    /// The source's `id` in that extension's `extension.yaml`.
-    pub source_id: String,
+pub struct PreviewCollectorParams {
+    /// The extension that declares it (its folder under `oxplow/extensions/`).
+    pub owner: String,
+    /// The collector's `id` in its `collectors:`.
+    pub id: String,
     /// Stream whose worktree to run it from; omit for your own.
     pub stream_id: Option<String>,
 }
@@ -1311,10 +1311,10 @@ impl OxplowMcp {
                        schedule, env), its last run (status, row counts, error) and whether a \
                        person on this machine has approved its current script."
     )]
-    async fn list_sources(&self) -> Result<CallToolResult, McpError> {
+    async fn list_collectors(&self) -> Result<CallToolResult, McpError> {
         let root = self.services.worktrees.resolve(None).await;
-        let list = oxplow_app::source_runner::list_sources(
-            &oxplow_app::source_runner::Sources::of(&self.services, &root),
+        let list = oxplow_app::collector_runner::list_collectors(
+            &oxplow_app::collector_runner::Collectors::of(&self.services, &root),
         )
         .await
         .map_err(internal)?;
@@ -1322,26 +1322,26 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Run an approved extension source now, refreshing its entities \
-                       (`v_<extension>_<entity>`). You cannot approve a source: running code the \
-                       human hasn't approved fails, so ask them to use Settings → Data → \
+        description = "Run an approved extension collector now, refreshing its entities \
+                       (`v_<extension>_<entity>`). You cannot approve a collector: running code \
+                       the human hasn't approved fails, so ask them to use Settings → Data → \
                        Approve & Run. Returns row counts per entity."
     )]
-    async fn run_source(
+    async fn run_collector(
         &self,
         extensions: rmcp::model::Extensions,
-        params: Parameters<RunSourceParams>,
+        params: Parameters<RunCollectorParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        // The `source.sync` command, as the caller: it never approves.
+        // The `collector.sync` command, as the caller: it never approves.
         let actor = self.verified_actor(&caller_of(&extensions)).await?;
         let out = self
             .services
             .commands
             .run(
                 &actor,
-                oxplow_app::source_runner::SYNC,
-                serde_json::json!({ "extension": p.extension, "source": p.source_id }),
+                oxplow_app::collector_runner::SYNC,
+                serde_json::json!({ "owner": p.owner, "id": p.id }),
                 false,
             )
             .await
@@ -1350,44 +1350,44 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Dry-run a source from a stream's worktree and return the rows it would \
+        description = "Dry-run a collector from a stream's worktree and return the rows it would \
                        store (first 50 per entity, coerced to the declared columns), storing \
-                       nothing. Use it to check a source you're writing, especially in a worktree \
-                       stream: run_source always runs the primary's copy, and source data is \
-                       project-wide. An exec source still needs a person's approval of that exact \
-                       version; starlark/jaq sources run without it."
+                       nothing. Use it to check a collector you're writing, especially in a \
+                       worktree stream: run_collector always runs the primary's copy, and \
+                       collected data is project-wide. An exec collector still needs a person's \
+                       approval of that exact version; starlark/jaq collectors run without it."
     )]
-    async fn preview_source(
+    async fn preview_collector(
         &self,
         extensions: rmcp::model::Extensions,
-        params: Parameters<PreviewSourceParams>,
+        params: Parameters<PreviewCollectorParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        check_optional_stream("preview_source", p.stream_id.as_deref())?;
+        check_optional_stream("preview_collector", p.stream_id.as_deref())?;
         // Omitted: the caller's own stream (tsk574).
         let stream = self
             .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
             .await;
         let root = self.services.worktrees.resolve(stream.as_deref()).await;
-        let preview = oxplow_app::source_runner::preview_source(
-            &oxplow_app::source_runner::Sources::of(&self.services, &root),
-            &p.extension,
-            &p.source_id,
+        let preview = oxplow_app::collector_runner::preview_collector(
+            &oxplow_app::collector_runner::Collectors::of(&self.services, &root),
+            &p.owner,
+            &p.id,
         )
         .await
         .map_err(|e| match e {
-            oxplow_app::source_runner::RunSourceError::NotFound => McpError::invalid_params(
+            oxplow_app::collector_runner::RunCollectorError::NotFound => McpError::invalid_params(
                 format!(
-                    "no source `{}/{}` in that stream's worktree (see list_extensions)",
-                    p.extension, p.source_id
+                    "no collector `{}/{}` in that stream's worktree (see list_extensions)",
+                    p.owner, p.id
                 ),
                 None,
             ),
-            oxplow_app::source_runner::RunSourceError::NeedsApproval(m)
-            | oxplow_app::source_runner::RunSourceError::Failed(m) => {
+            oxplow_app::collector_runner::RunCollectorError::NeedsApproval(m)
+            | oxplow_app::collector_runner::RunCollectorError::Failed(m) => {
                 McpError::invalid_params(m, None)
             }
-            oxplow_app::source_runner::RunSourceError::Storage(e) => internal(e),
+            oxplow_app::collector_runner::RunCollectorError::Storage(e) => internal(e),
         })?;
         json_result(&preview)
     }
@@ -4544,7 +4544,7 @@ fn code_err(e: oxplow_domain::code_intel::CodeIntelError) -> McpError {
 const READ_ONLY_TOOLS: &[&str] = &[
     "ping",
     "get_skill",
-    "list_sources",
+    "list_collectors",
     "list_ai_roles",
     "get_open_page",
     "list_extensions",
@@ -4615,7 +4615,7 @@ const WRITE_TOOLS: &[&str] = &[
     // Stores the change's analysis and starts its duplicate scan.
     "ensure_change",
     // Runs a source's program (stores nothing, but it executes code).
-    "preview_source",
+    "preview_collector",
     // Clones from the network into .oxplow/tmp.
     "review_extension",
     // Call an outside model provider and record an `ai_call` row.
@@ -4623,7 +4623,7 @@ const WRITE_TOOLS: &[&str] = &[
     "ai_summarize",
     "record_decision",
     "record_claim",
-    "run_source",
+    "run_collector",
     "install_extension",
     "update_extension",
     "create_dashboard",
@@ -5883,16 +5883,16 @@ mod tests {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let list: serde_json::Value =
-            serde_json::from_str(&text_payload(server.list_sources().await.unwrap())).unwrap();
+            serde_json::from_str(&text_payload(server.list_collectors().await.unwrap())).unwrap();
         assert_eq!(list[0]["approved"], false);
 
         // An agent can't consent on the human's behalf.
         let err = server
-            .run_source(
+            .run_collector(
                 as_writer(&services).await,
-                Parameters(RunSourceParams {
-                    extension: "my-gh".into(),
-                    source_id: "gh".into(),
+                Parameters(RunCollectorParams {
+                    owner: "my-gh".into(),
+                    id: "gh".into(),
                 }),
             )
             .await
@@ -6234,7 +6234,7 @@ mod tests {
     /// An agent previews a source from its stream's worktree: rows back,
     /// nothing stored (tsk377).
     #[tokio::test]
-    async fn preview_source_returns_rows_without_storing() {
+    async fn preview_collector_returns_rows_without_storing() {
         let (proj, svc, server) = boot();
         let ext = proj.path().join("oxplow/extensions/work");
         std::fs::create_dir_all(&ext).unwrap();
@@ -6245,11 +6245,11 @@ mod tests {
         .unwrap();
         std::fs::write(ext.join("one.jq"), "{entities: {nums: .rows}}").unwrap();
         let r = server
-            .preview_source(
+            .preview_collector(
                 rmcp::model::Extensions::new(),
-                Parameters(PreviewSourceParams {
-                    extension: "work".into(),
-                    source_id: "one".into(),
+                Parameters(PreviewCollectorParams {
+                    owner: "work".into(),
+                    id: "one".into(),
                     stream_id: None,
                 }),
             )
@@ -6257,7 +6257,7 @@ mod tests {
             .unwrap();
         let v: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
         assert_eq!(v["entities"][0]["rows"], serde_json::json!([[1]]));
-        assert!(svc.ext_source_store.list_states().await.unwrap().is_empty());
+        assert!(svc.collector_store.list_runs().await.unwrap().is_empty());
     }
 
     #[tokio::test]

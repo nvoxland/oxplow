@@ -65,7 +65,7 @@
     - { name: "prompt_version", type: "TEXT", doc: "The op's prompt version (`classify@1`); a new prompt is a new result." }
     - { name: "op", type: "TEXT", doc: "`classify`, `score`, `summarize` or `extract`." }
     - { name: "role", type: "TEXT", doc: "The role it ran on (`decide`, `summarize`, `main`)." }
-    - { name: "caller", type: "TEXT", doc: "What first asked, e.g. `inferred-decisions`, `source:<ext>/<id>`." }
+    - { name: "caller", type: "TEXT", doc: "What first asked, e.g. `inferred-decisions`, `collector:<owner>/<id>`." }
     - { name: "output_json", type: "TEXT", doc: "The result as JSON." }
     - { name: "input_tokens", type: "INTEGER", doc: "Input tokens of the call that computed it." }
     - { name: "output_tokens", type: "INTEGER", doc: "Output tokens of that call." }
@@ -746,6 +746,21 @@
   tests:
     - { not_null: asset }
     - { unique: asset }
+- name: collector_run
+  version: 1
+  description: "Each collector's last run (P7.B3): its outcome, the row counts it wrote and its checkpoint. A collector is owned by an extension, the project (`project`) or oxplow (`built-in`)."
+  columns:
+    - { name: "owner", type: "TEXT", doc: "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`." }
+    - { name: "id", type: "TEXT", doc: "The collector's id within its owner (may be dotted: `repo.scan_clone`)." }
+    - { name: "status", type: "TEXT", doc: "`ok`, `error`, or `needs_approval` (an exec collector a person hasn't approved)." }
+    - { name: "last_run_at", type: "TEXT", doc: "When it last ran (RFC 3339)." }
+    - { name: "error", type: "TEXT", doc: "The last run's error, when it failed." }
+    - { name: "row_counts_json", type: "TEXT", doc: "Rows per entity after the last successful run, as JSON." }
+    - { name: "cursor_json", type: "TEXT", doc: "Its checkpoint: the opaque state its script or provider read returned last." }
+    - { name: "last_event_id", type: "INTEGER", doc: "The seq of the last trigger event it ran for." }
+  tests:
+    - { not_null: owner }
+    - { not_null: id }
 - name: capability_provider
   version: 1
   description: "Each capability's providers and the feature flags they declare (P6b): oxplow's own (`work_items/oxplow`, `vcs/git`, `knowledge/oxplow`) and every running external provider. The UI shows a provider's enhancements only when its flags allow them (a Comment… action only for a work-items provider with `comments`)."

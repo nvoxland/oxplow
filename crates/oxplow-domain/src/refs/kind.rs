@@ -199,6 +199,12 @@ pub fn core_kinds() -> KindRegistry {
         // inferred (`claim.id`, `decision.id`; P7.C4 reviews them).
         KindSpec::new("claim", r"^[0-9]+$"),
         KindSpec::new("decision", r"^[0-9]+$"),
+        // A collector: `<owner>/<id>`, the owner an extension, `project`
+        // or `built-in`, the id dotted identifiers (P7.B3).
+        KindSpec::new(
+            "collector",
+            r"^[a-z0-9-]+/[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$",
+        ),
     ];
     for spec in specs {
         reg.register(spec.expect("core kind spec is valid"))

@@ -176,7 +176,7 @@ and `ai_extract(text, schema, instructions = "")` — Starlark builtins
 `AiHost` in `Evaluator::extra` (the `GaugeHost` pattern). The host holds
 a synchronous `dyn AiOracle`; the app's is `ai_compute::CollectorOracle`,
 which blocks the script's worker thread on the runtime and asks
-`AiCompute` as caller `source:<ext>/<id>` — so every answer is a
+`AiCompute` as caller `collector:<owner>/<id>` — so every answer is a
 recorded computation (the same question on the same text is one call,
 ever). The time a script waits on the oracle is left out of its sandbox
 `timeout` (`RunClock`, the in-flight call included;

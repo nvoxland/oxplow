@@ -90,8 +90,8 @@ actions:
     row: true
   - id: sync
     label: Sync PRs
-    command: source.sync
-    input: { extension: github, source: prs }
+    command: collector.sync
+    input: { owner: github, id: prs }
 ```
 
 `{{param.x}}` and `{{row.col}}` fill the input from the lens's params or
@@ -254,19 +254,19 @@ the whole protocol.
   **Update** pulls the latest. Don't edit installed extensions in place;
   updates overwrite them.
 
-## Sources: bringing in outside data
+## Collectors: bringing in outside data
 
-An extension can declare a **source**: a script that fetches records from
+An extension can declare a **collector**: a script that fetches records from
 somewhere else (GitHub, Linear, your CI) and prints them as JSON. Oxplow
 stores them as a view like `v_github_pr` that lenses can join with tasks and
 efforts.
 
 ```yaml
-sources:
+collectors:
   - id: prs
     runtime: exec
     entry: sync.sh               # inside the extension folder
-    schedule: every 15m          # or: manual
+    trigger: { every: 15m }      # or: manual
     env: [GITHUB_REPOSITORY]     # passed through from your environment
     credentials: [GITHUB_TOKEN]  # secrets from your keychain
     network: [api.github.com]    # the only host it may reach
@@ -284,10 +284,10 @@ The script prints:
 
 Column types are `text`, `int`, `real`, `bool` and `time` (an ISO timestamp).
 
-A source runs code, so **nothing runs until you approve it** in Settings →
+A collector runs code, so **nothing runs until you approve it** in Settings →
 Data → **Approve & Run**. Approval is per machine and per version of the
 script: a teammate who pulls it approves it themselves, and a changed script
-needs approving again. Agents can run approved sources but can't approve
+needs approving again. Agents can run approved collectors but can't approve
 them.
 
 Known limits:
@@ -295,27 +295,27 @@ Known limits:
 - It only gets the environment variables it declares, plus `PATH` and `HOME`.
 - It can only reach the hosts it lists under `network:` (for example
   `network: [api.github.com]`). The list is part of what you approve, so a
-  source that adds a host needs approving again. On macOS this is
+  collector that adds a host needs approving again. On macOS this is
   enforced, and anything else the script tries to reach fails. Other
   systems don't enforce it yet, and the approval says so.
-- Secrets go in `credentials:`. Set each one under the source in Settings →
+- Secrets go in `credentials:`. Set each one under the collector in Settings →
   Extensions; the value goes to your OS keychain and the script gets it as
   that environment variable. Values are per extension, and agents can't
   read or set them.
-- Sources run from the primary stream's worktree. Their data is shared by
+- Collectors run from the primary stream's worktree. Their data is shared by
   every stream.
 
-### Sources over your own data
+### Collectors over your own data
 
-A source can also compute new data from data oxplow already has, with a
+A collector can also compute new data from data oxplow already has, with a
 Starlark or jq script instead of a program. It gets the rows of a SQL query
 and returns entities in the same shape:
 
 ```yaml
-sources:
+collectors:
   - id: hot
     runtime: starlark            # or: jaq
-    entry: sources/hot.star
+    entry: collectors/hot.star
     input: "SELECT id, title FROM v_task WHERE priority = 'high'"
     entities:
       - { name: hot_task, key: id, columns: { id: int, title: text } }

@@ -11,6 +11,7 @@ use specta::Type;
 use thiserror::Error;
 use tracing::info;
 
+pub mod collectors;
 pub mod keys;
 
 pub use oxplow_domain::AgentKind;

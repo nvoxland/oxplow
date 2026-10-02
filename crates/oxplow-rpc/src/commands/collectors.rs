@@ -1,50 +1,47 @@
-//! Cores for the `sources` command module — extension-declared data
-//! sources: list with state, and run (with the human's consent). Sources
-//! are read from the primary stream's worktree: their data is
-//! project-global. See `.context/semantic-layer.md`.
+//! Cores for the `collectors` command module — extension-declared
+//! collectors: list with their last run, approve (a person's consent) and
+//! credentials. Collectors are read from the primary stream's worktree:
+//! their data is project-global. Running one is the `collector.sync`
+//! command. See `.context/semantic-layer.md` → "Collectors".
 
-use oxplow_app::source_runner::{self, SourceListing, Sources};
+use oxplow_app::collector_runner::{self, CollectorListing, Collectors};
 use oxplow_app::Services;
 
 use crate::error::IpcError;
 
-/// Every declared source with its last run state and whether this
-/// machine has approved its current entry script.
-pub async fn list_sources(svc: &Services) -> Result<Vec<SourceListing>, IpcError> {
+/// Every declared collector with its last run and whether this machine
+/// has approved its current entry script.
+pub async fn list_collectors(svc: &Services) -> Result<Vec<CollectorListing>, IpcError> {
     let root = svc.worktrees.resolve(None).await;
-    Ok(source_runner::list_sources(&Sources::of(svc, &root)).await?)
+    Ok(collector_runner::list_collectors(&Collectors::of(svc, &root)).await?)
 }
 
-/// A person approves an exec source at the listing's `version` they
+/// A person approves an exec collector at the listing's `version` they
 /// reviewed; one that changed since is refused (UI only; agents can't
-/// approve). Running it is the `source.sync` command.
-pub async fn approve_source(
+/// approve). Running it is the `collector.sync` command.
+pub async fn approve_collector(
     svc: &Services,
-    extension: String,
-    source_id: String,
+    owner: String,
+    id: String,
     version: String,
 ) -> Result<(), IpcError> {
     let root = svc.worktrees.resolve(None).await;
-    source_runner::approve_reviewed(
-        &source_runner::Sources::of(svc, &root),
-        &extension,
-        &source_id,
-        &version,
-    )
-    .map_err(|e| IpcError::from(oxplow_domain::DomainError::from(e)))
+    collector_runner::approve_reviewed(&Collectors::of(svc, &root), &owner, &id, &version)
+        .map_err(|e| IpcError::from(oxplow_domain::DomainError::from(e)))
 }
 
-/// Set (or clear with `null`) a credential an extension's source declares.
+/// Set (or clear with `null`) a credential an extension's collector or
+/// provider declares.
 /// The value goes to the keychain and never comes back. UI only.
-pub async fn set_source_credential(
+pub async fn set_credential(
     svc: &Services,
     extension: String,
     name: String,
     value: Option<String>,
 ) -> Result<(), IpcError> {
     let root = svc.worktrees.resolve(None).await;
-    Ok(source_runner::set_source_credential(
-        &Sources::of(svc, &root),
+    Ok(collector_runner::set_credential(
+        &Collectors::of(svc, &root),
         &extension,
         &name,
         value.as_deref(),
@@ -131,7 +128,7 @@ mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "name: my-gh\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
+            "manifest: 2\nname: my-gh\nsharing: private\nintent: { purpose: test, origin: null, examples: [] }\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
         )
         .unwrap();
         let script = ext.join("sync.sh");
@@ -161,25 +158,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_run_and_query_a_source() {
+    async fn list_run_and_query_a_collector() {
         let (svc, _dir) = crate::test_support::services();
         seed(&svc.layout.project_dir);
 
-        let list = crate::dispatch("list_sources", json!({}), &svc)
+        let list = crate::dispatch("list_collectors", json!({}), &svc)
             .await
             .unwrap();
-        assert_eq!(list[0]["extension"], "my-gh");
+        assert_eq!(list[0]["owner"], "my-gh");
         assert_eq!(list[0]["spec"]["id"], "gh");
         assert_eq!(list[0]["approved"], false);
-        assert_eq!(list[0]["state"], serde_json::Value::Null);
+        assert_eq!(list[0]["run"], serde_json::Value::Null);
 
-        // `source.sync` never approves: unapproved, it's refused.
+        // `collector.sync` never approves: unapproved, it's refused.
         let sync = || {
             crate::dispatch(
                 "run_command",
                 json!({
-                    "name": "source.sync",
-                    "input": { "extension": "my-gh", "source": "gh" },
+                    "name": "collector.sync",
+                    "input": { "owner": "my-gh", "id": "gh" },
                     "confirmed": false,
                 }),
                 &svc,
@@ -189,8 +186,8 @@ mod tests {
         assert_eq!(err.code, "INVALID");
         // A person approves the version they reviewed, then it runs.
         crate::dispatch(
-            "approve_source",
-            json!({ "extension": "my-gh", "sourceId": "gh", "version": list[0]["version"] }),
+            "approve_collector",
+            json!({ "owner": "my-gh", "id": "gh", "version": list[0]["version"] }),
             &svc,
         )
         .await
@@ -198,11 +195,20 @@ mod tests {
         let out = sync().await.unwrap();
         assert_eq!(out["result"]["rowCounts"]["pr"], 1);
 
-        let list = crate::dispatch("list_sources", json!({}), &svc)
+        let list = crate::dispatch("list_collectors", json!({}), &svc)
             .await
             .unwrap();
         assert_eq!(list[0]["approved"], true);
-        assert_eq!(list[0]["state"]["status"], "ok");
+        assert_eq!(list[0]["run"]["status"], "ok");
+        // The run is logged, in the transaction that wrote its rows.
+        let logged = crate::dispatch(
+            "query_sql",
+            json!({ "sql": "SELECT json_extract(payload, '$.collector'), json_extract(payload, '$.trigger'), json_extract(payload, '$.entities.pr') FROM v_event WHERE type = 'collector.synced'" }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(logged["rows"], json!([["collector:my-gh/gh", "manual", 1]]));
 
         let q = crate::dispatch(
             "query_sql",
@@ -245,13 +251,13 @@ mod tests {
         .unwrap();
 
         crate::dispatch(
-            "set_source_credential",
+            "set_credential",
             json!({ "extension": "my-gh", "name": "GH_PAT", "value": "pat-xyz" }),
             &svc,
         )
         .await
         .unwrap();
-        let list = crate::dispatch("list_sources", json!({}), &svc)
+        let list = crate::dispatch("list_collectors", json!({}), &svc)
             .await
             .unwrap();
         assert_eq!(
@@ -261,7 +267,7 @@ mod tests {
         assert!(!list.to_string().contains("pat-xyz"));
 
         let err = crate::dispatch(
-            "set_source_credential",
+            "set_credential",
             json!({ "extension": "my-gh", "name": "NOPE", "value": "x" }),
             &svc,
         )

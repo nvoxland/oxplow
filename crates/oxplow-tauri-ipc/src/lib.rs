@@ -89,8 +89,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<oxplow_domain::vcs::OpOutcome>()
         // A provider's work-item flags (`v_capability_provider.features`).
         .typ::<oxplow_domain::work_items::WorkItemsFeatures>()
-        // `source.sync`'s result, read through `run_command`.
-        .typ::<oxplow_app::source_runner::SourceRunReport>()
+        // `collector.sync`'s result, read through `run_command`.
+        .typ::<oxplow_app::collector_runner::CollectorRunReport>()
         .commands(collect_commands![
             // app
             commands::generated::app_version,
@@ -158,9 +158,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::save_lens,
             commands::generated::report_open_page,
             commands::generated::set_extension_enabled,
-            commands::generated::list_sources,
-            commands::generated::approve_source,
-            commands::generated::set_source_credential,
+            commands::generated::list_collectors,
+            commands::generated::approve_collector,
+            commands::generated::set_credential,
             commands::generated::list_project_programs,
             commands::generated::approve_project_program,
             commands::generated::provider_declaration_effects,

@@ -14,8 +14,8 @@ use oxplow_provider_protocol::model::InitializeResult;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::extension_sources::{SourceRuntime, SourceSpec};
 use crate::providers::ProviderSpec;
+use oxplow_config::collectors::{CollectorRuntime, CollectorSpec};
 
 /// How one thing differs between the installed version and the candidate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -41,7 +41,7 @@ fn change_of<T: PartialEq>(before: Option<&T>, after: Option<&T>) -> Change {
 #[serde(rename_all = "camelCase")]
 pub struct Grants {
     pub entry: String,
-    pub runtime: SourceRuntime,
+    pub runtime: CollectorRuntime,
     pub args: Vec<String>,
     pub hosts: Vec<String>,
     pub credentials: Vec<String>,
@@ -212,9 +212,9 @@ pub fn models_diff(
         .collect()
 }
 
-fn collector_grants(s: &SourceSpec) -> Grants {
+fn collector_grants(s: &CollectorSpec) -> Grants {
     Grants {
-        entry: s.entry.clone(),
+        entry: s.entry.clone().unwrap_or_default(),
         runtime: s.runtime,
         args: Vec::new(),
         hosts: s.network.clone(),
@@ -224,7 +224,7 @@ fn collector_grants(s: &SourceSpec) -> Grants {
 }
 
 /// Collectors before and after, by id: their grants and the views they fill.
-pub fn collectors_diff(before: &[SourceSpec], after: &[SourceSpec]) -> Vec<CollectorEffect> {
+pub fn collectors_diff(before: &[CollectorSpec], after: &[CollectorSpec]) -> Vec<CollectorEffect> {
     pair_by(before, after, |s| s.id.clone())
         .into_iter()
         .map(|(id, b, a)| CollectorEffect {
@@ -243,7 +243,7 @@ pub fn collectors_diff(before: &[SourceSpec], after: &[SourceSpec]) -> Vec<Colle
 fn provider_grants(p: &ProviderSpec) -> Grants {
     Grants {
         entry: p.entry.clone(),
-        runtime: SourceRuntime::Exec,
+        runtime: CollectorRuntime::Exec,
         args: p.args.clone(),
         hosts: p.network.clone(),
         credentials: p.credentials.clone(),
@@ -517,12 +517,12 @@ pub async fn effects(
             .filter(|v| !own.contains(v))
             .collect();
     }
-    let no_sources: Vec<SourceSpec> = Vec::new();
+    let no_collectors: Vec<CollectorSpec> = Vec::new();
     let collectors = collectors_diff(
         before
             .as_ref()
-            .map_or(&no_sources, |b| &b.extension.sources),
-        &after.extension.sources,
+            .map_or(&no_collectors, |b| &b.extension.collectors),
+        &after.extension.collectors,
     );
     let declared = |v: &Version<'_>| -> Vec<DeclaredProvider> {
         v.extension
@@ -638,11 +638,12 @@ mod tests {
         }
     }
 
-    fn source(id: &str, hosts: &[&str]) -> SourceSpec {
+    fn collector(id: &str, hosts: &[&str]) -> CollectorSpec {
         serde_json::from_value(json!({
-            "id": id, "doc": "", "runtime": "exec", "entry": "sync.sh", "input": null,
-            "sync": "replace", "schedule": { "kind": "manual" }, "env": [], "network": hosts,
-            "credentials": ["token"], "entities": []
+            "id": id, "doc": "", "runtime": "exec", "entry": "sync.sh", "provider": null,
+            "trigger": { "kind": "manual" }, "after": [], "input": null, "report": null,
+            "sync": "replace", "env": [], "network": hosts, "credentials": ["token"],
+            "entities": [], "facts": []
         }))
         .unwrap()
     }
@@ -664,10 +665,10 @@ mod tests {
     #[test]
     fn collectors_and_providers_diff_their_grants() {
         let collectors = collectors_diff(
-            &[source("prs", &["api.github.com"]), source("old", &[])],
+            &[collector("prs", &["api.github.com"]), collector("old", &[])],
             &[
-                source("prs", &["api.github.com", "*.githubusercontent.com"]),
-                source("new", &[]),
+                collector("prs", &["api.github.com", "*.githubusercontent.com"]),
+                collector("new", &[]),
             ],
         );
         let by: BTreeMap<&str, &CollectorEffect> =

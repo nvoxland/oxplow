@@ -355,17 +355,17 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listSources: () => typedError<SourceListing[], IpcError>(__TAURI_INVOKE("list_sources")),
+	listCollectors: () => typedError<CollectorListing[], IpcError>(__TAURI_INVOKE("list_collectors")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	approveSource: (extension: string, sourceId: string, version: string) => typedError<null, IpcError>(__TAURI_INVOKE("approve_source", { extension, sourceId, version })),
+	approveCollector: (owner: string, id: string, version: string) => typedError<null, IpcError>(__TAURI_INVOKE("approve_collector", { owner, id, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setSourceCredential: (extension: string, name: string, value: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("set_source_credential", { extension, name, value })),
+	setCredential: (extension: string, name: string, value: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("set_credential", { extension, name, value })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1663,6 +1663,123 @@ export type CollectorEffect = {
 	entities: string[],
 };
 
+// A declared collector with its last run and consent status.
+export type CollectorListing = {
+	// The extension that declares it.
+	owner: string,
+	spec: CollectorSpec,
+	run: CollectorRun | null,
+	/**
+	 *  This machine approved the entry script (and its `network` list) as
+	 *  it is now.
+	 */
+	approved: boolean,
+	// Whether this OS enforces the collector's `network` list.
+	networkEnforced: boolean,
+	// Each declared credential and whether it has a value (never the value).
+	credentials: CredentialStatus[],
+	/**
+	 *  Its approval hash as it is now: the person's Approve & Run sends
+	 *  back the version they reviewed (tsk349). `None` for derived
+	 *  collectors and unreadable entries.
+	 */
+	version: string | null,
+};
+
+// Last run of one collector (`collector_run`).
+export type CollectorRun = {
+	// The declaring extension, `project` or `built-in`.
+	owner: string,
+	id: string,
+	// `ok`, `error` or `needs_approval`.
+	status: string,
+	lastRunAt: string,
+	error: string | null,
+	// Row counts per entity from the last successful run.
+	rowCounts: { [key in string]: number },
+	// The checkpoint the last successful run returned (opaque).
+	cursor: unknown | null,
+	// The seq of the last trigger event it ran for.
+	lastEventId: number | null,
+};
+
+// Outcome of one run, as reported to the UI / agent.
+export type CollectorRunReport = {
+	owner: string,
+	id: string,
+	rowCounts: { [key in string]: number },
+};
+
+// What runs a collector.
+export type CollectorRuntime = 
+/**
+ *  A program: can reach the network and credentials, so it needs a
+ *  person's approval to run.
+ */
+"exec" | 
+// A sandboxed Starlark script: no I/O, so no approval.
+"starlark" | 
+// A sandboxed jq program: no I/O, so no approval.
+"jaq" | 
+/**
+ *  A provider instance's collector (`provider.sync`): its records
+ *  land in the capability's model (`v_work_item`).
+ */
+"read";
+
+// One declared collector.
+export type CollectorSpec = {
+	// Unique in its owner; a dotted id (`repo.scan_clone`) is fine.
+	id: string,
+	doc: string,
+	runtime: CollectorRuntime,
+	/**
+	 *  The program or script, relative to its owner's folder (the
+	 *  extension's, or the project's); absent for `read`.
+	 */
+	entry: string | null,
+	// For `read`: the provider collector it runs.
+	provider: ProviderRead | null,
+	trigger: Trigger,
+	/**
+	 *  With an `on:` trigger: the pump consumers that must have handled
+	 *  the event first (`change.analyze`).
+	 */
+	after: string[],
+	/**
+	 *  A script's input query: read-only SQL over the semantic layer,
+	 *  handed over as `input.rows`. `:stream_id`, `:snapshot_id`,
+	 *  `:effort_id`, `:thread_id`, `:turn_id` and `:event_id` bind the
+	 *  triggering event's anchors (NULL otherwise).
+	 */
+	input: string | null,
+	// A report file handed over as `input.report`.
+	report: ReportInput | null,
+	sync: CollectorSync,
+	// Host environment variables an exec collector gets.
+	env: string[],
+	// Hosts an exec collector may reach; part of what a person approves.
+	network: string[],
+	// Keychain secrets an exec collector gets as environment variables.
+	credentials: string[],
+	entities: EntityDecl[],
+	/**
+	 *  The measures its facts land on (`repo.rust_clone`); a fact on any
+	 *  other is dropped.
+	 */
+	facts: string[],
+};
+
+// How a run's entities land.
+export type CollectorSync = 
+// Each run restates every entity (one it doesn't mention is emptied).
+"replace" | 
+/**
+ *  Each run adds or updates rows by key, and removes the keys it lists
+ *  under `deleted`; an entity it doesn't mention is left alone.
+ */
+"upsert";
+
 // A provider's collector as Settings → Integrations shows it.
 export type CollectorView = {
 	name: string,
@@ -2210,6 +2327,35 @@ export type EffortFileChange = "created" | "updated" | "deleted";
 
 export type EffortId = string;
 
+export type EntityColumn = {
+	name: string,
+	colType: ColumnType,
+	doc: string,
+};
+
+// An entity a collector writes: its rows, published as a view.
+export type EntityDecl = {
+	name: string,
+	doc: string,
+	// Column that uniquely identifies a row.
+	key: string,
+	columns: EntityColumn[],
+	relations: EntityRelation[],
+	// SQL name lenses and agents query: `v_<owner>_<entity>`.
+	view: string,
+};
+
+/**
+ *  A documented join from an entity to another view. Not executed; it
+ *  tells agents and lens authors how the data connects.
+ */
+export type EntityRelation = {
+	// The view it joins to, e.g. `v_task` or `v_github_review`.
+	to: string,
+	// The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`.
+	on: string,
+};
+
 // One event as written to the log.
 export type Envelope = {
 	id: EventId,
@@ -2454,8 +2600,8 @@ export type Extension_Deserialize = {
 	 *  `install_extension`; `None` for ones written in this repo.
 	 */
 	source: ExtensionSource | null,
-	// Declared data sources (valid ones; invalid ones are in `errors`).
-	sources: SourceSpec[],
+	// Declared collectors (valid ones; invalid ones are in `errors`).
+	collectors: CollectorSpec[],
 	/**
 	 *  Declared providers (experimental: a private extension's only;
 	 *  valid ones — invalid ones are in `errors`).
@@ -2549,8 +2695,8 @@ export type Extension_Serialize = {
 	 *  `install_extension`; `None` for ones written in this repo.
 	 */
 	source: ExtensionSource | null,
-	// Declared data sources (valid ones; invalid ones are in `errors`).
-	sources: SourceSpec[],
+	// Declared collectors (valid ones; invalid ones are in `errors`).
+	collectors: CollectorSpec[],
 	/**
 	 *  Declared providers (experimental: a private extension's only;
 	 *  valid ones — invalid ones are in `errors`).
@@ -2781,7 +2927,7 @@ export type GeneratedConfig = {
 // What a program may reach: what a person approves.
 export type Grants = {
 	entry: string,
-	runtime: SourceRuntime,
+	runtime: CollectorRuntime,
 	args: string[],
 	hosts: string[],
 	credentials: string[],
@@ -3984,12 +4130,6 @@ detail: string | null } |
  */
 { kind: "dashboardsChanged" } | 
 /**
- *  An extension source finished a run (ok or error): its entity data
- *  and/or run state changed. Project-global; lenses re-run and the
- *  Extensions settings refresh.
- */
-{ kind: "sourceSynced"; extension: string; sourceId: string } | 
-/**
  *  A language server published diagnostics (or restarted) for
  *  `stream_id`: `v_diagnostic` changed. Debounced; lenses re-run.
  */
@@ -4240,6 +4380,13 @@ export type ProviderKind =
 // TypeSafe (Jev decision model).
 "typesafe";
 
+// A provider's collector a `read` collector runs.
+export type ProviderRead = {
+	// `<extension>/<provider id>`.
+	instance: string,
+	collector: string,
+};
+
 // One declared provider.
 export type ProviderSpec = {
 	/**
@@ -4352,6 +4499,20 @@ export type ReorderThreadQueueRequest = {
 export type ReportConfig = {
 	path: string,
 	format: string,
+};
+
+/**
+ *  A report file a collector reads as part of its input
+ *  (`input.report`): a tool's output in the worktree.
+ */
+export type ReportInput = {
+	// Relative to the project (`target/type-coverage.json`).
+	path: string,
+	/**
+	 *  How it's parsed before the script sees it: `text` (the default),
+	 *  `json`, `xml`, `lcov` or `lines`.
+	 */
+	format?: string,
 };
 
 // One revision in full: its message and the files it changed.
@@ -4556,143 +4717,6 @@ export type SnapshotTrigger =
 "head_moved" | 
 // Backfilled for a snapshot taken before the operation log existed.
 "legacy";
-
-export type SourceColumn = {
-	name: string,
-	colType: ColumnType,
-	doc: string,
-};
-
-export type SourceEntity = {
-	name: string,
-	doc: string,
-	// Column that uniquely identifies a row.
-	key: string,
-	columns: SourceColumn[],
-	relations: SourceRelation[],
-	// SQL name lenses and agents query: `v_<extension>_<entity>`.
-	view: string,
-};
-
-// A declared source with its last run and consent status.
-export type SourceListing = {
-	extension: string,
-	spec: SourceSpec,
-	state: SourceState | null,
-	/**
-	 *  This machine approved the entry script (and its `network` list) as
-	 *  it is now.
-	 */
-	approved: boolean,
-	// Whether this OS enforces the source's `network` list.
-	networkEnforced: boolean,
-	// Each declared credential and whether it has a value (never the value).
-	credentials: CredentialStatus[],
-	/**
-	 *  Its approval hash as it is now: the person's Approve & Run sends
-	 *  back the version they reviewed (tsk349). `None` for derived sources
-	 *  and unreadable entries.
-	 */
-	version: string | null,
-};
-
-/**
- *  A documented join from this entity to another view. Not executed;
- *  it tells agents and lens authors how the data connects.
- */
-export type SourceRelation = {
-	// The view it joins to, e.g. `v_task` or `v_github_review`.
-	to: string,
-	// The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`.
-	on: string,
-};
-
-// Outcome of one run, as reported to the UI / agent.
-export type SourceRunReport = {
-	extension: string,
-	sourceId: string,
-	rowCounts: { [key in string]: number },
-};
-
-// What runs a source.
-export type SourceRuntime = 
-/**
- *  A program: can reach the network and credentials, so it needs a
- *  person's approval to run.
- */
-"exec" | 
-/**
- *  A Starlark script deriving entities from its `input` rows. No I/O,
- *  so no approval.
- */
-"starlark" | 
-/**
- *  A jq program deriving entities from its `input` rows. No I/O, so no
- *  approval.
- */
-"jaq";
-
-// When a source runs by itself.
-export type SourceSchedule = 
-// Only when someone asks (Sync Now / `run_source`).
-{ kind: "manual" } | 
-// Every `minutes` minutes, once approved.
-{ kind: "every"; minutes: number };
-
-export type SourceSpec = {
-	id: string,
-	doc: string,
-	runtime: SourceRuntime,
-	// Path to the program or script, relative to the extension folder.
-	entry: string,
-	/**
-	 *  A derived source's input: read-only SQL over the semantic layer,
-	 *  handed to the script as `{"rows": [...]}`.
-	 */
-	input: string | null,
-	sync: SourceSync,
-	schedule: SourceSchedule,
-	/**
-	 *  Host environment variables passed through to the entry
-	 *  (e.g. `GITHUB_TOKEN`). Nothing else from the host env is.
-	 */
-	env: string[],
-	/**
-	 *  Hosts an exec source may reach (`api.github.com`,
-	 *  `*.githubusercontent.com`). Part of what a person approves; enforced
-	 *  where the OS allows (see `net_sandbox`). Empty = no network.
-	 */
-	network: string[],
-	/**
-	 *  Secrets the entry gets as environment variables of these names.
-	 *  Values live in the OS keychain, set by a person in Settings →
-	 *  Extensions, scoped to this extension.
-	 */
-	credentials: string[],
-	entities: SourceEntity[],
-};
-
-// Last run of one source.
-export type SourceState = {
-	extension: string,
-	sourceId: string,
-	// `ok` or `error`.
-	status: string,
-	lastRunAt: string,
-	error: string | null,
-	// Row counts per entity from the last successful run.
-	rowCounts: { [key in string]: number },
-};
-
-// How a run's output lands.
-export type SourceSync = 
-// Each run restates every entity (one it doesn't mention is emptied).
-"replace" | 
-/**
- *  Each run adds or updates rows by key, and removes the keys it lists
- *  under `deleted`; an entity it doesn't mention is left alone.
- */
-"upsert";
 
 /**
  *  One SQL value, serialized as a plain JSON scalar (`null`, boolean,
@@ -4913,6 +4937,19 @@ export type TranscriptItem = {
 	id: number,
 	seq: number,
 } & (ItemBody);
+
+// When a collector runs by itself.
+export type Trigger = 
+// Only when someone runs it (`collector.sync`).
+{ kind: "manual" } | 
+// Every `minutes` minutes (an exec collector once approved).
+{ kind: "every"; minutes: number } | 
+/**
+ *  When an event of one of these types is logged and its payload has
+ *  each `filter` field equal to its value — after the consumers in
+ *  the collector's `after` have handled the event.
+ */
+{ kind: "on"; events: string[]; filter: { [key in string]: string } };
 
 // What a kept earlier version is a version of.
 export type Twin = {

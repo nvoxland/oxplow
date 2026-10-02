@@ -43,8 +43,8 @@ import type {
   RecentProjectView,
   Role,
   RoleBinding,
-  SourceListing,
-  SourceRunReport,
+  CollectorListing,
+  CollectorRunReport,
   DataEntity,
   CommandOutcome,
   CommandSpec,
@@ -80,7 +80,7 @@ export type {
   TranscriptItem,
 };
 export type { DiffEntry };
-export type { DataEntity, Extension, ExtensionReview, Lens, LensRun, LensViz, LensSpec, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
+export type { DataEntity, Extension, ExtensionReview, Lens, LensRun, LensViz, LensSpec, SearchHit, CollectorListing, CollectorRunReport, SqlCell, SqlQueryResult };
 export type { ProviderInstanceView };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
@@ -737,24 +737,20 @@ export async function setExtensionEnabled(name: string, enabled: boolean): Promi
   return unwrap(await commands.setExtensionEnabled(name, enabled));
 }
 
-/// Extension-declared data sources with last run state and consent.
-export async function listSources(): Promise<SourceListing[]> {
-  return unwrap(await commands.listSources());
+/// Extension-declared collectors with their last run and consent.
+export async function listCollectors(): Promise<CollectorListing[]> {
+  return unwrap(await commands.listCollectors());
 }
 
-/// Run a source now. `approveVersion` is the listing's `version` the
-/// person reviewed: their consent is recorded for exactly that version
-/// first, and a source that changed since is refused (only the UI may
-/// pass it).
-/** A person approves an exec source at the listing's `version` they
+/** A person approves an exec collector at the listing's `version` they
  *  reviewed (refused if it changed since). */
-export async function approveSource(extension: string, sourceId: string, version: string): Promise<void> {
-  unwrap(await commands.approveSource(extension, sourceId, version));
+export async function approveCollector(owner: string, id: string, version: string): Promise<void> {
+  unwrap(await commands.approveCollector(owner, id, version));
 }
 
-/** Run a source now (`source.sync`); it never approves. */
-export async function syncSource(extension: string, sourceId: string): Promise<SourceRunReport> {
-  return (await runCommand("source.sync", { extension, source: sourceId })).result as SourceRunReport;
+/** Run a collector now (`collector.sync`); it never approves. */
+export async function syncCollector(owner: string, id: string): Promise<CollectorRunReport> {
+  return (await runCommand("collector.sync", { owner, id })).result as CollectorRunReport;
 }
 
 /// Analyze a change (a commit, an effort, or a stream's working tree) if
@@ -763,10 +759,11 @@ export async function ensureChange(target: ChangeTarget): Promise<ChangeRow> {
   return unwrap(await commands.ensureChange(target));
 }
 
-/// Set (or clear with null) a credential an extension's source declares.
-/// The value goes to the OS keychain and is never returned.
-export async function setSourceCredential(extension: string, name: string, value: string | null): Promise<void> {
-  unwrap(await commands.setSourceCredential(extension, name, value));
+/// Set (or clear with null) a credential an extension's collector or
+/// provider declares. The value goes to the OS keychain and is never
+/// returned.
+export async function setCredential(extension: string, name: string, value: string | null): Promise<void> {
+  unwrap(await commands.setCredential(extension, name, value));
 }
 
 /// Settings → AI: providers (whether each has a key, never the key) and

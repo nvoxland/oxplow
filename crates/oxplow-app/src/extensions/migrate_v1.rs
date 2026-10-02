@@ -19,7 +19,8 @@ use super::manifest_v2::key_line;
 /// - `sharing: private` and an `intent` skeleton (its `purpose` from
 ///   `description`) are inserted after the header (`name`,
 ///   `description`); the agent fills in `origin` and `examples`;
-/// - `sources:` becomes `collectors:`, and `slots:` becomes `ui:` /
+/// - `sources:` becomes `collectors:` (each source's `schedule:` its
+///   `trigger:`), and `slots:` becomes `ui:` /
 ///   `  slots:` with its block (comments and blank lines included)
 ///   indented under it and each v1 slot name renamed (`RENAMED_SLOTS`).
 pub fn migrate_v1_to_v2(text: &str) -> String {
@@ -58,7 +59,7 @@ pub fn migrate_v1_to_v2(text: &str) -> String {
     );
     let mut out = String::with_capacity(text.len() + 96);
     out.push_str("manifest: 2\n");
-    let mut in_slots = false;
+    let (mut in_slots, mut in_sources) = (false, false);
     for (i, line) in lines.iter().enumerate() {
         if i == header_end {
             out.push_str(&inserted);
@@ -66,8 +67,11 @@ pub fn migrate_v1_to_v2(text: &str) -> String {
         let top_level = !line.starts_with([' ', '-', '#']) && !line.trim().is_empty();
         if top_level {
             in_slots = false;
+            in_sources = line.starts_with("sources:");
         }
-        if let Some(rest) = line.strip_prefix("slots:") {
+        if in_sources && !top_level {
+            out.push_str(&schedule_to_trigger(line));
+        } else if let Some(rest) = line.strip_prefix("slots:") {
             out.push_str("ui:\n  slots:");
             out.push_str(rest);
             in_slots = true;
@@ -127,6 +131,45 @@ fn rename_slots(line: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// A source's `schedule: every <d>` / `schedule: manual` (bare or quoted,
+/// block or flow) as the collector's `trigger: { every: <d> }` /
+/// `trigger: manual`; anything else is left for the loader to report.
+fn schedule_to_trigger(line: &str) -> String {
+    const KEY: &str = "schedule:";
+    let Some(at) = line.find(KEY) else {
+        return line.to_string();
+    };
+    if !line[..at]
+        .chars()
+        .next_back()
+        .is_none_or(|c| matches!(c, ' ' | '{' | ',' | '-'))
+    {
+        return line.to_string();
+    }
+    let rest = line[at + KEY.len()..].trim_start_matches(' ');
+    let quote = rest.chars().next().filter(|c| matches!(c, '"' | '\''));
+    let body = &rest[quote.map_or(0, char::len_utf8)..];
+    let end = match quote {
+        Some(q) => body.find(q),
+        None => Some(body.find([',', '}', '#', '\n', '\r']).unwrap_or(body.len())),
+    };
+    let Some(end) = end else {
+        return line.to_string();
+    };
+    let value = body[..end].trim();
+    // What follows the value — a bare value's trailing spaces included.
+    let after = match quote {
+        Some(q) => &body[end + q.len_utf8()..],
+        None => &body[body[..end].trim_end().len()..],
+    };
+    let trigger = match value.strip_prefix("every ") {
+        Some(d) => format!("trigger: {{ every: {} }}", d.trim()),
+        None if value == "manual" => "trigger: manual".to_string(),
+        None => return line.to_string(),
+    };
+    format!("{}{trigger}{after}", &line[..at])
 }
 
 /// `sources:` → `collectors:`, top level only.
@@ -216,6 +259,21 @@ mod tests {
         assert!(
             out.ends_with(
                 "ui:\n  slots:\n    - slot: work_item.detail.body\n      lens: a\n    - { slot: \"vcs.status.details\", lens: b }\n    - { lens: c, slot: 'effort.review.details' }\n    - { slot: settings.section }\n    - { slot: rail, lens: d }\n    - { slot: commitx, lens: e }\nnote: { slot: commit }\n"
+            ),
+            "{out}"
+        );
+    }
+
+    /// A v1 source's `schedule:` is the collector's `trigger:` (P7.B3), in
+    /// a block or flow entry; outside `sources:` nothing is touched.
+    #[test]
+    fn a_schedule_becomes_a_trigger() {
+        let out = migrate_v1_to_v2(
+            "name: x\nsources:\n  - id: a\n    schedule: every 15m\n  - { id: b, schedule: manual }\n  - id: c\n    schedule: \"every 2h\" # hourly-ish\nnote: { schedule: every 1m }\n",
+        );
+        assert!(
+            out.ends_with(
+                "collectors:\n  - id: a\n    trigger: { every: 15m }\n  - { id: b, trigger: manual }\n  - id: c\n    trigger: { every: 2h } # hourly-ish\nnote: { schedule: every 1m }\n"
             ),
             "{out}"
         );

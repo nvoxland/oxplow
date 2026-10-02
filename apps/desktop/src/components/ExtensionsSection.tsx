@@ -17,18 +17,18 @@ import { useCallback, useEffect, useState } from "react";
 import {
   installExtension,
   listExtensions,
-  listSources,
+  listCollectors,
   reviewExtension,
   setExtensionEnabled,
-  setSourceCredential,
+  setCredential,
   subscribeOxplowEvents,
   updateExtension,
   type Extension,
   type ExtensionReview,
-  type SourceListing,
+  type CollectorListing,
 } from "../api.js";
 import { NEW_LENS_PROMPT } from "../lens/lensModel.js";
-import { extensionCredentials, extensionRowModel, reviewModel } from "./extensionRowModel.js";
+import { collectorRan, extensionCredentials, extensionRowModel, reviewModel } from "./extensionRowModel.js";
 import { EffectDiff } from "./EffectDiff.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import { recordOpError } from "./opErrorsStore.js";
@@ -37,7 +37,7 @@ import { EmptyState } from "./Prompts/EmptyState.js";
 
 export function ExtensionsSection() {
   const [exts, setExts] = useState<Extension[] | null>(null);
-  const [sources, setSources] = useState<SourceListing[]>([]);
+  const [collectors, setCollectors] = useState<CollectorListing[]>([]);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   /** An install or update waiting on the person's go-ahead. */
@@ -48,7 +48,7 @@ export function ExtensionsSection() {
   const refresh = useCallback(async () => {
     try {
       setExts(await listExtensions(null));
-      setSources(await listSources());
+      setCollectors(await listCollectors());
     } catch (e) {
       recordOpError({ label: "List extensions", message: String(e) });
       setExts([]);
@@ -59,7 +59,7 @@ export function ExtensionsSection() {
     void refresh();
     // Scheduled and agent-triggered runs land here too.
     return subscribeOxplowEvents((event) => {
-      if (event.kind === "sourceSynced") void refresh();
+      if (collectorRan(event)) void refresh();
     });
   }, [refresh]);
 
@@ -102,7 +102,7 @@ export function ExtensionsSection() {
     setBusy(name);
     try {
       setExts(await setExtensionEnabled(name, enabled));
-      setSources(await listSources());
+      setCollectors(await listCollectors());
       showToast({ message: enabled ? `Enabled ${name}.` : `Disabled ${name} for this project.` });
     } catch (e) {
       recordOpError({ label: `${enabled ? "Enable" : "Disable"} extension ${name}`, message: String(e) });
@@ -171,7 +171,7 @@ export function ExtensionsSection() {
                     {err}
                   </div>
                 ))}
-                {extensionCredentials(sources, m.name).map((c) => (
+                {extensionCredentials(collectors, m.name).map((c) => (
                   <CredentialRow
                     key={c.name}
                     extension={m.name}
@@ -316,7 +316,7 @@ export function CredentialRow({
   async function save(v: string | null) {
     setSaving(true);
     try {
-      await setSourceCredential(extension, name, v);
+      await setCredential(extension, name, v);
       setValue("");
       showToast({ message: v ? `Saved ${name} to your keychain.` : `Cleared ${name}.` });
       onChanged();
@@ -329,7 +329,7 @@ export function CredentialRow({
 
   return (
     <form
-      data-testid={`source-credential-${id}`}
+      data-testid={`credential-${id}`}
       style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}
       onSubmit={(e) => {
         e.preventDefault();
@@ -339,7 +339,7 @@ export function CredentialRow({
       <code>{name}</code>
       <span style={mutedStyle}>{set ? "Saved in keychain" : "Not set"}</span>
       <input
-        data-testid={`source-credential-input-${id}`}
+        data-testid={`credential-input-${id}`}
         type="password"
         autoComplete="off"
         value={value}
@@ -350,14 +350,14 @@ export function CredentialRow({
         }}
         style={{ flex: 1 }}
       />
-      <button type="submit" data-testid={`source-credential-save-${id}`} disabled={!value.trim() || saving}>
+      <button type="submit" data-testid={`credential-save-${id}`} disabled={!value.trim() || saving}>
         {saving ? "Saving…" : "Save"}
       </button>
       {set ? (
         <InlineConfirm
           triggerLabel="Clear"
           confirmLabel="Clear"
-          testIdPrefix={`source-credential-clear-${id}`}
+          testIdPrefix={`credential-clear-${id}`}
           disabled={saving}
           onConfirm={() => void save(null)}
         />

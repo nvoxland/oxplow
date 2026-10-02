@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`collector.synced@1` (P7.B3): a collector ran — by hand\n(`collector.sync`), on its schedule, or for an event its `on:` trigger\nnames (then the envelope's `cause` is that event). Logged in the\ntransaction that wrote what it collected; a run that failed logs one\ntoo, with what went wrong.",
+  "properties": {
+    "collector": {
+      "description": "`collector:<owner>/<id>`.",
+      "type": "string"
+    },
+    "elapsed_ms": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "entities": {
+      "additionalProperties": {
+        "format": "int64",
+        "type": "integer"
+      },
+      "description": "Rows per entity after the run (a failed run wrote none).",
+      "type": "object"
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "facts": {
+      "description": "Facts it recorded.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "status": {
+      "description": "`ok` or `error`.",
+      "type": "string"
+    },
+    "trigger": {
+      "description": "What ran it: `manual`, `every` or `on`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "collector",
+    "trigger",
+    "status",
+    "elapsed_ms"
+  ],
+  "title": "CollectorSyncedV1",
+  "type": "object"
+}
