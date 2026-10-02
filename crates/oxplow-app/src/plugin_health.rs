@@ -174,16 +174,35 @@ impl PluginHealth {
     }
 }
 
+/// Which kind of contribution `plugin.enable` names.
+#[derive(Deserialize, schemars::JsonSchema, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum Kind {
+    Provider,
+    Collector,
+}
+
+impl Kind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Kind::Provider => "provider",
+            Kind::Collector => "collector",
+        }
+    }
+}
+
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct EnableInput {
     /// The extension.
     plugin: String,
+    /// `provider` or `collector`: a provider and a collector may share an id.
+    kind: Kind,
     /// Its provider's or collector's id.
     contribution: String,
 }
 
-/// `plugin.enable { plugin, contribution }`: a person turns a contribution
+/// `plugin.enable { plugin, kind, contribution }`: a person turns a contribution
 /// back on on this machine, clearing an automatic disable. A provider
 /// instance starts again when the project's config enables it; a
 /// collector runs at its next trigger. Human
@@ -214,6 +233,7 @@ pub fn enable_command(
             Box::pin(async move {
                 let EnableInput {
                     plugin,
+                    kind,
                     contribution,
                 } = serde_json::from_value(input).map_err(|e| CommandError::Invalid {
                     field: None,
@@ -223,36 +243,30 @@ pub fn enable_command(
                     message: "the provider registry is gone".into(),
                 })?;
                 let instance = format!("{plugin}/{contribution}");
-                // Its kind: what its health row says (a collector has one
-                // once it failed), else a provider instance the registry
-                // knows (enabled from Settings before it ever failed).
-                let probe = PluginKey {
-                    plugin: plugin.clone(),
-                    contribution: contribution.clone(),
-                    kind: "provider",
-                };
-                let kind = match health.get(&probe).await?.map(|r| r.kind) {
-                    Some(k) if k == "collector" => "collector",
-                    Some(_) => "provider",
-                    None if providers.find(&instance).is_some() => "provider",
-                    None => {
-                        return Err(CommandError::Invalid {
-                            field: Some("/contribution".into()),
-                            message: format!(
-                                "`{instance}` is neither a provider instance nor a collector \
-                                 that has failed; there's nothing to enable"
-                            ),
-                        })
-                    }
-                };
                 let key = PluginKey {
                     plugin,
                     contribution,
-                    kind,
+                    kind: kind.as_str(),
                 };
+                // Something to enable: a contribution with health (a
+                // collector has it once it failed), or a provider instance
+                // the registry knows (enabled from Settings before it ever
+                // failed).
+                if health.get(&key).await?.is_none()
+                    && (kind == Kind::Collector || providers.find(&instance).is_none())
+                {
+                    return Err(CommandError::Invalid {
+                        field: Some("/contribution".into()),
+                        message: format!(
+                            "no {} `{instance}` has failed or is configured; there's nothing \
+                             to enable",
+                            kind.as_str()
+                        ),
+                    });
+                }
                 // Recorded first, so the reconcile below sees it cleared.
                 health.enable(&key, &actor.source()).await?;
-                if kind == "provider" {
+                if kind == Kind::Provider {
                     providers.reset(&instance).await;
                     providers.reconcile().await;
                 }
@@ -343,5 +357,31 @@ mod tests {
             h.failed(&k, "f").await.unwrap(),
             Verdict::Backoff { failures: 1 }
         );
+    }
+
+    /// P7 review (tsk721): a provider and a collector with the same
+    /// `<plugin>/<id>` are two contributions with two health rows.
+    #[tokio::test]
+    async fn a_provider_and_a_collector_named_alike_have_their_own_health() {
+        let db = Database::in_memory();
+        let h = PluginHealth::new(db.clone(), Arc::new(EventSchemaRegistry::core()));
+        let provider = key();
+        let collector = PluginKey {
+            kind: "collector",
+            ..key()
+        };
+        h.failed(&collector, "a").await.unwrap();
+        h.disable(&provider, "broken").await.unwrap();
+        let p = h.get(&provider).await.unwrap().unwrap();
+        let c = h.get(&collector).await.unwrap().unwrap();
+        assert_eq!(
+            (p.kind.as_str(), p.state.as_str()),
+            ("provider", "disabled")
+        );
+        assert_eq!(
+            (c.kind.as_str(), c.state.as_str(), c.consecutive_failures),
+            ("collector", "failing", 1)
+        );
+        assert_eq!(h.disabled_reason(&collector).await.unwrap(), None);
     }
 }

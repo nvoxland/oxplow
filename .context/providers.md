@@ -436,7 +436,7 @@ flight** (tsk569): each disable bumps the instance's epoch under the
 `running` lock, and a start registers (`admit`) only if the epoch it
 began with still holds, so a concurrent reconcile can't bring back
 what was just disabled.
-Only a person turns it back on — **`plugin.enable { plugin,
+Only a person turns it back on — **`plugin.enable { plugin, kind,
 contribution }`** (human-only, `External`, not undoable; it replaced
 `provider.enable`), which marks the row `ok`, logs `plugin.enabled@1`,
 resets the backoff and reconciles. Settings → Integrations' Enable runs

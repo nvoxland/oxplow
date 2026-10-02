@@ -124,5 +124,5 @@ test("Enable Again runs plugin.enable as the person", async () => {
     },
   } as unknown as PersonCommands;
   await enableAgain(health({ state: "disabled" }), commands);
-  expect(runs).toEqual([["Enable tracker/issues", "plugin.enable", { plugin: "tracker", contribution: "issues" }]]);
+  expect(runs).toEqual([["Enable tracker/issues", "plugin.enable", { plugin: "tracker", kind: "collector", contribution: "issues" }]]);
 });

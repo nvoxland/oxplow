@@ -48,7 +48,7 @@ test("Enable Again runs plugin.enable through the person's commands", async () =
   const view = render(<HealthRow health={disabled} />);
   fireEvent.click(view.getByTestId("extension-enable-tracker-issues"));
   await waitFor(() => expect(ran).toHaveLength(1));
-  expect(ran[0]).toEqual({ name: "plugin.enable", input: { plugin: "tracker", contribution: "issues" }, confirmed: false });
+  expect(ran[0]).toEqual({ name: "plugin.enable", input: { plugin: "tracker", kind: "collector", contribution: "issues" }, confirmed: false });
 });
 
 test("Repair with the Agent fills the agent input and runs nothing", () => {

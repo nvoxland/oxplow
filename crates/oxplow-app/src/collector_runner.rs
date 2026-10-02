@@ -2199,7 +2199,7 @@ mod tests {
         assert!(bad.disabled.is_some());
         assert!(due_collectors(&listings, i64::MAX).is_empty());
 
-        let enable = json!({ "plugin": "work", "contribution": "bad" });
+        let enable = json!({ "plugin": "work", "kind": "collector", "contribution": "bad" });
         let agent = oxplow_domain::Actor::Agent {
             thread_id: Some(fx.thread),
             stream_id: None,

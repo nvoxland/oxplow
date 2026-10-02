@@ -1751,8 +1751,10 @@ logs its `collector.synced@1`. Read as `v_collector_run`; see
 ### `plugin_health` — `SqlitePluginHealthStore` (`crates/oxplow-db/src/plugin_health_store.rs`)
 
 V135 (P7.C1). Each plugin contribution's health on this machine, keyed
-`plugin` (the extension) + `contribution` (its provider's or collector's
-id), `kind` `provider` | `collector`: `state` (`ok` / `failing` /
+`plugin` (the extension) + `kind` (`provider` | `collector`) +
+`contribution` (its provider's or collector's id) — V140 put `kind` in
+the key, since a provider and a collector may share an id (tsk721):
+`state` (`ok` / `failing` /
 `disabled`), `reason`, `consecutive_failures`, `last_ok_at`,
 `last_error`, `mean_ms` (a moving average), `next_due_at` (a schedule's
 next slot), `updated_at`. The policy is `oxplow-app/src/plugin_health.rs`:

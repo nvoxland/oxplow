@@ -1083,7 +1083,7 @@ impl ProviderRegistry {
             bus.run(
                 actor,
                 crate::plugin_health::ENABLE,
-                json!({ "plugin": key.plugin, "contribution": key.contribution }),
+                json!({ "plugin": key.plugin, "kind": key.kind, "contribution": key.contribution }),
                 false,
             )
             .await?;

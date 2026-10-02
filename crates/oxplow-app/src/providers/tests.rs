@@ -323,7 +323,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
                 stream_id: None,
             },
             "plugin.enable",
-            json!({ "plugin": "tracker", "contribution": "fake" }),
+            json!({ "plugin": "tracker", "kind": "provider", "contribution": "fake" }),
             false,
         )
         .await;
@@ -339,7 +339,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         .run(
             &Actor::Human,
             "plugin.enable",
-            json!({ "plugin": "tracker", "contribution": "fake" }),
+            json!({ "plugin": "tracker", "kind": "provider", "contribution": "fake" }),
             false,
         )
         .await

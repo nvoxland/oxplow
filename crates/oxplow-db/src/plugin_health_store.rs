@@ -4,15 +4,16 @@
 //! its row updates, each runnable on a caller's transaction so a
 //! transition commits with its event.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{named_params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::database::map_sql_err;
 use crate::Database;
 use oxplow_domain::DomainError;
 
-/// Which contribution: `plugin` (the extension) / `contribution` (its
-/// provider's or collector's id), and its `kind` (`provider`, `collector`).
+/// Which contribution: `plugin` (the extension), its `kind` (`provider`,
+/// `collector`) and `contribution` (that provider's or collector's id) —
+/// all three: a provider and a collector may share an id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PluginKey {
     pub plugin: String,
@@ -46,6 +47,10 @@ const SELECT: &str = "SELECT plugin, contribution, kind, state, reason, consecut
         last_ok_at, last_error, mean_ms, next_due_at, updated_at, repair_item, repair_seq
         FROM plugin_health";
 
+/// The row a [`PluginKey`] names, its parameters `:plugin`, `:kind`,
+/// `:contribution`.
+const KEY: &str = "plugin = :plugin AND kind = :kind AND contribution = :contribution";
+
 fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<PluginHealthRow> {
     Ok(PluginHealthRow {
         plugin: r.get(0)?,
@@ -67,8 +72,8 @@ fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<PluginHealthRow> {
 /// The row for `key`, if it has one.
 pub fn get_tx(c: &Connection, key: &PluginKey) -> Result<Option<PluginHealthRow>, DomainError> {
     c.query_row(
-        &format!("{SELECT} WHERE plugin = ?1 AND contribution = ?2"),
-        params![key.plugin, key.contribution],
+        &format!("{SELECT} WHERE {KEY}"),
+        named_params! { ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution },
         row,
     )
     .optional()
@@ -79,8 +84,12 @@ pub fn get_tx(c: &Connection, key: &PluginKey) -> Result<Option<PluginHealthRow>
 fn ensure(c: &Connection, key: &PluginKey, now: &str) -> Result<(), DomainError> {
     c.execute(
         "INSERT INTO plugin_health (plugin, contribution, kind, state, updated_at)
-         VALUES (?1, ?2, ?3, 'ok', ?4) ON CONFLICT (plugin, contribution) DO NOTHING",
-        params![key.plugin, key.contribution, key.kind, now],
+         VALUES (:plugin, :contribution, :kind, 'ok', :now)
+         ON CONFLICT (plugin, kind, contribution) DO NOTHING",
+        named_params! {
+            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":now": now,
+        },
     )
     .map(|_| ())
     .map_err(map_sql_err)
@@ -96,14 +105,19 @@ pub fn failed_tx(
 ) -> Result<i64, DomainError> {
     ensure(c, key, now)?;
     c.query_row(
-        "UPDATE plugin_health SET
-           consecutive_failures = consecutive_failures + 1,
-           last_error = ?3,
-           state = CASE WHEN state = 'disabled' THEN 'disabled' ELSE 'failing' END,
-           updated_at = ?4
-         WHERE plugin = ?1 AND contribution = ?2
-         RETURNING consecutive_failures",
-        params![key.plugin, key.contribution, error, now],
+        &format!(
+            "UPDATE plugin_health SET
+               consecutive_failures = consecutive_failures + 1,
+               last_error = :error,
+               state = CASE WHEN state = 'disabled' THEN 'disabled' ELSE 'failing' END,
+               updated_at = :now
+             WHERE {KEY}
+             RETURNING consecutive_failures"
+        ),
+        named_params! {
+            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":error": error, ":now": now,
+        },
         |r| r.get(0),
     )
     .map_err(map_sql_err)
@@ -120,16 +134,21 @@ pub fn succeeded_tx(
 ) -> Result<(), DomainError> {
     ensure(c, key, now)?;
     c.execute(
-        "UPDATE plugin_health SET
-           consecutive_failures = 0,
-           state = CASE WHEN state = 'disabled' THEN 'disabled' ELSE 'ok' END,
-           last_ok_at = ?4,
-           mean_ms = CASE WHEN ?3 IS NULL THEN mean_ms
-                          WHEN mean_ms IS NULL THEN ?3
-                          ELSE mean_ms + (?3 - mean_ms) / 10.0 END,
-           updated_at = ?4
-         WHERE plugin = ?1 AND contribution = ?2",
-        params![key.plugin, key.contribution, took_ms, now],
+        &format!(
+            "UPDATE plugin_health SET
+               consecutive_failures = 0,
+               state = CASE WHEN state = 'disabled' THEN 'disabled' ELSE 'ok' END,
+               last_ok_at = :now,
+               mean_ms = CASE WHEN :took IS NULL THEN mean_ms
+                              WHEN mean_ms IS NULL THEN :took
+                              ELSE mean_ms + (:took - mean_ms) / 10.0 END,
+               updated_at = :now
+             WHERE {KEY}"
+        ),
+        named_params! {
+            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":took": took_ms, ":now": now,
+        },
     )
     .map(|_| ())
     .map_err(map_sql_err)
@@ -144,9 +163,14 @@ pub fn disable_tx(
 ) -> Result<(), DomainError> {
     ensure(c, key, now)?;
     c.execute(
-        "UPDATE plugin_health SET state = 'disabled', reason = ?3, updated_at = ?4
-         WHERE plugin = ?1 AND contribution = ?2",
-        params![key.plugin, key.contribution, reason, now],
+        &format!(
+            "UPDATE plugin_health SET state = 'disabled', reason = :reason, updated_at = :now
+             WHERE {KEY}"
+        ),
+        named_params! {
+            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":reason": reason, ":now": now,
+        },
     )
     .map(|_| ())
     .map_err(map_sql_err)
@@ -156,10 +180,15 @@ pub fn disable_tx(
 pub fn enable_tx(c: &Connection, key: &PluginKey, now: &str) -> Result<(), DomainError> {
     ensure(c, key, now)?;
     c.execute(
-        "UPDATE plugin_health SET state = 'ok', reason = NULL, consecutive_failures = 0,
-           updated_at = ?3
-         WHERE plugin = ?1 AND contribution = ?2",
-        params![key.plugin, key.contribution, now],
+        &format!(
+            "UPDATE plugin_health SET state = 'ok', reason = NULL, consecutive_failures = 0,
+               updated_at = :now
+             WHERE {KEY}"
+        ),
+        named_params! {
+            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":now": now,
+        },
     )
     .map(|_| ())
     .map_err(map_sql_err)
@@ -174,8 +203,11 @@ pub fn set_next_due_tx(
 ) -> Result<(), DomainError> {
     ensure(c, key, now)?;
     c.execute(
-        "UPDATE plugin_health SET next_due_at = ?3 WHERE plugin = ?1 AND contribution = ?2",
-        params![key.plugin, key.contribution, next_due_at],
+        &format!("UPDATE plugin_health SET next_due_at = :due WHERE {KEY}"),
+        named_params! {
+            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":due": next_due_at,
+        },
     )
     .map(|_| ())
     .map_err(map_sql_err)
@@ -190,9 +222,11 @@ pub fn set_repair_tx(
     seq: i64,
 ) -> Result<(), DomainError> {
     c.execute(
-        "UPDATE plugin_health SET repair_item = ?3, repair_seq = ?4
-         WHERE plugin = ?1 AND contribution = ?2",
-        params![key.plugin, key.contribution, repair_item, seq],
+        &format!("UPDATE plugin_health SET repair_item = :item, repair_seq = :seq WHERE {KEY}"),
+        named_params! {
+            ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution,
+            ":item": repair_item, ":seq": seq,
+        },
     )
     .map(|_| ())
     .map_err(map_sql_err)
@@ -316,7 +350,7 @@ mod tests {
                     tx.execute(
                         "INSERT INTO event_log (seq, id, type, v, at, source, subject, payload)
                          VALUES (?1, 'e' || ?1, 'x.y', 1, 't', 's', ?2, '{}')",
-                        params![seq, subject],
+                        rusqlite::params![seq, subject],
                     )
                     .map_err(map_sql_err)?;
                 }
@@ -328,7 +362,7 @@ mod tests {
                     tx.execute(
                         "INSERT INTO event_dead_letter (consumer, event_seq, error, first_failed_at, last_failed_at, state)
                          VALUES (?1, ?2, 'boom', 't', 't', ?3)",
-                        params![consumer, seq, state],
+                        rusqlite::params![consumer, seq, state],
                     )
                     .map_err(map_sql_err)?;
                 }

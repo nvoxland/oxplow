@@ -1247,9 +1247,10 @@ one failure policy (`plugin_health.rs`, the `plugin_health` table read as
   once it's done or canceled the next disable files a new one
   (`plugin_health.repair_item`, `v_plugin_health.repair_item` while open).
   oxplow never sends it to an agent.
-- **Enabling.** Only a person: `plugin.enable { plugin, contribution }`
-  (human-only). Its kind comes from its `plugin_health` row (or the
-  provider registry for an instance enabled before it ever failed).
+- **Enabling.** Only a person: `plugin.enable { plugin, kind,
+  contribution }` (human-only). It names the kind — a provider and a
+  collector may share an id; there must be a failed one of that kind (or
+  a provider instance the registry knows).
 - **In the app (C3).** Settings → Extensions shows one health line per
   contribution under its extension (`pluginHealth.ts`, live over
   `v_plugin_health`): `OK` with its average time, a missed schedule and

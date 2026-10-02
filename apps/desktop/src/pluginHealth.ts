@@ -115,6 +115,7 @@ export function repairWithAgent(repairItem: string, insert: (text: string) => vo
 export function enableAgain(h: PluginHealth, commands: PersonCommands = personCommands): Promise<boolean> {
   return commands.run(`Enable ${h.plugin}/${h.contribution}`, "plugin.enable", {
     plugin: h.plugin,
+    kind: h.kind,
     contribution: h.contribution,
   });
 }
