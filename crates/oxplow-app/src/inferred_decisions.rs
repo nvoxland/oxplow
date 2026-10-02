@@ -245,9 +245,6 @@ pub async fn infer_for_effort(
         .replace_inferred(effort_id, proposals)
         .await
         .map_err(|e| e.to_string())?;
-    svc.events.emit(crate::OxplowEvent::ReasoningChanged {
-        effort_id: Some(effort_id),
-    });
     Ok(InferOutcome::Stored(stored))
 }
 

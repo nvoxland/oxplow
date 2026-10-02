@@ -4110,16 +4110,6 @@ detail: string | null } |
  */
 { kind: "diagnosticsChanged"; streamId: number } | 
 /**
- *  An effort's stored metric deltas / observations were recomputed
- *  (`v_effort_metric_delta`, `v_effort_observation`); lenses re-run.
- */
-{ kind: "effortEvidenceChanged"; effortId: number } | 
-/**
- *  Decisions or claims changed for `effort_id` (inferred decisions
- *  stored after an effort closed). Review-packet lenses re-run.
- */
-{ kind: "reasoningChanged"; effortId: number | null } | 
-/**
  *  `.git` directory appeared/disappeared at the project root —
  *  "is this a git workspace" flipped. Renderer hides/restores the
  *  git-aware UI on receipt.

@@ -1,137 +1,115 @@
 //! Keeps `v_effort_metric_delta` / `v_effort_observation` current. The
 //! metric engine computes an effort's deltas and evidence; lenses can't, so
-//! core stores them: when an effort closes, and (debounced) for open efforts
-//! as metric data or observations arrive. Emits `EffortEvidenceChanged`,
-//! which it doesn't listen to, so it can't loop. See
+//! core stores them: when an effort closes (the `effort.evidence` reaction
+//! to `effort.finished`), and for every open effort as an **asset** over
+//! the tables the evidence reads ([`OpenEffortEvidence`], P7.B6) — a commit
+//! to a capture, a fact, a run claim or a token row recomputes it once its
+//! inputs go quiet. Its own tables aren't inputs, so it can't loop. The
+//! renderer hears the rows move as `ModelsChanged`. See
 //! `.context/semantic-layer.md`.
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Weak};
 
-use crate::OxplowEvent;
+use crate::assets::{Materializer, Recomputed};
 
-/// Quiet period before recomputing open efforts after data arrives.
-pub const DEBOUNCE: Duration = Duration::from_secs(3);
+/// The asset: every open effort's evidence.
+pub const ASSET: &str = "effort_evidence";
 
-/// Whether `event` means open efforts' evidence may have changed.
-pub fn affects_open_efforts(event: &OxplowEvent) -> bool {
-    matches!(
-        event,
-        OxplowEvent::MetricSamplesChanged { .. }
-            | OxplowEvent::EffortObservationsChanged { .. }
-            | OxplowEvent::AgentTokenUsageChanged { .. }
-    )
-}
+/// What the evidence reads: metric captures and facts (deltas and
+/// observations), run claims (`effort_attribution`), token usage.
+const INPUTS: [&str; 4] = [
+    "metric_capture",
+    "fact",
+    "effort_attribution",
+    "agent_token_usage",
+];
 
-/// Recompute one effort's evidence and announce it; failures are logged.
+/// Recompute one effort's evidence; failures are logged.
 pub(crate) async fn refresh(state: &crate::Services, effort_id: i64) {
     let id = oxplow_domain::EffortId::new(effort_id).to_string();
-    match state
+    if let Err(error) = state
         .collection
         .refresh_effort_evidence(&id, &state.effort_evidence_store)
         .await
     {
-        Ok(()) => state
-            .events
-            .emit(OxplowEvent::EffortEvidenceChanged { effort_id }),
-        Err(error) => tracing::warn!(effort_id, %error, "refreshing effort evidence failed"),
+        tracing::warn!(effort_id, %error, "refreshing effort evidence failed");
     }
 }
 
-/// Background: refresh an effort when it closes, and open efforts
-/// (debounced) when their data may have changed.
-pub fn spawn(state: Arc<crate::Services>) {
-    let mut rx = state.events.subscribe();
-    let (dirty_tx, mut dirty_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-    let debounced = state.clone();
-    tokio::spawn(async move {
-        while dirty_rx.recv().await.is_some() {
-            // Coalesce a burst of data events into one pass.
-            loop {
-                match tokio::time::timeout(DEBOUNCE, dirty_rx.recv()).await {
-                    Ok(Some(())) => continue,
-                    Ok(None) => return,
-                    Err(_) => break,
-                }
-            }
-            match debounced.effort_store.list_all_open().await {
-                Ok(open) => {
-                    for e in open {
-                        refresh(&debounced, e.id.value()).await;
-                    }
-                }
-                Err(error) => tracing::warn!(%error, "listing open efforts failed"),
-            }
+/// Every open effort's evidence, recomputed when what it reads moves.
+pub struct OpenEffortEvidence {
+    svc: Weak<crate::Services>,
+}
+
+#[async_trait::async_trait]
+impl Materializer for OpenEffortEvidence {
+    fn asset(&self) -> &str {
+        ASSET
+    }
+
+    fn inputs(&self) -> Vec<String> {
+        INPUTS.iter().map(|t| t.to_string()).collect()
+    }
+
+    async fn recompute(&self) -> Result<Recomputed, oxplow_domain::DomainError> {
+        let Some(svc) = self.svc.upgrade() else {
+            return Ok(Recomputed::default());
+        };
+        for e in svc.effort_store.list_all_open().await? {
+            refresh(&svc, e.id.value()).await;
         }
-    });
-    tokio::spawn(async move {
-        loop {
-            match rx.recv().await {
-                Ok(ev) if affects_open_efforts(&ev) => {
-                    let _ = dirty_tx.send(());
-                }
-                Ok(_) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    let _ = dirty_tx.send(());
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
+        Ok(Recomputed::default())
+    }
+}
+
+/// Register the asset.
+pub fn register(state: &Arc<crate::Services>) {
+    state.assets.register(Arc::new(OpenEffortEvidence {
+        svc: Arc::downgrade(state),
+    }));
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
-    #[test]
-    fn only_data_events_trigger_a_refresh() {
-        assert!(affects_open_efforts(&OxplowEvent::MetricSamplesChanged {
-            stream_id: oxplow_domain::StreamId::new(1),
-            measures: vec![],
-        }));
-        assert!(affects_open_efforts(
-            &OxplowEvent::EffortObservationsChanged {
-                thread_id: oxplow_domain::ThreadId::new(1),
-                effort_id: "eff1".into(),
-            }
-        ));
-        assert!(!affects_open_efforts(&OxplowEvent::EffortEvidenceChanged {
-            effort_id: 1
-        }));
-        assert!(!affects_open_efforts(&OxplowEvent::PageVisitChanged));
-    }
-
+    /// P7.B6: open efforts' evidence is an asset over the tables it
+    /// reads — a commit to one recomputes it (its `asset_state` row), with
+    /// no in-memory bus in the loop.
     #[tokio::test]
-    async fn closing_an_effort_stores_its_evidence_and_announces_it() {
+    async fn open_effort_evidence_is_an_asset_over_its_inputs() {
         let f = crate::test_fixtures::services_with_effort().await;
-        let mut rx = f.svc.events.subscribe();
-        crate::effort_reactors::register(&f.svc);
+        register(&f.svc);
         f.svc
-            .tasks
-            .update(
-                f.task,
-                crate::task_service::UpdateTaskChanges {
-                    status: Some(oxplow_domain::TaskStatus::Done),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-        // The close's `effort.finished` reaches the `effort.evidence` reactor.
-        f.svc.event_pump.run_once().await.unwrap();
-        let want = f.effort.value();
-        let got = tokio::time::timeout(Duration::from_secs(10), async {
+            .assets
+            .changed(&std::collections::BTreeSet::from(["fact".to_string()]));
+        let computed = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
-                if let Ok(OxplowEvent::EffortEvidenceChanged { effort_id }) = rx.recv().await {
-                    if effort_id == want {
-                        return effort_id;
-                    }
+                let at: Option<String> = f
+                    .svc
+                    .db
+                    .read(|c| {
+                        use rusqlite::OptionalExtension;
+                        c.query_row(
+                            "SELECT computed_at FROM asset_state WHERE asset = ?1",
+                            [ASSET],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .map_err(oxplow_db::map_sql_err)
+                    })
+                    .await
+                    .unwrap();
+                if at.is_some() {
+                    return at;
                 }
+                tokio::time::sleep(Duration::from_millis(50)).await;
             }
         })
         .await
-        .expect("EffortEvidenceChanged after the effort closed");
-        assert_eq!(got, want);
+        .expect("the evidence recomputed after its input moved");
+        assert!(computed.is_some());
     }
 }

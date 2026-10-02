@@ -226,8 +226,9 @@ The first built-in use of a role (`oxplow-app/src/inferred_decisions.rs`).
   without a question or choice are skipped and a missing confidence
   becomes `low`.
 - `SqliteReasoningStore::replace_inferred` swaps the effort's inferred rows
-  in one transaction, so a re-run replaces rather than piles up.
-  `ReasoningChanged` is emitted so open review lenses re-run.
+  in one transaction, so a re-run replaces rather than piles up. Open
+  review lenses re-run on the `ModelsChanged` that commit makes
+  (`v_decision`).
 - Inferred rows are **never fed back to the agent** (the decisions block
   and the missing-decisions hint read `provenance = 'recorded'` only).
 - Calls record caller `inferred-decisions` in `v_ai_call`.
