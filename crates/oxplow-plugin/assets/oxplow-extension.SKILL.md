@@ -339,24 +339,33 @@ SELECT id, title FROM ref('task') WHERE status = 'blocked'
 
 ## Contributing metrics
 
-An extension can add to the metric catalog with `measures:`, `metrics:`,
-`gauges:` and `dimensions:` in `extension.yaml`, in exactly the `.oxplow/project.yaml`
-schema (the `oxplow-metrics` skill and `/oxplow:new-metric` cover it).
+An extension can add to the metric catalog with `measures:`, `metrics:`
+and `dimensions:` in `extension.yaml`, plus **fact collectors** (a
+`collectors:` entry with `facts:` instead of `entities:`) that record the
+facts — in exactly the `.oxplow/project.yaml` schema (the `oxplow-metrics`
+skill and `/oxplow:new-metric` cover it).
 
 ```yaml
 measures:
   - { key: acme.todo, title: TODO comments }
 metrics:
   - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum, direction: lower-better }
-gauges:
-  - key: acme.todo_scan
-    emits: [acme.todo]
-    compute: { runtime: starlark, entryFile: gauges/todo.star }
+collectors:
+  - id: acme.todo_scan
+    runtime: starlark
+    entry: collectors/todo.star
+    trigger: { on: [snapshot.taken] }
+    facts: [acme.todo]
 ```
 
-- `entryFile` is inside the extension folder.
-- Gauges run `starlark` or `jaq` only. `exec` is refused: running a
-  program needs the user's approval, which is what collectors are for.
+- `entry` is inside the extension folder.
+- An extension's fact collector runs `starlark` or `jaq` only. `exec` is
+  refused (only the project's own fact collectors may be `exec`); it gets
+  no `env`, `credentials` or `network`. Its script reads the snapshot
+  with `files()` / `ast_query()` and returns `{"facts": [...]}`.
+- A collector has `entities:` or `facts:`, never both.
+- A `gauges:` block is a load error; `oxplow plugin migrate <name>`
+  rewrites it as `collectors:`.
 - Metrics are `key:` definitions and are on while the extension is
   enabled. A project can still turn one off or change its target with a
   `use:` entry in `.oxplow/project.yaml`. `use:` isn't allowed in an
@@ -428,8 +437,8 @@ to a read-only SQL query:
   (`v_ai_result`): the same question on the same text is one model call,
   ever, so a re-sync costs nothing for rows that didn't change. They run
   on the project's AI roles (`decide`, `summarize`, `main`); with no model
-  assigned the run fails saying which role. Gauges and report parsers
-  can't call them. For example, what kind of work each turn was:
+  assigned the run fails saying which role. Fact collectors and report
+  parsers can't call them. For example, what kind of work each turn was:
 
   ```yaml
   collectors:

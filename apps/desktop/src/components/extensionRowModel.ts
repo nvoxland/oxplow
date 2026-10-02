@@ -207,8 +207,6 @@ export function reviewModel(review: ExtensionReview): ReviewModel {
       `${plural(advisories.length, "advisory", "advisories")} shown to your agents: ${advisories.map((a) => a.id).join(", ")}`,
     );
   }
-  const gauges = ext.gauges ?? [];
-  if (gauges.length > 0) declares.push(`${plural(gauges.length, "gauge")} (starlark/jaq, sandboxed)`);
   const metrics = ext.metrics ?? [];
   if (metrics.length > 0) declares.push(plural(metrics.length, "metric"));
   if (ext.ui.slots.length > 0) {

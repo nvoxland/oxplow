@@ -169,11 +169,12 @@ record `input_hash` NULL.
 
 ## `ai_*` functions for sources (current, P5.E2)
 
-A **collector** (a starlark derived source) calls `ai_classify(text,
+An **entity collector** (a starlark derived source) calls `ai_classify(text,
 labels)`, `ai_score(text, levels)`, `ai_summarize(text, focus = None)`
 and `ai_extract(text, schema, instructions = "")` — Starlark builtins
 (`crates/oxplow-collect-plugin/src/ai.rs`) answered by the run's
-`AiHost` in `Evaluator::extra` (the `GaugeHost` pattern). The host holds
+`AiHost` in `Evaluator::extra` (the same pattern as a fact collector's
+`TreeHost`). The host holds
 a synchronous `dyn AiOracle`; the app's is `ai_compute::CollectorOracle`,
 which blocks the script's worker thread on the runtime and asks
 `AiCompute` as caller `collector:<owner>/<id>` — so every answer is a
@@ -185,9 +186,11 @@ clock, model time included), so a per-row loop of calls can't run for
 hours and hold up every scheduled source behind it. When the sandbox
 gives up it stops the `RunClock`, and the detached worker's next `ai_*`
 call is refused — no paid calls after a timeout. A run cut off keeps
-what it recorded, so its next run gets further (tsk559). A gauge or a report parser runs without an
-`AiHost`, and the builtins refuse: "`ai_classify` is available in
-collectors only". Lenses never call a model when they render; they read
+what it recorded, so its next run gets further (tsk559). A **fact collector** (`facts:`,
+run by the fact engine with a `TreeHost`) or a report parser runs without
+an `AiHost`, and the builtins refuse: "`ai_classify` is available in
+collectors only (a derived source) …" — a fact collector can't call a
+model, and an entity collector has no `files()`. Lenses never call a model when they render; they read
 what collectors recorded. The extension skill's example classifies each
 turn's prompt (`turn_kind`).
 

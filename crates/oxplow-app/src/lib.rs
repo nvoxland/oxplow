@@ -949,14 +949,14 @@ impl Services {
                 efforts: effort_store.clone(),
                 config: config_arc.clone(),
             }));
-        // Built before the metric runner, which reports whole-tree gauge sweeps
+        // Built before the metric runner, which reports whole-tree collector sweeps
         // through it (tsk48).
         let background_tasks = BackgroundTaskStore::new();
         bridge_background_task_events(&background_tasks, &event_bus);
 
-        // The metric runner (config-declared gauges → substrate). Holds leaf
-        // Arcs only (never `Arc<Services>`); injected into TaskService for the
-        // on-effort-complete ride-along and spawned as a loop in `boot.rs`.
+        // The metric runner (fact collectors → substrate). Holds leaf Arcs
+        // only (never `Arc<Services>`); the `collector.triggers` consumer
+        // hands it events, and its catalog loop is spawned in `boot.rs`.
         let extension_catalog = Arc::new(extension_catalog::ExtensionCatalog::new());
         let extension_models = Arc::new(extension_models::ExtensionModelsService::new(
             db.clone(),
@@ -976,7 +976,12 @@ impl Services {
         .with_background_tasks(background_tasks.clone())
         .with_approvals(approvals.clone())
         .with_extension_catalog(extension_catalog.clone())
-        .with_snapshot_captures(snapshot_captures.clone());
+        .with_snapshot_captures(snapshot_captures.clone())
+        .with_run_log(collector_runner::RunLog {
+            db: db.clone(),
+            schemas: event_log_store.schemas().clone(),
+            layer: sql.clone(),
+        });
         let tasks = tasks
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
@@ -1099,6 +1104,7 @@ impl Services {
             catalog: extension_catalog.clone(),
             ai: ai_compute.clone(),
             worktrees: worktrees.clone(),
+            metrics: metrics.clone(),
         };
         commands
             .register(collector_runner::sync_command(collector_runner.clone()))
@@ -1504,7 +1510,6 @@ mod tests {
                 "lens.keep",
                 "lens.share",
                 "metric.rebuild",
-                "metric.run",
                 "provider.enable",
                 // The provider process's collectors (P7.A3).
                 "provider.sync",

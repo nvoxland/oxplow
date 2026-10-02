@@ -3,7 +3,7 @@
 // organize metrics the same way. Pure — no React, unit-testable.
 
 const CATEGORY_LABEL: Record<string, string> = {
-  custom: "Code gauges",
+  custom: "Code metrics",
   testing: "Tests",
   coverage: "Coverage",
   "static-quality": "Static analysis",
@@ -35,7 +35,7 @@ export function groupByCategory<T>(
 }
 
 // Display labels for language slugs (as carried on `MetricCatalogEntry.language`
-// — the built-in gauges use `""`/null for language-agnostic, else a lowercase
+// — the built-in collectors use `""`/null for language-agnostic, else a lowercase
 // slug). Unknown slugs fall back to a Capitalized form.
 const LANGUAGE_LABEL: Record<string, string> = {
   rust: "Rust",
@@ -77,7 +77,7 @@ export type MetricSection<T> = {
  * analysers fall under "General".
  *
  * Kept as the one sectioning rule (tsk81) for the same reason the Rust specs
- * read their language off the gauge: two copies of this rule drift, and two
+ * read their language off the collector: two copies of this rule drift, and two
  * surfaces then group the same metrics differently. Pure — rows sort
  * alphabetically within each section (tsk118), same locale collation as the
  * section labels.

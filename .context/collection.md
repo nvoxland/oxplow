@@ -215,7 +215,7 @@ hook + MCP wiring):
   swallowed error meant that run's coverage never existed. When both attempts
   lose — or a FRESH report exists but fails to parse — the miss is durable: a
   facts-empty `status = failed` coverage capture carrying the error (the
-  gauge-failure convention), queryable in the substrate instead of living
+  fact-collector failure convention), queryable in the substrate instead of living
   only in a tty warn.
   **Clippy needs `bun run lint:collect`:** nothing else writes
   `target/clippy.json` (plain `cargo clippy` prints human output), so the
@@ -434,15 +434,17 @@ script, never a Rust change (`crates/oxplow-collect-plugin/`):
    keeps an in-process parse deterministic and `observed`-eligible.
 2. **Field mapping (plugin-owned).** A *collector* maps that value into its
    kind's typed output. There is **never a formless observation** — every
-   collector declares a `kind` (`coverage` | `test` | `analysis` | `gauge`) with
+   collector declares a `kind` (`coverage` | `test` | `analysis`) with
    a fixed output schema. The genericity is in this uniform definition mechanism
    over typed kinds, so a future kind (perf, structure-map, …) is a new
    `CollectorKind` plus plugins that target it — not a new subsystem.
    (`analysis` was added exactly this way: a new `CollectorKind`, the
    `AnalysisReport` typed output, and bundled clippy/eslint jaq plugins — no
-   new store, IPC, or subsystem. `gauge` — the author-able scalar kind feeding
-   the metric substrate — was added the same way; see
-   [metrics.md](./metrics.md).)
+   new store, IPC, or subsystem.) The metric substrate's author-able
+   producers are not a `CollectorKind`: they are **fact collectors** (a
+   `collectors:` entry with `facts:`, P7.B3 — they were a `gauge` kind
+   until then), run by the fact engine through the same jaq/starlark/exec
+   tiers; see [metrics.md](./metrics.md).
 
 **Transform tiers** (trust/preference order): `jaq` (jq, pure Rust — primary,
 JSON→JSON reshaping), `starlark` (general/imperative; note: standard Starlark
@@ -479,12 +481,12 @@ with multiple MB through `cat`, and it had no budget to break out of it.
 >   child process — which is exactly what `exec` now has, so this caveat applies
 >   to `jaq`/`starlark` only. Until then the number is
 >   a **diagnostic ceiling for honest-but-slow scripts** (120s, matching
->   `GAUGE_TIMEOUT`) and must be set generously enough that honest ones never trip.
+>   `FACT_COLLECTOR_TIMEOUT`) and must be set generously enough that honest ones never trip.
 >
 > **This same shape of bug has now bitten three times** — a fixed timeout sized
 > for a small input silently killing whole-workspace work, and reporting it as
 > nothing rather than as a failure:
-> 1. **tsk47** — gauges timed out at 5s on every full-tree scan and wrote nothing
+> 1. **tsk47** — tree scans (then "gauges") timed out at 5s on every full-tree scan and wrote nothing
 >    (`oxplow.ts.console_calls` read 0 against 137 real calls).
 > 2. **tsk62** — the 5s *hook response* budget cancelled the coverage step after
 >    the junit ingest on EVERY run, naming "a multi-MB lcov parse" as the cause.
@@ -525,8 +527,9 @@ parsers pre-parse via `input` instead. (Standard Starlark forbids recursion +
 `while`, so deep tree-walks are still awkward there — for XML, jaq remains the
 easier fit.)
 
-Two more globals back the **`gauge`** kind (the metric substrate's author-able
-capabilities — see [metrics.md](./metrics.md)):
+More globals back **fact collectors** (the metric substrate's author-able
+producers — see [metrics.md](./metrics.md)); a fact collector can't call
+the `ai_*` builtins, and an entity collector has no `files()`:
 - `ast_query(text, language, sexpr)` → a flat `[{capture, text, start_row,
   start_col, end_row, end_col}]` list. Parses `text` with the named tree-sitter
   grammar (`rust`/`typescript`/`tsx`/`javascript`/`python`/`go`/`java`/`c`/`cpp`/
@@ -535,10 +538,10 @@ capabilities — see [metrics.md](./metrics.md)):
   `query`). Flat by design so no Starlark recursion is needed.
 - `files(glob)` → `[{path, text}]` of the **snapshot** files matching `glob`,
   from an in-memory map the host injects per run via `Evaluator::extra` (a
-  `GaugeHost`). Empty when no host is in scope (e.g. a report-derived run) or no
-  file matches. The snapshot is content-addressed/immutable → determinism +
-  `observed` trust hold. Run a gauge collector with a host via
-  `Collector::run_gauge(content, GaugeHost::new(map))`.
+  `TreeHost`). Empty when no file matches. The snapshot is
+  content-addressed/immutable → determinism + `observed` trust hold. A fact
+  collector's script runs with a host via `run_fact_starlark(script, input,
+  TreeHost::new(map), …)`; its `report:` is pre-parsed by `parse_report`.
 - `code_metrics(text, language)` → per-function `[{name, complexity, length,
   parameter_count, start_line, end_line, visibility, has_doc}]` via
   `oxplow-code-metrics`. `has_doc` (tsk125) is per-language doc detection
@@ -562,7 +565,7 @@ capabilities — see [metrics.md](./metrics.md)):
 - coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…], "branchesFound"?: <n>, "branchesHit"?: <n>, "functionsFound"?: <n>, "functionsHit"?: <n> } } }` — branch/function are optional **counts** (a line holds several branches; functions are named), default 0 = "no such data for this file" (tsk123). lcov emits them from `BRF`/`BRH`/`FNF`/`FNH`; jacoco from the sourcefile `<counter type="BRANCH"/"METHOD">`; cobertura branch from per-line `condition-coverage="H% (a/b)"` (direct `<lines>` only, so method `<lines>` don't double-count) and function from `<method>` `line-rate`.
 - test: `{ "suites": [ { "name", "cases": [ { "classname", "name", "status": "passed|failed|skipped", "timeMs"? } ] } ] }`
 - analysis: `{ "findings": [ { "path", "line"?, "column"?, "severity": "error|warning|info|note", "rule"?, "message" } ] }`
-- gauge: `{ "facts": [ { "measure", "value", "subject"?, "path"?, "line"?, "rule"?, "num"?, "den"?, "dims"? } ], "samples"?: [ { "value", "subject"? ("kind:ref"), "dims"? } ], "findings"?: [ … ] }` (see [metrics.md](./metrics.md)). The primary channel is now **`facts`** — the durable atomic grain of the inverted substrate (epic tsk12): each fact is bound to a defined `measure` (which must be in the gauge's `emits` allow-list) and re-aggregated by a metric *spec* at read time. `num`/`den` are optional ratio components (a `ratio` spec re-derives Σnum/Σden). `rule` populates the fact's `rule` column (the `oxplow.rule` dimension — the per-language idiom gauges tag each `oxplow.ast_hit` fact with the idiom slug there). Emitting a fact on an **undefined** measure — or one outside the gauge's `emits` — is a declare-to-collect violation (the fact is dropped with a warn). `facts` are now the **only** recorded channel (facts-only, T-C3b): `run_one_gauge` writes nothing but facts, and any legacy `samples`/`findings` a script still returns (the per-language idiom scripts, not yet unbaked) are computed-but-ignored.
+- fact collector: `{ "facts": [ { "measure", "value", "subject"?, "path"?, "line"?, "rule"?, "num"?, "den"?, "dims"? } ] }` and nothing else — `facts_of` refuses any other output (the old `samples`/`findings` channels are gone, P7.B3). See [metrics.md](./metrics.md). Facts are the durable atomic grain of the inverted substrate (epic tsk12): each is bound to a defined `measure` (which must be in the collector's `facts:` allow-list) and re-aggregated by a metric *spec* at read time. `num`/`den` are optional ratio components (a `ratio` spec re-derives Σnum/Σden). `rule` populates the fact's `rule` column (the `oxplow.rule` dimension — the per-language idiom collectors tag each `oxplow.ast_hit` fact with the idiom slug there). A fact on an **undefined** measure — or one outside the collector's `facts:` — is a declare-to-collect violation (dropped with a warn).
 
 The two bundled analysis plugins are the canonical templates: `clippy.jq`
 (`input: lines`; `fromjson?` per line tolerates non-JSON lines, keeps
@@ -612,23 +615,24 @@ The first-party parsers in `src/plugins/*.jq` are the canonical templates. New
 formats are verified by a golden test that the plugin reproduces the reference
 parser's output (`crates/oxplow-collect-plugin/src/lib.rs` tests).
 
-### Report-derived RATIO metrics (a gauge, not the ride-along)
+### Report-derived RATIO metrics (a fact collector, not the ride-along)
 
 A tool that emits a whole-project **ratio** (not line-sets/findings) — e.g. TS
 `type-coverage`'s `--json-output` (`{correctCount, totalCount, percent}`) — is a
-**`gauge`** with `compute.report`, NOT a `reports[]` ride-along entry (the
-ride-along only classifies the `coverage`/`test`/`analysis` kinds). The gauge
-runner reads `compute.report` and feeds it to a jaq/starlark plugin that emits a
+**fact collector** with `report: { path, format }`, NOT a `reports[]` ride-along
+entry (the ride-along only classifies the `coverage`/`test`/`analysis` kinds).
+The fact engine reads the report, parses it per `format` (`parse_report`) and
+hands it to the jaq/starlark script as `input.report`; the script returns a
 `{facts:[{measure, value, num, den}]}` ratio fact. tsk126 dogfoods this as
-`repo.type_coverage` (`oxplow/plugins/type_coverage.jq`, `input: text` +
-`try fromjson catch null` so a missing report emits nothing rather than failing
-the gauge; report at `target/type-coverage.json`, regenerated by the
+the `repo.scan_type_coverage` collector → `repo.type_coverage`
+(`oxplow/plugins/type_coverage.jq`, `format: text` + `try fromjson catch null`
+so a missing report emits nothing rather than failing the collector; report at `target/type-coverage.json`, regenerated by the
 `type:coverage` package script). **Two TypeScripts on purpose:** `apps/desktop`
 typechecks with TS 7 (the native compiler, no JS API), but `type-coverage` is
 built on the JS compiler API, so it's a pinned root devDependency whose
 `typescript` peer resolves to the root's `typescript@6` (the last JS release).
 Don't run it via `bunx type-coverage@latest` — bunx auto-installs the newest
 `typescript` as the peer and it crashes on TS 7 (`ts.SyntaxKind` undefined).
-`trigger: on-snapshot` re-reads the report each
-snapshot — there is no auto-firing `on-report` dispatcher, so `on-snapshot`
-(or `manual` via the `metric.run` command) is how a report gauge runs.
+`trigger: { on: [snapshot.taken] }` re-reads the report each snapshot — there
+is no "report written" event, so a snapshot trigger (or `collector.sync`
+by hand) is how a report collector runs.

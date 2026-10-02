@@ -2,7 +2,7 @@
 //! `.context/ai-providers.md` "`ai_*` functions for sources"):
 //! `ai_classify`, `ai_score`, `ai_summarize` and `ai_extract`, answered by
 //! the [`AiOracle`] of the run's [`AiHost`] (in `Evaluator::extra`, the
-//! `GaugeHost` pattern). The oracle is oxplow's recorded computations, so
+//! `TreeHost` pattern). The oracle is oxplow's recorded computations, so
 //! the same question on the same text is one model call, ever. A gauge or
 //! a report parser has no host and gets a refusal: a model call in a
 //! gauge would make a metric neither cheap nor reproducible.
@@ -69,7 +69,7 @@ fn host<'a>(
         .and_then(|e| e.downcast_ref::<AiHost>())
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "{builtin} is available in collectors only (a derived source): a gauge or a \
+                "{builtin} is available in entity collectors only: a fact collector or a \
                  report parser can't call a model"
             )
         })
@@ -145,7 +145,7 @@ mod tests {
         run_sandboxed_excluding, run_starlark, run_starlark_with_ai, run_starlark_with_host,
         SandboxBudget,
     };
-    use crate::GaugeHost;
+    use crate::TreeHost;
     use serde_json::json;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -221,14 +221,14 @@ def transform(input):
     /// P5.E2's red (the refusal half): no host — a gauge, a parser — and
     /// the builtin says where it works.
     #[test]
-    fn a_gauge_or_a_parser_cant_call_a_model() {
+    fn a_fact_collector_or_a_parser_cant_call_a_model() {
         for run in [
             run_starlark(SCRIPT, &json!({})),
-            run_starlark_with_host(SCRIPT, &json!({}), &GaugeHost::default()),
+            run_starlark_with_host(SCRIPT, &json!({}), &TreeHost::default()),
         ] {
             let err = run.unwrap_err().to_string();
             assert!(
-                err.contains("ai_classify is available in collectors only"),
+                err.contains("ai_classify is available in entity collectors only"),
                 "{err}"
             );
         }

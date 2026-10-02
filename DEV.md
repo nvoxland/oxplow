@@ -165,7 +165,7 @@ home is. An exported-but-empty value is treated as unset.
 The value is used **verbatim** (no `net.voxland.oxplow` suffix), and is
 inherited by every window the instance spawns, so one export covers the
 whole tree — the dev build keeps its own session, recents, and global
-metric/gauge/measure/dimension manifests.
+metric/measure/dimension manifests.
 
 Two things it does **not** move:
 

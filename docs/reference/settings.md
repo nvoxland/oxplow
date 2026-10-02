@@ -159,7 +159,7 @@ to leave the stock icon alone.
 running app; it does not alter the installed `.app` on disk, so it applies
 equally to a release build and a `cargo`-built one.
 
-The four metric blocks — `measures`, `gauges`, `metrics`, and
+The four metric blocks — `measures`, `collectors`, `metrics`, and
 `dimensions` — are covered in [Metrics](../guide/metrics.md), which
 also explains why you normally let the agent write them rather than
 editing them by hand.

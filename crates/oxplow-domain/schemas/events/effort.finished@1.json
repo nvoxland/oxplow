@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`effort.finished@1`: an effort's close is fully handled — its end\nsnapshot pinned, unclaimed work reconciled, lifecycle metrics projected.\nLogged once per effort by the effort-lifecycle consumer (dedupe key\n`effort.finished:<effort>`), caused by the `effort.closed` it handled;\nwhat the effort reactors (evidence, inferred decisions, gauges) consume.",
+  "description": "`effort.finished@1`: an effort's close is fully handled — its end\nsnapshot pinned, unclaimed work reconciled, lifecycle metrics projected.\nLogged once per effort by the effort-lifecycle consumer (dedupe key\n`effort.finished:<effort>`), caused by the `effort.closed` it handled;\nwhat the effort reactors (evidence, inferred decisions) and the\n`effort.finished` collectors consume.",
   "properties": {
     "effort": {
       "type": "string"

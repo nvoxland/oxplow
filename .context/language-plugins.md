@@ -43,7 +43,7 @@ just share the one identity:
 | Static-analysis tables (`LanguageSpec`: function/decision/container kinds, visibility) | `oxplow-code-metrics/src/spec.rs` | drives complexity/markers/container metrics |
 | AST-merge tables (`MergeSpec`, `KeyStrategy`) | `oxplow-git/src/ast_merge.rs` (`merge_spec(lang) -> Option<&MergeSpec>`) | merge-specific identity keys; `None` ⇒ language analysed but not merged (e.g. C#) |
 | Import/zone extraction | `oxplow-code-deps` | depends on the code-metrics grammar table |
-| Idiom metrics (`oxplow.<lang>.*` gauges) | `oxplow-collect-plugin/src/plugins/metrics/<lang>/*.star` | need the Starlark runtime; key off `Language` |
+| Idiom metrics (`oxplow.<lang>.*` built-in fact collectors) | `oxplow-collect-plugin/src/plugins/metrics/<lang>/*.star` | need the Starlark runtime; key off `Language` |
 | Editor language id, file icons | `apps/desktop/src/editor-language.ts` (Monaco ids) | renderer-only; Monaco's own id space |
 | LSP suggestion mirror | `apps/desktop/src/lspSuggestions.ts` | hand-mirrored from `plugin::mason_suggestion` |
 
@@ -113,7 +113,7 @@ were removed in tsk309; a per-package/-language view is lens or agent work.
 5. **Merge (optional)** — if the language should structurally auto-merge, add
    a `MergeSpec` + `merge_spec` arm in `oxplow-git/src/ast_merge.rs`; omit it
    and the merge tier simply skips the language (`merge_spec` ⇒ `None`).
-6. **Idiom metrics (optional)** — add `oxplow.<lang>.*` gauge scripts under
+6. **Idiom metrics (optional)** — add `oxplow.<lang>.*` fact-collector scripts under
    `oxplow-collect-plugin/src/plugins/metrics/<lang>/`.
 7. **Renderer (optional)** — Monaco id / icon in `editor-language.ts`;
    LSP suggestion mirror in `lspSuggestions.ts`.

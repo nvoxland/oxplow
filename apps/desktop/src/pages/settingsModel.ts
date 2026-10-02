@@ -25,7 +25,7 @@ const GROUPS: { title: string; matches(key: string): boolean }[] = [
   {
     title: "Metrics & Data",
     matches: (k) =>
-      k.startsWith("metric") || k.startsWith("dimension") || ["gauges", "measures"].includes(k),
+      k.startsWith("metric") || k.startsWith("dimension") || ["collectors", "measures"].includes(k),
   },
 ];
 

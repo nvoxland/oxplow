@@ -20,7 +20,6 @@ const review = (over: Partial<Extension> = {}): ExtensionReview => ({
     advisories: [],
     measures: [],
     metrics: [],
-    gauges: [],
     dimensions: [],
     ...over,
   } as Extension,

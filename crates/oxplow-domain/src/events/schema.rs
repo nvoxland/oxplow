@@ -1293,7 +1293,8 @@ impl EventType for KnowledgePageDeleted {
 /// snapshot pinned, unclaimed work reconciled, lifecycle metrics projected.
 /// Logged once per effort by the effort-lifecycle consumer (dedupe key
 /// `effort.finished:<effort>`), caused by the `effort.closed` it handled;
-/// what the effort reactors (evidence, inferred decisions, gauges) consume.
+/// what the effort reactors (evidence, inferred decisions) and the
+/// `effort.finished` collectors consume.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortFinishedV1 {

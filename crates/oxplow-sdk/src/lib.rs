@@ -401,7 +401,9 @@ pub struct Migrated {
 
 /// Rewrite `oxplow/extensions/<name>/extension.yaml` from v1 to v2 with
 /// the textual migration the loader already applies in memory
-/// (`extensions::migrate_v1`). Idempotent; a person's consent survives it.
+/// (`extensions::migrate_v1`), and its retired `gauges:` as `collectors:`
+/// (`collectors::migrate_gauges_text`, P7.B3). Idempotent; a person's
+/// consent survives it.
 pub fn migrate(root: &Path, name: &str) -> Result<Migrated, SdkError> {
     let rel = format!("{EXTENSIONS_DIR}/{name}/extension.yaml");
     let path = root.join(&rel);
@@ -409,7 +411,10 @@ pub fn migrate(root: &Path, name: &str) -> Result<Migrated, SdkError> {
         std::io::ErrorKind::NotFound => SdkError::NotFound(name.to_string()),
         _ => SdkError::Io(e),
     })?;
-    let migrated = extensions::migrate_v1::migrate_v1_to_v2(&text);
+    let migrated = oxplow_config::collectors::migrate_gauges_text(
+        &extensions::migrate_v1::migrate_v1_to_v2(&text),
+    )
+    .map_err(SdkError::Invalid)?;
     let changed = migrated != text;
     if changed {
         std::fs::write(&path, migrated)?;
@@ -417,6 +422,29 @@ pub fn migrate(root: &Path, name: &str) -> Result<Migrated, SdkError> {
     Ok(Migrated {
         name: name.to_string(),
         path: rel,
+        changed,
+    })
+}
+
+/// Rewrite the project's `.oxplow/project.yaml` `gauges:` block as
+/// `collectors:` in place (P7.B3); every other line is left as it is.
+/// Idempotent.
+pub fn migrate_project(root: &Path) -> Result<Migrated, SdkError> {
+    let path = oxplow_config::config_path(root);
+    let text = std::fs::read_to_string(&path)?;
+    let migrated =
+        oxplow_config::collectors::migrate_gauges_text(&text).map_err(SdkError::Invalid)?;
+    let changed = migrated != text;
+    if changed {
+        std::fs::write(&path, migrated)?;
+    }
+    Ok(Migrated {
+        name: oxplow_config::collectors::PROJECT.to_string(),
+        path: path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned(),
         changed,
     })
 }
@@ -579,5 +607,35 @@ mod tests {
         ));
         assert_eq!(name_of("oxplow/extensions/old/"), "old");
         assert_eq!(name_of("old"), "old");
+    }
+
+    /// P7.B3: migrating an extension also rewrites its `gauges:` as
+    /// `collectors:`; `migrate_project` does the project's file.
+    #[test]
+    fn migrate_rewrites_gauges_as_collectors() {
+        let dir = tempfile::tempdir().unwrap();
+        let gauges = "gauges:\n- key: acme.scan\n  emits: [acme.n]\n  compute: { runtime: starlark, entryFile: g.star }\n";
+        write(
+            dir.path(),
+            "oxplow/extensions/old/extension.yaml",
+            &format!("name: old\n{gauges}"),
+        );
+        assert!(migrate(dir.path(), "old").unwrap().changed);
+        let text = std::fs::read_to_string(dir.path().join("oxplow/extensions/old/extension.yaml"))
+            .unwrap();
+        assert!(text.contains("collectors:\n- id: acme.scan\n"), "{text}");
+        assert!(!text.contains("\ngauges:"), "{text}");
+
+        write(
+            dir.path(),
+            ".oxplow/project.yaml",
+            &format!("projectName: p\n{gauges}"),
+        );
+        let done = migrate_project(dir.path()).unwrap();
+        assert!(done.changed);
+        let text = std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap();
+        assert!(text.starts_with("projectName: p\ncollectors:\n"), "{text}");
+        oxplow_config::load_project_config(dir.path()).expect("loads");
+        assert!(!migrate_project(dir.path()).unwrap().changed);
     }
 }

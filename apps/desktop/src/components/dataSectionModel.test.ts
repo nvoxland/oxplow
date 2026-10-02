@@ -38,7 +38,7 @@ test("programRow says what runs and whether it will", () => {
   expect(m.command).toBe("tools/parse.sh --x");
   expect(m.status).toBe("Not approved: it won't run");
   expect(m.approveTitle).toContain("tools/parse.sh --x");
-  expect(programRow({ kind: "gauge", name: "repo.n", program: "t.sh", args: [], env: [], approved: true }).status).toBe(
+  expect(programRow({ kind: "collector", name: "repo.n", program: "t.sh", args: [], env: [], approved: true }).status).toBe(
     "Approved on this machine",
   );
   // An ACP agent shows the env it runs with, since that's part of what's approved.
@@ -94,8 +94,8 @@ test("a provider's approve waits for its declaration diff", () => {
   expect(canApprove(provider, "loading")).toBe(false);
   expect(canApprove(provider, { change: "added" } as ProviderEffect)).toBe(true);
   expect(canApprove(provider, { error: "no provider.json" })).toBe(false);
-  const gauge = { kind: "gauge", name: "g", program: "p", args: [], env: [], approved: false } as never;
-  expect(canApprove(gauge, undefined)).toBe(true);
+  const collector = { kind: "collector", name: "g", program: "p", args: [], env: [], approved: false } as never;
+  expect(canApprove(collector, undefined)).toBe(true);
 });
 
 test("a provider's declaration diff reads as lines", () => {

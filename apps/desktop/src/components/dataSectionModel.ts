@@ -52,7 +52,7 @@ export interface ProgramRowModel {
   approveTitle: string;
 }
 
-/// A program the project's config would run (an `exec` gauge or collection
+/// A program the project's config would run (an `exec` collector or collection
 /// plugin): unapproved ones don't run until a person approves them here.
 /// A shared extension's advisories are shown as what they'd say.
 export function programRow(p: ProjectProgram): ProgramRowModel {
@@ -86,7 +86,7 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
     };
   }
   const command = [...(p.env ?? []), p.program, ...p.args].join(" ");
-  const what = p.kind === "gauge" ? "Gauge" : p.kind === "plugin" ? "Collection plugin" : "ACP agent";
+  const what = p.kind === "collector" ? "Collector" : p.kind === "plugin" ? "Collection plugin" : "ACP agent";
   return {
     key: `${p.kind}:${p.name}`,
     label: `${what} ${p.name}`,

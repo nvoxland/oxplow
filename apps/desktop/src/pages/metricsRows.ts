@@ -9,8 +9,8 @@ export type ShowMode = "enabled" | "all";
 /**
  * Default to **enabled**. The page's row set is the metric CATALOG, which
  * includes metrics that are seeded as specs but never `use:`d in
- * `.oxplow/project.yaml` — the bundled C#/Clojure idiom gauges, say, in a
- * Rust/TS repo. Those gauges never run (`resolved_gauges` elides them), so they
+ * `.oxplow/project.yaml` — the bundled C#/Clojure idiom metrics, say, in a
+ * Rust/TS repo. Their collectors never run (`fact_collectors` elides them), so they
  * can only ever render `—`. Listing them by default makes the page look like it
  * tracks things it doesn't.
  */

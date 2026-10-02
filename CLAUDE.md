@@ -88,7 +88,7 @@ or exact mechanics.
 | The semantic layer — sources (entities + facts), dimensions, metrics, the `v_*` read contract, `query_sql`, user/extension sources (target design, epic tsk275) | `.context/semantic-layer.md` |
 | Extensions — `extension.yaml`, lenses (user/agent-built UI), slots, actions/alerts, the `oxplow-analytics` example extension, what moves out of core (target design) | `.context/extensions.md` |
 | AI providers & roles — API model access, role→model mapping, keychain, recorded computations (`AiCompute`, `ai_result`), the `ai_*` collector builtins, inferred decisions | `.context/ai-providers.md` |
-| Fact substrate (measure/dimension/metric_spec/capture/fact, cube, gauges, MCP/IPC reads, Metrics page) | `.context/metrics.md` |
+| Fact substrate (measure/dimension/metric_spec/capture/fact, cube, fact collectors, MCP/IPC reads, Metrics page) | `.context/metrics.md` |
 | Profiling (the `cube_equivalence` harness, samply traps), what's already optimized, what measurement ruled out | `.context/performance.md` |
 | User-created dashboards (dashboard/dashboard_item stores, DashboardsChanged event, MCP authoring tools, custom-dashboard page + tile grid) | `.context/dashboards.md` |
 | Tab store, page chrome, rail HUD, page kinds + tab id format | `.context/pages-and-tabs.md` |

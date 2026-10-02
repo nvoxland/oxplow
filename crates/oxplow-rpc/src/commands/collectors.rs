@@ -48,7 +48,7 @@ pub async fn set_credential(
     )?)
 }
 
-/// The programs the project's config would run (`exec` gauges and
+/// The programs the project's config would run (`exec` collectors and
 /// collection plugins) and whether this machine approved each. UI only.
 pub async fn list_project_programs(
     svc: &Services,
@@ -149,7 +149,7 @@ mod tests {
         assert_eq!(out, serde_json::json!([]), "no exec programs configured");
         let err = crate::dispatch(
             "approve_project_program",
-            serde_json::json!({ "kind": "gauge", "name": "repo.nope", "version": "x" }),
+            serde_json::json!({ "kind": "collector", "name": "repo.nope", "version": "x" }),
             &svc,
         )
         .await

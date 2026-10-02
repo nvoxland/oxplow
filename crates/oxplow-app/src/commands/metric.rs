@@ -5,15 +5,16 @@
 //! - `metric.record` asserts a number oxplow didn't compute (a CI import,
 //!   an agent's report) as a fact on the metric's measure, in the bus's
 //!   transaction with its audit.
-//! - `metric.run` / `metric.rebuild` run gauges now — one, or every
-//!   gauge's whole-tree baseline. They drive snapshot captures and gauge
-//!   scripts — systems the bus doesn't own — so they are `External`.
-//! - `metric.scaffold` returns a starter gauge and the config entries for
-//!   a new metric; it writes nothing.
+//! - `metric.rebuild` runs every fact collector's whole-tree baseline. It
+//!   drives snapshot captures and collector scripts — systems the bus
+//!   doesn't own — so it is `External`. One collector runs now through
+//!   `collector.sync`.
+//! - `metric.scaffold` returns a starter collector and the config entries
+//!   for a new metric; it writes nothing.
 //!
 //! `metric.enable { keys, enabled }` switches metrics on or off in this
 //! project's `.oxplow/project.yaml`. Which edit that is depends on the
-//! metric — a bundled gauge is off until a `use:` names it, a producer or
+//! metric — a bundled code metric is off until a `use:` names it, a producer or
 //! plugin metric is on until an `enabled: false` marker turns it off — so
 //! the command computes the new `metrics:` list with the metrics service's
 //! rule and hands it to `config.set`'s core: validated, written after
@@ -41,7 +42,6 @@ use crate::metrics_service::MetricsService;
 
 pub const ENABLE: &str = "metric.enable";
 pub const RECORD: &str = "metric.record";
-pub const RUN: &str = "metric.run";
 pub const REBUILD: &str = "metric.rebuild";
 pub const SCAFFOLD: &str = "metric.scaffold";
 
@@ -67,16 +67,6 @@ pub struct RecordInput {
     /// Extra dimensions, recorded on the fact.
     #[serde(default)]
     pub dims: Option<BTreeMap<String, String>>,
-    /// The stream (`str1`); defaults to the caller's, else the primary.
-    #[serde(default)]
-    pub stream: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct RunInput {
-    /// A configured gauge's metric key (`repo.unsafe_blocks`).
-    pub key: String,
     /// The stream (`str1`); defaults to the caller's, else the primary.
     #[serde(default)]
     pub stream: Option<String>,
@@ -209,7 +199,7 @@ fn record_tx(ctx: &TxCtx<'_>, input: &RecordInput, primary: StreamId) -> Result<
         return Err(invalid(
             "/key",
             "a `count` metric counts fact rows, so one asserted value can't represent it; \
-             run its collector instead (metric.run, record_test_run, ingest_analysis)",
+             run its collector instead (collector.sync, record_test_run, ingest_analysis)",
         ));
     }
     // Stamp the fact so the spec's own filter matches it (severity /
@@ -302,35 +292,6 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
             })),
         )
         .expect("metric.record registers")
-    };
-    let run = {
-        let metrics = metrics.clone();
-        Command::new(
-            spec(
-                RUN,
-                "Run a configured gauge now and record its facts, against the stream's latest \
-                 snapshot. Use after editing a gauge script, or for a `manual` gauge.",
-                serde_json::to_value(schemars::schema_for!(RunInput)).expect("schema serializes"),
-                Atomicity::External,
-                CommandEffect::Write,
-            ),
-            Handler::External(Arc::new(move |actor, input| {
-                let metrics = metrics.clone();
-                Box::pin(async move {
-                    let input: RunInput = parse(input)?;
-                    let stream = stream_for(&actor, input.stream.as_deref(), primary_stream)?;
-                    let count = metrics
-                        .run_metric_by_key(&input.key, Some(stream))
-                        .await
-                        .map_err(|message| invalid("/key", message))?;
-                    Ok(HandlerOutput {
-                        result: json!({ "key": input.key, "facts_recorded": count }),
-                        ..HandlerOutput::default()
-                    })
-                })
-            })),
-        )
-        .expect("metric.run registers")
     };
     let rebuild = {
         let metrics = metrics.clone();
@@ -445,7 +406,7 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
         })),
     )
     .expect("metric.enable registers");
-    vec![enable, record, run, rebuild, scaffold]
+    vec![enable, record, rebuild, scaffold]
 }
 
 #[cfg(test)]
@@ -600,9 +561,10 @@ mod tests {
         assert_eq!(facts, 0);
     }
 
-    /// `metric.run` computes a configured gauge now.
+    /// `collector.sync` runs one of the project's fact collectors now and
+    /// records its facts and its run.
     #[tokio::test]
-    async fn run_computes_a_configured_gauge() {
+    async fn collector_sync_runs_a_project_fact_collector() {
         let (svc, dir) = services().await;
         std::fs::write(
             dir.path().join("count.star"),
@@ -612,14 +574,18 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
             dir.path().join(".oxplow/project.yaml"),
-            "gauges:\n  - key: repo.answer\n    title: \"answer\"\n    trigger: manual\n    emits: [oxplow.ast_hit]\n    compute: { runtime: starlark, entryFile: count.star }\n",
+            "collectors:\n  - { id: repo.answer, doc: answer, runtime: starlark, entry: count.star, facts: [oxplow.ast_hit] }\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
-        let out = run(&svc, RUN, json!({ "key": "repo.answer" }))
-            .await
-            .unwrap();
-        assert_eq!(out["facts_recorded"], 1);
+        let out = run(
+            &svc,
+            crate::collector_runner::SYNC,
+            json!({ "owner": "project", "id": "repo.answer" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["facts"], 1);
         let measure = svc
             .fact_store
             .get_measure("oxplow.ast_hit")
@@ -630,6 +596,19 @@ mod tests {
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].value, 42.0);
         assert_eq!(facts[0].provenance, "observed");
+        let synced = svc
+            .sql
+            .query_sql(
+                "SELECT json_extract(payload, '$.trigger'), json_extract(payload, '$.facts') FROM v_event WHERE type = 'collector.synced'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(synced.rows).unwrap(),
+            json!([["manual", 1]])
+        );
     }
 
     /// `metric.scaffold` is a read: a template, and nothing written; the
@@ -644,10 +623,13 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(out["scriptPath"], "oxplow/gauges/acme_todo_density.star");
+        assert_eq!(
+            out["scriptPath"],
+            "oxplow/collectors/acme_todo_density.star"
+        );
         assert!(out["script"].as_str().unwrap().contains("def transform"));
-        assert!(out["projectYaml"].as_str().unwrap().contains("gauges:"));
-        assert!(!dir.path().join("oxplow/gauges").exists());
+        assert!(out["projectYaml"].as_str().unwrap().contains("collectors:"));
+        assert!(!dir.path().join("oxplow/collectors").exists());
         let err = run(&svc, SCAFFOLD, json!({ "key": "oxplow.nope" }))
             .await
             .unwrap_err();

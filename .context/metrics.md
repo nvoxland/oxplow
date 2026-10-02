@@ -34,7 +34,7 @@ is labelled "the BI fact grain" but holds *pre-aggregated, per-metric* values
 collector. `metric_finding` holds the *atomic, re-aggregatable* facts
 (function→complexity, test-case→pass/fail, lint hit) — but ephemerally, as
 CASCADE-with-run drill-in, not as a durable queryable series. So a new metric
-over the same reality needs a *new gauge that re-walks the code*: aggregation is
+over the same reality needs a *new collector that re-walks the code*: aggregation is
 welded to collection.
 
 **The fix (headless-BI / semantic-layer model).** Invert the source of truth:
@@ -56,7 +56,7 @@ welded to collection.
 >   population (a coverage report, a clippy run, the whole-tree duplication scan).
 >   The temporal fold applies directly.
 > - `capture_scope = per-path` — a capture restates **only the paths in its
->   snapshot**. This is what a **tree gauge** does: after the initial full index,
+>   snapshot**. This is what a **tree-scanning fact collector** does: after the initial full index,
 >   every snapshot is a per-commit **delta** (5–19 files).
 > - `capture_scope = per-subject` (V55, tsk43) — a capture restates **only the
 >   subjects it emitted facts for**. `oxplow.test_case`: a **partial** run
@@ -93,17 +93,17 @@ welded to collection.
 > the whole thing needs *no* write-side convention:
 > - a file whose count drops to **0** emits no fact (`if c > 0:`), but its path is
 >   in the new snapshot ⇒ the new capture supersedes the stale value. **No
->   zero-emission convention; the bundled gauge scripts are untouched.**
+>   zero-emission convention; the bundled collector scripts are untouched.**
 > - a **deleted** file's latest row is a `storage='deleted'` tombstone ⇒ dropped.
 >   **No tombstone facts.**
 > - **symbol**-grained facts and **many-facts-per-path** (TODO markers) are
 >   superseded *wholesale per file*, so a removed function/marker disappears.
-> - partitioning by **producer** matters: the 10 idiom gauges share
->   `oxplow.ast_hit` (sliced by `rule`), so without it a later gauge's capture would
->   supersede an earlier gauge's facts for the same path.
+> - partitioning by **producer** matters: the 10 idiom collectors share
+>   `oxplow.ast_hit` (sliced by `rule`), so without it a later collector's capture would
+>   supersede an earlier collector's facts for the same path.
 > - partitioning by **stream** matters for the same reason (tsk98): a stream is a
 >   **worktree**, and the fold reconstructs *one worktree's tree*. Two worktrees
->   running the same gauge share `(producer, path)` keys, so a stream-blind state
+>   running the same collector share `(producer, path)` keys, so a stream-blind state
 >   lets one worktree's capture evict the other's paths — yielding a point that is
 >   whichever worktree wrote last, per path, and belongs to neither. The state is
 >   therefore keyed **`stream → (producer, path)`**, matching the scoping the fact
@@ -119,7 +119,7 @@ welded to collection.
 > `zero_fill` is **suppressed** for `per-path`: an empty delta capture restated no
 > paths, so it means "nothing changed", not "the repo is zero".
 >
-> **Baseline (tsk71 — no fabricated snapshot).** A gauge's repo-wide total needs it
+> **Baseline (tsk71 — no fabricated snapshot).** A snapshot collector's repo-wide total needs it
 > to have restated the whole tree once — that's a **`scan_kind='full'` capture over
 > the reconstructed tree of an ordinary snapshot** (corpus via
 > `SqliteSnapshotStore::list_tree_files_at` → `build_full_file_map`), NOT a
@@ -129,10 +129,10 @@ welded to collection.
 > first landed in a snapshot inside whatever effort window was open when a rebuild
 > ran, producing false "changed but not claimed" EFFORT REVIEW flags.
 >
-> `gauges_needing_baseline` is the **pending-baseline queue**: the on-snapshot sweep
-> (`run_snapshot_gauges`) partitions gauges every time a snapshot lands — already-
-> baselined gauges run `delta` over the snapshot's own rows; queued ones run `full`
-> over the reconstruction. So a newly added/edited gauge baselines on the next
+> `collectors_needing_baseline` is the **pending-baseline queue**: the on-snapshot sweep
+> (`run_snapshot_collectors`) partitions fact collectors every time a snapshot lands — already-
+> baselined collectors run `delta` over the snapshot's own rows; queued ones run `full`
+> over the reconstruction. So a newly added/edited collector baselines on the next
 > ordinary snapshot automatically. **`Services::rebuild_metric_baseline(force)`** is
 > the on-demand entry point — it waits for the startup sweep, drains genuinely
 > pending edits into a NORMAL snapshot (real authored work, correctly attributed;
@@ -143,11 +143,11 @@ welded to collection.
 > branch switch — checkout rewrites the differing files, the watcher marks them
 > dirty, and the delta rescans exactly those paths.
 >
-> The sweep is **idempotent per (snapshot, gauge, fingerprint, scan_kind)**
-> (`gauge_done_for_snapshot` — kind-scoped so a delta capture can't satisfy a
-> pending full baseline over the same snapshot): a repeat rebuild or the event loop
-> reacting to the same snapshot won't double-scan the tree (the manual `run_metric`
-> path bypasses it — an explicit "run now" always runs).
+> The sweep is **idempotent per (snapshot, collector, fingerprint, scan_kind)**
+> (`collector_done_for_snapshot` — kind-scoped so a delta capture can't satisfy a
+> pending full baseline over the same snapshot): a repeat rebuild or a redelivered
+> `snapshot.taken` won't double-scan the tree (an explicit `collector.sync`
+> bypasses it — "run now" always runs).
 >
 > **Dominated-capture GC (tsk75).** A fresh baseline makes every effort-less
 > `delta`/`full` tree capture strictly OLDER than it dead weight (the dominance
@@ -249,17 +249,17 @@ welded to collection.
 > folds. Eliminating that needs per-capture points materialized during the cube
 > build (which already holds the live partition) — see [[tsk202]].
 >
-> **Gauges must be able to FINISH a whole-tree scan, and a failure must be seen.**
+> **Fact collectors must be able to FINISH a whole-tree scan, and a failure must be seen.**
 > The `SandboxBudget` default (5s) is sized for a report parser over one file. A tree
-> gauge tree-sitter-parses the *whole tree* per run, so gauge runs get their own
-> ceiling (`GAUGE_TIMEOUT`, 120s). Under the old 5s budget the broad-query gauges
+> collector tree-sitter-parses the *whole tree* per run, so fact-collector runs get their own
+> ceiling (`FACT_COLLECTOR_TIMEOUT`, 120s). Under the old 5s budget the broad-query collectors
 > timed out on every full-tree run and wrote **nothing** — `oxplow.ts.console_calls`
 > and `oxplow.ts.ts_ignore` had produced **zero facts since the project was indexed**,
 > against a repo with 137 console calls, and the only trace was a `tracing::warn`
-> (tsk47). A failing gauge now records a **`status='failed'` capture** (with the
+> (tsk47). A failing collector now records a **`status='failed'` capture** (with the
 > error and the fingerprint), and a whole-tree sweep is a tracked
-> `BackgroundTaskKind::Metrics` task with per-gauge progress that **fails** if any
-> gauge failed (tsk48) — so "why is oxplow pegging a core" and "is this metric
+> `BackgroundTaskKind::Metrics` task with per-collector progress that **fails** if any
+> collector failed (tsk48) — so "why is oxplow pegging a core" and "is this metric
 > trustworthy" both have answers.
 >
 > ⚠️ **Non-`done` captures are invisible to every fold** (`c.status = 'done'` in
@@ -271,25 +271,27 @@ welded to collection.
 > counted it, one timeout would supersede everything and silently zero the
 > metric. Worse than the bug it reports.
 >
-> `needs_tree_baseline` asks ONE question **per gauge** (`gauges_needing_baseline`):
-> *does this gauge have a completed `scan_kind='full'` capture at its current logic
+> `needs_tree_baseline` asks ONE question **per collector** (`collectors_needing_baseline`):
+> *does this collector have a completed `scan_kind='full'` capture at its current logic
 > fingerprint?* (`SqliteFactStore::has_full_capture`; fingerprint =
-> `gauge_fingerprint` — xxh3 of script text + runtime/input/args + `emits`, stamped
-> on every capture as `metric_capture.producer_version`, V56). That single check
-> covers BOTH a fresh/never-baselined gauge (incl. one stuck on deltas because its
+> `collector_fingerprint` — a hash of script text + runtime/report + `facts` (+ the
+> `input:` query when set), stamped on every capture as
+> `metric_capture.producer_version`, V56; its `v1` material is exactly what the
+> pre-P7.B3 gauges hashed, so a migrated gauge keeps its baseline). That single check
+> covers BOTH a fresh/never-baselined collector (incl. one stuck on deltas because its
 > full scan used to time out, tsk47/tsk49) AND a script change since the last
 > baseline (a full capture at stale logic carries the old fingerprint, tsk45). An
 > unfingerprintable script matches any-version — one full capture ever.
 >
-> **Per-GAUGE, not per-measure, is load-bearing (tsk49).** `oxplow.ast_hit` is one
-> measure shared by 10 idiom gauges (sliced by `rule`), so "does the measure have
-> facts" says nothing about one gauge — a delta-only gauge looks done because a
+> **Per-COLLECTOR, not per-measure, is load-bearing (tsk49).** `oxplow.ast_hit` is one
+> measure shared by 10 idiom collectors (sliced by `rule`), so "does the measure have
+> facts" says nothing about one collector — a delta-only collector looks done because a
 > *sibling* filled the measure. That is exactly how `oxplow.ts.console_calls` read
 > empty for weeks (137 real calls): `unsafe_blocks` completed its full-tree scan, so
 > `ast_hit` wasn't empty, so the old measure-level check never re-baselined the heavier
-> TS gauges that had only ever run on deltas.
+> TS collectors that had only ever run on deltas.
 >
-> **(2) is not optional either.** A gauge's facts are only as good as the code that
+> **(2) is not optional either.** A collector's facts are only as good as the code that
 > computed them, so a script change makes them stale but *not* empty. Without the
 > fingerprint a metric fix **silently no-ops** — you correct the query, the number
 > doesn't move, nothing says why (tsk44→tsk45: teaching `repo_allow.star` to match
@@ -298,8 +300,8 @@ welded to collection.
 > deletes, history preserved.
 >
 > `per-path` today: `oxplow.ast_hit`, `oxplow.complexity`, `oxplow.fn_length`,
-> `oxplow.parameter_count`, `oxplow.todo` (+ any project measure a snapshot gauge
-> emits per-file facts on — `metric.scaffold` sets it automatically). Validated in
+> `oxplow.parameter_count`, `oxplow.todo` (+ any project measure a snapshot collector
+> records per-file facts on — `metric.scaffold` sets it automatically). Validated in
 > config + `CaptureScope::parse`, deliberately **NOT** a DB CHECK: the
 > `temporal_semantics` CHECK is exactly why adding a value *there* would need a
 > `measure` table rebuild, which fires `fact.measure_id ON DELETE CASCADE` and wipes
@@ -328,8 +330,8 @@ welded to collection.
   `oxplow.cycle_time` (V43), plus `oxplow.coverage.branch` +
   `oxplow.coverage.function` (V68, tsk123 — per-file branch/function coverage
   ratios beside line coverage), plus `oxplow.ast_hit` (V45 — a per-file AST idiom
-  occurrence; the per-language gauges emit facts on it, distinguished by the
-  `oxplow.rule` dim; see the code-gauge section, tsk30), plus
+  occurrence; the per-language idiom collectors record facts on it, distinguished by the
+  `oxplow.rule` dim; see "Per-language idiom collectors", tsk30), plus
   `oxplow.effort_test_outcome` (V53, tsk38 — a per-effort-close scalar the
   lifecycle producer materializes; the four `oxplow.tests.{failed_at_close,
   peak_failed,distinct_failed,red_runs}` specs slice it by `oxplow.tests_stat`.
@@ -656,7 +658,7 @@ welded to collection.
 > **58 of 68 specs are cube-served** (42 before V64 promoted the four filter
 > dims — tsk101). The 10 that decline are all expected classes: 2 `min_value`
 > thresholds (permanent, by design) and 8 whose measure or filter matches **no
-> facts yet** (clean gauges, zero `severity=warning` rows) — those cube
+> facts yet** (clean collectors, zero `severity=warning` rows) — those cube
 > automatically the moment matching facts exist, and declining them is correct:
 > the fact path owns empty-producer seeding (tsk62). Verify a decline is one of
 > these classes before assuming the cube is working.
@@ -680,8 +682,8 @@ welded to collection.
   count-over-threshold), `formula` (derived-metric spec referencing other metric
   keys; NULL for a base), `sliceable_dims_json`, presentation
   - A project `key:`-defined metric may set `source_measure` to a **built-in**
-    measure to add a new aggregation over facts a bundled gauge already emits —
-    no new gauge, no collection. E.g. `repo.complexity_max` = `max` over
+    measure to add a new aggregation over facts a bundled collector already records —
+    no new collector, no collection. E.g. `repo.complexity_max` = `max` over
     `oxplow.complexity`, `repo.fn_length_max` = `max` over `oxplow.fn_length`
     (the project key just can't reuse the reserved `oxplow.` namespace).
   `direction`/`target`/`warn_at`/`fail_at`/`display_kind` (`gauge`|`findings`|
@@ -706,7 +708,7 @@ no-op that returns the existing id, so a replayed report never double-counts,
 tsk14/V51. `metric_capture.idempotency_key` is nullable with a partial unique
 index; the report ingests set it via `CollectionService::ingest_idempotency_key`
 = hash(producer + git version + snapshot + verbatim payload). Keyless captures —
-gauges, tokens, lifecycle — always insert fresh), `get_capture`,
+fact collectors, tokens, lifecycle — always insert fresh), `get_capture`,
 `facts_for_measure` (joined to the capture for the time/version/effort spine),
 `facts_for_captures` (the attribution-by-claim read). Ratio re-aggregation is
 NOT a store method — it lives in `metric_engine::aggregate_facts`.
@@ -741,7 +743,7 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   distinct partitions UNION (worktree B never evicts worktree A; one analyzer
   never evicts another for the same path — the tsk98/tsk106 forbidden shape).
   A `latest per (stream, producer, subject)` map on top of that was a no-op for
-  gauge-style measures and silently wrong for occurrence-grained ones:
+  tree-scan measures and silently wrong for occurrence-grained ones:
   `oxplow.lint_hit` and `oxplow.todo` emit one fact PER HIT with the containing
   file as the subject, so it made the breakdown count FILES while the headline
   counted hits. The rule is uniform: **any** group whose facts
@@ -761,7 +763,7 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   note the unscoped *headline* is narrower — the single newest worktree's
   value — a known asymmetry only visible with multiple active worktrees. `dim_value` reads the `severity`/`rule` columns and
   `package`-from-path directly, else `dims_json[key]`; `oxplow.language` /
-  bare `language` alias each other (the gauge scripts emit the conformed
+  bare `language` alias each other (the collector scripts emit the conformed
   namespaced key; pre-rename facts and the Explorer's declared sliceable_dims
   use the bare form). `FactRow` carries the
   capture's `producer` for exactly this scan-currency logic.
@@ -914,19 +916,22 @@ The UI shows the entity aggregation (`specAggregation`).
   in-memory value, or on a fresh process the latest stored fact. A level
   carries forward, so a restart doesn't pile up duplicates.
 
-### Exec gauges need consent (tsk331)
+### Exec fact collectors need consent (tsk331)
 
-A project-scope `runtime: exec` gauge runs only once a person approved it on
-this machine (`exec_consent::may_run`, checked in `compute_to_collector`), at
-its current program content and args. Global-scope gauges are the user's own
-and aren't gated.
+Only the project's own fact collectors may be `runtime: exec` (an extension's
+is starlark or jaq, and a fact collector gets no `env` / `credentials` /
+`network`). One runs only once a person approved it on this machine
+(`exec_consent::may_run` with `ProgramKind::Collector`, approval key
+`collector:<id>`, checked in `MetricsService::fact_runner`), at its current
+program content.
 
-- **Background runs** (snapshots, triggers) log "gauge: not run" and skip.
-- **Explicit runs** (`run_metric_by_key`, the `metric.run` command) return the
-  reason, via the `gauge_collector` / `run_gauge_collector` split.
+- **Background runs** (snapshot / event triggers) log "fact collector: not run"
+  and record a failed run (`collector_run` + `collector.synced`).
+- **Explicit runs** (`run_collector_by_key`, the `collector.sync` command)
+  return the reason as the command's error.
 - **Approving.** Settings → Data → Programs (IPC `list_project_programs` /
-  `approve_project_program`, UI-only). See architecture.md → "A repo's
-  config never runs a program without consent".
+  `approve_project_program`, UI-only; kind label "collector"). See
+  architecture.md → "A repo's config never runs a program without consent".
 
 ### Producers — facts on the capture spine (the ONLY write since T-E2)
 
@@ -945,8 +950,8 @@ reconcile). So disabling every metric over a measure stops its collection:
 `oxplow.task_effort`. **Tests keep their run record** even when the metric is off
 — a measured run whose `oxplow.tests.*` are all disabled records under the
 record-only `test-run` producer (no metric facts) so effort-review still sees the
-run. Code gauges need no gate — `resolved_gauges()` already elides a disabled
-gauge (it never runs). Test fixtures that exercise a producer must seed the
+run. Built-in code collectors need no gate — `fact_collectors()` already elides
+one whose metric isn't enabled (it never runs). Test fixtures that exercise a producer must seed the
 producer specs (as boot does) or the gate stays closed.
 
 Landed:
@@ -989,8 +994,8 @@ open window for a run to land in.
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr). **Branch + function coverage (tsk123)** ride the SAME capture as extra per-file facts on `oxplow.coverage.branch` / `oxplow.coverage.function` (num/den=hit/found), emitted only for files whose report carried the counts (`*_found > 0`) and only when their spec is enabled (per-measure gate via `active_coverage_measure`). Specs: `oxplow.coverage.branch_pct` / `oxplow.coverage.function_pct` (ratio %, higher-better). **Untested files (tsk124)** is a read-only spec `oxplow.coverage.untested_files` — a `count` over `oxplow.coverage` filtered `max_value: 0` (the new upper-bound `FactFilter` field, cube-ineligible like `min_value`), `findings` display so the drill-in lists which files, lower-better — no new collection |
 | test cases | `collection.rs::record_test_run` | one `oxplow.test_case` fact per case, status as the `oxplow.status` dim (+ `oxplow.test_suite`). MCP-asserted counts (no report) synthesize status-sliced facts (no case identity). A report-less, count-less run records its capture under the **`test-run`** producer — a run RECORD, not a measurement: an empty `tests` capture would read as "found 0 tests" to the zero-fill/currency logic and collapse the semi-additive `oxplow.tests.*` timeline |
 | duplication | `oxplow-app/src/duplication_scan.rs::DuplicationRecorder::record` — facts from **full-tree** scans only; the change analyzer's scoped scans record findings but no facts (tsk365) | one `oxplow.duplicate_lines` fact per duplicate block (value=line count, subject=`path:start-end`, peer side in `detail`); capture stamped with the **primary stream** (a scan has no natural stream) + tree `basis_ref`. A zero-hit scan still writes its EMPTY capture (tsk44 currency) — else the last non-empty scan's blocks stay "current" forever |
-| code gauges | `metrics_service.rs::run_one_gauge` → `record_gauge_facts` (tsk23) | the bundled code gauges emit a `facts` channel: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders the baked count reports |
-| per-language idiom gauges | same path (tsk30) | the ~10 idiom gauges (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug, dims carrying the conformed `oxplow.language`); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`) |
+| built-in code collectors | `metrics_service.rs::run_one_collector` → `record_collector_facts` (tsk23) | the bundled code collectors return `facts`: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders |
+| per-language idiom collectors | same path (tsk30) | the ~10 idiom collectors (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug, dims carrying the conformed `oxplow.language`); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`) |
 
 #### OTEL token tracking (tsk22)
 
@@ -1057,17 +1062,19 @@ open effort (`find_single_open_for_thread`), else stays null (deferred to
 reconcile). Stamped by: **tokens/turns** (`token_usage.rs`, the effort resolved
 once in `on_stop` and threaded to the capture), **tests / lint-hits / coverage /
 nudges** (`collection.rs`), and **effort-lifecycle** (`task_service.rs`, which
-knows its exact effort). The **snapshot code-gauge** captures are deliberately
+knows its exact effort). The **snapshot fact-collector** captures are deliberately
 NOT stamped — they're whole-tree scans whose baseline predates the effort, so
 T-D's File family attributes them by *claimed files × time window*, not by
 `effort_id`. `auto_attribute_run` now composes `resolve_owning_effort` +
 `claim_run` (the `run:<id>` ledger write is unchanged) so the run claim and the
 capture stamp always agree.
 
-**Code-gauge unbake (tsk23) — the keystone, and the one non-mechanical producer.**
-A gauge's `MetricReport` gained a third channel beside `samples` (baked headline)
-and `findings` (offenders drill-in): `facts: [GaugeFact { measure, value, subject?,
-path?, line?, dims? }]` — measure-bound atomics. `record_gauge_facts` resolves each
+**Code-metric unbake (tsk23) — the keystone, and the one non-mechanical producer.**
+A code scan's output used to be baked `samples` (headline) + `findings`
+(offenders drill-in); tsk23 added a `facts` channel, and P7.B3 removed the
+other two. A fact collector now returns only `{"facts": [CollectedFact { measure,
+value, subject?, path?, line?, rule?, num?, den?, dims? }]}` — measure-bound
+atomics (`facts_of` refuses any other shape). `record_collector_facts` resolves each
 fact's `measure` against the catalog (**declare-to-collect**, decision #4: a fact on
 an undefined measure is dropped with a `tracing::warn!`, never silently written) and
 writes the resolvable facts under one capture — the **only** output now (facts-only,
@@ -1075,35 +1082,32 @@ T-C3b). A ZERO-fact run still writes its (empty) capture — "this scan ran and 
 nothing" is the record the engine zero-fills a series from, so a count metric drops
 back to zero after the last offender is fixed (tsk44; the analysis ingest records
 its capture for a clean report the same way). The count-over-threshold headline is the **spec** (`builtin_metric_specs`),
-and the equivalence test `code_gauge_facts_reaggregate_to_the_expected_headline`
-pins `engine.headline_for_spec(spec) == the expected gauge total` for every bundled
-code metric — the proof the inversion is faithful. (Strict `> N` in the old gauge
+and the equivalence test `code_collector_facts_reaggregate_to_the_expected_headline`
+pins `engine.headline_for_spec(spec) == the expected baked total` for every bundled
+code metric — the proof the inversion is faithful. (Strict `> N` in the old baked count
 equals `min_value = N+1` on the integer complexity/length measures.) The 4 code
 scripts are unbaked (no `tree:.`/`file:` samples); the baked write path is gone.
 
-**Per-language idiom gauges (tsk30).** The same pattern extends to the ~10
-per-language AST idiom gauges, but they don't have a natural per-subject measure —
+**Per-language idiom collectors (tsk30).** The same pattern extends to the ~10
+per-language AST idiom collectors, but they don't have a natural per-subject measure —
 so they share **one** generic measure `oxplow.ast_hit` (a per-file idiom
 occurrence) and are told apart by the `oxplow.rule` dimension (the idiom slug,
-carried on the fact's `rule` column via the new `GaugeFact.rule`). Each gauge emits
-one per-file `ast_hit` fact (value=that file's count, `rule`=its slug) beside its
-per-file sample; each metric is a `Sum(oxplow.ast_hit)` spec filtered by
+carried on the fact's `rule` column via `CollectedFact.rule`). Each collector records
+one per-file `ast_hit` fact (value=that file's count, `rule`=its slug); each metric is a `Sum(oxplow.ast_hit)` spec filtered by
 `dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`, seeded in `seed_catalog`). Idioms
 sharing the measure never collide because every spec read applies the rule filter
-**before** it aggregates. `per_language_gauge_facts_reaggregate_to_the_baked_headline`
+**before** it aggregates. `per_language_collector_facts_reaggregate_to_the_baked_headline`
 pins each spec's `Sum` to its baked headline. The `<slug>` in the script and the
 spec MUST match (the equivalence test catches a drift → spec count 0 ≠ baked).
 
 Wired into `Services` as `fact_store: Arc<SqliteFactStore>` +
 `metric_engine: MetricEngine`; `TaskService`/`CollectionService`/
 `TokenUsageService` carry the fact store; the duplication write lives in the rpc
-layer (`svc.fact_store`). Still to come (see the epic's tasks): the **code-gauge
-unbake** (per-function complexity/length/param + marker facts; count-over-threshold
-becomes a metric spec — the design-heavy keystone).
+layer (`svc.fact_store`).
 
 **Producer specs (T-B).** Each always-on producer metric now has a `metric_spec`
 (`producer_metrics.rs::builtin_producer_specs`, seeded in `seed_catalog` beside
-the built-in gauge specs) — the aggregation it *is* over the measure its producer
+the built-in code-metric specs) — the aggregation it *is* over the measure its producer
 emits facts on, with conformed dims (not extra measures) distinguishing variants:
 token in/out slice `oxplow.tokens` by `oxplow.token_kind`; tests slice
 `oxplow.test_case` by `oxplow.status`; analysis filters `oxplow.lint_hit` by
@@ -1115,7 +1119,7 @@ measure home); new dim `oxplow.token_kind`.
 
 **Decision reversed — nudges are now IN the substrate (T-B, was tsk24).** The
 earlier call kept the advisory nudges (report-less, coverage-target,
-gauge-crossing) out of the substrate. T-B reverses it: with the
+threshold-crossing) out of the substrate. T-B reverses it: with the
 producer-spec layer in place, adding an `oxplow.nudge` event measure + one fact
 per fired nudge is cheap and makes the `agent.nudges.fired` operational metric a
 first-class spec like every other. The nudge rows in `agent_nudge` stay the
@@ -1150,13 +1154,16 @@ reached through `run_command`, audited like every command):
   asserted fact (below) written in the bus transaction with its audit
   (`fact_store::record_facts_tx`); after commit it clears the fact memo
   (the change loop announces `MetricSamplesChanged` for the measure).
-- `metric.run { key, stream? }` — `BestEffort` over
-  `MetricsService::run_metric_by_key` (the `manual` trigger).
 - `metric.rebuild { force }` — `BestEffort` over
   `MetricsService::rebuild_baseline`, the whole-tree baseline boot runs.
 - `metric.scaffold { key, title?, language?, glob? }` — a `Read`: the
-  starter gauge and the config entries, which the agent adds with
-  `config.set` (`gauges` is person-only, so that step asks the person).
+  starter collector script and the config entries, which the agent adds with
+  `config.set` (`collectors` is person-only, so that step asks the person).
+
+Running one fact collector now is **`collector.sync { owner, id }`** (the
+one manual run for every collector; `metric.run` is deleted) — it reaches
+`MetricsService::run_collector_by_key` and returns the `facts` count (see
+"Producers" below and [commands.md](./commands.md)).
 
 A stream defaults to the caller's, else the primary; an agent may only
 name its own.
@@ -1191,8 +1198,8 @@ dimensions:                        # custom conformed slice axes
   every project (unlike a global metric, which needs a project `use:`). The four
   `load_global_*_entries` loaders share one generic `load_global_entries` helper
   (tsk17 — they differ only in the doc field + validator).
-- **Read-path caching (tsk17):** `resolved_specs`/`resolved_gauges` run on
-  **every** snapshot event, so the four global YAML dirs are loaded once into a
+- **Read-path caching (tsk17):** `resolved_specs`/`fact_collectors` run on
+  **every** snapshot event, so the three global YAML dirs are loaded once into a
   `MetricsService.global_catalog` (`Arc<Mutex<Option<GlobalCatalog>>>`) and
   served from cache (`with_global_catalog`); the service's run loop clears it
   on every `ConfigChanged` before reseeding (an external edit to a global file
@@ -1224,7 +1231,7 @@ dimensions:                        # custom conformed slice axes
 
 **Not yet done:** a **Dimensions catalog** UI page; `promote_dimension` teeth
 (tsk28); unbaking the per-language idiom scripts (still emit dead `tree:.`/
-`file:` samples, harmless — `run_one_gauge` ignores them); formula-spec wiring
+`file:` samples, harmless — `run_one_collector` ignores them); formula-spec wiring
 (tsk21). Those are the open children of the epic. Already landed: the **MCP**
 metric-key reads (T-C2), the **IPC + bindings + frontend** read surface (T-C3a,
 tsk39), the **baked-write removal + 4-script unbake** (T-C3b, tsk40), the
@@ -1297,10 +1304,10 @@ age sweep only.
 + `EffortMetrics.tsx` are untouched). Two capture-resolution spines back the four
 families:
 
-- **claimed files × time** — code gauges are snapshot scans, so their captures are
+- **claimed files × time** — code-metric collectors are snapshot scans, so their captures are
   **not** effort-stamped; the File family reads them by claimed path + capture time,
-  scoped to the effort's stream. Exception: an `on-effort-complete` gauge run KNOWS
-  its producing effort and stamps the capture (tsk43 — `GaugeRunContext.effort_id`),
+  scoped to the effort's stream. Exception: an `{ on: [effort.finished] }` collector run KNOWS
+  its producing effort and stamps the capture (tsk43 — `CollectorRunContext.effort_id`),
   so its just-after-close capture still counts as the effort's "current".
 - **`metric_capture.effort_id`** — the run/operational producers stamp the owning
   effort at ingest (tsk37, `resolve_owning_effort`), so an effort's run + token +
@@ -1308,7 +1315,7 @@ families:
 
 | family | how the delta is computed |
 |---|---|
-| **File** — snapshot-scan gauge (`display_kind` ∈ {`gauge`, `findings`}, a source measure, no formula, non-producer, non-operational — includes the `static-quality` built-in code gauges, whose captures are never effort-stamped; tsk43) | Σ over the effort's **claimed files** (`effort_file`) of `(current − baseline)`, each fact contributing per the spec's **aggregation** (`count` ⇒ 1 per offender — matching the Metrics page — else the fact value); facts are scoped to the effort's **stream** (worktree). Baseline capture = latest before the effort start; current = latest at/before the effort end (newest when open; a capture STAMPED with this effort — an on-effort-complete gauge run — also counts). A CLOSED effort with no in-window capture yields no row (never a post-close capture, never a fabricated drop-to-zero). A claimed file absent from a capture = 0 (sparse emission → a drop-to-zero is seen), and the producers' EMPTY zero-hit captures are spliced into the timeline so a scan that found nothing is eligible as baseline/current (tsk44). **No claims, or repo-scalar facts with no path** → the repo-wide before→after fallback. `file_delta_from_facts` |
+| **File** — snapshot-scan metric (`display_kind` ∈ {`gauge`, `findings`}, a source measure, no formula, non-producer, non-operational — includes the `static-quality` built-in code metrics, whose captures are never effort-stamped; tsk43) | Σ over the effort's **claimed files** (`effort_file`) of `(current − baseline)`, each fact contributing per the spec's **aggregation** (`count` ⇒ 1 per offender — matching the Metrics page — else the fact value); facts are scoped to the effort's **stream** (worktree). Baseline capture = latest before the effort start; current = latest at/before the effort end (newest when open; a capture STAMPED with this effort — an `effort.finished` collector run — also counts). A CLOSED effort with no in-window capture yields no row (never a post-close capture, never a fabricated drop-to-zero). A claimed file absent from a capture = 0 (sparse emission → a drop-to-zero is seen), and the producers' EMPTY zero-hit captures are spliced into the timeline so a scan that found nothing is eligible as baseline/current (tsk44). **No claims, or repo-scalar facts with no path** → the repo-wide before→after fallback. `file_delta_from_facts` |
 | **Run** — tests (category `testing`) + the `oxplow.analysis.*` producer pair | before→after (or `sum` flow) over `aggregate_series` of the facts of the effort's OWN captures (`facts_for_captures(measure, captures_for_effort)`). Analysis is classified Run via the producer-key check (its facts arrive on effort-stamped run-ingest captures), so it never reaches the File branch (the tsk272 guard) |
 | **Window** — operational (`agent.*`/`effort.*`/`task.*`) + formula/event specs | identical read to Run now that captures carry `effort_id`; kept a distinct family only to document it has no run-claim write side. `effort_stamped_delta` serves both |
 | **Coverage** (category `coverage`) | effort-relative: for each coverage run CAPTURE this effort **claimed** (ledger — the capture is the run, T-E1), `coverage_delta_for_spec` derives the **diff-coverage** at read (`diff_coverage_for_effort`) from the capture's ABSOLUTE per-file **line-sets** (`metric_capture.detail_json`, the `coverage-detail` envelope), then before→after over the derived sequence. The coverage FACTS carry num/den counts; the line-sets live only in the detail envelope |
@@ -1364,7 +1371,7 @@ envelope) — a run claimed after close still yields a diff (tsk270). The mechan
 
 Ratio metrics (coverage %, pass rate) store `numerator`+`denominator`. Roll-ups
 MUST re-aggregate from components (`aggregate_ratio` = Σnum/Σden), never naive-
-AVG a percentage. Non-ratio gauges use `default_agg`.
+AVG a percentage. Non-ratio metrics use `default_agg`.
 
 ## Branch tracking
 
@@ -1389,7 +1396,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 | otel-tokens | `crates/oxplow-app/src/token_usage.rs` (`ingest_otlp_tokens`, fed by the control-plane OTLP receiver — tsk22) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
 | effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
-| config gauges | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the author-able runner. Seeds a `metric_spec` per resolved `metrics:` entry (+ a legacy `metric_definition` until the read-flip); runs each **gauge** (`resolved_gauges()` = config `gauges:` ∪ `use:`-enabled built-ins) on its trigger (`on-snapshot` via the snapshot-batch event in `run()`; `on-effort-complete` via the `effort.gauges` pump consumer on `effort.finished` (`effort_reactors.rs`); `manual` via `run_metric_by_key`) | one `fact` per `GaugeFact` the script emits (bound to a defined measure in the gauge's `emits`), version/branch/snapshot-stamped, under one `metric_capture`. Facts-only (T-C3b): `run_one_gauge` writes nothing but facts; any `samples`/`findings` a script still returns are ignored |
+| fact collectors | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the fact engine. Seeds a `metric_spec` per resolved `metrics:` entry; runs each **fact collector** (`fact_collectors()` = the project's `collectors:` with `facts:` ∪ enabled extensions' ∪ `use:`-enabled built-ins; an id two owners declare runs once, project > extension > built-in) on its trigger: `on:` from the `collector.triggers` pump consumer (`run_snapshot_collectors` for `snapshot.taken` that recorded files, `run_effort_collectors` over the effort's end snapshot for `effort.finished`, `run_event_collectors` over the stream's latest snapshot otherwise), `every:` from the scheduler, `manual` and any explicit run through `collector.sync` → `run_collector_by_key(owner, id, stream, source)` | one `fact` per `CollectedFact` the script returns (bound to a defined measure in the collector's `facts`), version/branch/snapshot-stamped, under one `metric_capture` (a failed capture on error), plus a `collector_run` row and a `collector.synced@1` event carrying the `facts` count. `facts_of` refuses any output but `{"facts": [...]}` |
 
 > Navigation / activity (`page_visit`, `usage_event`) are **deliberately not
 > projected** into the substrate: they're oxplow-usage telemetry (UI metadata),
@@ -1476,9 +1483,9 @@ just carries a Help blurb pointing there.
 >
 > `seed_catalog` seeds **every** built-in spec (`builtin_metric_specs` /
 > `builtin_ast_specs` / `builtin_producer_specs`) unless a config `enabled: false`
-> marker explicitly prunes it. A built-in gauge that is merely **un-`use:`d keeps
-> its spec** — it just never RUNS (`resolved_gauges` elides it). But `catalog()`
-> computes a built-in gauge's `enabled` as *"a non-disabled `use:` resolves it"*.
+> marker explicitly prunes it. A built-in code metric that is merely **un-`use:`d keeps
+> its spec** — its collector just never RUNS (`fact_collectors` elides it). But `catalog()`
+> computes a built-in code metric's `enabled` as *"a non-disabled `use:` resolves it"*.
 >
 > So `metric_spec` ⊋ "the enabled set", and **only the catalog knows about
 > `use:`**. Reading `v_metric_spec` alone and calling the result
@@ -1491,9 +1498,9 @@ just carries a Help blurb pointing there.
 >
 > (The "spec table = the enabled set" phrasing under the collection gate above is
 > about the **producer** measures, where disabling does prune. Don't generalize it
-> to gauges.)
+> to built-in code metrics.)
 >
-> Note enabling a C# gauge here still wouldn't show `0`: `oxplow.ast_hit` is
+> Note enabling a C# idiom metric here still wouldn't show `0`: `oxplow.ast_hit` is
 > `capture_scope: per-path`, whose zero-fill is deliberately suppressed, so a scan
 > that matches no files yields no point at all. Nothing auto-detects a project's
 > languages.
@@ -1541,12 +1548,12 @@ just carries a Help blurb pointing there.
 > caller can't drift.)
 >
 > **Grouping keys off `MetricCatalogEntry.language`** (tsk87). For a built-in
-> gauge the catalog takes that slug straight from the *gauge*
+> code metric the catalog takes that slug straight from its `BuiltinMetric`
 > (`builtin_metrics()`), so catalog and spec agree by construction.
 >
-> `builtin_ast_specs` nevertheless **reads each spec's language off its gauge by
+> `builtin_ast_specs` nevertheless **reads each spec's language off its `BuiltinMetric` by
 > key** rather than restating the slug
-> (`builtin_ast_specs_carry_the_language_their_gauge_declares` pins it). Before
+> (`builtin_ast_specs_carry_the_language_their_collector_declares` pins it). Before
 > tsk81 the specs set no `language` at all (`NewMetricSpec::base` defaults it to
 > `None`). That's no longer what sections the *page* — but `MetricSpec.language`
 > is still real read surface: `v_metric_spec.language` is how a query
@@ -1554,7 +1561,7 @@ just carries a Help blurb pointing there.
 > null. Keep it populated.
 >
 > Note the key segment is **not** the slug: `oxplow.ts.*` is language
-> `typescript`. A gauge's `language: ""` (the language-agnostic code gauges) maps
+> `typescript`. A built-in's `language: ""` (the language-agnostic code metrics) maps
 > to spec `None` — `""` is not a language, and `groupByLanguage` reads null/`""`
 > as its "General" bucket.
 - **Metric Detail** (`MetricDetailPage.tsx` + the pieces in `MetricDetail.tsx`
@@ -1576,7 +1583,7 @@ just carries a Help blurb pointing there.
 > **Definition descriptions (tsk309).** Every metric carries a one-line
 > `description` (on `metric_definition`). It's inherent to the definition — set
 > once and not overridable by a `use:` entry (`resolve_one` reads `def.description`,
-> like trigger). Sources: the built-in code gauges (`BuiltinMetric.description`),
+> like trigger). Sources: the built-in code metrics (`BuiltinMetric.description`),
 > the always-on producers (`ProducerMetric.description` in `producer_metrics.rs`),
 > and config `key:` entries (`MetricEntry.description` → `ResolvedSpec` →
 > `spec_definition()`).
@@ -1599,7 +1606,7 @@ folded it into the surfaces where you already look at a metric:
   on `configChanged` as well as `metricSamplesChanged`.
 - **"+ New metric" scaffolding is agent-driven (tsk122).** The inline
   `NewMetricBar.tsx` form was **removed** — authoring a metric always needs the
-  gauge script edited anyway, which is agent work. The scaffold backend
+  collector script edited anyway, which is agent work. The scaffold backend
   is now the `metric.scaffold` command (see below), and Recorded Metrics' details rail carries
   a Help blurb (`recorded-new-metric-help`) telling the user to ask their agent
   (the `/oxplow:new-metric` skill).
@@ -1617,7 +1624,7 @@ The mechanics behind those controls (unchanged by tsk117):
 - **The catalog is a registry of everything available**, NOT a list of metrics
   with recorded data — every metric the system can produce is listed via
   `list_metric_catalog`, even before any sample exists. `catalog()` unions
-  **four** sources, deduped by key: (1) the bundled code gauges
+  **four** sources, deduped by key: (1) the bundled code metrics
   (`builtin_metrics()`, toggleable); (2) project/global `metrics:` entries
   (toggleable); (3) the built-in always-on producers
   (`builtin_producer_metrics()` — tokens, tests, coverage, analysis, effort
@@ -1625,8 +1632,8 @@ The mechanics behind those controls (unchanged by tsk117):
   exist, tsk286); (4) every other seeded `metric_definition` — installed plugin
   metrics and legacy rows. **Every entry is `toggleable: true` (tsk31)** — the
   "always on" class is retired: producers/plugins can be enabled/disabled just
-  like code gauges. `catalog()` reads each row's `enabled` from config
-  (`config_state`): a built-in gauge is on only when a non-disabled `use:`
+  like code metrics. `catalog()` reads each row's `enabled` from config
+  (`config_state`): a built-in code metric is on only when a non-disabled `use:`
   resolves it; producers/plugins are default-ON unless an `enabled: false`
   marker disables them.
 - **Enable/disable** via the `metric.enable { keys, enabled }` command
@@ -1635,7 +1642,7 @@ The mechanics behind those controls (unchanged by tsk117):
   `config.set`'s core, so it is audited, logged as `config.changed` and
   undoable. Its config shape is
   default-aware (`apply_metric_enabled` + `is_default_on`): a default-OFF
-  metric (built-in code gauge / global def) toggles by the presence of a bare
+  metric (built-in code metric / global def) toggles by the presence of a bare
   `use:` entry, while a default-ON metric (producer/plugin) or a config `key:`
   definition toggles by an `enabled: false` **marker** (so disabling never
   deletes a `key:` definition). `seed_catalog` then **reconciles** the
@@ -1653,20 +1660,21 @@ The mechanics behind those controls (unchanged by tsk117):
   `resolve_one` reads it from the definition (like `compute`) and a `use:`
   entry can't override it (tsk290).
 - **`metric.scaffold` (a command since P4.8; a template since tsk391)** returns the
-  **trio** (measure + gauge + metric) and a starter fact-emitting Starlark stub,
+  **trio** (measure + collector + metric) and a starter fact-returning Starlark stub,
   and **writes nothing**: `MetricsService::metric_scaffold` → `MetricScaffold {
-  scriptPath: oxplow/gauges/<slug>.star, script, projectYaml }`, the entries a
-  `measures:` entry (`<key>.count`, per-path), a `gauges:` entry (`<key>`) and a
+  scriptPath: oxplow/collectors/<slug>.star, script, projectYaml }`, the entries a
+  `measures:` entry (`<key>.count`, per-path), a `collectors:` entry (id `<key>`,
+  starlark, `trigger: { on: [snapshot.taken] }`, `facts: [<key>.count]`) and a
   `metrics:` spec (`<key>`, `sum` over the measure), rendered by
   `oxplow_config::entries_yaml`. The agent writes the script with its own
-  tools and adds the entries through `config.set` (`gauges` is person-only,
+  tools and adds the entries through `config.set` (`collectors` is person-only,
   so the person confirms); `ConfigChanged` reseeds. It used to write the files itself
   (and had a `global` scope writing the global config dir), which let a
   read-only thread change the repo and always wrote to the primary worktree.
-  Global metrics are authored by hand in the global config dir; the runner
-  resolves each gauge's `entryFile` against the right base dir
-  (`script_base_dir`: `<global>/gauges` for a global-scope gauge, else the
-  project dir).
+  Global metrics are authored by hand in the global config dir (there are no
+  global collectors). The runner reads a collector's `entry` from its
+  owner's folder (`collector_script_text`: the project dir, the extension's
+  folder, or the embedded script for a built-in).
 
 Metrics are also surfaced **organically off the Metrics pages** (tsk250): the
 effort review (`DiffViewPage`'s `effort.review.details` slot) shows the oxplow-analytics
@@ -1698,26 +1706,34 @@ Token and page analytics are oxplow-analytics lenses (`usage`) over
 
 A project (or the user-global library) declares metrics in YAML — no Rust per
 metric. The substrate is dimensional, so authoring splits into **four orthogonal
-blocks** (matching the real cardinality): `measures:` (fact TYPEs) ← `gauges:`
-(fact PRODUCERs) → facts → `metrics:` (read SPECs), sliced by `dimensions:`.
-Parsed/validated/resolved in `crates/oxplow-config/src/lib.rs`
-(`MetricEntry`→`ResolvedSpec` + `resolve_metrics`; `GaugeEntry`→`ResolvedGauge` +
-`resolve_gauges`; `GaugeComputeConfig`; `load_global_{metric,gauge}_entries`); the
-runner (`MetricsService`) seeds a `metric_spec` per resolved metric (and a legacy
-`metric_definition` until the read-flip, tsk26) and runs each **gauge** on its
-`trigger`.
+blocks** (matching the real cardinality): `measures:` (fact TYPEs) ← `collectors:`
+(fact PRODUCERs — a collector with `facts:`) → facts → `metrics:` (read SPECs),
+sliced by `dimensions:`. Metrics/measures/dimensions are parsed, validated and
+resolved in `crates/oxplow-config/src/lib.rs` (`MetricEntry`→`ResolvedSpec` +
+`resolve_metrics`; `load_global_metric_entries`); collectors in
+`crates/oxplow-config/src/collectors.rs` (`CollectorSpec`, the same parser for
+`.oxplow/project.yaml` and `extension.yaml` — see
+[semantic-layer.md](./semantic-layer.md) "Collectors"). The fact engine
+(`MetricsService`) seeds a `metric_spec` per resolved metric and runs each
+**fact collector** on its `trigger`. (Until P7.B3 the producer block was
+`gauges:`; loading one is now an error naming `oxplow plugin migrate --project`,
+which rewrites it in place.)
 
 ```yaml
-measures:                             # the fact TYPE the gauge emits
+measures:                             # the fact TYPE the collector records
   - key: repo.todo_count
     subjectKind: file
     unit: count
     temporalSemantics: semi-additive  # additivity OVER TIME
-gauges:                               # the PRODUCER (runs a script, emits facts)
-  - key: repo.todo
-    trigger: on-snapshot              # on-report|on-snapshot|on-effort-complete|manual|continuous
-    emits: [repo.todo_count]          # declare-to-collect allow-list
-    compute: { runtime: starlark, entryFile: oxplow/gauges/todo.star }
+collectors:                           # the PRODUCER (runs a script, records facts)
+  - id: repo.todo
+    doc: TODO comment scan
+    runtime: starlark                 # starlark | jaq | exec (project only, approved)
+    entry: oxplow/collectors/todo.star
+    trigger: { on: [snapshot.taken] } # manual | { every: 15m } | { on: [<types>], where?: {...} }
+    facts: [repo.todo_count]          # declare-to-collect allow-list
+    # report: { path: target/x.json, format: json }   # text|json|xml|lcov|lines
+    # input: "SELECT … :effort_id"    # starlark/jaq: rows as input.rows
 metrics:                              # the read SPEC (the chartable metric)
   - key: repo.todo_count              # DEFINE — a measure aggregation
     sourceMeasure: repo.todo_count
@@ -1736,30 +1752,34 @@ metrics:                              # the read SPEC (the chartable metric)
   metrics). Two-axis aggregation: `aggregation` combines facts *within a capture*;
   the source measure's `temporalSemantics` governs the cross-time collapse. A
   `use:` may only re-target thresholds; the structural fields are inherent.
-- The **gauge** script returns `{ "facts": [ {measure, value, subject?, path?,
-  line?, rule?, dims?} ] }` — one atomic fact per subject (never a baked total),
-  each on a measure in the gauge's `emits`, calling the `files(glob)` /
-  `ast_query(text, language, sexpr)` host builtins (see [collection.md](./collection.md)).
-  A gauge may also return `"samples"`/`"findings"` (`GaugeFinding`, tsk311) —
-  the legacy baked channel, kept for the built-in gauges until the read-flip; a
-  facts-only gauge (the clean model) writes no baked run.
-- **Three scopes**, precedence **project > global > built-in** by key:
+- The **fact collector**'s script gets `input = {report?, rows?, event?}` (the
+  parsed `report:`, the `input:` query's rows, the trigger event) and the
+  snapshot tree through the `TreeHost` builtins `files(glob)` /
+  `source_files()` / `ast_query(text, language, sexpr)` (see
+  [collection.md](./collection.md)); it can't call the `ai_*` builtins (an
+  entity collector can, and has no `files()`). It returns `{ "facts": [
+  {measure, value, subject?, path?, line?, rule?, num?, den?, dims?} ] }` —
+  one atomic fact per subject (never a baked total). `facts_of` refuses any
+  other output (the old `samples` / `findings` shape is gone); a fact on a
+  measure not in the collector's `facts:` or not defined is dropped.
+- **Three metric scopes**, precedence **project > global > built-in** by key
+  (collectors have three owners instead: `project`, an extension, `built-in`):
   - **built-in** — the bundled catalog
     (`oxplow_collect_plugin::builtin_metrics()`; scripts under
     `crates/oxplow-collect-plugin/src/plugins/metrics/<lang>/`, embedded via
     `include_str!` in `builtin_metrics.rs`). Each authored through the **public**
     surface (`files()`/`ast_query()`) — no privileged Rust path — and verified by
     a golden test over a fixture corpus. A project activates one with
-    `metrics: - use: oxplow.<lang>.<name>`; the runner builds the collector from
-    the embedded script (`BuiltinMetric::collector()`), never a project-disk
-    file. Two families:
+    `metrics: - use: oxplow.<lang>.<name>`; that enables its `built-in`-owned
+    fact collector (`FactCollector::builtin`), which runs the embedded script,
+    never a project-disk file. Two families:
     - **Language-agnostic code metrics** (tsk314) — one metric, all languages —
       `oxplow.todos`, `oxplow.fn_count`, `oxplow.high_complexity_fns`,
       `oxplow.long_functions`, plus **`oxplow.doc_coverage`** (tsk125 — a per-file
       RATIO of documented-public ÷ public over `code_metrics()`'s `has_doc`;
       measure `oxplow.doc_coverage`, V69, per-path; spec is a `ratio` %,
       higher-better, not a count so it's an inline `BuiltinMetric`/`NewMetricSpec`
-      rather than the count-only `code_gauge`/`spec()` helpers). Built via the `code_gauge` helper with
+      rather than the count-only `code_metric`/`spec()` helpers). Built via the `code_metric` helper with
       `language: ""`; the scripts (under `plugins/metrics/code/`) sweep the
       `source_files()` reader and call a capability (`code_metrics()` /
       `markers()`), so the per-language knowledge lives in `oxplow-code-metrics`,
@@ -1770,7 +1790,7 @@ metrics:                              # the read SPEC (the chartable metric)
       header (`@generated`, `do not edit`, `autogenerated`) in the first 10
       lines. Otherwise a 3k-line tauri-specta bindings file reads as one giant
       "function" and dominates every fn_length/complexity tail metric. The
-      `files(glob)` reader does NOT filter — project gauges choose their own
+      `files(glob)` reader does NOT filter — project collectors choose their own
       corpus.
     - **Language-idiom metrics** (`oxplow.<lang>.*`) — concepts specific to one
       language: **Rust** (`unsafe_blocks`, `unwrap_expect_calls`,
@@ -1780,33 +1800,39 @@ metrics:                              # the read SPEC (the chartable metric)
 
     This repo dogfoods the language-idiom Rust/TS sets + all four unified code
     metrics in its own `.oxplow/project.yaml`. The
-    complexity/`code_metrics()`-backed gauges and the C# grammar
+    complexity/`code_metrics()`-backed collectors and the C# grammar
     (`tree-sitter-c-sharp` → `Language::CSharp` in `oxplow-code-metrics`) landed in
     tsk229/tsk230.
-  - **user-global** — `global_config_dir()/{metrics,gauges,measures,dimensions}/*.yaml`,
-    shared across projects, hot-reloaded by the config watcher. Global gauges +
+  - **user-global** — `global_config_dir()/{metrics,measures,dimensions}/*.yaml`,
+    shared across projects, hot-reloaded by the config watcher. Global
     measures are active everywhere automatically; a global *metric* is enabled
-    per-project with a `use:`.
-  - **project** — `.oxplow/project.yaml` + gauge scripts under `oxplow/gauges/`.
+    per-project with a `use:`. There are no global collectors.
+  - **project** — `.oxplow/project.yaml` + collector scripts under `oxplow/collectors/`.
+  - **extension** — an enabled extension's `extension.yaml` `measures:` /
+    `metrics:` / `collectors:` (its fact collectors sandboxed: starlark or jaq).
 
   `use:` references a catalog metric key and layers threshold overrides; `key:`
   defines a new spec. `oxplow.*` is reserved for built-ins (a project may `use:`
-  one but not `key:`-define under it). Gauges are definition-only (declared, never
-  `use:`d).
+  one but not `key:`-define under it). Collectors are definition-only (declared,
+  never `use:`d). The project's collectors record facts — an entity collector
+  belongs in an extension.
 - Validation mirrors the plugin rules: namespaced keys, project-relative
-  `entryFile` (no `..`), known runtime/aggregation/displayKind/trigger/direction;
+  `entry` (no `..`), known runtime/aggregation/displayKind/trigger/direction;
+  `report` only on a fact collector; `entities` or `facts`, not both;
   a `key:` metric must set exactly one of `sourceMeasure`/`formula`; a `use:` with
   an unknown key resolves to a warning (skipped), not an error.
 
 The in-oxplow agent authors these on request via the **`oxplow-metrics`** skill
 + the **`/oxplow:new-metric`** command (assets in `crates/oxplow-plugin/`,
 materialized for Claude/Codex/opencode) — "make a metric that counts TODOs" →
-the measure+gauge+metric trio + script + verification, no oxplow-team involvement.
+the measure+collector+metric trio + script + verification (`collector.sync`
+runs it now), no oxplow-team involvement.
 The skill's fast path is the **`metric.scaffold` command** (P4.8) →
 `MetricsService::metric_scaffold`, which returns that trio (measure `<key>.count`,
-gauge `<key>`, metric `<key>`) + a starter fact-emitting gauge script as a
-template the agent writes and adapts (tsk391), adding the entries through
-`config.set`; or the agent hand-authors the four blocks the same way.
+collector `<key>`, metric `<key>`) + a starter fact-returning script under
+`oxplow/collectors/` as a template the agent writes and adapts (tsk391), adding
+the entries through `config.set`; or the agent hand-authors the four blocks the
+same way.
 
 ## Targets & feedback (advise-only, P5/tsk220)
 
@@ -1832,7 +1858,7 @@ per-effort views, not in core:
   (`v_effort_metric_delta`; operational `agent.*`/`effort.*`/`task.*` and
   `event` kinds skipped), then "(Advisory — for awareness, not gating.)".
   The numbers are the same `effort_metric_deltas` roll-up the task page
-  shows (file-attributed for gauges).
+  shows (file-attributed for snapshot-scan metrics).
 - **`threshold-crossed`** (prompt, once per metric per effort): "⚠ <title>
   crossed its warn/fail threshold (N)", from the delta's `crossing`
   (`threshold_state`). This used to be a marker on the delta line; it's now
@@ -1875,11 +1901,13 @@ If you add another path that inserts into `fact`, it must call
 ## Gotchas
 
 - **Config write-back is generic** (tsk355). Every settings write rewrites
-  `metrics:` / `measures:` / `gauges:` / `dimensions:` in `project.yaml` through
+  `metrics:` / `measures:` / `dimensions:` in `project.yaml` through
   `oxplow_config::minimal_yaml`: the entry's own serde form, with nulls and empty
   lists and maps dropped. A new field on an entry struct is written back
   automatically. The per-field writers this replaced dropped entity metrics'
-  `entity` / `where` / …, so the next load failed validation.
+  `entity` / `where` / …, so the next load failed validation. `collectors:` is
+  written back as the file declared it (`ProjectConfig.collectors_yaml`) — a
+  parsed `CollectorSpec` isn't the declared shape.
 - **Provenance is the spine** (carried from collection.md): in-process/parsed →
   `observed`; agent-asserted / exec-tier → `asserted` / `plugin-exec:<name>`. The
   UI must never let an asserted number pass for a measured one.

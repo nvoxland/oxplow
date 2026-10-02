@@ -51,38 +51,96 @@ pub fn register(svc: &Arc<Services>) {
 }
 
 /// Whether `spec` runs for `event`: its `on:` names the event's type and
-/// each `where` field of the payload equals its value.
+/// its `where` matches the payload.
 pub fn triggered_by(spec: &CollectorSpec, event: &StoredEvent) -> bool {
-    let Trigger::On { events, filter } = &spec.trigger else {
+    matches!(&spec.trigger, Trigger::On { events, .. } if events.contains(&event.envelope.event_type))
+        && matches_where(&spec.trigger, event)
+}
+
+/// Whether each `where` field of `event`'s payload equals its value (an
+/// `on:` trigger without one matches every event of its types).
+pub fn matches_where(trigger: &Trigger, event: &StoredEvent) -> bool {
+    let Trigger::On { filter, .. } = trigger else {
         return false;
     };
-    events.contains(&event.envelope.event_type)
-        && filter
-            .iter()
-            .all(|(field, want)| match event.envelope.payload.get(field) {
-                Some(serde_json::Value::String(s)) => s == want,
-                Some(serde_json::Value::Bool(b)) => want.parse::<bool>().ok() == Some(*b),
-                Some(serde_json::Value::Number(n)) => {
-                    want.parse::<serde_json::Number>().ok().as_ref() == Some(n)
-                }
-                _ => false,
-            })
+    filter
+        .iter()
+        .all(|(field, want)| match event.envelope.payload.get(field) {
+            Some(serde_json::Value::String(s)) => s == want,
+            Some(serde_json::Value::Bool(b)) => want.parse::<bool>().ok() == Some(*b),
+            Some(serde_json::Value::Number(n)) => {
+                want.parse::<serde_json::Number>().ok().as_ref() == Some(n)
+            }
+            _ => false,
+        })
+}
+
+/// Hand `event` to the fact engine, which runs the fact collectors it
+/// triggers over one corpus: a snapshot's files (only a take that recorded
+/// some), an effort's end snapshot, or else the stream's latest snapshot.
+async fn run_fact_collectors(svc: &Services, event: Arc<StoredEvent>) -> Result<(), DomainError> {
+    let anchors = &event.envelope.anchors;
+    match event.envelope.event_type.as_str() {
+        "snapshot.taken" => {
+            let payload = &event.envelope.payload;
+            let recorded = !payload["unchanged"].as_bool().unwrap_or(false)
+                && payload["file_count"].as_u64().unwrap_or(0) > 0;
+            if let (true, Some(stream), Some(snapshot)) =
+                (recorded, anchors.stream_id, anchors.snapshot_id)
+            {
+                svc.metrics
+                    .run_snapshot_collectors(stream, snapshot, false, Some(event.clone()))
+                    .await;
+            }
+        }
+        "effort.finished" => {
+            let effort = event.envelope.payload["effort"]
+                .as_str()
+                .and_then(|r| r.strip_prefix("effort:"))
+                .and_then(oxplow_domain::EffortId::try_from_str)
+                .ok_or_else(|| {
+                    DomainError::Invalid(format!("effort.finished seq {}: no effort", event.seq))
+                })?;
+            if let Some(thread) = anchors.thread_id {
+                svc.metrics
+                    .run_effort_collectors(&thread, &effort, Some(event.clone()))
+                    .await;
+            }
+        }
+        _ => svc.metrics.run_event_collectors(event.clone()).await,
+    }
+    Ok(())
 }
 
 impl CollectorTriggers {
-    /// The enabled `on:` collectors, with their owners, from the primary
-    /// worktree's extensions (collected data is project-wide).
-    fn on_collectors(svc: &Services) -> Vec<(String, CollectorSpec)> {
+    /// The enabled extensions' `on:` collectors that write entities, with
+    /// their owners (collected data is project-wide, so the primary
+    /// worktree's). Fact collectors come from the fact engine.
+    fn entity_collectors(svc: &Services) -> Vec<(String, CollectorSpec)> {
         svc.extension_catalog
             .get(&svc.layout.project_dir)
             .iter()
             .flat_map(|ext| {
                 ext.collectors
                     .iter()
-                    .filter(|c| matches!(c.trigger, Trigger::On { .. }))
+                    .filter(|c| c.facts.is_empty() && matches!(c.trigger, Trigger::On { .. }))
                     .map(|c| (ext.name.clone(), c.clone()))
             })
             .collect()
+    }
+
+    /// Every `on:` collector's trigger and `after:`, fact and entity alike.
+    fn triggers(svc: &Services) -> Vec<(String, Trigger, Vec<String>)> {
+        let entities = Self::entity_collectors(svc)
+            .into_iter()
+            .map(|(owner, s)| (format!("{owner}/{}", s.id), s.trigger, s.after));
+        let facts = svc
+            .metrics
+            .fact_collectors()
+            .into_iter()
+            .filter(|c| matches!(c.trigger, Trigger::On { .. }))
+            .map(|c| (format!("{}/{}", c.owner, c.key), c.trigger, c.after));
+        entities.chain(facts).collect()
     }
 }
 
@@ -98,13 +156,12 @@ impl AsyncEventConsumer for CollectorTriggers {
         };
         let known = svc.event_pump.consumer_names();
         let mut after: Vec<String> = Vec::new();
-        for (owner, spec) in Self::on_collectors(&svc) {
-            for name in &spec.after {
+        for (collector, _, names) in Self::triggers(&svc) {
+            for name in names {
                 if !known.contains(&name.as_str()) {
-                    tracing::warn!(collector = %format!("{owner}/{}", spec.id), consumer = %name,
-                        "`after` names no consumer; ignored");
-                } else if !after.contains(name) {
-                    after.push(name.clone());
+                    tracing::warn!(%collector, consumer = %name, "`after` names no consumer; ignored");
+                } else if !after.contains(&name) {
+                    after.push(name);
                 }
             }
         }
@@ -119,8 +176,8 @@ impl AsyncEventConsumer for CollectorTriggers {
         let Some(svc) = self.services.upgrade() else {
             return false;
         };
-        Self::on_collectors(&svc).iter().any(|(_, spec)| {
-            matches!(&spec.trigger, Trigger::On { events, .. } if events.iter().any(|t| t == event_type))
+        Self::triggers(&svc).iter().any(|(_, trigger, _)| {
+            matches!(trigger, Trigger::On { events, .. } if events.iter().any(|t| t == event_type))
         })
     }
 
@@ -129,10 +186,19 @@ impl AsyncEventConsumer for CollectorTriggers {
         let Some(svc) = self.services.upgrade() else {
             return Err(DomainError::Busy("services are shutting down".into()));
         };
+        let event = Arc::new(event.clone());
+        let event_type = event.envelope.event_type.as_str();
+        if svc
+            .metrics
+            .fact_collectors()
+            .iter()
+            .any(|c| c.runs_on(event_type) && matches_where(&c.trigger, &event))
+        {
+            run_fact_collectors(&svc, event.clone()).await?;
+        }
         let root = svc.layout.project_dir.clone();
         let ctx = Collectors::of(&svc, &root);
-        let event = Arc::new(event.clone());
-        for (owner, spec) in Self::on_collectors(&svc) {
+        for (owner, spec) in Self::entity_collectors(&svc) {
             if !triggered_by(&spec, &event) {
                 continue;
             }

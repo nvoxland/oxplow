@@ -214,34 +214,6 @@ pub struct PluginConfig {
     pub args: Vec<String>,
 }
 
-/// How a gauge produces facts (the `compute:` block on a `gauges:` entry).
-/// Mirrors [`PluginConfig`]'s runtime fields — the gauge runner maps it to a
-/// registered collector. `report` is the report path for a report-derived
-/// gauge; tree-derived gauges read the snapshot via `files()` instead and leave
-/// it unset. (Renamed from `MetricComputeConfig` in epic tsk12, E: compute is a
-/// property of the *gauge* that emits facts, not the *metric* that reads them.)
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Default, schemars::JsonSchema,
-)]
-pub struct GaugeComputeConfig {
-    /// Transform tier: `jaq` | `starlark` | `exec`.
-    pub runtime: String,
-    /// Host pre-parse for a report-derived gauge: `text` | `json` | `xml` |
-    /// `lcov` | `lines` (default `text`). Ignored by `exec`.
-    #[serde(default)]
-    pub input: Option<String>,
-    /// Project-relative path to the script file (jaq/Starlark program or the
-    /// `exec` program). Required.
-    #[serde(rename = "entryFile", default)]
-    pub entry_file: Option<String>,
-    /// Extra arguments for the `exec` runtime.
-    #[serde(default)]
-    pub args: Vec<String>,
-    /// Optional project-relative report path for a report-derived gauge.
-    #[serde(default)]
-    pub report: Option<String>,
-}
-
 /// A fact predicate on a `metrics:` spec (the `filter:` block) — the config
 /// mirror of the engine's `FactFilter` (epic tsk12). A conjunctive predicate
 /// keeping only the facts that match before aggregation: `minValue` for a
@@ -279,7 +251,7 @@ pub struct FormulaConfig {
 /// One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a
 /// measure (epic tsk12, E). A metric no longer *computes* anything: it names a
 /// `sourceMeasure` + an `aggregation` (+ optional `filter`), or a `formula` over
-/// other metrics, and the engine aggregates the durable facts a `gauges:` entry
+/// other metrics, and the engine aggregates the durable facts a `collectors:` entry
 /// emitted. Two forms, distinguished by which key is set:
 /// - **`use:`** — enable an existing catalog metric by key (built-in/global),
 ///   optionally overriding `target`/thresholds for this project.
@@ -425,46 +397,6 @@ pub struct EntityDimensionSpec {
     pub join: Option<String>,
 }
 
-/// One entry in the top-level `gauges:` block — a **fact PRODUCER** (epic tsk12,
-/// E). A gauge runs its `compute:` collector on its `trigger`, emitting atomic
-/// facts on the measures it declares in `emits`. Unlike a metric there is no
-/// `use:`/`key:` split — a gauge is always a definition (you declare the
-/// producer; a project doesn't "enable" one). Resolved across global+project by
-/// [`resolve_gauges`]; built-in gauges live in code, not config.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct GaugeEntry {
-    /// The gauge's namespaced key (`<vendor>.<id>`). Required.
-    #[serde(default)]
-    pub key: Option<String>,
-    #[serde(default)]
-    pub title: Option<String>,
-    /// `on-report` | `on-snapshot` | `on-effort-complete` | `manual` |
-    /// `continuous` (default `on-snapshot`).
-    #[serde(default)]
-    pub trigger: Option<String>,
-    /// The measure keys this gauge is allowed to emit facts on (declare-to-collect:
-    /// a fact on a measure outside this list is dropped). At least one required.
-    #[serde(default)]
-    pub emits: Vec<String>,
-    /// How the gauge produces facts (required).
-    #[serde(default)]
-    pub compute: Option<GaugeComputeConfig>,
-}
-
-/// A fully-resolved gauge — the flat form the runner executes. Produced by
-/// [`resolve_gauges`] (project > global). Not serialized.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ResolvedGauge {
-    pub key: String,
-    pub title: String,
-    pub trigger: String,
-    pub emits: Vec<String>,
-    pub compute: GaugeComputeConfig,
-    /// `built-in` | `global` | `project`.
-    pub scope: String,
-}
-
 /// One entry in the top-level `measures:` block — the **measure catalog**
 /// authoring surface (epic tsk12, workstream E). A measure is a *type of atomic
 /// fact* a collector may emit (`oxplow.complexity`, `acme.api_latency`, …); the
@@ -494,10 +426,10 @@ pub struct MeasureEntry {
     /// A SEPARATE AXIS from `temporalSemantics`: `complete` means every capture
     /// restates the whole population (a coverage report, a test run), so the
     /// temporal fold applies directly. `per-path` means a capture restates only the
-    /// paths in its snapshot — which is what a **tree gauge over a per-commit delta**
+    /// paths in its snapshot — which is what a **tree collector over a per-commit delta**
     /// does. Such a measure is folded to the latest capture per (producer, path)
     /// before aggregating, so a repo-wide total stays correct while only changed
-    /// files are rescanned. Set this on any measure a snapshot-triggered gauge
+    /// files are rescanned. Set this on any measure a snapshot-triggered collector
     /// emits per-file facts on (tsk41).
     #[serde(rename = "captureScope", default)]
     pub capture_scope: Option<String>,
@@ -802,11 +734,15 @@ pub struct OxplowConfig {
     /// these across the built-in/global/project scopes; see [`resolve_metrics`].
     #[serde(default)]
     pub metrics: Vec<MetricEntry>,
-    /// Project-declared gauges (the `gauges:` block) — the fact PRODUCERS (epic
-    /// tsk12, E). Each runs its `compute:` collector on its trigger and emits
-    /// facts on the measures it `emits`. Resolved by [`resolve_gauges`].
+    /// The project's collectors (the `collectors:` block, P7.B3): fact
+    /// producers that run on their trigger and record facts on the measures
+    /// they declare. Owner [`collectors::PROJECT`].
     #[serde(default)]
-    pub gauges: Vec<GaugeEntry>,
+    pub collectors: Vec<collectors::CollectorSpec>,
+    /// The `collectors:` block as the file has it: what the writer puts
+    /// back (a parsed spec isn't the shape the file declares).
+    #[serde(skip)]
+    pub collectors_yaml: Option<serde_json::Value>,
     /// Project-declared measures (the `measures:` block) — custom fact TYPES a
     /// collector may emit (epic tsk12, workstream E). The `oxplow.*` built-ins
     /// are seeded by the DB migration; these add global/project ones. Resolved
@@ -1019,9 +955,9 @@ struct RawConfig {
     /// Metric specs: enable a catalog metric (`use`) or define one (`key`) over a measure.
     #[serde(default)]
     metrics: Option<Vec<MetricEntry>>,
-    /// Fact producers: each runs its `compute` collector on its trigger and emits facts. Runs programs (`runtime: exec`).
+    /// Collectors: scripts (starlark, jaq) and programs (`runtime: exec`, approved by a person) that record facts on declared measures when their trigger fires. Runs programs.
     #[serde(default)]
-    gauges: Option<Vec<GaugeEntry>>,
+    collectors: Option<serde_json::Value>,
     /// Custom fact types collectors may emit.
     #[serde(default)]
     measures: Option<Vec<MeasureEntry>>,
@@ -1139,8 +1075,8 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
     }
 
     let raw = std::fs::read_to_string(&config_path)?;
-    let parsed: RawConfig = serde_yaml::from_str(&raw)?;
-    let config = validate(parsed, &fallback_name)?;
+    let doc: serde_yaml::Value = serde_yaml::from_str(&raw)?;
+    let config = parse_project_config(doc, &fallback_name)?;
     info!(
         config_path = %config_path.display(),
         agents = ?config.agents,
@@ -1158,6 +1094,9 @@ pub fn parse_project_config(
     doc: serde_yaml::Value,
     fallback_name: &str,
 ) -> Result<OxplowConfig, ConfigError> {
+    if doc.get("gauges").is_some() {
+        return Err(ConfigError::Invalid(GAUGES_RETIRED.into()));
+    }
     let parsed: RawConfig = serde_yaml::from_value(doc)?;
     validate(parsed, fallback_name)
 }
@@ -1429,9 +1368,12 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         !config.metrics.is_empty(),
     );
     put(
-        "gauges",
-        serde_yaml::Value::Sequence(config.gauges.iter().map(minimal_yaml).collect()),
-        !config.gauges.is_empty(),
+        "collectors",
+        config
+            .collectors_yaml
+            .as_ref()
+            .map_or(serde_yaml::Value::Null, to_yaml),
+        config.collectors_yaml.is_some(),
     );
     put(
         "measures",
@@ -1507,65 +1449,13 @@ pub fn write_global_metrics_file(path: &Path, entries: &[MetricEntry]) -> Result
     Ok(())
 }
 
-/// Write a **global** gauges manifest (`global_config_dir()/gauges/<name>.yaml`)
-/// — a clean `gauges:` doc. Creates parent dirs. Loaded by
-/// [`load_global_gauge_entries`]; used by the "New gauge" scaffold at global
-/// scope (epic tsk12, E).
-pub fn write_global_gauges_file(path: &Path, entries: &[GaugeEntry]) -> Result<(), ConfigError> {
-    let seq: Vec<serde_yaml::Value> = entries.iter().map(minimal_yaml).collect();
-    let mut doc = serde_yaml::Mapping::new();
-    doc.insert("gauges".into(), serde_yaml::Value::Sequence(seq));
-    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, yaml)?;
-    Ok(())
-}
-
-/// Write a **global** measures manifest (`global_config_dir()/measures/<name>.yaml`)
-/// — a clean `measures:` doc. Creates parent dirs. Loaded by
-/// [`load_global_measure_entries`]; used by the "New measure" scaffold at global
-/// scope (epic tsk12, E).
-pub fn write_global_measures_file(
-    path: &Path,
-    entries: &[MeasureEntry],
-) -> Result<(), ConfigError> {
-    let seq: Vec<serde_yaml::Value> = entries.iter().map(minimal_yaml).collect();
-    let mut doc = serde_yaml::Mapping::new();
-    doc.insert("measures".into(), serde_yaml::Value::Sequence(seq));
-    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, yaml)?;
-    Ok(())
-}
-
-/// Write a **global** dimensions manifest
-/// (`global_config_dir()/dimensions/<name>.yaml`). Loaded by
-/// [`load_global_dimension_entries`]; used by the "New dimension" scaffold.
-pub fn write_global_dimensions_file(
-    path: &Path,
-    entries: &[DimensionEntry],
-) -> Result<(), ConfigError> {
-    let seq: Vec<serde_yaml::Value> = entries.iter().map(dimension_entry_to_yaml).collect();
-    let mut doc = serde_yaml::Mapping::new();
-    doc.insert("dimensions".into(), serde_yaml::Value::Sequence(seq));
-    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, yaml)?;
-    Ok(())
-}
-
-/// `measures:` / `gauges:` / `metrics:` entries as a `.oxplow/project.yaml`
-/// snippet (empty lists omitted), each entry minimal as the writer makes it.
-/// What a scaffold hands an agent to merge into the file itself (tsk391).
+/// `measures:` / `collectors:` / `metrics:` entries as a
+/// `.oxplow/project.yaml` snippet (empty lists omitted), each entry minimal
+/// as the writer makes it. What a scaffold hands an agent to merge into the
+/// file itself (tsk391). A collector is given as the YAML it's declared as.
 pub fn entries_yaml(
     measures: &[MeasureEntry],
-    gauges: &[GaugeEntry],
+    collectors: &[serde_yaml::Value],
     metrics: &[MetricEntry],
 ) -> String {
     let mut doc = serde_yaml::Mapping::new();
@@ -1575,7 +1465,7 @@ pub fn entries_yaml(
         }
     };
     put("measures", measures.iter().map(minimal_yaml).collect());
-    put("gauges", gauges.iter().map(minimal_yaml).collect());
+    put("collectors", collectors.to_vec());
     put("metrics", metrics.iter().map(minimal_yaml).collect());
     serde_yaml::to_string(&doc).unwrap_or_default()
 }
@@ -1635,7 +1525,8 @@ fn default_config(project_name: String) -> OxplowConfig {
         icon_tint: None,
         collection: CollectionConfig::default(),
         metrics: Vec::new(),
-        gauges: Vec::new(),
+        collectors: Vec::new(),
+        collectors_yaml: None,
         measures: Vec::new(),
         dimensions: Vec::new(),
         zones: Vec::new(),
@@ -1904,7 +1795,8 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
 
     let collection = validate_collection(raw.collection)?;
     let metrics = validate_metrics(raw.metrics)?;
-    let gauges = validate_gauges(raw.gauges)?;
+    let collectors_yaml = raw.collectors;
+    let collectors = parse_project_collectors(collectors_yaml.as_ref())?;
     let measures = validate_measures(raw.measures)?;
     let dimensions = validate_dimensions(raw.dimensions)?;
 
@@ -1985,7 +1877,8 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         icon_tint,
         collection,
         metrics,
-        gauges,
+        collectors,
+        collectors_yaml,
         measures,
         dimensions,
         zones,
@@ -2171,15 +2064,6 @@ const METRIC_CATEGORIES: &[&str] = &[
     "static-quality",
     "custom",
 ];
-/// Gauge triggers (when a `gauges:` producer runs).
-const METRIC_TRIGGERS: &[&str] = &[
-    "on-report",
-    "on-snapshot",
-    "on-effort-complete",
-    "manual",
-    "continuous",
-];
-
 /// Additivity-over-time a `measures:` entry may declare (mirrors the `measure`
 /// table's CHECK).
 const MEASURE_TEMPORAL_SEMANTICS: &[&str] = &["additive", "semi-additive", "non-additive"];
@@ -2433,104 +2317,30 @@ fn validate_formula(i: usize, f: FormulaConfig) -> Result<FormulaConfig, ConfigE
     Ok(FormulaConfig { op, left, right })
 }
 
-/// Validate the top-level `gauges:` block (the fact PRODUCERs). Namespaced keys,
-/// `oxplow.*` reserved for built-ins, a known trigger, a non-empty `emits`
-/// (declare-to-collect), and a valid `compute:` block. Definition-only (no
-/// `use:`/`key:` split — a gauge is always declared).
-pub fn validate_gauges(raw: Option<Vec<GaugeEntry>>) -> Result<Vec<GaugeEntry>, ConfigError> {
-    let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for (i, e) in raw.into_iter().flatten().enumerate() {
-        let key = validate_catalog_key("gauges", i, e.key, &mut seen)?;
-        let trigger = opt(e.trigger);
-        if let Some(t) = &trigger {
-            if !METRIC_TRIGGERS.contains(&t.as_str()) {
-                return Err(ConfigError::Invalid(format!(
-                    "gauges[{i}] trigger must be one of {METRIC_TRIGGERS:?} (got \"{t}\")"
-                )));
-            }
-        }
-        let emits: Vec<String> = e
-            .emits
-            .into_iter()
-            .map(|m| m.trim().to_string())
-            .filter(|m| !m.is_empty())
-            .collect();
-        if emits.is_empty() {
-            return Err(ConfigError::Invalid(format!(
-                "gauges[{i}] must declare at least one measure in `emits` \
-                 (a gauge may only emit facts on measures it declares)"
-            )));
-        }
-        let compute = match e.compute {
-            Some(c) => validate_gauge_compute(i, c)?,
-            None => {
-                return Err(ConfigError::Invalid(format!(
-                    "gauges[{i}] key \"{key}\" has no `compute` block"
-                )))
-            }
-        };
-        out.push(GaugeEntry {
-            key: Some(key),
-            title: opt(e.title),
-            trigger,
-            emits,
-            compute: Some(compute),
-        });
-    }
-    Ok(out)
-}
+/// Gauges were folded into collectors (P7.B3): what loading a `gauges:`
+/// block says.
+pub const GAUGES_RETIRED: &str = "`gauges:` is now `collectors:` (each gauge is a collector that \
+     records facts). Run `oxplow plugin migrate --project` to rewrite the block in place.";
 
-fn validate_gauge_compute(
-    i: usize,
-    c: GaugeComputeConfig,
-) -> Result<GaugeComputeConfig, ConfigError> {
-    let runtime = c.runtime.trim().to_ascii_lowercase();
-    if !PLUGIN_RUNTIMES.contains(&runtime.as_str()) {
-        return Err(ConfigError::Invalid(format!(
-            "gauges[{i}].compute.runtime must be jaq | starlark | exec (got \"{}\")",
-            c.runtime
-        )));
-    }
-    let input = match c.input.map(|s| s.trim().to_ascii_lowercase()) {
-        Some(s) if !s.is_empty() => {
-            if !PLUGIN_INPUTS.contains(&s.as_str()) {
-                return Err(ConfigError::Invalid(format!(
-                    "gauges[{i}].compute.input must be text | json | xml | lcov | lines (got \"{s}\")"
-                )));
-            }
-            Some(s)
-        }
-        _ => None,
+/// The project's `collectors:` block, parsed with owner
+/// [`collectors::PROJECT`]: every error at once, naming each collector.
+fn parse_project_collectors(
+    raw: Option<&serde_json::Value>,
+) -> Result<Vec<collectors::CollectorSpec>, ConfigError> {
+    let Some(raw) = raw else {
+        return Ok(Vec::new());
     };
-    let entry_file = c
-        .entry_file
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    let entry_file = match entry_file {
-        Some(f) => f,
-        None => {
-            return Err(ConfigError::Invalid(format!(
-                "gauges[{i}].compute.entryFile is required (the script file path)"
-            )))
-        }
-    };
-    if Path::new(&entry_file).is_absolute() || entry_file.split('/').any(|c| c == "..") {
-        return Err(ConfigError::Invalid(format!(
-            "gauges[{i}].compute.entryFile must be a project-relative path without `..` (got \"{entry_file}\")"
-        )));
+    let value: serde_yaml::Value = to_yaml(raw);
+    let (specs, errors) = collectors::parse_collectors(
+        collectors::PROJECT,
+        &value,
+        &oxplow_domain::events::schema::is_core_type,
+    );
+    if errors.is_empty() {
+        Ok(specs)
+    } else {
+        Err(ConfigError::Invalid(errors.join("; ")))
     }
-    Ok(GaugeComputeConfig {
-        runtime,
-        input,
-        entry_file: Some(entry_file),
-        args: c.args.into_iter().map(|a| a.trim().to_string()).collect(),
-        report: c
-            .report
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty()),
-    })
 }
 
 /// Resolve declared metric SPECS across the three scopes into the flat
@@ -2681,43 +2491,6 @@ fn resolve_one(
     }
 }
 
-/// Resolve declared gauges across the global + project scopes into the flat
-/// [`ResolvedGauge`] list the runner executes. Both scopes are definition-only (a
-/// gauge is declared, never "enabled"); a project entry with the same key as a
-/// global one wins (precedence project > global). First-seen order is preserved.
-/// Built-in gauges live in code and never flow through here.
-pub fn resolve_gauges(
-    global: &[GaugeEntry],
-    extensions: &[ExtensionLayer<GaugeEntry>],
-    project: &[GaugeEntry],
-) -> Vec<ResolvedGauge> {
-    let mut out: Vec<ResolvedGauge> = Vec::new();
-    let mut pos: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for (scope, entries) in scoped_layers(&[], global, extensions, project) {
-        for e in entries {
-            let Some(key) = e.key.as_deref() else {
-                continue;
-            };
-            let resolved = ResolvedGauge {
-                key: key.to_string(),
-                title: e.title.clone().unwrap_or_else(|| key.to_string()),
-                trigger: e.trigger.clone().unwrap_or_else(|| "on-snapshot".into()),
-                emits: e.emits.clone(),
-                compute: e.compute.clone().unwrap_or_default(),
-                scope: scope.clone(),
-            };
-            match pos.get(key) {
-                Some(&i) => out[i] = resolved,
-                None => {
-                    pos.insert(key.to_string(), out.len());
-                    out.push(resolved);
-                }
-            }
-        }
-    }
-    out
-}
-
 /// Load metric definitions from the user-global scope
 /// (`<global_dir>/metrics/*.yaml`). Each file is a `{ metrics: [ … ] }`
 /// document (same shape as the `.oxplow/project.yaml` block). Best-effort: an unreadable
@@ -2736,26 +2509,9 @@ pub fn load_global_metric_entries(global_dir: &Path) -> Vec<MetricEntry> {
     })
 }
 
-/// Load gauge definitions from the user-global scope
-/// (`<global_dir>/gauges/*.yaml`, each a `{ gauges: [ … ] }` doc). Best-effort:
-/// a malformed/unreadable file is logged and skipped. Filename order for
-/// deterministic precedence.
-pub fn load_global_gauge_entries(global_dir: &Path) -> Vec<GaugeEntry> {
-    #[derive(Deserialize)]
-    struct Doc {
-        #[serde(default)]
-        gauges: Option<Vec<GaugeEntry>>,
-    }
-    load_global_entries(global_dir, "gauges", |raw| {
-        serde_yaml::from_str::<Doc>(raw)
-            .ok()
-            .map(|d| validate_gauges(d.gauges).map_err(|e| e.to_string()))
-    })
-}
-
 /// List `*.yaml`/`*.yml` files under `<global_dir>/<subdir>`, sorted by filename
 /// for deterministic precedence. Empty when the directory is absent. Shared by
-/// the global catalog loaders (metrics / gauges / measures / dimensions).
+/// the global catalog loaders (metrics / measures / dimensions).
 fn global_yaml_files(global_dir: &Path, subdir: &str) -> Vec<PathBuf> {
     let dir = global_dir.join(subdir);
     let Ok(read) = std::fs::read_dir(&dir) else {
@@ -3390,21 +3146,13 @@ mod tests {
             aggregation: Some("sum".into()),
             ..Default::default()
         };
-        let gauge = GaugeEntry {
-            key: Some("acme.x".into()),
-            emits: vec!["acme.x.count".into()],
-            compute: Some(GaugeComputeConfig {
-                runtime: "starlark".into(),
-                input: None,
-                entry_file: Some("oxplow/gauges/acme_x.star".into()),
-                args: vec![],
-                report: None,
-            }),
-            ..Default::default()
-        };
+        let collector: serde_yaml::Value = serde_yaml::from_str(
+            "{ id: acme.x, runtime: starlark, entry: oxplow/collectors/acme_x.star, trigger: { on: [snapshot.taken] }, facts: [acme.x.count] }",
+        )
+        .unwrap();
         let yaml = entries_yaml(
             std::slice::from_ref(&measure),
-            std::slice::from_ref(&gauge),
+            std::slice::from_ref(&collector),
             std::slice::from_ref(&metric),
         );
         let dir = tempfile::tempdir().unwrap();
@@ -3412,7 +3160,7 @@ mod tests {
         std::fs::write(config_path(dir.path()), &yaml).unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(cfg.measures, vec![measure], "{yaml}");
-        assert_eq!(cfg.gauges, vec![gauge]);
+        assert_eq!(cfg.collectors[0].id, "acme.x");
         assert_eq!(cfg.metrics, vec![metric]);
     }
 
@@ -3908,48 +3656,30 @@ lsp:
         );
     }
 
+    /// The `collectors:` block is written back as the file declares it
+    /// (a parsed spec isn't the declared shape), so a write that changes
+    /// another key leaves it loading the same.
     #[test]
-    fn write_preserves_an_added_gauge_when_the_file_already_has_one() {
-        // tsk164: `gauges` was missing from MANAGED_KEYS, so the on-disk block
-        // was collected as an "extra" and re-inserted AFTER the in-memory one —
-        // reverting it. The first scaffold worked (no `gauges:` key on disk
-        // yet); every one after was silently lost, leaving an orphaned metric
-        // with no producer.
+    fn a_write_keeps_the_collectors_block_as_declared() {
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
-            "gauges:\n\
-             - key: repo.scan_one\n  \
-               title: One\n  \
-               trigger: on-snapshot\n  \
-               emits: [repo.one]\n  \
-               compute:\n    \
-                 runtime: starlark\n    \
-                 entryFile: oxplow/gauges/one.star\n",
+            "collectors:\n\
+             - id: repo.scan_one\n  \
+               doc: One\n  \
+               runtime: starlark\n  \
+               entry: oxplow/collectors/one.star\n  \
+               trigger: { on: [snapshot.taken] }\n  \
+               facts: [repo.one]\n",
         )
         .unwrap();
-
         let mut cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.gauges.len(), 1, "fixture loads its one gauge");
-
-        // What a `metric.scaffold` user does: append a second gauge, then write.
-        let mut added = cfg.gauges[0].clone();
-        added.key = Some("repo.scan_two".into());
-        added.title = Some("Two".into());
-        cfg.gauges.push(added);
+        assert_eq!(cfg.collectors.len(), 1);
+        cfg.snapshot_retention_days = 3;
         write_project_config(dir.path(), &cfg).unwrap();
-
         let reloaded = load_project_config(dir.path()).unwrap();
-        let keys: Vec<&str> = reloaded
-            .gauges
-            .iter()
-            .filter_map(|g| g.key.as_deref())
-            .collect();
-        assert_eq!(
-            keys,
-            vec!["repo.scan_one", "repo.scan_two"],
-            "both gauges survive the round-trip"
-        );
+        assert_eq!(reloaded.collectors, cfg.collectors);
+        assert_eq!(reloaded.snapshot_retention_days, 3);
     }
 
     #[test]
@@ -3960,14 +3690,13 @@ lsp:
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
-            "gauges:\n\
-             - key: repo.scan_one\n  \
-               title: One\n  \
-               trigger: on-snapshot\n  \
-               emits: [repo.one]\n  \
-               compute:\n    \
-                 runtime: starlark\n    \
-                 entryFile: oxplow/gauges/one.star\n\
+            "collectors:\n\
+             - id: repo.scan_one\n  \
+               doc: One\n  \
+               runtime: starlark\n  \
+               entry: oxplow/collectors/one.star\n  \
+               trigger: { on: [snapshot.taken] }\n  \
+               facts: [repo.one]\n\
              projectName: demo\n\
              snapshotRetentionDays: 3\n",
         )
@@ -3982,12 +3711,12 @@ lsp:
         // Every key present after a write must round-trip through a reload,
         // which is what being MANAGED buys.
         let reloaded = load_project_config(dir.path()).unwrap();
-        assert_eq!(reloaded.gauges.len(), 1);
+        assert_eq!(reloaded.collectors.len(), 1);
         assert_eq!(reloaded.project_name, "demo");
         assert_eq!(reloaded.snapshot_retention_days, 3);
         assert!(
-            map.contains_key(serde_yaml::Value::String("gauges".into())),
-            "gauges block written, got:\n{raw}"
+            map.contains_key(serde_yaml::Value::String("collectors".into())),
+            "collectors block written, got:\n{raw}"
         );
     }
 
@@ -4688,212 +4417,55 @@ metrics:
         assert_eq!(entries[0].key.as_deref(), Some("myglobal.todo"));
     }
 
-    // --- gauges (the fact PRODUCERs — workstream E) -------------------------
+    // --- collectors (the fact producers, P7.B3) ------------------------------
 
     #[test]
-    fn parses_gauges_block() {
+    fn parses_the_collectors_block_as_the_projects() {
         let cfg = load_from_yaml(
-            r#"
-gauges:
-  - key: acme.scan
-    title: "Acme scan"
-    trigger: on-snapshot
-    emits: [acme.complexity, acme.todo]
-    compute: { runtime: starlark, entryFile: oxplow/gauges/scan.star }
-"#,
+            "collectors:\n  - { id: acme.scan, runtime: starlark, entry: oxplow/collectors/scan.star, trigger: { on: [snapshot.taken] }, facts: [acme.todo, acme.complexity] }\n",
         )
         .unwrap();
-        assert_eq!(cfg.gauges.len(), 1);
-        assert_eq!(cfg.gauges[0].key.as_deref(), Some("acme.scan"));
-        assert_eq!(cfg.gauges[0].emits, vec!["acme.complexity", "acme.todo"]);
+        assert_eq!(cfg.collectors.len(), 1);
+        assert_eq!(cfg.collectors[0].id, "acme.scan");
         assert_eq!(
-            cfg.gauges[0]
-                .compute
-                .as_ref()
-                .unwrap()
-                .entry_file
-                .as_deref(),
-            Some("oxplow/gauges/scan.star")
+            cfg.collectors[0].facts,
+            vec!["acme.complexity", "acme.todo"]
+        );
+        // An invalid one fails the load, naming it.
+        let err = load_from_yaml(
+            "collectors:\n  - { id: acme.scan, runtime: starlark, entry: x.star, trigger: { on: [nope.happened] }, facts: [acme.todo] }\n",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("acme.scan"), "{err}");
+    }
+
+    /// This repo's own `.oxplow/project.yaml` loads — its collectors
+    /// included (migrated from `gauges:` in P7.B3).
+    #[test]
+    fn this_repos_project_config_loads() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let cfg = load_project_config(&root).expect("the repo's project.yaml loads");
+        assert!(
+            cfg.collectors
+                .iter()
+                .any(|c| c.id == "repo.scan_type_coverage"),
+            "{:?}",
+            cfg.collectors.iter().map(|c| &c.id).collect::<Vec<_>>()
         );
     }
 
+    /// `gauges:` is retired: loading one says how to migrate it.
     #[test]
-    fn gauge_validation_rejects_bad_entries() {
-        // Reserved namespace.
-        assert!(load_from_yaml(
-            "gauges:\n  - key: oxplow.foo\n    emits: [acme.m]\n    compute: { runtime: jaq, entryFile: x.jq }\n"
+    fn a_gauges_block_is_an_error_naming_the_migration() {
+        let err = load_from_yaml(
+            "gauges:\n  - key: acme.foo\n    emits: [acme.m]\n    compute: { runtime: starlark, entryFile: g.star }\n",
         )
-        .is_err());
-        // No emits (declare-to-collect requires at least one).
-        assert!(load_from_yaml(
-            "gauges:\n  - key: acme.foo\n    compute: { runtime: jaq, entryFile: x.jq }\n"
-        )
-        .is_err());
-        // No compute.
-        assert!(load_from_yaml("gauges:\n  - key: acme.foo\n    emits: [acme.m]\n").is_err());
-        // Bad runtime.
-        assert!(load_from_yaml(
-            "gauges:\n  - key: acme.foo\n    emits: [acme.m]\n    compute: { runtime: wasm, entryFile: x.jq }\n"
-        )
-        .is_err());
-        // entryFile escaping the project root.
-        assert!(load_from_yaml(
-            "gauges:\n  - key: acme.foo\n    emits: [acme.m]\n    compute: { runtime: jaq, entryFile: ../x.jq }\n"
-        )
-        .is_err());
-        // A full valid gauge is accepted.
-        assert!(load_from_yaml(
-            "gauges:\n  - key: acme.foo\n    emits: [acme.m]\n    compute: { runtime: starlark, entryFile: g.star }\n"
-        )
-        .is_ok());
-    }
-
-    #[test]
-    fn resolve_gauges_project_over_global() {
-        let g = |key: &str, file: &str| GaugeEntry {
-            key: Some(key.into()),
-            emits: vec!["acme.m".into()],
-            compute: Some(GaugeComputeConfig {
-                runtime: "starlark".into(),
-                entry_file: Some(file.into()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        let global = vec![g("acme.scan", "global.star")];
-        let project = vec![g("acme.scan", "project.star")];
-        let resolved = resolve_gauges(&global, &[], &project);
-        assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0].scope, "project");
-        assert_eq!(
-            resolved[0].compute.entry_file.as_deref(),
-            Some("project.star")
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("collectors:") && msg.contains("oxplow plugin migrate --project"),
+            "{msg}"
         );
-        // Default trigger when unset.
-        assert_eq!(resolved[0].trigger, "on-snapshot");
-    }
-
-    #[test]
-    fn extension_definitions_are_active_between_global_and_project() {
-        let ext = vec![(
-            "acme".to_string(),
-            vec![
-                define("acme.todos", Some(5.0)),
-                define("acme.shared", Some(1.0)),
-            ],
-        )];
-        // No project entries: the extension's metrics are on, scoped to it.
-        let resolved = resolve_metrics(&[], &[], &ext, &[]);
-        let keys: Vec<(&str, &str)> = resolved
-            .iter()
-            .map(|r| (r.key.as_str(), r.scope.as_str()))
-            .collect();
-        assert_eq!(
-            keys,
-            vec![
-                ("acme.todos", "extension:acme"),
-                ("acme.shared", "extension:acme")
-            ]
-        );
-        assert!(resolved.iter().all(|r| r.enabled));
-
-        // The project can turn one off, override another's target, or
-        // define its own under the same key (project wins).
-        let project = vec![
-            MetricEntry {
-                use_key: Some("acme.todos".into()),
-                enabled: Some(false),
-                ..Default::default()
-            },
-            define("acme.shared", Some(9.0)),
-        ];
-        let resolved = resolve_metrics(&[], &[], &ext, &project);
-        let todos = resolved.iter().find(|r| r.key == "acme.todos").unwrap();
-        assert_eq!(
-            (todos.scope.as_str(), todos.enabled),
-            ("extension:acme", false)
-        );
-        let shared: Vec<_> = resolved.iter().filter(|r| r.key == "acme.shared").collect();
-        assert_eq!(shared.len(), 1);
-        assert_eq!(
-            (shared[0].scope.as_str(), shared[0].target),
-            ("project", Some(9.0))
-        );
-    }
-
-    #[test]
-    fn extension_gauges_and_measures_sit_between_global_and_project() {
-        let g = |key: &str, file: &str| GaugeEntry {
-            key: Some(key.into()),
-            emits: vec!["acme.m".into()],
-            compute: Some(GaugeComputeConfig {
-                runtime: "starlark".into(),
-                entry_file: Some(file.into()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        let ext = vec![(
-            "acme".to_string(),
-            vec![g("acme.scan", "ext.star"), g("acme.other", "o.star")],
-        )];
-        let resolved = resolve_gauges(
-            &[g("acme.scan", "global.star")],
-            &ext,
-            &[g("acme.other", "p.star")],
-        );
-        let got: Vec<(&str, &str, Option<&str>)> = resolved
-            .iter()
-            .map(|r| {
-                (
-                    r.key.as_str(),
-                    r.scope.as_str(),
-                    r.compute.entry_file.as_deref(),
-                )
-            })
-            .collect();
-        assert_eq!(
-            got,
-            vec![
-                ("acme.scan", "extension:acme", Some("ext.star")),
-                ("acme.other", "project", Some("p.star")),
-            ]
-        );
-        let m = |key: &str, title: &str| MeasureEntry {
-            key: Some(key.into()),
-            title: Some(title.into()),
-            ..Default::default()
-        };
-        let ext = vec![("acme".to_string(), vec![m("acme.m", "From ext")])];
-        let resolved = resolve_measures(&[m("acme.m", "From global")], &ext, &[]);
-        assert_eq!(
-            (resolved[0].title.as_str(), resolved[0].scope.as_str()),
-            ("From ext", "extension:acme")
-        );
-    }
-
-    #[test]
-    fn gauges_round_trip_through_write() {
-        let dir = tempdir().unwrap();
-        let cfg = OxplowConfig {
-            gauges: vec![GaugeEntry {
-                key: Some("acme.scan".into()),
-                emits: vec!["acme.m".into()],
-                compute: Some(GaugeComputeConfig {
-                    runtime: "starlark".into(),
-                    entry_file: Some("g.star".into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }],
-            ..default_config("test".into())
-        };
-        write_project_config(dir.path(), &cfg).unwrap();
-        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
-        assert!(raw.contains("gauges:"), "got:\n{raw}");
-        assert!(!raw.contains("null"), "minimal write, got:\n{raw}");
-        let loaded = load_project_config(dir.path()).unwrap();
-        assert_eq!(loaded.gauges, cfg.gauges);
     }
 
     // --- measures + dimensions (workstream E) ------------------------------

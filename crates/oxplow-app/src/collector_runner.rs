@@ -53,7 +53,10 @@ pub use crate::exec_consent::LEGACY_APPROVALS_FILE;
 pub struct CollectorRunReport {
     pub owner: String,
     pub id: String,
+    /// An entity collector's rows per entity after the run.
     pub row_counts: BTreeMap<String, i64>,
+    /// A fact collector's facts recorded.
+    pub facts: i64,
 }
 
 /// A declared collector with its last run and consent status.
@@ -525,35 +528,13 @@ pub async fn derive_collector(
     let rows = match &spec.input {
         None => Vec::new(),
         Some(sql) => {
-            let limit = oxplow_db::semantic_layer::MAX_ROW_LIMIT;
-            let query = oxplow_db::semantic_layer::SqlQuery::new(sql.as_str())
-                .named(anchor_params(event))
-                .limit(Some(limit));
-            let out = layer
-                .run(query)
-                .await
-                .map_err(|e| format!("collector `{}` input: {e}", spec.id))?;
-            if out.truncated {
-                return Err(format!(
-                    "collector `{}` input returned more than {limit} rows; narrow it",
-                    spec.id
-                ));
-            }
-            out.rows
-                .into_iter()
-                .map(|r| {
-                    serde_json::Value::Object(
-                        out.columns
-                            .iter()
-                            .cloned()
-                            .zip(
-                                r.into_iter()
-                                    .map(|c| serde_json::to_value(c).unwrap_or_default()),
-                            )
-                            .collect(),
-                    )
-                })
-                .collect()
+            input_rows(
+                layer,
+                &spec.id,
+                sql,
+                anchor_params(event, Anchored::default()),
+            )
+            .await?
         }
     };
     let mut input = serde_json::json!({ "rows": rows });
@@ -682,33 +663,96 @@ impl RunTrigger {
     }
 }
 
+/// What a run knows of its context besides its trigger event's anchors
+/// (a fact collector's snapshot, say).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Anchored {
+    pub stream_id: Option<i64>,
+    pub snapshot_id: Option<i64>,
+    pub effort_id: Option<i64>,
+    pub thread_id: Option<i64>,
+}
+
 /// The named parameters a collector's `input` may use: the trigger
 /// event's anchors (`:stream_id`, `:snapshot_id`, `:effort_id`,
-/// `:thread_id`, `:turn_id`) and its seq (`:event_id`), NULL without one.
-fn anchor_params(event: Option<&StoredEvent>) -> Vec<(String, SqlCell)> {
+/// `:thread_id`, `:turn_id`), else what the run `known`, and the event's
+/// seq (`:event_id`); NULL when neither has one.
+pub fn anchor_params(event: Option<&StoredEvent>, known: Anchored) -> Vec<(String, SqlCell)> {
     let a = event.map(|e| &e.envelope.anchors);
     let int = |v: Option<i64>| v.map_or(SqlCell::Null(()), SqlCell::Int);
     vec![
         (
             "stream_id".into(),
-            int(a.and_then(|a| a.stream_id).map(|v| v.value())),
+            int(a
+                .and_then(|a| a.stream_id)
+                .map(|v| v.value())
+                .or(known.stream_id)),
         ),
-        ("snapshot_id".into(), int(a.and_then(|a| a.snapshot_id))),
+        (
+            "snapshot_id".into(),
+            int(a.and_then(|a| a.snapshot_id).or(known.snapshot_id)),
+        ),
         (
             "effort_id".into(),
-            int(a.and_then(|a| a.effort_id).map(|v| v.value())),
+            int(a
+                .and_then(|a| a.effort_id)
+                .map(|v| v.value())
+                .or(known.effort_id)),
         ),
         (
             "thread_id".into(),
-            int(a.and_then(|a| a.thread_id).map(|v| v.value())),
+            int(a
+                .and_then(|a| a.thread_id)
+                .map(|v| v.value())
+                .or(known.thread_id)),
         ),
         ("turn_id".into(), int(a.and_then(|a| a.turn_id))),
         ("event_id".into(), int(event.map(|e| e.seq))),
     ]
 }
 
+/// A collector's `input` rows: its read-only `sql` with `params` bound, as
+/// objects. More than the row limit fails rather than handing over a
+/// partial set.
+pub async fn input_rows(
+    layer: &crate::sql_gateway::SqlGateway,
+    id: &str,
+    sql: &str,
+    params: Vec<(String, SqlCell)>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let limit = oxplow_db::semantic_layer::MAX_ROW_LIMIT;
+    let query = oxplow_db::semantic_layer::SqlQuery::new(sql)
+        .named(params)
+        .limit(Some(limit));
+    let out = layer
+        .run(query)
+        .await
+        .map_err(|e| format!("collector `{id}` input: {e}"))?;
+    if out.truncated {
+        return Err(format!(
+            "collector `{id}` input returned more than {limit} rows; narrow it"
+        ));
+    }
+    Ok(out
+        .rows
+        .into_iter()
+        .map(|r| {
+            serde_json::Value::Object(
+                out.columns
+                    .iter()
+                    .cloned()
+                    .zip(
+                        r.into_iter()
+                            .map(|c| serde_json::to_value(c).unwrap_or_default()),
+                    )
+                    .collect(),
+            )
+        })
+        .collect())
+}
+
 /// The trigger event as a script sees it (`input.event`).
-fn event_input(e: &StoredEvent) -> serde_json::Value {
+pub fn event_input(e: &StoredEvent) -> serde_json::Value {
     serde_json::json!({
         "type": e.envelope.event_type,
         "seq": e.seq,
@@ -777,7 +821,7 @@ pub async fn run_collector(
                     oxplow_db::event_log_store::append_tx(
                         tx,
                         &schemas,
-                        &event.envelope("ok", counts.clone(), elapsed, None),
+                        &event.envelope("ok", counts.clone(), 0, elapsed, None),
                     )?;
                     Ok(counts)
                 })
@@ -788,6 +832,7 @@ pub async fn run_collector(
                         owner: owner.to_string(),
                         id: id.to_string(),
                         row_counts,
+                        facts: 0,
                     })
                 }
                 Err(e) => e.to_string(),
@@ -799,6 +844,7 @@ pub async fn run_collector(
     let envelope = event.envelope(
         "error",
         BTreeMap::new(),
+        0,
         elapsed_ms(started),
         Some(error.clone()),
     );
@@ -831,6 +877,7 @@ impl Synced {
         &self,
         status: &str,
         entities: BTreeMap<String, i64>,
+        facts: i64,
         elapsed_ms: i64,
         error: Option<String>,
     ) -> Envelope {
@@ -841,7 +888,7 @@ impl Synced {
                 trigger: self.trigger.into(),
                 status: status.into(),
                 entities,
-                facts: 0,
+                facts,
                 elapsed_ms,
                 error,
             },
@@ -858,6 +905,93 @@ impl Synced {
 
 fn elapsed_ms(started: std::time::Instant) -> i64 {
     i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX)
+}
+
+/// Where a run is recorded — its `collector_run` row and its
+/// `collector.synced@1`, in one transaction — and what its `input` is read
+/// through. The fact engine holds one; an entity run commits the same two
+/// with its rows.
+#[derive(Clone)]
+pub struct RunLog {
+    pub db: oxplow_db::Database,
+    pub schemas: Arc<EventSchemaRegistry>,
+    pub layer: crate::sql_gateway::SqlGateway,
+}
+
+/// One run to record (see [`RunLog::record`]).
+pub struct RunRecord<'a> {
+    pub owner: &'a str,
+    pub id: &'a str,
+    /// `manual`, `every` or `on`.
+    pub trigger: &'static str,
+    /// Who ran it, as an event source (`system`, `human`, `agent:<thread>`).
+    pub source: &'a str,
+    /// The trigger event (`on`): the run's `last_event_id`, its event's
+    /// cause and dedupe key.
+    pub cause: Option<&'a StoredEvent>,
+    /// `ok` or `error`.
+    pub status: &'a str,
+    pub entities: BTreeMap<String, i64>,
+    pub facts: i64,
+    pub elapsed_ms: i64,
+    pub error: Option<String>,
+}
+
+impl RunLog {
+    /// Whether collector `owner/id` already ran for the event at `seq` (its
+    /// `last_event_id` is at or past it): a redelivery runs nothing.
+    pub async fn ran_for(&self, owner: &str, id: &str, seq: i64) -> bool {
+        let (owner, id) = (owner.to_string(), id.to_string());
+        self.db
+            .read(move |c| {
+                c.query_row(
+                    "SELECT coalesce(last_event_id, 0) FROM collector_run WHERE owner = ?1 AND id = ?2",
+                    [&owner, &id],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map(Some)
+                .or_else(|e| match e {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    e => Err(e),
+                })
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|last| last >= seq)
+    }
+
+    /// Record `r`: its `collector_run` row and its `collector.synced@1`.
+    /// A redelivered trigger event (same dedupe key) writes nothing.
+    pub async fn record(&self, r: RunRecord<'_>) -> Result<(), DomainError> {
+        let run = CollectorRun {
+            owner: r.owner.to_string(),
+            id: r.id.to_string(),
+            status: r.status.to_string(),
+            last_run_at: now_rfc3339(),
+            error: r.error.clone(),
+            row_counts: r.entities.clone(),
+            cursor: None,
+            last_event_id: r.cause.map(|e| e.seq),
+        };
+        let synced = Synced {
+            source: r.source.to_string(),
+            collector: oxplow_domain::refs::build::collector_ref(r.owner, r.id),
+            trigger: r.trigger,
+            cause: r.cause.map(|e| (e.envelope.id.clone(), e.seq)),
+        };
+        let envelope = synced.envelope(r.status, r.entities, r.facts, r.elapsed_ms, r.error);
+        let schemas = self.schemas.clone();
+        self.db
+            .transaction(move |tx| {
+                if !oxplow_db::event_log_store::append_unique_tx(tx, &schemas, &envelope)? {
+                    return Ok(());
+                }
+                oxplow_db::collector_store::record_run_in(tx, &run).map_err(oxplow_db::map_sql_err)
+            })
+            .await
+    }
 }
 
 /// What [`run_for_event`] did.
@@ -1132,6 +1266,8 @@ pub struct CollectorRunner {
     pub catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
     pub ai: Arc<crate::ai_compute::AiCompute>,
     pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
+    /// The fact engine, which runs the collectors that record facts.
+    pub metrics: crate::metrics_service::MetricsService,
 }
 
 impl CollectorRunner {
@@ -1161,6 +1297,26 @@ impl CollectorRunner {
         trigger: RunTrigger,
         source: &str,
     ) -> Result<CollectorRunReport, RunCollectorError> {
+        // A fact collector (the project's, a built-in or an extension's
+        // that records facts) runs in the fact engine.
+        if self
+            .metrics
+            .fact_collectors()
+            .iter()
+            .any(|c| c.owner == owner && c.key == id)
+        {
+            let facts = self
+                .metrics
+                .run_collector_by_key(owner, id, None, source)
+                .await
+                .map_err(RunCollectorError::Failed)?;
+            return Ok(CollectorRunReport {
+                owner: owner.to_string(),
+                id: id.to_string(),
+                row_counts: BTreeMap::new(),
+                facts: i64::try_from(facts).unwrap_or(i64::MAX),
+            });
+        }
         let root = self.worktrees.resolve(None).await;
         run_collector(&self.collectors(&root), owner, id, trigger, source).await
     }

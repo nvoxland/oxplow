@@ -1,5 +1,5 @@
 ---
-description: Author an oxplow metric — a durable, chartable number tracked over time (count of X, complexity, bundle size, …). Scaffolds the .oxplow/project.yaml measure+gauge+metric trio + script and verifies it.
+description: Author an oxplow metric — a durable, chartable number tracked over time (count of X, complexity, bundle size, …). Scaffolds the .oxplow/project.yaml measure+collector+metric trio + script and verifies it.
 ---
 
 Author a metric so oxplow tracks a number over time and charts it on the
@@ -23,15 +23,15 @@ count, high-complexity functions, `any` usage, …), just turn it on with the
 `metric.enable` command (`run_command`):
 `{ "keys": ["oxplow.rust.unsafe_blocks"], "enabled": true }`.
 
-## 3. Otherwise define the trio (measure + gauge + metric)
+## 3. Otherwise define the trio (measure + collector + metric)
 
 Fastest path — the **`metric.scaffold` command** (`run_command`). It writes
-nothing: it returns a starter gauge script and the measure + gauge + metric
+nothing: it returns a starter collector script and the measure + collector + metric
 trio as a `.oxplow/project.yaml` snippet.
 
 ```
 metric.scaffold { key: "repo.todo_count", title: "TODO comments", language: "rust" }
-→ { "scriptPath": "oxplow/gauges/repo_todo_count.star", "script": "…", "projectYaml": "measures: …" }
+→ { "scriptPath": "oxplow/collectors/repo_todo_count.star", "script": "…", "projectYaml": "measures: …" }
 ```
 
 1. Write `script` at `scriptPath`, changed to compute what the user
@@ -39,25 +39,27 @@ metric.scaffold { key: "repo.todo_count", title: "TODO comments", language: "rus
    call `files(glob)` / `ast_query(text, language, sexpr)` /
    `code_metrics(text, language)`).
 2. Add each entry with `config.set` (`run_command`): `config.get` the
-   `measures` / `gauges` / `metrics` list, append the new entry, and set the
-   list back. `gauges` is person-only (a gauge runs a program), so that
+   `measures` / `collectors` / `metrics` list, append the new entry, and set the
+   list back. `collectors` is person-only (a collector runs a program), so that
    `config.set` asks the person to confirm. The catalog reseeds on the change.
 
 Then jump to **Verify**.
 
-The trio (namespaced — `oxplow.*` is reserved) and its gauge script under
-`oxplow/gauges/` look like this:
+The trio (namespaced — `oxplow.*` is reserved) and its collector script under
+`oxplow/collectors/` look like this:
 
 ```yaml
 measures:
   - key: repo.todo_count           # the fact TYPE
     subjectKind: file
     unit: count
-gauges:
-  - key: repo.todo                 # the PRODUCER
-    trigger: on-snapshot
-    emits: [repo.todo_count]
-    compute: { runtime: starlark, entryFile: oxplow/gauges/todo.star }
+collectors:
+  - id: repo.todo                  # the PRODUCER
+    doc: TODO comment scan
+    runtime: starlark
+    entry: oxplow/collectors/todo.star
+    trigger: { on: [snapshot.taken] }
+    facts: [repo.todo_count]       # the measures it may record
 metrics:
   - key: repo.todo_count           # the SPEC
     title: "TODO comments"
@@ -68,7 +70,7 @@ metrics:
 ```
 
 ```python
-# oxplow/gauges/todo.star — one per-file FACT (not a baked total)
+# oxplow/collectors/todo.star — one per-file FACT (not a baked total)
 def transform(input):
     facts = []
     for f in files("**/*.rs"):
@@ -81,7 +83,7 @@ def transform(input):
     return {"facts": facts}
 ```
 
-The gauge returns `{ "facts": [ { "measure", "value", "subject"?, "path"?, "dims"? } ] }`
+The collector returns `{ "facts": [ { "measure", "value", "subject"?, "path"?, "dims"? } ] }`
 — one atomic fact per subject; the `metrics:` spec (`aggregation: sum`) re-adds
 them. Read the `oxplow-metrics` skill for the four-block model, the full builtin
 surface (`files`/`ast_query`/`code_metrics`/`regex_find`/…) and the report-derived
@@ -91,8 +93,8 @@ templates.
 
 ## 4. Verify
 
-1. `metric.run { key: "repo.todo" }` (`run_command`) — runs the gauge now,
-   returns the fact count.
+1. `collector.sync { owner: "project", id: "repo.todo" }` (`run_command`) —
+   runs the collector now, returns the `facts` count.
 2. `query_sql`: `SELECT bucket, MEASURE('repo.todo_count') FROM metric_grid('day')`
    — confirm the value.
 3. It now appears on the Metrics page automatically.

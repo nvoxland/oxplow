@@ -1,7 +1,8 @@
 # oxplow.ts.non_null_assertions — count `expr!` non-null assertions (a
-# type-checker override that can hide real nullability bugs). Emits the
-# repo-total ("tree:.") plus a per-file sample ("file:<path>", nonzero only),
-# and a per-file `oxplow.ast_hit` FACT (rule="non_null_assertion") — the metric
+# type-checker override that can hide real nullability bugs). Its facts are per-file
+# (subject "file:<path>", nonzero only), so an effort's change attributes
+# through its files.
+# A per-file `oxplow.ast_hit` FACT (rule="non_null_assertion") — the metric
 # is the SPEC Sum(oxplow.ast_hit) filtered by that rule (epic tsk12).
 def _ts_files():
     out = []
@@ -12,13 +13,9 @@ def _ts_files():
     return out
 
 def transform(input):
-    total = 0
-    per_file = []
     facts = []
     for tri in _ts_files():
         c = len(ast_query(tri[1], tri[2], "(non_null_expression) @n"))
-        total += c
         if c > 0:
-            per_file.append({"value": c, "subject": "file:" + tri[0], "dims": {"oxplow.language": "typescript"}})
             facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "non_null_assertion", "subject": "file:" + tri[0], "path": tri[0], "dims": {"oxplow.language": "typescript"}})
-    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"oxplow.language": "typescript"}}] + per_file, "facts": facts}
+    return {"facts": facts}

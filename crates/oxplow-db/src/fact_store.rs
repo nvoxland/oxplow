@@ -2370,7 +2370,7 @@ impl SqliteFactStore {
     /// the event loop reacting to the same snapshot — must not re-scan the tree.
     /// `version = None` always returns `false` (can't confirm the logic matches, so
     /// don't skip).
-    pub async fn gauge_done_for_snapshot(
+    pub async fn collector_done_for_snapshot(
         &self,
         producer: &str,
         snapshot_id: i64,
@@ -3042,7 +3042,7 @@ mod tests {
     }
 
     /// A gauge capture by `producer` over `snap_id`, emitting one fact per
-    /// `(path, value)`. Mirrors what `record_gauge_facts` writes.
+    /// `(path, value)`. Mirrors what `record_collector_facts` writes.
     async fn gauge_capture(
         store: &SqliteFactStore,
         producer: &str,

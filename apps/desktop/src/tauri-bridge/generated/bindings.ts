@@ -1387,7 +1387,7 @@ export type AppVersion = {
 /**
  *  Whether the handler runs inside the bus's transaction (with the audit
  *  row and `command.executed`), or outside it, against a system the bus
- *  doesn't own — a VCS, a provider process, a gauge script — and is
+ *  doesn't own — a VCS, a provider process, a collector's script — and is
  *  audited after it returns (`External`). A `Dispatch` command decides
  *  per input (the `work_item.*` verbs: oxplow's own items in the
  *  transaction, another provider's through its process) and then runs
@@ -1707,7 +1707,10 @@ export type CollectorRun = {
 export type CollectorRunReport = {
 	owner: string,
 	id: string,
+	// An entity collector's rows per entity after the run.
 	rowCounts: { [key in string]: number },
+	// A fact collector's facts recorded.
+	facts: number,
 };
 
 // What runs a collector.
@@ -2627,14 +2630,13 @@ export type Extension_Deserialize = {
 	// Guidance for the coding agent (valid ones; invalid ones are in `errors`).
 	advisories: Advisory[],
 	/**
-	 *  Measures, metrics and gauges it contributes to the metric catalog
-	 *  (the `project.yaml` schema). Metrics are `key:` definitions and are
-	 *  on while the extension is enabled; gauges are `starlark`/`jaq` only,
-	 *  with their `entryFile` inside the extension.
+	 *  Measures and metrics it contributes to the metric catalog (the
+	 *  `project.yaml` schema). Metrics are `key:` definitions and are on
+	 *  while the extension is enabled; the facts they read come from its
+	 *  collectors (`collectors:` with `facts:`).
 	 */
 	measures: MeasureEntry[],
 	metrics: MetricEntry[],
-	gauges: GaugeEntry[],
 	/**
 	 *  Dimensions it contributes (fact or entity), never promoted: an
 	 *  extension toggling would rebuild the metric cube each time.
@@ -2722,14 +2724,13 @@ export type Extension_Serialize = {
 	// Guidance for the coding agent (valid ones; invalid ones are in `errors`).
 	advisories: Advisory[],
 	/**
-	 *  Measures, metrics and gauges it contributes to the metric catalog
-	 *  (the `project.yaml` schema). Metrics are `key:` definitions and are
-	 *  on while the extension is enabled; gauges are `starlark`/`jaq` only,
-	 *  with their `entryFile` inside the extension.
+	 *  Measures and metrics it contributes to the metric catalog (the
+	 *  `project.yaml` schema). Metrics are `key:` definitions and are on
+	 *  while the extension is enabled; the facts they read come from its
+	 *  collectors (`collectors:` with `facts:`).
 	 */
 	measures: MeasureEntry[],
 	metrics: MetricEntry[],
-	gauges: GaugeEntry[],
 	/**
 	 *  Dimensions it contributes (fact or entity), never promoted: an
 	 *  extension toggling would rebuild the metric cube each time.
@@ -2851,59 +2852,6 @@ export type FormulaConfig = {
 	left: string,
 	// The right operand metric key.
 	right: string,
-};
-
-/**
- *  How a gauge produces facts (the `compute:` block on a `gauges:` entry).
- *  Mirrors [`PluginConfig`]'s runtime fields — the gauge runner maps it to a
- *  registered collector. `report` is the report path for a report-derived
- *  gauge; tree-derived gauges read the snapshot via `files()` instead and leave
- *  it unset. (Renamed from `MetricComputeConfig` in epic tsk12, E: compute is a
- *  property of the *gauge* that emits facts, not the *metric* that reads them.)
- */
-export type GaugeComputeConfig = {
-	// Transform tier: `jaq` | `starlark` | `exec`.
-	runtime: string,
-	/**
-	 *  Host pre-parse for a report-derived gauge: `text` | `json` | `xml` |
-	 *  `lcov` | `lines` (default `text`). Ignored by `exec`.
-	 */
-	input?: string | null,
-	/**
-	 *  Project-relative path to the script file (jaq/Starlark program or the
-	 *  `exec` program). Required.
-	 */
-	entryFile?: string | null,
-	// Extra arguments for the `exec` runtime.
-	args?: string[],
-	// Optional project-relative report path for a report-derived gauge.
-	report?: string | null,
-};
-
-/**
- *  One entry in the top-level `gauges:` block — a **fact PRODUCER** (epic tsk12,
- *  E). A gauge runs its `compute:` collector on its `trigger`, emitting atomic
- *  facts on the measures it declares in `emits`. Unlike a metric there is no
- *  `use:`/`key:` split — a gauge is always a definition (you declare the
- *  producer; a project doesn't "enable" one). Resolved across global+project by
- *  [`resolve_gauges`]; built-in gauges live in code, not config.
- */
-export type GaugeEntry = {
-	// The gauge's namespaced key (`<vendor>.<id>`). Required.
-	key?: string | null,
-	title?: string | null,
-	/**
-	 *  `on-report` | `on-snapshot` | `on-effort-complete` | `manual` |
-	 *  `continuous` (default `on-snapshot`).
-	 */
-	trigger?: string | null,
-	/**
-	 *  The measure keys this gauge is allowed to emit facts on (declare-to-collect:
-	 *  a fact on a measure outside this list is dropped). At least one required.
-	 */
-	emits?: string[],
-	// How the gauge produces facts (required).
-	compute?: GaugeComputeConfig | null,
 };
 
 /**
@@ -3640,10 +3588,10 @@ export type MeasureEntry = {
 	 *  A SEPARATE AXIS from `temporalSemantics`: `complete` means every capture
 	 *  restates the whole population (a coverage report, a test run), so the
 	 *  temporal fold applies directly. `per-path` means a capture restates only the
-	 *  paths in its snapshot — which is what a **tree gauge over a per-commit delta**
+	 *  paths in its snapshot — which is what a **tree collector over a per-commit delta**
 	 *  does. Such a measure is folded to the latest capture per (producer, path)
 	 *  before aggregating, so a repo-wide total stays correct while only changed
-	 *  files are rescanned. Set this on any measure a snapshot-triggered gauge
+	 *  files are rescanned. Set this on any measure a snapshot-triggered collector
 	 *  emits per-file facts on (tsk41).
 	 */
 	captureScope?: string | null,
@@ -3690,7 +3638,7 @@ export type MergeReadiness =
  *  One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a
  *  measure (epic tsk12, E). A metric no longer *computes* anything: it names a
  *  `sourceMeasure` + an `aggregation` (+ optional `filter`), or a `formula` over
- *  other metrics, and the engine aggregates the durable facts a `gauges:` entry
+ *  other metrics, and the engine aggregates the durable facts a `collectors:` entry
  *  emitted. Two forms, distinguished by which key is set:
  *  - **`use:`** — enable an existing catalog metric by key (built-in/global),
  *    optionally overriding `target`/thresholds for this project.
@@ -3941,11 +3889,11 @@ export type OxplowConfig = {
 	 */
 	metrics?: MetricEntry[],
 	/**
-	 *  Project-declared gauges (the `gauges:` block) — the fact PRODUCERS (epic
-	 *  tsk12, E). Each runs its `compute:` collector on its trigger and emits
-	 *  facts on the measures it `emits`. Resolved by [`resolve_gauges`].
+	 *  The project's collectors (the `collectors:` block, P7.B3): fact
+	 *  producers that run on their trigger and record facts on the measures
+	 *  they declare. Owner [`collectors::PROJECT`].
 	 */
-	gauges?: GaugeEntry[],
+	collectors?: CollectorSpec[],
 	/**
 	 *  Project-declared measures (the `measures:` block) — custom fact TYPES a
 	 *  collector may emit (epic tsk12, workstream E). The `oxplow.*` built-ins
@@ -4263,8 +4211,8 @@ export type PluginConfig = {
 
 // What kind of project program it is.
 export type ProgramKind = 
-// A metric gauge (`gauges:`).
-"gauge" | 
+// A project collector's program (`collectors:` with `runtime: exec`).
+"collector" | 
 // A collection plugin (`collection.plugins`) parsing test/coverage/analysis reports.
 "plugin" | 
 // An agent spoken to over ACP (`acpAgents`, tsk335).
@@ -4283,7 +4231,7 @@ export type ProgramKind =
 // A program the project's config would run.
 export type ProjectProgram = {
 	kind: ProgramKind,
-	// The gauge key or plugin name.
+	// The collector id or plugin name.
 	name: string,
 	// Project-relative path of the program.
 	program: string,

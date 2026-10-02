@@ -40,7 +40,7 @@ describe("pickerSections", () => {
     // becomes per-language sections that sit as peers, all alphabetical.
     expect(labels).toContain("Coverage");
     expect(labels).toContain("Tests");
-    expect(labels).toContain("Code gauges");
+    expect(labels).toContain("Code metrics");
     expect(labels).toContain("General");
     expect(labels).toContain("Rust");
     expect(labels).toContain("TypeScript");

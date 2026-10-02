@@ -401,185 +401,208 @@ metrics:
   category: coverage
   language: typescript
   description: '% of TS expressions with a non-any type (the type-coverage tool).'
-gauges:
-- key: repo.scan_clone
-  title: Rust .clone() scan
-  trigger: on-snapshot
-  emits:
+collectors:
+- id: repo.scan_clone
+  doc: Rust .clone() scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_clone.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.rust_clone
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_clone.star
-- key: repo.scan_allow
-  title: Rust
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_allow
+  doc: Rust
+  runtime: starlark
+  entry: oxplow/collectors/repo_allow.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.rust_allow
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_allow.star
-- key: repo.scan_use_effect
-  title: React useEffect scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_use_effect
+  doc: React useEffect scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_use_effect.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.react_use_effect
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_use_effect.star
-- key: repo.scan_eslint
-  title: ESLint suppression scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_eslint
+  doc: ESLint suppression scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_eslint.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.eslint_disable
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_eslint.star
-- key: repo.scan_shared_state
-  title: Rust Arc/Mutex/RwLock scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_shared_state
+  doc: Rust Arc/Mutex/RwLock scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_shared_state.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.rust_shared_state
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_shared_state.star
-- key: repo.scan_async_fn
-  title: Rust async fn scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_async_fn
+  doc: Rust async fn scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_async_fn.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.rust_async_fn
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_async_fn.star
-- key: repo.scan_as_cast
-  title: TS as-cast scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_as_cast
+  doc: TS as-cast scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_as_cast.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.ts_as_cast
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_as_cast.star
-- key: repo.scan_dangerous_html
-  title: dangerouslySetInnerHTML scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_dangerous_html
+  doc: dangerouslySetInnerHTML scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_dangerous_html.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.dangerous_html
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_dangerous_html.star
-- key: repo.scan_skipped_tests
-  title: Skipped/ignored test scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_skipped_tests
+  doc: Skipped/ignored test scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_skipped_tests.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.skipped_tests
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_skipped_tests.star
-- key: repo.scan_focused_tests
-  title: Focused (.only) test scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_focused_tests
+  doc: Focused (.only) test scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_focused_tests.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.focused_tests
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_focused_tests.star
-- key: repo.scan_file_loc
-  title: File LOC scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_file_loc
+  doc: File LOC scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_file_loc.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.file_loc
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_file_loc.star
-- key: repo.scan_as_any
-  title: TS as-any scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_as_any
+  doc: TS as-any scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_as_any.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.ts_as_any
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_as_any.star
-- key: repo.scan_eval
-  title: eval() scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_eval
+  doc: eval() scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_eval.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.eval_usage
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_eval.star
-- key: repo.scan_dyn
-  title: Rust dyn dispatch scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_dyn
+  doc: Rust dyn dispatch scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_dyn.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.rust_dyn
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_dyn.star
-- key: repo.scan_imports
-  title: TS import scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_imports
+  doc: TS import scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_imports.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.file_imports
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_imports.star
-- key: repo.scan_innerhtml
-  title: innerHTML assignment scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_innerhtml
+  doc: innerHTML assignment scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_innerhtml.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.innerhtml_assign
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_innerhtml.star
-- key: repo.scan_hooks
-  title: React hook scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_hooks
+  doc: React hook scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_hooks.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.ts_hooks
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_hooks.star
-- key: repo.scan_secrets
-  title: Hardcoded-secret scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_secrets
+  doc: Hardcoded-secret scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_secrets.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.hardcoded_secrets
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_secrets.star
-- key: repo.scan_hardcoded_colors
-  title: Hardcoded-color scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_hardcoded_colors
+  doc: Hardcoded-color scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_hardcoded_colors.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.hardcoded_colors
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_hardcoded_colors.star
-- key: repo.scan_css_important
-  title: css !important scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_css_important
+  doc: css !important scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_css_important.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.css_important
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_css_important.star
-- key: repo.scan_inline_styles
-  title: Inline style-object scan
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_inline_styles
+  doc: Inline style-object scan
+  runtime: starlark
+  entry: oxplow/collectors/repo_inline_styles.star
+  trigger:
+    on:
+    - snapshot.taken
+  facts:
   - repo.inline_styles
-  compute:
-    runtime: starlark
-    entryFile: oxplow/gauges/repo_inline_styles.star
-- key: repo.scan_type_coverage
-  title: TypeScript type coverage
-  trigger: on-snapshot
-  emits:
+- id: repo.scan_type_coverage
+  doc: TypeScript type coverage
+  runtime: jaq
+  entry: oxplow/plugins/type_coverage.jq
+  trigger:
+    on:
+    - snapshot.taken
+  report:
+    path: target/type-coverage.json
+    format: text
+  facts:
   - repo.type_coverage
-  compute:
-    runtime: jaq
-    input: text
-    entryFile: oxplow/plugins/type_coverage.jq
-    report: target/type-coverage.json
 measures:
 - key: repo.type_coverage
   unit: '%'

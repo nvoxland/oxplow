@@ -15,7 +15,7 @@ and agents query.
 > - **Current:** decisions and claims (`v_decision`, `v_claim`, MCP
 >   `record_decision` / `record_claim`), the agent-activity views, stored
 >   change analysis (`v_change*`), and extension-declared measures,
->   metrics and gauges (tsk311, see extensions.md).
+>   metrics and fact collectors (tsk311, see extensions.md).
 > - **Current (tsk277):** git, LSP-diagnostic and test-run views
 >   (`v_commit*`, `v_branch`, `v_diagnostic`, `v_test_run`, `v_test_case`);
 >   spine dimensions and time buckets on fact metrics; entity metrics and
@@ -532,10 +532,11 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
 
 A **collector** brings data in: a program (`exec`), a sandboxed script
 (`starlark` / `jaq`) or a provider's read (`read`). It writes
-**entities** (rows a model can `ref()`) and/or **facts**. One
-declaration, `oxplow_config::collectors` (`CollectorSpec`,
-`parse_collectors`), serves `extension.yaml` (v1 `sources:` is migrated
-to it, each `schedule:` becoming a `trigger:`). The real, tested example
+**entities** (rows a model can `ref()`) or **facts** (measurements on
+declared measures), never both. One declaration, `oxplow_config::collectors`
+(`CollectorSpec`, `parse_collectors`), serves `extension.yaml` (v1
+`sources:` is migrated to it, each `schedule:` becoming a `trigger:`) and
+`.oxplow/project.yaml`. The real, tested example
 is `examples/extensions/github/` (PRs from the GitHub API via `gh` or
 `GITHUB_TOKEN`); the user guide is `docs/guide/lenses.md`.
 
@@ -561,15 +562,76 @@ collectors:
 
 The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`.
 
+**Entity vs fact collectors.**
+
+- An **entity collector** (`entities:`) writes rows published as
+  `v_<owner>_<entity>`; `collector_runner` runs it. It may be `exec`
+  (approved), `starlark` / `jaq` (derived, below; may call `ai_*`, has no
+  `files()`) or `read`.
+- A **fact collector** (`facts: [<measure>, …]`) is what a *gauge* was
+  until P7.B3. It runs in the fact engine (`MetricsService`,
+  [metrics.md](./metrics.md)): its Starlark gets the snapshot tree
+  (`files()` / `source_files()` / `ast_query()`, the `TreeHost`) but no
+  `ai_*`; its input is `{report?, rows?, event?}` (`report: { path,
+  format }` parsed — text | json | xml | lcov | lines; the `input:`
+  query's rows; the trigger event); it returns `{"facts": [{measure,
+  value, subject?, path?, line?, rule?, num?, den?, dims?}]}` and nothing
+  else (`facts_of`). A fact on a measure not in `facts:` or not defined is
+  dropped. Each run records one metric capture (or a failed one) plus a
+  `collector_run` row and `collector.synced@1` with its `facts` count.
+  Snapshot runs keep the delta / full-baseline machinery (pending-baseline
+  queue, `scan_kind`, fingerprint, dominated-capture prune).
+
+**Owners.** An extension (its name), `project` (`.oxplow/project.yaml`'s
+`collectors:`) or `built-in` (the bundled `oxplow.*` code metrics, run
+only when `metrics: - use: oxplow.<x>` enables them). `project` and
+`built-in` are reserved extension names. There are no global collectors.
+
+- **The project's collectors record facts** (`collectors:` in
+  `.oxplow/project.yaml`; scripts under `oxplow/collectors/`); an entity
+  collector belongs in an extension.
+- **An extension's fact collector is sandboxed** (starlark or jaq). Only
+  the project's own fact collectors may be `exec`, and those need a
+  person's approval (Settings → Data → Programs; `exec_consent`
+  `ProgramKind::Collector`, key `collector:<id>`).
+- **A fact collector gets no `env` / `credentials` / `network`**, and
+  `report` is for fact collectors only.
+
+**Migrating `gauges:`.** A `gauges:` block in either file is a load
+error naming the fix: `oxplow plugin migrate --project` (project.yaml) or
+`oxplow plugin migrate <name>` (an extension; it also does the v1→v2
+manifest migration). Both rewrite the block in place, textually and
+idempotently: `key`→`id`, `title`→`doc`, `compute.runtime`→`runtime`,
+`compute.entryFile`→`entry`, `emits`→`facts`, `compute.report` +
+`compute.input` → `report: { path, format }`, trigger `on-snapshot` (the
+default) → `{ on: [snapshot.taken] }`, `on-effort-complete` → `{ on:
+[effort.finished] }`, `manual` → `manual`. `on-report` / `continuous` and
+`compute.args` have no equivalent — the migration refuses, naming the
+gauge. Fingerprints are preserved, so a migrated gauge keeps its
+baseline.
+
+**Running.** `on:` collectors, entity and fact alike, run from the
+`collector.triggers` consumer (below). For a fact collector:
+`snapshot.taken` runs it only when the take recorded files (not
+`unchanged`, `file_count > 0`); `effort.finished` runs it over the
+effort's end snapshot; any other type over the stream's latest snapshot.
+`every:` collectors run from the scheduler as the system through
+`collector.sync`. **`collector.sync { owner, id }` is the one manual run
+for every collector** — it replaced `source.sync` and `metric.run`; for a
+fact collector it returns `facts`. (`metric.rebuild` still runs the
+whole-tree baseline.)
+
 **Parse rules.** `entry` for exec/starlark/jaq; `provider: { instance,
 collector }` (and nothing a script needs) for `read`, whose records land
 in the capability's model and which `provider.sync` runs; `env`,
-`credentials`, `network` only on exec; `input` only on starlark/jaq; at
-least one of `entities` / `facts`; `after` and `where` only with `on:`,
+`credentials`, `network` only on an exec entity collector; `input` only on
+starlark/jaq; exactly one of `entities` / `facts`; `report` only with
+`facts`; a project collector must have `facts`; an extension's fact
+collector isn't `exec`; `after` and `where` only with `on:`,
 whose types must be registered (`v_event_type`); `oxplow.` ids are
 oxplow's own.
 
-**A run** (`collector_runner::run_collector`) commits its rows, its
+**An entity collector's run** (`collector_runner::run_collector`) commits its rows, its
 `collector_run` row and its `collector.synced@1` event in **one
 transaction**; a failed run commits the failure the same way (no rows,
 the last good counts and checkpoint kept). The event's subject is
@@ -653,6 +715,9 @@ entities from data already in the semantic layer:
 | Piece | Where |
 |---|---|
 | Parse/validate declarations (`CollectorSpec`, `Trigger`) | `crates/oxplow-config/src/collectors.rs` |
+| `gauges:` → `collectors:` (`migrate_gauges_text`, behind `oxplow plugin migrate --project` / `<name>`) | `crates/oxplow-config/src/collectors.rs`, `apps/desktop/src-tauri/src/plugin_cli.rs` |
+| Fact collectors: `FactCollector`, `fact_collectors()`, `run_collector_by_key`, `run_snapshot_collectors` / `run_effort_collectors` / `run_event_collectors` | `crates/oxplow-app/src/metrics_service.rs` |
+| Fact-collector script host (`TreeHost`, `run_fact_starlark`, `facts_of`, `parse_report`) | `crates/oxplow-collect-plugin/src/lib.rs`, `runtime.rs` |
 | v1 `sources:` / `schedule:` → `collectors:` / `trigger:` | `crates/oxplow-app/src/extensions/migrate_v1.rs` |
 | Consent (`approve_reviewed`), exec, coercion, `run_collector` / `run_for_event`, `CollectorRunner` + the `collector.sync` command, scheduler | `crates/oxplow-app/src/collector_runner.rs` |
 | The `collector.triggers` consumer (`on:` / `where` / `after`) | `crates/oxplow-app/src/collector_triggers.rs` |
@@ -837,7 +902,7 @@ see extensions.md.)
 ## Relation to other docs
 
 - [metrics.md](./metrics.md): the fact substrate this generalizes. Still
-  authoritative for facts, captures, the cube and gauges.
+  authoritative for facts, captures, the cube and fact collectors.
 - [extensions.md](./extensions.md): how lenses and extensions consume this
   layer.
 - [ai-providers.md](./ai-providers.md): the AI functions sources and lenses

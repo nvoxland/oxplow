@@ -930,13 +930,12 @@ pub struct Extension {
     pub enabled: bool,
     /// Guidance for the coding agent (valid ones; invalid ones are in `errors`).
     pub advisories: Vec<Advisory>,
-    /// Measures, metrics and gauges it contributes to the metric catalog
-    /// (the `project.yaml` schema). Metrics are `key:` definitions and are
-    /// on while the extension is enabled; gauges are `starlark`/`jaq` only,
-    /// with their `entryFile` inside the extension.
+    /// Measures and metrics it contributes to the metric catalog (the
+    /// `project.yaml` schema). Metrics are `key:` definitions and are on
+    /// while the extension is enabled; the facts they read come from its
+    /// collectors (`collectors:` with `facts:`).
     pub measures: Vec<oxplow_config::MeasureEntry>,
     pub metrics: Vec<oxplow_config::MetricEntry>,
-    pub gauges: Vec<oxplow_config::GaugeEntry>,
     /// Dimensions it contributes (fact or entity), never promoted: an
     /// extension toggling would rebuild the metric cube each time.
     pub dimensions: Vec<oxplow_config::DimensionEntry>,
@@ -1066,7 +1065,7 @@ pub fn load_extensions(root: &Path) -> Vec<Extension> {
     out
 }
 
-/// A `measures:` / `metrics:` / `gauges:` block as typed entries.
+/// A `measures:` / `metrics:` block as typed entries.
 fn parse_block<T: serde::de::DeserializeOwned>(
     v: Option<serde_yaml::Value>,
 ) -> Result<Option<Vec<T>>, String> {
@@ -1082,7 +1081,7 @@ pub fn load_project_extension(root: &Path, name: &str) -> Extension {
 }
 
 /// A file inside extension `name` (bundled or in `oxplow/extensions/`),
-/// e.g. a gauge's script. `None` when there's no such extension or file.
+/// e.g. a collector's script. `None` when there's no such extension or file.
 pub fn read_extension_file(root: &Path, name: &str, rel: &str) -> Option<String> {
     if rel.split('/').any(|seg| seg == "..") {
         return None;
@@ -1177,7 +1176,6 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         dimensions: Vec::new(),
         models: Vec::new(),
         metrics: Vec::new(),
-        gauges: Vec::new(),
         launcher: Vec::new(),
         panels: Vec::new(),
         pages: Vec::new(),
@@ -1263,18 +1261,39 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             .filter(|_| m.sharing == Sharing::Private);
     let page_files = m.pages.clone();
     let slot_files = {
+        if m.gauges.is_some() {
+            ext.errors.push(at(
+                &file,
+                key_line(&manifest, "gauges"),
+                format!(
+                    "`gauges:` is now `collectors:` (each gauge is a collector that records \
+                     facts); run `oxplow plugin migrate {name}` to rewrite it in place"
+                ),
+            ));
+        }
         if let Some(v) = &m.collectors {
             let (collectors, errors) = oxplow_config::collectors::parse_collectors(
                 name,
                 v,
                 &oxplow_domain::events::schema::is_core_type,
             );
-            ext.collectors = collectors;
-            ext.errors.extend(
-                errors
-                    .into_iter()
-                    .map(|e| at(&file, key_line(&manifest, "collectors"), e)),
-            );
+            let line = key_line(&manifest, "collectors");
+            ext.errors
+                .extend(errors.into_iter().map(|e| at(&file, line, e)));
+            // A script or program the collector runs must be in the folder.
+            for c in collectors {
+                match c.entry.as_deref() {
+                    Some(entry) if files.read(entry).is_none() => ext.errors.push(at(
+                        &file,
+                        line,
+                        format!(
+                            "collector `{}`: entry `{entry}` isn't in the extension",
+                            c.id
+                        ),
+                    )),
+                    _ => ext.collectors.push(c),
+                }
+            }
         }
         // An experimental kind: a shared manifest's is refused by `check`.
         if let Some(v) = m
@@ -1382,34 +1401,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             }
             Err(e) => ext.errors.push(err_at("metrics", e)),
         }
-        match parse_block(m.gauges.clone())
-            .and_then(|v| oxplow_config::validate_gauges(v).map_err(|e| e.to_string()))
-        {
-            Ok(v) => {
-                for g in v {
-                    let key = g.key.clone().unwrap_or_default();
-                    let compute = g.compute.clone().unwrap_or_default();
-                    let entry = compute.entry_file.clone().unwrap_or_default();
-                    if !matches!(compute.runtime.as_str(), "starlark" | "jaq") {
-                        ext.errors.push(err_at(
-                            "gauges",
-                            format!(
-                                "gauge `{key}`: extension gauges run `starlark` or `jaq` only, not `{}` (a program belongs in a collector, which needs your approval)",
-                                compute.runtime
-                            ),
-                        ));
-                    } else if files.read(&entry).is_none() {
-                        ext.errors.push(err_at(
-                            "gauges",
-                            format!("gauge `{key}`: entryFile `{entry}` isn't in the extension"),
-                        ));
-                    } else {
-                        ext.gauges.push(g);
-                    }
-                }
-            }
-            Err(e) => ext.errors.push(err_at("gauges", e)),
-        }
         match parse_block::<oxplow_db::models::ModelDecl>(m.models.clone()) {
             Ok(decls) => {
                 let dir = format!("{rel}/models");
@@ -1434,7 +1425,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             Err(e) => ext.errors.push(err_at("models", format!("models: {e}"))),
         }
         // Cross-references inside the catalog: a metric's source measure
-        // and a gauge's emitted measures are normally ones this extension
+        // and a collector's fact measures are normally ones this extension
         // declares or oxplow's built-ins. A measure from another scope
         // (the project's or another extension's `measures:`) resolves
         // when the catalog is assembled, so that is a warning, not an
@@ -1456,14 +1447,14 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 }
             }
         }
-        for g in &ext.gauges {
-            for emitted in &g.emits {
-                if !measure_known(emitted) {
+        for c in &ext.collectors {
+            for fact in &c.facts {
+                if !measure_known(fact) {
                     ext.warnings.push(err_at(
-                        "gauges",
+                        "collectors",
                         format!(
-                            "gauge `{}`: emits `{emitted}`, which is not a measure this extension declares (or a built-in `oxplow.*`); it must come from the project's or another extension's `measures:`",
-                            g.key.clone().unwrap_or_default()
+                            "collector `{}`: facts `{fact}`, which is not a measure this extension declares (or a built-in `oxplow.*`); it must come from the project's or another extension's `measures:`",
+                            c.id
                         ),
                     ));
                 }
@@ -1985,7 +1976,6 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.measures.clear();
         ext.dimensions.clear();
         ext.metrics.clear();
-        ext.gauges.clear();
         ext.models.clear();
         ext.launcher.clear();
         ext.panels.clear();
@@ -4075,8 +4065,13 @@ empty: No tasks.
             "oxplow/extensions/review/lenses/by-status.yaml",
             LENS,
         );
+        write(
+            dir.path(),
+            "oxplow/extensions/review/bin/sync.sh",
+            "#!/bin/sh\n",
+        );
         let e = &project_extensions(dir.path())[0];
-        assert_eq!(e.collectors.len(), 1);
+        assert_eq!(e.collectors.len(), 1, "{:?}", e.errors);
         assert_eq!(e.collectors[0].entities[0].view, "v_review_pr");
         assert_eq!(e.errors.len(), 1, "{:?}", e.errors);
         assert!(
@@ -4095,6 +4090,7 @@ empty: No tasks.
             "oxplow/extensions/gh/extension.yaml",
             "name: gh\nsources:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
         );
+        write(dir.path(), "oxplow/extensions/gh/sync.sh", "#!/bin/sh\n");
         write(
             dir.path(),
             "oxplow/extensions/gh/lenses/all.yaml",
@@ -4769,32 +4765,40 @@ empty: No tasks.
     }
 
     #[test]
-    fn extensions_declare_measures_metrics_and_gauges() {
+    fn extensions_declare_measures_metrics_and_fact_collectors() {
         let manifest = [
             "measures:",
             "  - { key: acme.todo, title: TODOs }",
             "metrics:",
             "  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum }",
             "  - { use: oxplow.rust.unsafe_blocks }",
-            "gauges:",
-            "  - key: acme.missing",
-            "    emits: [acme.todo]",
-            "    compute: { runtime: starlark, entryFile: gauges/nope.star }",
-            "  - key: acme.shell",
-            "    emits: [acme.todo]",
-            "    compute: { runtime: exec, entryFile: gauges/todo.star }",
+            "collectors:",
+            "  - { id: acme.missing, runtime: starlark, entry: collectors/nope.star, facts: [acme.todo] }",
+            "  - { id: acme.shell, runtime: exec, entry: collectors/todo.sh, facts: [acme.todo] }",
+            "  - { id: acme.stray, runtime: starlark, entry: collectors/todo.star, facts: [acme.other] }",
             "",
         ]
         .join("\n");
-        let (_d, ext) = load_x(&[], &manifest);
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/x/extension.yaml",
+            &format!("name: x\n{manifest}"),
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/x/collectors/todo.star",
+            "def transform(input):\n    return {\"facts\": []}\n",
+        );
+        let ext = project_extensions(dir.path()).remove(0);
         assert_eq!(ext.measures.len(), 1, "{:?}", ext.errors);
         assert_eq!(ext.metrics.len(), 1, "{:?}", ext.errors);
-        // A missing script and an `exec` gauge are refused; so is a `use:`,
-        // which only a project can write.
-        assert!(ext.gauges.is_empty());
+        // A missing script and an extension's program recording facts are
+        // refused; so is a `use:`, which only a project can write.
+        assert!(ext.collectors.iter().all(|c| c.id == "acme.stray"));
         for (needle, also) in [
-            ("acme.missing", "gauges/nope.star"),
-            ("acme.shell", "exec"),
+            ("acme.missing", "collectors/nope.star"),
+            ("acme.shell", "sandboxed"),
             ("use: oxplow.rust.unsafe_blocks", "project.yaml"),
         ] {
             assert!(
@@ -4805,6 +4809,21 @@ empty: No tasks.
                 ext.errors
             );
         }
+        // A measure it doesn't declare is a warning, not an error.
+        assert!(
+            ext.warnings.iter().any(|w| w.contains("acme.other")),
+            "{:?}",
+            ext.warnings
+        );
+        // `gauges:` is retired, naming the migration.
+        let (_d, ext) = load_x(&[], "gauges:\n  - { key: acme.x }\n");
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("gauges:") && e.contains("oxplow plugin migrate x")),
+            "{:?}",
+            ext.errors
+        );
     }
 
     /// P4.9 (tsk494): `models:` entries with their `models/<name>.sql`
@@ -4915,27 +4934,27 @@ empty: No tasks.
     }
 
     #[test]
-    fn an_extension_gauge_runs_its_own_script() {
+    fn an_extension_fact_collector_reads_its_own_script() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             "oxplow/extensions/x/extension.yaml",
-            "name: x\ngauges:\n  - key: acme.todo_scan\n    emits: [acme.todo]\n    compute: { runtime: starlark, entryFile: gauges/todo.star }\n",
+            "name: x\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, trigger: { on: [snapshot.taken] }, facts: [acme.todo] }\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/x/gauges/todo.star",
-            "def run(ctx):\n    return []\n",
+            "oxplow/extensions/x/collectors/todo.star",
+            "def transform(input):\n    return {\"facts\": []}\n",
         );
         let ext = project_extensions(dir.path()).remove(0);
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        assert_eq!(ext.gauges.len(), 1);
+        assert_eq!(ext.collectors.len(), 1);
         assert_eq!(
-            read_extension_file(dir.path(), "x", "gauges/todo.star").as_deref(),
-            Some("def run(ctx):\n    return []\n")
+            read_extension_file(dir.path(), "x", "collectors/todo.star").as_deref(),
+            Some("def transform(input):\n    return {\"facts\": []}\n")
         );
         assert_eq!(
-            read_extension_file(dir.path(), "x", "gauges/none.star"),
+            read_extension_file(dir.path(), "x", "collectors/none.star"),
             None
         );
     }

@@ -9,7 +9,7 @@ for the user to install.
 > `"metrics"` → `complexity` / `function-length` / `parameter-count` findings),
 > the standalone **Code-quality page**, and the `run_code_quality_scan` /
 > `list_code_quality_scans` IPC+MCP commands are **gone**. Those signals now live
-> in the **metric substrate** as bundled, **language-agnostic** gauges
+> in the **metric substrate** as bundled, **language-agnostic** fact collectors
 > (`oxplow.high_complexity_fns`, `oxplow.long_functions`, `oxplow.fn_count` —
 > computed via the `code_metrics()` host builtin across all languages, tsk314 —
 > see [metrics.md](./metrics.md)). What remains here: the **duplication** scan
@@ -34,7 +34,7 @@ for the user to install.
 `oxplow-code-metrics` computes complexity / length / parameter-count /
 visibility / container-path per function. These are no longer fanned into a
 persisted code-quality scan; the change analyzer uses them (below) and the
-bundled gauges project them into the metric substrate.
+bundled fact collectors project them into the metric substrate.
 
 `FunctionMetrics.visibility` (`Public`/`Private`/`Unknown`, surfaced
 on the IPC as `"public"`/`"private"`/`"unknown"`) is a heuristic

@@ -1,12 +1,16 @@
-//! The metric runner (epic tsk213, P3): ties config-declared `metrics:` entries
-//! to the substrate. It seeds a `metric_definition` per resolved metric and runs
-//! each on its trigger — `on-snapshot` after a snapshot is captured,
-//! `on-effort-complete` when an effort closes, `manual` via MCP.
+//! The metric runner (epic tsk213, P3; P7.B3): ties config-declared
+//! `metrics:` entries to the substrate, and runs the **fact collectors** —
+//! the collectors that record facts (`collectors:` with `facts:`, the
+//! project's, an extension's, or a built-in one a `metrics: - use:`
+//! enables). The `collector.triggers` pump consumer hands it the ones an
+//! event triggers (`snapshot.taken`, `effort.finished`, …); `collector.sync`
+//! runs one by hand; `metric.rebuild` baselines them.
 //!
-//! A gauge collector (Starlark/jaq/exec, built from the entry's `compute:`) is
-//! run with a [`GaugeHost`] exposing the captured snapshot's file map, so a
-//! tree-derived gauge can call `files(glob)` / `ast_query(...)`. Each
-//! `MetricReport.sample` becomes a durable `metric_sample`.
+//! A fact collector's Starlark script runs with a [`TreeHost`] exposing the
+//! snapshot's file map, so it can call `files(glob)` / `ast_query(...)`; its
+//! input is `{report?, rows?, event?}` like every collector's. Each run
+//! records one capture of facts and its `collector_run` +
+//! `collector.synced@1`.
 //!
 //! Best-effort, like the other producers (`token_usage.rs` / `collection.rs`):
 //! a compute/write error is logged via `tracing::warn!`, never propagated, and
@@ -17,14 +21,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use oxplow_collect_plugin::{
-    builtin_metrics, Collector, CollectorInput, CollectorKind, GaugeHost, SandboxBudget,
-};
+use oxplow_collect_plugin::{builtin_metrics, CollectedFact, SandboxBudget, TreeHost};
+use oxplow_config::collectors::{CollectorRuntime, CollectorSpec, ReportInput, Trigger};
 use oxplow_config::{
-    global_config_dir, load_global_dimension_entries, load_global_gauge_entries,
-    load_global_measure_entries, load_global_metric_entries, resolve_dimensions, resolve_gauges,
-    resolve_measures, resolve_metrics, DimensionEntry, GaugeComputeConfig, GaugeEntry,
-    MeasureEntry, MetricEntry, OxplowConfig, ResolvedGauge, ResolvedSpec,
+    global_config_dir, load_global_dimension_entries, load_global_measure_entries,
+    load_global_metric_entries, resolve_dimensions, resolve_measures, resolve_metrics,
+    DimensionEntry, MeasureEntry, MetricEntry, OxplowConfig, ResolvedSpec,
 };
 use oxplow_db::{
     EffortStore, NewDimension, NewMeasure, NewMetricSpec, SnapshotStorage, SqliteEffortStore,
@@ -38,7 +40,6 @@ use specta::Type;
 use crate::events::OxplowEvent;
 use crate::producer_metrics::builtin_producer_metrics;
 use crate::snapshot_content::SnapshotContent;
-use oxplow_domain::snapshot::SnapshotTrigger;
 
 const DEFAULT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
@@ -52,7 +53,7 @@ const DEFAULT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 ///
 /// Gauges run detached on a blocking thread, so a generous ceiling costs nothing in
 /// latency; it exists only to catch a genuinely runaway script.
-const GAUGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+const FACT_COLLECTOR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// A gauge sweep over at least this many files is a WHOLE-TREE sweep (the baseline)
 /// rather than an ordinary per-commit delta, so it gets tracked as a visible
@@ -70,17 +71,112 @@ pub struct SweepReport {
     pub failed: Vec<String>,
 }
 
+/// A collector that records facts, as the fact engine runs it (P7.B3): one
+/// of the project's `collectors:`, an enabled extension's, or a built-in
+/// one (`oxplow.*`) that `metrics: - use:` enabled.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FactCollector {
+    /// Its id — the producer name its captures carry.
+    pub key: String,
+    /// `built-in`, `project` or the extension's name.
+    pub owner: String,
+    pub trigger: Trigger,
+    /// The measures its facts may land on; empty for a built-in (the
+    /// catalog alone governs those).
+    pub facts: Vec<String>,
+    pub runtime: CollectorRuntime,
+    /// Its script or program, relative to its owner's folder; `None` for a
+    /// built-in (the script is embedded).
+    pub entry: Option<String>,
+    pub report: Option<ReportInput>,
+    /// Read-only SQL handed over as `input.rows`, the trigger's anchors bound.
+    pub input: Option<String>,
+    /// With an `on:` trigger: the pump consumers that must have handled the
+    /// event first.
+    pub after: Vec<String>,
+}
+
+impl FactCollector {
+    /// The fact collector `spec` declares, or `None` when it writes
+    /// entities instead.
+    pub fn from_spec(owner: &str, spec: &CollectorSpec) -> Option<Self> {
+        (!spec.facts.is_empty()).then(|| FactCollector {
+            key: spec.id.clone(),
+            owner: owner.to_string(),
+            trigger: spec.trigger.clone(),
+            facts: spec.facts.clone(),
+            runtime: spec.runtime,
+            entry: spec.entry.clone(),
+            report: spec.report.clone(),
+            input: spec.input.clone(),
+            after: spec.after.clone(),
+        })
+    }
+
+    /// A bundled code metric's collector, run on every snapshot.
+    fn builtin(key: &str) -> Self {
+        FactCollector {
+            key: key.to_string(),
+            owner: oxplow_config::collectors::BUILT_IN.to_string(),
+            trigger: Trigger::On {
+                events: vec![SNAPSHOT_TAKEN.into()],
+                filter: Default::default(),
+            },
+            facts: Vec::new(),
+            runtime: CollectorRuntime::Starlark,
+            entry: None,
+            report: None,
+            input: None,
+            after: Vec::new(),
+        }
+    }
+
+    fn is_builtin(&self) -> bool {
+        self.owner == oxplow_config::collectors::BUILT_IN
+    }
+
+    /// Whether an event of `event_type` triggers it.
+    pub fn runs_on(&self, event_type: &str) -> bool {
+        matches!(&self.trigger, Trigger::On { events, .. } if events.iter().any(|e| e == event_type))
+    }
+
+    /// The scope its captures record (the metric catalog's vocabulary).
+    fn scope(&self) -> String {
+        match self.owner.as_str() {
+            o @ (oxplow_config::collectors::BUILT_IN | oxplow_config::collectors::PROJECT) => {
+                o.to_string()
+            }
+            ext => oxplow_config::extension_scope(ext),
+        }
+    }
+}
+
+/// The event that runs snapshot-triggered fact collectors.
+const SNAPSHOT_TAKEN: &str = "snapshot.taken";
+/// The event that runs effort-triggered fact collectors.
+const EFFORT_FINISHED: &str = "effort.finished";
+
+/// How one fact collector's run went.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FactRun {
+    /// It recorded this many facts.
+    Recorded(usize),
+    /// It failed (recorded as a failed capture).
+    Failed(String),
+    /// It had already run over this snapshot at its current logic.
+    Skipped,
+}
+
 /// Runs config-declared metrics into the substrate. Cheap to clone (a handle of
 /// leaf `Arc`s) — deliberately NOT holding `Arc<Services>`, to avoid a cycle.
-/// The four global-scope catalog blocks parsed from `<global_dir>/{metrics,
-/// gauges,measures,dimensions}/*.yaml`. Cached so the hot read paths
-/// (`resolved_specs`/`resolved_gauges`, run on every snapshot event) don't
+/// The global-scope catalog blocks parsed from `<global_dir>/{metrics,
+/// measures,dimensions}/*.yaml`. Cached so the hot read paths
+/// (`resolved_specs`, run on every snapshot event) don't
 /// re-read + re-parse these files each time (tsk17). Project config stays read
 /// fresh from the in-memory `RwLock` — only the *disk* loads are cached.
 #[derive(Default)]
 struct GlobalCatalog {
     metrics: Vec<MetricEntry>,
-    gauges: Vec<GaugeEntry>,
     measures: Vec<MeasureEntry>,
     dimensions: Vec<DimensionEntry>,
 }
@@ -123,6 +219,10 @@ pub struct MetricsService {
     /// Per state entity metric: when it was last captured and the value
     /// (tsk322), for the throttle and the unchanged-value skip.
     entity_captures: Arc<std::sync::Mutex<HashMap<String, (std::time::Instant, f64)>>>,
+    /// Where a fact collector's run is recorded (`collector_run` +
+    /// `collector.synced@1`) and its `input` read. `None` in tests that don't
+    /// wire it: the run still records its capture.
+    run_log: Option<crate::collector_runner::RunLog>,
 }
 
 /// How often a state entity metric may be re-captured.
@@ -158,7 +258,7 @@ pub struct MetricCatalogEntry {
 }
 
 /// The per-trigger context every gauge run is stamped with.
-struct GaugeRunContext {
+struct CollectorRunContext {
     stream_val: i64,
     thread_id: Option<i64>,
     trigger: &'static str,
@@ -176,6 +276,13 @@ struct GaugeRunContext {
     /// over the RECONSTRUCTED tree as-of the snapshot. Stamped verbatim onto
     /// the capture — the per-path fold branches on it.
     scan_kind: &'static str,
+    /// The event that triggered the run (`on:`), when one did: the script's
+    /// `input.event`, its anchors' `input` parameters, and the cause of the
+    /// run's `collector.synced@1`.
+    event: Option<Arc<oxplow_domain::StoredEvent>>,
+    /// Who ran it, as an event source (`collector.synced@1`'s): the
+    /// system, unless someone ran it by hand.
+    source: String,
 }
 
 /// Whether a workspace path is an extension's manifest
@@ -186,12 +293,13 @@ fn is_extension_manifest(path: &str) -> bool {
         .is_some_and(|(name, file)| !name.is_empty() && file == "extension.yaml")
 }
 
-/// Measures, metrics and gauges from enabled extensions, per extension.
+/// Measures, metrics, fact collectors and dimensions from enabled
+/// extensions, per extension.
 #[derive(Default)]
 struct ExtensionCatalog {
     measures: Vec<oxplow_config::ExtensionLayer<oxplow_config::MeasureEntry>>,
     metrics: Vec<oxplow_config::ExtensionLayer<oxplow_config::MetricEntry>>,
-    gauges: Vec<oxplow_config::ExtensionLayer<oxplow_config::GaugeEntry>>,
+    collectors: Vec<FactCollector>,
     dimensions: Vec<oxplow_config::ExtensionLayer<oxplow_config::DimensionEntry>>,
 }
 
@@ -231,7 +339,14 @@ impl MetricsService {
             snapshot_captures: None,
             extensions_cache: Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             entity_captures: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            run_log: None,
         }
+    }
+
+    /// Record fact collectors' runs and read their `input` through `log`.
+    pub fn with_run_log(mut self, log: crate::collector_runner::RunLog) -> Self {
+        self.run_log = Some(log);
+        self
     }
 
     /// Override the global config dir (test seam; default `global_config_dir()`).
@@ -254,7 +369,7 @@ impl MetricsService {
         self
     }
 
-    /// The program approvals project exec gauges are checked against.
+    /// The program approvals a project's exec collectors are checked against.
     pub fn with_approvals(mut self, approvals: Arc<crate::exec_consent::ApprovalStore>) -> Self {
         self.approvals = approvals;
         self
@@ -303,7 +418,6 @@ impl MetricsService {
             *guard = Some(match dir {
                 Some(d) => GlobalCatalog {
                     metrics: load_global_metric_entries(&d),
-                    gauges: load_global_gauge_entries(&d),
                     measures: load_global_measure_entries(&d),
                     dimensions: load_global_dimension_entries(&d),
                 },
@@ -336,28 +450,16 @@ impl MetricsService {
             if !e.metrics.is_empty() {
                 out.metrics.push((e.name.clone(), e.metrics));
             }
-            if !e.gauges.is_empty() {
-                out.gauges.push((e.name.clone(), e.gauges));
-            }
+            out.collectors.extend(
+                e.collectors
+                    .iter()
+                    .filter_map(|c| FactCollector::from_spec(&e.name, c)),
+            );
             if !e.dimensions.is_empty() {
                 out.dimensions.push((e.name.clone(), e.dimensions));
             }
         }
         out
-    }
-
-    /// Base dir a gauge's `compute.entryFile` / `report` resolves against:
-    /// `<global>/gauges` for a global-scope gauge, else the project dir. Falls
-    /// back to the project dir if no global dir is available. (An extension
-    /// gauge's script is read through the extension instead — see
-    /// [`gauge_script_text`] — and its `report` resolves against the project.)
-    fn script_base_dir(&self, gauge: &ResolvedGauge) -> PathBuf {
-        if gauge.scope == "global" {
-            if let Some(g) = self.effective_global_dir() {
-                return g.join("gauges");
-            }
-        }
-        self.project_dir.clone()
     }
 
     /// The active, resolved metric SPECS for this project (built-in ∪ global ∪
@@ -377,30 +479,65 @@ impl MetricsService {
         resolve_metrics(&builtin, &global, &ext.metrics, &project)
     }
 
-    /// The active, resolved GAUGES (fact producers) for this project: config
-    /// `gauges:` (global ∪ project, always active once declared) ∪ the built-in
-    /// gauges whose metric is `use:`-enabled in this project. This is what the
-    /// run paths execute.
-    fn resolved_gauges(&self) -> Vec<ResolvedGauge> {
-        let project = self
-            .config
-            .read()
-            .map(|c| c.gauges.clone())
-            .unwrap_or_default();
-        let global = self.with_global_catalog(|g| g.gauges.clone());
-        let ext = self.extension_catalog();
-        let mut out = resolve_gauges(&global, &ext.gauges, &project);
-        // Built-in gauges run only when their metric is enabled (`metrics: use:`)
-        // AND not disabled by a marker — a disabled gauge must not compute.
+    /// `collectors` without the ones that already ran for `event` (a
+    /// redelivered event runs nothing again).
+    async fn not_yet_run(
+        &self,
+        collectors: Vec<FactCollector>,
+        event: Option<&oxplow_domain::StoredEvent>,
+    ) -> Vec<FactCollector> {
+        let (Some(event), Some(log)) = (event, self.run_log.as_ref()) else {
+            return collectors;
+        };
+        let mut out = Vec::new();
+        for c in collectors {
+            if !log.ran_for(&c.owner, &c.key, event.seq).await {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    /// The fact collectors this project runs (P7.B3): the project's own
+    /// (`collectors:` with `facts:`), enabled extensions', and the built-in
+    /// ones whose metric `metrics: - use:` enables (and no marker disables).
+    /// An id two owners declare runs once — the project's over an
+    /// extension's over a built-in — with a warning.
+    pub fn fact_collectors(&self) -> Vec<FactCollector> {
         let enabled: std::collections::HashSet<String> = self
             .resolved_specs()
             .into_iter()
             .filter(|s| s.scope == "built-in" && s.enabled)
             .map(|s| s.key)
             .collect();
-        for m in builtin_metrics() {
-            if enabled.contains(m.key) {
-                out.push(builtin_gauge(m.key, m.trigger));
+        let builtin: Vec<FactCollector> = builtin_metrics()
+            .iter()
+            .filter(|m| enabled.contains(m.key))
+            .map(|m| FactCollector::builtin(m.key))
+            .collect();
+        let project: Vec<FactCollector> = self
+            .config
+            .read()
+            .map(|c| {
+                c.collectors
+                    .iter()
+                    .filter_map(|s| FactCollector::from_spec(oxplow_config::collectors::PROJECT, s))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut out: Vec<FactCollector> = Vec::new();
+        for c in builtin
+            .into_iter()
+            .chain(self.extension_catalog().collectors)
+            .chain(project)
+        {
+            match out.iter().position(|o| o.key == c.key) {
+                Some(i) => {
+                    tracing::warn!(id = %c.key, kept = %c.owner, dropped = %out[i].owner,
+                        "two owners declare this collector id; the later one runs");
+                    out[i] = c;
+                }
+                None => out.push(c),
             }
         }
         out
@@ -528,7 +665,7 @@ impl MetricsService {
         // marker in config, in which case the row is pruned (so spec-driven reads
         // go empty and, for producers, `measure_has_active_spec` closes the
         // collection gate). Built-in gauges keep their spec seeded when merely
-        // un-`use:`d — the gauge simply doesn't RUN (gated in `resolved_gauges`) —
+        // un-`use:`d — its collector simply doesn't RUN (gated in `fact_collectors`) —
         // so a disable is only ever an explicit marker.
         // A spec whose aggregation the engine cannot compute must not seed
         // (tsk108): the V44 CHECK reserves `p95`/`count_distinct` in the
@@ -908,10 +1045,10 @@ impl MetricsService {
         }
     }
 
-    /// A new gauge-backed metric, as a template (epic tsk12, E; tsk391): a
-    /// starter Starlark gauge script plus the **trio** that wires it up —
-    /// a `measures:` entry (`<key>.count`, the fact type the gauge emits), a
-    /// `gauges:` entry (`<key>`, the producer) and a `metrics:` spec
+    /// A new collector-backed metric, as a template (epic tsk12, E; tsk391):
+    /// a starter Starlark collector script plus the **trio** that wires it
+    /// up — a `measures:` entry (`<key>.count`, the fact type it records), a
+    /// `collectors:` entry (`<key>`, the producer) and a `metrics:` spec
     /// (`<key>`, a `sum` over that measure) as a `.oxplow/project.yaml`
     /// snippet. Writes nothing: the agent writes the script and merges the
     /// snippet with its own file tools, so the write guard, filing and its
@@ -937,7 +1074,7 @@ impl MetricsService {
                 .read()
                 .map_err(|_| "config lock poisoned".to_string())?;
             if cfg.metrics.iter().any(|e| e.key.as_deref() == Some(key))
-                || cfg.gauges.iter().any(|e| e.key.as_deref() == Some(key))
+                || cfg.collectors.iter().any(|c| c.id == key)
             {
                 return Err(format!(
                     "metric `{key}` already exists in .oxplow/project.yaml"
@@ -951,8 +1088,8 @@ impl MetricsService {
         let slug = slugify(key);
         let measure_key = format!("{key}.count");
         let title = title.filter(|t| !t.is_empty());
-        let script = starter_gauge_script(key, &measure_key, &glob, language.as_deref());
-        let script_path = format!("oxplow/gauges/{slug}.star");
+        let script = starter_collector_script(key, &measure_key, &glob, language.as_deref());
+        let script_path = format!("oxplow/collectors/{slug}.star");
 
         // The `<key>.count` measure the gauge emits (per-file counts). A scaffolded
         // gauge is snapshot-triggered and emits per-FILE facts over a delta, so it
@@ -969,20 +1106,25 @@ impl MetricsService {
             component_role: None,
             description: None,
         };
-        // The gauge (producer) — emits `<key>.count` facts on every snapshot.
-        let gauge = GaugeEntry {
-            key: Some(key.to_string()),
-            title: title.clone(),
-            trigger: Some("on-snapshot".to_string()),
-            emits: vec![measure_key.clone()],
-            compute: Some(GaugeComputeConfig {
-                runtime: "starlark".to_string(),
-                input: None,
-                entry_file: Some(script_path.clone()),
-                args: vec![],
-                report: None,
-            }),
-        };
+        // The collector (producer) — records `<key>.count` facts on every
+        // snapshot.
+        let mut collector = serde_yaml::Mapping::new();
+        collector.insert("id".into(), key.into());
+        if let Some(t) = &title {
+            collector.insert("doc".into(), t.as_str().into());
+        }
+        collector.insert("runtime".into(), "starlark".into());
+        collector.insert("entry".into(), script_path.as_str().into());
+        let mut trigger = serde_yaml::Mapping::new();
+        trigger.insert(
+            "on".into(),
+            serde_yaml::Value::Sequence(vec![SNAPSHOT_TAKEN.into()]),
+        );
+        collector.insert("trigger".into(), serde_yaml::Value::Mapping(trigger));
+        collector.insert(
+            "facts".into(),
+            serde_yaml::Value::Sequence(vec![measure_key.as_str().into()]),
+        );
         // The metric (spec) — a `sum` over the measure's facts.
         let metric = MetricEntry {
             key: Some(key.to_string()),
@@ -996,7 +1138,11 @@ impl MetricsService {
 
         Ok(MetricScaffold {
             key: key.to_string(),
-            project_yaml: oxplow_config::entries_yaml(&[measure], &[gauge], &[metric]),
+            project_yaml: oxplow_config::entries_yaml(
+                &[measure],
+                &[serde_yaml::Value::Mapping(collector)],
+                &[metric],
+            ),
             script_path,
             script,
         })
@@ -1011,9 +1157,9 @@ impl MetricsService {
     /// from 0 over months instead of reporting the repo (tsk41). The baseline
     /// is a `scan_kind = 'full'` capture over the RECONSTRUCTED tree of an
     /// ordinary snapshot (tsk71) — the on-snapshot sweep drains
-    /// [`Self::gauges_needing_baseline`] on the next snapshot that lands.
+    /// [`Self::collectors_needing_baseline`] on the next snapshot that lands.
     pub async fn needs_tree_baseline(&self, stream_id: i64) -> bool {
-        !self.gauges_needing_baseline(stream_id).await.is_empty()
+        !self.collectors_needing_baseline(stream_id).await.is_empty()
     }
 
     /// Enabled on-snapshot gauges that have not been baselined at their CURRENT logic —
@@ -1025,14 +1171,14 @@ impl MetricsService {
     /// the measure. A gauge is un-baselined when it has no completed
     /// `scan_kind = 'full'` capture at its current fingerprint (tsk71): that one
     /// check covers both "never scanned the whole tree" and "script changed since
-    /// the last baseline" (the old `gauge_is_stale` criterion — a full capture at
+    /// the last baseline" (the old `collector_is_stale` criterion — a full capture at
     /// stale logic carries the old fingerprint and doesn't match).
     ///
     /// This set is the pending-baseline QUEUE: the on-snapshot sweep drains it by
     /// running these gauges `full` over the next snapshot that lands, so a newly
     /// added or edited gauge baselines on the next ordinary snapshot — no
     /// fabricated full-tree snapshot (which used to pollute effort attribution).
-    pub async fn gauges_needing_baseline(&self, stream_id: i64) -> Vec<String> {
+    pub async fn collectors_needing_baseline(&self, stream_id: i64) -> Vec<String> {
         let Some(facts) = self.fact_store.as_ref() else {
             return Vec::new();
         };
@@ -1047,14 +1193,14 @@ impl MetricsService {
             return Vec::new();
         }
         let mut out = Vec::new();
-        for gauge in self.resolved_gauges() {
-            if gauge.trigger != "on-snapshot" {
+        for gauge in self.fact_collectors() {
+            if !gauge.runs_on(SNAPSHOT_TAKEN) {
                 continue;
             }
             // Fingerprint-scoped when the script is hashable; any-version
-            // otherwise (an unfingerprintable gauge can't detect staleness,
-            // so one full capture ever is the best we can require).
-            let fp = gauge_fingerprint(&gauge, &self.script_base_dir(&gauge), &self.project_dir);
+            // otherwise (an unfingerprintable collector can't detect
+            // staleness, so one full capture ever is the best we can require).
+            let fp = collector_fingerprint(&gauge, &self.project_dir);
             let baselined = facts
                 .has_full_capture(&gauge.key, stream_id, fp.as_deref())
                 .await
@@ -1072,13 +1218,11 @@ impl MetricsService {
     /// `false` when it has never run (the empty-fold check covers that) or when its
     /// script can't be fingerprinted (better to skip than to re-baseline the whole
     /// tree on every boot over an unreadable file).
-    pub async fn gauge_is_stale(&self, gauge: &ResolvedGauge, stream_id: i64) -> bool {
+    pub async fn collector_is_stale(&self, gauge: &FactCollector, stream_id: i64) -> bool {
         let Some(facts) = self.fact_store.as_ref() else {
             return false;
         };
-        let Some(current) =
-            gauge_fingerprint(gauge, &self.script_base_dir(gauge), &self.project_dir)
-        else {
+        let Some(current) = collector_fingerprint(gauge, &self.project_dir) else {
             return false;
         };
         let recorded = match facts.latest_producer_version(&gauge.key, stream_id).await {
@@ -1127,7 +1271,7 @@ impl MetricsService {
             .unwrap_or(1);
 
         if !force {
-            let pending = self.gauges_needing_baseline(stream_val).await;
+            let pending = self.collectors_needing_baseline(stream_val).await;
             if pending.is_empty() {
                 // Nothing to baseline — but still sweep out captures an
                 // EARLIER baseline made dead weight (tsk75): the post-sweep
@@ -1190,20 +1334,25 @@ impl MetricsService {
         };
 
         let sweep = self
-            .run_snapshot_gauges_with(oxplow_domain::StreamId::new(stream_val), snapshot_id, force)
+            .run_snapshot_collectors(
+                oxplow_domain::StreamId::new(stream_val),
+                snapshot_id,
+                force,
+                None,
+            )
             .await;
         Ok(BaselineReport {
             ran: true,
             snapshot_id: Some(snapshot_id),
-            gauges_run: sweep.ran,
+            collectors_run: sweep.ran,
             failed: sweep.failed,
         })
     }
 
-    /// Event loop: seed once, then reseed on `ConfigChanged` and run
-    /// on-snapshot gauges when a snapshot batch lands. Spawned at boot (see
-    /// `boot.rs`). On-effort-complete gauges run from the `effort.gauges`
-    /// pump consumer (`effort_reactors`).
+    /// Event loop: seed once, then reseed on `ConfigChanged` or an extension
+    /// manifest change, and re-capture state entity metrics when their rows
+    /// may have moved. Spawned at boot (see `boot.rs`). Fact collectors run
+    /// from the `collector.triggers` pump consumer.
     pub async fn run(self, mut rx: tokio::sync::broadcast::Receiver<OxplowEvent>) {
         self.seed_catalog().await;
         self.capture_entity_states(true).await;
@@ -1231,23 +1380,10 @@ impl MetricsService {
                     self.capture_entity_states(true).await;
                 }
                 // An extension's manifest can add or drop measures, metrics
-                // and gauges.
+                // and collectors.
                 Ok(OxplowEvent::WorkspaceChanged { path, .. }) if is_extension_manifest(&path) => {
                     self.seed_catalog().await;
                     self.capture_entity_states(true).await;
-                }
-                Ok(OxplowEvent::SnapshotTaken {
-                    stream_id,
-                    snapshot_id,
-                    trigger,
-                    ..
-                }) => {
-                    // A HEAD re-stamp with no content change can't move a
-                    // tree metric — skip it to avoid recompute storms.
-                    if trigger == SnapshotTrigger::HeadMoved {
-                        continue;
-                    }
-                    self.run_snapshot_gauges(stream_id, snapshot_id).await;
                 }
                 Ok(_) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
@@ -1343,59 +1479,56 @@ impl MetricsService {
     ///
     /// Two-phase (tsk71): gauges already baselined run a `delta` scan over the
     /// snapshot's own file rows (the cheap incremental rescan); gauges in the
-    /// pending-baseline queue ([`Self::gauges_needing_baseline`]) run a `full`
+    /// pending-baseline queue ([`Self::collectors_needing_baseline`]) run a `full`
     /// scan over the RECONSTRUCTED tree as-of this snapshot and record
     /// `scan_kind = 'full'` captures anchored to it. So a baseline needs no
     /// fabricated full-tree snapshot — it piggybacks on whatever ordinary
     /// snapshot lands next.
-    pub(crate) async fn run_snapshot_gauges(
-        &self,
-        stream_id: StreamId,
-        snapshot_id: i64,
-    ) -> SweepReport {
-        self.run_snapshot_gauges_with(stream_id, snapshot_id, false)
-            .await
-    }
-
-    /// [`Self::run_snapshot_gauges`] with a `force_full` override: treat EVERY
+    /// [`Self::run_snapshot_collectors`] with a `force_full` override: treat EVERY
     /// on-snapshot gauge as needing a baseline (the `metric.rebuild { force }`
     /// escape hatch). The per-snapshot idempotency guard still applies, so a
     /// repeated force over the same unchanged snapshot doesn't re-scan.
-    pub(crate) async fn run_snapshot_gauges_with(
+    pub(crate) async fn run_snapshot_collectors(
         &self,
         stream_id: StreamId,
         snapshot_id: i64,
         force_full: bool,
+        event: Option<Arc<oxplow_domain::StoredEvent>>,
     ) -> SweepReport {
-        let gauges: Vec<ResolvedGauge> = self
-            .resolved_gauges()
+        let gauges: Vec<FactCollector> = self
+            .fact_collectors()
             .into_iter()
-            .filter(|g| g.trigger == "on-snapshot")
+            .filter(|g| g.runs_on(SNAPSHOT_TAKEN))
+            .filter(|g| {
+                event
+                    .as_ref()
+                    .is_none_or(|e| crate::collector_triggers::matches_where(&g.trigger, e))
+            })
             .collect();
+        let gauges = self.not_yet_run(gauges, event.as_deref()).await;
         if gauges.is_empty() {
             return SweepReport::default();
         }
         let needing: std::collections::HashSet<String> = if force_full {
             gauges.iter().map(|g| g.key.clone()).collect()
         } else {
-            self.gauges_needing_baseline(stream_id.value())
+            self.collectors_needing_baseline(stream_id.value())
                 .await
                 .into_iter()
                 .collect()
         };
-        let (full_gauges, delta_gauges): (Vec<ResolvedGauge>, Vec<ResolvedGauge>) =
+        let (full_gauges, delta_gauges): (Vec<FactCollector>, Vec<FactCollector>) =
             gauges.into_iter().partition(|g| needing.contains(&g.key));
 
         let mut report = SweepReport::default();
         if !delta_gauges.is_empty() {
             // The snapshot's own rows — the incremental rescan corpus.
             let files = Arc::new(self.build_file_map(snapshot_id).await);
-            let ctx = self
-                .snapshot_context(stream_id.value(), None, "on-snapshot", snapshot_id)
+            let mut ctx = self
+                .snapshot_context(stream_id.value(), None, SNAPSHOT_TAKEN, snapshot_id)
                 .await;
-            let r = self
-                .run_gauge_sweep(&delta_gauges, &ctx, files, stream_id.value())
-                .await;
+            ctx.event = event.clone();
+            let r = self.run_collector_sweep(&delta_gauges, &ctx, files).await;
             report.ran += r.ran;
             report.failed.extend(r.failed);
         }
@@ -1404,12 +1537,11 @@ impl MetricsService {
             // corpus. Built only when something actually needs baselining.
             let files = Arc::new(self.build_full_file_map(snapshot_id).await);
             let mut ctx = self
-                .snapshot_context(stream_id.value(), None, "on-snapshot", snapshot_id)
+                .snapshot_context(stream_id.value(), None, SNAPSHOT_TAKEN, snapshot_id)
                 .await;
             ctx.scan_kind = "full";
-            let r = self
-                .run_gauge_sweep(&full_gauges, &ctx, files, stream_id.value())
-                .await;
+            ctx.event = event.clone();
+            let r = self.run_collector_sweep(&full_gauges, &ctx, files).await;
             let full_ok = r.failed.is_empty();
             report.ran += r.ran;
             report.failed.extend(r.failed);
@@ -1438,28 +1570,27 @@ impl MetricsService {
     }
 
     /// Run `gauges` over one file map, reporting progress when it's a whole-tree
-    /// sweep. Split out from [`Self::run_snapshot_gauges`] so the tracking is
+    /// sweep. Split out from [`Self::run_snapshot_collectors`] so the tracking is
     /// exercisable without standing up real snapshot blobs.
-    async fn run_gauge_sweep(
+    async fn run_collector_sweep(
         &self,
-        gauges: &[ResolvedGauge],
-        ctx: &GaugeRunContext,
+        gauges: &[FactCollector],
+        ctx: &CollectorRunContext,
         files: Arc<HashMap<String, String>>,
-        stream_val: i64,
     ) -> SweepReport {
         // Idempotency: skip a gauge that already has a `done` capture for THIS
         // snapshot at its current fingerprint (tsk50). Otherwise a re-delivered
         // snapshot event — or the direct baseline run PLUS the event loop reacting to
         // the same snapshot — would tree-sitter-parse the whole tree twice (minutes of
-        // CPU). The manual `metric.run` path doesn't come through here, so an explicit
+        // CPU). The manual `collector.sync` path doesn't come through here, so an explicit
         // "run now" still runs.
-        let mut to_run: Vec<&ResolvedGauge> = Vec::new();
+        let mut to_run: Vec<&FactCollector> = Vec::new();
         for g in gauges {
             let already = match (ctx.snapshot_id, self.fact_store.as_ref()) {
                 (Some(snap), Some(facts)) => {
-                    let fp = gauge_fingerprint(g, &self.script_base_dir(g), &self.project_dir);
+                    let fp = collector_fingerprint(g, &self.project_dir);
                     facts
-                        .gauge_done_for_snapshot(&g.key, snap, fp.as_deref(), ctx.scan_kind)
+                        .collector_done_for_snapshot(&g.key, snap, fp.as_deref(), ctx.scan_kind)
                         .await
                         .unwrap_or(false)
                 }
@@ -1508,10 +1639,7 @@ impl MetricsService {
                     },
                 );
             }
-            // `run_one_gauge` returns 0 both for "found nothing" and "failed", so ask
-            // the substrate which it was rather than guessing.
-            self.run_one_gauge(g, ctx, files.clone()).await;
-            if self.last_run_failed(&g.key, stream_val).await {
+            if let FactRun::Failed(_) = self.run_one_collector(g, ctx, files.clone()).await {
                 failed.push(g.key.clone());
             }
         }
@@ -1543,30 +1671,26 @@ impl MetricsService {
         }
     }
 
-    /// Whether this producer's LATEST capture is a failure — i.e. the gauge we just
-    /// ran errored. `run_one_gauge` can't tell us directly (it returns 0 for both
-    /// "found nothing" and "blew up"), but the failure capture (tsk47) can.
-    async fn last_run_failed(&self, producer: &str, stream_id: i64) -> bool {
-        let Some(facts) = self.fact_store.as_ref() else {
-            return false;
-        };
-        facts
-            .latest_capture_status(producer, stream_id)
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|s| s == "failed")
-    }
-
-    /// Run every enabled `on-effort-complete` gauge when an effort closes. The
-    /// file map comes from the effort's end snapshot (the worktree as it stood
-    /// at close); samples default their subject to the effort.
-    pub async fn run_effort_complete_gauges(&self, thread_id: &ThreadId, effort_id: &EffortId) {
-        let gauges: Vec<ResolvedGauge> = self
-            .resolved_gauges()
+    /// Run the fact collectors an `effort.finished` triggers, over the
+    /// effort's end snapshot (the worktree as it stood at close), stamped
+    /// with the effort.
+    pub async fn run_effort_collectors(
+        &self,
+        thread_id: &ThreadId,
+        effort_id: &EffortId,
+        event: Option<Arc<oxplow_domain::StoredEvent>>,
+    ) {
+        let gauges: Vec<FactCollector> = self
+            .fact_collectors()
             .into_iter()
-            .filter(|g| g.trigger == "on-effort-complete")
+            .filter(|g| g.runs_on(EFFORT_FINISHED))
+            .filter(|g| {
+                event
+                    .as_ref()
+                    .is_none_or(|e| crate::collector_triggers::matches_where(&g.trigger, e))
+            })
             .collect();
+        let gauges = self.not_yet_run(gauges, event.as_deref()).await;
         if gauges.is_empty() {
             return;
         }
@@ -1586,32 +1710,75 @@ impl MetricsService {
             .snapshot_context(
                 stream_val,
                 Some(thread_id.value()),
-                "on-effort-complete",
+                EFFORT_FINISHED,
                 snapshot_id.unwrap_or(0),
             )
             .await;
+        ctx.event = event;
         // This trigger KNOWS the producing effort — stamp it so the capture is
         // attributable via `captures_for_effort` (tsk43; the pre-arc effort
         // subject default was removed without a replacement).
         ctx.effort_id = Some(effort_id.value());
         for g in &gauges {
-            self.run_one_gauge(g, &ctx, files.clone()).await;
+            self.run_one_collector(g, &ctx, files.clone()).await;
         }
     }
 
-    /// Manually run one configured gauge by key, against the stream's latest
-    /// snapshot. Returns the number of samples recorded, or an error string.
-    /// (The `metric.run` command calls this.)
-    pub async fn run_metric_by_key(
+    /// Run the fact collectors an event of any other type triggers, over
+    /// the latest snapshot of the event's stream (the primary when it has
+    /// none).
+    pub async fn run_event_collectors(&self, event: Arc<oxplow_domain::StoredEvent>) {
+        let event_type = event.envelope.event_type.clone();
+        let collectors: Vec<FactCollector> = self
+            .fact_collectors()
+            .into_iter()
+            .filter(|c| {
+                c.runs_on(&event_type)
+                    && crate::collector_triggers::matches_where(&c.trigger, &event)
+            })
+            .collect();
+        let collectors = self.not_yet_run(collectors, Some(&event)).await;
+        if collectors.is_empty() {
+            return;
+        }
+        let stream_val = event.envelope.anchors.stream_id.map_or(1, |s| s.value());
+        let snapshot_id = self
+            .snapshot_store
+            .latest_snapshot_id_for_stream(StreamId::new(stream_val))
+            .await
+            .ok()
+            .flatten();
+        let files = Arc::new(match snapshot_id {
+            Some(sid) => self.build_file_map(sid).await,
+            None => HashMap::new(),
+        });
+        let mut ctx = self
+            .snapshot_context(stream_val, None, "on", snapshot_id.unwrap_or(0))
+            .await;
+        ctx.thread_id = event.envelope.anchors.thread_id.map(|t| t.value());
+        ctx.effort_id = event.envelope.anchors.effort_id.map(|e| e.value());
+        ctx.event = Some(event);
+        for c in &collectors {
+            self.run_one_collector(c, &ctx, files.clone()).await;
+        }
+    }
+
+    /// Run one fact collector now, by owner and id, over the stream's latest
+    /// snapshot (the `collector.sync` command). Returns the facts recorded,
+    /// or why it couldn't run (unknown, an unapproved program, a missing
+    /// script) or failed — never a silent zero.
+    pub async fn run_collector_by_key(
         &self,
+        owner: &str,
         key: &str,
         stream: Option<StreamId>,
+        source: &str,
     ) -> Result<usize, String> {
         let metric = self
-            .resolved_gauges()
+            .fact_collectors()
             .into_iter()
-            .find(|m| m.key == key)
-            .ok_or_else(|| format!("no configured metric with key \"{key}\""))?;
+            .find(|m| m.owner == owner && m.key == key)
+            .ok_or_else(|| format!("no fact collector `{owner}/{key}`"))?;
         let stream_val = match stream {
             Some(s) => s.value(),
             None => 1, // primary stream default
@@ -1628,13 +1795,23 @@ impl MetricsService {
         });
         // Asked for explicitly: say why it can't run (an unapproved program,
         // a missing script) instead of quietly recording nothing.
-        let collector = self.gauge_collector(&metric)?;
-        let ctx = self
+        let mut ctx = self
             .snapshot_context(stream_val, None, "manual", snapshot_id.unwrap_or(0))
             .await;
-        Ok(self
-            .run_gauge_collector(&metric, collector, &ctx, files)
-            .await)
+        ctx.source = source.to_string();
+        let runner = match self.fact_runner(&metric) {
+            Ok(r) => r,
+            Err(e) => {
+                self.log_run(&metric, &ctx, &FactRun::Failed(e.clone()), 0)
+                    .await;
+                return Err(e);
+            }
+        };
+        match self.run_fact_runner(&metric, runner, &ctx, files).await {
+            FactRun::Recorded(n) => Ok(n),
+            FactRun::Failed(e) => Err(e),
+            FactRun::Skipped => Ok(0),
+        }
     }
 
     /// Build the snapshot file map (repo-relative path → UTF-8 content) for
@@ -1706,7 +1883,7 @@ impl MetricsService {
         thread_id: Option<i64>,
         trigger: &'static str,
         snapshot_id: i64,
-    ) -> GaugeRunContext {
+    ) -> CollectorRunContext {
         let version = if snapshot_id > 0 {
             crate::file_ref_version::resolve(
                 &self.snapshot_store,
@@ -1719,7 +1896,7 @@ impl MetricsService {
         } else {
             None
         };
-        GaugeRunContext {
+        CollectorRunContext {
             stream_val,
             thread_id,
             trigger,
@@ -1729,109 +1906,215 @@ impl MetricsService {
             branch: self.current_branch().await,
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         }
     }
 
-    /// The collector a gauge runs: the embedded script for a built-in, else
-    /// its `compute:` block (which refuses an unapproved project `exec`).
-    fn gauge_collector(&self, gauge: &ResolvedGauge) -> Result<Collector, String> {
-        if gauge.scope == "built-in" {
-            return builtin_collector(&gauge.key)
-                .ok_or_else(|| format!("unknown built-in gauge `{}`", gauge.key));
-        }
-        // A global gauge's script lives under the global config dir, not the
-        // project; project gauges resolve against the project dir.
-        compute_to_collector(
-            gauge,
-            &self.script_base_dir(gauge),
-            &self.project_dir,
-            &self.approvals,
-        )
+    /// What runs `c`: its embedded script for a built-in, its script read
+    /// from its extension or the project, or — for a project's `exec`
+    /// collector a person approved on this machine — its program.
+    fn fact_runner(&self, c: &FactCollector) -> Result<FactRunner, String> {
+        let script = || {
+            collector_script_text(c, &self.project_dir).ok_or_else(|| {
+                format!(
+                    "collector `{}`: entry `{}` can't be read",
+                    c.key,
+                    c.entry.as_deref().unwrap_or_default()
+                )
+            })
+        };
+        Ok(match c.runtime {
+            CollectorRuntime::Starlark => FactRunner::Starlark(script()?),
+            CollectorRuntime::Jaq => FactRunner::Jaq(script()?),
+            CollectorRuntime::Exec => {
+                // A project collector's program comes from the repo: it runs
+                // only once a person approved it on this machine (tsk331).
+                use crate::exec_consent::{may_run, needs_approval, ProgramKind};
+                let entry = c.entry.as_deref().unwrap_or_default();
+                if !may_run(
+                    &self.approvals,
+                    &self.project_dir,
+                    ProgramKind::Collector,
+                    &c.key,
+                    entry,
+                    &[],
+                ) {
+                    return Err(needs_approval(ProgramKind::Collector, &c.key, entry));
+                }
+                FactRunner::Exec(vec![self
+                    .project_dir
+                    .join(entry)
+                    .to_string_lossy()
+                    .into_owned()])
+            }
+            CollectorRuntime::Read => {
+                return Err(format!(
+                    "collector `{}` reads a provider; it records no facts",
+                    c.key
+                ))
+            }
+        })
     }
 
-    /// Run one gauge: build its collector, execute under the sandbox with the
-    /// file-map host, and record a run + a sample per `MetricReport.sample`.
-    /// Best-effort — errors are logged and swallowed. Returns the sample count.
-    async fn run_one_gauge(
+    /// Run one fact collector: build its runner and run it with the
+    /// file-map host. Best-effort — a collector that can't run (no consent,
+    /// no script) is logged and recorded as failed. How it went.
+    async fn run_one_collector(
         &self,
-        gauge: &ResolvedGauge,
-        ctx: &GaugeRunContext,
+        gauge: &FactCollector,
+        ctx: &CollectorRunContext,
         files: Arc<HashMap<String, String>>,
-    ) -> usize {
-        match self.gauge_collector(gauge) {
-            Ok(collector) => self.run_gauge_collector(gauge, collector, ctx, files).await,
+    ) -> FactRun {
+        match self.fact_runner(gauge) {
+            Ok(runner) => self.run_fact_runner(gauge, runner, ctx, files).await,
             Err(e) => {
-                tracing::warn!(key = %gauge.key, error = %e, "gauge: not run");
-                0
+                tracing::warn!(key = %gauge.key, error = %e, "fact collector: not run");
+                self.log_run(gauge, ctx, &FactRun::Failed(e.clone()), 0)
+                    .await;
+                FactRun::Failed(e)
             }
         }
     }
 
-    /// [`Self::run_one_gauge`] with its collector already built.
-    async fn run_gauge_collector(
+    /// [`Self::run_one_collector`] with its runner already built: its input
+    /// (`{report?, rows?, event?}`), the run under the sandbox budget, its
+    /// facts recorded as one capture (or a failed capture), and its
+    /// `collector_run` + `collector.synced@1`.
+    async fn run_fact_runner(
         &self,
-        gauge: &ResolvedGauge,
-        collector: Collector,
-        ctx: &GaugeRunContext,
+        gauge: &FactCollector,
+        runner: FactRunner,
+        ctx: &CollectorRunContext,
         files: Arc<HashMap<String, String>>,
-    ) -> usize {
-        let source = gauge_source(gauge, &collector);
-        // The report-derived content (if any); tree-derived gauges ignore it.
-        let content = match &gauge.compute.report {
-            Some(rel) => {
-                std::fs::read_to_string(self.script_base_dir(gauge).join(rel)).unwrap_or_default()
-            }
-            None => String::new(),
-        };
-        // A tree gauge scans the WHOLE tree (hundreds of files, tree-sitter each) —
-        // the 5s default was sized for report parsers over a single small file and is
-        // nowhere near enough. Under it, the broad-query gauges silently timed out on
-        // every full-tree run: `oxplow.ts.console_calls` and `oxplow.ts.ts_ignore` had
-        // produced ZERO facts since the project was indexed, while the repo held 137
-        // console calls (tsk47). Gauges run detached under `spawn_blocking`, so a
-        // generous ceiling costs nothing and still catches a runaway script.
-        let collector = collector.with_budget(SandboxBudget::with_timeout(GAUGE_TIMEOUT));
-        let host = GaugeHost::from_shared(files);
+    ) -> FactRun {
+        let source = collector_source(gauge);
         let started = std::time::Instant::now();
-        let report =
-            match tokio::task::spawn_blocking(move || collector.run_gauge(&content, host)).await {
-                Ok(Ok(out)) => out,
-                Ok(Err(e)) => {
-                    // NOT a silent warn. A gauge that fails leaves its metric reading
-                    // stale-or-empty forever, and that is exactly how two built-in
-                    // metrics went unnoticed for weeks. Record the failure durably so
-                    // it can be seen and reasoned about.
-                    self.record_gauge_failure(gauge, ctx, &source, &e.to_string())
-                        .await;
-                    tracing::error!(
-                        key = %gauge.key,
-                        error = %e,
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        "gauge: compute FAILED — its metric will read stale or empty",
-                    );
-                    return 0;
-                }
-                Err(e) => {
-                    tracing::error!(key = %gauge.key, error = %e, "gauge: join failed");
-                    return 0;
-                }
-            };
-        tracing::debug!(
-            key = %gauge.key,
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "gauge: complete",
-        );
-        let gauge_facts = match report {
-            oxplow_collect_plugin::CollectorOutput::Gauge(r) => r.facts,
-            _ => return 0,
+        let outcome = match self.fact_input(gauge, ctx).await {
+            Err(e) => Err(e),
+            Ok(input) => {
+                // A tree collector scans the WHOLE tree (hundreds of files,
+                // tree-sitter each): the 5 s default sized for report parsers
+                // silently timed out the broad-query ones on every full-tree
+                // run (tsk47). They run detached under `spawn_blocking`, so a
+                // generous ceiling costs nothing and still catches a runaway.
+                let host = TreeHost::from_shared(files);
+                tokio::task::spawn_blocking(move || runner.run(&input, host))
+                    .await
+                    .unwrap_or_else(|e| Err(format!("task failed: {e}")))
+            }
         };
+        let run = match outcome {
+            Ok(gauge_facts) => {
+                tracing::debug!(
+                    key = %gauge.key,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "fact collector: complete",
+                );
+                FactRun::Recorded(
+                    self.record_collector_facts(gauge, ctx, &source, &gauge_facts)
+                        .await,
+                )
+            }
+            Err(e) => {
+                // NOT a silent warn: a collector that fails leaves its metric
+                // reading stale or empty, which is how two built-in metrics
+                // went unnoticed for weeks. Record the failure durably.
+                self.record_collector_failure(gauge, ctx, &source, &e).await;
+                tracing::error!(
+                    key = %gauge.key,
+                    error = %e,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "fact collector: FAILED — its metric will read stale or empty",
+                );
+                FactRun::Failed(e)
+            }
+        };
+        let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
+        self.log_run(gauge, ctx, &run, elapsed).await;
+        run
+    }
 
-        // Inverted substrate (epic tsk12): the gauge's durable atomic `facts` are
-        // the ONLY output recorded — the metric reads aggregate them via the
-        // engine (the read flip, T-C3). Any legacy `samples`/`findings` a script
-        // still returns are ignored. Best-effort; never fails the gauge run.
-        self.record_gauge_facts(gauge, ctx, &source, &gauge_facts)
+    /// A fact collector's input: its `report` parsed in its format, its
+    /// `input` rows (the trigger's anchors bound), and the trigger event.
+    async fn fact_input(
+        &self,
+        c: &FactCollector,
+        ctx: &CollectorRunContext,
+    ) -> Result<serde_json::Value, String> {
+        let mut input = serde_json::Map::new();
+        if let Some(report) = &c.report {
+            // A report that isn't there yet is empty text, not a failure: the
+            // script decides (a tool that hasn't run).
+            let text =
+                std::fs::read_to_string(self.project_dir.join(&report.path)).unwrap_or_default();
+            input.insert(
+                "report".into(),
+                oxplow_collect_plugin::parse_report(&report.format, &text)
+                    .map_err(|e| format!("collector `{}` report: {e}", c.key))?,
+            );
+        }
+        if let Some(sql) = &c.input {
+            let log = self.run_log.as_ref().ok_or_else(|| {
+                format!("collector `{}`: no database to read `input` from", c.key)
+            })?;
+            let params = crate::collector_runner::anchor_params(
+                ctx.event.as_deref(),
+                crate::collector_runner::Anchored {
+                    stream_id: Some(ctx.stream_val),
+                    snapshot_id: ctx.snapshot_id,
+                    effort_id: ctx.effort_id,
+                    thread_id: ctx.thread_id,
+                },
+            );
+            let rows = crate::collector_runner::input_rows(&log.layer, &c.key, sql, params).await?;
+            input.insert("rows".into(), serde_json::Value::Array(rows));
+        }
+        if let Some(e) = &ctx.event {
+            input.insert("event".into(), crate::collector_runner::event_input(e));
+        }
+        Ok(serde_json::Value::Object(input))
+    }
+
+    /// Record a fact collector's run as its `collector_run` row and
+    /// `collector.synced@1` (when the run log is wired). A failure to record
+    /// is logged: the facts already landed.
+    async fn log_run(
+        &self,
+        c: &FactCollector,
+        ctx: &CollectorRunContext,
+        run: &FactRun,
+        elapsed_ms: i64,
+    ) {
+        let Some(log) = self.run_log.as_ref() else {
+            return;
+        };
+        let (status, facts, error) = match run {
+            FactRun::Recorded(n) => ("ok", i64::try_from(*n).unwrap_or(i64::MAX), None),
+            FactRun::Failed(e) => ("error", 0, Some(e.clone())),
+            FactRun::Skipped => return,
+        };
+        let trigger = match ctx.trigger {
+            "manual" => "manual",
+            _ => "on",
+        };
+        if let Err(e) = log
+            .record(crate::collector_runner::RunRecord {
+                owner: &c.owner,
+                id: &c.key,
+                trigger,
+                source: &ctx.source,
+                cause: ctx.event.as_deref(),
+                status,
+                entities: Default::default(),
+                facts,
+                elapsed_ms,
+                error,
+            })
             .await
+        {
+            tracing::warn!(key = %c.key, error = %e, "fact collector: run record failed");
+        }
     }
 
     /// Record a FAILED gauge run as a `status = 'failed'` capture (tsk47).
@@ -1842,16 +2125,16 @@ impl MetricsService {
     ///    weeks against a repo with 137 console calls. A metric that is obviously
     ///    broken is far better than one that is quietly wrong.
     /// 2. **It stops the boot loop.** The capture carries the gauge's fingerprint, so
-    ///    `gauge_is_stale` sees the current logic *was* attempted and doesn't demand a
+    ///    `collector_is_stale` sees the current logic *was* attempted and doesn't demand a
     ///    fresh full-tree baseline on every single boot.
     ///
     /// It carries NO facts, and the read folds skip non-`done` captures — critical,
     /// because an empty capture over a *full-tree* snapshot restates every path, and
     /// would otherwise supersede everything and zero the metric.
-    async fn record_gauge_failure(
+    async fn record_collector_failure(
         &self,
-        gauge: &ResolvedGauge,
-        ctx: &GaugeRunContext,
+        gauge: &FactCollector,
+        ctx: &CollectorRunContext,
         source: &str,
         error: &str,
     ) {
@@ -1867,14 +2150,13 @@ impl MetricsService {
         capture.error = Some(error.to_string());
         capture.thread_id = ctx.thread_id;
         capture.effort_id = ctx.effort_id;
-        capture.scope = Some(gauge.scope.clone());
+        capture.scope = Some(gauge.scope());
         capture.trigger = Some(ctx.trigger.into());
         capture.snapshot_id = ctx.snapshot_id;
         capture.closest_vcs_rev = ctx.closest_vcs_rev.clone();
         capture.vcs_rev_exact = ctx.vcs_rev_exact;
         capture.branch = ctx.branch.clone();
-        capture.producer_version =
-            gauge_fingerprint(gauge, &self.script_base_dir(gauge), &self.project_dir);
+        capture.producer_version = collector_fingerprint(gauge, &self.project_dir);
         capture.scan_kind = ctx.scan_kind.into();
         if let Err(e) = facts.record_facts(capture, Vec::new()).await {
             tracing::warn!(key = %gauge.key, error = %e, "gauge: failure record write failed");
@@ -1894,12 +2176,12 @@ impl MetricsService {
     /// after the last offender is fixed; the engine zero-fills the series from
     /// the producer's captures (tsk44). Returns the number of facts recorded.
     /// Emits `MetricSamplesChanged` when it writes. Best-effort.
-    async fn record_gauge_facts(
+    async fn record_collector_facts(
         &self,
-        gauge: &ResolvedGauge,
-        ctx: &GaugeRunContext,
+        gauge: &FactCollector,
+        ctx: &CollectorRunContext,
         source: &str,
-        gauge_facts: &[oxplow_collect_plugin::GaugeFact],
+        gauge_facts: &[CollectedFact],
     ) -> usize {
         let Some(facts) = self.fact_store.as_ref() else {
             return 0;
@@ -1921,10 +2203,10 @@ impl MetricsService {
             }
             // The gauge's own contract: a config gauge may only emit measures it
             // declared in `emits` (built-ins declare none → unrestricted).
-            if !gauge.emits.is_empty() && !gauge.emits.iter().any(|m| m == &gf.measure) {
+            if !gauge.facts.is_empty() && !gauge.facts.iter().any(|m| m == &gf.measure) {
                 tracing::warn!(
                     key = %gauge.key, measure = %gf.measure,
-                    "gauge facts: measure not in the gauge's `emits` — fact dropped"
+                    "collector facts: measure not in the collector's `facts` — fact dropped"
                 );
                 continue;
             }
@@ -1963,7 +2245,7 @@ impl MetricsService {
         let capture = oxplow_db::NewMetricCapture {
             thread_id: ctx.thread_id,
             effort_id: ctx.effort_id,
-            scope: Some(gauge.scope.clone()),
+            scope: Some(gauge.scope()),
             trigger: Some(ctx.trigger.into()),
             basis_ref: ctx.closest_vcs_rev.clone(),
             snapshot_id: ctx.snapshot_id,
@@ -1972,11 +2254,7 @@ impl MetricsService {
             branch: ctx.branch.clone(),
             // Record WHICH LOGIC produced these facts, so a later script change is
             // detectable and can re-baseline instead of silently no-opping (tsk45).
-            producer_version: gauge_fingerprint(
-                gauge,
-                &self.script_base_dir(gauge),
-                &self.project_dir,
-            ),
+            producer_version: collector_fingerprint(gauge, &self.project_dir),
             scan_kind: ctx.scan_kind.into(),
             ..oxplow_db::NewMetricCapture::done(
                 ctx.stream_val,
@@ -2267,21 +2545,6 @@ fn filter_from_json(json: Option<&str>) -> Option<oxplow_config::FilterConfig> {
     })
 }
 
-/// A built-in gauge as a `ResolvedGauge` — `run_one_gauge` builds its collector
-/// from the embedded script (never a project-disk file), so the compute is a
-/// default sentinel and `emits` is empty (built-ins are catalog-governed, not
-/// `emits`-restricted).
-fn builtin_gauge(key: &str, trigger: &str) -> ResolvedGauge {
-    ResolvedGauge {
-        key: key.to_string(),
-        title: key.to_string(),
-        trigger: trigger.to_string(),
-        emits: Vec::new(),
-        compute: GaugeComputeConfig::default(),
-        scope: "built-in".to_string(),
-    }
-}
-
 /// The built-in metric SPECS (epic tsk12) for the bundled code gauges — the
 /// count-over-facts headlines that replace the baked gauge sample. Each is a
 /// `count` over a per-function / per-marker measure; the threshold metrics filter
@@ -2454,14 +2717,6 @@ fn builtin_ast_specs() -> Vec<NewMetricSpec> {
     ]
 }
 
-/// Build the embedded collector for a built-in metric key, if known.
-fn builtin_collector(key: &str) -> Option<Collector> {
-    builtin_metrics()
-        .iter()
-        .find(|m| m.key == key)
-        .map(|m| m.collector())
-}
-
 /// A filesystem-safe slug from a namespaced key (non-alphanumerics → `_`), for
 /// naming the global scaffold's `<slug>.yaml` / `<slug>.star` files.
 /// What [`MetricsService::metric_scaffold`] hands the agent to write.
@@ -2471,9 +2726,9 @@ pub struct MetricScaffold {
     pub key: String,
     /// Where the script goes, project-relative.
     pub script_path: String,
-    /// The starter gauge script.
+    /// The starter collector script.
     pub script: String,
-    /// `measures:` / `gauges:` / `metrics:` entries to merge into
+    /// `measures:` / `collectors:` / `metrics:` entries to merge into
     /// `.oxplow/project.yaml` (appending to lists already there).
     pub project_yaml: String,
 }
@@ -2489,7 +2744,12 @@ fn slugify(key: &str) -> String {
 /// matched file (TODO/FIXME count) — the metric spec (`sum` over `<measure>`)
 /// charts it. Emits facts only (no baked sample), the clean substrate model
 /// (epic tsk12); an `ast_query` example is in a comment for the author.
-fn starter_gauge_script(key: &str, measure: &str, glob: &str, language: Option<&str>) -> String {
+fn starter_collector_script(
+    key: &str,
+    measure: &str,
+    glob: &str,
+    language: Option<&str>,
+) -> String {
     let lang = language.unwrap_or("rust");
     format!(
         "# {key} — a tree-derived gauge. Reads the snapshot via files() and (optionally)\n\
@@ -2510,80 +2770,50 @@ fn starter_gauge_script(key: &str, measure: &str, glob: &str, language: Option<&
     )
 }
 
-/// Build a gauge [`Collector`] from a gauge's `compute:` block (mirrors
-/// `collection.rs::plugin_to_collector`, but always `Gauge` kind).
-fn compute_to_collector(
-    gauge: &ResolvedGauge,
-    project_dir: &Path,
-    root: &Path,
-    approvals: &crate::exec_consent::ApprovalStore,
-) -> Result<Collector, String> {
-    let c: &GaugeComputeConfig = &gauge.compute;
-    let input = match c.input.as_deref().unwrap_or("text") {
-        "text" => CollectorInput::Text,
-        "json" => CollectorInput::Json,
-        "xml" => CollectorInput::Xml,
-        "lcov" => CollectorInput::Lcov,
-        "lines" => CollectorInput::Lines,
-        other => return Err(format!("unknown input \"{other}\"")),
-    };
-    let entry_file = c
-        .entry_file
-        .as_deref()
-        .ok_or_else(|| "missing entryFile".to_string())?;
-    let abs = project_dir.join(entry_file);
-    let name = gauge.key.clone();
-    let formats = [gauge.key.clone()];
-    Ok(match c.runtime.as_str() {
-        "jaq" | "starlark" => {
-            let script = gauge_script_text(gauge, project_dir, root)
-                .ok_or_else(|| format!("read entryFile \"{entry_file}\": not found"))?;
-            if c.runtime == "jaq" {
-                Collector::jaq(name, CollectorKind::Gauge, formats, input, script)
-            } else {
-                Collector::starlark(name, CollectorKind::Gauge, formats, input, script)
-            }
-        }
-        "exec" => {
-            // A project gauge's program comes from the repo: it runs only once
-            // a person approved it on this machine (tsk331). A global gauge is
-            // the user's own config.
-            use crate::exec_consent::{may_run, needs_approval, ProgramKind};
-            if gauge.scope == "project"
-                && !may_run(
-                    approvals,
-                    project_dir,
-                    ProgramKind::Gauge,
-                    &gauge.key,
-                    entry_file,
-                    &c.args,
-                )
-            {
-                return Err(needs_approval(ProgramKind::Gauge, &gauge.key, entry_file));
-            }
-            let mut argv = vec![abs.to_string_lossy().into_owned()];
-            argv.extend(c.args.iter().cloned());
-            Collector::exec(name, CollectorKind::Gauge, formats, argv)
-        }
-        other => return Err(format!("unknown runtime \"{other}\"")),
-    })
+/// What runs a fact collector.
+enum FactRunner {
+    Starlark(String),
+    Jaq(String),
+    /// A project's approved program: `argv`, the input as JSON on stdin.
+    Exec(Vec<String>),
 }
 
-/// The script a gauge runs — the embedded text for a built-in, the `entryFile`'s
-/// contents for a global/project one. `None` when it can't be read (an `exec` gauge
-/// with no readable script, or a missing file).
-fn gauge_script_text(gauge: &ResolvedGauge, base: &Path, root: &Path) -> Option<String> {
-    if gauge.scope == "built-in" {
+impl FactRunner {
+    /// Run over `input` under the fact-collector budget and read its
+    /// `{"facts": [...]}`. Blocking: call it from `spawn_blocking`.
+    fn run(self, input: &serde_json::Value, host: TreeHost) -> Result<Vec<CollectedFact>, String> {
+        use oxplow_collect_plugin::runtime::{run_exec, run_jaq, run_sandboxed};
+        use oxplow_collect_plugin::{facts_of, run_fact_starlark};
+        let budget = SandboxBudget::with_timeout(FACT_COLLECTOR_TIMEOUT);
+        match self {
+            FactRunner::Starlark(script) => run_fact_starlark(&script, input, host, &budget),
+            FactRunner::Jaq(script) => {
+                let input = input.clone();
+                run_sandboxed(&budget, move || run_jaq(&script, &input)).and_then(facts_of)
+            }
+            FactRunner::Exec(argv) => {
+                run_exec(&budget, &argv, &input.to_string()).and_then(facts_of)
+            }
+        }
+        .map_err(|e| e.to_string())
+    }
+}
+
+/// The script a fact collector runs — the embedded text for a built-in, its
+/// entry read through its extension, or the project's file. `None` when it
+/// can't be read.
+fn collector_script_text(gauge: &FactCollector, root: &Path) -> Option<String> {
+    if gauge.is_builtin() {
         return builtin_metrics()
             .iter()
             .find(|m| m.key == gauge.key)
             .map(|m| m.script.to_string());
     }
-    let entry = gauge.compute.entry_file.as_deref()?;
-    if let Some(ext) = oxplow_config::scope_extension(&gauge.scope) {
-        return crate::extensions::read_extension_file(root, ext, entry);
+    let entry = gauge.entry.as_deref()?;
+    if gauge.owner == oxplow_config::collectors::PROJECT {
+        return std::fs::read_to_string(root.join(entry)).ok();
     }
-    std::fs::read_to_string(base.join(entry)).ok()
+    crate::extensions::read_extension_file(root, &gauge.owner, entry)
 }
 
 /// A fingerprint of the LOGIC that produces a gauge's facts (tsk45): its script
@@ -2598,28 +2828,41 @@ fn gauge_script_text(gauge: &ResolvedGauge, base: &Path, root: &Path) -> Option<
 ///
 /// `None` when the script can't be read — better to skip the check than to
 /// re-baseline the whole tree on every boot over an unreadable file.
-fn gauge_fingerprint(gauge: &ResolvedGauge, base: &Path, root: &Path) -> Option<String> {
-    let script = gauge_script_text(gauge, base, root)?;
-    let c = &gauge.compute;
-    // Everything that can change what the gauge produces. `emits` matters because a
-    // measure dropped from the allow-list silently stops being recorded.
-    let material = format!(
+fn collector_fingerprint(gauge: &FactCollector, root: &Path) -> Option<String> {
+    let script = collector_script_text(gauge, root)?;
+    // Everything that can change what the collector produces. `facts` matters
+    // because a measure dropped from the allow-list silently stops being
+    // recorded. The `v1` material is what gauges hashed (runtime — empty for
+    // a built-in — report format, args, report path, emits, script), so a
+    // gauge migrated to a collector keeps its baseline. `input` is hashed
+    // after it when set (a collector's own query).
+    let runtime = match (gauge.is_builtin(), gauge.runtime) {
+        (true, _) => "",
+        (false, CollectorRuntime::Starlark) => "starlark",
+        (false, CollectorRuntime::Jaq) => "jaq",
+        (false, CollectorRuntime::Exec) => "exec",
+        (false, CollectorRuntime::Read) => "read",
+    };
+    let report = gauge.report.as_ref();
+    let mut material = format!(
         "v1\u{0}{}\u{0}{}\u{0}{}\u{0}{}\u{0}{}\u{0}{}",
-        c.runtime,
-        c.input.as_deref().unwrap_or("text"),
-        c.args.join(","),
-        c.report.as_deref().unwrap_or(""),
-        gauge.emits.join(","),
+        runtime,
+        report.map_or("text", |r| r.format.as_str()),
+        "",
+        report.map_or("", |r| r.path.as_str()),
+        gauge.facts.join(","),
         script,
     );
+    if let Some(sql) = &gauge.input {
+        material.push_str(&format!("\u{0}input:{sql}"));
+    }
     Some(crate::blob_store::BlobStore::hash(material.as_bytes()))
 }
 
 /// Trust label: in-process tiers are `observed` under a `metric:<key>` source;
 /// the `exec` escape hatch is flagged `plugin-exec:<name>` (lower-trust).
-fn gauge_source(gauge: &ResolvedGauge, collector: &Collector) -> String {
-    use oxplow_collect_plugin::CollectorRuntime;
-    if collector.runtime() == CollectorRuntime::Exec {
+fn collector_source(gauge: &FactCollector) -> String {
+    if gauge.runtime == CollectorRuntime::Exec {
         format!("plugin-exec:{}", gauge.key)
     } else {
         format!("metric:{}", gauge.key)
@@ -2633,7 +2876,7 @@ pub struct BaselineReport {
     /// False when no gauge needed a baseline (a warm, up-to-date repo).
     pub ran: bool,
     pub snapshot_id: Option<i64>,
-    pub gauges_run: usize,
+    pub collectors_run: usize,
     /// Gauges that failed during the sweep (empty on success). Non-empty means those
     /// metrics will read stale/empty — a visible failure, not a silent one.
     pub failed: Vec<String>,
@@ -2690,7 +2933,6 @@ mod tests {
         }
     }
     use super::*;
-    use oxplow_config::GaugeComputeConfig;
     use oxplow_domain::refs::build::work_item_ref;
 
     /// A distinct count's buckets don't add up, so its points aren't
@@ -2732,7 +2974,7 @@ mod tests {
     /// In production `build_file_map` derives the gauge's file map FROM these rows,
     /// so the two are the same set by construction. A `per-path` measure's fold
     /// (tsk41) anchors on them to know which paths a capture restated, so a test
-    /// that hands `run_one_gauge` a map must create the matching snapshot — otherwise
+    /// that hands `run_one_collector` a map must create the matching snapshot — otherwise
     /// the capture restates nothing and its facts never surface.
     async fn snapshot_with_files(
         svc: &Arc<crate::Services>,
@@ -2766,23 +3008,93 @@ mod tests {
         snap
     }
 
-    fn starlark_gauge(key: &str, entry_file: &str) -> ResolvedGauge {
+    /// P7.B3: a snapshot runs each enabled fact collector exactly once.
+    /// The `collector.triggers` consumer is the one path (the event loop no
+    /// longer runs them), and a redelivered `snapshot.taken` runs nothing
+    /// again — no second capture, no second `collector.synced`.
+    #[tokio::test]
+    async fn a_snapshot_runs_each_enabled_collector_exactly_once() {
+        let (svc, dir) = fixture().await;
+        std::fs::write(
+            dir.path().join("once.star"),
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"tree:.\"}]}\n",
+        )
+        .unwrap();
+        let (specs, errors) = oxplow_config::collectors::parse_collectors(
+            oxplow_config::collectors::PROJECT,
+            &serde_yaml::from_str(
+                "- { id: repo.once, runtime: starlark, entry: once.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
+            )
+            .unwrap(),
+            &|_| true,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        svc.config.write().unwrap().collectors = specs;
+        let snap =
+            snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
+        let env = oxplow_domain::Envelope::typed::<oxplow_domain::events::schema::SnapshotTaken>(
+            "system",
+            &oxplow_domain::events::schema::SnapshotTakenV1 {
+                stream: "stream:1".into(),
+                snapshot: format!("snapshot:{snap}"),
+                parent: None,
+                trigger: oxplow_domain::snapshot::SnapshotTrigger::TurnEnd,
+                unchanged: false,
+                file_count: 1,
+                elapsed_ms: 1,
+                budget_ms: None,
+                over_budget: false,
+            },
+        )
+        .with_anchors(oxplow_domain::events::Anchors {
+            stream_id: Some(StreamId::new(1)),
+            snapshot_id: Some(snap),
+            ..Default::default()
+        });
+        let id = env.id.clone();
+        svc.event_log_store.append(env).await.unwrap();
+        let event = svc.event_log_store.get(id).await.unwrap().unwrap();
+        let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
+        use crate::event_pump::AsyncEventConsumer as _;
+        assert!(consumer.handles("snapshot.taken"));
+        consumer.handle(&event).await.unwrap();
+        consumer.handle(&event).await.unwrap();
+        let counts: (i64, i64) = svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT (SELECT count(*) FROM metric_capture WHERE producer = 'repo.once'),
+                            (SELECT count(*) FROM event_log WHERE type = 'collector.synced')",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(counts, (1, 1), "one capture and one run for one snapshot");
+    }
+
+    fn starlark_gauge(key: &str, entry_file: &str) -> FactCollector {
         starlark_gauge_emits(key, entry_file, Vec::new())
     }
 
-    /// A project-scope Starlark gauge with an explicit `emits` allow-list.
-    fn starlark_gauge_emits(key: &str, entry_file: &str, emits: Vec<String>) -> ResolvedGauge {
-        ResolvedGauge {
+    /// A project Starlark fact collector with an explicit `facts`
+    /// allow-list, run on every snapshot.
+    fn starlark_gauge_emits(key: &str, entry_file: &str, facts: Vec<String>) -> FactCollector {
+        FactCollector {
             key: key.into(),
-            title: key.into(),
-            trigger: "on-snapshot".into(),
-            emits,
-            compute: GaugeComputeConfig {
-                runtime: "starlark".into(),
-                entry_file: Some(entry_file.into()),
-                ..Default::default()
+            owner: oxplow_config::collectors::PROJECT.into(),
+            trigger: Trigger::On {
+                events: vec![SNAPSHOT_TAKEN.into()],
+                filter: Default::default(),
             },
-            scope: "project".into(),
+            facts,
+            runtime: CollectorRuntime::Starlark,
+            entry: Some(entry_file.into()),
+            report: None,
+            input: None,
+            after: Vec::new(),
         }
     }
 
@@ -2813,7 +3125,7 @@ def transform(input):
         );
         files.insert("src/b.rs".to_string(), "fn c() {}".to_string());
 
-        let ctx = GaugeRunContext {
+        let ctx = CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -2823,13 +3135,15 @@ def transform(input):
             branch: Some("metrics-substrate".into()),
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
         // Only src/a.rs has unsafe blocks → one fact recorded.
         let count = svc
             .metrics
-            .run_one_gauge(&metric, &ctx, Arc::new(files))
+            .run_one_collector(&metric, &ctx, Arc::new(files))
             .await;
-        assert_eq!(count, 1);
+        assert_eq!(count, FactRun::Recorded(1));
 
         let measure = svc
             .fact_store
@@ -2866,7 +3180,7 @@ def transform(input):
         let (svc, _dir) = fixture().await;
         svc.metrics.seed_catalog().await;
         let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
-        let ctx = |snapshot_id: i64| GaugeRunContext {
+        let ctx = |snapshot_id: i64| CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -2876,6 +3190,8 @@ def transform(input):
             branch: None,
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
 
         // Scan 1: src/a.rs has one unsafe block.
@@ -2886,7 +3202,7 @@ def transform(input):
             "fn a() { unsafe { x(); } }".to_string(),
         )]);
         svc.metrics
-            .run_one_gauge(&gauge, &ctx(s1), Arc::new(dirty))
+            .run_one_collector(&gauge, &ctx(s1), Arc::new(dirty))
             .await;
 
         let spec = svc
@@ -2905,7 +3221,7 @@ def transform(input):
             snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let clean = HashMap::from([("src/a.rs".to_string(), "fn a() { x(); }".to_string())]);
         svc.metrics
-            .run_one_gauge(&gauge, &ctx(s2), Arc::new(clean))
+            .run_one_collector(&gauge, &ctx(s2), Arc::new(clean))
             .await;
 
         assert_eq!(
@@ -2924,8 +3240,8 @@ def transform(input):
         )
     }
 
-    fn sweep_ctx() -> GaugeRunContext {
-        GaugeRunContext {
+    fn sweep_ctx() -> CollectorRunContext {
+        CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -2935,6 +3251,8 @@ def transform(input):
             branch: None,
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         }
     }
 
@@ -3071,7 +3389,7 @@ def transform(input):
         // console_calls reads empty forever. The baseline question must be per-gauge.
         let (svc, _dir) = fixture().await;
         svc.metrics.seed_catalog().await;
-        // A gauge is only in `resolved_gauges` when its metric is enabled — enable the
+        // A built-in is only in `fact_collectors` when its metric is enabled — enable the
         // two built-ins this test drives.
         enable(
             &svc,
@@ -3082,7 +3400,7 @@ def transform(input):
             true,
         )
         .await;
-        let ctx = |snapshot_id: i64| GaugeRunContext {
+        let ctx = |snapshot_id: i64| CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -3092,6 +3410,8 @@ def transform(input):
             branch: None,
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
         let src = "pub fn f() {\n    unsafe { g(); }\n    console.log(x);\n}\n".to_string();
 
@@ -3111,7 +3431,7 @@ def transform(input):
         let mut full_ctx = ctx(big);
         full_ctx.scan_kind = "full";
         svc.metrics
-            .run_one_gauge(
+            .run_one_collector(
                 &builtin_gauge_fixture("oxplow.rust.unsafe_blocks"),
                 &full_ctx,
                 files,
@@ -3122,14 +3442,14 @@ def transform(input):
         let small =
             snapshot_with_files(&svc, &[("f0.tsx", oxplow_db::SnapshotStorage::Oxplow)]).await;
         svc.metrics
-            .run_one_gauge(
+            .run_one_collector(
                 &builtin_gauge_fixture("oxplow.ts.console_calls"),
                 &ctx(small),
                 Arc::new(HashMap::from([("f0.tsx".to_string(), "ok".to_string())])),
             )
             .await;
 
-        let needing = svc.metrics.gauges_needing_baseline(1).await;
+        let needing = svc.metrics.collectors_needing_baseline(1).await;
         assert!(
             needing.contains(&"oxplow.ts.console_calls".to_string()),
             "the delta-only gauge must still need a baseline; got {needing:?}"
@@ -3150,7 +3470,7 @@ def transform(input):
         let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
 
         svc.metrics
-            .run_gauge_sweep(&[gauge], &sweep_ctx(), big_corpus(120), 1)
+            .run_collector_sweep(&[gauge], &sweep_ctx(), big_corpus(120))
             .await;
 
         let task = svc
@@ -3174,7 +3494,7 @@ def transform(input):
         let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
 
         svc.metrics
-            .run_gauge_sweep(&[gauge], &sweep_ctx(), big_corpus(3), 1)
+            .run_collector_sweep(&[gauge], &sweep_ctx(), big_corpus(3))
             .await;
 
         assert!(
@@ -3204,7 +3524,7 @@ def transform(input):
         );
 
         svc.metrics
-            .run_gauge_sweep(&[gauge], &sweep_ctx(), big_corpus(120), 1)
+            .run_collector_sweep(&[gauge], &sweep_ctx(), big_corpus(120))
             .await;
 
         let task = svc
@@ -3252,7 +3572,7 @@ def transform(input):
         );
 
         let snap = snapshot_with_files(&svc, &[("a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
-        let ctx = GaugeRunContext {
+        let ctx = CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -3262,13 +3582,17 @@ def transform(input):
             branch: None,
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
         let files = Arc::new(HashMap::from([("a.rs".to_string(), "x".to_string())]));
-        svc.metrics.run_one_gauge(&gauge, &ctx, files.clone()).await;
+        svc.metrics
+            .run_one_collector(&gauge, &ctx, files.clone())
+            .await;
 
         // Same script → the recorded fingerprint still matches → nothing to redo.
         assert!(
-            !svc.metrics.gauge_is_stale(&gauge, 1).await,
+            !svc.metrics.collector_is_stale(&gauge, 1).await,
             "an unchanged gauge must not force a re-baseline on every boot"
         );
 
@@ -3279,7 +3603,7 @@ def transform(input):
              \"subject\": \"file:a.rs\", \"path\": \"a.rs\"}]}\n",
         );
         assert!(
-            svc.metrics.gauge_is_stale(&gauge, 1).await,
+            svc.metrics.collector_is_stale(&gauge, 1).await,
             "a changed script must be detected as stale — otherwise the fix no-ops"
         );
     }
@@ -3296,7 +3620,7 @@ def transform(input):
         let (svc, _dir) = fixture().await;
         svc.metrics.seed_catalog().await;
         let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
-        let ctx = |snapshot_id: i64| GaugeRunContext {
+        let ctx = |snapshot_id: i64| CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -3306,6 +3630,8 @@ def transform(input):
             branch: None,
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
         let unsafe_n = |n: usize| {
             let body = "unsafe { x(); } ".repeat(n);
@@ -3328,7 +3654,7 @@ def transform(input):
             ("c.rs".to_string(), unsafe_n(0)),
         ]);
         svc.metrics
-            .run_one_gauge(&gauge, &ctx(base), Arc::new(full_tree))
+            .run_one_collector(&gauge, &ctx(base), Arc::new(full_tree))
             .await;
 
         let spec = svc
@@ -3349,7 +3675,7 @@ def transform(input):
             snapshot_with_files(&svc, &[("a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let changed = HashMap::from([("a.rs".to_string(), unsafe_n(1))]);
         svc.metrics
-            .run_one_gauge(&gauge, &ctx(delta), Arc::new(changed))
+            .run_one_collector(&gauge, &ctx(delta), Arc::new(changed))
             .await;
 
         assert_eq!(
@@ -3370,7 +3696,7 @@ def transform(input):
         let (svc, _dir) = fixture().await;
         svc.metrics.seed_catalog().await;
         let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
-        let ctx = |snapshot_id: i64| GaugeRunContext {
+        let ctx = |snapshot_id: i64| CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -3380,6 +3706,8 @@ def transform(input):
             branch: None,
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
 
         let s1 =
@@ -3389,14 +3717,14 @@ def transform(input):
             "fn a() { unsafe { x(); } }".to_string(),
         )]);
         svc.metrics
-            .run_one_gauge(&gauge, &ctx(s1), Arc::new(dirty))
+            .run_one_collector(&gauge, &ctx(s1), Arc::new(dirty))
             .await;
 
         // A later commit touched nothing this gauge scans: an empty snapshot + an
         // empty file map.
         let s2 = snapshot_with_files(&svc, &[]).await;
         svc.metrics
-            .run_one_gauge(&gauge, &ctx(s2), Arc::new(HashMap::new()))
+            .run_one_collector(&gauge, &ctx(s2), Arc::new(HashMap::new()))
             .await;
 
         let spec = svc
@@ -3415,7 +3743,7 @@ def transform(input):
     #[tokio::test]
     async fn effort_complete_gauge_capture_is_effort_stamped() {
         // tsk43: the on-effort-complete trigger KNOWS its producing effort —
-        // `record_gauge_facts` stamps the capture's `effort_id` so the T-D
+        // `record_collector_facts` stamps the capture's `effort_id` so the T-D
         // attribution spine (`captures_for_effort`) sees the run. Snapshot scans
         // (the other fixtures, `effort_id: None`) stay unstamped.
         use oxplow_domain::stores::TaskStore as _;
@@ -3461,7 +3789,7 @@ def transform(input):
         )
         .unwrap();
         let metric = starlark_gauge("acme.effgauge", "oxplow/metrics/eff.star");
-        let ctx = GaugeRunContext {
+        let ctx = CollectorRunContext {
             stream_val: 1,
             thread_id: Some(1),
             trigger: "on-effort-complete",
@@ -3471,12 +3799,14 @@ def transform(input):
             branch: None,
             effort_id: Some(effort.id.value()),
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
         let count = svc
             .metrics
-            .run_one_gauge(&metric, &ctx, Arc::new(HashMap::new()))
+            .run_one_collector(&metric, &ctx, Arc::new(HashMap::new()))
             .await;
-        assert_eq!(count, 1);
+        assert_eq!(count, FactRun::Recorded(1));
         let caps = svc
             .fact_store
             .captures_for_effort(effort.id.value())
@@ -3488,8 +3818,9 @@ def transform(input):
 
     #[tokio::test]
     async fn effort_finished_runs_on_effort_complete_gauges() {
-        // Effort-complete gauges run from the `effort.gauges` pump consumer
-        // on `effort.finished` (P2.6b), not a direct call from TaskService.
+        // Effort-triggered collectors run from the `collector.triggers` pump
+        // consumer on `effort.finished` (P7.B3), not a direct call from
+        // TaskService.
         use oxplow_domain::stores::TaskStore as _;
         use oxplow_domain::{Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus};
         let (svc, dir) = fixture().await;
@@ -3521,28 +3852,23 @@ def transform(input):
             .start(&work_item_ref(task), &thread, None)
             .await
             .unwrap();
-        crate::effort_reactors::register(&svc);
+        crate::collector_triggers::register(&svc);
         std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
         std::fs::write(
             dir.path().join("oxplow/metrics/eff.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"eff\", \"subject\": \"tree:.\"}]}\n",
         )
         .unwrap();
-        svc.config
-            .write()
-            .unwrap()
-            .gauges
-            .push(oxplow_config::GaugeEntry {
-                key: Some("acme.effgauge".into()),
-                title: None,
-                trigger: Some("on-effort-complete".into()),
-                emits: vec!["oxplow.ast_hit".into()],
-                compute: Some(GaugeComputeConfig {
-                    runtime: "starlark".into(),
-                    entry_file: Some("oxplow/metrics/eff.star".into()),
-                    ..Default::default()
-                }),
-            });
+        let (specs, errors) = oxplow_config::collectors::parse_collectors(
+            oxplow_config::collectors::PROJECT,
+            &serde_yaml::from_str(
+                "- { id: acme.effgauge, runtime: starlark, entry: oxplow/metrics/eff.star, trigger: { on: [effort.finished] }, facts: [oxplow.ast_hit] }",
+            )
+            .unwrap(),
+            &|_| true,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        svc.config.write().unwrap().collectors = specs;
         svc.tasks
             .update(
                 task,
@@ -3593,7 +3919,7 @@ def transform(input):
             "src/a.rs".to_string(),
             "fn big() {\n    let x = 1;\n    let y = 2;\n}\n".to_string(),
         );
-        let ctx = GaugeRunContext {
+        let ctx = CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -3603,12 +3929,14 @@ def transform(input):
             branch: None,
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
         let count = svc
             .metrics
-            .run_one_gauge(&metric, &ctx, Arc::new(files))
+            .run_one_collector(&metric, &ctx, Arc::new(files))
             .await;
-        assert_eq!(count, 1, "one function → one fact");
+        assert_eq!(count, FactRun::Recorded(1), "one function → one fact");
 
         let measure = svc
             .fact_store
@@ -3624,10 +3952,10 @@ def transform(input):
         assert!(facts[0].value >= 3.0);
     }
 
-    /// A built-in-scope `ResolvedGauge` — `run_one_gauge` builds its collector
-    /// from the embedded script (never a project-disk file).
-    fn builtin_gauge_fixture(key: &str) -> ResolvedGauge {
-        super::builtin_gauge(key, "on-snapshot")
+    /// A built-in fact collector — `run_one_collector` runs its embedded
+    /// script (never a project-disk file).
+    fn builtin_gauge_fixture(key: &str) -> FactCollector {
+        FactCollector::builtin(key)
     }
 
     /// A mixed-language corpus: a high-complexity + long Rust fn, a TS fn with a
@@ -3658,7 +3986,7 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn code_gauge_facts_reaggregate_to_the_expected_headline() {
+    async fn code_collector_facts_reaggregate_to_the_expected_headline() {
         // The keystone proof of the inversion (epic tsk12): a metric SPEC computed
         // over the per-item FACTS the gauge emitted == the expected gauge total,
         // for every bundled code metric. This is what let the reads flip to the
@@ -3668,7 +3996,7 @@ def transform(input):
         svc.metrics.seed_catalog().await;
 
         let files = Arc::new(equivalence_corpus());
-        let ctx = GaugeRunContext {
+        let ctx = CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -3678,6 +4006,8 @@ def transform(input):
             branch: Some("main".into()),
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
         for key in [
             "oxplow.fn_count",
@@ -3686,7 +4016,7 @@ def transform(input):
             "oxplow.todos",
         ] {
             svc.metrics
-                .run_one_gauge(&builtin_gauge_fixture(key), &ctx, files.clone())
+                .run_one_collector(&builtin_gauge_fixture(key), &ctx, files.clone())
                 .await;
         }
 
@@ -3723,7 +4053,7 @@ def transform(input):
             dir.path().join("oxplow/metrics/mixed.star"),
             r#"
 def transform(input):
-    return {"samples": [{"value": 2, "subject": "tree:."}], "facts": [
+    return {"facts": [
         {"measure": "oxplow.complexity", "value": 5, "subject": "symbol:src/a.rs::foo"},
         {"measure": "acme.undefined", "value": 9, "subject": "symbol:src/a.rs::bar"},
     ]}
@@ -3731,7 +4061,7 @@ def transform(input):
         )
         .unwrap();
         let metric = starlark_gauge("acme.mixed_facts", "oxplow/metrics/mixed.star");
-        let ctx = GaugeRunContext {
+        let ctx = CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "manual",
@@ -3741,9 +4071,11 @@ def transform(input):
             branch: None,
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
         svc.metrics
-            .run_one_gauge(&metric, &ctx, Arc::new(HashMap::new()))
+            .run_one_collector(&metric, &ctx, Arc::new(HashMap::new()))
             .await;
 
         // The defined-measure fact landed…
@@ -3795,7 +4127,7 @@ def transform(input):
             "oxplow/gauges/emits.star",
             vec!["oxplow.complexity".into()],
         );
-        let ctx = GaugeRunContext {
+        let ctx = CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "manual",
@@ -3805,9 +4137,11 @@ def transform(input):
             branch: None,
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
         svc.metrics
-            .run_one_gauge(&gauge, &ctx, Arc::new(HashMap::new()))
+            .run_one_collector(&gauge, &ctx, Arc::new(HashMap::new()))
             .await;
 
         let complexity = svc
@@ -3865,7 +4199,7 @@ def transform(input):
             "oxplow/gauges/ratio.star",
             vec!["oxplow.complexity".into()],
         );
-        let ctx = GaugeRunContext {
+        let ctx = CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "manual",
@@ -3875,9 +4209,11 @@ def transform(input):
             branch: None,
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
         svc.metrics
-            .run_one_gauge(&gauge, &ctx, Arc::new(HashMap::new()))
+            .run_one_collector(&gauge, &ctx, Arc::new(HashMap::new()))
             .await;
 
         let m = svc
@@ -3893,7 +4229,7 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn per_language_gauge_facts_reaggregate_through_the_spec() {
+    async fn per_language_collector_facts_reaggregate_through_the_spec() {
         // tsk30: the per-language idiom gauges emit per-file `oxplow.ast_hit`
         // facts (rule-tagged); each metric is a Sum(oxplow.ast_hit) spec filtered
         // by rule. Prove every emitted-fact stream re-aggregates through its spec
@@ -3931,7 +4267,7 @@ def transform(input):
                 .to_string(),
         );
         let files = Arc::new(corpus);
-        let ctx = GaugeRunContext {
+        let ctx = CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -3941,6 +4277,8 @@ def transform(input):
             branch: Some("main".into()),
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
 
         let keys = [
@@ -3957,7 +4295,7 @@ def transform(input):
         ];
         for key in keys {
             svc.metrics
-                .run_one_gauge(&builtin_gauge_fixture(key), &ctx, files.clone())
+                .run_one_collector(&builtin_gauge_fixture(key), &ctx, files.clone())
                 .await;
         }
 
@@ -3999,7 +4337,7 @@ def transform(input):
         // The snapshot IS the gauge's scanned set (tsk41) — create it to match the map.
         let snap =
             snapshot_with_files(&svc, &[("src/lib.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
-        let ctx = GaugeRunContext {
+        let ctx = CollectorRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -4009,9 +4347,11 @@ def transform(input):
             branch: Some("main".into()),
             effort_id: None,
             scan_kind: "delta",
+            event: None,
+            source: "system".into(),
         };
         svc.metrics
-            .run_one_gauge(
+            .run_one_collector(
                 &builtin_gauge_fixture("oxplow.rust.unsafe_blocks"),
                 &ctx,
                 files.clone(),
@@ -4073,7 +4413,7 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn builtin_ast_specs_carry_the_language_their_gauge_declares() {
+    async fn builtin_ast_specs_carry_the_language_their_collector_declares() {
         // tsk81: the idiom specs are seeded with the SAME language slug their
         // built-in gauge declares, so the two metric surfaces can't disagree
         // about what language a metric is — Metric Settings sections by the
@@ -4480,7 +4820,7 @@ def transform(input):
         // facts and runs without error (the read flip made it facts-only, T-C3b).
         let count = svc
             .metrics
-            .run_metric_by_key("oxplow.rust.unsafe_blocks", None)
+            .run_collector_by_key("built-in", "oxplow.rust.unsafe_blocks", None, "human")
             .await
             .unwrap();
         assert_eq!(count, 0, "empty snapshot → no facts, runs without error");
@@ -4502,17 +4842,17 @@ def transform(input):
     async fn an_extension_contributes_measures_metrics_and_gauges() {
         let (svc, dir) = fixture().await;
         let ext = dir.path().join("oxplow/extensions/acme");
-        std::fs::create_dir_all(ext.join("gauges")).unwrap();
+        std::fs::create_dir_all(ext.join("collectors")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
             "name: acme\n\
              measures:\n  - { key: acme.todo, title: TODOs }\n\
              metrics:\n  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum }\n\
-             gauges:\n  - key: acme.todo_scan\n    trigger: manual\n    emits: [acme.todo]\n    compute: { runtime: starlark, entryFile: gauges/todo.star }\n",
+             collectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n",
         )
         .unwrap();
         std::fs::write(
-            ext.join("gauges/todo.star"),
+            ext.join("collectors/todo.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"acme.todo\", \"value\": 3}]}\n",
         )
         .unwrap();
@@ -4544,7 +4884,7 @@ def transform(input):
         // Its gauge runs its own script, read through the extension.
         let n = svc
             .metrics
-            .run_metric_by_key("acme.todo_scan", None)
+            .run_collector_by_key("acme", "acme.todo_scan", None, "human")
             .await
             .unwrap();
         assert_eq!(n, 1);
@@ -4573,7 +4913,7 @@ def transform(input):
             .is_some());
         assert!(svc
             .metrics
-            .run_metric_by_key("acme.todo_scan", None)
+            .run_collector_by_key("acme", "acme.todo_scan", None, "human")
             .await
             .is_err());
     }
@@ -4641,14 +4981,14 @@ def transform(input):
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::write(
             oxplow_config::config_path(dir.path()),
-            "measures:\n  - { key: repo.n, title: N }\ngauges:\n  - key: repo.count\n    trigger: manual\n    emits: [repo.n]\n    compute: { runtime: exec, entryFile: tools/count.sh }\n",
+            "measures:\n  - { key: repo.n, title: N }\ncollectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
         svc.metrics.seed_catalog().await;
         let err = svc
             .metrics
-            .run_metric_by_key("repo.count", None)
+            .run_collector_by_key("project", "repo.count", None, "human")
             .await
             .unwrap_err();
         assert!(err.contains("approval"), "{err}");
@@ -4658,20 +4998,20 @@ def transform(input):
             dir.path(),
             &cfg,
             &[],
-            crate::exec_consent::ProgramKind::Gauge,
+            crate::exec_consent::ProgramKind::Collector,
             "repo.count",
             &crate::exec_consent::version_of(
                 &svc.approvals,
                 dir.path(),
                 &cfg,
-                crate::exec_consent::ProgramKind::Gauge,
+                crate::exec_consent::ProgramKind::Collector,
                 "repo.count",
             ),
         )
         .unwrap();
         assert_eq!(
             svc.metrics
-                .run_metric_by_key("repo.count", None)
+                .run_collector_by_key("project", "repo.count", None, "human")
                 .await
                 .unwrap(),
             1
@@ -4949,7 +5289,7 @@ def transform(input):
                 Some("**/*.rs".to_string()),
             )
             .unwrap();
-        assert_eq!(t.script_path, "oxplow/gauges/acme_todo_density.star");
+        assert_eq!(t.script_path, "oxplow/collectors/acme_todo_density.star");
         assert!(t.script.contains("def transform(input):"), "{}", t.script);
         assert!(t.script.contains("files(\"**/*.rs\")"), "{}", t.script);
         assert!(t.script.contains("acme.todo_density.count"), "{}", t.script);
@@ -5021,52 +5361,5 @@ def transform(input):
         // After invalidation the reload picks it up.
         m.invalidate_global_catalog();
         assert_eq!(m.with_global_catalog(|g| g.measures.len()), 1, "reloaded");
-    }
-
-    #[tokio::test]
-    async fn run_one_gauge_resolves_global_scope_script_from_global_dir() {
-        let (svc, _dir) = fixture().await;
-        let gtmp = tempfile::tempdir().unwrap();
-        // The global gauge's script lives under <global>/gauges/, NOT the
-        // project — the project dir has no such file.
-        std::fs::create_dir_all(gtmp.path().join("gauges")).unwrap();
-        std::fs::write(
-            gtmp.path().join("gauges/g.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": float(len(files(\"**/*\"))), \"rule\": \"filecount\", \"subject\": \"tree:.\"}]}\n",
-        )
-        .unwrap();
-
-        let mut metric = starlark_gauge("myglobal.filecount", "g.star");
-        metric.scope = "global".into();
-
-        let m = svc
-            .metrics
-            .clone()
-            .with_global_dir(gtmp.path().to_path_buf());
-        let mut files = HashMap::new();
-        files.insert("a.rs".to_string(), "x".to_string());
-        files.insert("b.rs".to_string(), "y".to_string());
-        let ctx = GaugeRunContext {
-            stream_val: 1,
-            thread_id: None,
-            trigger: "on-snapshot",
-            snapshot_id: None,
-            closest_vcs_rev: None,
-            vcs_rev_exact: false,
-            branch: None,
-            effort_id: None,
-            scan_kind: "delta",
-        };
-        let count = m.run_one_gauge(&metric, &ctx, Arc::new(files)).await;
-        assert_eq!(count, 1, "global-scope script resolved + ran");
-        let measure = svc
-            .fact_store
-            .get_measure("oxplow.ast_hit")
-            .await
-            .unwrap()
-            .expect("oxplow.ast_hit seeded by migration");
-        let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
-        assert_eq!(facts.len(), 1);
-        assert_eq!(facts[0].value, 2.0, "counted both files");
     }
 }

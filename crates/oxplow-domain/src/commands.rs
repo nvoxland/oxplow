@@ -77,7 +77,7 @@ pub enum Lifecycle {
 
 /// Whether the handler runs inside the bus's transaction (with the audit
 /// row and `command.executed`), or outside it, against a system the bus
-/// doesn't own — a VCS, a provider process, a gauge script — and is
+/// doesn't own — a VCS, a provider process, a collector's script — and is
 /// audited after it returns (`External`). A `Dispatch` command decides
 /// per input (the `work_item.*` verbs: oxplow's own items in the
 /// transaction, another provider's through its process) and then runs

@@ -476,7 +476,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         tokio::spawn(async move {
             match state.metrics.rebuild_baseline(false).await {
                 Ok(r) if r.ran => tracing::info!(
-                    gauges = r.gauges_run,
+                    gauges = r.collectors_run,
                     failed = ?r.failed,
                     "metric tree baseline: complete",
                 ),

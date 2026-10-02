@@ -4802,7 +4802,7 @@ mod tests {
             // per-subject fold can never be ancestry-aware (tsk97) — and it is
             // NOT backfillable: which commit a past run tested is unrecoverable.
             // Gauge captures got this for free via the snapshot-driven
-            // `GaugeRunContext`; test runs went unstamped for 125 captures.
+            // `CollectorRunContext`; test runs went unstamped for 125 captures.
             let h = build_full(None, true).await;
             h.service
                 .record_test_run(

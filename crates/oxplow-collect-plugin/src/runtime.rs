@@ -36,7 +36,7 @@ use oxplow_coverage::{
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{CollectError, CollectorKind, CollectorOutput, MetricReport};
+use crate::{CollectError, CollectorKind, CollectorOutput};
 
 /// Resource limits for an in-process script run. Currently a wall-clock
 /// timeout enforced by running the engine on a worker thread; the caller
@@ -372,7 +372,7 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         Ok(heap.alloc(serde_json::Value::Array(arr)))
     }
     /// Return the snapshot files matching `glob` as `[{path, text}]`, read from
-    /// the per-run [`GaugeHost`] injected via `Evaluator::extra`. When no host is
+    /// the per-run [`TreeHost`] injected via `Evaluator::extra`. When no host is
     /// present (e.g. a report-derived run) or the host has no files, returns an
     /// empty list. A malformed glob is an error.
     fn files<'v>(
@@ -383,7 +383,7 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
             .map_err(|e| anyhow::anyhow!("bad glob \"{glob}\": {e}"))?
             .compile_matcher();
         let arr: Vec<serde_json::Value> =
-            match eval.extra.and_then(|e| e.downcast_ref::<GaugeHost>()) {
+            match eval.extra.and_then(|e| e.downcast_ref::<TreeHost>()) {
                 Some(host) => {
                     let mut entries: Vec<(&String, &String)> = host
                         .files
@@ -412,7 +412,7 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
     ) -> anyhow::Result<starlark::values::Value<'v>> {
         let arr: Vec<serde_json::Value> = match eval
             .extra
-            .and_then(|e| e.downcast_ref::<GaugeHost>())
+            .and_then(|e| e.downcast_ref::<TreeHost>())
         {
             Some(host) => {
                 let mut entries: Vec<(&String, &String)> = host
@@ -460,19 +460,19 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
     }
 }
 
-/// Per-run host state for a Starlark **gauge**, injected via `Evaluator::extra`
-/// and read by the `files(glob)` builtin. The file map (path → content) is held
-/// behind an `Arc` so the *same* captured snapshot can be shared across every
-/// gauge of a run without cloning the whole map per gauge (a real cost when many
-/// gauges run on one snapshot). It carries no borrow lifetime across the
+/// Per-run host state for a Starlark **fact collector**, injected via
+/// `Evaluator::extra` and read by the `files(glob)` builtin. The file map
+/// (path → content) is held behind an `Arc` so the *same* captured snapshot
+/// can be shared across every collector of a run without cloning the whole
+/// map per collector (a real cost when many run on one snapshot). It carries no borrow lifetime across the
 /// Starlark boundary and stays `Send + 'static` (it can move into the sandbox
 /// worker thread).
 #[derive(Debug, Default, starlark::any::ProvidesStaticType)]
-pub struct GaugeHost {
+pub struct TreeHost {
     files: std::sync::Arc<std::collections::HashMap<String, String>>,
 }
 
-impl GaugeHost {
+impl TreeHost {
     /// A host exposing `files` (repo-relative path → UTF-8 content) to
     /// `files(glob)`, owning the map.
     pub fn new(files: std::collections::HashMap<String, String>) -> Self {
@@ -481,8 +481,8 @@ impl GaugeHost {
         }
     }
 
-    /// A host sharing an already-`Arc`'d file map — the per-gauge construction
-    /// path, so N gauges over one snapshot share one map (a cheap refcount bump
+    /// A host sharing an already-`Arc`'d file map — the per-collector
+    /// construction path, so N collectors over one snapshot share one map (a cheap refcount bump
     /// each) instead of N full clones.
     pub fn from_shared(files: std::sync::Arc<std::collections::HashMap<String, String>>) -> Self {
         Self { files }
@@ -539,19 +539,19 @@ pub fn run_starlark_with_ai(
 /// What a run's `Evaluator::extra` holds.
 enum Host<'a> {
     None,
-    Gauge(&'a GaugeHost),
+    Tree(&'a TreeHost),
     Ai(&'a crate::ai::AiHost),
 }
 
-/// Like [`run_starlark`] but with a [`GaugeHost`] in scope, so the script's
-/// `files(glob)` builtin can read the snapshot file map. Used by gauge
+/// Like [`run_starlark`] but with a [`TreeHost`] in scope, so the script's
+/// `files(glob)` builtin can read the snapshot file map. Used by fact
 /// collectors; the host moves in by value so this stays `Send` for the sandbox.
 pub fn run_starlark_with_host(
     script: &str,
     input: &Value,
-    host: &GaugeHost,
+    host: &TreeHost,
 ) -> Result<Value, CollectError> {
-    run_starlark_inner(script, input, Host::Gauge(host))
+    run_starlark_inner(script, input, Host::Tree(host))
 }
 
 fn run_starlark_inner(script: &str, input: &Value, host: Host<'_>) -> Result<Value, CollectError> {
@@ -579,7 +579,7 @@ fn run_starlark_inner(script: &str, input: &Value, host: Host<'_>) -> Result<Val
         let mut eval = Evaluator::new(&module);
         match host {
             Host::None => {}
-            Host::Gauge(h) => eval.extra = Some(h),
+            Host::Tree(h) => eval.extra = Some(h),
             Host::Ai(h) => eval.extra = Some(h),
         }
         let result = eval
@@ -715,14 +715,6 @@ pub fn value_to_output(kind: CollectorKind, value: Value) -> Result<CollectorOut
             let parsed: AnalysisReportJson =
                 serde_json::from_value(value).map_err(|e| CollectError::Shape(e.to_string()))?;
             Ok(CollectorOutput::Analysis(parsed.into()))
-        }
-        CollectorKind::Gauge => {
-            // `MetricReport` is its own serde-friendly shape, so it deserializes
-            // directly (no separate `*Json` mirror): `samples` defaults to empty,
-            // each sample's `subject`/`dims` are optional.
-            let report: MetricReport =
-                serde_json::from_value(value).map_err(|e| CollectError::Shape(e.to_string()))?;
-            Ok(CollectorOutput::Gauge(report))
         }
     }
 }
@@ -1126,31 +1118,6 @@ def transform(input):
 
         let empty = value_to_output(CollectorKind::Analysis, json!({})).expect("typed");
         assert!(empty.as_analysis().unwrap().findings.is_empty());
-    }
-
-    #[test]
-    fn gauge_report_deserializes_samples_with_defaults() {
-        // Two samples: one fully populated, one bare value. Integer values
-        // coerce to f64; missing subject/dims → None.
-        let v = json!({ "samples": [
-            { "value": 3.0, "subject": "file:src/a.rs", "dims": { "language": "rust" } },
-            { "value": 1 }
-        ]});
-        let out = value_to_output(CollectorKind::Gauge, v).expect("typed");
-        let report = out.as_gauge().expect("gauge");
-        assert_eq!(report.samples.len(), 2);
-        assert_eq!(report.samples[0].value, 3.0);
-        assert_eq!(report.samples[0].subject.as_deref(), Some("file:src/a.rs"));
-        assert_eq!(
-            report.samples[0].dims.as_ref().unwrap()["language"],
-            json!("rust")
-        );
-        assert_eq!(report.samples[1].value, 1.0);
-        assert!(report.samples[1].subject.is_none() && report.samples[1].dims.is_none());
-
-        // Missing `samples` → empty report, not an error.
-        let empty = value_to_output(CollectorKind::Gauge, json!({})).expect("typed");
-        assert!(empty.as_gauge().unwrap().samples.is_empty());
     }
 
     #[test]

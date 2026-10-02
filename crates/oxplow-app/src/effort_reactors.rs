@@ -10,7 +10,6 @@
 //! - `effort.evidence` — rebuild the effort's evidence rows.
 //! - `effort.decisions` — infer the decisions it made (a model call;
 //!   failures are logged, the review packet just shows none).
-//! - `effort.gauges` — run the on-effort-complete metric gauges.
 //!
 //! They hold `Services` weakly: the pump that runs them is part of it.
 
@@ -26,7 +25,6 @@ use crate::Services;
 enum Reaction {
     Evidence,
     Decisions,
-    Gauges,
 }
 
 struct EffortReactor {
@@ -34,9 +32,9 @@ struct EffortReactor {
     services: Weak<Services>,
 }
 
-/// Register the three reactors on `svc`'s pump (boot, before it spawns).
+/// Register the reactors on `svc`'s pump (boot, before it spawns).
 pub fn register(svc: &Arc<Services>) {
-    for reaction in [Reaction::Evidence, Reaction::Decisions, Reaction::Gauges] {
+    for reaction in [Reaction::Evidence, Reaction::Decisions] {
         svc.event_pump.register_async(Arc::new(EffortReactor {
             reaction,
             services: Arc::downgrade(svc),
@@ -59,7 +57,6 @@ impl AsyncEventConsumer for EffortReactor {
         match self.reaction {
             Reaction::Evidence => "effort.evidence",
             Reaction::Decisions => "effort.decisions",
-            Reaction::Gauges => "effort.gauges",
         }
     }
 
@@ -79,13 +76,6 @@ impl AsyncEventConsumer for EffortReactor {
                 match crate::inferred_decisions::infer_for_effort(&svc, effort.value()).await {
                     Ok(outcome) => tracing::debug!(%effort, ?outcome, "inferred decisions"),
                     Err(error) => tracing::warn!(%effort, %error, "inferring decisions failed"),
-                }
-            }
-            Reaction::Gauges => {
-                if let Some(thread) = event.envelope.anchors.thread_id {
-                    svc.metrics
-                        .run_effort_complete_gauges(&thread, &effort)
-                        .await;
                 }
             }
         }
@@ -132,7 +122,7 @@ mod tests {
                     && e.envelope.payload["retroactive"] == true
             })
             .expect("the synthesized effort finished");
-        for reactor in ["effort.evidence", "effort.decisions", "effort.gauges"] {
+        for reactor in ["effort.evidence", "effort.decisions"] {
             let cp = f
                 .svc
                 .event_log_store

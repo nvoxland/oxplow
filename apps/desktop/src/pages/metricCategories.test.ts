@@ -88,7 +88,7 @@ describe("buildMetricSections", () => {
       row("a", "custom"),
       row("b", "coverage"),
     ]);
-    expect(built.map((s) => s.label)).toEqual(["Code gauges", "Coverage", "Operational"]);
+    expect(built.map((s) => s.label)).toEqual(["Code metrics", "Coverage", "Operational"]);
     expect(built.map((s) => s.key)).toEqual(["custom", "coverage", "operational"]);
   });
 
@@ -102,7 +102,7 @@ describe("buildMetricSections", () => {
       row("b", "coverage"),
     ]);
     expect(built.map((s) => s.label)).toEqual([
-      "Code gauges",
+      "Code metrics",
       "Coverage",
       "Elixir",
       "experiments",
@@ -131,9 +131,9 @@ describe("buildMetricSections", () => {
     ]);
     // Unknown category renders under its raw key; null under "Other" — both
     // simply alphabetical like everything else (tsk116; locale collation is
-    // case-insensitive, so "mystery" sits between Code gauges and Operational).
+    // case-insensitive, so "mystery" sits between Code metrics and Operational).
     expect(built.map((s) => s.label)).toEqual([
-      "Code gauges",
+      "Code metrics",
       "mystery",
       "Operational",
       "Other",

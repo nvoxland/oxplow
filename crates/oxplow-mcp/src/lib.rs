@@ -1607,7 +1607,7 @@ impl OxplowMcp {
         description = "Before installing (`git_url`) or updating (`name`) an extension: clone it \
                        and report what it would bring in, installing nothing: the extension as it \
                        would load (lenses, sources with the programs they run, the hosts they \
-                       reach and the credentials they read, advisories, gauges; `errors` block \
+                       reach and the credentials they read, advisories, collectors; `errors` block \
                        the install), the commit `sha`, and `problems` a dry run of its lenses \
                        found. Show the person what it declares and get their go-ahead, then \
                        pass `sha` as `reviewed_sha` to install_extension / update_extension."
@@ -2379,7 +2379,7 @@ impl OxplowMcp {
     // ---------- code quality (duplication) ----------
     //
     // The per-function metrics scan was retired (tsk229) — those signals live in
-    // the metric substrate now (`v_metric_spec` via query_sql; `metric.run`).
+    // the metric substrate now (`v_metric_spec` via query_sql; `collector.sync`).
     // Duplicate-block detection remains an inherent feature; read its findings
     // here.
 
@@ -6547,7 +6547,7 @@ mod tests {
             "config.list_keys",
             "work_item.transition",
             "metric.record",
-            "metric.run",
+            "collector.sync",
             "metric.rebuild",
             "metric.scaffold",
         ] {

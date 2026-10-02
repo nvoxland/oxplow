@@ -825,8 +825,9 @@ seeders for tests.
   logged at warn and visible on the op and event, never silent.
 - The in-memory bus gets `OxplowEvent::SnapshotTaken` **after commit**,
   only when something new was recorded (a new snapshot, or a HEAD
-  re-stamp with 0 files) — the indexer, metric gauges, change analysis
-  and the UI wake on it. It replaced `FileSnapshotCreated` (never
+  re-stamp with 0 files) — the indexer, change analysis and the UI wake
+  on it. (Snapshot fact collectors run from the logged `snapshot.taken`
+  through the `collector.triggers` consumer instead, P7.B3.) It replaced `FileSnapshotCreated` (never
   emitted) and `FileSnapshotsBatchCreated`.
 
 **Baseline is hidden from Local History.** The first snapshot per
@@ -1256,9 +1257,9 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `collection` | async | `agent.tool.finished` (Bash) | test / analysis / coverage captures, `test.*` events, nudges | boot |
 | `advisories.post_tool` | async | `agent.tool.finished` | post-tool-use advisories, persisted as nudges | boot |
 | `token_usage.turns` | async | `agent.turn.ended` | a turn's token rows (transcript tail or reported counts) | boot |
-| `effort.evidence` / `effort.decisions` / `effort.gauges` | async | `effort.finished` | evidence rows, inferred decisions, on-effort gauges | boot.rs |
+| `effort.evidence` / `effort.decisions` | async | `effort.finished` | evidence rows, inferred decisions | boot.rs |
 | `search.index` | async | `work_item.*`, `snapshot.taken` | the search index for tasks and snapshot files | boot.rs |
-| `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event: its rows, `collector_run` and `collector.synced@1` (P7.B3) | boot.rs |
+| `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event, once per event (`collector_run.last_event_id`): an entity collector's rows, or a fact collector through the fact engine (`snapshot.taken` only when the take recorded files; `effort.finished` over the effort's end snapshot; anything else over the stream's latest snapshot) — plus `collector_run` and `collector.synced@1` (P7.B3; replaced `effort.gauges` and the metrics bus `SnapshotTaken` arm) | boot.rs |
 
 **Async consumers (P2.6.2, tsk454).** `trait AsyncEventConsumer { name,
 after() -> Vec<String>, handles(type), async handle(&StoredEvent) }`
@@ -1309,8 +1310,9 @@ reconciliation replaces, `effort.finished` is deduped, and
 **Effort reactors** (`crates/oxplow-app/src/effort_reactors.rs`, P2.6b)
 consume `effort.finished`, each its own async consumer registered at boot:
 `effort.evidence` (rebuild evidence rows), `effort.decisions` (infer
-decisions — a model call; failures logged), `effort.gauges`
-(on-effort-complete gauges). They hold `Services` weakly (the pump is part
+decisions — a model call; failures logged). (`effort.gauges` is gone:
+`{ on: [effort.finished] }` fact collectors run from `collector.triggers`.)
+They hold `Services` weakly (the pump is part
 of it). The in-memory `OxplowEvent::EffortFinished` is gone — it dropped on
 lag and never fired for synthesized or recovered efforts, which now reach
 every reactor.

@@ -109,6 +109,7 @@ mod tests {
             "name: my-gh\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, doc: A pull request., key: number, columns: { number: int } }\n",
         )
         .unwrap();
+        std::fs::write(ext.join("sync.sh"), "#!/bin/sh\n").unwrap();
         let db = Database::in_memory();
         let layer = crate::sql_gateway::SqlGateway::new(db.clone());
         let catalog = crate::extension_catalog::ExtensionCatalog::new();

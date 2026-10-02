@@ -1,11 +1,11 @@
 ---
 name: oxplow-metrics
-description: Author and read oxplow metrics — durable, BI-reportable numbers tracked over time (LOC, unsafe blocks, bundle size, TODO count, complexity, …). Loads when the user asks to "make/add/track a metric", "count X over time", "chart X", "set a target on X", or "measure X in the codebase". Teaches the four config blocks in .oxplow/project.yaml (measures / gauges / metrics / dimensions), the gauge script surface (files/ast_query/code_metrics), the metric.* commands, and reading metrics in SQL with metric_grid().
+description: Author and read oxplow metrics — durable, BI-reportable numbers tracked over time (LOC, unsafe blocks, bundle size, TODO count, complexity, …). Loads when the user asks to "make/add/track a metric", "count X over time", "chart X", "set a target on X", or "measure X in the codebase". Teaches the four config blocks in .oxplow/project.yaml (measures / collectors / metrics / dimensions), the fact-collector script surface (files/ast_query/code_metrics), collector.sync and the metric.* commands, and reading metrics in SQL with metric_grid().
 ---
 
 # Authoring oxplow metrics
 
-oxplow's metric substrate is **dimensional / BI-shaped**: gauges emit durable,
+oxplow's metric substrate is **dimensional / BI-shaped**: collectors record durable,
 atomic **facts** on declared **measures**; **metrics** are read-time *specs* that
 aggregate those facts. Facts outlive the effort, are branch/git-version stamped,
 and a metric charts on the **Metrics** page with **no UI work**. When the user
@@ -18,13 +18,13 @@ team — the authoring surface is public config + a small script.
 
 | block | what it declares | cardinality |
 |---|---|---|
-| `measures:` | a **fact TYPE** a gauge may emit (`acme.complexity`) | one measure ← many gauges |
-| `gauges:` | a **fact PRODUCER** — runs a script, emits facts on measures it `emits` | one gauge → many measures |
+| `measures:` | a **fact TYPE** a collector may record (`acme.complexity`) | one measure ← many collectors |
+| `collectors:` | a **fact PRODUCER** — runs a script, records facts on the measures in its `facts:` | one collector → many measures |
 | `metrics:` | a **read-time SPEC** — aggregates a measure (or a formula over metrics) | one measure → many metrics |
 | `dimensions:` | a **conformed slice axis** for drill-across (`acme.rule`) | shared by many facts |
 
 A metric no longer *computes* anything — it names a `sourceMeasure` + an
-`aggregation`. The number comes from re-aggregating the facts a gauge emitted.
+`aggregation`. The number comes from re-aggregating the facts a collector recorded.
 
 ## Step 1 — is there already a built-in? (`use:`)
 
@@ -50,15 +50,16 @@ metrics:
 
 `oxplow.*` is reserved for built-ins — a project may `use:` one but not `key:`-define under it.
 
-## Step 2 — a new metric: declare the trio (measure + gauge + metric)
+## Step 2 — a new metric: declare the trio (measure + collector + metric)
 
 The fastest path is the `metric.scaffold` command (`run_command`). It writes
-nothing: it returns a starter gauge script (`scriptPath`, `script`) and the
-three entries (`projectYaml`). Write the script with your file tools, then add
-each entry with `config.set` (`run_command`): read the list with `config.get
-{ "key": "measures" }`, append, and set it back — the same for `gauges` and
-`metrics`. A gauge runs a program, so `gauges` is a person-only key: your
-`config.set` on it asks the person to confirm. The trio looks like this:
+nothing: it returns a starter collector script (`scriptPath`, under
+`oxplow/collectors/<slug>.star`, and `script`) and the three entries
+(`projectYaml`). Write the script with your file tools, then add each entry
+with `config.set` (`run_command`): read the list with `config.get
+{ "key": "measures" }`, append, and set it back — the same for `collectors` and
+`metrics`. A collector runs a program, so `collectors` is a person-only key:
+your `config.set` on it asks the person to confirm. The trio looks like this:
 
 ```yaml
 measures:
@@ -67,11 +68,13 @@ measures:
     unit: count
     temporalSemantics: semi-additive  # additivity OVER TIME (see below)
 
-gauges:
-  - key: repo.todo                  # the PRODUCER
-    trigger: on-snapshot            # runs after each snapshot
-    emits: [repo.todo_count]        # declare-to-collect: it may only emit these
-    compute: { runtime: starlark, entryFile: oxplow/gauges/todo.star }
+collectors:
+  - id: repo.todo                   # the PRODUCER
+    doc: TODO comment scan
+    runtime: starlark
+    entry: oxplow/collectors/todo.star
+    trigger: { on: [snapshot.taken] }   # runs after each snapshot that recorded files
+    facts: [repo.todo_count]        # declare-to-collect: it may only record these
 
 metrics:
   - key: repo.todo_count            # the SPEC (the chartable metric)
@@ -114,26 +117,33 @@ Namespace every key `<vendor>.<id>` (e.g. `repo.todo_count`, `acme.bundle_size`)
 source measure's `temporalSemantics` governs how the series collapses across
 time. A count-over-threshold is `aggregation: count` + a `filter: { minValue: N }`.
 
-### `gauges:` fields
+### `collectors:` fields (a fact collector)
 
 | field | meaning |
 |---|---|
-| `key` | namespaced producer id (required) |
-| `trigger` | when it runs: `on-snapshot` (after a snapshot — the default for tree scans), `on-effort-complete`, `manual` (only via `metric.run`). (`on-report` / `continuous` reserved.) |
-| `emits` | the measure keys it may emit facts on (declare-to-collect — a fact outside this list is dropped) |
-| `compute` | `{ runtime, input?, entryFile, args?, report? }` — how it produces facts |
+| `id` | namespaced producer id (required) — the producer name its captures carry |
+| `doc` | one line on what it collects |
+| `runtime` | `starlark` \| `jaq` (sandboxed, no I/O) \| `exec` (a program; needs a person's approval) |
+| `entry` | the script or program, project-relative |
+| `trigger` | when it runs: `{ on: [snapshot.taken] }` (after a snapshot that recorded files — tree scans), `{ on: [effort.finished] }` (over the effort's end snapshot), `{ on: [<other event types>], where?: { field: value } }`, `{ every: 15m }`, or `manual` (only via `collector.sync`) |
+| `facts` | the measure keys it may record facts on (declare-to-collect — a fact outside this list is dropped) |
+| `report` | `{ path, format }` — a tool's report file it reads (`text`\|`json`\|`xml`\|`lcov`\|`lines`), parsed into `input.report` |
+| `input` | (starlark/jaq) a SQL query whose rows arrive as `input.rows`; binds `:stream_id :snapshot_id :effort_id :thread_id :turn_id :event_id` |
 
-## Step 3 — write the gauge script (emits FACTS)
+A collector with `entities:` instead of `facts:` is an **entity collector**
+(rows, not measurements) — that belongs in an extension, not the project.
 
-A gauge script is Starlark (or jaq/exec) that returns the **fact shape** — one
-atomic fact per subject, NOT a pre-aggregated total:
+## Step 3 — write the collector script (records FACTS)
+
+A fact collector's script is Starlark (or jaq/exec) that returns the **fact
+shape** — one atomic fact per subject, NOT a pre-aggregated total:
 
 ```json
 { "facts": [ { "measure": "repo.todo_count", "value": <n>, "subject"?: "file:src/a.rs",
                "path"?: "src/a.rs", "line"?: 12, "rule"?: "todo", "dims"?: { ... } } ] }
 ```
 
-- `measure` (required) is the measure key — MUST be in the gauge's `emits`.
+- `measure` (required) is the measure key — MUST be in the collector's `facts`.
 - `value` is the atomic number for this subject.
 - `subject` is a `"kind:ref"` string (`file:src/a.rs`, `symbol:src/a.rs::foo`).
 - `rule` is a conformed slice value read as the `oxplow.rule` dimension (so a spec
@@ -143,6 +153,9 @@ atomic fact per subject, NOT a pre-aggregated total:
   pass rate) instead of averaging pre-divided values.
 
 The Starlark entry is `def transform(input): … return { "facts": [...] }`.
+`input` is `{report?, rows?, event?}`: the parsed `report`, the `input:`
+query's rows, and the event that triggered the run. Anything but `facts` in
+the return (an old `samples` / `findings` shape) is refused.
 
 ### Three authoring patterns
 
@@ -154,9 +167,11 @@ The Starlark entry is `def transform(input): … return { "facts": [...] }`.
 - `code_metrics(text, language)` → per-function `[{name, complexity, length,
   parameter_count, start_line, end_line, visibility}]`.
 - plus `regex_find`, `parse_json`, `parse_xml`, `lines`, `lcov_records`, `xpath`.
+- A fact collector can't call the `ai_*` builtins (those are for entity
+  collectors, which in turn get no `files()`).
 
 ```python
-# oxplow/gauges/todo.star — one per-file fact on repo.todo_count
+# oxplow/collectors/todo.star — one per-file fact on repo.todo_count
 def transform(input):
     facts = []
     for f in files("**/*.rs"):
@@ -173,36 +188,42 @@ def transform(input):
 The `metrics:` spec `aggregation: sum` re-adds the per-file facts into the headline.
 
 **B) Report-derived** — reshape a build/tool report with jaq or starlark:
-`compute: { runtime: jaq, input: json, entryFile: …jq, report: path/to/report.json }`.
+`runtime: jaq`, `entry: …jq`, `report: { path: path/to/report.json, format: json }`;
+the parsed report is `input.report`.
 
 **C) exec (escape hatch)** — a program that prints the fact JSON to stdout:
-`compute: { runtime: exec, entryFile: oxplow/gauges/bundle-size.sh }`. Lower trust
-(it does I/O) — tagged `plugin-exec:<key>`. Use only when no in-process tier can
+`runtime: exec`, `entry: oxplow/collectors/bundle-size.sh`. Lower trust (it does
+I/O) — tagged `plugin-exec:<id>`. Only the project's own collectors may be
+`exec` (an extension's fact collector is starlark or jaq), and it gets no
+`env` / `credentials` / `network`. Use it only when no in-process tier can
 compute it: **it won't run until the user approves it** in Settings → Data →
-Programs (you can't approve it; `metric.run` tells you when it's waiting), and
-any change to the program or its args needs approving again.
+Programs (you can't approve it; `collector.sync` tells you when it's waiting),
+and any change to the program needs approving again.
 
-The bundled gauge scripts in
+The bundled collector scripts in
 `crates/oxplow-collect-plugin/src/plugins/metrics/<lang>/*.star` are the canonical
 copy-paste templates — each emits per-item facts.
 
 ## Step 4 — scope
 
-- **Project** (default): `.oxplow/project.yaml` + scripts under `oxplow/gauges/`
-  (checked into the repo, shared with the team).
+- **Project** (default): `.oxplow/project.yaml` + scripts under
+  `oxplow/collectors/` (checked into the repo, shared with the team).
+- **Extension**: an extension's `extension.yaml` declares its own `collectors:`
+  (its fact collectors are sandboxed — starlark or jaq).
 - **User-global** (cross-project): `*.yaml` files under the user's global config
-  dir — a `measures/`, `gauges/`, and `metrics/` folder — hot-reloaded. Global
-  measures + gauges are active in every project automatically; a global *metric*
-  is enabled per-project with a `use:`.
+  dir — a `measures/`, `metrics/` and `dimensions/` folder — hot-reloaded.
+  Global measures are active in every project automatically; a global *metric*
+  is enabled per-project with a `use:`. There are no global collectors.
 
 Precedence is **project > global > built-in** by key.
 
 ## Step 5 — verify
 
-1. **Run the gauge now:** the `metric.run` command, `{ "key": "repo.todo" }` —
-   runs the gauge against the latest snapshot and records its facts; returns
-   the count. `metric.rebuild` (`{ "force": true }` to redo everything) runs
-   every gauge's whole-tree baseline.
+1. **Run the collector now:** the `collector.sync` command,
+   `{ "owner": "project", "id": "repo.todo" }` — runs it against the latest
+   snapshot and records its facts; returns the `facts` count. `metric.rebuild`
+   (`{ "force": true }` to redo everything) runs every snapshot collector's
+   whole-tree baseline.
 2. **Read the metric back** with `query_sql` and the metric function:
 
    ```sql
@@ -246,7 +267,7 @@ the `metric.record` command, `{ key, value, subject?, dims? }` (stored
 ## Metrics over data (entity metrics)
 
 When the number is about records oxplow already has (tasks, commits, test
-runs, an extension's synced entities), skip the gauge. Aggregate the view
+runs, an extension's synced entities), skip the collector. Aggregate the view
 directly (the views and their columns are in `v_model` / `v_model_column`):
 
 ```yaml
@@ -278,17 +299,20 @@ dimensions:
 
 ## Gotchas
 
-- **Gauges emit facts, metrics aggregate them.** The trio splits producer
-  (`gauges:`), fact type (`measures:`) and read spec (`metrics:`). A gauge script
+- **Collectors record facts, metrics aggregate them.** The trio splits producer
+  (`collectors:`), fact type (`measures:`) and read spec (`metrics:`). A collector script
   returns `{ "facts": [...] }` (one fact per subject), never a baked total.
 - **Declare-to-collect.** A fact is dropped unless its measure is (a) declared in
-  `measures:` (or a built-in) AND (b) in the gauge's own `emits` list.
-- **`oxplow.*` is reserved** — define new measures/gauges/metrics under a
+  `measures:` (or a built-in) AND (b) in the collector's own `facts` list.
+- **`oxplow.*` is reserved** — define new measures/collectors/metrics under a
   project/vendor namespace.
-- **entryFile is project-relative**, no leading `/`, no `..`.
+- **`entry` is project-relative**, no leading `/`, no `..`.
+- **No `gauges:` block.** It's a load error now; `oxplow plugin migrate
+  --project` rewrites it in place as `collectors:`.
 - **Scripts do no I/O** (jaq/starlark) — that's what keeps facts `observed`. Reach
   for `exec` only when you truly must shell out.
 - A `use:` entry may only re-target thresholds; the measure/aggregation/filter are
   inherent to the definition.
-- If a fact doesn't appear, the run is best-effort (errors are logged, not
-  surfaced) — check the daemon log, or re-run `metric.run` and read the return.
+- If a fact doesn't appear, check the run: every run logs a `collector.synced`
+  event and a `collector_run` row (a failed one with its error) — or re-run
+  `collector.sync` and read the return.

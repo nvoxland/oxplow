@@ -63,7 +63,8 @@ has no exceptions.
 A cloned or pulled repo is **untrusted** (decided 2026-09-27, tsk331 /
 tsk162). Its committed config can name programs:
 
-- `exec` gauges and collection plugins in `.oxplow/project.yaml`;
+- `exec` collectors (the project's fact collectors) and collection plugins in
+  `.oxplow/project.yaml`;
 - `exec` sources in `oxplow/extensions/*/extension.yaml`;
 - advisories in a shared extension (committed or git-installed): SQL whose
   results go into the agent's context (tsk352). Approved as a unit per
@@ -77,7 +78,7 @@ None of these run until a person approves that program on their machine.
 
 - **What an approval covers.** It is bound to a hash of what runs
   (tsk347):
-  - the program's content, plus for a gauge or plugin every file in its
+  - the program's content, plus for a project collector or plugin every file in its
     directory (a helper it sources), unless that's the project root;
   - its args, plus the content of any arg that names a file, read where
     the program runs (an ACP agent from its stream's worktree), so
@@ -131,7 +132,7 @@ A new way for config to start a program must go through the same gate.
 > extension (`extensions/oxplow-analytics/`, compiled in by
 > `crates/oxplow-app/src/bundled_extensions.rs`), and core works with it
 > disabled. The engine they read stays in core: the fact store, metrics
-> and gauges, the cube, collection ingest, snapshots, plus the basic
+> and fact collectors, the cube, collection ingest, snapshots, plus the basic
 > metrics explorer and dashboards. ACP agents and AI providers are built
 > (see [agent-model.md](./agent-model.md) → ACP,
 > [ai-providers.md](./ai-providers.md)); the semantic layer is partly

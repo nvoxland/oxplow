@@ -74,11 +74,12 @@ and roll it up by day, week, or month, e.g. "tokens per task per week".
 Four config blocks in `.oxplow/project.yaml`:
 
 - `measures` -- what is being counted, and how it aggregates.
-- `gauges` -- the script that produces the raw numbers. Starlark,
-  jq, or an external program. An external program from the project's
-  config runs only after you approve it in Settings → Data → Programs,
-  so pulling a repo can't run something behind your back. A changed
-  program or arguments needs approving again.
+- `collectors` -- the script that produces the raw numbers, and when it
+  runs (after each snapshot, when an effort finishes, on a schedule, or
+  by hand). Starlark, jq, or an external program. An external program
+  from the project's config runs only after you approve it in Settings →
+  Data → Programs, so pulling a repo can't run something behind your
+  back. A changed program needs approving again.
 - `metrics` -- a chartable view over a measure: aggregation, filters,
   target, direction.
 - `dimensions` -- the axes you can slice by (package, language,
@@ -110,9 +111,9 @@ you want counted:
 > Track how many `unwrap()` calls are in the Rust crates, and set a
 > target of zero.
 
-The agent asks oxplow for a template of the measure/gauge/metric trio
-plus the gauge script. It writes the script like any other edit (under
-a task, in its own worktree) and adds the config entries. A gauge runs
+The agent asks oxplow for a template of the measure/collector/metric trio
+plus the collector script. It writes the script like any other edit (under
+a task, in its own worktree) and adds the config entries. A collector runs
 a program, so oxplow asks you to confirm that part. Then the agent runs
 the metric to confirm it produces a number. The `/oxplow:new-metric` skill walks
 the same path with more structure.
@@ -122,11 +123,15 @@ you want counted is faster than filling in four config blocks by
 hand.
 
 An [extension](lenses.md) can ship metrics too: the same `measures`,
-`metrics` and `gauges` blocks in its `extension.yaml`, with the gauge
-script inside the extension. They're on while the extension is enabled,
-and your `.oxplow/project.yaml` can still turn one off or change its
-target. Extension gauges run Starlark or jq only, never an external
-program.
+`metrics` and `collectors` blocks in its `extension.yaml`, with the
+collector script inside the extension. They're on while the extension is
+enabled, and your `.oxplow/project.yaml` can still turn one off or change
+its target. An extension's metric collectors run Starlark or jq only,
+never an external program.
+
+Older configs used a `gauges` block. oxplow now refuses to load it and
+says so; `oxplow plugin migrate --project` (or `oxplow plugin migrate
+<name>` for an extension) rewrites it as `collectors`.
 
 ## Collection
 

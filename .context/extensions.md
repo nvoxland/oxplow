@@ -30,7 +30,8 @@ the bundled `oxplow-analytics` example extension.
 >     it disabled (checked headless, 2026-09-27).
 >   - lens alerts (tsk316; the `rail` slot they mounted in became panels
 >     in P6.G1), and extension-declared
->     measures, metrics and gauges (tsk311; see "Contributing metrics").
+>     measures, metrics and fact collectors (tsk311, gauges until P7.B3;
+>     see "Contributing metrics").
 > - **Current:** extension-declared dimensions (tsk328).
 > - **Current:** lens action buttons (tsk329) and the `settings.section` slot (then `settings`)
 >   (tsk330).
@@ -231,7 +232,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       (reported, not blocking: a lens over an unsynced source can't run
       yet). Settings shows it as an inline panel spelling out each exec
       source's program, hosts and credentials, derived sources,
-      advisories, gauges and slots (`reviewModel`); Install/Update
+      advisories, fact collectors and slots (`reviewModel`); Install/Update
       confirms. `install_extension` / `update_extension` take the
       `reviewed_sha` and refuse a clone at any other commit, or one with
       load errors.
@@ -492,7 +493,7 @@ state*. Its `.gitignore` ignores everything except `project.yaml`, and the
 fs watcher prunes its subdirectories wholesale, so files there are neither
 committed nor snapshotted nor attributed to efforts. Project-authored
 oxplow content already lives in `oxplow/` at the repo root (for example
-`oxplow/gauges/*.star`). Extensions follow that convention, so they are
+`oxplow/collectors/*.star`). Extensions follow that convention, so they are
 ordinary project files: visible in the file tree, diffed, reviewed and
 merged like code.
 
@@ -525,9 +526,10 @@ intent:                  # required
 # stable kinds (permanent API)
 measures:    [...]   # same schema as .oxplow/project.yaml
 metrics:     [...]   # `key:` definitions; sourceMeasure must be declared here or oxplow.*
-gauges:      [...]   # starlark / jaq only; emits must be declared here or oxplow.*
 dimensions:  [...]
-collectors:  [...]   # v1 `sources`: exec / starlark / jaq programs → entities (see semantic-layer.md)
+collectors:  [...]   # v1 `sources`: entity collectors (exec / starlark / jaq / read → entities) and
+                     # fact collectors (`facts:`; starlark / jaq only; facts must be declared here or oxplow.*)
+                     # see semantic-layer.md "Collectors"; a `gauges:` key is an error → `oxplow plugin migrate <name>`
 ui:                  # what it adds to the core UI
   slots:             # lenses mounted into core pages (v1 `slots`); see "Slots"
     - { slot: effort.review.details, lens: change-review }
@@ -568,7 +570,7 @@ its line.
 - cross-references: a `ui.slots` lens exists (and declares a param
   the slot binds); a grid's `children` exist — in this extension or,
   once everything is loaded, in another; a `launcher` target is a
-  canonical ref. A metric's `sourceMeasure` or a gauge's `emits` that
+  canonical ref. A metric's `sourceMeasure` or a fact collector's `facts` that
   is neither declared in the extension nor an `oxplow.*` built-in is a
   **warning** (it may come from the project's or another extension's
   `measures:`, which resolves when the catalog is assembled).
@@ -1079,9 +1081,11 @@ already holds (a provider) is refused and kept as the extension's
 
 ## Contributing metrics (current)
 
-`extension.yaml` takes `measures:`, `metrics:`, `gauges:` and `dimensions:` in the
+`extension.yaml` takes `measures:`, `metrics:` and `dimensions:` in the
 `.oxplow/project.yaml` schema, checked with the same
-`oxplow_config::validate_*` functions, plus:
+`oxplow_config::validate_*` functions, and fact collectors (a `collectors:`
+entry with `facts:`, parsed by `oxplow_config::collectors` like the
+project's), plus:
 
 - Metrics must be `key:` definitions; `use:` belongs to the project.
 - Entity metrics (`entity:` + `where` / `time` / `value`, tsk322) work
@@ -1097,17 +1101,21 @@ already holds (a provider) is refused and kept as the extension's
   - A disabled or removed extension's dimensions are deleted
     (`delete_extension_dimensions_not_in`, never a promoted one). Facts
     don't reference dimension rows, so nothing else is lost.
-- Gauges run `starlark` / `jaq` only. `exec` is refused: nothing from an
-  extension runs a program without the user's approval, which is what
-  (approved) sources are for. `entryFile` must exist in the extension.
+- Fact collectors run `starlark` / `jaq` only, with no `env` /
+  `credentials` / `network`. `exec` is refused: a program that records
+  facts runs only from the project's own `collectors:`, with approval;
+  an extension's programs are entity collectors, which a person approves.
+  `entry` must exist in the extension.
 - Precedence is built-in < global < each extension < project
-  (`oxplow_config::resolve_{metrics,gauges,measures}` take an
-  `extensions` layer; scope `extension:<name>`). An enabled extension's
+  (`oxplow_config::resolve_{metrics,measures,dimensions}` take an
+  `extensions` layer; scope `extension:<name>`). A collector id two owners
+  declare runs once — project over extension over built-in
+  (`MetricsService::fact_collectors`). An enabled extension's
   metrics are **on** unless the project mentions the key (a `use:`
   override or disable marker, or its own definition).
 - `MetricsService::extension_catalog` loads enabled extensions from the
-  primary worktree on each resolve; gauge scripts are read through
-  `extensions::read_extension_file` (bundled or disk), and a gauge's
+  primary worktree on each resolve; fact-collector scripts are read through
+  `extensions::read_extension_file` (bundled or disk), and a collector's
   `report` still resolves against the project.
 - Storage: the scope CHECK only allows built-in / global / project, and
   rebuilding `measure` / `metric_spec` would cascade-delete facts (V54),
@@ -1319,8 +1327,8 @@ What moves out of core, and what it becomes:
 | Planning / Review / Quality dashboards | `grid` lenses (**done**: `planning`, `review`, `quality`) |
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
 | Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` grid in the `effort.review.details` / `vcs.commit.details` / `vcs.status.details` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
-| Gauges (`oxplow/gauges/*.star`, idiom `.star`) | extensions can declare gauges now (tsk311); the built-in catalog stays core as the opt-in standard library |
-| Gauge-threshold nudges | **done:** the `threshold-crossed` advisory (with `coverage-target` and `metric-deltas`) |
+| Fact collectors (`oxplow/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); the built-in catalog stays core as the opt-in standard library |
+| Metric-threshold nudges | **done:** the `threshold-crossed` advisory (with `coverage-target` and `metric-deltas`) |
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |

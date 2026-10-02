@@ -1,14 +1,12 @@
 //! Bundled built-in metric catalog (epic tsk213, P3b). Every code/language
 //! metric oxplow ships is authored through the **public** capability surface
-//! (`files()` / `ast_query()` + the gauge `MetricReport` shape) and embedded
+//! (`files()` / `ast_query()` + a collector's `{"facts": [...]}`) and embedded
 //! here — never a privileged Rust path. A project enables one with
 //! `metrics: - use: oxplow.<lang>.<name>`; the runner resolves it at `built-in`
 //! scope and runs it from the embedded script below (no project-disk file).
 //!
 //! These are the reference implementations a user copies. Each is exercised by a
 //! golden test over a fixture corpus (see the tests module).
-
-use crate::{Collector, CollectorInput, CollectorKind};
 
 /// One bundled metric: its catalog metadata + the embedded script that computes
 /// it. `key` is reserved under the `oxplow.` namespace.
@@ -30,42 +28,6 @@ pub struct BuiltinMetric {
     pub runtime: &'static str,
     pub input: &'static str,
     pub script: &'static str,
-}
-
-impl BuiltinMetric {
-    fn collector_input(&self) -> CollectorInput {
-        match self.input {
-            "json" => CollectorInput::Json,
-            "xml" => CollectorInput::Xml,
-            "lcov" => CollectorInput::Lcov,
-            "lines" => CollectorInput::Lines,
-            _ => CollectorInput::Text,
-        }
-    }
-
-    /// Build the gauge collector for this metric from its embedded script. The
-    /// runner calls this for `built-in`-scoped metrics instead of reading a
-    /// project-disk `entryFile`.
-    pub fn collector(&self) -> Collector {
-        let input = self.collector_input();
-        match self.runtime {
-            "jaq" => Collector::jaq(
-                self.key,
-                CollectorKind::Gauge,
-                [self.key],
-                input,
-                self.script,
-            ),
-            // starlark (default)
-            _ => Collector::starlark(
-                self.key,
-                CollectorKind::Gauge,
-                [self.key],
-                input,
-                self.script,
-            ),
-        }
-    }
 }
 
 const RUST: &[BuiltinMetric] = &[
@@ -125,28 +87,28 @@ const RUST: &[BuiltinMetric] = &[
 /// language is NULL; samples carry the per-file `language` dim). These replace
 /// the old per-language todo/complexity/fn-count/long-function gauges.
 const CODE: &[BuiltinMetric] = &[
-    code_gauge(
+    code_metric(
         "oxplow.todos",
         "TODO / FIXME markers",
         "TODO/FIXME/HACK/XXX/BUG markers in comments, across all languages.",
         "lower-better",
         include_str!("plugins/metrics/code/todos.star"),
     ),
-    code_gauge(
+    code_metric(
         "oxplow.fn_count",
         "function count",
         "Total functions / methods defined, across all languages.",
         "neutral",
         include_str!("plugins/metrics/code/fn_count.star"),
     ),
-    code_gauge(
+    code_metric(
         "oxplow.high_complexity_fns",
         "high-complexity functions",
         "Functions whose cyclomatic complexity exceeds the threshold, across all languages.",
         "lower-better",
         include_str!("plugins/metrics/code/high_complexity_fns.star"),
     ),
-    code_gauge(
+    code_metric(
         "oxplow.long_functions",
         "long functions (>60 lines)",
         "Functions longer than 60 lines, across all languages.",
@@ -154,7 +116,7 @@ const CODE: &[BuiltinMetric] = &[
         include_str!("plugins/metrics/code/long_functions.star"),
     ),
     // Doc coverage is a per-file RATIO (%), not a count, so it can't use the
-    // count-based `code_gauge` helper (tsk125).
+    // count-based `code_metric` helper (tsk125).
     BuiltinMetric {
         key: "oxplow.doc_coverage",
         kind: "coverage",
@@ -173,9 +135,9 @@ const CODE: &[BuiltinMetric] = &[
     },
 ];
 
-/// A language-agnostic tree gauge (the unified code metrics). Like `ast_gauge`
+/// A language-agnostic tree gauge (the unified code metrics). Like `ast_metric`
 /// but `language: ""` (no single language — it sweeps `source_files()` itself).
-const fn code_gauge(
+const fn code_metric(
     key: &'static str,
     title: &'static str,
     description: &'static str,
@@ -202,7 +164,7 @@ const fn code_gauge(
 
 /// A `gauge`/`tree`/`on-snapshot`/`starlark`/`text` metric (the common shape for
 /// a tree-derived AST scan), so each per-language entry stays terse.
-const fn ast_gauge(
+const fn ast_metric(
     key: &'static str,
     title: &'static str,
     description: &'static str,
@@ -230,7 +192,7 @@ const fn ast_gauge(
 }
 
 const TS: &[BuiltinMetric] = &[
-    ast_gauge(
+    ast_metric(
         "oxplow.ts.any_usage",
         "any usage",
         "Uses of the `any` type.",
@@ -239,7 +201,7 @@ const TS: &[BuiltinMetric] = &[
         None,
         include_str!("plugins/metrics/ts/any_usage.star"),
     ),
-    ast_gauge(
+    ast_metric(
         "oxplow.ts.non_null_assertions",
         "non-null assertions",
         "Non-null assertions (`!`).",
@@ -248,7 +210,7 @@ const TS: &[BuiltinMetric] = &[
         None,
         include_str!("plugins/metrics/ts/non_null_assertions.star"),
     ),
-    ast_gauge(
+    ast_metric(
         "oxplow.ts.console_calls",
         "console.* calls",
         "Calls to `console.*`.",
@@ -257,7 +219,7 @@ const TS: &[BuiltinMetric] = &[
         None,
         include_str!("plugins/metrics/ts/console_calls.star"),
     ),
-    ast_gauge(
+    ast_metric(
         "oxplow.ts.ts_ignore",
         "ts-ignore / ts-expect-error",
         "`@ts-ignore` / `@ts-expect-error` suppressions.",
@@ -268,7 +230,7 @@ const TS: &[BuiltinMetric] = &[
     ),
 ];
 
-const CLOJURE: &[BuiltinMetric] = &[ast_gauge(
+const CLOJURE: &[BuiltinMetric] = &[ast_metric(
     "oxplow.clojure.defn_count",
     "defn count",
     "Number of `defn` definitions.",
@@ -279,7 +241,7 @@ const CLOJURE: &[BuiltinMetric] = &[ast_gauge(
 )];
 
 const CSHARP: &[BuiltinMetric] = &[
-    ast_gauge(
+    ast_metric(
         "oxplow.csharp.empty_catch",
         "empty catch blocks",
         "Empty `catch` blocks that swallow exceptions.",
@@ -288,7 +250,7 @@ const CSHARP: &[BuiltinMetric] = &[
         None,
         include_str!("plugins/metrics/csharp/empty_catch.star"),
     ),
-    ast_gauge(
+    ast_metric(
         "oxplow.csharp.blocking_async_calls",
         "blocking async calls (.Result / .Wait())",
         "Blocking calls on async code (`.Result` / `.Wait()`).",
@@ -308,70 +270,44 @@ pub fn builtin_metrics() -> Vec<BuiltinMetric> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GaugeHost;
+    use crate::TreeHost;
     use std::collections::HashMap;
 
-    /// Run a built-in metric by key over a fixture file map and return its
-    /// gauge report (headline `tree:.` total + sparse `file:<path>` per-file
-    /// breakdown — the grain split from metrics.md).
-    fn report_over(key: &str, files: HashMap<String, String>) -> crate::MetricReport {
+    /// Run a built-in metric's script by key over a fixture file map and
+    /// return its facts.
+    fn report_over(key: &str, files: HashMap<String, String>) -> Vec<crate::CollectedFact> {
         let metric = builtin_metrics()
             .into_iter()
             .find(|m| m.key == key)
             .unwrap_or_else(|| panic!("no builtin metric {key}"));
-        let out = metric
-            .collector()
-            .run_gauge("", GaugeHost::new(files))
-            .expect("gauge runs");
-        out.as_gauge().expect("gauge output").clone()
+        crate::run_fact_starlark(
+            metric.script,
+            &serde_json::json!({}),
+            TreeHost::new(files),
+            &crate::SandboxBudget::default(),
+        )
+        .expect("script runs")
     }
 
-    /// Run a built-in metric and return the repo-total (the `tree:.` sample's
-    /// value), asserting the invariant that the per-file (`file:<path>`)
-    /// breakdown sums exactly to it and that no sample carries a stray subject.
+    /// Run a built-in idiom metric and return its repo total — the sum of its
+    /// per-file facts — asserting each is a `file:<path>` fact on its path.
     fn run_over(key: &str, files: HashMap<String, String>) -> f64 {
-        let report = report_over(key, files);
-        let totals = report
-            .samples
-            .iter()
-            .filter(|s| s.subject.as_deref() == Some("tree:."))
-            .count();
-        assert_eq!(totals, 1, "{key} must project exactly one tree:. total");
-        let total = report
-            .samples
-            .iter()
-            .find(|s| s.subject.as_deref() == Some("tree:."))
-            .expect("tree:. total")
-            .value;
-        let per_file_sum: f64 = report
-            .samples
-            .iter()
-            .filter(|s| {
-                s.subject
-                    .as_deref()
-                    .is_some_and(|sub| sub.starts_with("file:"))
-            })
-            .map(|s| s.value)
-            .sum();
-        assert_eq!(
-            total, per_file_sum,
-            "{key}: tree:. total must equal the sum of per-file samples"
-        );
-        for s in &report.samples {
-            let sub = s.subject.as_deref().unwrap_or("");
-            assert!(
-                sub == "tree:." || sub.starts_with("file:"),
-                "{key}: unexpected sample subject {sub:?}"
+        let facts = report_over(key, files);
+        for f in &facts {
+            let path = f.path.as_deref().unwrap_or_default();
+            assert_eq!(
+                f.subject.as_deref(),
+                Some(format!("file:{path}").as_str()),
+                "{key}: a per-file fact"
             );
         }
-        total
+        facts.iter().map(|f| f.value).sum()
     }
 
-    /// Every `oxplow.*` FACT the gauge emits (the durable atomic grain), as
-    /// `(measure, value, language)` — the inverted substrate's per-item output.
+    /// Every `oxplow.*` FACT the script emits, as `(measure, value,
+    /// language)`.
     fn facts_over(key: &str, files: HashMap<String, String>) -> Vec<(String, f64, Option<String>)> {
         report_over(key, files)
-            .facts
             .iter()
             .map(|fc| {
                 // The conformed dimension key (V43) — the scripts emit it
@@ -387,18 +323,12 @@ mod tests {
             .collect()
     }
 
-    /// The `(path, value)` of every per-file (`file:<path>`) sample, in emit
-    /// order — the attribution grain the effort rollup reads.
+    /// The `(path, value)` of every per-file fact, in emit order — the
+    /// attribution grain the effort rollup reads.
     fn per_file_over(key: &str, files: HashMap<String, String>) -> Vec<(String, f64)> {
         report_over(key, files)
-            .samples
             .iter()
-            .filter_map(|s| {
-                s.subject
-                    .as_deref()
-                    .and_then(|sub| sub.strip_prefix("file:"))
-                    .map(|p| (p.to_string(), s.value))
-            })
+            .filter_map(|f| f.path.clone().map(|p| (p, f.value)))
             .collect()
     }
 
@@ -451,30 +381,18 @@ fn b() {
 
     #[test]
     fn per_language_gauges_emit_rule_tagged_ast_hit_facts() {
-        // tsk30: each per-language idiom gauge emits per-file `oxplow.ast_hit`
-        // facts tagged with its rule; the fact values sum to the baked tree total
-        // (so the Sum(ast_hit)-by-rule spec reproduces the headline).
-        let report = report_over("oxplow.rust.unsafe_blocks", corpus());
-        assert!(!report.facts.is_empty(), "emits ast_hit facts");
+        // tsk30: each per-language idiom script emits per-file `oxplow.ast_hit`
+        // facts tagged with its rule (so the Sum(ast_hit)-by-rule spec is the
+        // headline).
+        let facts = report_over("oxplow.rust.unsafe_blocks", corpus());
+        assert!(!facts.is_empty(), "emits ast_hit facts");
         assert!(
-            report
-                .facts
+            facts
                 .iter()
                 .all(|f| f.measure == "oxplow.ast_hit" && f.rule.as_deref() == Some("unsafe_block")),
             "every fact is on oxplow.ast_hit tagged rule=unsafe_block"
         );
-        let fact_sum: f64 = report.facts.iter().map(|f| f.value).sum();
-        let baked = report
-            .samples
-            .iter()
-            .find(|s| s.subject.as_deref() == Some("tree:."))
-            .unwrap()
-            .value;
-        assert_eq!(
-            fact_sum, baked,
-            "per-file ast_hit facts sum to the baked total"
-        );
-        assert_eq!(baked, 2.0);
+        assert_eq!(facts.iter().map(|f| f.value).sum::<f64>(), 2.0);
     }
 
     #[test]
@@ -570,9 +488,9 @@ const g = (a: any) => a!;
             "src/a.rs".to_string(),
             "/// documented\npub fn a() {}\npub fn b() {}\nfn c() {}\n".to_string(),
         );
-        let report = report_over("oxplow.doc_coverage", files);
-        assert_eq!(report.facts.len(), 1, "one per-file doc-coverage fact");
-        let f = &report.facts[0];
+        let facts = report_over("oxplow.doc_coverage", files);
+        assert_eq!(facts.len(), 1, "one per-file doc-coverage fact");
+        let f = &facts[0];
         assert_eq!(f.measure, "oxplow.doc_coverage");
         assert_eq!(f.num, Some(1.0), "1 documented public");
         assert_eq!(f.den, Some(2.0), "2 public");

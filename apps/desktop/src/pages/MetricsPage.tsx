@@ -111,7 +111,7 @@ const sel = { fontSize: 12, width: "100%" } as const;
 /**
  * Metrics — every catalogued metric as a `title · trend sparkline ·
  * latest value` row, organized as **one table per section** under headings, via
- * the shared `buildMetricSections` (Code gauges / Tests / Coverage / then one
+ * the shared `buildMetricSections` (Code metrics / Tests / Coverage / then one
  * top-level section **per language** for static analysis / Operational)
  * (tsk81). A right-side panel scopes the latest/trend by a preset time range
  * (default 7 days) and branch, picks Enabled (default) / All, and holds the
@@ -124,9 +124,9 @@ const sel = { fontSize: 12, width: "100%" } as const;
  * Live on `metricSamplesChanged` (debounced) and `configChanged`.
  *
  * **The row set is the CATALOG, not the spec table (tsk87).** Only the catalog
- * knows about `use:`: a built-in gauge keeps its seeded spec when merely
- * un-`use:`d (it just never runs), so reading specs alone listed the bundled
- * C#/Clojure idiom gauges in a Rust/TS repo as permanent `—` rows while Metric
+ * knows about `use:`: a built-in metric keeps its seeded spec when merely
+ * un-`use:`d (its collector just never runs), so reading specs alone listed the
+ * bundled C#/Clojure idiom metrics in a Rust/TS repo as permanent `—` rows while Metric
  * Settings showed the same rows unchecked. The spec joins in by key for the
  * presentation metadata (unit / direction / thresholds) and is null only for an
  * explicitly disabled metric, whose spec is pruned.
@@ -290,7 +290,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
           </div>
           {/* Authoring a custom metric is agent work now (the "+ New metric"
               scaffold form was retired, tsk122): the agent wires up the trio +
-              gauge script correctly via the /oxplow:new-metric skill. This blurb
+              collector script correctly via the /oxplow:new-metric skill. This blurb
               points the user there. */}
           <div
             data-testid="recorded-new-metric-help"
@@ -306,7 +306,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
             <span style={{ opacity: 0.6, fontSize: 12 }}>New metric</span>
             <span style={{ fontSize: 12, lineHeight: 1.5, opacity: 0.85 }}>
               Ask your agent to add one — e.g. “track our TODO count” or “chart
-              bundle size.” It wires up the measure, gauge, and metric in{" "}
+              bundle size.” It wires up the measure, collector, and metric in{" "}
               <code>.oxplow/project.yaml</code> and verifies it charts here (the{" "}
               <code>/oxplow:new-metric</code> skill).
             </span>

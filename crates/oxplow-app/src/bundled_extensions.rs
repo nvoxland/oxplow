@@ -87,6 +87,8 @@ pub fn find(name: &str) -> Option<&'static BundledExtension> {
 
 pub fn is_reserved(name: &str) -> bool {
     find(name).is_some()
+        // A collector's owner names its extension, the project or oxplow.
+        || [oxplow_config::collectors::PROJECT, oxplow_config::collectors::BUILT_IN].contains(&name)
 }
 
 #[cfg(test)]

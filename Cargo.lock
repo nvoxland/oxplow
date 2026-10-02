@@ -4829,6 +4829,7 @@ name = "oxplow-sdk"
 version = "0.7.0"
 dependencies = [
  "oxplow-app",
+ "oxplow-config",
  "oxplow-db",
  "oxplow-domain",
  "oxplow-plugin",

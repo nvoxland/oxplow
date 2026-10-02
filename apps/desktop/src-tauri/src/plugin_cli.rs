@@ -24,7 +24,10 @@ usage:
       project has been opened in oxplow (.oxplow/local.sqlite exists) every
       lens and advisory is also dry-run against its database
   oxplow plugin migrate <name|path> [--root <dir>]
-      rewrite a v1 extension.yaml as v2 in place (idempotent)
+      rewrite a v1 extension.yaml as v2, and its `gauges:` as `collectors:`,
+      in place (idempotent)
+  oxplow plugin migrate --project [--root <dir>]
+      rewrite .oxplow/project.yaml's `gauges:` as `collectors:` in place
   oxplow plugin test <name|path> [--bless] [--json] [--root <dir>]
       check, then run each declared provider: its handshake against its
       declarations, its test config, the intent examples' fixtures, every
@@ -75,6 +78,7 @@ struct Parsed {
     root: Option<PathBuf>,
     json: bool,
     bless: bool,
+    project: bool,
 }
 
 fn parse(args: &[String]) -> Result<Parsed, Failure> {
@@ -84,6 +88,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
         root: None,
         json: false,
         bless: false,
+        project: false,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -103,6 +108,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
             }
             "--json" => p.json = true,
             "--bless" => p.bless = true,
+            "--project" => p.project = true,
             "-h" | "--help" | "help" => return Err(Failure::Usage("help".into())),
             flag if flag.starts_with('-') => {
                 return Err(Failure::Usage(format!("unknown flag `{flag}`")))
@@ -198,6 +204,21 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                 let _ = writeln!(out);
             }
             Ok(if report.ok { 0 } else { 1 })
+        }
+        "migrate" if p.project => {
+            let root = p.root.clone().unwrap_or_else(cwd);
+            let done = oxplow_sdk::migrate_project(&root)?;
+            let _ = writeln!(
+                out,
+                "{}: {}",
+                done.path,
+                if done.changed {
+                    "`gauges:` rewritten as `collectors:`"
+                } else {
+                    "no `gauges:`, nothing to do"
+                }
+            );
+            Ok(0)
         }
         "migrate" => {
             let target = pos

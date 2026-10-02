@@ -36,7 +36,7 @@ pub mod runtime;
 pub use ai::{AiHost, AiOracle};
 pub use builtin_metrics::{builtin_metrics, BuiltinMetric};
 pub use helpers::HelperError;
-pub use runtime::{GaugeHost, SandboxBudget};
+pub use runtime::{SandboxBudget, TreeHost};
 
 /// The *type* of thing a collector observes. Each kind has a fixed,
 /// host-side typed output contract (see [`CollectorOutput`]).
@@ -49,10 +49,6 @@ pub enum CollectorKind {
     Test,
     /// A flat list of linter/analyzer findings.
     Analysis,
-    /// One or more scalar samples projected into the metric substrate
-    /// (`metric_sample`). The author-able kind: any deterministically-computable
-    /// number (LOC, unsafe-block count, bundle size, …).
-    Gauge,
 }
 
 /// Which engine runs a collector's field-mapping step.
@@ -69,51 +65,15 @@ pub enum CollectorRuntime {
     Exec,
 }
 
-/// One scalar sample projected by a `gauge` collector. `subject` is an optional
-/// `"kind:ref"` string (e.g. `"file:src/a.rs"`, `"module:apps/desktop"`) the
-/// host splits onto `subject_kind`/`subject_ref`; `dims` are open author
-/// dimensions carried onto the sample as `dims_json`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GaugeSample {
-    pub value: f64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subject: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dims: Option<serde_json::Map<String, serde_json::Value>>,
-}
-
-/// The typed output of a `gauge` collector: ≥1 scalar sample to project into
-/// `metric_sample`, plus optional located `findings` — the underlying items the
-/// metric counted (e.g. each high-complexity function), persisted on the run so
-/// a recording can be drilled into. Mirrors the JSON a gauge script returns —
-/// `{ "samples": [ … ], "findings"?: [ … ], "facts"?: [ … ] }`.
-///
-/// `facts` is the durable atomic channel of the inverted metric substrate (epic
-/// tsk12): each entry is a per-subject measurement bound to a **measure**
-/// (`oxplow.complexity`, `oxplow.todo`, …) — the raw grain a metric SPEC
-/// re-aggregates at read time. It is distinct from `samples` (the legacy baked
-/// headline) and `findings` (the offenders drill-in): a gauge dual-writes a
-/// baked headline AND the facts behind it, and the count-over-threshold headline
-/// becomes a spec over the facts.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct MetricReport {
-    #[serde(default)]
-    pub samples: Vec<GaugeSample>,
-    #[serde(default)]
-    pub findings: Vec<GaugeFinding>,
-    #[serde(default)]
-    pub facts: Vec<GaugeFact>,
-}
-
-/// One durable atomic fact a gauge emits (epic tsk12) — a per-subject
-/// measurement bound to a **measure**, the grain a metric spec re-aggregates.
-/// `measure` is the (defined) measure key the fact lands on; emitting a fact on
-/// an undefined measure is a declare-to-collect violation the host surfaces.
-/// `subject` is an optional `"kind:ref"` string (split like `GaugeSample`);
+/// One durable atomic fact a collector records (epic tsk12; P7.B3) — a
+/// per-subject measurement bound to a **measure**, the grain a metric spec
+/// re-aggregates. `measure` is the (defined) measure key the fact lands on;
+/// a fact on an undefined measure is a declare-to-collect violation the host
+/// surfaces. `subject` is an optional `"kind:ref"` string;
 /// `path`/`line` are the location at capture; `dims` are open author dimensions
 /// carried onto the fact as `dims_json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GaugeFact {
+pub struct CollectedFact {
     pub measure: String,
     pub value: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -140,28 +100,36 @@ pub struct GaugeFact {
     pub dims: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// One located item a gauge counted — projected onto `metric_finding` on the
-/// run. All fields optional so a script emits only what's meaningful (a
-/// complexity finding: `path` + `line` + `message`=name + `value`=complexity).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GaugeFinding {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub line: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub end_line: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub value: Option<f64>,
-    /// Optional `"kind:ref"` subject (split like `GaugeSample.subject`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subject: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rule: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub severity: Option<String>,
+/// A fact collector's output — `{"facts": [...]}` — as its facts.
+pub fn facts_of(value: serde_json::Value) -> Result<Vec<CollectedFact>, CollectError> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Output {
+        #[serde(default)]
+        facts: Vec<CollectedFact>,
+    }
+    serde_json::from_value::<Output>(value)
+        .map(|o| o.facts)
+        .map_err(|e| {
+            CollectError::Shape(format!(
+                "a fact collector returns {{\"facts\": [...]}}: {e}"
+            ))
+        })
+}
+
+/// Run a fact collector's Starlark `script` over `input` with `host`'s tree
+/// in scope (`files()`, `source_files()`), under `budget`, and read its facts.
+pub fn run_fact_starlark(
+    script: &str,
+    input: &serde_json::Value,
+    host: TreeHost,
+    budget: &SandboxBudget,
+) -> Result<Vec<CollectedFact>, CollectError> {
+    let (script, input) = (script.to_string(), input.clone());
+    let raw = runtime::run_sandboxed(budget, move || {
+        runtime::run_starlark_with_host(&script, &input, &host)
+    })?;
+    facts_of(raw)
 }
 
 /// The typed result of running a collector. The variant is determined by the
@@ -173,7 +141,6 @@ pub enum CollectorOutput {
     Coverage(CoverageReport),
     Test(TestReport),
     Analysis(AnalysisReport),
-    Gauge(MetricReport),
 }
 
 impl CollectorOutput {
@@ -183,7 +150,6 @@ impl CollectorOutput {
             CollectorOutput::Coverage(_) => CollectorKind::Coverage,
             CollectorOutput::Test(_) => CollectorKind::Test,
             CollectorOutput::Analysis(_) => CollectorKind::Analysis,
-            CollectorOutput::Gauge(_) => CollectorKind::Gauge,
         }
     }
 
@@ -207,14 +173,6 @@ impl CollectorOutput {
     pub fn as_analysis(&self) -> Option<&AnalysisReport> {
         match self {
             CollectorOutput::Analysis(r) => Some(r),
-            _ => None,
-        }
-    }
-
-    /// Borrow the gauge report, if this is a gauge output.
-    pub fn as_gauge(&self) -> Option<&MetricReport> {
-        match self {
-            CollectorOutput::Gauge(r) => Some(r),
             _ => None,
         }
     }
@@ -270,6 +228,21 @@ pub enum CollectorInput {
     Lcov,
     /// Split into an array of line strings.
     Lines,
+}
+
+/// Parse a report's text in a collector's `report.format` (`text`,
+/// `json`, `xml`, `lcov` or `lines`): what a collector gets as
+/// `input.report`.
+pub fn parse_report(format: &str, content: &str) -> Result<serde_json::Value, CollectError> {
+    let input = match format {
+        "text" => CollectorInput::Text,
+        "json" => CollectorInput::Json,
+        "xml" => CollectorInput::Xml,
+        "lcov" => CollectorInput::Lcov,
+        "lines" => CollectorInput::Lines,
+        other => return Err(CollectError::UnknownFormat(other.to_string())),
+    };
+    input.parse(content)
 }
 
 impl CollectorInput {
@@ -481,30 +454,6 @@ impl Collector {
                 let raw = runtime::run_exec(&self.budget, argv, content)?;
                 runtime::value_to_output(kind, raw)
             }
-        }
-    }
-
-    /// Run a gauge collector with a [`GaugeHost`] in scope so a Starlark script's
-    /// `files(glob)` builtin can read the snapshot file map. The host moves into
-    /// the sandbox worker by value. For non-Starlark runtimes the host is unused
-    /// and this is equivalent to [`run`](Collector::run).
-    pub fn run_gauge(
-        &self,
-        content: &str,
-        host: GaugeHost,
-    ) -> Result<CollectorOutput, CollectError> {
-        let kind = self.kind;
-        match &self.runner {
-            Runner::Starlark { input, script } => {
-                let value = input.parse(content)?;
-                let script = script.clone();
-                let raw = runtime::run_sandboxed(&self.budget, move || {
-                    runtime::run_starlark_with_host(&script, &value, &host)
-                })?;
-                runtime::value_to_output(kind, raw)
-            }
-            // jaq / exec / builtin don't read the file-map host.
-            _ => self.run(content),
         }
     }
 }
@@ -801,70 +750,47 @@ mod tests {
         );
     }
 
+    /// A fact script's facts over a file map, with the default budget.
+    fn facts(script: &str, map: std::collections::HashMap<String, String>) -> Vec<CollectedFact> {
+        run_fact_starlark(
+            script,
+            &serde_json::json!({}),
+            TreeHost::new(map),
+            &SandboxBudget::default(),
+        )
+        .expect("runs")
+    }
+
     #[test]
-    fn jaq_gauge_collector_runs_end_to_end() {
-        // A jaq gauge over JSON input → typed MetricReport with one sample.
-        let program =
-            r#"{ samples: [ { value: (.lines | length), dims: { language: "rust" } } ] }"#;
-        let c = Collector::jaq(
-            "acme.loc",
-            CollectorKind::Gauge,
-            ["loc-json"],
-            CollectorInput::Json,
-            program,
-        );
-        let out = c.run(r#"{"lines":[1,2,3,4]}"#).expect("runs");
-        assert_eq!(out.kind(), CollectorKind::Gauge);
-        let report = out.as_gauge().expect("gauge");
-        assert_eq!(report.samples.len(), 1);
-        assert_eq!(report.samples[0].value, 4.0);
+    fn a_jaq_fact_script_reads_its_report() {
+        let raw = runtime::run_jaq(
+            r#"{ facts: [ { measure: "acme.loc", value: (.report.lines | length), dims: { language: "rust" } } ] }"#,
+            &serde_json::json!({ "report": { "lines": [1, 2, 3, 4] } }),
+        )
+        .expect("runs");
+        let facts = facts_of(raw).expect("facts");
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].value, 4.0);
         assert_eq!(
-            report.samples[0].dims.as_ref().unwrap()["language"],
+            facts[0].dims.as_ref().unwrap()["language"],
             serde_json::json!("rust")
         );
+        // Anything but `facts` is refused.
+        let err = facts_of(serde_json::json!({ "samples": [] })).unwrap_err();
+        assert!(err.to_string().contains("facts"), "{err}");
     }
 
     #[test]
-    fn starlark_gauge_collector_runs_end_to_end() {
-        // A starlark gauge over raw text → counts via the regex_find host
-        // builtin, projecting one subject-tagged sample.
-        let script = r#"
-def transform(input):
-    n = len(regex_find(r"TODO", input))
-    return {"samples": [{"value": n, "subject": "tree:."}]}
-"#;
-        let c = Collector::starlark(
-            "acme.todos",
-            CollectorKind::Gauge,
-            ["todos"],
-            CollectorInput::Text,
-            script,
-        );
-        let out = c.run("a TODO here and a TODO there").expect("runs");
-        let report = out.as_gauge().expect("gauge");
-        assert_eq!(report.samples.len(), 1);
-        assert_eq!(report.samples[0].value, 2.0);
-        assert_eq!(report.samples[0].subject.as_deref(), Some("tree:."));
-    }
-
-    #[test]
-    fn starlark_gauge_reads_snapshot_files_and_queries_ast() {
-        // The headline P3 capability: a tree-derived gauge that walks the
-        // snapshot file map via files() and counts AST nodes via ast_query().
+    fn a_fact_script_reads_snapshot_files_and_queries_ast() {
+        // The headline capability: a tree script walks the snapshot file map
+        // via files() and counts AST nodes via ast_query().
         let script = r#"
 def transform(input):
     n = 0
     for f in files("**/*.rs"):
         n += len(ast_query(f["text"], "rust", "(unsafe_block) @u"))
-    return {"samples": [{"value": n, "subject": "tree:.", "dims": {"language": "rust"}}]}
+    return {"facts": [{"measure": "acme.unsafe", "value": n, "subject": "tree:."}]}
 "#;
-        let c = Collector::starlark(
-            "acme.unsafe_blocks",
-            CollectorKind::Gauge,
-            ["unsafe-blocks"],
-            CollectorInput::Text,
-            script,
-        );
         let mut map = std::collections::HashMap::new();
         map.insert(
             "src/a.rs".to_string(),
@@ -873,41 +799,27 @@ def transform(input):
         map.insert("src/b.rs".to_string(), "fn c() { let z = 1; }".to_string());
         // A non-Rust file the glob must skip.
         map.insert("README.md".to_string(), "unsafe { not code }".to_string());
-
-        let out = c.run_gauge("", GaugeHost::new(map)).expect("runs");
-        let report = out.as_gauge().expect("gauge");
-        assert_eq!(report.samples.len(), 1);
-        assert_eq!(report.samples[0].value, 2.0, "two unsafe blocks across .rs");
-        assert_eq!(report.samples[0].subject.as_deref(), Some("tree:."));
+        let out = facts(script, map);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].value, 2.0, "two unsafe blocks across .rs");
+        assert_eq!(out[0].subject.as_deref(), Some("tree:."));
     }
 
     #[test]
     fn source_files_and_markers_builtins_are_language_agnostic() {
         // A single script sweeps source_files() (each tagged with language) and
         // counts TODO/FIXME markers per file via the markers() capability — no
-        // language named in the script. Verifies cross-language collection.
+        // language named in the script.
         let script = r#"
 def transform(input):
-    total = 0
     by_lang = {}
     for f in source_files():
         lang = f["language"]
         c = len(markers(f["text"], lang))
-        total += c
         if c > 0:
             by_lang[lang] = by_lang.get(lang, 0) + c
-    samples = [{"value": total, "subject": "tree:."}]
-    for lang in sorted(by_lang):
-        samples.append({"value": by_lang[lang], "subject": "language:" + lang, "dims": {"language": lang}})
-    return {"samples": samples}
+    return {"facts": [{"measure": "acme.todo", "value": by_lang[lang], "dims": {"language": lang}} for lang in sorted(by_lang)]}
 "#;
-        let c = Collector::starlark(
-            "oxplow.todos",
-            CollectorKind::Gauge,
-            ["todos"],
-            CollectorInput::Text,
-            script,
-        );
         let mut map = std::collections::HashMap::new();
         map.insert(
             "src/a.rs".to_string(),
@@ -923,31 +835,24 @@ def transform(input):
         );
         // Non-source file (skipped by source_files) — its "TODO" must not count.
         map.insert("README.md".to_string(), "TODO not code\n".to_string());
-
-        let out = c.run_gauge("", GaugeHost::new(map)).expect("runs");
-        let report = out.as_gauge().expect("gauge");
-        let tree = report
-            .samples
-            .iter()
-            .find(|s| s.subject.as_deref() == Some("tree:."))
-            .expect("headline");
+        let by_lang: Vec<(String, f64)> = facts(script, map)
+            .into_iter()
+            .map(|f| {
+                (
+                    f.dims.unwrap()["language"].as_str().unwrap().to_string(),
+                    f.value,
+                )
+            })
+            .collect();
         assert_eq!(
-            tree.value, 4.0,
+            by_lang,
+            vec![
+                ("clojure".to_string(), 1.0),
+                ("rust".to_string(), 1.0),
+                ("typescript".to_string(), 2.0)
+            ],
             "4 markers across rust/ts/clojure, README skipped"
         );
-        // Per-language breakdown rides as language: samples with a language dim.
-        let rust = report
-            .samples
-            .iter()
-            .find(|s| s.subject.as_deref() == Some("language:rust"))
-            .expect("rust breakdown");
-        assert_eq!(rust.value, 1.0);
-        let ts = report
-            .samples
-            .iter()
-            .find(|s| s.subject.as_deref() == Some("language:typescript"))
-            .expect("ts breakdown");
-        assert_eq!(ts.value, 2.0);
     }
 
     #[test]
@@ -957,15 +862,8 @@ def transform(input):
         // file read as one giant "function" dominates every tail metric.
         let script = r#"
 def transform(input):
-    return {"samples": [{"value": len(source_files()), "subject": "tree:."}]}
+    return {"facts": [{"measure": "acme.files", "value": len(source_files())}]}
 "#;
-        let c = Collector::starlark(
-            "acme.corpus",
-            CollectorKind::Gauge,
-            ["corpus"],
-            CollectorInput::Text,
-            script,
-        );
         let mut map = std::collections::HashMap::new();
         map.insert("src/a.rs".to_string(), "fn a() {}\n".to_string());
         map.insert(
@@ -976,32 +874,22 @@ def transform(input):
             "src/api.ts".to_string(),
             "// This file has been generated by Tauri Specta. Do not edit this file manually.\nexport const y = 1;\n".to_string(),
         );
-
-        let out = c.run_gauge("", GaugeHost::new(map)).expect("runs");
-        let report = out.as_gauge().expect("gauge");
-        assert_eq!(report.samples.len(), 1);
         assert_eq!(
-            report.samples[0].value, 1.0,
+            facts(script, map)[0].value,
+            1.0,
             "only the hand-written file survives"
         );
     }
 
     #[test]
     fn files_builtin_is_empty_without_a_host() {
-        // run() (no host) → files() sees no snapshot map and yields nothing.
-        let script = r#"
-def transform(input):
-    return {"samples": [{"value": len(files("**/*"))}]}
-"#;
-        let c = Collector::starlark(
-            "acme.count_files",
-            CollectorKind::Gauge,
-            ["count-files"],
-            CollectorInput::Text,
-            script,
-        );
-        let out = c.run("").expect("runs");
-        assert_eq!(out.as_gauge().expect("gauge").samples[0].value, 0.0);
+        // No host → files() sees no snapshot map and yields nothing.
+        let raw = runtime::run_starlark(
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"acme.n\", \"value\": len(files(\"**/*\"))}]}\n",
+            &serde_json::json!({}),
+        )
+        .expect("runs");
+        assert_eq!(facts_of(raw).unwrap()[0].value, 0.0);
     }
 
     #[test]
