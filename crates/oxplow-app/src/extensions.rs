@@ -1130,6 +1130,62 @@ impl ExtensionFiles for Disk {
     }
 }
 
+/// An extension's files held in memory — one revision's (P8.C1): paths
+/// inside the extension folder → their text.
+pub struct Tree(std::collections::BTreeMap<String, String>);
+
+impl Tree {
+    pub fn new(files: impl IntoIterator<Item = (String, String)>) -> Self {
+        Self(files.into_iter().collect())
+    }
+}
+
+impl ExtensionFiles for Tree {
+    fn read(&self, rel: &str) -> Option<String> {
+        self.0.get(rel).cloned()
+    }
+    /// What `dir` holds directly: its files, and the folders on the way to
+    /// deeper ones, as a directory listing would show them.
+    fn list(&self, dir: &str) -> Vec<String> {
+        let prefix = format!("{}/", dir.trim_end_matches('/'));
+        self.0
+            .keys()
+            .filter_map(|p| p.strip_prefix(&prefix))
+            .map(|rest| rest.split('/').next().unwrap_or(rest).to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+    /// A custom component's bundle is built on disk; a revision's tree has
+    /// none to stat.
+    fn bundle_stat(&self, _rel: &str) -> Option<custom_components::BundleStat> {
+        None
+    }
+}
+
+/// Project extension `name` as it is at `rev` of the workspace `ws` — a
+/// commit, a snapshot, the working tree — through `Trees` (P8.C1). `None`
+/// when that revision has no `oxplow/extensions/<name>/extension.yaml`.
+pub async fn extension_at(
+    trees: &crate::trees::Trees,
+    ws: &Path,
+    rev: &oxplow_domain::vcs::Revision,
+    name: &str,
+) -> Result<Option<Extension>, DomainError> {
+    let rel = format!("{EXTENSIONS_DIR}/{name}");
+    let prefix = format!("{rel}/");
+    let files = trees
+        .corpus(ws, rev, |p| p.starts_with(&prefix))
+        .await?
+        .into_iter()
+        .filter_map(|(path, text)| Some((path.strip_prefix(&prefix)?.to_string(), text)));
+    let tree = Tree::new(files);
+    if tree.read("extension.yaml").is_none() {
+        return Ok(None);
+    }
+    Ok(Some(load_one(&tree, name, &rel, "project")))
+}
+
 struct Embedded(&'static crate::bundled_extensions::BundledExtension);
 
 impl ExtensionFiles for Embedded {
@@ -5804,5 +5860,71 @@ commands:
             );
             assert!(ext.pages.is_empty(), "{page}");
         }
+    }
+
+    /// P8.C1: an extension loads from any revision — at `git:HEAD` of a
+    /// clean worktree exactly as from disk, and at a snapshot as that
+    /// snapshot holds it, whatever the disk says now.
+    #[tokio::test]
+    async fn an_extension_loads_at_any_revision() {
+        use oxplow_domain::stores::StreamStore as _;
+        use oxplow_domain::vcs::Revision;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let ws = f.svc.layout.project_dir.clone();
+        let manifest = |purpose: &str| {
+            format!(
+                "manifest: 2\nname: acme\ndescription: {purpose}\nintent:\n  purpose: {purpose}\n  origin: thread:thr1\n  examples: []\n"
+            )
+        };
+        let dir = ws.join("oxplow/extensions/acme");
+        std::fs::create_dir_all(dir.join("lenses")).unwrap();
+        std::fs::write(dir.join("extension.yaml"), manifest("Committed.")).unwrap();
+        std::fs::write(
+            dir.join("lenses/streams.yaml"),
+            "title: Streams\nquery: SELECT id FROM v_stream\n",
+        )
+        .unwrap();
+        crate::test_fixtures::commit_all(&ws, "acme");
+
+        let at_head = extension_at(&f.svc.trees, &ws, &Revision::git("HEAD"), "acme")
+            .await
+            .unwrap()
+            .expect("acme is at HEAD");
+        assert_eq!(at_head, load_project_extension(&ws, "acme"));
+        assert_eq!(at_head.lenses.len(), 1);
+        assert!(
+            extension_at(&f.svc.trees, &ws, &Revision::git("HEAD"), "nope")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        // A snapshot holding an edited manifest loads the edit, though the
+        // disk holds the committed one.
+        let stream = f.svc.stream_store.list().await.unwrap()[0].id;
+        let snap = f.svc.snapshot_store.create_snapshot(stream).await.unwrap();
+        let edited = manifest("Edited.");
+        let hash = f.svc.blobs.write(edited.as_bytes()).unwrap();
+        f.svc
+            .snapshot_store
+            .capture(oxplow_db::FileSnapshot {
+                id: 0,
+                stream_id: stream,
+                path: "oxplow/extensions/acme/extension.yaml".into(),
+                blob_hash: Some(hash),
+                size_bytes: edited.len() as i64,
+                captured_at: oxplow_domain::Timestamp::now(),
+                storage: oxplow_db::SnapshotStorage::Oxplow,
+                snapshot_id: Some(snap),
+                mtime_ms: None,
+                content_hash: None,
+            })
+            .await
+            .unwrap();
+        let at_snapshot = extension_at(&f.svc.trees, &ws, &Revision::Snapshot(snap), "acme")
+            .await
+            .unwrap()
+            .expect("acme is in the snapshot");
+        assert_eq!(at_snapshot.description, "Edited.");
     }
 }

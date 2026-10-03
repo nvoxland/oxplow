@@ -944,6 +944,16 @@ side by side (`EffectDiff`; no line diff yet). Deferred: model row
 counts, collector dry-run output, `plugin check --effects`, and the
 effort-review view of an extension change.
 
+**An extension at any revision** (P8.C1). `extension_at(trees, ws, rev,
+name)` loads project extension `name` as revision `rev` of the
+workspace holds it — a commit (`git:HEAD`), a snapshot, the working
+tree — through `Trees::corpus` into an in-memory `Tree` (the
+`ExtensionFiles` the loader reads; a custom component's bundle has
+nothing to stat there). At `git:HEAD` of a clean worktree it equals the
+disk load; `None` when that revision has no `extension.yaml`. It's what
+lets a review compare two revisions of an extension, neither of which
+need be on disk.
+
 ## Commands in core menus (`ui.commands`)
 
 `ui.commands` (stable, P6b.C4; `extensions/ui_commands.rs`) puts a
