@@ -22,11 +22,14 @@ usage:
       collector with a model and a lens over it; a command composing core
       commands. Each checks clean and passes `test` as written (a provider
       once a real program replaces its stub)
-  oxplow plugin check <name|path> [--json] [--root <dir>]
+  oxplow plugin check <name|path> [--effects [--against <rev>]] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
       its models, commands, lenses and advisories — against the project's
       database when it has been opened in oxplow (.oxplow/local.sqlite),
-      else an empty one; command names against a throwaway oxplow
+      else an empty one; command names against a throwaway oxplow.
+      --effects also says what the working tree's version changes against
+      git HEAD (or --against <rev>): lenses' text, models and their rows,
+      collectors' outputs, providers' grants — writing nothing
   oxplow plugin migrate <name|path> [--root <dir>]
       rewrite a v1 extension.yaml as v2, and its `gauges:` as `collectors:`,
       in place (idempotent)
@@ -86,6 +89,9 @@ struct Parsed {
     json: bool,
     bless: bool,
     project: bool,
+    /// `check --effects`: compare the working tree with `against`.
+    effects: bool,
+    against: Option<String>,
 }
 
 fn parse(args: &[String]) -> Result<Parsed, Failure> {
@@ -96,6 +102,8 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
         json: false,
         bless: false,
         project: false,
+        effects: false,
+        against: None,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -114,6 +122,14 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
                     })?))
             }
             "--json" => p.json = true,
+            "--effects" => p.effects = true,
+            "--against" => {
+                p.against = Some(
+                    it.next()
+                        .ok_or_else(|| Failure::Usage("--against needs a git revision".into()))?
+                        .clone(),
+                )
+            }
             "--bless" => p.bless = true,
             "--project" => p.project = true,
             "-h" | "--help" | "help" => return Err(Failure::Usage("help".into())),
@@ -178,13 +194,24 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
             let layer = db.map(oxplow_app::sql_gateway::SqlGateway::new);
             // No running oxplow to ask which commands exist: launcher
             // command entries are reported unchecked.
-            let report = block_on(oxplow_sdk::check(
+            let mut report = block_on(oxplow_sdk::check(
                 &root,
                 &name,
                 &catalog,
                 layer.as_ref(),
                 None,
             ))?;
+            if p.effects || p.against.is_some() {
+                let against = p.against.clone().unwrap_or_else(|| "HEAD".into());
+                report.effects = Some(block_on(oxplow_sdk::check_effects(
+                    &root,
+                    &name,
+                    &catalog,
+                    layer.as_ref(),
+                    &against,
+                ))?);
+                report.against = Some(against);
+            }
             let format = if p.json { Format::Json } else { Format::Text };
             let _ = write!(out, "{}", oxplow_sdk::render_findings(&report, format));
             if p.json {
@@ -545,5 +572,72 @@ mod tests {
         assert_eq!(root, PathBuf::from("/r"));
         assert_eq!(name, "demo");
         assert_eq!(locate(None, "demo").1, "demo");
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let ok = std::process::Command::new("git")
+            .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?}");
+    }
+
+    /// P8.C6: `check --effects` compares the working tree with `git:HEAD`
+    /// (or `--against`): a lens and a model edited in the worktree read as
+    /// changed, the model with its rows; `--json` carries the report; the
+    /// project's database isn't touched.
+    #[test]
+    fn check_effects_compares_the_worktree_with_head_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let ext = root.join("oxplow/extensions/acme");
+        let w = |rel: &str, body: &str| {
+            let p = ext.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        };
+        w(
+            "extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: Count.\n  origin: thread:thr1\n  examples: []\nmodels:\n  - name: x\n    version: 1\n    description: X.\n    columns:\n      - { name: n, type: \"\", doc: N. }\n",
+        );
+        w("models/x.sql", "SELECT 1 AS n\n");
+        w(
+            "lenses/count.yaml",
+            "title: Count\nquery: SELECT n FROM v_acme_x\nviz: number\n",
+        );
+        git(root, &["init", "-q", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(root, &["commit", "-q", "-m", "init"]);
+        // A project database the check may read but must not change.
+        let db_path = root.join(".oxplow/local.sqlite");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        drop(oxplow_db::Database::open(&db_path).unwrap());
+        let db_before = std::fs::read(&db_path).unwrap();
+
+        w("models/x.sql", "SELECT 2 AS n\n");
+        let root_s = root.to_str().unwrap();
+        let (code, out, err) = cli(&["check", "acme", "--root", root_s, "--effects"]);
+        assert_eq!(code, 0, "{out}{err}");
+        assert!(out.contains("effects against HEAD:"), "{out}");
+        assert!(out.contains("Lens acme/count: changed"), "{out}");
+        assert!(out.contains("Model v_acme_x rows: 1 → 1"), "{out}");
+
+        let (code, out, _) = cli(&["check", "acme", "--root", root_s, "--effects", "--json"]);
+        assert_eq!(code, 0);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v["effects"]["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l == "Lens acme/count: changed"));
+
+        assert_eq!(
+            std::fs::read(&db_path).unwrap(),
+            db_before,
+            "the database is untouched"
+        );
     }
 }

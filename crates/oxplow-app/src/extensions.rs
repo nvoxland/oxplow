@@ -1138,6 +1138,16 @@ impl Tree {
     pub fn new(files: impl IntoIterator<Item = (String, String)>) -> Self {
         Self(files.into_iter().collect())
     }
+
+    /// A file's text, by path inside the extension folder.
+    pub fn file(&self, rel: &str) -> Option<String> {
+        self.0.get(rel).cloned()
+    }
+
+    /// The extension these files load as, its paths shown under `rel`.
+    pub fn load(&self, name: &str, rel: &str) -> Extension {
+        load_one(self, name, rel, "project")
+    }
 }
 
 impl ExtensionFiles for Tree {
@@ -1173,17 +1183,81 @@ pub async fn extension_at(
     name: &str,
 ) -> Result<Option<Extension>, DomainError> {
     let rel = format!("{EXTENSIONS_DIR}/{name}");
-    let prefix = format!("{rel}/");
+    Ok(extension_tree_at(trees, ws, rev, name)
+        .await?
+        .map(|tree| tree.load(name, &rel)))
+}
+
+/// Project extension `name`'s files at `rev` (P8.C1): `None` when that
+/// revision has no `extension.yaml` for it.
+pub async fn extension_tree_at(
+    trees: &crate::trees::Trees,
+    ws: &Path,
+    rev: &oxplow_domain::vcs::Revision,
+    name: &str,
+) -> Result<Option<Tree>, DomainError> {
+    let prefix = format!("{EXTENSIONS_DIR}/{name}/");
     let files = trees
         .corpus(ws, rev, |p| p.starts_with(&prefix))
         .await?
         .into_iter()
         .filter_map(|(path, text)| Some((path.strip_prefix(&prefix)?.to_string(), text)));
     let tree = Tree::new(files);
-    if tree.read("extension.yaml").is_none() {
-        return Ok(None);
-    }
-    Ok(Some(load_one(&tree, name, &rel, "project")))
+    Ok(tree.read("extension.yaml").is_some().then_some(tree))
+}
+
+/// One version of an extension under review: as loaded, and how to read
+/// its files.
+pub struct ReviewSide<'a> {
+    pub extension: Extension,
+    pub read: &'a (dyn Fn(&str) -> Option<String> + Sync),
+}
+
+/// What going from `before` (none: a first install) to `after` would
+/// change (P8.C2–C5): each side prepared on its own overlay, then
+/// compared — lenses, models and their rows, collectors and their
+/// outputs, providers, config. `after.extension` gets its check's errors.
+pub async fn effects_between(
+    layer: &crate::sql_gateway::SqlGateway,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
+    root: &Path,
+    before: Option<ReviewSide<'_>>,
+    after: &mut ReviewSide<'_>,
+    commands: CommandSchemas<'_>,
+) -> crate::extension_effects::EffectReport {
+    let prepared_after = prepare(layer, catalog, root, &mut after.extension, Some(commands)).await;
+    let prepared_before = match &before {
+        Some(b) => Some(
+            prepare(
+                layer,
+                catalog,
+                root,
+                &mut b.extension.clone(),
+                Some(commands),
+            )
+            .await,
+        ),
+        None => None,
+    };
+    let no_runs = LensRuns::new();
+    crate::extension_effects::effects(
+        layer,
+        before.as_ref().map(|b| crate::extension_effects::Version {
+            extension: &b.extension,
+            read: b.read,
+            lenses: prepared_before.as_ref().map_or(&no_runs, |p| &p.lenses),
+            overlay: prepared_before
+                .as_ref()
+                .map_or(&[], |p| p.overlay.as_slice()),
+        }),
+        crate::extension_effects::Version {
+            extension: &after.extension,
+            read: after.read,
+            lenses: &prepared_after.lenses,
+            overlay: &prepared_after.overlay,
+        },
+    )
+    .await
 }
 
 struct Embedded(&'static crate::bundled_extensions::BundledExtension);
@@ -2728,8 +2802,6 @@ pub async fn review_extension(
     };
     let mut extension = fetched.load();
     let load_errors = extension.errors.len();
-    let after = prepare(layer, catalog, root, &mut extension, Some(commands)).await;
-    let problems = extension.errors.split_off(load_errors);
     let installed: Option<Extension> = replacing.and_then(|name| {
         catalog
             .get(root)
@@ -2737,42 +2809,39 @@ pub async fn review_extension(
             .find(|e| e.name == name && e.origin == "project")
             .cloned()
     });
-    let read_installed = |rel: &str| read_extension_file(root, &extension.name, rel);
+    let name = extension.name.clone();
+    let read_installed = |rel: &str| read_extension_file(root, &name, rel);
     let clone = Disk(fetched.clone.clone());
     let read_candidate = |rel: &str| clone.read(rel);
-    // A candidate that doesn't load has nothing reliable to compare.
     let effects = if load_errors > 0 {
+        // A candidate that doesn't load has nothing reliable to compare;
+        // its check still says what else is wrong.
+        prepare(layer, catalog, root, &mut extension, Some(commands)).await;
         None
     } else {
         // The installed side through its own models, too: what's
         // published may not be it (a disabled extension, a model that
         // failed, another worktree's copy).
-        let before = match &installed {
-            Some(e) => Some(prepare(layer, catalog, root, &mut e.clone(), Some(commands)).await),
-            None => None,
+        let mut after = ReviewSide {
+            extension,
+            read: &read_candidate,
         };
-        let no_runs = LensRuns::new();
-        Some(
-            crate::extension_effects::effects(
-                layer,
-                installed
-                    .as_ref()
-                    .map(|e| crate::extension_effects::Version {
-                        extension: e,
-                        read: &read_installed,
-                        lenses: before.as_ref().map_or(&no_runs, |p| &p.lenses),
-                        overlay: before.as_ref().map_or(&[], |p| p.overlay.as_slice()),
-                    }),
-                crate::extension_effects::Version {
-                    extension: &extension,
-                    read: &read_candidate,
-                    lenses: &after.lenses,
-                    overlay: &after.overlay,
-                },
-            )
-            .await,
+        let report = effects_between(
+            layer,
+            catalog,
+            root,
+            installed.map(|e| ReviewSide {
+                extension: e,
+                read: &read_installed,
+            }),
+            &mut after,
+            commands,
         )
+        .await;
+        extension = after.extension;
+        Some(report)
     };
+    let problems = extension.errors.split_off(load_errors);
     Ok(ExtensionReview {
         extension,
         git: git_url.to_string(),

@@ -989,6 +989,17 @@ holds each input's `Ran { counts, rows (20 per entity), error? }` before
 and after. An exec or read collector is never run — approved or not —
 and says so in `not_run`.
 
+**`oxplow plugin check <name> --effects [--against <rev>]`** (P8.C6).
+The same review on the CLI: `oxplow_sdk::check_effects` loads the
+extension at git `HEAD` (or `--against`) — `extension_tree_at` through a
+`Trees` over the VCS alone — as `before` and the working tree as `after`,
+and runs `extensions::effects_between` (the install review's path too):
+each side prepared on its own overlay over the project's database read
+read-only (else an empty one), so it **writes nothing** — the database
+file is byte-identical after. Text output adds `effects against <rev>:`
+and the report's lines; `--json` adds `effects` (the `EffectReport`) and
+`against` to the check's JSON.
+
 ## Commands in core menus (`ui.commands`)
 
 `ui.commands` (stable, P6b.C4; `extensions/ui_commands.rs`) puts a

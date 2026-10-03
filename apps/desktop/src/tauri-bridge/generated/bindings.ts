@@ -1415,6 +1415,13 @@ export type CheckReport_Deserialize = {
 	// What its SQL was dry-run against.
 	dryRun: DryRun,
 	extension: Extension_Deserialize,
+	/**
+	 *  With `--effects` (P8.C6): what going from `against` to the working
+	 *  tree changes; `null` without it.
+	 */
+	effects: EffectReport | null,
+	// The revision `effects` compares the working tree with.
+	against: string | null,
 };
 
 // What `check` found.
@@ -1428,6 +1435,13 @@ export type CheckReport_Serialize = {
 	// What its SQL was dry-run against.
 	dryRun: DryRun,
 	extension: Extension_Serialize,
+	/**
+	 *  With `--effects` (P8.C6): what going from `against` to the working
+	 *  tree changes; `null` without it.
+	 */
+	effects: EffectReport | null,
+	// The revision `effects` compares the working tree with.
+	against: string | null,
 };
 
 /**

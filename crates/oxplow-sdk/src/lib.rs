@@ -422,6 +422,11 @@ pub struct CheckReport {
     /// What its SQL was dry-run against.
     pub dry_run: DryRun,
     pub extension: Extension,
+    /// With `--effects` (P8.C6): what going from `against` to the working
+    /// tree changes; `null` without it.
+    pub effects: Option<oxplow_app::extension_effects::EffectReport>,
+    /// The revision `effects` compares the working tree with.
+    pub against: Option<String>,
 }
 
 /// The database a check dry-runs an extension's SQL on. It always has one
@@ -485,7 +490,80 @@ pub async fn check(
         warnings: extension.warnings.clone(),
         dry_run,
         extension,
+        effects: None,
+        against: None,
     })
+}
+
+/// What going from git revision `against` (`HEAD`, a branch, a sha) to the
+/// working tree changes for extension `name` (P8.C6) — the review an
+/// install or an effort shows, on the CLI: lenses, models and their rows,
+/// collectors and their outputs, providers, config. It reads the project's
+/// database through `layer` when given (else an empty one) and writes
+/// nothing: each side's models are temp views.
+pub async fn check_effects(
+    root: &Path,
+    name: &str,
+    catalog: &ExtensionCatalog,
+    layer: Option<&SqlGateway>,
+    against: &str,
+) -> Result<oxplow_app::extension_effects::EffectReport, SdkError> {
+    use oxplow_app::extensions::{effects_between, extension_tree_at, ReviewSide};
+    let host = throwaway::Host::start(root)
+        .await
+        .map_err(SdkError::Invalid)?;
+    let empty;
+    let layer = match layer {
+        Some(layer) => layer,
+        None => {
+            empty = SqlGateway::new(oxplow_db::Database::in_memory());
+            &empty
+        }
+    };
+    // A revision's files through the VCS; nothing here reads a snapshot.
+    let trees = oxplow_app::trees::Trees::new(
+        std::sync::Arc::new(oxplow_app::vcs::GitProvider),
+        std::sync::Arc::new(oxplow_db::SqliteSnapshotStore::new(
+            oxplow_db::Database::in_memory(),
+        )),
+        oxplow_app::blob_store::BlobStore::new(std::env::temp_dir()),
+        // The project's workspace filter decides what a revision holds.
+        std::sync::Arc::new(std::sync::RwLock::new(
+            oxplow_config::load_project_config(root)
+                .map_err(|e| SdkError::Invalid(format!(".oxplow/project.yaml: {e}")))?,
+        )),
+    );
+    let before = extension_tree_at(
+        &trees,
+        root,
+        &oxplow_domain::vcs::Revision::git(against),
+        name,
+    )
+    .await
+    .map_err(SdkError::Domain)?;
+    let rel = format!("{EXTENSIONS_DIR}/{name}");
+    let read_before = |file: &str| before.as_ref().and_then(|t| t.file(file));
+    let read_after = |file: &str| extensions::read_extension_file(root, name, file);
+    let after = catalog.named(root, name).map_err(|e| match e {
+        DomainError::NotFound => SdkError::NotFound(name.to_string()),
+        other => SdkError::Domain(other),
+    })?;
+    let mut after = ReviewSide {
+        extension: after,
+        read: &read_after,
+    };
+    Ok(effects_between(
+        layer,
+        catalog,
+        root,
+        before.as_ref().map(|t| ReviewSide {
+            extension: t.load(name, &rel),
+            read: &read_before,
+        }),
+        &mut after,
+        host.svc.commands.as_ref(),
+    )
+    .await)
 }
 
 /// `check` for a folder path (`oxplow/extensions/<name>` or an absolute
@@ -536,6 +614,18 @@ pub fn render_findings(report: &CheckReport, format: Format) -> String {
                 report.warnings.len(),
                 if report.warnings.len() == 1 { "" } else { "s" },
             ));
+            if let Some(effects) = &report.effects {
+                out.push_str(&format!(
+                    "effects against {}:\n",
+                    report.against.as_deref().unwrap_or("HEAD")
+                ));
+                if effects.lines.is_empty() {
+                    out.push_str("  (nothing changes)\n");
+                }
+                for line in &effects.lines {
+                    out.push_str(&format!("  {line}\n"));
+                }
+            }
             out
         }
     }
