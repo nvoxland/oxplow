@@ -313,14 +313,15 @@ pub struct ManifestV2 {
     /// evidence a kind needs to be promoted.
     #[serde(default)]
     pub advisories: Vec<Value>,
+    /// The event types it may log (P9.D6). Stable.
+    #[serde(default)]
+    pub event_types: Option<Value>,
 
     // ---- experimental kinds (private extensions only) ----
     #[serde(default)]
     pub providers: Option<Value>,
     #[serde(default)]
     pub effects: Option<Value>,
-    #[serde(default)]
-    pub event_types: Option<Value>,
     #[serde(default)]
     pub ref_kinds: Option<Value>,
     #[serde(default)]

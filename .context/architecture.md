@@ -36,17 +36,16 @@ invariant, guarded by tests — the mechanics and the human-input
 transport (`forward_terminal_input`) live in
 [agent-model.md](./agent-model.md#no-synthesized-agent-terminal-input-no-automation).
 
-### Scoped exceptions (target design, not yet built)
+### Scoped exceptions
 
-Two planned features send model input. Neither breaks the rule's
-principle, which is that oxplow steers and never drives a doing-agent.
-Until they ship (epic tsk275), the invariant above is unchanged and
-has no exceptions.
+Two features send model input. Neither breaks the rule's principle,
+which is that oxplow steers and never drives a doing-agent.
 
-- **AI functions** ([ai-providers.md](./ai-providers.md)): oxplow calls a
-  model over its API to classify, score or summarize data for the semantic
-  layer. That is oxplow's own computation. It never prompts the agent doing
-  the work and never touches an agent terminal.
+- **AI functions** (built; [ai-providers.md](./ai-providers.md)): oxplow
+  calls a model over its API to classify, score or summarize data for the
+  semantic layer — the `ai_*` collector builtins, recorded computations
+  (`AiCompute`). That is oxplow's own computation. It never prompts the
+  agent doing the work and never touches an agent terminal.
 - **ACP agents** (tsk281, built): an agent spoken to over the Agent Client
   Protocol receives a prompt **only** when a human presses Enter in the
   thread's prompt box. oxplow's context (session context, advisories,

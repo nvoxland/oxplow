@@ -1,9 +1,9 @@
 //! Uniform data types for test/coverage results.
 //!
-//! This crate is **pure types** — the shapes a collector produces and oxplow
-//! stores. Report *parsing* is no longer here: it moved to the pluggable
-//! collector registry in `oxplow-collect-plugin` (the first-party
-//! cobertura/lcov/jacoco/junit parsers ship as bundled jaq plugins). Keeping
+//! This crate is **pure types** — the shapes a report parser produces and
+//! oxplow stores. Parsing is `oxplow-collect-plugin`'s: the bundled
+//! junit/lcov/cobertura/jacoco/clippy/eslint jq programs and a project's
+//! own report collectors' scripts. Keeping
 //! these types in their own dependency-light crate lets both the plugin
 //! runtime and the app/db layers share one definition of coverage line-sets
 //! and the test suite/case tree.

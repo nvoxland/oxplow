@@ -57,20 +57,22 @@ exposes it.
 
 ## The three pluggable parts
 
-### 1. Sources produce data
+### 1. Collectors produce data
 
-A **source** emits:
+A **collector** (the target design called it a *source*) records one of:
 
 - **entities**: typed rows with a key and relations (a task, a commit, an
-  LSP diagnostic, a GitHub PR); and/or
-- **facts**: atomic measurements on the existing fact substrate (a
-  function's complexity, a test case's outcome, a token count).
+  LSP diagnostic, a GitHub PR);
+- **facts**: atomic measurements on the fact substrate (a function's
+  complexity, a test case's outcome, a token count); or
+- **records**: a test, coverage or analysis report it parses (the
+  project's report collectors, tsk863).
 
-Core ships built-in sources. Extensions declare more with the same format.
-A source runs on a `schedule`: `every <dur>`, `on-snapshot`,
-`on-effort-complete` or `manual`. The existing `CollectorRegistry` runtimes
-(`BuiltinRust`, `Jaq`, `Starlark`, `Exec`, in `crates/oxplow-collect-plugin`)
-become the source runtimes.
+Core ships built-in collectors. Extensions and the project declare more
+with the same format. A collector runs on its `trigger`: `manual`,
+`{ every: <dur> }`, `{ on: [<event types>] }` or, for a report collector,
+`{ on_run: test | analysis }`; its runtime is `exec`, `starlark`, `jaq` or
+`read` (`crates/oxplow-config/src/collectors.rs`; "Collectors" below).
 
 ### 2. Dimensions slice data
 

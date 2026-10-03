@@ -630,9 +630,9 @@ self-parse raw `format: text`). For `exec`, `entry` is the program to spawn
 (executable, with a shebang); it gets the raw report on stdin (so it takes no
 `format`) and must print the kind's JSON to stdout.
 
-The bundled parsers in `src/plugins/*.jq` are the canonical templates. New
-ones are verified by a golden test that the parser reproduces the reference
-output (`crates/oxplow-collect-plugin/src/lib.rs` tests).
+The bundled parsers in `src/plugins/*.jq` are the canonical templates; each
+is pinned by tests of its output over a real report
+(`crates/oxplow-collect-plugin/src/lib.rs`).
 
 ### Report-derived RATIO metrics (a fact collector, not the ride-along)
 

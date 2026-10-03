@@ -601,8 +601,8 @@ The collection subsystem (`.context/collection.md`) follows the same
   panel reads the model, and MCP `list_effort_observations` (agent-only in
   the surface-parity manifest) reads the same stored rows
   (`SqliteEffortEvidenceStore::list_observations`, tsk862). Mutations are the
-  `test.ingest_coverage` / `test.record_run` commands (agents run them;
-  P8.A8) since the UI never writes observations. A view of them re-runs on
+  `test.record_run` command and `collector.sync` on a report collector
+  (agents run them; P8.A8, tsk863) since the UI never writes observations. A view of them re-runs on
   `ModelsChanged` (P8.A2: the bespoke `EffortObservationsChanged` had no
   listener and is gone).
 - **The engine lives in `oxplow-app`, not a store.** `CollectionService`

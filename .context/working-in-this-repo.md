@@ -99,8 +99,8 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   `oxplow-runtime` (write guard + filing enforcement),
   `oxplow-tmux`, `oxplow-pty`, `oxplow-lsp`, `oxplow-mcp`,
   `oxplow-coverage` (pure report-parse data types),
-  `oxplow-collect-plugin` (pluggable collector registry + host
-  parse helpers + jaq/Starlark/exec transform runtimes),
+  `oxplow-collect-plugin` (the bundled report parsers + host parse
+  helpers + jaq/Starlark/exec transform runtimes),
   `oxplow-app` (Services orchestration + shared boot orchestration in
   `boot.rs`), `oxplow-rpc` (transport-neutral command cores + the
   `rpc_dispatch!` registry; no tauri deps), `oxplow-daemon` (headless

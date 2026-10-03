@@ -1,7 +1,7 @@
 # JUnit test plugin (input: xml → explicit element tree).
 # <testsuite name="S"> … <testcase classname="C" name="N" time="T"> with an
 # optional <failure>/<error> (→ failed) or <skipped> (→ skipped) child;
-# otherwise passed. Mirrors oxplow_coverage::parse_junit. Tolerant of the
+# otherwise passed. Tolerant of the
 # <testsuites> wrapper and a bare <testsuite> root.
 #
 # Each testcase is taken from its IMMEDIATE parent testsuite's direct
