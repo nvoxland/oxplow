@@ -49,9 +49,9 @@ own them, so the scan, not the compiler, holds the line (tsk785);
 push each UI event (its `EMITTERS` table), and
 `every_ui_event_has_an_emitter` fails on a variant with none (a listener
 no one wakes — tsk789). What's left there is a signal no model carries —
-the config swap, agent status, a stall alert, background tasks, a
-thread's in-memory follow-ups (bridged from `FollowupStore` like
-background tasks), the LSP server list, a snapshot take, VCS refs, the
+the config swap, agent status, a stall alert, an orphaned stream
+(`StreamOrphaned`), background tasks, a thread's in-memory follow-ups
+(`FollowupsChanged` bridged from `FollowupStore` like background tasks), the LSP server list, a snapshot take, VCS refs, the
 workspace; every other view re-reads a model on `ModelsChanged`
 (P8.A2–A10).
 

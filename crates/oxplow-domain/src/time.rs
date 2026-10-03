@@ -82,6 +82,19 @@ impl<'de> Deserialize<'de> for Timestamp {
     }
 }
 
+/// The collectors' and models' duration grammar — `15m`, `2h` — as a
+/// duration; anything else (zero included) is `None`. One parser for
+/// `trigger: { every: … }` and `materialize: { every: … }`.
+pub fn parse_every(text: &str) -> Option<std::time::Duration> {
+    let t = text.trim();
+    let (n, unit) = match t.strip_suffix('m') {
+        Some(n) => (n, 60),
+        None => (t.strip_suffix('h')?, 3600),
+    };
+    let n: u64 = n.trim().parse().ok().filter(|n| *n > 0)?;
+    Some(std::time::Duration::from_secs(n * unit))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,6 +142,16 @@ mod tests {
             "\"2023-11-14T22:13:20.500000Z\""
         );
         assert_eq!(half.to_string(), half.to_text());
+    }
+
+    #[test]
+    fn every_reads_minutes_and_hours_and_nothing_else() {
+        use std::time::Duration;
+        assert_eq!(parse_every("15m"), Some(Duration::from_secs(900)));
+        assert_eq!(parse_every(" 2h "), Some(Duration::from_secs(7200)));
+        for bad in ["0m", "1d", "h", "-1h", "90s", ""] {
+            assert_eq!(parse_every(bad), None, "{bad}");
+        }
     }
 
     #[test]

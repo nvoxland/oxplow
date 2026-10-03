@@ -36,9 +36,14 @@ it isn't. The build script embeds `models/` the same way
 **The model registry** (V105, V109): `model` (one row per published view
 — owner `core` or an extension, `kind` `sql` or `entity`, version,
 compiled SQL), `model_input` (its `ref`/`source` inputs), `model_contract`
-(the columns each view promised at each version; outlives the view, so
-a changed contract at the same version is refused) and `model_test`
-(the last result of each declared test). Readable as `v_model*`.
+(the columns each view promised at each version, and since V141 its
+`key_json` — the declared `key:` columns, `'[]'` for the versions
+recorded before keys; outlives the view, so a changed contract or key at
+the same version is refused) and `model_test` (the last result of each
+declared test). `model.materialize` is `on_change`, `every <duration>`
+(V142) or `incremental <column>` (V143): SQLite can't widen a CHECK in
+place, so both rebuilt `model`, keeping `model_input` and `model_test`
+aside across the cascade. Readable as `v_model*`.
 
 **Changed tables per commit** (P4.6, `crates/oxplow-db/src/changes.rs`):
 every pooled connection's init installs SQLite's preupdate, commit and
@@ -1967,9 +1972,9 @@ binary (`apps/desktop/src-tauri/src/main.rs`) runs it at boot and every
 24h with a 14-day window, mirroring the snapshot cleanup loop. Open
 comments are never swept.
 
-Change fan-out: the IPC/MCP layers emit `OxplowEvent::CommentsChanged
-{ stream_id, target_kind, target_id }` after every mutation; the
-renderer refetches the affected page's comments + the Comments inbox.
+Change fan-out: a comment's writes are the `knowledge.*` comment
+commands (P8.A6); the renderer re-reads the comment models on
+`ModelsChanged` — there is no comment-specific event.
 
 ### `search_entry` + `search_fts` — `SqliteSearchStore` (`crates/oxplow-db/src/search_store.rs`, migration `V25__search_index.sql`)
 

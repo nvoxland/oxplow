@@ -2,10 +2,12 @@
 //! updating it would change — lenses' rendered text, models and their
 //! contracts (and what reads them), collectors' and providers' grants, a
 //! provider's commands and features, the instance config schema — rather
-//! than only what it declares. Built from the two versions' loaded
-//! extensions; **it never runs a collector or a provider** (consent
-//! forbids running an unapproved version). See `.context/extensions.md`
-//! → "Reviewing by effect".
+//! than only what it declares, plus models' rows before and after
+//! (P8.C3), derived collectors' and effects' dry runs on the same inputs
+//! (P8.C4, D12) — each version on its own models' overlay. It never
+//! runs a program, a provider or an exec collector (consent forbids
+//! running an unapproved version), and stores nothing. See
+//! `.context/extensions.md` → "Reviewing by effect".
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1543,8 +1545,10 @@ pub async fn downstream_of(layer: &crate::sql_gateway::SqlGateway, view: &str) -
 }
 
 /// What installing `after` — over `before`, when one is installed — would
-/// change. Lenses are rendered (their queries run read-only, against the
-/// models as published now); collectors and providers are only compared.
+/// change. Lenses are rendered from each version's runs (on its own
+/// overlay); models' rows read and diffed; derived collectors and effects
+/// dry-run on the same inputs, within [`REVIEW_DEADLINE`]; exec
+/// collectors and providers only compared.
 pub async fn effects(
     layer: &crate::sql_gateway::SqlGateway,
     before: Option<Version<'_>>,
@@ -1584,7 +1588,8 @@ pub async fn effects_within(
                 change: match (b, a) {
                     (None, _) => Change::Added,
                     (_, None) => Change::Removed,
-                    (Some(Ok(x)), Some(Ok(y))) if x == y => Change::Unchanged,
+                    // The same text, or the same failure.
+                    (Some(x), Some(y)) if x == y => Change::Unchanged,
                     _ => Change::Changed,
                 },
                 before: ok(b),
@@ -2016,6 +2021,48 @@ mod tests {
             .find(|e| e.name == "x")
             .unwrap();
         (d, ext)
+    }
+
+    /// tsk795: a lens that fails the same way in both versions didn't
+    /// change; one whose failure changed did.
+    #[tokio::test]
+    async fn a_lens_failing_the_same_way_on_both_sides_is_unchanged() {
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let broken = "title: Broken\nquery: SELECT n FROM v_no_such_model\n";
+        let (_b, before) = version(&[("broken", broken), ("moved", broken)]);
+        let (_a, after) = version(&[
+            ("broken", broken),
+            (
+                "moved",
+                "title: Broken\nquery: SELECT n FROM v_another_missing_model\n",
+            ),
+        ]);
+        let none = |_: &str| None;
+        let (runs_before, runs_after) = (
+            crate::extensions::run_lenses(&layer, &before).await,
+            crate::extensions::run_lenses(&layer, &after).await,
+        );
+        let report = effects(
+            &layer,
+            Some(Version {
+                extension: &before,
+                read: &none,
+                lenses: &runs_before,
+                overlay: &[],
+            }),
+            Version {
+                extension: &after,
+                read: &none,
+                lenses: &runs_after,
+                overlay: &[],
+            },
+        )
+        .await;
+        let by: BTreeMap<&str, &LensEffect> =
+            report.lenses.iter().map(|l| (l.id.as_str(), l)).collect();
+        assert_eq!(by["x/broken"].change, Change::Unchanged);
+        assert!(by["x/broken"].error.is_some(), "still says why it fails");
+        assert_eq!(by["x/moved"].change, Change::Changed);
     }
 
     #[tokio::test]

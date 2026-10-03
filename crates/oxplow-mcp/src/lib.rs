@@ -3446,37 +3446,6 @@ mod tests {
     /// P8.A10: an agent writes records through `run_command`; the named
     /// write tools are gone and stay gone.
     #[test]
-    fn the_named_write_tools_are_gone() {
-        let registered = registered_tool_names();
-        let back: Vec<&str> = [
-            "create_task",
-            "update_task",
-            "complete_task",
-            "upsert_task",
-            "transition_tasks",
-            "reorder_tasks",
-            "file_epic_with_children",
-            "amend_effort",
-            "record_decision",
-            "record_claim",
-            "record_test_run",
-            "ingest_coverage",
-            "ingest_analysis",
-            "add_thread_note",
-            "create_comment",
-            "respond_to_comment",
-            "resolve_comment",
-            "install_extension",
-            "restore_file_snapshot",
-            "lsp_install_server",
-        ]
-        .into_iter()
-        .filter(|t| registered.iter().any(|r| r == t))
-        .collect();
-        assert_eq!(back, Vec::<&str>::new());
-    }
-
-    #[test]
     fn read_write_split_covers_every_tool() {
         use std::collections::HashSet;
         let registered: HashSet<String> = registered_tool_names().into_iter().collect();

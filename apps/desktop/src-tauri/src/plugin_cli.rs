@@ -22,14 +22,15 @@ usage:
       collector with a model and a lens over it; a command composing core
       commands. Each checks clean and passes `test` as written (a provider
       once a real program replaces its stub)
-  oxplow plugin check <name|path> [--effects [--against <rev>]] [--json] [--root <dir>]
+  oxplow plugin check <name|path> [--effects] [--against <rev>] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
       its models, commands, lenses and advisories — against the project's
       database when it has been opened in oxplow (.oxplow/local.sqlite),
       else an empty one; command names against a throwaway oxplow.
       --effects also says what the working tree's version changes against
-      git HEAD (or --against <rev>): lenses' text, models and their rows,
-      collectors' outputs, providers' grants — writing nothing
+      git HEAD (or --against <rev>, which implies --effects): lenses' text,
+      models and their rows, collectors' outputs, providers' grants —
+      writing nothing
   oxplow plugin migrate <name|path> [--root <dir>]
       rewrite a v1 extension.yaml as v2, and its `gauges:` as `collectors:`,
       in place (idempotent)

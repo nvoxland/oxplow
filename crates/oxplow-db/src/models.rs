@@ -124,21 +124,10 @@ impl Materialize {
     /// The clock of an `every:` policy: `15m`, `2h`.
     pub fn every(&self) -> Option<std::time::Duration> {
         match self {
-            Materialize::Every { every } => every_duration(every),
+            Materialize::Every { every } => oxplow_domain::time::parse_every(every),
             _ => None,
         }
     }
-}
-
-/// `15m`, `2h` → the duration; anything else (zero included) is `None`.
-pub fn every_duration(text: &str) -> Option<std::time::Duration> {
-    let t = text.trim();
-    let (n, unit) = match t.strip_suffix('m') {
-        Some(n) => (n, 60),
-        None => (t.strip_suffix('h')?, 3600),
-    };
-    let n: u64 = n.trim().parse().ok().filter(|n| *n > 0)?;
-    Some(std::time::Duration::from_secs(n * unit))
 }
 
 /// The policy `model.materialize` recorded (`on_change`, `every 1h`).

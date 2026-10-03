@@ -470,7 +470,10 @@ a person's confirmation, `{ kind: "proposed", proposal, message }`). Extensions 
 tools. `run_command` is an agent's only write path for records — the
 named write tools (`create_task`, `complete_task`, `amend_effort`,
 `record_test_run`, `add_thread_note`, …) are gone (P8.A10;
-`the_named_write_tools_are_gone` keeps them gone).
+`oxplow-mcp`'s `WRITE_TOOLS` lists every tool that isn't read-only,
+each with its reason, and `read_write_split_covers_every_tool` fails on a
+tool in neither list — a new write tool is a deliberate, reviewed
+addition).
 
 **Caller identity.** Every harness carries the acting thread on the
 HTTP request, and `oxplow_mcp::McpCaller::from_parts` reads it from the

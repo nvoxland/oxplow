@@ -212,16 +212,15 @@ impl Assets {
             if have.contains_key(&view) {
                 continue;
             }
-            self.register(Arc::new(SqlModelMaterializer {
-                db: self.db.clone(),
-                view: view.clone(),
-                sql: model.sql.clone(),
-                tables: model.tables.clone(),
-                every: oxplow_db::models::recorded_materialize(&model.materialize)
-                    .and_then(|m| m.every()),
-                incremental: oxplow_db::models::recorded_materialize(&model.materialize)
-                    .and_then(|m| m.incremental().map(str::to_string)),
-            }));
+            let policy = oxplow_db::models::recorded_materialize(&model.materialize)
+                .unwrap_or(oxplow_db::models::Materialize::ON_CHANGE);
+            self.register(Arc::new(SqlModelMaterializer::new(
+                self.db.clone(),
+                &view,
+                &model.sql,
+                model.tables.clone(),
+                &policy,
+            )));
             have.insert(view, model);
         }
         Ok(())

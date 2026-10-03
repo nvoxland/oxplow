@@ -946,17 +946,20 @@ as `ProviderEffect.lines` — capitalizes them for the Data section's
 approval row.
 
 The report is built from the two loaded versions: **it never runs a
-collector or a provider** — consent forbids running a version nobody
-approved.
+program, an exec collector or a provider** — consent forbids running a
+version nobody approved. What it does run is read-only or sandboxed:
+lens and model queries on each version's overlay, and derived
+collectors' and effects' scripts (below).
 
 `extension_effects::effects(layer, before, after)` (P6b.E2) builds it:
 each version carries its lenses **already run once**
 (`extensions::run_lenses` → `LensRuns`: default params, no viewer
 context) — for the candidate, the very runs `check_extension` checked,
 so a review runs each lens once — and each is rendered from its run
-(`lens_text::render`, a grid's children rendering empty) against the
-models **as published now** — a lens over a model the candidate changes
-or adds renders against today's model, or fails (its `error`). Each
+(`lens_text::render`, a grid's children rendering empty) against **its
+own version's models** (each side's overlay, P8.C2 — so a lens over a
+model the candidate changes renders against the changed SQL). A lens
+that fails the same way on both sides is `unchanged`. Each
 model's `downstream` is its direct readers from `v_model_lineage`
 (`downstream_of`) other than this extension's own views, by exact name;
 a provider's declarations are read from each version's files.
@@ -970,9 +973,9 @@ review, `plugin check --effects` and an effort's review share:
 collectors' and providers' grants first — "now reaches x (was y)", a
 provider command added (destructive) — then models with their readers,
 lenses, the config keys) and each changed lens's text before and after,
-side by side (`EffectDiff`; no line diff yet). Deferred: model row
-counts, collector dry-run output, `plugin check --effects`, and the
-effort-review view of an extension change (P8.C below covers each).
+side by side (`EffectDiff`; no line diff yet). Model rows, collector
+dry runs, `plugin check --effects` and the effort-review view followed
+in P8.C (below).
 
 **An extension at any revision** (P8.C1). `extension_at(trees, ws, rev,
 name)` loads project extension `name` as revision `rev` of the

@@ -66,7 +66,7 @@ pub struct OpenEffort {
 /// upstream dependency.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingEffortReview {
-    /// The canonical `eff<N>` form — what `amend_effort` parses.
+    /// The canonical `eff<N>` form — what `effort.amend` takes.
     pub effort_id: String,
     /// The effort's work item, as a canonical `work_item` ref.
     pub work_item: String,

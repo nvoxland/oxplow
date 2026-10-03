@@ -4090,16 +4090,19 @@ detail: string | null } |
  */
 { kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null; effortId: EffortId | null } | 
 /**
+ *  Published models (views) changed: a commit touched a table one of
+ *  them reads, directly or through other models (P4.6). A lens re-runs
+ *  when a model it read is listed.
+ */
+{ kind: "modelsChanged"; models: string[] } | 
+/**
  *  One or more metric samples landed in `stream_id` (unified metric
  *  substrate, tsk213). `measures` names the measure keys the write touched
  *  so a consumer can skip an event that can't affect it (tsk198); an EMPTY
  *  list is fail-open — "unknown, refresh anyway" — which is what the
  *  low-frequency emit sites still send. See `.context/metrics.md`.
- *  Published models (views) changed: a commit touched a table one of
- *  them reads, directly or through other models (P4.6). A lens re-runs
- *  when a model it read is listed.
  */
-{ kind: "modelsChanged"; models: string[] } | { kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] } | 
+{ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] } | 
 /**
  *  `.oxplow/project.yaml` was reloaded from disk (external edit, e.g. the agent
  *  running `/oxplow:configure`). The in-memory config has been swapped;

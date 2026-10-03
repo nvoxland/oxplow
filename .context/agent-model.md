@@ -1316,8 +1316,9 @@ is `{ to: done|canceled, native_state: archived }`.
   comments when the user prompts it (typically via the
   `/review-comments` plugin command, which just wraps these calls).
   `comment_id` is an integer (comments use autoincrement ids). Store:
-  `crates/oxplow-db/src/comment_store.rs`; mutations emit
-  `CommentsChanged` on the bus.
+  `crates/oxplow-db/src/comment_store.rs`; an agent's mutations are
+  `knowledge.*` comment commands through `run_command`, and views
+  re-read the comment models on `ModelsChanged`.
   - **`list_comments` returns hydrated typed context, not just the
     quote.** Each row is an `EnrichedCommentThread { thread, primary,
     context_chain, referenced }`. `thread` is the raw comment + message

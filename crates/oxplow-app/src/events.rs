@@ -114,15 +114,15 @@ pub enum OxplowEvent {
         turn_id: Option<i64>,
         effort_id: Option<oxplow_domain::EffortId>,
     },
+    /// Published models (views) changed: a commit touched a table one of
+    /// them reads, directly or through other models (P4.6). A lens re-runs
+    /// when a model it read is listed.
+    ModelsChanged { models: Vec<String> },
     /// One or more metric samples landed in `stream_id` (unified metric
     /// substrate, tsk213). `measures` names the measure keys the write touched
     /// so a consumer can skip an event that can't affect it (tsk198); an EMPTY
     /// list is fail-open — "unknown, refresh anyway" — which is what the
     /// low-frequency emit sites still send. See `.context/metrics.md`.
-    /// Published models (views) changed: a commit touched a table one of
-    /// them reads, directly or through other models (P4.6). A lens re-runs
-    /// when a model it read is listed.
-    ModelsChanged { models: Vec<String> },
     MetricSamplesChanged {
         stream_id: StreamId,
         #[serde(default)]

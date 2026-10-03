@@ -357,20 +357,6 @@ fn parse_type(t: &str) -> Option<ColumnType> {
     })
 }
 
-/// `15m`, `2h` → minutes.
-fn parse_every(s: &str) -> Option<u32> {
-    let s = s.trim();
-    let (n, mult) = match s.strip_suffix('m') {
-        Some(n) => (n, 1),
-        None => (s.strip_suffix('h')?, 60),
-    };
-    n.trim()
-        .parse::<u32>()
-        .ok()
-        .filter(|n| *n > 0)
-        .map(|n| n * mult)
-}
-
 /// The `trigger:` value: `manual`, `{ every: 15m }` or
 /// `{ on: [types], where?: { field: value } }`. An extension's effect
 /// (`effects:`) reads its `on`/`where` through it too.
@@ -402,9 +388,13 @@ pub fn parse_trigger(
             if get("where").is_some() {
                 return Err("trigger: `where` goes with `on`".into());
             }
-            let minutes = every.as_str().and_then(parse_every).ok_or_else(|| {
-                "trigger: `every` takes a duration like `15m` or `2h`".to_string()
-            })?;
+            let minutes = every
+                .as_str()
+                .and_then(oxplow_domain::time::parse_every)
+                .and_then(|d| u32::try_from(d.as_secs() / 60).ok())
+                .ok_or_else(|| {
+                    "trigger: `every` takes a duration like `15m` or `2h`".to_string()
+                })?;
             Ok(Trigger::Every { minutes })
         }
         (None, Some(on)) => {

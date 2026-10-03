@@ -305,8 +305,9 @@ source.
 ### LSP servers
 
 Installs are **explicit**, not automatic. Use the **Language
-Servers** section of the Settings page, or let the agent do it via
-the `lsp_install_server` MCP tool. Nothing is fetched just because
+Servers** section of the Settings page, or ask the agent: it proposes
+the `lsp.install_server` command, and the install runs once you
+approve it. Nothing is fetched just because
 you opened a file.
 
 Servers install into `.oxplow/lsp/` (downloads are cached
