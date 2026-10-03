@@ -230,31 +230,16 @@ impl std::fmt::Display for OAuthError {
     }
 }
 
-/// An HTTP request as far as the loopback listener (and the tests'
-/// authorization server) read one.
-pub struct HttpRequest {
-    pub method: String,
+/// An HTTP request as far as the loopback listener reads one: the
+/// redirect is a `GET`, so its line is all that matters.
+struct HttpRequest {
+    method: String,
     /// The path and query.
-    pub target: String,
-    /// Each header, its name lower-cased.
-    pub headers: Vec<(String, String)>,
-    pub body: String,
-}
-
-impl HttpRequest {
-    /// The first header named `name` (lower-case).
-    pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| v.as_str())
-    }
+    target: String,
 }
 
 /// The most bytes of a request's line and headers read.
-pub const MAX_REQUEST_HEAD: usize = 16 * 1024;
-/// The largest body read (a token request's form is a few hundred bytes).
-pub const MAX_REQUEST_BODY: usize = 64 * 1024;
+const MAX_REQUEST_HEAD: usize = 16 * 1024;
 /// How long one connection may take to send its request.
 const REQUEST_READ_WAIT: Duration = Duration::from_secs(10);
 /// How many connections are read at once while waiting for the redirect.
@@ -267,56 +252,29 @@ fn too_large(what: &str) -> std::io::Error {
     )
 }
 
-/// Read one HTTP/1.1 request: its line, headers and `Content-Length` body,
-/// within [`MAX_REQUEST_HEAD`] and [`MAX_REQUEST_BODY`] — a line that
-/// never ends, or a body larger than that, is an error, not a wait.
-pub async fn read_request(conn: &mut TcpStream) -> std::io::Result<HttpRequest> {
+/// Read one HTTP/1.1 request's line and headers, within
+/// [`MAX_REQUEST_HEAD`] — a line that never ends is an error, not a wait.
+/// A body is never read: the redirect has none.
+async fn read_request(conn: &mut TcpStream) -> std::io::Result<HttpRequest> {
     let mut reader = BufReader::new(conn);
-    let (method, target, headers, length) = {
-        let mut head = (&mut reader).take(MAX_REQUEST_HEAD as u64);
-        let mut next_line = async || -> std::io::Result<String> {
-            let mut line = String::new();
-            let n = head.read_line(&mut line).await?;
-            // Cut short by the bound: no end of line within it.
-            if n > 0 && !line.ends_with('\n') {
-                return Err(too_large("head"));
-            }
-            Ok(line)
-        };
-        let line = next_line().await?;
-        let mut parts = line.split_whitespace();
-        let (method, target) = (
-            parts.next().unwrap_or_default().to_string(),
-            parts.next().unwrap_or_default().to_string(),
-        );
-        let mut length = 0usize;
-        let mut headers = Vec::new();
-        loop {
-            let header = next_line().await?;
-            if header.trim().is_empty() {
-                break;
-            }
-            if let Some((name, value)) = header.split_once(':') {
-                let (name, value) = (name.trim().to_ascii_lowercase(), value.trim().to_string());
-                if name == "content-length" {
-                    length = value.parse().unwrap_or(0);
-                }
-                headers.push((name, value));
-            }
+    let mut head = (&mut reader).take(MAX_REQUEST_HEAD as u64);
+    let mut next_line = async || -> std::io::Result<String> {
+        let mut line = String::new();
+        let n = head.read_line(&mut line).await?;
+        // Cut short by the bound: no end of line within it.
+        if n > 0 && !line.ends_with('\n') {
+            return Err(too_large("head"));
         }
-        (method, target, headers, length)
+        Ok(line)
     };
-    if length > MAX_REQUEST_BODY {
-        return Err(too_large("body"));
-    }
-    let mut body = vec![0u8; length];
-    reader.read_exact(&mut body).await?;
-    Ok(HttpRequest {
-        method,
-        target,
-        headers,
-        body: String::from_utf8_lossy(&body).into_owned(),
-    })
+    let line = next_line().await?;
+    let mut parts = line.split_whitespace();
+    let (method, target) = (
+        parts.next().unwrap_or_default().to_string(),
+        parts.next().unwrap_or_default().to_string(),
+    );
+    while !next_line().await?.trim().is_empty() {}
+    Ok(HttpRequest { method, target })
 }
 
 /// PKCE's S256 challenge for `verifier`.
@@ -686,8 +644,8 @@ async fn token_request(
 
 #[cfg(test)]
 mod tests {
-    use super::super::oauth_sim::OAuthSim;
     use super::*;
+    use oxplow_oauth_sim::OAuthSim;
 
     fn decl(sim: &OAuthSim) -> OAuthDecl {
         OAuthDecl {
@@ -1051,8 +1009,8 @@ mod tests {
         assert!(sign_in.done.await.unwrap().is_ok());
     }
 
-    /// tsk825: a request's head and body are bounded: a line with no end,
-    /// or a body larger than any redirect's, is refused rather than read.
+    /// tsk825: a request's head is bounded: a line with no end is refused
+    /// rather than read.
     #[tokio::test]
     async fn a_request_is_read_within_its_bounds() {
         async fn read_after(bytes: Vec<u8>) -> std::io::Result<HttpRequest> {
@@ -1071,11 +1029,6 @@ mod tests {
         }
         let endless = vec![b'a'; MAX_REQUEST_HEAD + 10];
         assert!(read_after(endless).await.is_err());
-        let huge = format!(
-            "POST /token HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
-            MAX_REQUEST_BODY + 1
-        );
-        assert!(read_after(huge.into_bytes()).await.is_err());
         let fine = read_after(b"GET /callback?x=1 HTTP/1.1\r\nHost: a\r\n\r\n".to_vec())
             .await
             .unwrap();

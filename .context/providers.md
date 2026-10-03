@@ -350,7 +350,9 @@ the fixture extension `tests/fixtures/notes/` in front of the test server
 `create_item`, `update_item` over notes `open | doing | stuck | closed |
 dropped`; over stdio, or with `--http <addr>` over streamable HTTP at
 `/mcp`, behind the bearer in `$NOTES_BEARER` when set — the library's
-`notes::serve_http` is what the tests run in-process;
+`notes::serve_http` / `notes::http_router` is what the tests run
+in-process, behind a token check (`notes::Tokens`; `notes::only(t)`
+takes one token, the OAuth stand-in its live access tokens);
 `a_server_by_url_is_pinned_and_called` covers the pin, the calls, a
 bearer refused at check and mid-session, and a missing one, and
 `tests/kit.rs` runs `plugin test` on the fixture with its server by url) — the pin (an edited `tools.json` is refused), the mapping's
@@ -694,12 +696,21 @@ form; sign-in is a provider's.
 - **Limits.** With a remote daemon the redirect lands on the daemon's
   machine, so sign-in works only where the browser and the core share a
   host (a tunnel to `redirect_port` otherwise). No real OAuth service
-  has been exercised: the tests run against `oauth_sim.rs`, a stand-in
-  authorization server that holds each code to the client, redirect and
-  PKCE challenge it was issued for (RFC 6749 §4.1.3), reads the client
-  from a Basic header or the form, issues refresh tokens, and can
-  expire, rotate, revoke, delay, redirect token requests and answer
-  with another `token_type` or a string `expires_in` (tsk830).
+  has been exercised: the tests run against **`oxplow-oauth-sim`**
+  (`crates/oxplow-oauth-sim`, axum), a stand-in authorization server
+  that holds each code to the client, redirect and PKCE challenge it was
+  issued for (RFC 6749 §4.1.3), reads the client from a Basic header or
+  the form, issues refresh tokens, and can expire, rotate, revoke, delay,
+  redirect token requests and answer with another `token_type` or a
+  string `expires_in` (tsk830). At `/mcp` it serves the notes MCP server
+  behind exactly the access tokens it issued and still holds live, so a
+  signed-in bearer runs end to end; `POST /sim/expire` lapses every
+  access token and `POST /sim/revoke` revokes the grant (its access
+  tokens stop working, its refresh is `invalid_grant`). Run it by hand
+  with `cargo run -p oxplow-oauth-sim -- --http 127.0.0.1:8124` (it
+  prints its urls). **Development only:** it is a dev-dependency of the
+  crates that test sign-in and a binary, never a dependency of anything
+  that ships (guard `the_oauth_sim_is_never_a_production_dependency`).
 
 The key is human-only (`HUMAN_ONLY_KEYS`: enabling runs a program) and
 shared with the team; whether it *runs* is per machine (approval,

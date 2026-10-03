@@ -496,9 +496,9 @@ async fn http_notes_refusing(
         .await
         .unwrap();
     let url = format!("http://{}/mcp", listener.local_addr().unwrap());
-    let bearer = bearer.map(str::to_string);
+    let tokens = bearer.map(oxplow_provider_mcp::notes::only);
     let task = tokio::spawn(async move {
-        let _ = oxplow_provider_mcp::notes::serve_http(listener, bearer, refusal).await;
+        let _ = oxplow_provider_mcp::notes::serve_http(listener, tokens, refusal).await;
     });
     (url, task)
 }

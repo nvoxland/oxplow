@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use oxplow_domain::{Actor, ThreadId};
+use oxplow_oauth_sim::OAuthSim;
 use serde_json::json;
 
 use super::*;
@@ -3094,9 +3095,9 @@ async fn an_oauth_credential_is_declared_checked_and_shown_for_approval() {
 /// The fixture with the tracker extension approved, its `FAKE_TOKEN` one
 /// the person signs in for at a stand-in authorization server (`more`:
 /// further lines of the manifest, continuing the `oauth:` block).
-async fn signing_in(hooks: &str, more: &str) -> (EffortFixture, oauth_sim::OAuthSim) {
+async fn signing_in(hooks: &str, more: &str) -> (EffortFixture, OAuthSim) {
     let fx = services_with_effort().await;
-    let sim = oauth_sim::OAuthSim::start().await;
+    let sim = OAuthSim::start().await;
     let project = fx.svc.layout.project_dir.clone();
     write_oauth_extension(&project, hooks, &sim.authorize_url, &sim.token_url, more);
     approve(&fx, &extension(&project));
@@ -3284,9 +3285,9 @@ async fn a_refused_token_is_renewed_and_the_call_tried_once_more() {
 
 /// Two credentials signed in at the stand-in, `FAKE_TOKEN` and
 /// `OTHER_TOKEN`, the instance ready on both.
-async fn signed_in_twice(hooks: &str) -> (EffortFixture, oauth_sim::OAuthSim) {
+async fn signed_in_twice(hooks: &str) -> (EffortFixture, OAuthSim) {
     let fx = services_with_effort().await;
-    let sim = oauth_sim::OAuthSim::start().await;
+    let sim = OAuthSim::start().await;
     let project = fx.svc.layout.project_dir.clone();
     let other = format!(
         "      - name: OTHER_TOKEN\n        oauth:\n          authorize_url: {}\n          token_url: {}\n          client_id: oxplow-test\n",
@@ -3301,7 +3302,7 @@ async fn signed_in_twice(hooks: &str) -> (EffortFixture, oauth_sim::OAuthSim) {
     (fx, sim)
 }
 
-fn refreshes(sim: &oauth_sim::OAuthSim) -> usize {
+fn refreshes(sim: &OAuthSim) -> usize {
     sim.grants()
         .iter()
         .filter(|g| *g == "refresh_token")

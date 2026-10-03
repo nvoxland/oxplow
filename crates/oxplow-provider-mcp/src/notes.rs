@@ -231,14 +231,30 @@ pub enum Refusal {
     Forbidden,
 }
 
-/// Serve the notes over streamable HTTP at `/mcp` on `listener`, every
-/// session over one book. With `bearer`, a request without `Authorization:
-/// Bearer <bearer>` is refused as `refusal` says.
+/// Which bearer tokens the HTTP server takes: a token check.
+pub type Tokens = std::sync::Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// [`Tokens`] that take `token` and no other.
+pub fn only(token: &str) -> Tokens {
+    let token = token.to_string();
+    std::sync::Arc::new(move |given| given == token)
+}
+
+/// Serve the notes over streamable HTTP at `/mcp` on `listener` (see
+/// [`http_router`]).
 pub async fn serve_http(
     listener: tokio::net::TcpListener,
-    bearer: Option<String>,
+    tokens: Option<Tokens>,
     refusal: Refusal,
 ) -> std::io::Result<()> {
+    axum::serve(listener, http_router(tokens, refusal)).await
+}
+
+/// The notes at `/mcp` over streamable HTTP, every session over one book.
+/// With `tokens`, a request whose `Authorization: Bearer <token>` they
+/// don't take is refused as `refusal` says. The OAuth stand-in mounts it
+/// behind the access tokens it issued (`oxplow-oauth-sim`).
+pub fn http_router(tokens: Option<Tokens>, refusal: Refusal) -> axum::Router {
     use axum::http::{header, StatusCode};
     use axum::response::IntoResponse;
     use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -252,39 +268,37 @@ pub async fn serve_http(
         Default::default(),
         StreamableHttpServerConfig::default(),
     );
-    let expected = bearer.map(|token| format!("Bearer {token}"));
-    let router =
-        axum::Router::new()
-            .nest_service("/mcp", service)
-            .layer(axum::middleware::from_fn(
-                move |request: axum::extract::Request, next: axum::middleware::Next| {
-                    let expected = expected.clone();
-                    async move {
-                        let given = request
-                            .headers()
-                            .get(header::AUTHORIZATION)
-                            .and_then(|v| v.to_str().ok());
-                        match expected {
-                            Some(expected) if given != Some(expected.as_str()) => match refusal {
-                                Refusal::Challenge => (
-                                    StatusCode::UNAUTHORIZED,
-                                    [(header::WWW_AUTHENTICATE, "Bearer")],
-                                )
-                                    .into_response(),
-                                Refusal::Bare => StatusCode::UNAUTHORIZED.into_response(),
-                                Refusal::Forbidden => (
-                                    StatusCode::FORBIDDEN,
-                                    [(
-                                        header::WWW_AUTHENTICATE,
-                                        r#"Bearer error="insufficient_scope", scope="notes:write""#,
-                                    )],
-                                )
-                                    .into_response(),
-                            },
-                            _ => next.run(request).await,
-                        }
+    axum::Router::new()
+        .nest_service("/mcp", service)
+        .layer(axum::middleware::from_fn(
+            move |request: axum::extract::Request, next: axum::middleware::Next| {
+                let tokens = tokens.clone();
+                async move {
+                    let given = request
+                        .headers()
+                        .get(header::AUTHORIZATION)
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.strip_prefix("Bearer "));
+                    match tokens {
+                        Some(takes) if !given.is_some_and(|t| takes(t)) => match refusal {
+                            Refusal::Challenge => (
+                                StatusCode::UNAUTHORIZED,
+                                [(header::WWW_AUTHENTICATE, "Bearer")],
+                            )
+                                .into_response(),
+                            Refusal::Bare => StatusCode::UNAUTHORIZED.into_response(),
+                            Refusal::Forbidden => (
+                                StatusCode::FORBIDDEN,
+                                [(
+                                    header::WWW_AUTHENTICATE,
+                                    r#"Bearer error="insufficient_scope", scope="notes:write""#,
+                                )],
+                            )
+                                .into_response(),
+                        },
+                        _ => next.run(request).await,
                     }
-                },
-            ));
-    axum::serve(listener, router).await
+                }
+            },
+        ))
 }

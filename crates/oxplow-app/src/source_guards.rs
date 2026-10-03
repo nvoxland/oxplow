@@ -462,7 +462,6 @@ fn a_test_only_module_is_not_production() {
     let has = |p: &str| sources.iter().any(|s| s == p);
     assert!(has("crates/oxplow-app/src/providers/registry.rs"));
     assert!(!has("crates/oxplow-app/src/providers/tests.rs"));
-    assert!(!has("crates/oxplow-app/src/providers/oauth_sim.rs"));
     assert!(!has("crates/oxplow-app/src/test_fixtures.rs"));
 }
 
@@ -534,4 +533,77 @@ fn no_legacy_shims() {
         })
         .collect();
     assert_eq!(found, Vec::<String>::new());
+}
+
+/// The `[section]` each line of a Cargo manifest is in, paired with the
+/// line.
+fn manifest_lines(text: &str) -> Vec<(String, String)> {
+    let mut section = String::new();
+    text.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[') {
+                section = trimmed.to_string();
+                None
+            } else {
+                Some((section.clone(), trimmed.to_string()))
+            }
+        })
+        .collect()
+}
+
+/// The sections a development-only crate may be named in: a crate's
+/// dev-dependencies, and the workspace's table of paths.
+fn names_it_for_production(manifest: &str, krate: &str) -> Vec<String> {
+    manifest_lines(manifest)
+        .into_iter()
+        .filter(|(_, line)| {
+            line.starts_with(&format!("{krate} "))
+                || line.starts_with(&format!("{krate}="))
+                || line.starts_with(&format!("{krate}."))
+        })
+        .filter(|(section, _)| {
+            !matches!(
+                section.as_str(),
+                "[dev-dependencies]" | "[workspace.dependencies]"
+            ) && !section.ends_with(".dev-dependencies]")
+        })
+        .map(|(section, line)| format!("{section} {line}"))
+        .collect()
+}
+
+/// P10: the stand-in OAuth server signs anyone in; it is the sign-in
+/// tests' dev-dependency and a binary run by hand, never part of anything
+/// that ships.
+#[test]
+fn the_oauth_sim_is_never_a_production_dependency() {
+    assert_eq!(
+        names_it_for_production(
+            "[package]\nname = \"a\"\n[dependencies]\noxplow-oauth-sim = { workspace = true }\n[dev-dependencies]\noxplow-oauth-sim = { workspace = true }\n[target.'cfg(unix)'.dev-dependencies]\noxplow-oauth-sim.workspace = true\n",
+            "oxplow-oauth-sim"
+        ),
+        vec!["[dependencies] oxplow-oauth-sim = { workspace = true }"]
+    );
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut manifests = vec![
+        root.join("Cargo.toml"),
+        root.join("apps/desktop/src-tauri/Cargo.toml"),
+    ];
+    for entry in std::fs::read_dir(root.join("crates")).unwrap() {
+        let manifest = entry.unwrap().path().join("Cargo.toml");
+        if manifest.exists() {
+            manifests.push(manifest);
+        }
+    }
+    let offenders: Vec<String> = manifests
+        .iter()
+        .filter(|m| !m.ends_with("crates/oxplow-oauth-sim/Cargo.toml"))
+        .flat_map(|m| {
+            let text = std::fs::read_to_string(m).unwrap();
+            names_it_for_production(&text, "oxplow-oauth-sim")
+                .into_iter()
+                .map(move |l| format!("{}: {l}", m.display()))
+        })
+        .collect();
+    assert!(offenders.is_empty(), "{offenders:#?}");
 }

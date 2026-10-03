@@ -15,10 +15,12 @@ async fn main() {
                     if let Ok(local) = listener.local_addr() {
                         eprintln!("notes: http://{local}/mcp");
                     }
-                    let bearer = std::env::var("NOTES_BEARER").ok();
+                    let tokens = std::env::var("NOTES_BEARER")
+                        .ok()
+                        .map(|t| oxplow_provider_mcp::notes::only(&t));
                     oxplow_provider_mcp::notes::serve_http(
                         listener,
-                        bearer,
+                        tokens,
                         oxplow_provider_mcp::notes::Refusal::Challenge,
                     )
                     .await

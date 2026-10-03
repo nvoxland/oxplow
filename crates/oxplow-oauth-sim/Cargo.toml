@@ -1,0 +1,32 @@
+[package]
+name = "oxplow-oauth-sim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "A stand-in OAuth authorization server, with the notes MCP server behind the tokens it issues, for oxplow's sign-in tests and the in-app walk"
+publish = false
+
+# Development only: a dev-dependency of the crates that test sign-in, and a
+# binary to run by hand. Never a dependency of anything that ships (guard
+# `the_oauth_sim_is_never_a_production_dependency`).
+[[bin]]
+name = "oxplow-oauth-sim"
+path = "src/main.rs"
+
+[dependencies]
+oxplow-provider-mcp = { workspace = true }
+axum = { version = "0.8" }
+base64 = "0.23"
+parking_lot = "0.12"
+sha2 = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }
+
+[lints]
+workspace = true

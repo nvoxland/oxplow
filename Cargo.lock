@@ -4390,6 +4390,7 @@ dependencies = [
  "oxplow-git",
  "oxplow-lsp",
  "oxplow-lsp-installer",
+ "oxplow-oauth-sim",
  "oxplow-plugin",
  "oxplow-provider-fake",
  "oxplow-provider-protocol",
@@ -4739,6 +4740,21 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "oxplow-oauth-sim"
+version = "0.7.0"
+dependencies = [
+ "axum",
+ "base64 0.23.1",
+ "oxplow-provider-mcp",
+ "parking_lot",
+ "reqwest",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokio",
+ "url",
 ]
 
 [[package]]
