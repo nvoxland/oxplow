@@ -3240,6 +3240,60 @@
       "key": []
     }
   },
+  "ref_kind": {
+    "1": {
+      "columns": [
+        {
+          "doc": "The kind (`work_item`, `acme_pr`).",
+          "name": "kind",
+          "type": "TEXT"
+        },
+        {
+          "doc": "The extension that declares it; NULL for a core kind.",
+          "name": "extension",
+          "type": "TEXT"
+        },
+        {
+          "doc": "What one is called (`Pull request`); NULL for a core kind.",
+          "name": "label",
+          "type": "TEXT"
+        },
+        {
+          "doc": "The regex its ids match.",
+          "name": "id_pattern",
+          "type": "TEXT"
+        },
+        {
+          "doc": "1 when a ref to one may carry `@rev`.",
+          "name": "revisioned",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "JSON array of its `[[prefix:…]]` sugar (`git` for `commit`).",
+          "name": "wikilinks",
+          "type": "TEXT"
+        },
+        {
+          "doc": "The view whose `title` names one, by its `ref` column; NULL for a core kind.",
+          "name": "resolve",
+          "type": "TEXT"
+        },
+        {
+          "doc": "The page that opens one (`page:ext.<extension>.<page>`, given `?ref=`); NULL for a core kind.",
+          "name": "page",
+          "type": "TEXT"
+        },
+        {
+          "doc": "Its icon's name (one of `REF_KIND_ICONS`); NULL for a core kind.",
+          "name": "icon",
+          "type": "TEXT"
+        }
+      ],
+      "key": [
+        "kind"
+      ]
+    }
+  },
   "snapshot": {
     "2": {
       "columns": [

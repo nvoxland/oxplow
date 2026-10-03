@@ -60,6 +60,7 @@ pub mod extension_commands;
 pub mod extension_effects;
 pub mod extension_event_types;
 pub mod extension_models;
+pub mod extension_ref_kinds;
 pub mod extensions;
 pub mod file_ref_version;
 pub mod followup;

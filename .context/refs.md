@@ -110,7 +110,9 @@ a swap never changes what an open transaction validates against. Every
 function that reads kinds takes them: `refs::validate_ref(&kinds, r)`,
 `canonical_wikilink`, `classify_wikilinks`, `extract`, and the
 `page_ref_projections` edge builders. Tests build `core_kinds()` or their
-own handle; two handles in one process never share a kind.
+own handle; two handles in one process never share a kind. An extension's
+`ref_kinds:` (P8.D6, extensions.md "Ref kinds") join the running kinds
+through the vocabulary reactor, and `v_ref_kind` lists them all.
 
 `refs::validate_ref` parses a ref and checks it against the kind
 registry. The event log's `append_tx` runs it on every `subject`

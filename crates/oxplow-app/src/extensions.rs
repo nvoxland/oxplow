@@ -923,6 +923,9 @@ pub struct Extension {
     /// Event types it declares (experimental: a private extension's only;
     /// valid ones — the vocabulary registers them, `vocabulary_reactor`).
     pub event_types: crate::extension_event_types::EventTypes,
+    /// Ref kinds it declares (experimental: a private extension's only;
+    /// valid ones — the vocabulary registers them, `vocabulary_reactor`).
+    pub ref_kinds: Vec<crate::extension_ref_kinds::RefKindDecl>,
     /// `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
     /// read-only).
     pub origin: String,
@@ -1392,6 +1395,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         providers: Vec::new(),
         custom_components: Vec::new(),
         event_types: Default::default(),
+        ref_kinds: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
         enabled: true,
@@ -1484,6 +1488,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             .clone()
             .filter(|_| m.sharing == Sharing::Private);
     let page_files = m.pages.clone();
+    // An experimental kind: a shared manifest's is refused by `check`.
+    let ref_kind_files = m
+        .ref_kinds
+        .clone()
+        .filter(|_| m.sharing == Sharing::Private);
     let slot_files = {
         if m.gauges.is_some() {
             ext.errors.push(at(
@@ -1919,6 +1928,19 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             )
         }));
     }
+    // After models and pages: a ref kind names one of each.
+    if let Some(v) = ref_kind_files {
+        let (kinds, errors) = crate::extension_ref_kinds::parse_ref_kinds(
+            name,
+            &ext.models,
+            &ext.pages,
+            &v,
+            &file,
+            &manifest,
+        );
+        ext.ref_kinds = kinds;
+        ext.errors.extend(errors);
+    }
     if let Some(v) = panel_files {
         let (panels, errors) = parse_panels(name, &ext.lenses, v);
         ext.panels = panels;
@@ -2229,6 +2251,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.providers.clear();
         ext.custom_components.clear();
         ext.event_types = Default::default();
+        ext.ref_kinds.clear();
         ext.advisories.clear();
         ext.measures.clear();
         ext.dimensions.clear();

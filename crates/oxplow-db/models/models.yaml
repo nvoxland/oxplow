@@ -563,6 +563,22 @@
     - { name: "recorded_at", type: "TEXT", doc: "When it was first registered (RFC 3339)." }
   tests:
     - { not_null: event_type }
+- name: ref_kind
+  version: 1
+  key: [kind]
+  description: "Every kind of ref the running vocabulary knows (P8.D6): core's, and those extensions declare (`ref_kinds:`, with how to show one). A removed extension's kinds leave with it."
+  columns:
+    - { name: "kind", type: "TEXT", doc: "The kind (`work_item`, `acme_pr`)." }
+    - { name: "extension", type: "TEXT", doc: "The extension that declares it; NULL for a core kind." }
+    - { name: "label", type: "TEXT", doc: "What one is called (`Pull request`); NULL for a core kind." }
+    - { name: "id_pattern", type: "TEXT", doc: "The regex its ids match." }
+    - { name: "revisioned", type: "INTEGER", doc: "1 when a ref to one may carry `@rev`." }
+    - { name: "wikilinks", type: "TEXT", doc: "JSON array of its `[[prefix:…]]` sugar (`git` for `commit`)." }
+    - { name: "resolve", type: "TEXT", doc: "The view whose `title` names one, by its `ref` column; NULL for a core kind." }
+    - { name: "page", type: "TEXT", doc: "The page that opens one (`page:ext.<extension>.<page>`, given `?ref=`); NULL for a core kind." }
+    - { name: "icon", type: "TEXT", doc: "Its icon's name (one of `REF_KIND_ICONS`); NULL for a core kind." }
+  tests:
+    - { not_null: kind }
 - name: plugin_health
   version: 2
   description: "Each plugin contribution's health on this machine (P7.C1): a provider instance or a collector, under one failure policy — three failures in a row disable it until a person runs `plugin.enable`."

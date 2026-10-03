@@ -18,7 +18,7 @@
 //! The pass restates `event_type_contract` (read as `v_event_type`) in
 //! the same transaction that checks it.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -26,15 +26,17 @@ use std::time::Duration;
 
 use oxplow_db::event_retention::{restate_declared_tx, DeclaredRetention};
 use oxplow_db::event_type_store::{recorded_schema_tx, restate_tx, EventTypeRow};
+use oxplow_db::ref_kind_store::RefKindRow;
 use oxplow_db::Database;
 use oxplow_domain::events::schema::{plugin_namespace, EventSchemaRegistry};
-use oxplow_domain::refs::kind::core_kinds;
+use oxplow_domain::refs::kind::{core_kinds, KindLifecycle, KindRegistry, KindSpec};
 use oxplow_domain::vocabulary::{Vocabulary, VocabularyHandle};
 use oxplow_domain::DomainError;
 use tokio::sync::Mutex;
 
 use crate::extension_catalog::ExtensionCatalog;
 use crate::extension_event_types::EventTypes;
+use crate::extension_ref_kinds::RefKindDecl;
 use crate::extensions::Extension;
 
 /// A burst of file events is one pass.
@@ -55,8 +57,8 @@ pub struct VocabularyService {
     state: Mutex<State>,
 }
 
-/// Each enabled extension's `event_types:`, by name.
-type Declared = Vec<(String, EventTypes)>;
+/// Each enabled extension's `event_types:` and `ref_kinds:`, by name.
+type Declared = Vec<(String, EventTypes, Vec<RefKindDecl>)>;
 
 impl VocabularyService {
     pub fn new(
@@ -85,7 +87,7 @@ impl VocabularyService {
             .get(&self.root)
             .iter()
             .filter(|e| e.enabled)
-            .map(|e| (e.name.clone(), e.event_types.clone()))
+            .map(|e| (e.name.clone(), e.event_types.clone(), e.ref_kinds.clone()))
             .collect();
         let fingerprint = {
             let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -161,14 +163,14 @@ fn build_tx(
     let mut errors: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let declares = |t: &EventTypes| !t.types.is_empty() || t.retention.is_some();
     let mut by_namespace: HashMap<String, Vec<&str>> = HashMap::new();
-    for (extension, _) in declared.iter().filter(|(_, t)| declares(t)) {
+    for (extension, _, _) in declared.iter().filter(|(_, t, _)| declares(t)) {
         by_namespace
             .entry(plugin_namespace(extension))
             .or_default()
             .push(extension);
     }
     let mut retention = Vec::new();
-    for (extension, declared) in declared {
+    for (extension, types, _) in declared {
         let namespace = plugin_namespace(extension);
         let others: Vec<&str> = by_namespace
             .get(&namespace)
@@ -177,7 +179,7 @@ fn build_tx(
             .copied()
             .filter(|o| o != extension)
             .collect();
-        if declares(declared) && !others.is_empty() {
+        if declares(types) && !others.is_empty() {
             errors.entry(extension.clone()).or_default().push(format!(
                 "event types: `{namespace}.*` is also {}'s namespace; rename one extension",
                 others
@@ -191,11 +193,11 @@ fn build_tx(
         retention.push(DeclaredRetention {
             namespace,
             extension: extension.clone(),
-            window: declared
+            window: types
                 .retention
                 .map(|r| (r.payload_days.into(), r.content_days.into())),
         });
-        for d in &declared.types {
+        for d in &types.types {
             let refused = match recorded_schema_tx(tx, &d.event_type, d.v)? {
                 Some(recorded) if recorded != d.schema => Some(format!(
                     "{}: the schema of `{}@{}` changed since that version was recorded; declare \
@@ -228,7 +230,86 @@ fn build_tx(
         })
         .collect();
     restate_tx(tx, &rows, now)?;
-    Ok((Vocabulary::new(events, core_kinds()), errors))
+    let kinds = register_kinds(declared, &mut errors);
+    oxplow_db::ref_kind_store::restate_tx(tx, &kind_rows(&kinds, declared))?;
+    Ok((Vocabulary::new(events, kinds), errors))
+}
+
+/// Core's kinds plus every extension's that doesn't collide: a kind or
+/// `wikilink:` prefix two extensions both use (one's kind as the other's
+/// prefix too) is an error on each, and neither registers it; one core
+/// holds is that extension's error.
+fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>>) -> KindRegistry {
+    let mut kinds = core_kinds();
+    let mut users: HashMap<&str, BTreeSet<&str>> = HashMap::new();
+    for (extension, _, decls) in declared {
+        for d in decls {
+            for name in std::iter::once(d.kind.as_str()).chain(d.wikilink.as_deref()) {
+                users.entry(name).or_default().insert(extension);
+            }
+        }
+    }
+    for (extension, _, decls) in declared {
+        for d in decls {
+            let shared: BTreeSet<&str> = std::iter::once(d.kind.as_str())
+                .chain(d.wikilink.as_deref())
+                .flat_map(|name| users[name].iter().copied())
+                .filter(|o| o != extension)
+                .collect();
+            let refused = if !shared.is_empty() {
+                Some(format!(
+                    "{}: ref kind `{}` collides with {}'s ref kinds; rename one",
+                    d.declared_at,
+                    d.kind,
+                    shared
+                        .iter()
+                        .map(|o| format!("`{o}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+            } else {
+                let spec = KindSpec::new(&d.kind, &d.id_pattern).map(|s| {
+                    let s = s.lifecycle(KindLifecycle::Experimental);
+                    match &d.wikilink {
+                        Some(w) => s.wikilink_prefix(w),
+                        None => s,
+                    }
+                });
+                spec.and_then(|s| kinds.register(s))
+                    .err()
+                    .map(|e| format!("{}: {e}", d.declared_at))
+            };
+            if let Some(e) = refused {
+                errors.entry(extension.clone()).or_default().push(e);
+            }
+        }
+    }
+    kinds
+}
+
+/// `v_ref_kind`'s rows: every registered kind, an extension's with how
+/// to show it.
+fn kind_rows(kinds: &KindRegistry, declared: &Declared) -> Vec<RefKindRow> {
+    kinds
+        .kinds()
+        .map(|k| {
+            let decl = declared
+                .iter()
+                .flat_map(|(_, _, d)| d)
+                .find(|d| d.kind == k.kind);
+            RefKindRow {
+                kind: k.kind.clone(),
+                extension: decl.map(|d| d.extension.clone()),
+                label: decl.map(|d| d.label.clone()),
+                id_pattern: k.id_regex.to_string(),
+                revisioned: k.revisioned,
+                wikilinks: k.wikilink_prefixes.clone(),
+                resolve: decl.map(|d| d.resolve.clone()),
+                page: decl.map(|d| d.page.clone()),
+                icon: decl.map(|d| d.icon.clone()),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -378,6 +459,84 @@ mod tests {
         std::fs::remove_dir_all(root.join("oxplow/extensions/acme-pr")).unwrap();
         svc.vocabulary_service.sync().await.unwrap();
         assert_eq!(window().await, (7, 3));
+    }
+
+    /// P8.D6: a declared ref kind links (`[[pr:12]]` → `acme_pr:12`) and
+    /// is listed while its extension is installed, and is unrecognized
+    /// once it's gone.
+    #[tokio::test]
+    async fn a_declared_ref_kind_links_while_its_extension_is_installed() {
+        use crate::extension_ref_kinds::tests::{write_acme, MANIFEST as ACME};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        let link = || {
+            oxplow_domain::refs::canonical_wikilink(&svc.vocabulary.current().kinds, "pr:12")
+                .map(|r| r.to_string())
+        };
+        assert_eq!(link(), None);
+        write_acme(&root, ACME);
+        svc.vocabulary_service.sync().await.unwrap();
+        assert_eq!(link().as_deref(), Some("acme_pr:12"));
+        let listed = svc
+            .sql
+            .query_sql(
+                "SELECT extension, page, icon FROM v_ref_kind WHERE kind = 'acme_pr'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            listed.rows,
+            vec![vec![
+                SqlCell::Text("acme".into()),
+                SqlCell::Text("page:ext.acme.pr".into()),
+                SqlCell::Text("git-pull-request".into())
+            ]]
+        );
+        std::fs::remove_dir_all(root.join("oxplow/extensions/acme")).unwrap();
+        svc.vocabulary_service.sync().await.unwrap();
+        assert_eq!(link(), None);
+    }
+
+    /// Two extensions using one `wikilink:` prefix: an error on each, and
+    /// neither's kind registers.
+    #[tokio::test]
+    async fn a_ref_kind_collision_is_an_error_on_both_extensions() {
+        use crate::extension_ref_kinds::tests::{write_acme, MANIFEST as ACME};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        write_acme(&root, ACME);
+        let beta = tempfile::tempdir().unwrap();
+        write_acme(
+            beta.path(),
+            &ACME
+                .replace("name: acme", "name: beta")
+                .replace("kind: acme_pr", "kind: beta_pr"),
+        );
+        std::fs::rename(
+            beta.path().join("oxplow/extensions/acme"),
+            root.join("oxplow/extensions/beta"),
+        )
+        .unwrap();
+        svc.vocabulary_service.sync().await.unwrap();
+        let listed = svc.listed_extensions(&root).await;
+        for (name, other) in [("acme", "beta"), ("beta", "acme")] {
+            let errors = listed
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap()
+                .errors
+                .join("\n");
+            assert!(
+                errors.contains(&format!("collides with `{other}`")),
+                "{name}: {errors}"
+            );
+        }
+        let kinds = &svc.vocabulary.current().kinds;
+        assert!(kinds.get("acme_pr").is_none() && kinds.get("beta_pr").is_none());
     }
 
     /// A collector may follow its own extension's declared types, never

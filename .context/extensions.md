@@ -1243,6 +1243,40 @@ declared types as well as core ones; another extension's are refused.
 declaration is a load problem, like a model's contract drift, not a
 failing run that counts toward a disable.
 
+## Ref kinds (experimental)
+
+`ref_kinds:` (a private extension only, P8.D6; `extension_ref_kinds.rs`,
+`vocabulary_reactor.rs`) adds kinds of thing a ref can name:
+
+```yaml
+ref_kinds:
+  - kind: acme_pr             # <namespace>_<name>
+    label: Pull request
+    id: '^\d+$'               # anchored
+    resolve: prs              # one of its models, with `ref` and `title` columns
+    page: pr                  # one of its pages, opened with `?ref=<ref>`
+    wikilink: pr              # optional `[[pr:12]]` sugar
+    icon: git-pull-request    # one of REF_KIND_ICONS
+```
+
+**Loading** (after models and pages) refuses, at `extension.yaml:<line>`:
+a kind outside the extension's namespace, an unanchored or broken id
+regex, a `resolve` that isn't one of its models with `ref` and `title`, a
+`page` that isn't one of its pages, a `wikilink` core already reads
+(a core kind, `git`, `dir`, `finding`, `tsk`), an icon not in
+`REF_KIND_ICONS` (lucide names the desktop maps), a duplicate.
+
+**Registering** is the vocabulary reactor's: core kinds plus each
+extension's (`KindLifecycle::Experimental`), so `validate_ref`,
+`[[acme_pr:12]]` and `[[pr:12]]` know them while the extension is
+installed and not after. A kind or prefix two extensions both use — one's
+kind as the other's prefix too — is an error on each, and neither
+registers it; a kind core holds is that extension's error. The pass
+restates `ref_kind` (V146) whole, read as `v_ref_kind` (kind, extension,
+label, id pattern, revisioned, wikilinks, resolve, page, icon); unlike
+event types, a removed extension's kinds leave, and refs to them are
+unrecognized again.
+
 ## Commands
 
 An extension's `commands:` (a stable kind, P6b; `extension_commands.rs`)

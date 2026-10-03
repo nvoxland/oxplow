@@ -2538,6 +2538,11 @@ export type Extension_Deserialize = {
 	 */
 	eventTypes: EventTypes,
 	/**
+	 *  Ref kinds it declares (experimental: a private extension's only;
+	 *  valid ones — the vocabulary registers them, `vocabulary_reactor`).
+	 */
+	refKinds: RefKindDecl[],
+	/**
 	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).
 	 */
@@ -2636,6 +2641,11 @@ export type Extension_Serialize = {
 	 *  valid ones — the vocabulary registers them, `vocabulary_reactor`).
 	 */
 	eventTypes: EventTypes,
+	/**
+	 *  Ref kinds it declares (experimental: a private extension's only;
+	 *  valid ones — the vocabulary registers them, `vocabulary_reactor`).
+	 */
+	refKinds: RefKindDecl[],
 	/**
 	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).
@@ -4315,6 +4325,29 @@ export type RecentProjectView = {
 	 *  launcher's "missing" badge).
 	 */
 	exists: boolean,
+};
+
+/**
+ *  A ref kind an extension declares (valid ones; invalid ones are in its
+ *  `errors`).
+ */
+export type RefKindDecl = {
+	kind: string,
+	extension: string,
+	label: string,
+	// The anchored regex its ids match.
+	idPattern: string,
+	// The view whose `title` names one (`v_<extension>_<model>`, by `ref`).
+	resolve: string,
+	/**
+	 *  The page that opens one: `page:ext.<extension>.<page>`, given
+	 *  `?ref=<ref>`.
+	 */
+	page: string,
+	wikilink: string | null,
+	icon: string,
+	// `file:line` of the declaration.
+	declaredAt: string,
 };
 
 export type Relationship = {
