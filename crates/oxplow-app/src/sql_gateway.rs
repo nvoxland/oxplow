@@ -159,6 +159,15 @@ impl SqlGateway {
         self.layer.check_extension_models(extensions, stubs).await
     }
 
+    /// The latest `limit` events of any of `types`, newest first.
+    pub async fn recent_events(
+        &self,
+        types: Vec<String>,
+        limit: usize,
+    ) -> Result<Vec<oxplow_domain::StoredEvent>, DomainError> {
+        self.layer.recent_events(types, limit).await
+    }
+
     /// The name of every view in the database.
     pub async fn view_names(&self) -> Result<std::collections::HashSet<String>, DomainError> {
         self.layer.view_names().await

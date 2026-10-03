@@ -942,7 +942,7 @@ provider command added (destructive) — then models with their readers,
 lenses, the config keys) and each changed lens's text before and after,
 side by side (`EffectDiff`; no line diff yet). Deferred: model row
 counts, collector dry-run output, `plugin check --effects`, and the
-effort-review view of an extension change.
+effort-review view of an extension change (P8.C below covers each).
 
 **An extension at any revision** (P8.C1). `extension_at(trees, ws, rev,
 name)` loads project extension `name` as revision `rev` of the
@@ -973,6 +973,18 @@ and its row before and after; otherwise, or past the limit, counts with a
 note saying why (or that a side's query failed). An unchanged model has
 none. The rows are the review's only reads of model data; nothing is
 written.
+
+**A collector's outputs** (P8.C4). Each derived collector (Starlark,
+jaq) whose script or declaration changed is dry-run on the same inputs
+in both versions — each version's intent-example fixtures that name it
+(`fixtures/<example>.yaml`, `input: { collector, rows }`), the latest
+five events its `on:` trigger matches, else its `input:` query once — by
+`collector_runner::dry_run_collector`: each version's own script text,
+storing nothing, with a `RefusingOracle` answering every `ai_*` builtin
+with an error (a review never spends or sends). `CollectorEffect.outputs`
+holds each input's `Ran { counts, rows (20 per entity), error? }` before
+and after. An exec or read collector is never run — approved or not —
+and says so in `not_run`.
 
 ## Commands in core menus (`ui.commands`)
 

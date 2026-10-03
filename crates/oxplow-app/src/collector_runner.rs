@@ -393,7 +393,7 @@ pub fn approve(
 
 /// What a collector run returns: rows per entity, and (with `sync: upsert`)
 /// the keys to remove per entity.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScriptOutput {
     pub entities: BTreeMap<String, Vec<serde_json::Value>>,
@@ -544,6 +544,77 @@ pub fn exec_collector(
         )
     })?;
     ScriptOutput::parse(spec, value)
+}
+
+/// A model call refused: a review runs no model (P8.C4) — the `ai_*`
+/// builtins answer with this error, so a review never spends or sends.
+pub struct RefusingOracle;
+
+const REFUSED: &str = "a review runs no model: `ai_*` calls are refused";
+
+impl oxplow_collect_plugin::AiOracle for RefusingOracle {
+    fn classify(&self, _: &str, _: &[String]) -> Result<serde_json::Value, String> {
+        Err(REFUSED.into())
+    }
+    fn score(&self, _: &str, _: &[String]) -> Result<serde_json::Value, String> {
+        Err(REFUSED.into())
+    }
+    fn summarize(&self, _: &str, _: Option<&str>) -> Result<String, String> {
+        Err(REFUSED.into())
+    }
+    fn extract(
+        &self,
+        _: &str,
+        _: &str,
+        _: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        Err(REFUSED.into())
+    }
+}
+
+/// What a review's dry run of a collector gave (P8.C4).
+#[derive(Debug, Clone, PartialEq)]
+pub enum DryRun {
+    Output(ScriptOutput),
+    Failed(String),
+    /// It runs a program or reads a provider: a review never does, approved
+    /// or not.
+    NotRun(String),
+}
+
+/// Run collector `spec` — `script` being its entry's text in the version
+/// under review — on `event` / `rows`, storing nothing and asking no model.
+/// Only a derived collector (Starlark, jaq) runs; an exec or read one is
+/// [`DryRun::NotRun`] and nothing is spawned.
+pub async fn dry_run_collector(
+    layer: &crate::sql_gateway::SqlGateway,
+    spec: &CollectorSpec,
+    script: Option<String>,
+    event: Option<&StoredEvent>,
+    rows: Option<Vec<serde_json::Value>>,
+) -> DryRun {
+    if !spec.runtime.is_derived() {
+        return DryRun::NotRun(match spec.runtime {
+            CollectorRuntime::Read => "it reads a provider, which a review never does".into(),
+            _ => "it runs a program, which a review never does, approved or not".into(),
+        });
+    }
+    let Some(script) = script else {
+        return DryRun::Failed(format!("entry `{}` doesn't exist", entry_of(spec)));
+    };
+    match derive_collector(
+        layer,
+        script,
+        spec,
+        std::sync::Arc::new(RefusingOracle),
+        event,
+        rows,
+    )
+    .await
+    {
+        Ok(out) => DryRun::Output(out),
+        Err(e) => DryRun::Failed(e),
+    }
 }
 
 /// Run a derived (starlark / jaq) collector: read its `input` rows (the

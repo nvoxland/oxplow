@@ -227,6 +227,73 @@ pub struct CollectorEffect {
     pub after: Option<Grants>,
     /// The views it fills.
     pub entities: Vec<String>,
+    /// What each version makes of the same inputs (P8.C4) — its fixtures
+    /// and the latest events it'd run on — for a derived collector whose
+    /// script or declaration changed; storing nothing, asking no model.
+    pub outputs: Vec<CollectorOutput>,
+    /// Why it wasn't run: it runs a program or reads a provider, which a
+    /// review never does, approved or not.
+    pub not_run: Option<String>,
+}
+
+/// The most inputs a collector's outputs are compared on, and the most
+/// rows shown per entity.
+pub const COLLECTOR_EVENTS: usize = 5;
+const COLLECTOR_ROWS: usize = 20;
+
+/// One input, run on each version.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectorOutput {
+    /// `fixture <name>`, `event #<seq>` or `input query`.
+    pub input: String,
+    pub change: Change,
+    pub before: Option<Ran>,
+    pub after: Option<Ran>,
+}
+
+/// What one version's collector made of an input.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Ran {
+    /// Rows per entity.
+    pub counts: BTreeMap<String, i64>,
+    /// The rows per entity (the first 20).
+    #[specta(type = oxplow_domain::Json)]
+    pub rows: Value,
+    /// Why it failed (a model call it tried was refused, say).
+    pub error: Option<String>,
+}
+
+fn ran(run: crate::collector_runner::DryRun) -> Result<Ran, String> {
+    use crate::collector_runner::DryRun;
+    match run {
+        DryRun::Output(out) => Ok(Ran {
+            counts: out
+                .entities
+                .iter()
+                .map(|(e, rows)| (e.clone(), rows.len() as i64))
+                .collect(),
+            rows: Value::Object(
+                out.entities
+                    .into_iter()
+                    .map(|(e, rows)| {
+                        (
+                            e,
+                            Value::Array(rows.into_iter().take(COLLECTOR_ROWS).collect()),
+                        )
+                    })
+                    .collect(),
+            ),
+            error: None,
+        }),
+        DryRun::Failed(e) => Ok(Ran {
+            counts: BTreeMap::new(),
+            rows: Value::Null,
+            error: Some(e),
+        }),
+        DryRun::NotRun(why) => Err(why),
+    }
 }
 
 /// One of a provider's declared commands, or of its pinned MCP tools.
@@ -381,8 +448,118 @@ pub fn collectors_diff(before: &[CollectorSpec], after: &[CollectorSpec]) -> Vec
                 .or(b)
                 .map(|s| s.entities.iter().map(|e| e.view.clone()).collect())
                 .unwrap_or_default(),
+            outputs: Vec::new(),
+            not_run: None,
         })
         .collect()
+}
+
+/// The fixtures of `v`'s intent examples that run collector `id`: the
+/// example's name and its `rows`.
+fn collector_fixtures(v: &Version<'_>, id: &str) -> Vec<(String, Option<Vec<Value>>)> {
+    let examples = v
+        .extension
+        .intent
+        .as_ref()
+        .map(|i| i.examples.clone())
+        .unwrap_or_default();
+    examples
+        .into_iter()
+        .filter_map(|ex| {
+            let text = (v.read)(&format!("fixtures/{}.yaml", ex.name))?;
+            let doc: Value = serde_yaml::from_str(&text).ok()?;
+            let input = doc.get("input")?;
+            (input.get("collector")?.as_str()? == id).then(|| {
+                let rows = input.get("rows").and_then(Value::as_array).cloned();
+                (ex.name.clone(), rows)
+            })
+        })
+        .collect()
+}
+
+/// Fill a collector's outputs: each input — both versions' fixtures for it,
+/// the latest events it'd run on — run on each version.
+async fn collector_outputs(
+    layer: &crate::sql_gateway::SqlGateway,
+    before: Option<&Version<'_>>,
+    after: &Version<'_>,
+    effect: &mut CollectorEffect,
+) {
+    use crate::collector_runner::dry_run_collector;
+    let spec_of = |v: &Version<'_>| {
+        v.extension
+            .collectors
+            .iter()
+            .find(|c| c.id == effect.id)
+            .cloned()
+    };
+    let (spec_b, spec_a) = (before.and_then(spec_of), spec_of(after));
+    let script = |v: Option<&Version<'_>>, spec: &Option<CollectorSpec>| {
+        let (v, spec) = (v?, spec.as_ref()?);
+        (v.read)(spec.entry.as_deref().unwrap_or_default())
+    };
+    let (script_b, script_a) = (script(before, &spec_b), script(Some(after), &spec_a));
+    if effect.change == Change::Unchanged && script_b == script_a {
+        return;
+    }
+    let Some(spec) = spec_a.clone().or(spec_b.clone()) else {
+        return;
+    };
+    if !spec.runtime.is_derived() {
+        if let crate::collector_runner::DryRun::NotRun(why) =
+            dry_run_collector(layer, &spec, None, None, None).await
+        {
+            effect.not_run = Some(why);
+        }
+        return;
+    }
+    // The inputs: fixtures (the candidate's first), then the events.
+    let mut fixtures: BTreeMap<String, Option<Vec<Value>>> = BTreeMap::new();
+    for v in before.into_iter().chain(std::iter::once(after)) {
+        for (name, rows) in collector_fixtures(v, &effect.id) {
+            fixtures.insert(name, rows);
+        }
+    }
+    let events = match &spec.trigger {
+        oxplow_config::collectors::Trigger::On { events, .. } => layer
+            .recent_events(events.clone(), COLLECTOR_EVENTS)
+            .await
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    let mut inputs: Vec<(
+        String,
+        Option<oxplow_domain::StoredEvent>,
+        Option<Vec<Value>>,
+    )> = fixtures
+        .into_iter()
+        .map(|(name, rows)| (format!("fixture {name}"), None, rows))
+        .chain(
+            events
+                .into_iter()
+                .map(|e| (format!("event #{}", e.seq), Some(e), None)),
+        )
+        .collect();
+    if inputs.is_empty() && spec.input.is_some() {
+        inputs.push(("input query".into(), None, None));
+    }
+    for (label, event, rows) in inputs {
+        let run = |spec: &Option<CollectorSpec>, script: &Option<String>| {
+            let (spec, script, rows, event) =
+                (spec.clone(), script.clone(), rows.clone(), event.clone());
+            async move {
+                let spec = spec?;
+                ran(dry_run_collector(layer, &spec, script, event.as_ref(), rows).await).ok()
+            }
+        };
+        let (b, a) = (run(&spec_b, &script_b).await, run(&spec_a, &script_a).await);
+        effect.outputs.push(CollectorOutput {
+            input: label,
+            change: change_of(b.as_ref(), a.as_ref()),
+            before: b,
+            after: a,
+        });
+    }
 }
 
 fn provider_grants(p: &ProviderSpec) -> Grants {
@@ -771,12 +948,15 @@ pub async fn effects(
         m.rows = Some(diff);
     }
     let no_collectors: Vec<CollectorSpec> = Vec::new();
-    let collectors = collectors_diff(
+    let mut collectors = collectors_diff(
         before
             .as_ref()
             .map_or(&no_collectors, |b| &b.extension.collectors),
         &after.extension.collectors,
     );
+    for c in &mut collectors {
+        collector_outputs(layer, before.as_ref(), &after, c).await;
+    }
     let declared = |v: &Version<'_>| -> Vec<DeclaredProvider> {
         v.extension
             .providers
@@ -1314,5 +1494,127 @@ mod tests {
 
         let added = row_diff(None, Some((&after, &key)));
         assert_eq!((added.before, added.after), (None, Some(2)));
+    }
+
+    /// One version of the `acme` extension under `root`: a Starlark
+    /// collector labelling its fixture rows `label`, an exec one whose
+    /// script would touch `sentinel`, and one asking a model.
+    fn acme(root: &std::path::Path, label: &str, sentinel: &std::path::Path) {
+        let dir = root.join("oxplow/extensions/acme");
+        let w = |rel: &str, body: &str| {
+            let p = dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        };
+        w(
+            "extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: Things.\n  origin: thread:thr1\n  examples:\n    - { name: two, input: { collector: things }, expect: two things }\n    - { name: smart, input: { collector: smart }, expect: summaries }\ncollectors:\n  - id: things\n    runtime: starlark\n    entry: collectors/things.star\n    entities:\n      - { name: thing, key: id, columns: { id: int, label: text } }\n  - id: shell\n    runtime: exec\n    entry: collectors/shell.sh\n    entities:\n      - { name: line, key: n, columns: { n: int } }\n  - id: smart\n    runtime: starlark\n    entry: collectors/smart.star\n    entities:\n      - { name: summary, key: id, columns: { id: int, text: text } }\n",
+        );
+        w(
+            "fixtures/two.yaml",
+            "input: { collector: things, rows: [{ id: 1 }, { id: 2 }] }\nexpect: { entities: { thing: 2 } }\n",
+        );
+        w(
+            "fixtures/smart.yaml",
+            "input: { collector: smart, rows: [{ id: 1 }] }\nexpect: { entities: { summary: 1 } }\n",
+        );
+        w(
+            "collectors/things.star",
+            &format!("def transform(input):\n    return {{\"entities\": {{\"thing\": [{{\"id\": r[\"id\"], \"label\": \"{label}\"}} for r in input[\"rows\"]]}}}}\n"),
+        );
+        w(
+            "collectors/shell.sh",
+            &format!(
+                "#!/bin/sh\ntouch '{}'\necho '{label}'\n",
+                sentinel.display()
+            ),
+        );
+        w(
+            "collectors/smart.star",
+            &format!("def transform(input):\n    return {{\"entities\": {{\"summary\": [{{\"id\": r[\"id\"], \"text\": ai_summarize(\"{label}\")}} for r in input[\"rows\"]]}}}}\n"),
+        );
+    }
+
+    /// P8.C4: a review runs each changed derived collector on the same
+    /// inputs in both versions — here its fixture — and shows how the
+    /// output differs; it never runs an exec collector's program (approved
+    /// or not), and a model call is refused, not made.
+    #[tokio::test]
+    async fn a_collectors_outputs_are_compared_without_running_a_program_or_a_model() {
+        let (old, new, scratch) = (
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+        );
+        let sentinel = scratch.path().join("ran");
+        acme(old.path(), "a", &sentinel);
+        acme(new.path(), "b", &sentinel);
+        let (eb, ea) = (
+            crate::extensions::load_project_extension(old.path(), "acme"),
+            crate::extensions::load_project_extension(new.path(), "acme"),
+        );
+        let reader = |root: std::path::PathBuf| {
+            move |rel: &str| {
+                std::fs::read_to_string(root.join("oxplow/extensions/acme").join(rel)).ok()
+            }
+        };
+        let (rb, ra) = (
+            reader(old.path().to_path_buf()),
+            reader(new.path().to_path_buf()),
+        );
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let runs = crate::extensions::LensRuns::new();
+        let report = effects(
+            &layer,
+            Some(Version {
+                extension: &eb,
+                read: &rb,
+                lenses: &runs,
+                overlay: &[],
+            }),
+            Version {
+                extension: &ea,
+                read: &ra,
+                lenses: &runs,
+                overlay: &[],
+            },
+        )
+        .await;
+        let by_id = |id: &str| {
+            report
+                .collectors
+                .iter()
+                .find(|c| c.id == id)
+                .unwrap()
+                .clone()
+        };
+
+        let things = by_id("things");
+        assert_eq!(things.outputs.len(), 1, "{things:?}");
+        let out = &things.outputs[0];
+        assert_eq!(
+            (out.input.as_str(), out.change),
+            ("fixture two", Change::Changed)
+        );
+        assert_eq!(out.before.as_ref().unwrap().counts["thing"], 2);
+        assert_eq!(out.after.as_ref().unwrap().rows["thing"][0]["label"], "b");
+
+        let shell = by_id("shell");
+        assert!(shell.outputs.is_empty());
+        assert!(shell.not_run.unwrap().contains("never"));
+        assert!(
+            !sentinel.exists(),
+            "a review never spawns an exec collector"
+        );
+
+        let smart = by_id("smart");
+        let error = smart.outputs[0]
+            .after
+            .as_ref()
+            .unwrap()
+            .error
+            .clone()
+            .unwrap();
+        assert!(error.contains("refused"), "{error}");
     }
 }

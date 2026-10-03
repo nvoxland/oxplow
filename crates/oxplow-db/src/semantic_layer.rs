@@ -244,6 +244,31 @@ impl SemanticLayer {
 
     /// The name of every view in the database — the schema, read directly
     /// rather than through the query contract.
+    /// The latest `limit` events of any of `types`, newest first — what a
+    /// review dry-runs an event-triggered collector on (P8.C4).
+    pub async fn recent_events(
+        &self,
+        types: Vec<String>,
+        limit: usize,
+    ) -> Result<Vec<oxplow_domain::StoredEvent>, DomainError> {
+        self.db
+            .read(move |conn| {
+                let mut out = Vec::new();
+                for t in &types {
+                    // `LIKE` reads `_` as a wildcard: keep the exact type.
+                    out.extend(
+                        crate::event_log_store::recent_tx(conn, t, None, None, limit)?
+                            .into_iter()
+                            .filter(|e| &e.envelope.event_type == t),
+                    );
+                }
+                out.sort_by_key(|e| std::cmp::Reverse(e.seq));
+                out.truncate(limit);
+                Ok(out)
+            })
+            .await
+    }
+
     pub async fn view_names(&self) -> Result<std::collections::HashSet<String>, DomainError> {
         self.db.call_mut(|conn| view_names(conn)).await
     }

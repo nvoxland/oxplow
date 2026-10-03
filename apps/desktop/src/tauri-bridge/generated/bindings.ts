@@ -1497,6 +1497,17 @@ export type CollectorEffect = {
 	after: Grants | null,
 	// The views it fills.
 	entities: string[],
+	/**
+	 *  What each version makes of the same inputs (P8.C4) — its fixtures
+	 *  and the latest events it'd run on — for a derived collector whose
+	 *  script or declaration changed; storing nothing, asking no model.
+	 */
+	outputs: CollectorOutput[],
+	/**
+	 *  Why it wasn't run: it runs a program or reads a provider, which a
+	 *  review never does, approved or not.
+	 */
+	notRun: string | null,
 };
 
 // A declared collector with its last run and consent status.
@@ -1522,6 +1533,15 @@ export type CollectorListing = {
 	version: string | null,
 	// Why failures disabled it on this machine, when they did (P7.C2).
 	disabled: string | null,
+};
+
+// One input, run on each version.
+export type CollectorOutput = {
+	// `fixture <name>`, `event #<seq>` or `input query`.
+	input: string,
+	change: Change,
+	before: Ran | null,
+	after: Ran | null,
 };
 
 // Last run of one collector (`collector_run`).
@@ -4160,6 +4180,16 @@ export type ProviderStatus = {
 	kind: ProviderKind,
 	baseUrl: string | null,
 	keySet: boolean,
+};
+
+// What one version's collector made of an input.
+export type Ran = {
+	// Rows per entity.
+	counts: { [key in string]: number },
+	// The rows per entity (the first 20).
+	rows: unknown,
+	// Why it failed (a model call it tried was refused, say).
+	error: string | null,
 };
 
 /**
