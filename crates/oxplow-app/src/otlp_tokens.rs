@@ -93,7 +93,7 @@ pub fn decode_token_export(body: &[u8]) -> Option<TokenExport> {
         .map(|c| c.at_unix_nano)
         .max()
         .filter(|n| *n > 0)
-        .map(|n| oxplow_domain::Timestamp::from_unix_ms((n / 1_000_000) as i64));
+        .and_then(|n| oxplow_domain::Timestamp::from_unix_nanos(n as i128));
     Some(TokenExport { counts, window_end })
 }
 
@@ -489,7 +489,7 @@ pub(crate) fn encoded_claude_export_at(
         }),
         ..Default::default()
     };
-    let time_unix_nano = at.map_or(0, |t| t.unix_ms() as u64 * 1_000_000);
+    let time_unix_nano = at.map_or(0, |t| t.unix_nanos() as u64);
     let point = |ty: &str, val: i64| NumberDataPoint {
         attributes: vec![kv("type", ty), kv("model", model)],
         value: Some(number_data_point::Value::AsInt(val)),
@@ -619,10 +619,12 @@ mod tests {
 
     /// tsk860: an export says when it was measured — the latest of its
     /// points' times — which is what places it in a turn; one that doesn't
-    /// say has no window end, and a body with no token counts is none.
+    /// say has no window end, and a body with no token counts is none. It
+    /// keeps the export's precision: a turn stored to the microsecond that
+    /// began earlier in the same millisecond is still before it.
     #[test]
     fn an_export_reports_its_window_end() {
-        let at = oxplow_domain::Timestamp::from_unix_ms(1_790_000_000_000);
+        let at = oxplow_domain::Timestamp::from_unix_nanos(1_790_000_000_123_456_000).unwrap();
         let export = decode_token_export(&encoded_claude_export_at("m", 100, 20, Some(at)))
             .expect("token counts");
         assert_eq!(export.window_end, Some(at));

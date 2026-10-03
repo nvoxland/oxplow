@@ -48,6 +48,18 @@ impl Timestamp {
         (self.0.unix_timestamp_nanos() / 1_000_000) as i64
     }
 
+    /// At full precision: what an OTLP point's `time_unix_nano` says. A
+    /// value out of range is `None`.
+    pub fn from_unix_nanos(nanos: i128) -> Option<Self> {
+        OffsetDateTime::from_unix_timestamp_nanos(nanos)
+            .ok()
+            .map(Self)
+    }
+
+    pub fn unix_nanos(&self) -> i128 {
+        self.0.unix_timestamp_nanos()
+    }
+
     /// The fixed-width text form: what goes over the wire and into SQLite.
     /// Lexicographic order of these strings is chronological order.
     pub fn to_text(&self) -> String {
