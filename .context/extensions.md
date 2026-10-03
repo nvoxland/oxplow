@@ -1679,6 +1679,35 @@ failed (`useFailedReactions`), each with its reason and **Retry**
 idempotency contract no provider has ([providers.md](./providers.md)
 "Idempotency").
 
+**Backfill** (P9.D5). The live consumer never reacts to what was logged
+before an effect's approval. A person has it react to that past with
+`effect.backfill { effect, from_seq? | since?, to_seq? }` (human-only,
+`Confirm::Always`, `External`): the events in the range that match its
+`on` and `where` — each read at its type's newest version, as the pump
+delivers it — and that it **never reacted to** (`unreacted_tx`: no
+`effect_run` row), oldest first, each through
+`run_reaction(…, ReactionOrigin::Backfill)`: attempt 1 with `origin:
+backfill`, the same dedupe, loop guard, approval and health as a live
+reaction. So a second backfill finds nothing, the live consumer never
+reacts to a backfilled event again, and three failures in a row disable
+the effect and stop the run (`stopped`). A run makes at most
+`BACKFILL_BATCH` (200) reactions; the result `{ planned, ran, skipped,
+proposed, failed, remaining, stopped? }` says what is left for another
+run. The effect must be enabled and approved as it is now.
+
+`effect.backfill_plan` (a read, anyone's) answers `{ planned, from_seq,
+to_seq }` for the same input: what a backfill would react to. The bus's
+confirmation shows a command's summary and input, not a count, so the
+count is the plan's: an approved effect's row in Settings → Data →
+Programs has **Backfill…**, which reads the plan, says how many events
+the effect never reacted to and that it may call outside oxplow for each
+(`backfillAsk`), and runs only on the second click.
+
+**There is no consumer-level replay.** Core's consumers are re-derivable
+(a projection is rebuilt, not replayed); replaying the log through every
+consumer would re-fire collectors noisily and effects without consent.
+Reacting to the past exists only as `effect.backfill`.
+
 ## Commands
 
 An extension's `commands:` (a stable kind, P6b; `extension_commands.rs`)

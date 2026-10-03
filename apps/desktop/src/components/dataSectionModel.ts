@@ -124,3 +124,37 @@ export function canApprove(p: ProjectProgram, effects: ProviderEffectState | und
 
 /** A provider's declaration diff as the Data section holds it. */
 export type ProviderEffectState = ProviderEffect | "loading" | { error: string };
+
+/** What `effect.backfill` answers (P9.D5). */
+export interface BackfillResult {
+  planned: number;
+  ran: number;
+  skipped: number;
+  proposed: number;
+  failed: number;
+  remaining: number;
+  stopped?: string;
+}
+
+/** What a person is told before a backfill runs: how many past events the
+ *  effect never reacted to (`effect.backfill_plan`), and what running it
+ *  means. */
+export function backfillAsk(effect: string, planned: number): string {
+  if (planned === 0) return `${effect} has reacted to every matching event: nothing to backfill.`;
+  return planned === 1
+    ? `${effect} never reacted to 1 matching event. Backfilling runs it on that event, as it is now; it may call outside oxplow.`
+    : `${effect} never reacted to ${planned} matching events. Backfilling runs it on each, oldest first, as it is now; it may call outside oxplow for every one.`;
+}
+
+/** How a backfill went, in a sentence or two. */
+export function backfillDone(r: BackfillResult): string {
+  const also = [
+    r.failed > 0 ? `${r.failed} failed` : null,
+    r.proposed > 0 ? `${r.proposed} wait for your approval` : null,
+    r.skipped > 0 ? `${r.skipped} skipped` : null,
+    !r.stopped && r.remaining > 0 ? `${r.remaining} remain — run it again for the rest` : null,
+  ].filter((p): p is string => p !== null);
+  const head = `Reacted to ${r.ran} of ${r.planned} ${r.planned === 1 ? "event" : "events"}`;
+  const body = also.length > 0 ? `${head}; ${also.join(", ")}.` : `${head}.`;
+  return r.stopped ? `${body} Stopped: ${r.stopped}.` : body;
+}

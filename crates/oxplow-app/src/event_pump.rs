@@ -623,7 +623,10 @@ enum Delivery {
 /// be upcast fails the delivery, which parks it as a dead letter. A type
 /// the running vocabulary doesn't know (its extension was removed) passes
 /// through as logged: there is no newer shape to carry it to.
-fn at_latest(vocabulary: &Vocabulary, event: &StoredEvent) -> Result<StoredEvent, DomainError> {
+pub(crate) fn at_latest(
+    vocabulary: &Vocabulary,
+    event: &StoredEvent,
+) -> Result<StoredEvent, DomainError> {
     let env = &event.envelope;
     match vocabulary.latest(&env.event_type) {
         None => return Ok(event.clone()),

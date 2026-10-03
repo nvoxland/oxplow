@@ -104,7 +104,7 @@ test("programRow shows an effect as reacting to events from approval on (P8.D9)"
   expect(m.approveTitle).toContain("every file in oxplow/extensions/acme");
 });
 
-import { canApprove, providerEffectLines } from "./dataSectionModel.js";
+import { backfillAsk, backfillDone, canApprove, providerEffectLines } from "./dataSectionModel.js";
 import type { ProviderEffect } from "../tauri-bridge/generated/bindings.js";
 
 // P6b.E3: a provider's Approve waits for what approving would change; the
@@ -154,4 +154,22 @@ test("programRow says a server by url isn't code this approval covers", () => {
   );
   expect(row.approveTitle).toContain("The server runs elsewhere: its code isn't part of this approval");
   expect(row.approveTitle).toContain("its tools stop matching the pinned ones");
+});
+
+// P9.D5: what a backfill would do, said before it runs, and what it did.
+test("a backfill says how many events it would react to, and how it went", () => {
+  expect(backfillAsk("acme/mark-done", 0)).toBe("acme/mark-done has reacted to every matching event: nothing to backfill.");
+  expect(backfillAsk("acme/mark-done", 1)).toBe(
+    "acme/mark-done never reacted to 1 matching event. Backfilling runs it on that event, as it is now; it may call outside oxplow.",
+  );
+  expect(backfillAsk("acme/mark-done", 3)).toBe(
+    "acme/mark-done never reacted to 3 matching events. Backfilling runs it on each, oldest first, as it is now; it may call outside oxplow for every one.",
+  );
+  expect(backfillDone({ planned: 3, ran: 3, skipped: 0, proposed: 0, failed: 0, remaining: 0 })).toBe("Reacted to 3 of 3 events.");
+  expect(backfillDone({ planned: 5, ran: 1, skipped: 1, proposed: 0, failed: 3, remaining: 0, stopped: "the effect was disabled: 3 failures in a row" })).toBe(
+    "Reacted to 1 of 5 events; 3 failed, 1 skipped. Stopped: the effect was disabled: 3 failures in a row.",
+  );
+  expect(backfillDone({ planned: 300, ran: 200, skipped: 0, proposed: 0, failed: 0, remaining: 100 })).toBe(
+    "Reacted to 200 of 300 events; 100 remain — run it again for the rest.",
+  );
 });

@@ -31,7 +31,13 @@ mock.module("../api.js", () => ({
         },
   runCommand: async (name: string, input: unknown, confirmed = false) => {
     ran.push([name, input, confirmed]);
-    return { result: retried, audit_id: 1, event_id: null, inverse: null };
+    const result =
+      name === "effect.backfill_plan"
+        ? { effect: "acme/mark-done", planned: 3, from_seq: 4, to_seq: 9 }
+        : name === "effect.backfill"
+          ? { effect: "acme/mark-done", planned: 3, ran: 3, skipped: 0, proposed: 0, failed: 0, remaining: 0 }
+          : retried;
+    return { result, audit_id: 1, event_id: null, inverse: null };
   },
   retryDeadLetter: async (id: number) => {
     decided.push(`retry ${id}`);
@@ -55,6 +61,19 @@ mock.module("../api.js", () => ({
       tree: "oxplow/extensions/tracker",
       approved: false,
       version: "h1",
+    },
+    {
+      kind: "effect",
+      name: "acme/mark-done",
+      program: "oxplow/extensions/acme/mark.star",
+      args: [],
+      env: [],
+      credentials: [],
+      network: [],
+      tree: "oxplow/extensions/acme",
+      remote: false,
+      approved: true,
+      version: "h2",
     },
   ],
   providerDeclarationEffects: () => answer(),
@@ -117,4 +136,20 @@ test("Delivery lists a failed reaction and retries it only once confirmed", asyn
   expect(ran).toEqual([]);
   fireEvent.click(view.getByTestId("reaction-retry-acme/mark-done-e1-confirm"));
   await waitFor(() => expect(ran).toEqual([["effect.retry", { effect: "acme/mark-done", event: "event:e1" }, true]]));
+});
+
+// P9.D5: an approved effect's row offers Backfill…: it says how many past
+// events the effect never reacted to, and runs only on the second click.
+test("Backfill… asks with the count and runs effect.backfill once confirmed", async () => {
+  const view = render(<DataSection />);
+  await waitFor(() => view.getByTestId("program-row-effect:acme/mark-done"));
+  // Only an effect's row, and only an approved one, has it.
+  expect(view.queryByTestId("effect-backfill-provider:tracker/fake")).toBeNull();
+  fireEvent.click(view.getByTestId("effect-backfill-effect:acme/mark-done"));
+  const ask = await waitFor(() => view.getByTestId("effect-backfill-ask-effect:acme/mark-done"));
+  expect(ask.textContent).toContain("never reacted to 3 matching events");
+  expect(ran).toEqual([["effect.backfill_plan", { effect: "acme/mark-done" }, false]]);
+  fireEvent.click(view.getByTestId("effect-backfill-run-effect:acme/mark-done"));
+  await waitFor(() => expect(ran[1]).toEqual(["effect.backfill", { effect: "acme/mark-done" }, true]));
+  await waitFor(() => expect(view.queryByTestId("effect-backfill-ask-effect:acme/mark-done")).toBeNull());
 });

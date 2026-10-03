@@ -113,14 +113,22 @@ impl EffectTriggers {
 }
 
 /// Register the consumer on `svc`'s pump (boot, before it spawns), and
-/// the commands a person runs effects with (`effect.retry`): they hold
-/// `Services` as the consumer does.
+/// the commands a person runs effects with (`effect.retry`,
+/// `effect.backfill` and its plan): they hold `Services` as the consumer
+/// does.
 pub fn register(svc: &Arc<Services>) {
     svc.event_pump
         .register_async(Arc::new(EffectTriggers::new(Arc::downgrade(svc))));
-    svc.commands
-        .register(crate::commands::effect::retry_command(Arc::downgrade(svc)))
-        .expect("effect.retry registers");
+    use crate::commands::effect;
+    for command in [
+        effect::retry_command(Arc::downgrade(svc)),
+        effect::backfill_command(Arc::downgrade(svc)),
+        effect::backfill_plan_command(Arc::downgrade(svc)),
+    ] {
+        svc.commands
+            .register(command)
+            .expect("the effect commands register");
+    }
 }
 
 /// The enabled extensions' effects, in the primary worktree (where, like
@@ -1249,5 +1257,206 @@ mod tests {
         )
         .await;
         assert_eq!(guarded, json!([["skipped"]]));
+    }
+
+    async fn run_as_person(
+        svc: &Services,
+        name: &str,
+        input: Value,
+    ) -> Result<Value, CommandError> {
+        svc.commands
+            .run(&oxplow_domain::Actor::Human, name, input, true)
+            .await
+            .map(|o| o.result)
+    }
+
+    /// P9.D5: an effect never reacts to what was logged before its
+    /// approval — until a person backfills it. A backfill reacts, once
+    /// each and oldest first, to the matching events the effect never
+    /// reacted to; a second one has nothing left.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_backfill_reacts_to_what_the_effect_never_saw() {
+        use crate::commands::effect::{BACKFILL, BACKFILL_PLAN};
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        register(svc);
+        let before = title(&fx).await;
+        // Before its approval: three it would react to, one its `where`
+        // excludes.
+        let mut past = Vec::new();
+        for _ in 0..3 {
+            past.push(log(svc, transitioned(fx.task, TaskStatus::Done)).await);
+        }
+        log(svc, transitioned(fx.task, TaskStatus::Blocked)).await;
+        approve(svc).await;
+        let consumer = EffectTriggers::new(Arc::downgrade(svc));
+        for ev in &past {
+            consumer.handle(ev).await.unwrap();
+        }
+        assert_eq!(title(&fx).await, before, "the past isn't reacted to");
+        assert_eq!(
+            rows(svc, "SELECT count(*) FROM v_effect_run").await,
+            json!([[0]])
+        );
+
+        // What a backfill would do: a read, an agent's too.
+        let input = json!({ "effect": "acme/mark-done" });
+        let agent = oxplow_domain::Actor::Agent {
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let plan = svc
+            .commands
+            .run(&agent, BACKFILL_PLAN, input.clone(), false)
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(
+            plan,
+            json!({ "effect": "acme/mark-done", "planned": 3, "from_seq": past[0].seq, "to_seq": past[2].seq })
+        );
+        // Running it is a person's, asked first.
+        assert!(matches!(
+            svc.commands
+                .run(&agent, BACKFILL, input.clone(), true)
+                .await,
+            Err(CommandError::Denied { .. })
+        ));
+        match svc
+            .commands
+            .run(&oxplow_domain::Actor::Human, BACKFILL, input.clone(), false)
+            .await
+        {
+            Err(CommandError::NeedsConfirmation { preview }) => {
+                assert!(
+                    preview.summary.contains("outside oxplow"),
+                    "{}",
+                    preview.summary
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(title(&fx).await, before, "asking ran nothing");
+
+        let ran = run_as_person(svc, BACKFILL, input.clone()).await.unwrap();
+        assert_eq!(
+            ran,
+            json!({ "effect": "acme/mark-done", "planned": 3, "ran": 3, "skipped": 0, "proposed": 0, "failed": 0, "remaining": 0 })
+        );
+        assert_eq!(title(&fx).await, format!("{before} (done) (done) (done)"));
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT event_seq, attempt, origin, state FROM v_effect_run ORDER BY event_seq"
+            )
+            .await,
+            json!(past
+                .iter()
+                .map(|e| json!([e.seq, 1, "backfill", "ok"]))
+                .collect::<Vec<_>>())
+        );
+        assert_eq!(
+            rows(svc, "SELECT DISTINCT json_extract(payload, '$.origin') FROM v_event WHERE type = 'effect.result'").await,
+            json!([["backfill"]])
+        );
+        // Nothing left, and the live consumer doesn't react to them again.
+        let again = run_as_person(svc, BACKFILL, input.clone()).await.unwrap();
+        assert_eq!(
+            (again["planned"].clone(), again["ran"].clone()),
+            (json!(0), json!(0))
+        );
+        for ev in &past {
+            consumer.handle(ev).await.unwrap();
+        }
+        assert_eq!(title(&fx).await, format!("{before} (done) (done) (done)"));
+    }
+
+    /// P9.D5: a backfill is bounded — by the range a person gives, and by
+    /// a batch a run (the rest is `remaining`, for another run).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_backfill_keeps_to_its_range_and_its_batch() {
+        use crate::commands::effect::{backfill, Range, BACKFILL, BACKFILL_PLAN};
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        register(svc);
+        let mut past = Vec::new();
+        for _ in 0..3 {
+            past.push(log(svc, transitioned(fx.task, TaskStatus::Done)).await);
+        }
+        approve(svc).await;
+        let planned = |input: Value| async move {
+            run_as_person(svc, BACKFILL_PLAN, input).await.unwrap()["planned"].clone()
+        };
+        assert_eq!(
+            planned(json!({ "effect": "acme/mark-done", "from_seq": past[1].seq })).await,
+            json!(2)
+        );
+        assert_eq!(
+            planned(json!({ "effect": "acme/mark-done", "to_seq": past[0].seq })).await,
+            json!(1)
+        );
+        assert_eq!(
+            planned(json!({ "effect": "acme/mark-done", "since": "2999-01-01T00:00:00Z" })).await,
+            json!(0)
+        );
+        // One way to say where it starts.
+        let both = run_as_person(
+            svc,
+            BACKFILL,
+            json!({ "effect": "acme/mark-done", "from_seq": 1, "since": "2020-01-01T00:00:00Z" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(both.to_string().contains("`from_seq` or `since`"), "{both}");
+
+        // Two a run: the third waits for the next.
+        let (ext, decl) = find_effect(svc, "acme/mark-done").unwrap();
+        let first = backfill(svc, &ext, &decl, &Range::default(), 2)
+            .await
+            .unwrap();
+        assert_eq!((first.planned, first.ran, first.remaining), (3, 2, 1));
+        let second = backfill(svc, &ext, &decl, &Range::default(), 2)
+            .await
+            .unwrap();
+        assert_eq!((second.planned, second.ran, second.remaining), (1, 1, 0));
+    }
+
+    /// P9.D5: a backfill runs the effect as it is now, under the same
+    /// health: it needs the effect enabled and approved, and three
+    /// failures in a row stop it — and disable the effect, as live.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_backfill_needs_approval_and_stops_when_the_effect_is_disabled() {
+        use crate::commands::effect::BACKFILL;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let broken = "def transform(x):\n    return 1 // 0\n";
+        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", broken)]);
+        register(svc);
+        for _ in 0..5 {
+            log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        }
+        let input = json!({ "effect": "acme/mark-done" });
+        let unapproved = run_as_person(svc, BACKFILL, input.clone())
+            .await
+            .unwrap_err();
+        assert!(unapproved.to_string().contains("approv"), "{unapproved}");
+        approve(svc).await;
+        let out = run_as_person(svc, BACKFILL, input.clone()).await.unwrap();
+        assert_eq!(
+            (
+                out["planned"].clone(),
+                out["failed"].clone(),
+                out["remaining"].clone()
+            ),
+            (json!(5), json!(3), json!(2))
+        );
+        assert!(
+            out["stopped"].as_str().unwrap().contains("disabled"),
+            "{out}"
+        );
+        let disabled = run_as_person(svc, BACKFILL, input).await.unwrap_err();
+        assert!(disabled.to_string().contains("is disabled"), "{disabled}");
     }
 }

@@ -29,11 +29,14 @@ import type { ProjectProgram } from "../tauri-bridge/generated/bindings.js";
 import { indexRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import {
+  backfillAsk,
+  backfillDone,
   canApprove,
   entityRows,
   entitySummary,
   programRow,
   providerEffectLines,
+  type BackfillResult,
   type EntityRowModel,
   type ProviderEffectState,
 } from "./dataSectionModel.js";
@@ -285,6 +288,7 @@ export function DataSection() {
                   </button>
                 )}
               </div>
+              {p.kind === "effect" && p.approved ? <BackfillAction rowKey={m.key} effect={p.name} /> : null}
               {effect === "loading" ? (
                 <div style={mutedStyle}>Comparing its declarations…</div>
               ) : failed !== null ? (
@@ -373,3 +377,75 @@ const tdStyle: CSSProperties = { padding: "3px 6px", borderBottom: "1px solid va
 const subheadStyle: CSSProperties = { fontSize: "var(--text-sm)", margin: "16px 0 4px" };
 const rowStyle: CSSProperties = { padding: "6px 0", borderBottom: "1px solid var(--border-subtle)", fontSize: "var(--text-sm)" };
 const errorStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--severity-critical)", marginTop: 4 };
+
+/** Backfill… on an approved effect's row (P9.D5): the live consumer never
+ *  reacts to what was logged before the effect's approval, so a person has
+ *  it react to those events — told first how many there are
+ *  (`effect.backfill_plan`), and that the effect may call outside oxplow
+ *  for each. The second click is the confirmation `effect.backfill` asks
+ *  for; Escape (or Cancel) backs out. */
+function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) {
+  const [planned, setPlanned] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function plan() {
+    setBusy(true);
+    try {
+      const out = await runCommand("effect.backfill_plan", { effect });
+      setPlanned(Number((out.result as { planned?: number } | null)?.planned ?? 0));
+    } catch (e) {
+      recordOpError({ label: `Plan a backfill of ${effect}`, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function run() {
+    setBusy(true);
+    try {
+      const out = await runCommand("effect.backfill", { effect }, true);
+      showToast({ message: backfillDone(out.result as BackfillResult) });
+      setPlanned(null);
+    } catch (e) {
+      recordOpError({ label: `Backfill ${effect}`, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (planned === null) {
+    return (
+      <div style={{ marginTop: 4 }}>
+        <button
+          type="button"
+          data-testid={`effect-backfill-${rowKey}`}
+          title="Have it react to matching events logged before it was approved. You're shown how many first."
+          disabled={busy}
+          onClick={() => void plan()}
+        >
+          {busy ? "Counting…" : "Backfill…"}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div
+      data-testid={`effect-backfill-ask-${rowKey}`}
+      style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") setPlanned(null);
+      }}
+    >
+      <span style={mutedStyle}>{backfillAsk(effect, planned)}</span>
+      <span style={{ flex: 1 }} />
+      {planned > 0 ? (
+        <button type="button" autoFocus data-testid={`effect-backfill-run-${rowKey}`} disabled={busy} onClick={() => void run()}>
+          {busy ? "Running…" : `Run on ${planned} ${planned === 1 ? "event" : "events"}`}
+        </button>
+      ) : null}
+      <button type="button" data-testid={`effect-backfill-cancel-${rowKey}`} disabled={busy} onClick={() => setPlanned(null)}>
+        {planned > 0 ? "Cancel" : "Close"}
+      </button>
+    </div>
+  );
+}
