@@ -1,5 +1,5 @@
 use oxplow_provider_protocol::codec::notify;
-use oxplow_provider_protocol::errors::{ErrorObject, ProtocolError, INVALID_INPUT};
+use oxplow_provider_protocol::errors::{ErrorObject, ProtocolError, AUTH, INVALID_INPUT};
 use oxplow_provider_protocol::{Incoming, Message, Peer};
 use serde_json::json;
 
@@ -82,6 +82,30 @@ fn errors_keep_their_meaning() {
         ProtocolError::from(ErrorObject::from(&ProtocolError::Cancelled)),
         ProtocolError::Cancelled
     );
+}
+
+/// tsk821: an `Auth` may say which credential was refused (`data.credential`)
+/// — a service with two tokens refuses one — and the host renews only it.
+#[test]
+fn auth_carries_its_credential() {
+    let named = ProtocolError::Auth {
+        message: "Linear refused it".into(),
+        credential: Some("LINEAR_API_KEY".into()),
+    };
+    let wire = ErrorObject::from(&named);
+    assert_eq!(wire.code, AUTH);
+    assert_eq!(
+        wire.data,
+        Some(serde_json::json!({ "credential": "LINEAR_API_KEY" }))
+    );
+    assert_eq!(ProtocolError::from(wire), named);
+    let unnamed = ProtocolError::Auth {
+        message: "refused".into(),
+        credential: None,
+    };
+    let wire = ErrorObject::from(&unnamed);
+    assert_eq!(wire.data, None);
+    assert_eq!(ProtocolError::from(wire), unnamed);
 }
 
 /// Two peers over a pipe: a request gets its reply, and a cancelled one

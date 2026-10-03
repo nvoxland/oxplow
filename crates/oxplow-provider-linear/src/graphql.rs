@@ -67,7 +67,11 @@ impl Client {
             });
         }
         if status == 401 || code == "AUTHENTICATION_ERROR" {
-            return Err(ProtocolError::Auth(format!("Linear: {message}")));
+            // Its one credential: the API key the request carried.
+            return Err(ProtocolError::Auth {
+                message: format!("Linear: {message}"),
+                credential: Some(crate::API_KEY.into()),
+            });
         }
         // A bad argument (an issue that doesn't exist): the caller says
         // which of its inputs it was.

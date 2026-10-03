@@ -3282,6 +3282,95 @@ async fn a_refused_token_is_renewed_and_the_call_tried_once_more() {
     );
 }
 
+/// Two credentials signed in at the stand-in, `FAKE_TOKEN` and
+/// `OTHER_TOKEN`, the instance ready on both.
+async fn signed_in_twice(hooks: &str) -> (EffortFixture, oauth_sim::OAuthSim) {
+    let fx = services_with_effort().await;
+    let sim = oauth_sim::OAuthSim::start().await;
+    let project = fx.svc.layout.project_dir.clone();
+    let other = format!(
+        "      - name: OTHER_TOKEN\n        oauth:\n          authorize_url: {}\n          token_url: {}\n          client_id: oxplow-test\n",
+        sim.authorize_url, sim.token_url
+    );
+    write_oauth_extension(&project, hooks, &sim.authorize_url, &sim.token_url, &other);
+    approve(&fx, &extension(&project));
+    configure(&fx, true, json!({ "team": "core" }));
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+    assert_eq!(sign_in(&fx, "OTHER_TOKEN").await, None);
+    first_read(&fx).await;
+    (fx, sim)
+}
+
+fn refreshes(sim: &oauth_sim::OAuthSim) -> usize {
+    sim.grants()
+        .iter()
+        .filter(|g| *g == "refresh_token")
+        .count()
+}
+
+/// tsk821: an `Auth` that names its credential renews that one alone.
+#[tokio::test]
+async fn an_auth_renews_only_the_credential_it_names() {
+    let (fx, sim) = signed_in_twice("").await;
+    set_hooks(&fx, "accepts:FAKE_TOKEN=never").await;
+    // Renewed and tried again on a fresh process (which starts without
+    // the hook), so the call lands.
+    create_on_fake(&fx).await.unwrap();
+    assert_eq!(refreshes(&sim), 1, "FAKE_TOKEN only: {:?}", sim.grants());
+}
+
+/// tsk821: renewing the credential an `Auth` named never touches another:
+/// when the service refuses the renewal for good, only the named one
+/// reads "sign in again".
+#[tokio::test]
+async fn an_auth_never_lapses_a_credential_it_didnt_name() {
+    let (fx, sim) = signed_in_twice("").await;
+    set_hooks(&fx, "accepts:FAKE_TOKEN=never").await;
+    sim.revoke();
+    assert!(create_on_fake(&fx).await.is_err());
+    let views = fx.svc.providers.list().await;
+    assert!(
+        matches!(
+            sign_in_state(&views, "FAKE_TOKEN").1,
+            Some(oauth::SignInState::SignInAgain)
+        ),
+        "{:?}",
+        sign_in_state(&views, "FAKE_TOKEN")
+    );
+    assert!(
+        matches!(
+            sign_in_state(&views, "OTHER_TOKEN").1,
+            Some(oauth::SignInState::SignedIn { .. })
+        ),
+        "{:?}",
+        sign_in_state(&views, "OTHER_TOKEN")
+    );
+}
+
+/// tsk821: an `Auth` that names no credential renews one only when the
+/// instance signs in for exactly one — with two, it can't know which, so
+/// it renews none and the refusal is the call's failure.
+#[tokio::test]
+async fn an_unnamed_auth_with_two_sign_ins_renews_nothing() {
+    let (fx, sim) = signed_in_twice("").await;
+    set_hooks(&fx, "refuse-auth").await;
+    let err = create_on_fake(&fx).await.unwrap_err().to_string();
+    assert!(err.contains("authentication failed"), "{err}");
+    assert_eq!(refreshes(&sim), 0, "{:?}", sim.grants());
+}
+
+/// tsk821: with one signed-in credential, an unnamed `Auth` is its.
+#[tokio::test]
+async fn an_unnamed_auth_with_one_sign_in_renews_it() {
+    let (fx, sim) = signing_in("", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+    first_read(&fx).await;
+    set_hooks(&fx, "refuse-auth").await;
+    create_on_fake(&fx).await.unwrap();
+    assert_eq!(refreshes(&sim), 1, "{:?}", sim.grants());
+}
+
 /// P9.B3: renewed once, not for ever — a service that refuses the renewed
 /// token too is a failure like any other.
 #[tokio::test]

@@ -460,12 +460,26 @@ fn refused<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<Refused<'
     None
 }
 
-/// A failure talking to the server: `Auth` when it refused the bearer.
-fn server_error(what: String, error: &(dyn std::error::Error + 'static)) -> ProtocolError {
+/// The credential that is the server's bearer token (`--auth-env`).
+fn bearer(server: &Server) -> Option<&str> {
+    match server {
+        Server::Url { auth_env, .. } => auth_env.as_deref(),
+        Server::Command(_) => None,
+    }
+}
+
+/// A failure talking to the server: `Auth` when it refused the bearer,
+/// naming the credential that is (tsk821).
+fn server_error(
+    what: String,
+    bearer: Option<&str>,
+    error: &(dyn std::error::Error + 'static),
+) -> ProtocolError {
     match refused(error) {
-        Some(Refused::Token) => {
-            ProtocolError::Auth(format!("{what}: the MCP server refused its bearer token"))
-        }
+        Some(Refused::Token) => ProtocolError::Auth {
+            message: format!("{what}: the MCP server refused its bearer token"),
+            credential: bearer.map(str::to_string),
+        },
         Some(Refused::Scope(scope)) => internal(format!(
             "{what}: the MCP server takes its bearer token but it may not do this{}",
             scope
@@ -528,7 +542,11 @@ async fn connect(server: &Server) -> Result<Client, Unstarted> {
             }
             let transport = StreamableHttpClientTransport::with_client(Http::new(), config);
             Ok(().serve(transport).await.map_err(|e| {
-                server_error(format!("the MCP server at `{url}` didn't initialize"), &e)
+                server_error(
+                    format!("the MCP server at `{url}` didn't initialize"),
+                    auth_env.as_deref(),
+                    &e,
+                )
             })?)
         }
     }
@@ -540,7 +558,7 @@ async fn start(adapter: &Adapter) -> Result<Arc<Client>, Unstarted> {
     let live: Vec<Value> = client
         .list_all_tools()
         .await
-        .map_err(|e| server_error("tools/list failed".into(), &e))?
+        .map_err(|e| server_error("tools/list failed".into(), bearer(&adapter.server), &e))?
         .iter()
         .map(pinned)
         .collect();
@@ -613,7 +631,7 @@ async fn run(
     if let Some(refused) = refusal(&tool_call) {
         return Err(refused);
     }
-    let (tool, output, failed) = call(client, &tool_call).await?;
+    let (tool, output, failed) = call(client, bearer(&adapter.server), &tool_call).await?;
     x["phase"] = json!(then);
     x["output"] = output.clone();
     if failed {
@@ -639,7 +657,11 @@ async fn run(
 
 /// Call the tool a mapping's answer names (`{ tool, arguments }`): its
 /// name, its output and whether it's a tool error.
-async fn call(client: &Client, call: &Value) -> Result<(String, Value, bool), ProtocolError> {
+async fn call(
+    client: &Client,
+    bearer: Option<&str>,
+    call: &Value,
+) -> Result<(String, Value, bool), ProtocolError> {
     let tool = call["tool"]
         .as_str()
         .ok_or_else(|| internal("the mapping named no `tool`"))?
@@ -648,7 +670,7 @@ async fn call(client: &Client, call: &Value) -> Result<(String, Value, bool), Pr
     let result = client
         .call_tool(CallToolRequestParams::new(tool.clone()).with_arguments(arguments))
         .await
-        .map_err(|e| server_error(format!("tool `{tool}`"), &e))?;
+        .map_err(|e| server_error(format!("tool `{tool}`"), bearer, &e))?;
     let output = output_of(&result);
     Ok((tool, output, result.is_error == Some(true)))
 }

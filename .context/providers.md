@@ -44,8 +44,9 @@ schemars), host → provider:
 `PROTOCOL_VERSION` is `"1"`.
 
 **Errors** (`errors.rs`): JSON-RPC's standard codes plus
-`NotConfigured` (-32001), `Auth` (-32002), `RateLimited` (-32003,
-`data.retry_after_ms`), `InvalidInput` (-32004, `data.field`) and
+`NotConfigured` (-32001), `Auth` (-32002, `data.credential` — the
+credential the service refused, when the provider knows it; tsk821),
+`RateLimited` (-32003, `data.retry_after_ms`), `InvalidInput` (-32004, `data.field`) and
 `Cancelled` (-32800). `ProtocolError` is the typed form; the conversion
 keeps the data both ways.
 
@@ -94,9 +95,11 @@ read fails after `n` checkpointed records) and `bad-record` (a read
 streams another provider's item), `rate-limit:<ms>` (its next invoke or
 read is refused `RateLimited`), `needs:<NAME>` (`check` reports
 `/credentials/<NAME>` unless that credential reached the process) and
-`accepts:<NAME>=<value>` (check, invoke and read answer `Auth` unless the
-credential `<NAME>` the process holds is `<value>` — a service that
-takes one token and no other, for the sign-in tests).
+`accepts:<NAME>=<value>` (check, invoke and read answer `Auth` naming
+`<NAME>` unless the credential the process holds is `<value>` — a
+service that takes one token and no other, for the sign-in tests) and
+`refuse-auth` (invoke and read answer an `Auth` that names no
+credential).
 `tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
 notifications against the goldens.
 
@@ -274,8 +277,8 @@ added, removed or changed (`ProviderEffect.tools`).
   `credentials` or is one of them named as a `client_secret` (the host's
   alone, never in the process's environment, so it could never reach the
   server — tsk835), and `auth` beside a `command`.
-- **A `401` is `Auth`** (at the server's initialize, `tools/list` or a
-  tool call), so a signed-in bearer is renewed and the call tried once
+- **A `401` is `Auth`** naming the bearer's credential (at the server's
+  initialize, `tools/list` or a tool call), so a signed-in bearer is renewed and the call tried once
   more ("Credentials and sign-in"); a pasted one is a failure that says
   the bearer was refused. That holds with or without a
   `WWW-Authenticate` challenge (tsk831): rmcp types only a challenged
@@ -625,13 +628,19 @@ form; sign-in is a provider's.
   **never** in the process's environment (nor the kit's).
 - **Renewal** (`oauth::access_token`): before every start a token
   within 60 s of lapsing is renewed and kept; a `check` that answers
-  `Auth` is tried once more on renewed tokens (`Instance::start`); an
+  `Auth` is tried once more on a renewed token (`Instance::start`); an
   `invoke` or `read` that answers `Auth` renews, ends the process and
   tries the call once more on a fresh one (`Instance::reauthorize` — a
   process started since the refused call is left alone, so two callers
-  renew once). None of that counts as a failure; an `Auth` after the
-  renewal does, like any other. A provider with no signed-in credential
-  gets no retry. Renewals of one account are **serialized** in-process
+  renew once). **Only the refused credential is renewed** (tsk821,
+  `Instance::renewable`): the one the `Auth` names, when the instance
+  signs in for it; with none named, its only signed-in credential — with
+  two or more it can't know which and renews none, so the refusal is the
+  call's failure. A named credential that is pasted, not signed in for,
+  has nothing to renew. Another credential is never renewed, so a
+  renewal its service refuses for good never lapses one it didn't name.
+  None of that counts as a failure; an `Auth` after the renewal does,
+  like any other. Renewals of one account are **serialized** in-process
   (`renewal_lock`): a caller that waited re-reads the keychain and uses
   what the first renewed, so a rotating refresh token is spent once
   (tsk827). The write compares first: a sign-out during the renewal
@@ -639,8 +648,8 @@ form; sign-in is a provider's.
   process) is used rather than overwritten, and a refused renewal marks
   the token lapsed only if it is still the one that was refused. Calls
   refused together renew once (tsk828): `Instance.renewed_at` records
-  the last renewal, `reauthorize` returns early when one happened since
-  the refused call, and a call cut off because a renewal ended its
+  each credential's last renewal, `reauthorize` returns early when that
+  credential was renewed since the refused call, and a call cut off because a renewal ended its
   process (peer closed) is retried like an `Auth` — in `invoke` and in
   the sync's `read`.
 - **A renewal the service refuses for good** (`invalid_grant`, or no

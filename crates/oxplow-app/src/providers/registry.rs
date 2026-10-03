@@ -266,6 +266,17 @@ pub struct CollectorView {
     pub records: i64,
 }
 
+/// Why a call is tried again on a renewed sign-in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Refusal {
+    /// Its service refused its credentials (`Auth`), naming the one it
+    /// refused when it said.
+    Auth(Option<String>),
+    /// It was cut off because another caller's refusal renewed a sign-in
+    /// and ended the process under it: nothing to renew, only retry.
+    RenewedUnder,
+}
+
 /// A started process and the handle its `check` returned.
 struct Live {
     conn: Connection,
@@ -297,8 +308,9 @@ pub struct Instance {
     stopped: std::sync::atomic::AtomicBool,
     /// One start at a time; held across a start, which `live` never is.
     starting: tokio::sync::Mutex<()>,
-    /// When its sign-in was last renewed because its service refused it.
-    renewed_at: parking_lot::Mutex<Option<Instant>>,
+    /// When each signed-in credential was last renewed because its
+    /// service refused it (tsk828, per credential since tsk821).
+    renewed_at: parking_lot::Mutex<BTreeMap<String, Instant>>,
     not_before: parking_lot::Mutex<Option<Instant>>,
     /// One read per collector at a time (tsk715): a second waits, then
     /// resumes from the checkpoint the first left.
@@ -307,11 +319,6 @@ pub struct Instance {
 }
 
 impl Instance {
-    /// Whether any of its credentials is one the person signs in for.
-    fn signs_in(&self) -> bool {
-        self.spec.credentials.iter().any(|c| c.oauth.is_some())
-    }
-
     /// The keychain account of its credential `name`.
     fn account(&self, name: &str) -> String {
         crate::collector_runner::instance_credential_account(
@@ -328,7 +335,12 @@ impl Instance {
     /// refused it. A client secret is the host's to send with a token
     /// request, never the process's. A signed-in credential with no token
     /// to give is a problem with the instance, at `/credentials/<NAME>`.
-    async fn credentials(&self, renew: bool) -> Result<BTreeMap<String, String>, HostError> {
+    /// Its credentials' values, for a start. `renew` names the signed-in
+    /// credential whose token is renewed first (the one an `Auth` refused).
+    async fn credentials(
+        &self,
+        renew: Option<&str>,
+    ) -> Result<BTreeMap<String, String>, HostError> {
         let failed = |name: &str, why: String| HostError::Failed {
             name: self.name.clone(),
             message: format!("credential `{name}`: {why}"),
@@ -375,7 +387,7 @@ impl Instance {
                 &self.account(name),
                 decl,
                 client_secret.as_deref(),
-                renew,
+                renew == Some(name),
             )
             .await
             {
@@ -408,19 +420,25 @@ impl Instance {
 
     /// Consent (a verified copy of the approved folder), spawn from that
     /// copy, handshake, check. A `check` its service refuses for its
-    /// credentials (`Auth`) is tried once more on renewed tokens, when it
-    /// has any to renew.
+    /// credentials (`Auth`) is tried once more on a renewed token, when
+    /// the refusal points at a signed-in credential ([`Self::renewable`]).
     async fn start(&self) -> Result<Live, HostError> {
-        match self.start_once(false).await {
-            Err((_, true)) if self.signs_in() => self.start_once(true).await.map_err(|(e, _)| e),
+        match self.start_once(None).await {
+            Err((e, Some(named))) => match self.renewable(named.as_deref()) {
+                Some(cred) => self.start_once(Some(&cred)).await.map_err(|(e, _)| e),
+                None => Err(e),
+            },
             other => other.map_err(|(e, _)| e),
         }
     }
 
-    /// One start; the error says whether it was its `check` answering
-    /// `Auth`.
-    async fn start_once(&self, renew: bool) -> Result<Live, (HostError, bool)> {
-        let plain = |e: HostError| (e, false);
+    /// One start, renewing `renew` first; the error carries, when its
+    /// `check` answered `Auth`, the credential that named (if any).
+    async fn start_once(
+        &self,
+        renew: Option<&str>,
+    ) -> Result<Live, (HostError, Option<Option<String>>)> {
+        let plain = |e: HostError| (e, None);
         let copy = copy_approved(&self.deps, &self.ext, &self.spec)
             .await
             .map_err(plain)?;
@@ -456,7 +474,10 @@ impl Instance {
         )
         .await
         .map_err(|e| {
-            let auth = matches!(e, ProtocolError::Auth(_));
+            let auth = match &e {
+                ProtocolError::Auth { credential, .. } => Some(credential.clone()),
+                _ => None,
+            };
             (
                 HostError::Failed {
                     name: self.name.clone(),
@@ -478,26 +499,54 @@ impl Instance {
         }
     }
 
-    /// Its service refused its credentials (`Auth`) on a call made at
-    /// `called`: renew each signed-in credential's token and end the
-    /// process, so the next call starts on them. False when it has none
-    /// to renew. A process started since `called` is already on newer
-    /// tokens than the refused call's and is left alone.
-    /// Whether its sign-in was renewed (and its process ended for that)
-    /// after `t`.
-    pub(super) fn renewed_since(&self, t: Instant) -> bool {
-        self.renewed_at.lock().is_some_and(|at| at > t)
+    /// The signed-in credential a refusal points at (tsk821): the one an
+    /// `Auth` names, when it signs in for that one; with none named, its
+    /// only signed-in credential — with two or more it can't know which,
+    /// and renews none. A named credential that isn't signed in for (a
+    /// pasted key) has nothing to renew.
+    pub(super) fn renewable(&self, named: Option<&str>) -> Option<String> {
+        let mut signed_in = self
+            .spec
+            .credentials
+            .iter()
+            .filter(|c| c.oauth.is_some())
+            .map(|c| c.name.as_str());
+        match named {
+            Some(name) => signed_in.find(|c| *c == name).map(str::to_string),
+            None => match (signed_in.next(), signed_in.next()) {
+                (Some(only), None) => Some(only.to_string()),
+                _ => None,
+            },
+        }
     }
 
-    pub(super) async fn reauthorize(&self, called: Instant) -> bool {
-        if !self.signs_in() {
-            return false;
-        }
+    /// Whether any of its sign-ins was renewed (and its process ended for
+    /// that) after `t`.
+    pub(super) fn renewed_since(&self, t: Instant) -> bool {
+        self.renewed_at.lock().values().any(|at| *at > t)
+    }
+
+    /// A call made at `called` was refused: renew what `refusal` points at
+    /// and end the process, so the next call starts on it. Whether to try
+    /// the call once more — false when there is nothing to renew. A
+    /// credential renewed since `called` (another caller refused at the
+    /// same time got here first), or a process started since on newer
+    /// tokens, needs nothing but the retry (tsk828).
+    pub(super) async fn reauthorize(&self, called: Instant, refusal: &Refusal) -> bool {
+        let cred = match refusal {
+            Refusal::RenewedUnder => return true,
+            Refusal::Auth(named) => match self.renewable(named.as_deref()) {
+                Some(cred) => cred,
+                None => return false,
+            },
+        };
         let _one = self.starting.lock().await;
-        // Renewed since the refused call (another caller refused at the
-        // same time got here first), or started since on newer tokens:
-        // nothing to do but try again (tsk828).
-        if self.renewed_since(called) {
+        if self
+            .renewed_at
+            .lock()
+            .get(&cred)
+            .is_some_and(|at| *at > called)
+        {
             return true;
         }
         {
@@ -507,11 +556,11 @@ impl Instance {
             }
             live.take();
         }
-        *self.renewed_at.lock() = Some(Instant::now());
+        self.renewed_at.lock().insert(cred.clone(), Instant::now());
         // What can't be renewed shows when it next starts (its `check`
         // names the credential); here the only question is whether to
         // try again.
-        if let Err(e) = self.credentials(true).await {
+        if let Err(e) = self.credentials(Some(&cred)).await {
             tracing::info!(instance = %self.name, error = %e, "renewing its sign-in failed");
         }
         true
@@ -649,11 +698,20 @@ impl Instance {
             // Its service refused its credentials — or the process was
             // ended under this call to renew them for another caller: once,
             // on renewed ones.
-            let refused = matches!(result, Err(ProtocolError::Auth(_)))
-                || (result.is_err() && peer.is_closed() && self.renewed_since(started));
-            if refused && !reauthorized && self.reauthorize(started).await {
-                reauthorized = true;
-                continue;
+            let refusal = match &result {
+                Err(ProtocolError::Auth { credential, .. }) => {
+                    Some(Refusal::Auth(credential.clone()))
+                }
+                Err(_) if peer.is_closed() && self.renewed_since(started) => {
+                    Some(Refusal::RenewedUnder)
+                }
+                _ => None,
+            };
+            if let Some(refusal) = refusal {
+                if !reauthorized && self.reauthorize(started, &refusal).await {
+                    reauthorized = true;
+                    continue;
+                }
             }
             return self.after_call(result, started).await;
         }
@@ -1414,7 +1472,7 @@ impl ProviderRegistry {
             live: tokio::sync::Mutex::new(None),
             stopped: std::sync::atomic::AtomicBool::new(false),
             starting: tokio::sync::Mutex::new(()),
-            renewed_at: parking_lot::Mutex::new(None),
+            renewed_at: parking_lot::Mutex::new(BTreeMap::new()),
             not_before: parking_lot::Mutex::new(None),
             reading: parking_lot::Mutex::new(std::collections::HashMap::new()),
         }))

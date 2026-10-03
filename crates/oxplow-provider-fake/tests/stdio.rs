@@ -388,7 +388,10 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         )
         .await;
     assert!(
-        matches!(refused, Err(ProtocolError::Auth(_))),
+        matches!(
+            &refused,
+            Err(ProtocolError::Auth { credential: Some(c), .. }) if c == "FAKE_TOKEN"
+        ),
         "{refused:?}"
     );
     let (_c4, fresh, _i4) = spawn_as("fake", "accepts:FAKE_TOKEN=at-2", Some("at-2"));
@@ -404,7 +407,10 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         .unwrap();
     let refused = invoke(&fresh, &handle, "create", json!({ "title": "y" })).await;
     assert!(
-        matches!(refused, Err(ProtocolError::Auth(_))),
+        matches!(
+            &refused,
+            Err(ProtocolError::Auth { credential: Some(c), .. }) if c == "FAKE_TOKEN"
+        ),
         "{refused:?}"
     );
 }

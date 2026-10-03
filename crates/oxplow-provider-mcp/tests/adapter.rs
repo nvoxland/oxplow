@@ -600,19 +600,13 @@ async fn a_server_by_url_is_pinned_and_called() {
     let _ = server.await;
     let (_, server) = http_notes(port, Some("rotated")).await;
     let refused = invoke(&peer, &handle, "create", json!({ "title": "Second" })).await;
-    assert!(
-        matches!(refused, Err(ProtocolError::Auth(_))),
-        "{refused:?}"
-    );
+    assert!(is_notes_auth(&refused), "{refused:?}");
 
     // A bearer the server refuses is `Auth` at check; none to send is the
     // credential's problem.
     let (_child, wrong) = spawn_by_url(ext.path(), &url, Some("s3cret"));
     let refused = try_check(&wrong).await;
-    assert!(
-        matches!(refused, Err(ProtocolError::Auth(_))),
-        "{refused:?}"
-    );
+    assert!(is_notes_auth(&refused), "{refused:?}");
     let (_child, without) = spawn_by_url(ext.path(), &url, None);
     let unset = try_check(&without).await.unwrap();
     assert_eq!(unset.handle, None);
@@ -636,6 +630,12 @@ async fn a_server_by_url_is_pinned_and_called() {
     server.abort();
 }
 
+/// `Auth` naming the bearer it sent (tsk821), so the host renews that
+/// credential and no other.
+fn is_notes_auth<T>(r: &Result<T, ProtocolError>) -> bool {
+    matches!(r, Err(ProtocolError::Auth { credential: Some(c), .. }) if c == "NOTES_TOKEN")
+}
+
 /// tsk831: a `401` is `Auth` however the server words it — many send no
 /// `WWW-Authenticate` — so the host renews a signed-in token whenever a
 /// server stops taking it. A `403` isn't: the server knows the token and
@@ -649,10 +649,7 @@ async fn a_401_is_auth_however_it_is_worded() {
         // Refused at the start ...
         let (_child, wrong) = spawn_by_url(ext.path(), &url, Some("wrong"));
         let refused = try_check(&wrong).await;
-        assert!(
-            matches!(refused, Err(ProtocolError::Auth(_))),
-            "{refusal:?} at check: {refused:?}"
-        );
+        assert!(is_notes_auth(&refused), "{refusal:?} at check: {refused:?}");
         // ... and mid-session.
         let port: u16 = url::Url::parse(&url).unwrap().port().unwrap();
         let (_child, peer) = spawn_by_url(ext.path(), &url, Some("s3cret"));
@@ -662,7 +659,7 @@ async fn a_401_is_auth_however_it_is_worded() {
         let (_, server) = http_notes_refusing(port, Some("rotated"), refusal).await;
         let refused = invoke(&peer, &handle, "create", json!({ "title": "Late" })).await;
         assert!(
-            matches!(refused, Err(ProtocolError::Auth(_))),
+            is_notes_auth(&refused),
             "{refusal:?} mid-session: {refused:?}"
         );
         server.abort();

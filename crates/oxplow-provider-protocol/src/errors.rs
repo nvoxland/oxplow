@@ -24,7 +24,8 @@ pub const INTERNAL_ERROR: i64 = -32603;
 /// The instance isn't configured (no `check`ed handle, or its config is
 /// incomplete).
 pub const NOT_CONFIGURED: i64 = -32001;
-/// The provider's credentials were refused.
+/// The provider's credentials were refused; `data.credential` names the
+/// one, when the provider knows which.
 pub const AUTH: i64 = -32002;
 /// The provider's upstream is rate limiting; `data.retry_after_ms` says
 /// when to try again.
@@ -49,8 +50,13 @@ pub enum ProtocolError {
     Internal(String),
     #[error("not configured: {0}")]
     NotConfigured(String),
-    #[error("authentication failed: {0}")]
-    Auth(String),
+    /// Its credentials were refused — `credential` the one the service
+    /// refused, when the provider knows (the host renews that one alone).
+    #[error("authentication failed: {message}")]
+    Auth {
+        message: String,
+        credential: Option<String>,
+    },
     #[error("rate limited: {message}")]
     RateLimited {
         message: String,
@@ -74,7 +80,10 @@ impl From<&ProtocolError> for ErrorObject {
             ProtocolError::InvalidParams(_) => (INVALID_PARAMS, None),
             ProtocolError::Internal(_) => (INTERNAL_ERROR, None),
             ProtocolError::NotConfigured(_) => (NOT_CONFIGURED, None),
-            ProtocolError::Auth(_) => (AUTH, None),
+            ProtocolError::Auth { credential, .. } => (
+                AUTH,
+                credential.as_ref().map(|c| json!({ "credential": c })),
+            ),
             ProtocolError::RateLimited { retry_after_ms, .. } => (
                 RATE_LIMITED,
                 retry_after_ms.map(|ms| json!({ "retry_after_ms": ms })),
@@ -87,7 +96,8 @@ impl From<&ProtocolError> for ErrorObject {
         };
         let message = match e {
             ProtocolError::InvalidInput { message, .. }
-            | ProtocolError::RateLimited { message, .. } => message.clone(),
+            | ProtocolError::RateLimited { message, .. }
+            | ProtocolError::Auth { message, .. } => message.clone(),
             other => other.to_string(),
         };
         ErrorObject {
@@ -108,7 +118,10 @@ impl From<ErrorObject> for ProtocolError {
             INVALID_PARAMS => ProtocolError::InvalidParams(e.message),
             INTERNAL_ERROR => ProtocolError::Internal(e.message),
             NOT_CONFIGURED => ProtocolError::NotConfigured(e.message),
-            AUTH => ProtocolError::Auth(e.message),
+            AUTH => ProtocolError::Auth {
+                credential: field("credential").and_then(|v| v.as_str().map(str::to_string)),
+                message: e.message,
+            },
             RATE_LIMITED => ProtocolError::RateLimited {
                 retry_after_ms: field("retry_after_ms").and_then(|v| v.as_u64()),
                 message: e.message,

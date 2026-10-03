@@ -35,7 +35,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::registry::{Instance, ProviderRegistry};
+use super::registry::{Instance, ProviderRegistry, Refusal};
 use super::spec;
 use crate::commands::{Command, Handler, HandlerOutput};
 
@@ -53,10 +53,16 @@ pub struct CollectorRead {
 struct ReadFailure {
     error: CommandError,
     counts: bool,
+    /// Whether, and how, it may be tried again.
+    retry: Option<Retry>,
+}
+
+/// How a stopped read may be tried again.
+enum Retry {
     /// The provider's service said to wait: its message and how long.
-    rate_limit: Option<(String, Option<u64>)>,
-    /// The provider's service refused its credentials.
-    auth: bool,
+    RateLimited(String, Option<u64>),
+    /// On a renewed sign-in.
+    Refused(Refusal),
 }
 
 impl ReadFailure {
@@ -64,8 +70,7 @@ impl ReadFailure {
         Self {
             error: CommandError::Failed { message },
             counts: true,
-            rate_limit: None,
-            auth: false,
+            retry: None,
         }
     }
 
@@ -73,8 +78,7 @@ impl ReadFailure {
         Self {
             error,
             counts: false,
-            rate_limit: None,
-            auth: false,
+            retry: None,
         }
     }
 }
@@ -137,8 +141,9 @@ impl Instance {
                     // Ended under it to renew the sign-in for another
                     // caller: as refused, so it tries again on the renewal.
                     if let Err(failure) = &mut outcome {
-                        if peer.is_closed() && self.renewed_since(called) {
-                            failure.auth = true;
+                        if failure.retry.is_none() && peer.is_closed() && self.renewed_since(called)
+                        {
+                            failure.retry = Some(Retry::Refused(Refusal::RenewedUnder));
                         }
                     }
                     self.forget_if_closed(&peer).await;
@@ -147,26 +152,26 @@ impl Instance {
                 // A start that failed was counted as it failed.
                 Err(error) => Err(ReadFailure::uncounted(error)),
             };
-            if let Err(ReadFailure {
-                rate_limit: Some((message, retry_after_ms)),
-                ..
-            }) = &outcome
-            {
-                match self.rate_limited(message, *retry_after_ms, retried).await {
+            match &outcome {
+                Err(ReadFailure {
+                    retry: Some(Retry::RateLimited(message, retry_after_ms)),
+                    ..
+                }) => match self.rate_limited(message, *retry_after_ms, retried).await {
                     None => {
                         retried = true;
                         continue;
                     }
                     Some(error) => break Err(ReadFailure::uncounted(error)),
+                },
+                // Its service refused its credentials: once, on renewed ones.
+                Err(ReadFailure {
+                    retry: Some(Retry::Refused(refusal)),
+                    ..
+                }) if !reauthorized && self.reauthorize(called, refusal).await => {
+                    reauthorized = true;
+                    continue;
                 }
-            }
-            // Its service refused its credentials: once, on renewed ones.
-            if matches!(&outcome, Err(ReadFailure { auth: true, .. }))
-                && !reauthorized
-                && self.reauthorize(called).await
-            {
-                reauthorized = true;
-                continue;
+                _ => {}
             }
             break outcome;
         };
@@ -285,8 +290,7 @@ impl Instance {
                         message: message.clone(),
                     },
                     counts: false,
-                    rate_limit: Some((message, retry_after_ms)),
-                    auth: false,
+                    retry: Some(Retry::RateLimited(message, retry_after_ms)),
                 });
             }
             Err(e) => {
@@ -294,12 +298,16 @@ impl Instance {
                     e,
                     ProtocolError::InvalidInput { .. } | ProtocolError::Cancelled
                 );
-                let auth = matches!(e, ProtocolError::Auth(_));
+                let retry = match &e {
+                    ProtocolError::Auth { credential, .. } => {
+                        Some(Retry::Refused(Refusal::Auth(credential.clone())))
+                    }
+                    _ => None,
+                };
                 return Err(ReadFailure {
                     error: self.command_error(e),
                     counts,
-                    rate_limit: None,
-                    auth,
+                    retry,
                 });
             }
         };

@@ -44,8 +44,10 @@
 //! - `needs:<NAME>` — `check` reports a problem unless the credential
 //!   `<NAME>` reached the process;
 //! - `accepts:<NAME>=<value>` — `check`, `invoke` and `read` answer `Auth`
-//!   unless the credential `<NAME>` the process holds is `<value>` (its
-//!   service takes that token and no other).
+//!   naming `<NAME>` unless the credential `<NAME>` the process holds is
+//!   `<value>` (its service takes that token and no other).
+//! - `refuse-auth` — `invoke` and `read` answer `Auth` naming no
+//!   credential (a service that doesn't say which token it refused).
 
 use oxplow_domain::vocabulary::Vocabulary;
 use std::collections::{BTreeMap, HashMap};
@@ -81,8 +83,12 @@ pub struct Hooks {
     /// `<NAME>` reached it (as an environment variable).
     pub needs: Option<String>,
     /// `accepts:<NAME>=<value>`: every `check`, `invoke` and `read` is
-    /// refused `Auth` unless the credential `<NAME>` is `<value>`.
+    /// refused `Auth` (naming `<NAME>`) unless the credential `<NAME>` is
+    /// `<value>`.
     pub accepts: Option<(String, String)>,
+    /// `refuse-auth`: every `invoke` and `read` is refused `Auth` naming
+    /// no credential.
+    pub refuse_auth: bool,
 }
 
 impl Hooks {
@@ -108,6 +114,7 @@ impl Hooks {
                 }
                 None if part == "fail-next" => self.fail_next = 1,
                 None if part == "crash" => self.crash = true,
+                None if part == "refuse-auth" => self.refuse_auth = true,
                 None if part == "bad-declarations" => self.bad_declarations = true,
                 None if part == "progress" => self.progress = true,
                 None if part == "bad-record" => self.bad_record = true,
@@ -348,14 +355,30 @@ async fn take_rate_limit(world: &Shared) -> Result<(), ProtocolError> {
     }
 }
 
-/// The `accepts` hook: the service refuses any token but the one named.
+/// The `accepts` hook: the service refuses any token but the one named,
+/// saying which credential it refused.
 async fn require_token(world: &Shared) -> Result<(), ProtocolError> {
     match &world.lock().await.hooks.accepts {
-        Some((name, value)) if std::env::var(name).ok().as_deref() != Some(value) => Err(
-            ProtocolError::Auth(format!("scripted: `{name}` isn't the token it accepts")),
-        ),
+        Some((name, value)) if std::env::var(name).ok().as_deref() != Some(value) => {
+            Err(ProtocolError::Auth {
+                message: format!("scripted: `{name}` isn't the token it accepts"),
+                credential: Some(name.clone()),
+            })
+        }
         _ => Ok(()),
     }
+}
+
+/// The `refuse-auth` hook: the service refuses the call's credentials
+/// without saying which.
+async fn refuse_auth(world: &Shared) -> Result<(), ProtocolError> {
+    if world.lock().await.hooks.refuse_auth {
+        return Err(ProtocolError::Auth {
+            message: "scripted: refused, no credential named".into(),
+            credential: None,
+        });
+    }
+    Ok(())
 }
 
 async fn take_failure(world: &Shared) -> Result<(), ProtocolError> {
@@ -472,6 +495,7 @@ async fn handle(
             take_rate_limit(world).await?;
             take_failure(world).await?;
             require_token(world).await?;
+            refuse_auth(world).await?;
             let p: InvokeParams = parse(params)?;
             require_handle(&p.handle)?;
             slow(world).await;
@@ -481,6 +505,7 @@ async fn handle(
             take_rate_limit(world).await?;
             take_failure(world).await?;
             require_token(world).await?;
+            refuse_auth(world).await?;
             let p: ReadParams = parse(params)?;
             require_handle(&p.handle)?;
             if p.collector != "work_items" {

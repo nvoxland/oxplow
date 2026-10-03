@@ -263,11 +263,10 @@ async fn instance(world: &Shared, handle: &Handle) -> Result<(Client, Instance),
     let instance = w.instances.get(&handle.0).cloned().ok_or_else(|| {
         ProtocolError::NotConfigured(format!("`{}` isn't a checked instance", handle.0))
     })?;
-    let key = w
-        .env
-        .key
-        .clone()
-        .ok_or_else(|| ProtocolError::Auth(format!("{API_KEY} isn't set")))?;
+    let key = w.env.key.clone().ok_or_else(|| ProtocolError::Auth {
+        message: format!("{API_KEY} isn't set"),
+        credential: Some(API_KEY.into()),
+    })?;
     Ok((Client::new(&w.env.url, &key), instance))
 }
 
@@ -375,7 +374,7 @@ async fn check(world: &Shared, p: CheckParams) -> Result<CheckResult, ProtocolEr
     };
     let client = Client::new(&url, &key);
     let teams = match client.run(issue::TEAM, json!({ "key": team_key })).await {
-        Err(ProtocolError::Auth(message)) => {
+        Err(ProtocolError::Auth { message, .. }) => {
             return Ok(problem(
                 "",
                 format!("Linear refused the API key: {message}"),
