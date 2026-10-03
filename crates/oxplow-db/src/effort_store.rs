@@ -9,6 +9,7 @@
 //! - `effort_file` (per-effort file changes)
 
 use async_trait::async_trait;
+use oxplow_domain::vocabulary::VocabularyHandle;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -29,8 +30,7 @@ use oxplow_domain::refs::build::{
     effort_ref, snapshot_ref, task_of_work_item_ref, thread_ref, validate_work_item_ref,
     work_item_id_of_ref,
 };
-use oxplow_domain::{Anchors, EventSchemaRegistry, StreamId};
-use std::sync::Arc;
+use oxplow_domain::{Anchors, StreamId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -568,21 +568,21 @@ pub struct SqliteEffortStore {
     db: Database,
     page_refs: SqlitePageRefStore,
     /// Validates the `effort.*` envelopes this store logs.
-    event_schemas: Arc<EventSchemaRegistry>,
+    vocabulary: VocabularyHandle,
 }
 
 impl SqliteEffortStore {
     /// A store with its own core schema registry. `Services` shares one
-    /// registry across stores via [`Self::with_event_schemas`].
+    /// registry across stores via [`Self::with_vocabulary`].
     pub fn new(db: Database) -> Self {
-        Self::with_event_schemas(db, Arc::new(EventSchemaRegistry::core()))
+        Self::with_vocabulary(db, VocabularyHandle::core())
     }
 
-    pub fn with_event_schemas(db: Database, event_schemas: Arc<EventSchemaRegistry>) -> Self {
+    pub fn with_vocabulary(db: Database, vocabulary: VocabularyHandle) -> Self {
         Self {
             page_refs: SqlitePageRefStore::new(db.clone()),
             db,
-            event_schemas,
+            vocabulary,
         }
     }
 
@@ -659,8 +659,9 @@ impl SqliteEffortStore {
                 }
             }
         }
+        let vocabulary = self.vocabulary.current();
         let mut edges = effort_touched_file_edges(&source, &paths);
-        edges.extend(effort_summary_edges(&source, &summaries));
+        edges.extend(effort_summary_edges(&vocabulary.kinds, &source, &summaries));
         edges.extend(effort_impact_edges(&source, &impacts));
         refs.replace_source_for_ref_types(KIND_WORK_ITEM, &source, effort_ref_types(), edges)
             .await
@@ -710,11 +711,12 @@ impl SqliteEffortStore {
         validate_work_item_ref(&args.work_item)?;
         let work_item = args.work_item.clone();
         let a = std::sync::Arc::new(args);
-        let schemas = self.event_schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         let effort_id = self
             .db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "effort_attribution");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "effort_attribution");
                 let existing =
                     most_recent_for_work_item_tx(tx, &a.work_item).map_err(map_sql_err)?;
                 let (effort_id, open) = match &existing {
@@ -912,11 +914,12 @@ impl EffortStore for SqliteEffortStore {
         let now = Timestamp::now();
         let work_item = work_item.to_string();
         let w = work_item.clone();
-        let schemas = self.event_schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         let id = self
             .db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "effort_store");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "effort_store");
                 start_tx(tx, &ev, &w, thread, start_snapshot_id, now, false)
             })
             .await?;
@@ -944,10 +947,11 @@ impl EffortStore for SqliteEffortStore {
             .map(|s| !s.trim().is_empty())
             .unwrap_or(false);
         let now = Timestamp::now();
-        let schemas = self.event_schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "effort_store");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "effort_store");
                 finish_tx(
                     tx,
                     &ev,

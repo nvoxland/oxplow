@@ -127,9 +127,23 @@ pub fn work_item_label(r: &str) -> String {
 /// rather than treated as a different item.
 pub fn validate_work_item_ref(r: &str) -> Result<(), crate::DomainError> {
     let invalid = |why: &str| Err(crate::DomainError::Invalid(format!("`{r}` {why}")));
-    let parsed = crate::refs::validate_ref(r)?;
+    // `work_item` is core's kind, the same in every vocabulary: its shape
+    // is checked here, no registry needed.
+    let parsed = crate::refs::CanonicalRef::parse(r).map_err(|e| {
+        crate::DomainError::Invalid(format!("`{r}` is not a canonical ref: {}", e.reason()))
+    })?;
     if parsed.kind != "work_item" {
         return invalid("is not a work_item ref");
+    }
+    let provider_ok = parsed.id.split_once(':').is_some_and(|(provider, native)| {
+        !native.is_empty()
+            && provider.starts_with(|c: char| c.is_ascii_lowercase())
+            && provider
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+    });
+    if !provider_ok {
+        return invalid("names no `<provider>:<id>`");
     }
     if parsed.rev.is_some() || parsed.frag.is_some() {
         return invalid("names a work item with a revision or fragment");

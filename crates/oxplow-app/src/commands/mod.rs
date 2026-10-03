@@ -489,8 +489,8 @@ impl CommandBus {
     }
 
     /// The event types the log accepts.
-    pub fn event_schemas(&self) -> &Arc<oxplow_domain::EventSchemaRegistry> {
-        self.log.schemas()
+    pub fn vocabulary(&self) -> &oxplow_domain::vocabulary::VocabularyHandle {
+        self.log.vocabulary()
     }
 
     pub fn audit_store(&self) -> &SqliteCommandAuditStore {
@@ -729,7 +729,7 @@ impl CommandBus {
                 let actor_c = actor.clone();
                 let spec_c = spec.clone();
                 let input_c = input.clone();
-                let schemas = self.log.schemas().clone();
+                let vocabulary = self.log.vocabulary().clone();
                 // A handler error must roll the transaction back, which
                 // means returning `Err` from the closure; the structured
                 // `CommandError` rides out through this slot.
@@ -747,7 +747,7 @@ impl CommandBus {
                             conn: tx,
                             actor: &actor_c,
                             events: oxplow_db::EventCtx {
-                                schemas: &schemas,
+                                vocabulary: &vocabulary.current(),
                                 source: actor_c.source(),
                                 cause: Some(executed_id.clone()),
                             },
@@ -771,7 +771,7 @@ impl CommandBus {
                         };
                         let recorded = record_tx(
                             tx,
-                            &schemas,
+                            &vocabulary.current(),
                             &actor_c,
                             &spec_c,
                             &input_c,
@@ -797,7 +797,14 @@ impl CommandBus {
                             ));
                         }
                         if let RunOrigin::Approval(id) = origin {
-                            log_approved_tx(tx, &schemas, &actor_c, &spec_c, id, &recorded)?;
+                            log_approved_tx(
+                                tx,
+                                &vocabulary.current(),
+                                &actor_c,
+                                &spec_c,
+                                id,
+                                &recorded,
+                            )?;
                         }
                         Ok((out, recorded))
                     })
@@ -946,9 +953,9 @@ impl CommandBus {
             preview: serde_json::to_value(&preview).expect("a preview serializes"),
             dry_run,
         };
-        let (actor_c, schemas, destructive) = (
+        let (actor_c, vocabulary, destructive) = (
             actor.clone(),
-            self.log.schemas().clone(),
+            self.log.vocabulary().clone(),
             preview.destructive,
         );
         let stored = self
@@ -973,7 +980,7 @@ impl CommandBus {
                 )
                 .with_anchors(actor_c.anchors())
                 .with_subject([proposal_ref(inserted.id), command_ref(&row.command)]);
-                append_tx(tx, &schemas, &proposed)?;
+                append_tx(tx, &vocabulary.current(), &proposed)?;
                 Ok((inserted.id, supersedes))
             })
             .await;
@@ -1001,7 +1008,7 @@ impl CommandBus {
         gates: Gates,
     ) -> Result<Value, CommandError> {
         let (actor, input) = (actor.clone(), input.clone());
-        let schemas = self.log.schemas().clone();
+        let vocabulary = self.log.vocabulary().clone();
         let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
         let failed_c = failed.clone();
         self.db
@@ -1010,7 +1017,7 @@ impl CommandBus {
                     conn: tx,
                     actor: &actor,
                     events: oxplow_db::EventCtx {
-                        schemas: &schemas,
+                        vocabulary: &vocabulary.current(),
                         source: actor.source(),
                         cause: None,
                     },
@@ -1062,7 +1069,7 @@ impl CommandBus {
     /// `command.declined`, nothing run. A person's only.
     pub async fn decline(&self, actor: &Actor, id: i64) -> Result<(), CommandError> {
         self.pending_proposal(actor, id).await?;
-        let (actor_c, schemas) = (actor.clone(), self.log.schemas().clone());
+        let (actor_c, vocabulary) = (actor.clone(), self.log.vocabulary().clone());
         self.db
             .transaction(move |tx| {
                 let declined = proposal_store::decline_tx(tx, id)?;
@@ -1074,7 +1081,7 @@ impl CommandBus {
                     },
                 )
                 .with_subject([proposal_ref(id), command_ref(&declined.command)]);
-                append_tx(tx, &schemas, &event)?;
+                append_tx(tx, &vocabulary.current(), &event)?;
                 Ok(())
             })
             .await?;
@@ -1306,7 +1313,7 @@ impl CommandBus {
             Resolved::Tx(handler) => {
                 let handler = handler.clone();
                 let actor = actor.clone();
-                let schemas = self.log.schemas().clone();
+                let vocabulary = self.log.vocabulary().clone();
                 let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
                 let failed_c = failed.clone();
                 // A read snapshot, always rolled back: a Read handler's
@@ -1317,7 +1324,7 @@ impl CommandBus {
                             conn: tx,
                             actor: &actor,
                             events: oxplow_db::EventCtx {
-                                schemas: &schemas,
+                                vocabulary: &vocabulary.current(),
                                 source: actor.source(),
                                 cause: None,
                             },
@@ -1400,7 +1407,7 @@ impl CommandBus {
         origin: RunOrigin,
     ) -> CommandOutcome {
         let (actor_c, spec_c, input_c) = (actor.clone(), spec.clone(), input.clone());
-        let schemas = self.log.schemas().clone();
+        let vocabulary = self.log.vocabulary().clone();
         let shadow = HandlerOutput {
             result: out.result.clone(),
             inverse: out.inverse.clone(),
@@ -1412,7 +1419,7 @@ impl CommandBus {
             .transaction(move |tx| {
                 let recorded = record_tx(
                     tx,
-                    &schemas,
+                    &vocabulary.current(),
                     &actor_c,
                     &spec_c,
                     &input_c,
@@ -1426,7 +1433,14 @@ impl CommandBus {
                     }
                     RunOrigin::Approval(id) => {
                         proposal_store::finish_claim_tx(tx, id, recorded.audit_id)?;
-                        log_approved_tx(tx, &schemas, &actor_c, &spec_c, id, &recorded)?;
+                        log_approved_tx(
+                            tx,
+                            &vocabulary.current(),
+                            &actor_c,
+                            &spec_c,
+                            id,
+                            &recorded,
+                        )?;
                     }
                 }
                 Ok(recorded)
@@ -1579,7 +1593,7 @@ impl Executed {
 /// pointing at it, the handler's domain events, and the row's event id.
 fn record_tx(
     tx: &rusqlite::Connection,
-    schemas: &oxplow_domain::EventSchemaRegistry,
+    vocabulary: &oxplow_domain::vocabulary::Vocabulary,
     actor: &Actor,
     spec: &CommandSpec,
     input: &Value,
@@ -1630,7 +1644,7 @@ fn record_tx(
     .with_anchors(actor.anchors())
     .with_subject([command_ref(&spec.name)]);
     executed.id = executed_id;
-    append_tx(tx, schemas, &executed)?;
+    append_tx(tx, vocabulary, &executed)?;
     // A handler's own events carry the actor's thread and stream unless
     // it anchored them itself.
     let fallback = actor.anchors();
@@ -1638,7 +1652,7 @@ fn record_tx(
         let mut event = event.clone().with_cause(executed.id.clone());
         event.anchors.thread_id = event.anchors.thread_id.or(fallback.thread_id);
         event.anchors.stream_id = event.anchors.stream_id.or(fallback.stream_id);
-        append_tx(tx, schemas, &event)?;
+        append_tx(tx, vocabulary, &event)?;
     }
     set_event_id_tx(tx, audit_id, &executed.id)?;
     Ok(Recorded {
@@ -1650,7 +1664,7 @@ fn record_tx(
 /// `command.approved` for proposal `id`, caused by the approving run.
 fn log_approved_tx(
     tx: &rusqlite::Connection,
-    schemas: &oxplow_domain::EventSchemaRegistry,
+    vocabulary: &oxplow_domain::vocabulary::Vocabulary,
     actor: &Actor,
     spec: &CommandSpec,
     id: i64,
@@ -1666,7 +1680,7 @@ fn log_approved_tx(
     )
     .with_subject([proposal_ref(id), command_ref(&spec.name)])
     .with_cause(recorded.event_id.clone());
-    append_tx(tx, schemas, &approved)?;
+    append_tx(tx, vocabulary, &approved)?;
     Ok(())
 }
 
@@ -1692,14 +1706,15 @@ fn undoable(row: &CommandAudit) -> Result<CommandCall, CommandError> {
 mod tests {
     use super::*;
     use oxplow_domain::events::schema::{ActorKind, ConfigChanged, ConfigChangedV1};
-    use oxplow_domain::{
-        CommandEffect, Confirm, EventSchemaRegistry, Invokers, Lifecycle, ThreadId,
-    };
+    use oxplow_domain::{CommandEffect, Confirm, Invokers, Lifecycle, ThreadId};
     use serde_json::json;
 
     fn bus() -> (Database, CommandBus) {
         let db = Database::in_memory();
-        let log = SqliteEventLogStore::new(db.clone(), Arc::new(EventSchemaRegistry::core()));
+        let log = SqliteEventLogStore::new(
+            db.clone(),
+            oxplow_domain::vocabulary::VocabularyHandle::core(),
+        );
         let pump = Arc::new(EventPump::new(db.clone(), log.clone(), vec![]));
         let bus = CommandBus::new(db.clone(), log, Arc::new(AgentPolicy::default()), pump);
         db.clone()

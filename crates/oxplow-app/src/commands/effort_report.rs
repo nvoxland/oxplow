@@ -99,6 +99,8 @@ pub struct EffortDeps {
     pub runtime: Arc<ThreadRuntimeRegistry>,
     pub sql: SqlGateway,
     pub db: Database,
+    /// The ref kinds a summary's links may name.
+    pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
     pub project_dir: PathBuf,
     pub vcs: Arc<dyn Vcs>,
 }
@@ -282,7 +284,14 @@ async fn report(
     }
     let link_warnings = match &summary {
         Some(body) => {
-            crate::link_check::check_links_at(&deps.db, &deps.project_dir, &*deps.vcs, body).await
+            crate::link_check::check_links_at(
+                &deps.db,
+                &deps.vocabulary,
+                &deps.project_dir,
+                &*deps.vcs,
+                body,
+            )
+            .await
         }
         None => Vec::new(),
     };

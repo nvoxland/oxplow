@@ -944,8 +944,14 @@ fn tx_comment(registry: WorkItemsRegistry) -> Arc<TxHandler> {
         } else {
             "user"
         };
-        let note = oxplow_db::task_satellite::add_task_note_tx(ctx.conn, task, &input.body, author)
-            .map_err(CommandError::from)?;
+        let note = oxplow_db::task_satellite::add_task_note_tx(
+            ctx.conn,
+            &ctx.events.vocabulary.kinds,
+            task,
+            &input.body,
+            author,
+        )
+        .map_err(CommandError::from)?;
         let event = ctx
             .events
             .typed::<WorkItemCommented>(&WorkItemCommentedV1 {

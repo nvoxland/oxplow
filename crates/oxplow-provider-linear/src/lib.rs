@@ -22,10 +22,11 @@ pub mod issue;
 pub mod sim;
 pub mod states;
 
+use oxplow_domain::vocabulary::Vocabulary;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use oxplow_domain::events::schema::{EventSchemaRegistry, EventType, WorkItemRecorded};
+use oxplow_domain::events::schema::{EventType, WorkItemRecorded};
 use oxplow_domain::work_items::{CanonicalState, WorkItemRecord};
 use oxplow_provider_protocol::codec::notify;
 use oxplow_provider_protocol::model::*;
@@ -87,7 +88,7 @@ pub fn declarations() -> InitializeResult {
                         "enum": ["todo", "in_progress", "blocked", "done", "canceled"] });
     let native = json!({ "type": "object", "additionalProperties": false,
                          "properties": { "priority": { "type": "integer", "minimum": 0, "maximum": 4 } } });
-    let recorded_schema = EventSchemaRegistry::core()
+    let recorded_schema = Vocabulary::core()
         .schema(WorkItemRecorded::TYPE, WorkItemRecorded::V)
         .cloned()
         .unwrap_or(Value::Null);

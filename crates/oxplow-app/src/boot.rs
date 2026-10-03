@@ -314,7 +314,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     {
         let wiki_store = state.wiki_page_store.clone();
         let wiki_db = state.db.clone();
-        let wiki_schemas = state.event_schemas.clone();
+        let wiki_vocabulary = state.vocabulary.clone();
         let wiki_dir = state.layout.project_dir.clone();
         let bts = state.background_tasks.clone();
         let task = bts.start(StartInput {
@@ -327,7 +327,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
             if let Some(watcher) = crate::wiki_pages_watch::WikiPagesWatcher::spawn(
                 wiki_dir,
                 wiki_db,
-                wiki_schemas,
+                wiki_vocabulary,
                 wiki_store,
             )
             .await
@@ -414,6 +414,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // Unified page-ref graph backfill: re-project every existing task,
     // link, effort, and finding into the `page_ref` table. Idempotent.
     {
+        let vocabulary = state.vocabulary.clone();
         let page_refs = state.page_ref_store.clone();
         let tasks = state.task_store.clone();
         let links = state.task_link_store.clone();
@@ -421,9 +422,10 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         let findings = state.code_quality_store.clone();
         let notes = state.work_note_store.clone();
         tokio::spawn(async move {
-            let counts =
-                crate::page_ref_backfill::run(page_refs, tasks, links, efforts, findings, notes)
-                    .await;
+            let counts = crate::page_ref_backfill::run(
+                vocabulary, page_refs, tasks, links, efforts, findings, notes,
+            )
+            .await;
             tracing::info!(?counts, "page-ref backfill done");
         });
     }

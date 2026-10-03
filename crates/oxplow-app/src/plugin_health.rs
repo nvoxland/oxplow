@@ -9,13 +9,14 @@
 //! What "off" means is the contribution's: the provider registry stops
 //! the instance; a collector's scheduler skips it.
 
+use oxplow_domain::vocabulary::VocabularyHandle;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use oxplow_db::plugin_health_store::{self as store, PluginHealthRow, PluginKey};
 use oxplow_db::Database;
 use oxplow_domain::events::schema::{
-    EventSchemaRegistry, PluginDisabled, PluginDisabledV1, PluginEnabled, PluginEnabledV1,
+    PluginDisabled, PluginDisabledV1, PluginEnabled, PluginEnabledV1,
 };
 use oxplow_domain::{
     Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, DomainError, Envelope, Invokers,
@@ -45,7 +46,7 @@ pub enum Verdict {
 #[derive(Clone)]
 pub struct PluginHealth {
     db: Database,
-    schemas: Arc<EventSchemaRegistry>,
+    vocabulary: VocabularyHandle,
 }
 
 /// How late a scheduled run may start: the collector and provider
@@ -87,15 +88,15 @@ pub fn plugin_ref(plugin: &str) -> String {
 }
 
 impl PluginHealth {
-    pub fn new(db: Database, schemas: Arc<EventSchemaRegistry>) -> Self {
-        Self { db, schemas }
+    pub fn new(db: Database, vocabulary: VocabularyHandle) -> Self {
+        Self { db, vocabulary }
     }
 
     /// Count a failure. The [`FAILURES_TO_DISABLE`]th in a row disables it
     /// (unless it already is), with the row and `plugin.disabled@1` in one
     /// transaction.
     pub async fn failed(&self, key: &PluginKey, error: &str) -> Result<Verdict, DomainError> {
-        let (key, error, schemas) = (key.clone(), error.to_string(), self.schemas.clone());
+        let (key, error, vocabulary) = (key.clone(), error.to_string(), self.vocabulary.clone());
         self.db
             .transaction(move |tx| {
                 let at = now();
@@ -115,7 +116,7 @@ impl PluginHealth {
                 store::disable_tx(tx, &key, &reason, &at)?;
                 oxplow_db::event_log_store::append_tx(
                     tx,
-                    &schemas,
+                    &vocabulary.current(),
                     &disabled_event(&key, &reason),
                 )?;
                 Ok(Verdict::Disabled { reason })
@@ -141,15 +142,19 @@ impl PluginHealth {
     /// failures (a provider that no longer answers with its approved
     /// declarations). Logged once: already disabled, nothing changes.
     pub async fn disable(&self, key: &PluginKey, reason: &str) -> Result<(), DomainError> {
-        let (key, reason, schemas) = (key.clone(), reason.to_string(), self.schemas.clone());
+        let (key, reason, vocabulary) = (key.clone(), reason.to_string(), self.vocabulary.clone());
         self.db
             .transaction(move |tx| {
                 if store::get_tx(tx, &key)?.is_some_and(|r| r.state == "disabled") {
                     return Ok(());
                 }
                 store::disable_tx(tx, &key, &reason, &now())?;
-                oxplow_db::event_log_store::append_tx(tx, &schemas, &disabled_event(&key, &reason))
-                    .map(|_| ())
+                oxplow_db::event_log_store::append_tx(
+                    tx,
+                    &vocabulary.current(),
+                    &disabled_event(&key, &reason),
+                )
+                .map(|_| ())
             })
             .await
     }
@@ -157,7 +162,7 @@ impl PluginHealth {
     /// A person enabled it again (`plugin.enable`, logged as `source`):
     /// `ok`, its count starting over, and `plugin.enabled@1`.
     pub async fn enable(&self, key: &PluginKey, source: &str) -> Result<(), DomainError> {
-        let (key, source, schemas) = (key.clone(), source.to_string(), self.schemas.clone());
+        let (key, source, vocabulary) = (key.clone(), source.to_string(), self.vocabulary.clone());
         self.db
             .transaction(move |tx| {
                 store::enable_tx(tx, &key, &now())?;
@@ -170,7 +175,7 @@ impl PluginHealth {
                     },
                 )
                 .with_subject([plugin_ref(&key.plugin)]);
-                oxplow_db::event_log_store::append_tx(tx, &schemas, &event).map(|_| ())
+                oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &event).map(|_| ())
             })
             .await
     }
@@ -350,7 +355,7 @@ mod tests {
     #[tokio::test]
     async fn three_failures_in_a_row_disable_until_enabled() {
         let db = Database::in_memory();
-        let h = PluginHealth::new(db.clone(), Arc::new(EventSchemaRegistry::core()));
+        let h = PluginHealth::new(db.clone(), VocabularyHandle::core());
         let k = key();
         assert_eq!(
             h.failed(&k, "a").await.unwrap(),
@@ -399,7 +404,7 @@ mod tests {
     #[tokio::test]
     async fn a_provider_and_a_collector_named_alike_have_their_own_health() {
         let db = Database::in_memory();
-        let h = PluginHealth::new(db.clone(), Arc::new(EventSchemaRegistry::core()));
+        let h = PluginHealth::new(db.clone(), VocabularyHandle::core());
         let provider = key();
         let collector = PluginKey {
             kind: "collector",

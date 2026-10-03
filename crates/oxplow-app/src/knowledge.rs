@@ -191,7 +191,7 @@ pub fn write_page_tx(
     oxplow_db::wiki_page_store::upsert_tx(conn, &page, body, &body_hash(body))?;
 
     let pin = pin_tx(conn)?;
-    let mut edges = wiki_edges(slug, body);
+    let mut edges = wiki_edges(&ev.vocabulary.kinds, slug, body);
     if let Some(id) = pin.snapshot_id {
         stamp_file_versions(
             &mut edges,
@@ -549,6 +549,7 @@ fn domain(e: DomainError) -> CommandError {
 fn links_resolve(
     target: &KnowledgeTarget,
     conn: &rusqlite::Connection,
+    kinds: &oxplow_domain::refs::kind::KindRegistry,
     slug: &str,
     body: &str,
 ) -> Result<(), CommandError> {
@@ -556,7 +557,7 @@ fn links_resolve(
     let existing: std::collections::HashSet<String> =
         std::fs::read_to_string(page_path(&target.project_dir, slug))
             .map(|current| {
-                oxplow_domain::refs::classify_wikilinks(&current)
+                oxplow_domain::refs::classify_wikilinks(kinds, &current)
                     .into_iter()
                     .map(|l| l.raw)
                     .collect()
@@ -565,6 +566,7 @@ fn links_resolve(
     let mut warnings = check_links_in(
         &LinkWorld {
             conn,
+            kinds,
             project_dir: &target.project_dir,
             graph: &*graph,
             this_page: Some(slug),
@@ -705,7 +707,7 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
         if let Some(title) = &input.title {
             body = with_title(&body, title);
         }
-        links_resolve(&t, ctx.conn, slug, &body)?;
+        links_resolve(&t, ctx.conn, &ctx.events.vocabulary.kinds, slug, &body)?;
         let written = write_page_tx(
             ctx.conn,
             &ctx.events,
@@ -769,7 +771,7 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
             return Err(invalid("/target", format!("`{slug}` already links to it")));
         }
         let body = strip_body_version_literals(&with_related(&current, &line));
-        links_resolve(&t, ctx.conn, slug, &body)?;
+        links_resolve(&t, ctx.conn, &ctx.events.vocabulary.kinds, slug, &body)?;
         let written = write_page_tx(
             ctx.conn,
             &ctx.events,
@@ -957,7 +959,7 @@ mod tests {
         // The file the command wrote syncs to a no-op, not a second write.
         assert!(!crate::wiki_pages::sync_page(
             &fx.svc.db,
-            &fx.svc.event_schemas,
+            &fx.svc.vocabulary,
             &dir(&fx),
             "vcs-notes"
         )
@@ -1001,7 +1003,7 @@ mod tests {
         std::fs::write(wiki.join("Bad_Name.md"), "# Bad\n").unwrap();
         crate::wiki_pages::scan_and_sync_all(
             &fx.svc.db,
-            &fx.svc.event_schemas,
+            &fx.svc.vocabulary,
             &dir(&fx),
             &fx.svc.wiki_page_store,
         )
@@ -1199,7 +1201,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "# Hand\n\nsee [[not-yet-written]]\n").unwrap();
         assert!(
-            crate::wiki_pages::sync_page(&fx.svc.db, &fx.svc.event_schemas, &dir(&fx), "hand")
+            crate::wiki_pages::sync_page(&fx.svc.db, &fx.svc.vocabulary, &dir(&fx), "hand")
                 .await
                 .unwrap()
         );
@@ -1217,7 +1219,7 @@ mod tests {
         assert_eq!(written[0].envelope.source, "system:wiki_watch");
         std::fs::remove_file(&path).unwrap();
         assert!(
-            crate::wiki_pages::sync_page(&fx.svc.db, &fx.svc.event_schemas, &dir(&fx), "hand")
+            crate::wiki_pages::sync_page(&fx.svc.db, &fx.svc.vocabulary, &dir(&fx), "hand")
                 .await
                 .unwrap()
         );
@@ -1265,14 +1267,11 @@ mod tests {
             "# Notes\n\nEdited by hand.\n",
         )
         .unwrap();
-        assert!(crate::wiki_pages::sync_page(
-            &fx.svc.db,
-            &fx.svc.event_schemas,
-            &dir(&fx),
-            "notes"
-        )
-        .await
-        .unwrap());
+        assert!(
+            crate::wiki_pages::sync_page(&fx.svc.db, &fx.svc.vocabulary, &dir(&fx), "notes")
+                .await
+                .unwrap()
+        );
         assert_eq!(
             body_of(&fx, "wiki:notes").await.as_deref(),
             Some("# Notes\n\nEdited by hand.\n")

@@ -588,7 +588,7 @@ pub fn record_facts_tx(
     }
     if let Some(log) = log {
         let env = (log.build)(capture_id);
-        crate::event_log_store::append_unique_tx(conn, &log.schemas, &env)?;
+        crate::event_log_store::append_unique_tx(conn, &log.vocabulary.current(), &env)?;
     }
     Ok(capture_id)
 }
@@ -1051,7 +1051,7 @@ impl CubeRowsCache {
 /// The event a capture write logs with it: built from the new capture's id
 /// and validated against `schemas` on append.
 pub struct CaptureEvent {
-    pub schemas: Arc<oxplow_domain::EventSchemaRegistry>,
+    pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
     pub build: Box<dyn Fn(i64) -> oxplow_domain::Envelope + Send + Sync>,
 }
 

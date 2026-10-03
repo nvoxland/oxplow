@@ -28,6 +28,7 @@ use oxplow_db::page_ref_projections::{
 };
 use oxplow_db::{PageRefEdge, SqlitePageRefStore};
 use oxplow_domain::refs::extract;
+use oxplow_domain::refs::kind::KindRegistry;
 use oxplow_domain::vcs::{Branch, LogQuery, RevisionDetail, Vcs};
 
 /// How far a pass walks from a head. It reads `window` revisions, and
@@ -53,7 +54,7 @@ impl IndexDepth {
 
 /// Pure: build the edge set for one commit. Exposed so tests can
 /// exercise the projection independently of a real repo.
-pub fn commit_edges(detail: &RevisionDetail) -> Vec<PageRefEdge> {
+pub fn commit_edges(kinds: &KindRegistry, detail: &RevisionDetail) -> Vec<PageRefEdge> {
     let sha = detail.info.id.as_str();
     let mut out = Vec::new();
     // touched-file edges from the diff.
@@ -79,7 +80,7 @@ pub fn commit_edges(detail: &RevisionDetail) -> Vec<PageRefEdge> {
         combined.push('\n');
         combined.push_str(&detail.body);
     }
-    let refs = extract(&combined);
+    let refs = extract(kinds, &combined);
     for task_id in refs.tasks {
         out.push(PageRefEdge::new(
             KIND_COMMIT,
@@ -129,6 +130,7 @@ pub fn commit_edges(detail: &RevisionDetail) -> Vec<PageRefEdge> {
 /// `v_commit_file`) and project it into `page_ref`. Returns the number
 /// newly indexed.
 pub async fn index_recent(
+    kinds: &KindRegistry,
     vcs: &dyn Vcs,
     ws: &Path,
     page_refs: &SqlitePageRefStore,
@@ -160,7 +162,7 @@ pub async fn index_recent(
             if git.has_commit(&info.id).await.unwrap_or(false) {
                 continue;
             }
-            if index_one(vcs, ws, page_refs, git, &info.id).await {
+            if index_one(kinds, vcs, ws, page_refs, git, &info.id).await {
                 this_pass.insert(info.id);
             }
         }
@@ -176,6 +178,7 @@ pub async fn index_recent(
 
 /// Store and project one revision; whether it was.
 async fn index_one(
+    kinds: &KindRegistry,
     vcs: &dyn Vcs,
     ws: &Path,
     page_refs: &SqlitePageRefStore,
@@ -185,7 +188,7 @@ async fn index_one(
     let Ok(Some(detail)) = vcs.revision(ws, sha).await else {
         return false;
     };
-    let edges = commit_edges(&detail);
+    let edges = commit_edges(kinds, &detail);
     if let Err(e) = page_refs.replace_source(KIND_COMMIT, sha, edges).await {
         tracing::warn!(?e, %sha, "commit indexer write failed");
         return false;
@@ -213,9 +216,11 @@ pub async fn refresh(svc: &crate::Services) -> usize {
     if !workspaces.contains(&primary) {
         workspaces.insert(0, primary.clone());
     }
+    let vocabulary = svc.vocabulary.current();
     let mut n = 0;
     for ws in &workspaces {
         n += index_recent(
+            &vocabulary.kinds,
             &*svc.vcs,
             ws,
             &svc.page_ref_store,
@@ -321,6 +326,7 @@ fn branch_rows(branches: &[Branch], streams: &[(i64, String)]) -> Vec<oxplow_db:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_domain::refs::kind::core_kinds;
     use oxplow_domain::vcs::{FileStatus, RevisionFile, RevisionInfo};
 
     fn commit(sha: &str, subject: &str, body: &str, paths: &[&str]) -> RevisionDetail {
@@ -355,7 +361,7 @@ mod tests {
             "",
             &["src/app.rs", "src/lib.rs"],
         );
-        let edges = commit_edges(&c);
+        let edges = commit_edges(&core_kinds(), &c);
         let files: std::collections::BTreeSet<_> = edges
             .iter()
             .filter(|e| e.ref_type == "touched_file")
@@ -373,7 +379,7 @@ mod tests {
             "see finding:fnd-7 for details",
             &[],
         );
-        let edges = commit_edges(&c);
+        let edges = commit_edges(&core_kinds(), &c);
         let targets: Vec<_> = edges
             .iter()
             .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
@@ -388,7 +394,7 @@ mod tests {
         // If a commit message accidentally contains its own short
         // sha (e.g. "revert abc1234"), don't emit a self-loop.
         let c = commit("abc1234567890def", "revert abc1234", "", &[]);
-        let edges = commit_edges(&c);
+        let edges = commit_edges(&core_kinds(), &c);
         assert!(
             !edges
                 .iter()
@@ -523,6 +529,7 @@ mod tests {
         let page_refs = SqlitePageRefStore::new(db.clone());
         let git = oxplow_db::SqliteGitStore::new(db.clone());
         let n = index_recent(
+            &core_kinds(),
             &crate::vcs::GitProvider,
             dir.path(),
             &page_refs,
@@ -571,6 +578,7 @@ mod tests {
 
         // Re-index — nothing new.
         let n2 = index_recent(
+            &core_kinds(),
             &crate::vcs::GitProvider,
             dir.path(),
             &page_refs,
@@ -606,6 +614,7 @@ mod tests {
             let ws = dir.path().to_path_buf();
             async move {
                 index_recent(
+                    &core_kinds(),
                     &crate::vcs::GitProvider,
                     &ws,
                     &page_refs,

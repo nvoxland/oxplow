@@ -15,15 +15,13 @@
 //! the event in the dead-letter table ([`dead_letter_tx`]) and the
 //! checkpoint still advances, so one poison event never stalls the pump.
 
+use oxplow_domain::vocabulary::{Vocabulary, VocabularyHandle};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use std::sync::Arc;
-
 use oxplow_domain::{
-    Anchors, DomainError, EffortId, Envelope, EventId, EventSchemaRegistry, StoredEvent, StreamId,
-    ThreadId, Timestamp,
+    Anchors, DomainError, EffortId, Envelope, EventId, StoredEvent, StreamId, ThreadId, Timestamp,
 };
 
 use crate::database::{map_sql_err, Database};
@@ -35,7 +33,7 @@ use crate::database::{string_to_ts, ts_to_string};
 /// as the source and cause.
 #[derive(Clone)]
 pub struct EventCtx<'a> {
-    pub schemas: &'a EventSchemaRegistry,
+    pub vocabulary: &'a Vocabulary,
     /// `system:<component>`, or an actor's source when a command runs.
     pub source: String,
     /// The event that caused these (a command's `command.executed`).
@@ -44,9 +42,9 @@ pub struct EventCtx<'a> {
 
 impl<'a> EventCtx<'a> {
     /// A system component writing on its own behalf (`system:<component>`).
-    pub fn system(schemas: &'a EventSchemaRegistry, component: &str) -> Self {
+    pub fn system(vocabulary: &'a Vocabulary, component: &str) -> Self {
         Self {
-            schemas,
+            vocabulary,
             source: oxplow_domain::refs::build::system_source(component),
             cause: None,
         }
@@ -65,7 +63,7 @@ impl<'a> EventCtx<'a> {
     }
 
     pub fn append(&self, conn: &Connection, env: &Envelope) -> Result<i64, DomainError> {
-        append_tx(conn, self.schemas, env)
+        append_tx(conn, self.vocabulary, env)
     }
 }
 
@@ -94,10 +92,10 @@ pub fn anchors_for_thread_tx(conn: &Connection, thread: ThreadId) -> Result<Anch
 /// always appended.
 pub fn append_unique_tx(
     conn: &Connection,
-    schemas: &EventSchemaRegistry,
+    vocabulary: &Vocabulary,
     env: &Envelope,
 ) -> Result<bool, DomainError> {
-    Ok(insert_tx(conn, schemas, env, true)?.is_some())
+    Ok(insert_tx(conn, vocabulary, env, true)?.is_some())
 }
 
 /// Append one envelope. Returns its `seq`. The payload must validate
@@ -107,10 +105,10 @@ pub fn append_unique_tx(
 /// an at-least-once producer retry blindly.
 pub fn append_tx(
     conn: &Connection,
-    schemas: &EventSchemaRegistry,
+    vocabulary: &Vocabulary,
     env: &Envelope,
 ) -> Result<i64, DomainError> {
-    Ok(insert_tx(conn, schemas, env, false)?.expect("a plain insert inserts or fails"))
+    Ok(insert_tx(conn, vocabulary, env, false)?.expect("a plain insert inserts or fails"))
 }
 
 /// The one insert. `skip_duplicate` makes a `dedupe_key` collision a
@@ -118,11 +116,11 @@ pub fn append_tx(
 /// slip between a check and the insert; otherwise it is a `Constraint`.
 fn insert_tx(
     conn: &Connection,
-    schemas: &EventSchemaRegistry,
+    vocabulary: &Vocabulary,
     env: &Envelope,
     skip_duplicate: bool,
 ) -> Result<Option<i64>, DomainError> {
-    schemas.validate_envelope(env)?;
+    vocabulary.validate_envelope(env)?;
     let subject = serde_json::to_string(&env.subject)
         .map_err(|e| DomainError::Invalid(format!("subject: {e}")))?;
     let payload = serde_json::to_string(&env.payload)
@@ -381,26 +379,26 @@ pub fn list_dead_letters_tx(conn: &Connection, all: bool) -> Result<Vec<DeadLett
 #[derive(Clone)]
 pub struct SqliteEventLogStore {
     db: Database,
-    schemas: Arc<EventSchemaRegistry>,
+    vocabulary: VocabularyHandle,
 }
 
 impl SqliteEventLogStore {
-    pub fn new(db: Database, schemas: Arc<EventSchemaRegistry>) -> Self {
-        Self { db, schemas }
+    pub fn new(db: Database, vocabulary: VocabularyHandle) -> Self {
+        Self { db, vocabulary }
     }
 
     /// The registry `append` validates against; producers composing
     /// [`append_tx`] into their own transaction take it from here.
-    pub fn schemas(&self) -> &Arc<EventSchemaRegistry> {
-        &self.schemas
+    pub fn vocabulary(&self) -> &VocabularyHandle {
+        &self.vocabulary
     }
 
     /// Append in a transaction of its own. For activity that has no
     /// state write of its own (an agent tool call, a lens view).
     pub async fn append(&self, env: Envelope) -> Result<i64, DomainError> {
-        let schemas = self.schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         self.db
-            .transaction(move |tx| append_tx(tx, &schemas, &env))
+            .transaction(move |tx| append_tx(tx, &vocabulary.current(), &env))
             .await
     }
 
@@ -480,12 +478,12 @@ mod tests {
     use oxplow_domain::TaskStatus;
     use serde_json::{json, Value};
 
-    fn schemas() -> Arc<EventSchemaRegistry> {
-        Arc::new(EventSchemaRegistry::core())
+    fn vocabulary() -> VocabularyHandle {
+        VocabularyHandle::core()
     }
 
     fn store(db: &Database) -> SqliteEventLogStore {
-        SqliteEventLogStore::new(db.clone(), schemas())
+        SqliteEventLogStore::new(db.clone(), vocabulary())
     }
 
     /// A valid `config.changed@1` envelope, optionally with a dedupe key.
@@ -504,14 +502,31 @@ mod tests {
         }
     }
 
+    /// A store holds the running vocabulary, not the one it was built
+    /// with: a type swapped in later is appendable through it.
+    #[tokio::test]
+    async fn a_store_accepts_a_type_swapped_in_after_it_was_built() {
+        use oxplow_domain::events::schema::EventSchemaRegistry;
+        use oxplow_domain::refs::kind::core_kinds;
+        use oxplow_domain::vocabulary::Vocabulary;
+        let db = Database::in_memory();
+        let handle =
+            VocabularyHandle::new(Vocabulary::new(EventSchemaRegistry::new(), core_kinds()));
+        let store = SqliteEventLogStore::new(db.clone(), handle.clone());
+        assert!(store.append(env(None)).await.is_err());
+        handle.swap(Vocabulary::core());
+        store.append(env(None)).await.unwrap();
+        assert_eq!(store.read_after(0, 10).await.unwrap().len(), 1);
+    }
+
     #[tokio::test]
     async fn append_inside_a_rolled_back_transaction_leaves_no_row() {
         let db = Database::in_memory();
         let store = store(&db);
-        let schemas = schemas();
+        let vocabulary = vocabulary();
         let res = db
             .transaction(move |tx| {
-                append_tx(tx, &schemas, &env(None))?;
+                append_tx(tx, &vocabulary.current(), &env(None))?;
                 Err::<(), _>(DomainError::Invariant("boom".into()))
             })
             .await;
@@ -553,8 +568,13 @@ mod tests {
         .with_cause(e1.id.clone());
         let (s1, s2) = db
             .transaction({
-                let (e1, e2, schemas) = (e1.clone(), e2.clone(), schemas());
-                move |tx| Ok((append_tx(tx, &schemas, &e1)?, append_tx(tx, &schemas, &e2)?))
+                let (e1, e2, vocabulary) = (e1.clone(), e2.clone(), vocabulary());
+                move |tx| {
+                    Ok((
+                        append_tx(tx, &vocabulary.current(), &e1)?,
+                        append_tx(tx, &vocabulary.current(), &e2)?,
+                    ))
+                }
             })
             .await
             .unwrap();
@@ -590,8 +610,8 @@ mod tests {
         // The duplicate is caught by the insert (ON CONFLICT), not by a
         // read first, so a concurrent twin can't turn into a Constraint.
         let db = Database::in_memory();
-        let schemas = Arc::new(EventSchemaRegistry::core());
-        let s2 = schemas.clone();
+        let vocabulary = VocabularyHandle::core();
+        let s2 = vocabulary.clone();
         let landed = db
             .transaction(move |tx| {
                 let env = |key: &str| {
@@ -605,15 +625,15 @@ mod tests {
                     .with_dedupe_key(key)
                 };
                 Ok((
-                    append_unique_tx(tx, &s2, &env("once"))?,
-                    append_unique_tx(tx, &s2, &env("once"))?,
-                    append_unique_tx(tx, &s2, &env("other"))?,
+                    append_unique_tx(tx, &s2.current(), &env("once"))?,
+                    append_unique_tx(tx, &s2.current(), &env("once"))?,
+                    append_unique_tx(tx, &s2.current(), &env("other"))?,
                 ))
             })
             .await
             .unwrap();
         assert_eq!(landed, (true, false, true));
-        let n = SqliteEventLogStore::new(db, schemas)
+        let n = SqliteEventLogStore::new(db, vocabulary)
             .read_after(0, 10)
             .await
             .unwrap()

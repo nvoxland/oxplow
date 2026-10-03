@@ -18,13 +18,13 @@
 //!    not preceded by `/` or alphanumerics so we don't pick up partial
 //!    URLs.
 
+use oxplow_domain::vocabulary::VocabularyHandle;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use oxplow_db::{Database, SqliteWikiPageStore};
-use oxplow_domain::{DomainError, EventSchemaRegistry, Timestamp};
+use oxplow_domain::{DomainError, Timestamp};
 
 /// One file reference parsed out of a wikilink: the path and an optional
 /// line anchor. A version (`[[path@sha]]`) is not the page's to say —
@@ -216,14 +216,18 @@ pub fn sync_page_tx(
 /// [`sync_page_tx`] in its own transaction.
 pub async fn sync_page(
     db: &Database,
-    schemas: &Arc<EventSchemaRegistry>,
+    vocabulary: &VocabularyHandle,
     project_dir: &Path,
     slug: &str,
 ) -> Result<bool, DomainError> {
-    let (schemas, project_dir, slug) =
-        (schemas.clone(), project_dir.to_path_buf(), slug.to_string());
+    let (vocabulary, project_dir, slug) = (
+        vocabulary.clone(),
+        project_dir.to_path_buf(),
+        slug.to_string(),
+    );
     db.transaction(move |tx| {
-        let ev = oxplow_db::EventCtx::system(&schemas, "wiki_watch");
+        let vocabulary = vocabulary.current();
+        let ev = oxplow_db::EventCtx::system(&vocabulary, "wiki_watch");
         sync_page_tx(tx, &ev, &project_dir, &slug)
     })
     .await
@@ -359,7 +363,7 @@ pub struct ScanReport {
 /// scan-fatal failures (listing the known rows).
 pub async fn scan_and_sync_all(
     db: &Database,
-    schemas: &Arc<EventSchemaRegistry>,
+    vocabulary: &VocabularyHandle,
     project_dir: &Path,
     store: &SqliteWikiPageStore,
 ) -> Result<ScanReport, DomainError> {
@@ -383,7 +387,7 @@ pub async fn scan_and_sync_all(
     }
     let mut report = ScanReport::default();
     for slug in &slugs {
-        match retry_busy(|| sync_page(db, schemas, project_dir, slug)).await {
+        match retry_busy(|| sync_page(db, vocabulary, project_dir, slug)).await {
             Ok(_) => report.synced += 1,
             Err(err) => {
                 tracing::warn!(slug, ?err, "wiki page sync failed during scan");
@@ -590,8 +594,8 @@ fn find_inline_paths(body: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
-    fn schemas() -> Arc<EventSchemaRegistry> {
-        Arc::new(EventSchemaRegistry::core())
+    fn vocabulary() -> VocabularyHandle {
+        VocabularyHandle::core()
     }
 
     /// Re-syncing an unchanged file (e.g. the boot-time full scan on
@@ -609,11 +613,15 @@ mod tests {
         let db = oxplow_db::Database::in_memory();
         let store = oxplow_db::SqliteWikiPageStore::new(db.clone());
 
-        sync_page(&db, &schemas(), &project, "note").await.unwrap();
+        sync_page(&db, &vocabulary(), &project, "note")
+            .await
+            .unwrap();
         let first = store.get("note").await.unwrap().unwrap();
 
         tokio::time::sleep(std::time::Duration::from_millis(15)).await;
-        sync_page(&db, &schemas(), &project, "note").await.unwrap();
+        sync_page(&db, &vocabulary(), &project, "note")
+            .await
+            .unwrap();
         let second = store.get("note").await.unwrap().unwrap();
         assert_eq!(
             second.updated_at, first.updated_at,
@@ -622,7 +630,9 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(15)).await;
         std::fs::write(wiki_dir.join("note.md"), "# Note\nedited body\n").unwrap();
-        sync_page(&db, &schemas(), &project, "note").await.unwrap();
+        sync_page(&db, &vocabulary(), &project, "note")
+            .await
+            .unwrap();
         let third = store.get("note").await.unwrap().unwrap();
         assert!(
             third.updated_at > first.updated_at,
@@ -645,7 +655,7 @@ mod tests {
         let db = oxplow_db::Database::in_memory();
         let store = oxplow_db::SqliteWikiPageStore::new(db.clone());
 
-        let report = scan_and_sync_all(&db, &schemas(), &project, &store)
+        let report = scan_and_sync_all(&db, &vocabulary(), &project, &store)
             .await
             .unwrap();
         assert_eq!(report.synced, 2, "both healthy pages sync");
@@ -1127,7 +1137,9 @@ mod tests {
         let db = oxplow_db::Database::in_memory();
         let page_refs = oxplow_db::SqlitePageRefStore::new(db.clone());
 
-        sync_page(&db, &schemas(), project, "intro").await.unwrap();
+        sync_page(&db, &vocabulary(), project, "intro")
+            .await
+            .unwrap();
 
         // wi-1 backlink picks up the wiki source.
         let inbound_wi = page_refs
@@ -1198,7 +1210,9 @@ mod tests {
         let db = oxplow_db::Database::in_memory();
         let page_refs = oxplow_db::SqlitePageRefStore::new(db.clone());
 
-        sync_page(&db, &schemas(), project, "intro").await.unwrap();
+        sync_page(&db, &vocabulary(), project, "intro")
+            .await
+            .unwrap();
         // Materialize a verification edge for a file under the cited dir.
         page_refs
             .upsert_edge(
@@ -1216,7 +1230,9 @@ mod tests {
 
         // Re-sync with the body UNCHANGED: the verification edge must
         // survive (and keep its pin), even though it isn't in the body.
-        sync_page(&db, &schemas(), project, "intro").await.unwrap();
+        sync_page(&db, &vocabulary(), project, "intro")
+            .await
+            .unwrap();
         let after = page_refs
             .list_backlinks("file", "crates/cp/src/lib.rs", None)
             .await
@@ -1227,7 +1243,9 @@ mod tests {
         // Remove the dir ref from the body → next sync prunes the now-
         // orphaned verification edge.
         std::fs::write(&body_path, "no refs at all now").unwrap();
-        sync_page(&db, &schemas(), project, "intro").await.unwrap();
+        sync_page(&db, &vocabulary(), project, "intro")
+            .await
+            .unwrap();
         let gone = page_refs
             .list_backlinks("file", "crates/cp/src/lib.rs", None)
             .await
@@ -1251,10 +1269,14 @@ mod tests {
         let db = oxplow_db::Database::in_memory();
         let page_refs = oxplow_db::SqlitePageRefStore::new(db.clone());
 
-        sync_page(&db, &schemas(), project, "intro").await.unwrap();
+        sync_page(&db, &vocabulary(), project, "intro")
+            .await
+            .unwrap();
         // Now drop wi-2 from the body.
         std::fs::write(&body_path, "[[tsk1]] only").unwrap();
-        sync_page(&db, &schemas(), project, "intro").await.unwrap();
+        sync_page(&db, &vocabulary(), project, "intro")
+            .await
+            .unwrap();
 
         let inbound_2 = page_refs
             .list_backlinks("work_item", "oxplow:tsk2", None)

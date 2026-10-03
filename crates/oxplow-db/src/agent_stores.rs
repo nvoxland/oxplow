@@ -2,14 +2,14 @@
 //! agent status, which is read from the log: a thread's status is its
 //! newest `agent.status.changed`.
 
-use std::sync::Arc;
+use oxplow_domain::vocabulary::{Vocabulary, VocabularyHandle};
 
 use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use oxplow_domain::events::schema::{
     AgentStatusChanged, AgentTurnEnded, AgentTurnEndedV2, AgentTurnStarted, AgentTurnStartedV1,
-    EventSchemaRegistry, EventType,
+    EventType,
 };
 use oxplow_domain::events::Anchors;
 use oxplow_domain::hook::TurnOutcome;
@@ -193,7 +193,7 @@ pub fn close_turn_tx(
 /// One `agent.status.changed` row as the thread's status, read at the
 /// type's newest version.
 fn row_to_status(
-    schemas: &EventSchemaRegistry,
+    vocabulary: &Vocabulary,
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<AgentStatus> {
     let thread: i64 = row.get(0)?;
@@ -203,7 +203,7 @@ fn row_to_status(
     let decode = || -> Result<AgentStatus, DomainError> {
         let value = serde_json::from_str(&payload)
             .map_err(|e| DomainError::Invalid(format!("agent.status.changed payload: {e}")))?;
-        let (_, value) = schemas.upcast_to_latest(AgentStatusChanged::TYPE, v, value)?;
+        let (_, value) = vocabulary.upcast_to_latest(AgentStatusChanged::TYPE, v, value)?;
         let p: <AgentStatusChanged as EventType>::Payload = serde_json::from_value(value)
             .map_err(|e| DomainError::Invalid(format!("agent.status.changed payload: {e}")))?;
         Ok(AgentStatus {
@@ -219,7 +219,7 @@ fn row_to_status(
 /// The thread's current status: its newest `agent.status.changed`.
 pub fn last_status_tx(
     conn: &Connection,
-    schemas: &EventSchemaRegistry,
+    vocabulary: &Vocabulary,
     thread: ThreadId,
 ) -> Result<Option<AgentStatus>, DomainError> {
     conn.query_row(
@@ -227,7 +227,7 @@ pub fn last_status_tx(
           WHERE thread_id = ?1 AND type = ?2
           ORDER BY seq DESC LIMIT 1",
         params![thread.value(), AgentStatusChanged::TYPE],
-        |r| row_to_status(schemas, r),
+        |r| row_to_status(vocabulary, r),
     )
     .optional()
     .map_err(map_sql_err)
@@ -236,7 +236,7 @@ pub fn last_status_tx(
 /// Every existing thread's current status.
 fn all_statuses_tx(
     conn: &Connection,
-    schemas: &EventSchemaRegistry,
+    vocabulary: &Vocabulary,
 ) -> Result<Vec<AgentStatus>, DomainError> {
     let mut stmt = conn
         .prepare(
@@ -249,7 +249,7 @@ fn all_statuses_tx(
         )
         .map_err(map_sql_err)?;
     let rows = stmt
-        .query_map([AgentStatusChanged::TYPE], |r| row_to_status(schemas, r))
+        .query_map([AgentStatusChanged::TYPE], |r| row_to_status(vocabulary, r))
         .map_err(map_sql_err)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(map_sql_err)?;
@@ -261,28 +261,28 @@ fn all_statuses_tx(
 #[derive(Clone)]
 pub struct SqliteAgentStatusStore {
     db: Database,
-    schemas: Arc<EventSchemaRegistry>,
+    vocabulary: VocabularyHandle,
 }
 
 impl SqliteAgentStatusStore {
-    pub fn new(db: Database, schemas: Arc<EventSchemaRegistry>) -> Self {
-        Self { db, schemas }
+    pub fn new(db: Database, vocabulary: VocabularyHandle) -> Self {
+        Self { db, vocabulary }
     }
 }
 
 #[async_trait]
 impl AgentStatusStore for SqliteAgentStatusStore {
     async fn get(&self, thread: &ThreadId) -> Result<Option<AgentStatus>, DomainError> {
-        let (schemas, thread) = (self.schemas.clone(), *thread);
+        let (vocabulary, thread) = (self.vocabulary.clone(), *thread);
         self.db
-            .call_mut(move |c| last_status_tx(c, &schemas, thread))
+            .call_mut(move |c| last_status_tx(c, &vocabulary.current(), thread))
             .await
     }
 
     async fn list_all(&self) -> Result<Vec<AgentStatus>, DomainError> {
-        let schemas = self.schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         self.db
-            .call_mut(move |c| all_statuses_tx(c, &schemas))
+            .call_mut(move |c| all_statuses_tx(c, &vocabulary.current()))
             .await
     }
 }
@@ -292,16 +292,16 @@ impl AgentStatusStore for SqliteAgentStatusStore {
 #[derive(Clone)]
 pub struct SqliteAgentTurnStore {
     db: Database,
-    event_schemas: Arc<EventSchemaRegistry>,
+    vocabulary: VocabularyHandle,
 }
 
 impl SqliteAgentTurnStore {
     pub fn new(db: Database) -> Self {
-        Self::with_event_schemas(db, Arc::new(EventSchemaRegistry::core()))
+        Self::with_vocabulary(db, VocabularyHandle::core())
     }
 
-    pub fn with_event_schemas(db: Database, event_schemas: Arc<EventSchemaRegistry>) -> Self {
-        Self { db, event_schemas }
+    pub fn with_vocabulary(db: Database, vocabulary: VocabularyHandle) -> Self {
+        Self { db, vocabulary }
     }
 
     /// Whether any thread of `stream` has a turn open — the quiet-period
@@ -324,11 +324,12 @@ impl SqliteAgentTurnStore {
 impl AgentTurnStore for SqliteAgentTurnStore {
     async fn open(&self, turn: &AgentTurn) -> Result<AgentTurnId, DomainError> {
         let turn = turn.clone();
-        let schemas = self.event_schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
                 if turn.id.is_placeholder() {
-                    let ev = EventCtx::system(&schemas, "hook_ingest");
+                    let vocabulary = vocabulary.current();
+                    let ev = EventCtx::system(&vocabulary, "hook_ingest");
                     return open_turn_tx(
                         tx,
                         &ev,
@@ -371,14 +372,15 @@ impl AgentTurnStore for SqliteAgentTurnStore {
         outcome: TurnOutcome,
     ) -> Result<bool, DomainError> {
         let id = *id;
-        let schemas = self.event_schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
                 let component = match outcome {
                     TurnOutcome::Restart => "recovery",
                     _ => "hook_ingest",
                 };
-                let ev = EventCtx::system(&schemas, component);
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, component);
                 let end = TurnEnd {
                     answer: answer.as_deref(),
                     ..TurnEnd::new(Timestamp::now(), outcome)
@@ -500,14 +502,14 @@ mod tests {
 
     fn log_status(
         db: &Database,
-        schemas: &EventSchemaRegistry,
+        vocabulary: &Vocabulary,
         thread: ThreadId,
         state: oxplow_domain::AgentStatusState,
         detail: Option<&str>,
     ) {
         use oxplow_domain::events::schema::AgentStatusChangedV1;
         let conn = db.conn().unwrap();
-        let ev = EventCtx::system(schemas, "test");
+        let ev = EventCtx::system(vocabulary, "test");
         let env = ev
             .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
                 thread: thread_ref(thread),
@@ -523,16 +525,22 @@ mod tests {
     async fn status_is_the_newest_logged_status_change() {
         use oxplow_domain::AgentStatusState as S;
         let (db, tid) = fixture().await;
-        let schemas = Arc::new(EventSchemaRegistry::core());
-        let store = SqliteAgentStatusStore::new(db.clone(), schemas.clone());
+        let vocabulary = VocabularyHandle::core();
+        let store = SqliteAgentStatusStore::new(db.clone(), vocabulary.clone());
         assert!(store.get(&tid).await.unwrap().is_none());
         assert!(store.list_all().await.unwrap().is_empty());
 
-        log_status(&db, &schemas, tid, S::Running, None);
-        log_status(&db, &schemas, tid, S::AwaitingUser, Some("A or B?"));
+        log_status(&db, &vocabulary.current(), tid, S::Running, None);
+        log_status(
+            &db,
+            &vocabulary.current(),
+            tid,
+            S::AwaitingUser,
+            Some("A or B?"),
+        );
 
         // A fresh store over the same database (a restarted daemon) reads it.
-        let store = SqliteAgentStatusStore::new(db.clone(), schemas);
+        let store = SqliteAgentStatusStore::new(db.clone(), vocabulary);
         let got = store.get(&tid).await.unwrap().unwrap();
         assert_eq!(got.state, S::AwaitingUser);
         assert_eq!(got.detail.as_deref(), Some("A or B?"));

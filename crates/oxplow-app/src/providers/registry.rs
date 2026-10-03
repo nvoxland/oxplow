@@ -541,7 +541,7 @@ pub(super) fn plugin_key(instance: &str) -> PluginKey {
 impl ProviderRegistry {
     pub fn new(deps: HostDeps, bus: &Arc<CommandBus>, work_items: WorkItemsRegistry) -> Arc<Self> {
         let plugins =
-            crate::plugin_health::PluginHealth::new(deps.db.clone(), deps.log.schemas().clone());
+            crate::plugin_health::PluginHealth::new(deps.db.clone(), deps.log.vocabulary().clone());
         Arc::new_cyclic(|me| Self {
             plugins,
             deps,
@@ -867,9 +867,9 @@ impl ProviderRegistry {
                 return Err(e);
             }
         };
-        let schemas = bus.event_schemas();
+        let vocabulary = bus.vocabulary().current();
         for t in &instance.declared.event_types {
-            if schemas.schema(&t.event_type, t.v) != Some(&t.schema) {
+            if vocabulary.schema(&t.event_type, t.v) != Some(&t.schema) {
                 return Err(refuse(format!(
                     "it declares `{}@{}`, which isn't an event type oxplow knows with that schema \
                      (a provider emits core types only, for now)",

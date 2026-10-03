@@ -100,6 +100,18 @@ spelling, and `oxplow:tsk<n>` exactly as `work_item_ref` writes it
 (`tsk01` is refused). `command` ids have two or more dot segments;
 `commit` ids are 7–64 hex (SHA-256 repositories).
 
+**There is no process-wide registry (P8.D1, tsk761).** The kinds live in
+the running `Vocabulary { events, kinds }`
+(`crates/oxplow-domain/src/vocabulary.rs`), held in a `VocabularyHandle`
+(`Arc<RwLock<Arc<Vocabulary>>>`) that `Services.vocabulary` owns and every
+store and consumer clones. Installing an extension swaps a whole new
+vocabulary in; a writer takes `handle.current()` once per transaction, so
+a swap never changes what an open transaction validates against. Every
+function that reads kinds takes them: `refs::validate_ref(&kinds, r)`,
+`canonical_wikilink`, `classify_wikilinks`, `extract`, and the
+`page_ref_projections` edge builders. Tests build `core_kinds()` or their
+own handle; two handles in one process never share a kind.
+
 `refs::validate_ref` parses a ref and checks it against the kind
 registry. The event log's `append_tx` runs it on every `subject`
 entry, so an event naming `zones`, `config:`, `nope:thing`,

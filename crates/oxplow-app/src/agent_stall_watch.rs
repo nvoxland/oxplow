@@ -239,12 +239,12 @@ mod tests {
             archived_at: None,
         };
         threads.upsert(&t).await.unwrap();
-        let schemas = Arc::new(oxplow_domain::EventSchemaRegistry::core());
+        let vocabulary = oxplow_domain::vocabulary::VocabularyHandle::core();
         let statuses = Arc::new(oxplow_db::SqliteAgentStatusStore::new(
             db.clone(),
-            schemas.clone(),
+            vocabulary.clone(),
         ));
-        let log = oxplow_db::SqliteEventLogStore::new(db.clone(), schemas);
+        let log = oxplow_db::SqliteEventLogStore::new(db.clone(), vocabulary);
         let tasks = Arc::new(SqliteTaskStore::new(db));
         let bus = EventBus::new();
         let activity = OutputActivity::new();

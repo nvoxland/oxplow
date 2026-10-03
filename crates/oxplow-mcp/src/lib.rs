@@ -4689,7 +4689,7 @@ mod tests {
     async fn wiki_ref_drift_reports_status_per_ref() {
         let (proj, svc, server) = boot();
         seed_wiki(proj.path(), "intro", "see [[crates/foo.rs]]").await;
-        oxplow_app::wiki_pages::sync_page(&svc.db, &svc.event_schemas, proj.path(), "intro")
+        oxplow_app::wiki_pages::sync_page(&svc.db, &svc.vocabulary, proj.path(), "intro")
             .await
             .unwrap();
         // The file IS referenced but has no pin (no snapshot service in tests).

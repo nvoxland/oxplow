@@ -77,6 +77,7 @@ fn with_warnings(deps: &NoteDeps, ctx: &TxCtx<'_>, note: Value, body: &str) -> V
     let warnings = check_links_in(
         &LinkWorld {
             conn: ctx.conn,
+            kinds: &ctx.events.vocabulary.kinds,
             project_dir: &deps.project_dir,
             graph: &*graph,
             this_page: None,
@@ -119,8 +120,13 @@ pub fn add_command(deps: NoteDeps) -> Command {
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: AddInput = parse(input)?;
             let thread = acting_thread(ctx, input.thread.as_deref())?;
-            let (note, event) =
-                add_thread_note_tx(ctx.conn, thread, &input.body, author_of(ctx.actor))?;
+            let (note, event) = add_thread_note_tx(
+                ctx.conn,
+                &ctx.events.vocabulary.kinds,
+                thread,
+                &input.body,
+                author_of(ctx.actor),
+            )?;
             let note = serde_json::to_value(note).expect("a note serializes");
             Ok(HandlerOutput {
                 result: with_warnings(&deps, ctx, note, &input.body),
@@ -160,7 +166,7 @@ pub fn update_command(deps: NoteDeps) -> Command {
                     });
                 }
             }
-            let event = update_note_tx(ctx.conn, id, &input.body)?;
+            let event = update_note_tx(ctx.conn, &ctx.events.vocabulary.kinds, id, &input.body)?;
             let note = serde_json::to_value(note_tx(ctx.conn, id)?).expect("a note serializes");
             Ok(HandlerOutput {
                 result: with_warnings(&deps, ctx, note, &input.body),

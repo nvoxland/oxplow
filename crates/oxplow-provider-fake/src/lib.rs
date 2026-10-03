@@ -40,11 +40,12 @@
 //! - `stuck-cursor` — every `$/state` checkpoint is `{ cursor: 0 }`, so a
 //!   read from it streams everything again.
 
+use oxplow_domain::vocabulary::Vocabulary;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use oxplow_domain::events::schema::{EventSchemaRegistry, EventType, WorkItemRecorded};
+use oxplow_domain::events::schema::{EventType, WorkItemRecorded};
 use oxplow_domain::work_items::{CanonicalState, WorkItemRecord};
 use oxplow_provider_protocol::codec::notify;
 use oxplow_provider_protocol::model::*;
@@ -146,7 +147,7 @@ pub fn declarations() -> InitializeResult {
                         "enum": ["todo", "in_progress", "blocked", "done", "canceled"] });
     let native = json!({ "type": "object", "additionalProperties": false,
                          "properties": { "points": { "type": "integer" } } });
-    let recorded_schema = EventSchemaRegistry::core()
+    let recorded_schema = Vocabulary::core()
         .schema(WorkItemRecorded::TYPE, WorkItemRecorded::V)
         .cloned()
         .unwrap_or(Value::Null);

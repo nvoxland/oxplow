@@ -34,7 +34,6 @@ pub mod grammar;
 pub mod kind;
 
 use std::collections::BTreeSet;
-use std::sync::OnceLock;
 
 use grammar::CanonicalRef;
 use kind::KindRegistry;
@@ -103,19 +102,14 @@ pub struct ClassifiedWikilink {
     pub reference: Option<Reference>,
 }
 
-/// The registry every `[[…]]` translation and event subject validates
-/// against: the core kinds (plugin `ref_kinds` join it once they run).
-pub fn registry() -> &'static KindRegistry {
-    static REG: OnceLock<KindRegistry> = OnceLock::new();
-    REG.get_or_init(kind::core_kinds)
-}
-
-/// `r` is a canonical ref of a registered kind whose id fits that kind.
-pub fn validate_ref(r: &str) -> Result<CanonicalRef, crate::DomainError> {
+/// `r` is a canonical ref of a kind `kinds` has, whose id fits that kind.
+/// The kinds are the running vocabulary's (`vocabulary::Vocabulary`):
+/// core's, and the running extensions' `ref_kinds`.
+pub fn validate_ref(kinds: &KindRegistry, r: &str) -> Result<CanonicalRef, crate::DomainError> {
     let parsed = CanonicalRef::parse(r).map_err(|e| {
         crate::DomainError::Invalid(format!("`{r}` is not a canonical ref: {}", e.reason()))
     })?;
-    registry()
+    kinds
         .validate(&parsed)
         .map_err(|e| crate::DomainError::Invalid(format!("`{r}`: {e}")))?;
     Ok(parsed)
@@ -132,12 +126,12 @@ pub fn validate_ref(r: &str) -> Result<CanonicalRef, crate::DomainError> {
 /// - `path/file.ext[@version][:line]` → `file:<path>[@git:<version>][#L<line>]`
 ///   (`@disk` / `@local` mean the working tree and add no revision)
 /// - `bare-slug` → `wiki:<slug>`
-pub fn canonical_wikilink(interior: &str) -> Option<CanonicalRef> {
+pub fn canonical_wikilink(kinds: &KindRegistry, interior: &str) -> Option<CanonicalRef> {
     let interior = interior.trim();
     if interior.is_empty() {
         return None;
     }
-    let reg = registry();
+    let reg = kinds;
     // Sugar with a registered `[[prefix:…]]` (today only `git:`).
     if let Some((prefix, rest)) = interior.split_once(':') {
         if let Some(spec) = reg.kind_for_wikilink_prefix(&prefix.to_ascii_lowercase()) {
@@ -236,15 +230,15 @@ impl TryFrom<&CanonicalRef> for Reference {
 /// the kinds that have a typed view. Shared by [`extract`] and
 /// [`classify_wikilinks`] so the graph writer and the link checker never
 /// drift; both go through [`canonical_wikilink`].
-fn classify_interior(interior: &str) -> Option<Reference> {
-    Reference::try_from(&canonical_wikilink(interior)?).ok()
+fn classify_interior(kinds: &KindRegistry, interior: &str) -> Option<Reference> {
+    Reference::try_from(&canonical_wikilink(kinds, interior)?).ok()
 }
 
 /// Classify every `[[…]]` wikilink in `body`. Code spans / fenced
 /// blocks are masked first (via [`mask_code_regions`]) so illustrative
 /// links inside them are skipped, mirroring [`extract`]. Interiors that
 /// match no known ref shape come back with `reference: None`.
-pub fn classify_wikilinks(body: &str) -> Vec<ClassifiedWikilink> {
+pub fn classify_wikilinks(kinds: &KindRegistry, body: &str) -> Vec<ClassifiedWikilink> {
     if body.is_empty() {
         return Vec::new();
     }
@@ -255,7 +249,7 @@ pub fn classify_wikilinks(body: &str) -> Vec<ClassifiedWikilink> {
         if interior.is_empty() {
             continue;
         }
-        let canonical = canonical_wikilink(interior);
+        let canonical = canonical_wikilink(kinds, interior);
         let reference = canonical.as_ref().and_then(|c| Reference::try_from(c).ok());
         out.push(ClassifiedWikilink {
             raw: interior.to_string(),
@@ -267,7 +261,7 @@ pub fn classify_wikilinks(body: &str) -> Vec<ClassifiedWikilink> {
 }
 
 /// Parse `body` into [`ExtractedRefs`]. Pure; never errors.
-pub fn extract(body: &str) -> ExtractedRefs {
+pub fn extract(kinds: &KindRegistry, body: &str) -> ExtractedRefs {
     if body.is_empty() {
         return ExtractedRefs::default();
     }
@@ -286,7 +280,7 @@ pub fn extract(body: &str) -> ExtractedRefs {
 
     for cap in find_wikilinks(body) {
         let interior = cap.split('|').next().unwrap_or(cap).trim();
-        match classify_interior(interior) {
+        match classify_interior(kinds, interior) {
             Some(Reference::Dir(d)) => {
                 dirs.insert(d);
             }
@@ -778,12 +772,15 @@ mod tests {
 
     #[test]
     fn empty_body() {
-        assert_eq!(extract(""), ExtractedRefs::default());
+        assert_eq!(extract(&kind::core_kinds(), ""), ExtractedRefs::default());
     }
 
     #[test]
     fn wikilink_file_with_version_and_line() {
-        let r = extract("see [[src/app.rs@HEAD:42]] for context");
+        let r = extract(
+            &kind::core_kinds(),
+            "see [[src/app.rs@HEAD:42]] for context",
+        );
         assert_eq!(r.files, vec!["src/app.rs"]);
         assert_eq!(r.files_detail.len(), 1);
         assert_eq!(r.files_detail[0].path, "src/app.rs");
@@ -794,7 +791,7 @@ mod tests {
     #[test]
     fn wikilink_dir_and_slug_and_task_and_finding_and_commit() {
         let body = "[[dir:src/components]] and [[architecture]] and [[tsk42]] and [[finding:fnd-1]] and [[git:abcdef0]]";
-        let r = extract(body);
+        let r = extract(&kind::core_kinds(), body);
         assert_eq!(r.dirs, vec!["src/components"]);
         assert_eq!(r.wikis, vec!["architecture"]);
         assert_eq!(r.tasks, vec![42]);
@@ -804,64 +801,67 @@ mod tests {
 
     #[test]
     fn bare_hex_in_wikilink_is_commit() {
-        let r = extract("[[abc1234567]]");
+        let r = extract(&kind::core_kinds(), "[[abc1234567]]");
         assert_eq!(r.commits, vec!["abc1234567"]);
         assert!(r.wikis.is_empty());
     }
 
     #[test]
     fn inline_path_picked_up() {
-        let r = extract("touched src/lib.rs in this commit");
+        let r = extract(&kind::core_kinds(), "touched src/lib.rs in this commit");
         assert_eq!(r.files, vec!["src/lib.rs"]);
     }
 
     #[test]
     fn url_is_not_a_file_ref() {
-        let r = extract("see https://example.com/foo.json");
+        let r = extract(&kind::core_kinds(), "see https://example.com/foo.json");
         assert!(r.files.is_empty(), "got {:?}", r.files);
     }
 
     #[test]
     fn inline_task_and_finding_mention() {
-        let r = extract("blocked by tsk42 see finding:fnd-2");
+        let r = extract(&kind::core_kinds(), "blocked by tsk42 see finding:fnd-2");
         assert_eq!(r.tasks, vec![42]);
         assert_eq!(r.findings, vec!["fnd-2"]);
     }
 
     #[test]
     fn inline_task_rejects_non_digits() {
-        let r = extract("tskfoo and tsk42abc");
+        let r = extract(&kind::core_kinds(), "tskfoo and tsk42abc");
         assert!(r.tasks.is_empty());
     }
 
     #[test]
     fn inline_task_with_trailing_punctuation() {
-        let r = extract("tsk42 fixes issue. also tsk7, see");
+        let r = extract(&kind::core_kinds(), "tsk42 fixes issue. also tsk7, see");
         assert_eq!(r.tasks, vec![7, 42]);
     }
 
     #[test]
     fn wikilink_task_rejects_non_digits() {
-        let r = extract("[[tsknotanumber]] [[tsk42abc]]");
+        let r = extract(&kind::core_kinds(), "[[tsknotanumber]] [[tsk42abc]]");
         assert!(r.tasks.is_empty());
     }
 
     #[test]
     fn dedup_across_wikilink_and_inline() {
-        let r = extract("see [[src/lib.rs]] and src/lib.rs again");
+        let r = extract(
+            &kind::core_kinds(),
+            "see [[src/lib.rs]] and src/lib.rs again",
+        );
         assert_eq!(r.files, vec!["src/lib.rs"]);
         assert_eq!(r.files_detail.len(), 1);
     }
 
     #[test]
     fn pipe_alias_stripped() {
-        let r = extract("[[src/app.rs|application entry]]");
+        let r = extract(&kind::core_kinds(), "[[src/app.rs|application entry]]");
         assert_eq!(r.files, vec!["src/app.rs"]);
     }
 
     #[test]
     fn wikilink_task_form_does_not_become_slug() {
-        let r = extract("[[tsk7]]");
+        let r = extract(&kind::core_kinds(), "[[tsk7]]");
         assert!(r.wikis.is_empty());
         assert_eq!(r.tasks, vec![7]);
     }
@@ -869,6 +869,7 @@ mod tests {
     #[test]
     fn classify_recognizes_each_kind() {
         let links = classify_wikilinks(
+            &kind::core_kinds(),
             "[[tsk7]] [[architecture]] [[src/lib.rs]] [[dir:src]] \
              [[git:abc1234]] [[finding:fnd-1]]",
         );
@@ -885,7 +886,7 @@ mod tests {
     fn classify_flags_github_style_ref_as_unrecognized() {
         // `#13` is the exact bug: a `[[…]]` interior that matches no known
         // ref shape → `reference: None`, so the link checker flags it.
-        let links = classify_wikilinks("Follow-ups: [[#13]] and [[#14]].");
+        let links = classify_wikilinks(&kind::core_kinds(), "Follow-ups: [[#13]] and [[#14]].");
         assert_eq!(links.len(), 2);
         assert_eq!(links[0].raw, "#13");
         assert!(links[0].reference.is_none());
@@ -894,7 +895,8 @@ mod tests {
 
     #[test]
     fn classify_strips_label_and_ignores_code() {
-        let links = classify_wikilinks("[[tsk7|the task]] but not `[[tsk8]]`.");
+        let links =
+            classify_wikilinks(&kind::core_kinds(), "[[tsk7|the task]] but not `[[tsk8]]`.");
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].raw, "tsk7");
         assert_eq!(links[0].reference, Some(Reference::Task(7)));
@@ -905,7 +907,7 @@ mod tests {
         // `0` is a valid integer; the renderer is free to treat it as a
         // dead link (since SQLite never assigns 0), but the extractor
         // itself does not gatekeep — that's the renderer's job.
-        let r = extract("[[tsk0]] inline tsk0");
+        let r = extract(&kind::core_kinds(), "[[tsk0]] inline tsk0");
         assert_eq!(r.tasks, vec![0]);
     }
 
@@ -913,7 +915,7 @@ mod tests {
     fn wikilink_task_negative_rejected() {
         // The wikilink grammar accepts only ASCII digits — the leading
         // `-` makes the body fail the digit check.
-        let r = extract("[[tsk-1]] inline tsk-1");
+        let r = extract(&kind::core_kinds(), "[[tsk-1]] inline tsk-1");
         assert!(r.tasks.is_empty());
     }
 
@@ -922,19 +924,25 @@ mod tests {
         // i64 overflows are dropped silently (parse::<i64>() returns
         // None). We don't surface a parse error; the renderer just
         // doesn't see the ref.
-        let r = extract("[[tsk99999999999999999999]]");
+        let r = extract(&kind::core_kinds(), "[[tsk99999999999999999999]]");
         assert!(r.tasks.is_empty());
     }
 
     #[test]
     fn inline_task_overflow_rejected() {
-        let r = extract("see tsk99999999999999999999 in passing");
+        let r = extract(
+            &kind::core_kinds(),
+            "see tsk99999999999999999999 in passing",
+        );
         assert!(r.tasks.is_empty());
     }
 
     #[test]
     fn inline_tilde_path_captured_with_leading_tilde() {
-        let r = extract("see ~/.claude/plans/yes-plan-a-good-harmonic-floyd.md for details");
+        let r = extract(
+            &kind::core_kinds(),
+            "see ~/.claude/plans/yes-plan-a-good-harmonic-floyd.md for details",
+        );
         assert_eq!(
             r.files,
             vec!["~/.claude/plans/yes-plan-a-good-harmonic-floyd.md"]
@@ -943,13 +951,13 @@ mod tests {
 
     #[test]
     fn inline_tilde_path_in_parens() {
-        let r = extract("docs (~/notes/things.md) cover that");
+        let r = extract(&kind::core_kinds(), "docs (~/notes/things.md) cover that");
         assert_eq!(r.files, vec!["~/notes/things.md"]);
     }
 
     #[test]
     fn bare_tilde_without_slash_is_not_a_path() {
-        let r = extract("approximately ~5 items");
+        let r = extract(&kind::core_kinds(), "approximately ~5 items");
         assert!(r.files.is_empty(), "got {:?}", r.files);
     }
 
@@ -957,7 +965,10 @@ mod tests {
     fn wikilink_inside_inline_code_is_ignored() {
         // Regression: `` `[[path]]` `` in prose is illustrative, not a
         // link. Neither the wiki slug nor a file path should extract.
-        let r = extract("normalized to the `[[some-slug]]` form, see `[[src/foo.rs]]`");
+        let r = extract(
+            &kind::core_kinds(),
+            "normalized to the `[[some-slug]]` form, see `[[src/foo.rs]]`",
+        );
         assert!(r.wikis.is_empty(), "got wikis {:?}", r.wikis);
         assert!(r.files.is_empty(), "got files {:?}", r.files);
     }
@@ -965,27 +976,30 @@ mod tests {
     #[test]
     fn wikilink_inside_fenced_block_is_ignored() {
         let body = "before\n```\n[[src/foo.rs]] and [[in-fence-slug]]\n```\nafter [[real-slug]]";
-        let r = extract(body);
+        let r = extract(&kind::core_kinds(), body);
         assert!(r.files.is_empty(), "got files {:?}", r.files);
         assert_eq!(r.wikis, vec!["real-slug"]);
     }
 
     #[test]
     fn inline_path_inside_code_span_is_ignored() {
-        let r = extract("run `cargo test src/lib.rs` to check");
+        let r = extract(&kind::core_kinds(), "run `cargo test src/lib.rs` to check");
         assert!(r.files.is_empty(), "got {:?}", r.files);
     }
 
     #[test]
     fn link_outside_code_still_extracted_alongside_code() {
-        let r = extract("see [[src/foo.rs]] and run `cargo build`");
+        let r = extract(
+            &kind::core_kinds(),
+            "see [[src/foo.rs]] and run `cargo build`",
+        );
         assert_eq!(r.files, vec!["src/foo.rs"]);
     }
 
     #[test]
     fn unterminated_backtick_does_not_swallow_rest() {
         // A lone backtick is not a code span — refs after it still parse.
-        let r = extract("a stray ` then [[real-slug]]");
+        let r = extract(&kind::core_kinds(), "a stray ` then [[real-slug]]");
         assert_eq!(r.wikis, vec!["real-slug"]);
     }
 
@@ -999,7 +1013,7 @@ mod tests {
     fn tilde_after_alnum_is_not_a_path_start() {
         // `foo~/bar.md` shouldn't trigger — the tilde isn't at a word
         // boundary so it's not a home-relative path.
-        let r = extract("foo~/bar.md");
+        let r = extract(&kind::core_kinds(), "foo~/bar.md");
         assert!(
             !r.files.iter().any(|p| p.starts_with('~')),
             "got {:?}",

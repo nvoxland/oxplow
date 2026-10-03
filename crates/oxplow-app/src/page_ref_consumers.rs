@@ -15,13 +15,18 @@ use oxplow_db::page_ref_store::replace_source_for_ref_types_tx;
 use oxplow_db::task_store::get_task_tx;
 use oxplow_domain::events::schema::EventType;
 use oxplow_domain::events::schema::{WorkItemCreated, WorkItemEdited};
+use oxplow_domain::refs::kind::KindRegistry;
+use oxplow_domain::vocabulary::VocabularyHandle;
 use oxplow_domain::{DomainError, StoredEvent, TaskId};
 
 use crate::event_pump::EventConsumer;
 
 /// Projects a task's body-mention `page_ref` edges on `work_item.created`
 /// and re-projects them on `work_item.edited`.
-pub struct PageRefWorkItemConsumer;
+pub struct PageRefWorkItemConsumer {
+    /// The ref kinds a body's mentions may name.
+    pub vocabulary: VocabularyHandle,
+}
 
 impl PageRefWorkItemConsumer {
     pub const NAME: &'static str = "page_ref.work_item";
@@ -29,8 +34,8 @@ impl PageRefWorkItemConsumer {
 
 /// The task behind a `work_item:oxplow:tskN` ref; `None` for another
 /// provider's item, which has no page here.
-fn task_of(subject: &str) -> Result<Option<TaskId>, DomainError> {
-    let r = oxplow_domain::refs::validate_ref(subject)?;
+fn task_of(kinds: &KindRegistry, subject: &str) -> Result<Option<TaskId>, DomainError> {
+    let r = oxplow_domain::refs::validate_ref(kinds, subject)?;
     if r.kind != "work_item" {
         return Err(DomainError::Invalid(format!(
             "subject `{subject}` is not a work_item"
@@ -60,7 +65,8 @@ impl EventConsumer for PageRefWorkItemConsumer {
             .get("work_item")
             .and_then(|v| v.as_str())
             .ok_or_else(|| DomainError::Invalid("payload has no `work_item`".into()))?;
-        let Some(task_id) = task_of(subject)? else {
+        let vocabulary = self.vocabulary.current();
+        let Some(task_id) = task_of(&vocabulary.kinds, subject)? else {
             return Ok(());
         };
         // A task deleted after the event was logged has nothing to
@@ -73,7 +79,7 @@ impl EventConsumer for PageRefWorkItemConsumer {
             KIND_WORK_ITEM,
             &work_item_id(task.id),
             &task_body_ref_types(),
-            task_edges(&task),
+            task_edges(&vocabulary.kinds, &task),
         )
     }
 }
@@ -81,16 +87,20 @@ impl EventConsumer for PageRefWorkItemConsumer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_domain::refs::kind::core_kinds;
 
     #[test]
     fn subject_parsing_names_oxplow_tasks_only() {
         assert_eq!(
-            task_of("work_item:oxplow:tsk42").unwrap(),
+            task_of(&core_kinds(), "work_item:oxplow:tsk42").unwrap(),
             Some(TaskId::new(42))
         );
-        assert_eq!(task_of("work_item:linear:ENG-12").unwrap(), None);
-        assert!(task_of("commit:abc").is_err());
-        assert!(task_of("work_item:oxplow:nope").is_err());
-        assert!(task_of("not a ref").is_err());
+        assert_eq!(
+            task_of(&core_kinds(), "work_item:linear:ENG-12").unwrap(),
+            None
+        );
+        assert!(task_of(&core_kinds(), "commit:abc").is_err());
+        assert!(task_of(&core_kinds(), "work_item:oxplow:nope").is_err());
+        assert!(task_of(&core_kinds(), "not a ref").is_err());
     }
 }

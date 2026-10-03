@@ -137,13 +137,13 @@ fn wikilink_sugar_translates_to_canonical_refs() {
         ("effort:eff3", "effort:eff3"),
     ];
     for (interior, expected) in cases {
-        let got = canonical_wikilink(interior)
+        let got = canonical_wikilink(&oxplow_domain::refs::kind::core_kinds(), interior)
             .unwrap_or_else(|| panic!("[[{interior}]] should translate"));
         assert_eq!(got.to_string(), expected, "[[{interior}]]");
     }
     for bad in ["", "#13", "not a ref!", "tskfoo/x", "Unknown_Kind:1"] {
         assert!(
-            canonical_wikilink(bad).is_none(),
+            canonical_wikilink(&oxplow_domain::refs::kind::core_kinds(), bad).is_none(),
             "[[{bad}]] should not translate"
         );
     }
@@ -152,7 +152,7 @@ fn wikilink_sugar_translates_to_canonical_refs() {
 #[test]
 fn classify_wikilinks_reports_the_canonical_ref_beside_the_typed_view() {
     let body = "See [[tsk42]], [[git:abc1234]], [[abc1234]], [[dir:src]] and [[missing thing]].";
-    let links = classify_wikilinks(body);
+    let links = classify_wikilinks(&oxplow_domain::refs::kind::core_kinds(), body);
     let refs: Vec<Option<String>> = links
         .iter()
         .map(|l| l.canonical.as_ref().map(ToString::to_string))

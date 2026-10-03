@@ -148,6 +148,7 @@ pub use hook_ingest::{
 pub use oxplow_lsp::{LspError, LspProxy};
 pub use task_service::{CreateTaskInput, TaskService, TaskServiceError, UpdateTaskChanges};
 
+use oxplow_domain::vocabulary::VocabularyHandle;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -177,7 +178,6 @@ use oxplow_db::{
     SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::AgentStatusStore;
-use oxplow_domain::EventSchemaRegistry;
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
 
 #[derive(Debug, Error)]
@@ -465,7 +465,7 @@ pub struct Services {
     pub assets: assets::Assets,
     /// Every event `type@v` the log accepts, with its schema. Core types
     /// at boot; plugin types join when their manifests load.
-    pub event_schemas: Arc<EventSchemaRegistry>,
+    pub vocabulary: VocabularyHandle,
     /// Delivers the log to its consumers (checkpoints, dead letters).
     /// Producers `wake()` it after they commit; `boot.rs` spawns the loop.
     pub event_pump: Arc<event_pump::EventPump>,
@@ -714,15 +714,15 @@ impl Services {
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
-        let event_schemas = Arc::new(EventSchemaRegistry::core());
-        let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), event_schemas.clone()));
-        let task_store = Arc::new(SqliteTaskStore::with_event_schemas(
+        let vocabulary = VocabularyHandle::core();
+        let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
+        let task_store = Arc::new(SqliteTaskStore::with_vocabulary(
             db.clone(),
-            event_schemas.clone(),
+            vocabulary.clone(),
         ));
         let work_note_store = Arc::new(SqliteTaskNoteStore::new(db.clone()));
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
-        let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), event_schemas.clone()));
+        let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
         let sql = sql_gateway::SqlGateway::new(db.clone());
         let event_bus = EventBus::new();
         let ref_moves = ref_moves::RefMoves::new(event_bus.clone());
@@ -730,7 +730,9 @@ impl Services {
             db.clone(),
             (*event_log_store).clone(),
             vec![
-                Arc::new(page_ref_consumers::PageRefWorkItemConsumer),
+                Arc::new(page_ref_consumers::PageRefWorkItemConsumer {
+                    vocabulary: vocabulary.clone(),
+                }),
                 Arc::new(work_items::WorkItemsProjection),
                 Arc::new(tool_call_reactors::ToolCallProjection),
                 Arc::new(knowledge::WikiAttribution),
@@ -757,21 +759,21 @@ impl Services {
         );
         let snapshot_store = Arc::new({
             let content = snapshot_content.clone();
-            SqliteSnapshotStore::with_event_schemas(db.clone(), event_schemas.clone())
+            SqliteSnapshotStore::with_vocabulary(db.clone(), vocabulary.clone())
                 .with_content_hasher(Arc::new(move |oid: &str| content.object_content_hash(oid)))
         });
         let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
         let thread_runtime = Arc::new(thread_runtime::ThreadRuntimeRegistry::new());
         let agent_status_store: Arc<dyn AgentStatusStore> = Arc::new(
-            oxplow_db::SqliteAgentStatusStore::new(db.clone(), event_schemas.clone()),
+            oxplow_db::SqliteAgentStatusStore::new(db.clone(), vocabulary.clone()),
         );
-        let agent_turn_store = Arc::new(SqliteAgentTurnStore::with_event_schemas(
+        let agent_turn_store = Arc::new(SqliteAgentTurnStore::with_vocabulary(
             db.clone(),
-            event_schemas.clone(),
+            vocabulary.clone(),
         ));
-        let effort_store = Arc::new(SqliteEffortStore::with_event_schemas(
+        let effort_store = Arc::new(SqliteEffortStore::with_vocabulary(
             db.clone(),
-            event_schemas.clone(),
+            vocabulary.clone(),
         ));
         let fact_store = Arc::new(SqliteFactStore::new(db.clone()));
         let metric_visibility = Arc::new(metric_visibility::VisibilityResolver::new(
@@ -810,7 +812,7 @@ impl Services {
 
         let hook_ingest = HookIngestService::new(
             db.clone(),
-            event_schemas.clone(),
+            vocabulary.clone(),
             layout.project_dir.clone(),
             event_bus.clone(),
         )
@@ -1001,7 +1003,7 @@ impl Services {
         .with_snapshot_captures(snapshot_captures.clone())
         .with_run_log(collector_runner::RunLog {
             db: db.clone(),
-            schemas: event_log_store.schemas().clone(),
+            vocabulary: event_log_store.vocabulary().clone(),
             layer: sql.clone(),
         });
         let tasks = tasks
@@ -1098,6 +1100,7 @@ impl Services {
                 runtime: thread_runtime.clone(),
                 sql: sql.clone(),
                 db: db.clone(),
+                vocabulary: vocabulary.clone(),
                 project_dir: layout.project_dir.clone(),
                 vcs: vcs.clone(),
             },
@@ -1136,7 +1139,7 @@ impl Services {
             work_items.clone(),
         );
         let plugin_health =
-            plugin_health::PluginHealth::new(db.clone(), event_log_store.schemas().clone());
+            plugin_health::PluginHealth::new(db.clone(), event_log_store.vocabulary().clone());
         commands
             .register(plugin_health::enable_command(
                 plugin_health.clone(),
@@ -1156,7 +1159,7 @@ impl Services {
             approvals: approvals.clone(),
             store: collector_store.clone(),
             db: db.clone(),
-            schemas: event_log_store.schemas().clone(),
+            vocabulary: event_log_store.vocabulary().clone(),
             secrets: machine.secrets.clone(),
             layer: sql.clone(),
             catalog: extension_catalog.clone(),
@@ -1218,7 +1221,7 @@ impl Services {
             attribution_store.clone(),
         )
         .with_approvals(approvals.clone())
-        .with_event_schemas(event_schemas.clone());
+        .with_vocabulary(vocabulary.clone());
         for command in commands::test_runs::commands(collection.clone())
             .into_iter()
             .chain(commands::extension_install::commands(
@@ -1264,10 +1267,7 @@ impl Services {
         // A turn's tokens are counted when it ends (P3.7).
         event_pump.register_async(Arc::new(token_usage::TurnTokensConsumer {
             tokens: token_usage.clone(),
-            turns: oxplow_db::SqliteAgentTurnStore::with_event_schemas(
-                db.clone(),
-                event_schemas.clone(),
-            ),
+            turns: oxplow_db::SqliteAgentTurnStore::with_vocabulary(db.clone(), vocabulary.clone()),
         }));
         // Collection and post-tool advisories react to finished tool calls
         // on the pump (P3.6).
@@ -1306,7 +1306,7 @@ impl Services {
             sql,
             model_watermarks,
             assets,
-            event_schemas,
+            vocabulary,
             event_pump,
             extension_models,
             extension_catalog,

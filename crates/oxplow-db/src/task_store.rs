@@ -1,3 +1,4 @@
+use oxplow_domain::vocabulary::VocabularyHandle;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -10,8 +11,8 @@ use oxplow_domain::events::schema::{
 use oxplow_domain::refs::build::{effort_ref, work_item_ref};
 use oxplow_domain::stores::TaskStore;
 use oxplow_domain::{
-    Anchors, DomainError, EffortId, EventSchemaRegistry, Task, TaskActorKind, TaskAuthor, TaskId,
-    TaskPriority, TaskStatus, ThreadId, Timestamp,
+    Anchors, DomainError, EffortId, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority,
+    TaskStatus, ThreadId, Timestamp,
 };
 
 use crate::database::Database;
@@ -25,7 +26,7 @@ pub struct SqliteTaskStore {
     db: Database,
     page_refs: SqlitePageRefStore,
     /// Validates the `work_item.transitioned` envelopes this store logs.
-    event_schemas: Arc<EventSchemaRegistry>,
+    vocabulary: VocabularyHandle,
 }
 
 /// What a status change did to the task's effort (see [`update_logged_tx`]).
@@ -54,16 +55,16 @@ pub struct StatusChange {
 
 impl SqliteTaskStore {
     /// A store with its own core schema registry. `Services` shares one
-    /// registry across stores via [`Self::with_event_schemas`].
+    /// registry across stores via [`Self::with_vocabulary`].
     pub fn new(db: Database) -> Self {
-        Self::with_event_schemas(db, Arc::new(EventSchemaRegistry::core()))
+        Self::with_vocabulary(db, VocabularyHandle::core())
     }
 
-    pub fn with_event_schemas(db: Database, event_schemas: Arc<EventSchemaRegistry>) -> Self {
+    pub fn with_vocabulary(db: Database, vocabulary: VocabularyHandle) -> Self {
         Self {
             page_refs: SqlitePageRefStore::new(db.clone()),
             db,
-            event_schemas,
+            vocabulary,
         }
     }
 
@@ -94,11 +95,12 @@ impl SqliteTaskStore {
         item: &Task,
     ) -> Result<(TaskId, Option<EffortId>), DomainError> {
         let owned = Arc::new(item.clone());
-        let schemas = self.event_schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         let (id, effort) = self
             .db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "task_service");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "task_service");
                 insert_logged_tx(tx, &ev, &owned)
             })
             .await?;
@@ -111,12 +113,13 @@ impl SqliteTaskStore {
     async fn project_body_refs(&self, item: &Task, id: TaskId) -> Result<(), DomainError> {
         let mut placed = item.clone();
         placed.id = id;
+        let vocabulary = self.vocabulary.current();
         self.page_refs
             .replace_source_for_ref_types(
                 KIND_WORK_ITEM,
                 &work_item_id(id),
                 task_body_ref_types(),
-                task_edges(&placed),
+                task_edges(&vocabulary.kinds, &placed),
             )
             .await
     }
@@ -127,11 +130,12 @@ impl SqliteTaskStore {
     /// landing on a thread opens one there (another stream's included —
     /// an effort's snapshots belong to one stream). Returns the moved row.
     pub async fn move_task(&self, id: TaskId, dest: Option<ThreadId>) -> Result<Task, DomainError> {
-        let schemas = self.event_schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         let moved = self
             .db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "task_service");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "task_service");
                 let item = get_task_tx(tx, id)?.ok_or(DomainError::NotFound)?;
                 if item.thread_id == dest {
                     return Ok(item);
@@ -148,10 +152,11 @@ impl SqliteTaskStore {
         id: TaskId,
         to: TaskStatus,
     ) -> Result<StatusChange, DomainError> {
-        let schemas = self.event_schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "task_service");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "task_service");
                 set_status_tx(tx, &ev, id, to, Timestamp::now())
             })
             .await
@@ -166,11 +171,12 @@ impl SqliteTaskStore {
         status: Option<TaskStatus>,
     ) -> Result<Task, DomainError> {
         let owned = Arc::new(item.clone());
-        let schemas = self.event_schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         let after = self
             .db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "task_service");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "task_service");
                 update_with_status_tx(tx, &ev, &owned, status, Timestamp::now())
                     .map(|(after, _)| after)
             })
@@ -965,16 +971,18 @@ impl TaskStore for SqliteTaskStore {
     async fn update(&self, item: &Task) -> Result<(), DomainError> {
         let item = item.clone();
         let edges_item = item.clone();
-        let schemas = self.event_schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "task_store");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "task_store");
                 update_with_status_tx(tx, &ev, &item, None, Timestamp::now()).map(|_| ())
             })
             .await?;
         {
             let refs = &self.page_refs;
-            let edges = task_edges(&edges_item);
+            let vocabulary = self.vocabulary.current();
+            let edges = task_edges(&vocabulary.kinds, &edges_item);
             refs.replace_source_for_ref_types(
                 KIND_WORK_ITEM,
                 &work_item_id(edges_item.id),
@@ -989,10 +997,11 @@ impl TaskStore for SqliteTaskStore {
     /// Soft-delete the task and close its open effort in the same
     /// transaction: no claim outlives its task.
     async fn soft_delete(&self, id: TaskId) -> Result<(), DomainError> {
-        let schemas = self.event_schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "task_store");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "task_store");
                 match soft_delete_tx(tx, &ev, id, Timestamp::now()) {
                     // Deleting a deleted (or missing) task is a no-op here.
                     Err(DomainError::NotFound) => Ok(()),
@@ -1337,11 +1346,12 @@ mod tests {
         let (store, tid) = fixture().await;
         let id = store.insert(&item(Some(tid))).await.unwrap();
         let stale = store.get(id).await.unwrap().unwrap();
-        let schemas = store.event_schemas.clone();
+        let vocabulary = store.vocabulary.clone();
         store
             .db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "test");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "test");
                 set_status_tx(tx, &ev, id, TaskStatus::Done, Timestamp::from_unix_ms(7))
             })
             .await
@@ -1462,11 +1472,12 @@ mod tests {
     async fn set_status_tx_derives_the_row_and_reports_the_change() {
         let (store, tid) = fixture().await;
         let id = store.insert(&item(Some(tid))).await.unwrap();
-        let schemas = store.event_schemas.clone();
+        let vocabulary = store.vocabulary.clone();
         let change = store
             .db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "test");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "test");
                 set_status_tx(
                     tx,
                     &ev,
@@ -1480,22 +1491,24 @@ mod tests {
         assert_eq!(change.before.status, TaskStatus::Ready);
         assert_eq!(change.after.status, TaskStatus::InProgress);
         assert!(matches!(change.effort, EffortTransition::Opened(_)));
-        let schemas = store.event_schemas.clone();
+        let vocabulary = store.vocabulary.clone();
         let done = store
             .db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "test");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "test");
                 set_status_tx(tx, &ev, id, TaskStatus::Done, Timestamp::from_unix_ms(9))
             })
             .await
             .unwrap();
         assert_eq!(done.after.completed_at, Some(Timestamp::from_unix_ms(9)));
         assert!(matches!(done.effort, EffortTransition::Finished(_)));
-        let schemas = store.event_schemas.clone();
+        let vocabulary = store.vocabulary.clone();
         let missing = store
             .db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "test");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "test");
                 set_status_tx(
                     tx,
                     &ev,

@@ -35,6 +35,8 @@ pub struct LinkWarning {
 /// written, which may link to itself before its row exists.
 pub struct LinkWorld<'a> {
     pub conn: &'a rusqlite::Connection,
+    /// The ref kinds links may name (the running vocabulary's).
+    pub kinds: &'a oxplow_domain::refs::kind::KindRegistry,
     pub project_dir: &'a std::path::Path,
     pub graph: &'a dyn RevisionGraph,
     pub this_page: Option<&'a str>,
@@ -46,7 +48,7 @@ pub struct LinkWorld<'a> {
 /// Synchronous, so a command validates inside its transaction.
 pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
     let mut out = Vec::new();
-    for link in classify_wikilinks(body) {
+    for link in classify_wikilinks(world.kinds, body) {
         match &link.reference {
             None => out.push(LinkWarning {
                 target: link.raw.clone(),
@@ -75,6 +77,7 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
 pub async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {
     check_links_at(
         &services.db,
+        &services.vocabulary,
         &services.layout.project_dir,
         &*services.vcs,
         body,
@@ -86,6 +89,7 @@ pub async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {
 /// run outside the bus's transaction (`effort.report`).
 pub async fn check_links_at(
     db: &oxplow_db::Database,
+    vocabulary: &oxplow_domain::vocabulary::VocabularyHandle,
     project_dir: &std::path::Path,
     vcs: &dyn oxplow_domain::vcs::Vcs,
     body: &str,
@@ -93,10 +97,12 @@ pub async fn check_links_at(
     let project_dir = project_dir.to_path_buf();
     let graph = vcs.revision_graph(&project_dir);
     let body = body.to_string();
+    let vocabulary = vocabulary.current();
     db.read(move |conn| {
         Ok(check_links_in(
             &LinkWorld {
                 conn,
+                kinds: &vocabulary.kinds,
                 project_dir: &project_dir,
                 graph: &*graph,
                 this_page: None,

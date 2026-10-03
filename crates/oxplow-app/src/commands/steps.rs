@@ -344,14 +344,14 @@ impl CommandBus {
             after_commit: None,
         };
         let (actor_c, spec_c, input_c) = (actor.clone(), spec.clone(), input.clone());
-        let schemas = self.log.schemas().clone();
+        let vocabulary = self.log.vocabulary().clone();
         let failed_c = failed.clone();
         let recorded = self
             .db
             .transaction(move |tx| {
                 let recorded = record_tx(
                     tx,
-                    &schemas,
+                    &vocabulary.current(),
                     &actor_c,
                     &spec_c,
                     &input_c,
@@ -368,7 +368,14 @@ impl CommandBus {
                     }
                     RunOrigin::Approval(id) => {
                         proposal_store::finish_claim_tx(tx, id, recorded.audit_id)?;
-                        log_approved_tx(tx, &schemas, &actor_c, &spec_c, id, &recorded)?;
+                        log_approved_tx(
+                            tx,
+                            &vocabulary.current(),
+                            &actor_c,
+                            &spec_c,
+                            id,
+                            &recorded,
+                        )?;
                     }
                 }
                 Ok(recorded)
@@ -410,7 +417,7 @@ impl CommandBus {
         gates: Gates,
     ) -> Result<HandlerOutput, CommandError> {
         let (actor, input, cause) = (actor.clone(), input.clone(), cause.clone());
-        let schemas = self.log.schemas().clone();
+        let vocabulary = self.log.vocabulary().clone();
         let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
         let failed_c = failed.clone();
         self.db
@@ -419,7 +426,7 @@ impl CommandBus {
                     conn: tx,
                     actor: &actor,
                     events: oxplow_db::EventCtx {
-                        schemas: &schemas,
+                        vocabulary: &vocabulary.current(),
                         source: actor.source(),
                         cause: Some(cause.clone()),
                     },

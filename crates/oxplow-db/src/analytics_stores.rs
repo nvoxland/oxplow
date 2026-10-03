@@ -5,6 +5,7 @@
 
 use async_trait::async_trait;
 use oxplow_domain::vcs::Revision;
+use oxplow_domain::vocabulary::{Vocabulary, VocabularyHandle};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -19,14 +20,11 @@ use crate::event_log_store::append_tx;
 use crate::page_ref_projections::finding_edges;
 use crate::page_ref_store::SqlitePageRefStore;
 use crate::snapshot_tree::{identities, manifest_hash, ContentHasher, SnapshotTree, TreeEntry};
-use oxplow_domain::events::schema::{
-    EventSchemaRegistry, SnapshotTaken, SnapshotTakenV1, VcsHeadMoved, VcsHeadMovedV1,
-};
+use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV1, VcsHeadMoved, VcsHeadMovedV1};
 use oxplow_domain::events::{Anchors, Envelope};
 use oxplow_domain::refs::build::{commit_ref, snapshot_ref, stream_ref};
 use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::EffortId;
-use std::sync::Arc;
 
 // ---------------- Page visits ----------------
 
@@ -1183,7 +1181,7 @@ fn insert_op_tx(
 
 fn record_take_tx(
     tx: &rusqlite::Connection,
-    schemas: &EventSchemaRegistry,
+    vocabulary: &Vocabulary,
     take: &TakeRecord,
 ) -> Result<Option<TakeOutcome>, DomainError> {
     use crate::database::map_sql_err;
@@ -1291,7 +1289,7 @@ fn record_take_tx(
         snapshot_id: Some(snapshot_id),
     })
     .with_subject([stream, snapshot_ref(snapshot_id)]);
-    append_tx(tx, schemas, &env)?;
+    append_tx(tx, vocabulary, &env)?;
     Ok(Some(TakeOutcome {
         op_seq,
         snapshot_id,
@@ -1304,7 +1302,7 @@ fn record_take_tx(
 
 fn record_head_moved_tx(
     tx: &rusqlite::Connection,
-    schemas: &EventSchemaRegistry,
+    vocabulary: &Vocabulary,
     stream_id: StreamId,
     expected: i64,
     revision: &Revision,
@@ -1360,7 +1358,7 @@ fn record_head_moved_tx(
         snapshot_ref(sid),
         commit_ref(revision.vcs_rev().unwrap_or_default()),
     ]);
-    append_tx(tx, schemas, &env)?;
+    append_tx(tx, vocabulary, &env)?;
     Ok(Some(TakeOutcome {
         op_seq,
         snapshot_id: sid,
@@ -1457,19 +1455,19 @@ pub struct SqliteSnapshotStore {
     db: Database,
     content_hasher: Option<ContentHasher>,
     /// Validates the `snapshot.taken` / `vcs.head.moved` envelopes.
-    event_schemas: Arc<EventSchemaRegistry>,
+    vocabulary: VocabularyHandle,
 }
 
 impl SqliteSnapshotStore {
     pub fn new(db: Database) -> Self {
-        Self::with_event_schemas(db, Arc::new(EventSchemaRegistry::core()))
+        Self::with_vocabulary(db, VocabularyHandle::core())
     }
 
-    pub fn with_event_schemas(db: Database, event_schemas: Arc<EventSchemaRegistry>) -> Self {
+    pub fn with_vocabulary(db: Database, vocabulary: VocabularyHandle) -> Self {
         Self {
             db,
             content_hasher: None,
-            event_schemas,
+            vocabulary,
         }
     }
 
@@ -1482,9 +1480,9 @@ impl SqliteSnapshotStore {
     /// says `unchanged`. `Ok(None)` only when the stream has no snapshot
     /// at all yet and nothing to record.
     pub async fn record_take(&self, take: TakeRecord) -> Result<Option<TakeOutcome>, DomainError> {
-        let schemas = self.event_schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         self.db
-            .transaction(move |tx| record_take_tx(tx, &schemas, &take))
+            .transaction(move |tx| record_take_tx(tx, &vocabulary.current(), &take))
             .await
     }
 
@@ -1502,10 +1500,17 @@ impl SqliteSnapshotStore {
         revision: Revision,
         source: String,
     ) -> Result<Option<TakeOutcome>, DomainError> {
-        let schemas = self.event_schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
-                record_head_moved_tx(tx, &schemas, stream_id, snapshot_id, &revision, &source)
+                record_head_moved_tx(
+                    tx,
+                    &vocabulary.current(),
+                    stream_id,
+                    snapshot_id,
+                    &revision,
+                    &source,
+                )
             })
             .await
     }

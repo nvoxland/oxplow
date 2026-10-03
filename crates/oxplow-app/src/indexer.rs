@@ -531,7 +531,7 @@ mod tests {
             "# Gears\n\nThe flange holds.\n",
         )
         .unwrap();
-        crate::wiki_pages::sync_page(&svc.db, &svc.event_schemas, dir.path(), "gears")
+        crate::wiki_pages::sync_page(&svc.db, &svc.vocabulary, dir.path(), "gears")
             .await
             .unwrap();
         svc.event_pump.run_once().await.unwrap();
@@ -741,11 +741,11 @@ mod tests {
             "indexed on knowledge.note.written"
         );
         // Nothing deletes a note but this test: the core, its event logged.
-        let schemas = svc.event_schemas.clone();
+        let vocabulary = svc.vocabulary.clone();
         svc.db
             .transaction(move |tx| {
                 if let Some(e) = oxplow_db::task_satellite::delete_note_tx(tx, note)? {
-                    oxplow_db::event_log_store::append_tx(tx, &schemas, &e)?;
+                    oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &e)?;
                 }
                 Ok(())
             })

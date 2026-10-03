@@ -230,7 +230,7 @@ async fn recent_errors(svc: &Services, key: &PluginKey, reason: &str) -> Vec<Str
         errors.push(reason.to_string());
         let health = crate::plugin_health::PluginHealth::new(
             svc.db.clone(),
-            svc.event_log_store.schemas().clone(),
+            svc.event_log_store.vocabulary().clone(),
         );
         if let Ok(Some(last)) = health.get(key).await.map(|r| r.and_then(|r| r.last_error)) {
             if !reason.contains(&last) {
@@ -426,7 +426,7 @@ mod tests {
     async fn disable(svc: &Arc<Services>, reason: &str) -> StoredEvent {
         let health = crate::plugin_health::PluginHealth::new(
             svc.db.clone(),
-            svc.event_log_store.schemas().clone(),
+            svc.event_log_store.vocabulary().clone(),
         );
         let key = crate::collector_runner::plugin_key("work", "hot");
         health.enable(&key, "human").await.unwrap();

@@ -233,6 +233,7 @@ pub fn add_command() -> Command {
             };
             let (created, events) = create_tx(
                 ctx.conn,
+                &ctx.events.vocabulary.kinds,
                 &NewComment {
                     stream,
                     thread,

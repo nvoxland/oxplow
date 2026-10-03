@@ -28,6 +28,7 @@ use oxplow_db::{
     SqliteTaskNoteStore, SqliteTaskStore,
 };
 use oxplow_domain::stores::TaskLinkStore as _;
+use oxplow_domain::vocabulary::VocabularyHandle;
 
 /// Counts of rows touched per kind. Logged at INFO so the boot
 /// trail makes the backfill observable.
@@ -42,6 +43,7 @@ pub struct BackfillCounts {
 
 /// Project every existing row into `page_ref`. Idempotent.
 pub async fn run(
+    vocabulary: VocabularyHandle,
     page_refs: Arc<SqlitePageRefStore>,
     tasks: Arc<SqliteTaskStore>,
     links: Arc<SqliteTaskLinkStore>,
@@ -50,11 +52,13 @@ pub async fn run(
     task_note: Arc<SqliteTaskNoteStore>,
 ) -> BackfillCounts {
     let mut counts = BackfillCounts::default();
+    let vocabulary = vocabulary.current();
+    let kinds = &vocabulary.kinds;
 
     // 1. task body slice + touched-file slice.
     if let Ok(items) = tasks.list_all_for_backfill().await {
         for item in items {
-            let edges = task_edges(&item);
+            let edges = task_edges(kinds, &item);
             let id_str = work_item_id(item.id);
             if let Err(e) = page_refs
                 .replace_source_for_ref_types(KIND_WORK_ITEM, &id_str, task_body_ref_types(), edges)
@@ -110,7 +114,7 @@ pub async fn run(
     // 3. Work notes — one source per note row, parsed from body.
     if let Ok(rows) = task_note.list_all_for_backfill().await {
         for (id, body) in rows {
-            let edges = note_edges(&id, &body);
+            let edges = note_edges(kinds, &id, &body);
             if page_refs
                 .replace_source(KIND_TASK_NOTE, &id, edges)
                 .await
@@ -281,6 +285,7 @@ mod tests {
         let notes = Arc::new(SqliteTaskNoteStore::new(db.clone()));
 
         let counts = run(
+            VocabularyHandle::core(),
             page_refs.clone(),
             items_attached,
             links,

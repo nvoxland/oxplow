@@ -1651,7 +1651,7 @@ mod tests {
                 Arc::new(oxplow_db::SqliteAgentTurnStore::new(db.clone())),
                 Arc::new(oxplow_db::SqliteCommentStore::new(
                     db.clone(),
-                    std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
+                    oxplow_domain::vocabulary::VocabularyHandle::core(),
                 )),
             );
         let svc = with_lifecycle_pump(svc, &db);
@@ -1664,7 +1664,7 @@ mod tests {
     fn with_lifecycle_pump(svc: TaskService, db: &Database) -> TaskService {
         let log = oxplow_db::SqliteEventLogStore::new(
             db.clone(),
-            Arc::new(oxplow_domain::EventSchemaRegistry::core()),
+            oxplow_domain::vocabulary::VocabularyHandle::core(),
         );
         let pump = Arc::new(crate::event_pump::EventPump::new(db.clone(), log, vec![]));
         pump.register_async(Arc::new(
@@ -1672,7 +1672,7 @@ mod tests {
                 svc.without_event_pump(),
                 oxplow_db::SqliteEventLogStore::new(
                     db.clone(),
-                    Arc::new(oxplow_domain::EventSchemaRegistry::core()),
+                    oxplow_domain::vocabulary::VocabularyHandle::core(),
                 ),
             ),
         ));
@@ -2248,7 +2248,14 @@ mod tests {
             };
             facts
                 .database()
-                .transaction(move |tx| oxplow_db::comment_store::create_tx(tx, &new).map(|_| ()))
+                .transaction(move |tx| {
+                    oxplow_db::comment_store::create_tx(
+                        tx,
+                        &oxplow_domain::refs::kind::core_kinds(),
+                        &new,
+                    )
+                    .map(|_| ())
+                })
                 .await
                 .unwrap();
         }

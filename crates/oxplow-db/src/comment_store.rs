@@ -71,11 +71,14 @@ fn refs_to_json(refs: &[CommentTarget]) -> String {
 /// matches the `page_ref` graph and tab ids exactly. Inline mentions
 /// like `tsk42`, `src/x.rs`, or `[[slug]]` become typed refs even
 /// when the surface never rendered them as links.
-fn refs_from_quote(quote: &str) -> Vec<CommentTarget> {
+fn refs_from_quote(
+    kinds: &oxplow_domain::refs::kind::KindRegistry,
+    quote: &str,
+) -> Vec<CommentTarget> {
     use crate::page_ref_projections::{
         work_item_id, KIND_COMMIT, KIND_DIR, KIND_FILE, KIND_FINDING, KIND_WIKI, KIND_WORK_ITEM,
     };
-    let r = oxplow_domain::refs::extract(quote);
+    let r = oxplow_domain::refs::extract(kinds, quote);
     let mut out = Vec::new();
     let mut push = |kind: &str, id: String| {
         out.push(CommentTarget {
@@ -109,9 +112,13 @@ fn refs_from_quote(quote: &str) -> Vec<CommentTarget> {
 /// deduplicating on `(kind,id)` and preserving the provided refs first.
 /// Centralizing this in the create path means no surface ever has to
 /// reimplement ref parsing.
-fn union_referenced_refs(provided: &[CommentTarget], quote: &str) -> Vec<CommentTarget> {
+fn union_referenced_refs(
+    kinds: &oxplow_domain::refs::kind::KindRegistry,
+    provided: &[CommentTarget],
+    quote: &str,
+) -> Vec<CommentTarget> {
     let mut out = provided.to_vec();
-    for r in refs_from_quote(quote) {
+    for r in refs_from_quote(kinds, quote) {
         if !out.iter().any(|e| e.kind == r.kind && e.id == r.id) {
             out.push(r);
         }
@@ -198,7 +205,7 @@ fn list_threads(
 #[derive(Clone)]
 pub struct SqliteCommentStore {
     db: Database,
-    schemas: std::sync::Arc<oxplow_domain::events::schema::EventSchemaRegistry>,
+    vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
 }
 
 /// What a comment's event is logged as.
@@ -306,9 +313,10 @@ pub fn get_tx(
 /// Returns it and the `knowledge.comment.written` to log.
 pub fn create_tx(
     conn: &rusqlite::Connection,
+    kinds: &oxplow_domain::refs::kind::KindRegistry,
     new: &NewComment,
 ) -> Result<(CommentThread, Vec<Envelope>), DomainError> {
-    let referenced_refs = union_referenced_refs(&new.referenced_refs, &new.quote);
+    let referenced_refs = union_referenced_refs(kinds, &new.referenced_refs, &new.quote);
     let now = Timestamp::now();
     let now_s = ts_to_string(now);
     conn.execute(
@@ -465,11 +473,8 @@ pub fn delete_tx(conn: &rusqlite::Connection, id: CommentId) -> Result<Vec<Envel
 }
 
 impl SqliteCommentStore {
-    pub fn new(
-        db: Database,
-        schemas: std::sync::Arc<oxplow_domain::events::schema::EventSchemaRegistry>,
-    ) -> Self {
-        Self { db, schemas }
+    pub fn new(db: Database, vocabulary: oxplow_domain::vocabulary::VocabularyHandle) -> Self {
+        Self { db, vocabulary }
     }
 
     /// Run `f` and log the events it returns, in one transaction (a retry
@@ -479,12 +484,12 @@ impl SqliteCommentStore {
         F: Fn(&rusqlite::Connection) -> rusqlite::Result<(R, Vec<Envelope>)> + Send + 'static,
         R: Send + 'static,
     {
-        let schemas = self.schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
                 let (out, events) = f(tx).map_err(crate::database::map_sql_err)?;
                 for e in &events {
-                    crate::event_log_store::append_tx(tx, &schemas, e)?;
+                    crate::event_log_store::append_tx(tx, &vocabulary.current(), e)?;
                 }
                 Ok(out)
             })
@@ -585,12 +590,12 @@ impl SqliteCommentStore {
         &self,
         f: impl Fn(&rusqlite::Connection) -> Result<(R, Vec<Envelope>), DomainError> + Send + 'static,
     ) -> Result<R, DomainError> {
-        let schemas = self.schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
                 let (out, events) = f(tx)?;
                 for e in &events {
-                    crate::event_log_store::append_tx(tx, &schemas, e)?;
+                    crate::event_log_store::append_tx(tx, &vocabulary.current(), e)?;
                 }
                 Ok(out)
             })
@@ -623,7 +628,9 @@ impl SqliteCommentStore {
             author: author.into(),
             body: body.into(),
         };
-        self.run(move |c| create_tx(c, &new)).await
+        let vocabulary = self.vocabulary.current();
+        self.run(move |c| create_tx(c, &vocabulary.kinds, &new))
+            .await
     }
 
     async fn add_message(
@@ -726,10 +733,8 @@ mod tests {
     #[tokio::test]
     async fn create_round_trips_with_first_message() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db,
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
+        let store =
+            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
         let created = store
             .create(
                 &stream,
@@ -761,10 +766,8 @@ mod tests {
     #[tokio::test]
     async fn create_round_trips_context_chain_and_referenced_refs() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db,
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
+        let store =
+            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
         let context_chain = vec![
             CommentTarget {
                 kind: "commit".into(),
@@ -814,10 +817,8 @@ mod tests {
     #[tokio::test]
     async fn create_unions_refs_extracted_from_quote_into_referenced_refs() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db,
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
+        let store =
+            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
         // The frontend captured one DOM-link ref; the quote *also* names
         // `tsk42` and `src/app.rs` inline (not rendered as links).
         let provided = vec![CommentTarget {
@@ -865,10 +866,8 @@ mod tests {
     #[tokio::test]
     async fn create_dedups_quote_refs_against_provided() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db,
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
+        let store =
+            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
         // FE already supplied tsk42; the quote names it again. It must
         // appear exactly once.
         let provided = vec![CommentTarget {
@@ -906,10 +905,8 @@ mod tests {
     #[tokio::test]
     async fn resolved_at_set_on_resolve_cleared_on_reopen() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db,
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
+        let store =
+            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
         let c = store
             .create(
                 &stream,
@@ -953,10 +950,8 @@ mod tests {
     #[tokio::test]
     async fn relink_rewrites_quote_and_clears_orphan() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db,
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
+        let store =
+            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
         let c = store
             .create(
                 &stream,
@@ -1000,10 +995,8 @@ mod tests {
     #[tokio::test]
     async fn thread_grows_and_orders_oldest_first() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db,
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
+        let store =
+            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
         let c = store
             .create(
                 &stream,
@@ -1035,10 +1028,8 @@ mod tests {
     #[tokio::test]
     async fn needs_response_tracks_authorship() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db,
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
+        let store =
+            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
         let c = store
             .create(
                 &stream,
@@ -1099,10 +1090,8 @@ mod tests {
     #[tokio::test]
     async fn note_intent_never_needs_response() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db,
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
+        let store =
+            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
         let c = store
             .create(
                 &stream,
@@ -1129,10 +1118,8 @@ mod tests {
     #[tokio::test]
     async fn list_for_stream_and_thread() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db,
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
+        let store =
+            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
         store
             .create(
                 &stream,
@@ -1173,10 +1160,8 @@ mod tests {
     #[tokio::test]
     async fn set_anchor_marks_orphaned() {
         let (db, stream, thread) = fixture().await;
-        let store = SqliteCommentStore::new(
-            db,
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
-        );
+        let store =
+            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
         let c = store
             .create(
                 &stream,
@@ -1206,7 +1191,7 @@ mod tests {
         let (db, stream, thread) = fixture().await;
         let store = SqliteCommentStore::new(
             db.clone(),
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
+            oxplow_domain::vocabulary::VocabularyHandle::core(),
         );
         let c = store
             .create(
@@ -1239,7 +1224,7 @@ mod tests {
         let (db, stream, thread) = fixture().await;
         let store = SqliteCommentStore::new(
             db.clone(),
-            std::sync::Arc::new(oxplow_domain::events::schema::EventSchemaRegistry::core()),
+            oxplow_domain::vocabulary::VocabularyHandle::core(),
         );
         // An open comment must survive cleanup.
         store

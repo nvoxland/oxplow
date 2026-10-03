@@ -23,6 +23,7 @@
 //! the failure the same way. See `.context/semantic-layer.md` →
 //! "Collectors".
 
+use oxplow_domain::vocabulary::VocabularyHandle;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,7 +36,7 @@ use oxplow_config::collectors::{
 use oxplow_db::{
     CollectorRun, EntityTable, EntityWrite, SqlCell, SqliteCollectorStore, StoredType,
 };
-use oxplow_domain::events::schema::{CollectorSynced, CollectorSyncedV1, EventSchemaRegistry};
+use oxplow_domain::events::schema::{CollectorSynced, CollectorSyncedV1};
 use oxplow_domain::{DomainError, Envelope, StoredEvent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -100,7 +101,7 @@ pub struct Collectors<'a> {
     pub store: &'a SqliteCollectorStore,
     /// What a run commits its rows, run state and event through.
     pub db: oxplow_db::Database,
-    pub schemas: Arc<EventSchemaRegistry>,
+    pub vocabulary: VocabularyHandle,
     /// Where credential values are kept (the OS keychain in the app).
     pub secrets: &'a dyn SecretStore,
     /// What a derived collector's `input` is read through.
@@ -119,7 +120,7 @@ impl<'a> Collectors<'a> {
             approvals: &svc.approvals,
             store: &svc.collector_store,
             db: svc.db.clone(),
-            schemas: svc.event_log_store.schemas().clone(),
+            vocabulary: svc.event_log_store.vocabulary().clone(),
             secrets: svc.secrets.as_ref(),
             layer: svc.sql.clone(),
             catalog: &svc.extension_catalog,
@@ -184,7 +185,7 @@ pub fn set_credential(
 /// Every declared collector under `root`, with its last run and consent.
 pub async fn list_collectors(ctx: &Collectors<'_>) -> Result<Vec<CollectorListing>, DomainError> {
     let runs = ctx.store.list_runs().await?;
-    let health = crate::plugin_health::PluginHealth::new(ctx.db.clone(), ctx.schemas.clone());
+    let health = crate::plugin_health::PluginHealth::new(ctx.db.clone(), ctx.vocabulary.clone());
     let mut out = Vec::new();
     for ext in ctx.catalog.get(ctx.root).iter().cloned() {
         let ext_dir = ctx.root.join(&ext.path);
@@ -288,7 +289,7 @@ pub async fn run_due_collectors(state: &crate::Services) -> Vec<(String, String)
         })
         .collect();
     let health =
-        crate::plugin_health::PluginHealth::new(state.db.clone(), state.event_schemas.clone());
+        crate::plugin_health::PluginHealth::new(state.db.clone(), state.vocabulary.clone());
     if let Err(e) = health.set_next_due(plans).await {
         tracing::warn!(error = ?e, "recording the collectors' next due times failed");
     }
@@ -892,7 +893,7 @@ pub async fn run_collector(
     trigger: RunTrigger,
     source: &str,
 ) -> Result<CollectorRunReport, RunCollectorError> {
-    let health = crate::plugin_health::PluginHealth::new(ctx.db.clone(), ctx.schemas.clone());
+    let health = crate::plugin_health::PluginHealth::new(ctx.db.clone(), ctx.vocabulary.clone());
     let key = plugin_key(owner, id);
     if let Some(reason) = health
         .disabled_reason(&key)
@@ -954,7 +955,7 @@ async fn run_collector_once(
         Ok(writes) => {
             let names: Vec<String> = writes.iter().map(|(t, _)| t.entity.clone()).collect();
             let ok_run = run("ok", None);
-            let schemas = ctx.schemas.clone();
+            let vocabulary = ctx.vocabulary.clone();
             let event = event.clone();
             let elapsed = elapsed_ms(started);
             let committed = ctx
@@ -973,7 +974,7 @@ async fn run_collector_once(
                         .map_err(oxplow_db::map_sql_err)?;
                     oxplow_db::event_log_store::append_tx(
                         tx,
-                        &schemas,
+                        &vocabulary.current(),
                         &event.envelope("ok", counts.clone(), 0, elapsed, None),
                     )?;
                     Ok(counts)
@@ -1001,12 +1002,12 @@ async fn run_collector_once(
         elapsed_ms(started),
         Some(error.clone()),
     );
-    let schemas = ctx.schemas.clone();
+    let vocabulary = ctx.vocabulary.clone();
     ctx.db
         .transaction(move |tx| {
             oxplow_db::collector_store::record_run_in(tx, &failed)
                 .map_err(oxplow_db::map_sql_err)?;
-            oxplow_db::event_log_store::append_tx(tx, &schemas, &envelope).map(|_| ())
+            oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &envelope).map(|_| ())
         })
         .await
         .map_err(RunCollectorError::Storage)?;
@@ -1067,7 +1068,7 @@ fn elapsed_ms(started: std::time::Instant) -> i64 {
 #[derive(Clone)]
 pub struct RunLog {
     pub db: oxplow_db::Database,
-    pub schemas: Arc<EventSchemaRegistry>,
+    pub vocabulary: VocabularyHandle,
     pub layer: crate::sql_gateway::SqlGateway,
 }
 
@@ -1093,7 +1094,7 @@ pub struct RunRecord<'a> {
 impl RunLog {
     /// The plugin failure policy, over this log's database.
     pub fn health(&self) -> crate::plugin_health::PluginHealth {
-        crate::plugin_health::PluginHealth::new(self.db.clone(), self.schemas.clone())
+        crate::plugin_health::PluginHealth::new(self.db.clone(), self.vocabulary.clone())
     }
 
     /// Whether collector `owner/id` already ran for the event at `seq` (its
@@ -1152,10 +1153,14 @@ impl RunLog {
             cause: r.cause.map(|e| (e.envelope.id.clone(), e.seq)),
         };
         let envelope = synced.envelope(r.status, r.entities, r.facts, r.elapsed_ms, r.error);
-        let schemas = self.schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
-                if !oxplow_db::event_log_store::append_unique_tx(tx, &schemas, &envelope)? {
+                if !oxplow_db::event_log_store::append_unique_tx(
+                    tx,
+                    &vocabulary.current(),
+                    &envelope,
+                )? {
                     return Ok(false);
                 }
                 if let Some((capture, facts)) = &capture {
@@ -1445,7 +1450,7 @@ pub struct CollectorRunner {
     pub approvals: Arc<crate::exec_consent::ApprovalStore>,
     pub store: Arc<SqliteCollectorStore>,
     pub db: oxplow_db::Database,
-    pub schemas: Arc<EventSchemaRegistry>,
+    pub vocabulary: VocabularyHandle,
     pub secrets: Arc<dyn SecretStore>,
     pub layer: crate::sql_gateway::SqlGateway,
     pub catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
@@ -1463,7 +1468,7 @@ impl CollectorRunner {
             approvals: &self.approvals,
             store: &self.store,
             db: self.db.clone(),
-            schemas: self.schemas.clone(),
+            vocabulary: self.vocabulary.clone(),
             secrets: self.secrets.as_ref(),
             layer: self.layer.clone(),
             catalog: &self.catalog,
@@ -1491,7 +1496,7 @@ impl CollectorRunner {
             .any(|c| c.owner == owner && c.key == id)
         {
             let health =
-                crate::plugin_health::PluginHealth::new(self.db.clone(), self.schemas.clone());
+                crate::plugin_health::PluginHealth::new(self.db.clone(), self.vocabulary.clone());
             if let Some(reason) = health
                 .disabled_reason(&plugin_key(owner, id))
                 .await
@@ -1981,7 +1986,7 @@ pub(crate) mod tests {
             store: &store,
             secrets: &secrets,
             db: db.clone(),
-            schemas: Arc::new(EventSchemaRegistry::core()),
+            vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
@@ -2155,7 +2160,7 @@ pub(crate) mod tests {
             store: &store,
             secrets: &secrets,
             db: db.clone(),
-            schemas: Arc::new(EventSchemaRegistry::core()),
+            vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
@@ -2185,7 +2190,7 @@ pub(crate) mod tests {
             store: &store,
             secrets: &secrets,
             db: db.clone(),
-            schemas: Arc::new(EventSchemaRegistry::core()),
+            vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
@@ -2440,7 +2445,7 @@ pub(crate) mod tests {
             store: &store,
             secrets: &secrets,
             db: db.clone(),
-            schemas: Arc::new(EventSchemaRegistry::core()),
+            vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
@@ -2529,7 +2534,7 @@ pub(crate) mod tests {
             store: &store,
             secrets: &secrets,
             db: db.clone(),
-            schemas: Arc::new(EventSchemaRegistry::core()),
+            vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: std::sync::Arc::new(crate::ai_compute::AiCompute::new(
@@ -2589,7 +2594,7 @@ pub(crate) mod tests {
             store: &store,
             secrets: &secrets,
             db: db.clone(),
-            schemas: Arc::new(EventSchemaRegistry::core()),
+            vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
@@ -2649,7 +2654,7 @@ pub(crate) mod tests {
             store: &store,
             secrets: &secrets,
             db: db.clone(),
-            schemas: Arc::new(EventSchemaRegistry::core()),
+            vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
@@ -2748,7 +2753,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             store: &store,
             secrets: &secrets,
             db: db.clone(),
-            schemas: Arc::new(EventSchemaRegistry::core()),
+            vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
@@ -2846,7 +2851,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             store: &store,
             secrets: &secrets,
             db: db.clone(),
-            schemas: Arc::new(EventSchemaRegistry::core()),
+            vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),

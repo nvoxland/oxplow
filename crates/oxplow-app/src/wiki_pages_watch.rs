@@ -5,12 +5,12 @@
 //! just wrote syncs to a no-op (its body hash matches). Wraps
 //! [`oxplow_fs_watch::FsWatcher`] for the debouncing.
 
+use oxplow_domain::vocabulary::VocabularyHandle;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use oxplow_db::{Database, SqliteWikiPageStore};
-use oxplow_domain::EventSchemaRegistry;
 use oxplow_fs_watch::FsWatcher;
 use tracing::{info, warn};
 
@@ -30,13 +30,13 @@ impl WikiPagesWatcher {
     pub async fn spawn(
         project_dir: PathBuf,
         db: Database,
-        schemas: Arc<EventSchemaRegistry>,
+        vocabulary: VocabularyHandle,
         store: Arc<SqliteWikiPageStore>,
     ) -> Option<Self> {
         let dir = wiki_pages::wiki_pages_dir(&project_dir);
         std::fs::create_dir_all(&dir).ok();
 
-        match wiki_pages::scan_and_sync_all(&db, &schemas, &project_dir, &store).await {
+        match wiki_pages::scan_and_sync_all(&db, &vocabulary, &project_dir, &store).await {
             Ok(report) if report.failures.is_empty() => {
                 info!(dir = %dir.display(), synced = report.synced, "wiki pages initial scan complete");
             }
@@ -75,7 +75,7 @@ impl WikiPagesWatcher {
                         // The row write is the announcement: the UI re-reads on
                         // its `modelsChanged`.
                         if let Err(err) =
-                            wiki_pages::sync_page(&db, &schemas, &project_dir, slug).await
+                            wiki_pages::sync_page(&db, &vocabulary, &project_dir, slug).await
                         {
                             warn!(slug, ?err, "wiki page resync failed");
                         }
@@ -110,9 +110,9 @@ mod tests {
 
         let db = oxplow_db::Database::in_memory();
         let store = Arc::new(oxplow_db::SqliteWikiPageStore::new(db.clone()));
-        let schemas = Arc::new(EventSchemaRegistry::core());
+        let vocabulary = VocabularyHandle::core();
 
-        let _watcher = WikiPagesWatcher::spawn(project.clone(), db, schemas, store.clone())
+        let _watcher = WikiPagesWatcher::spawn(project.clone(), db, vocabulary, store.clone())
             .await
             .expect("watcher to spawn");
 

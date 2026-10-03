@@ -286,19 +286,6 @@ impl EventSchemaRegistry {
         }
     }
 
-    /// Validate an envelope's `type@v` and payload.
-    /// The payload against its schema, and every subject as a canonical
-    /// ref of a registered kind (a consumer resolves subjects; a malformed
-    /// one would dead-letter far from the producer that wrote it).
-    pub fn validate_envelope(&self, env: &Envelope) -> Result<(), DomainError> {
-        self.validate(&env.event_type, env.v, &env.payload)?;
-        for subject in &env.subject {
-            crate::refs::validate_ref(subject)
-                .map_err(|e| DomainError::Invalid(format!("{} subject: {e}", env.event_type)))?;
-        }
-        Ok(())
-    }
-
     /// Carry a payload written at `from_v` to the newest version of its
     /// type and validate it there. A payload already at the newest version
     /// is validated and returned unchanged.
@@ -1485,7 +1472,7 @@ mod tests {
     /// shape is what `Envelope::typed` emits.
     #[test]
     fn turn_ended_v1_upcasts_to_v2_with_nothing_added() {
-        let r = EventSchemaRegistry::core();
+        let r = crate::vocabulary::Vocabulary::core();
         let v1 = json!({ "turn": "turn:trn12", "thread": "thread:thr3", "outcome": "completed" });
         let (v, up) = r
             .upcast_to_latest("agent.turn.ended", 1, v1.clone())
@@ -1519,7 +1506,7 @@ mod tests {
 
     #[test]
     fn validate_accepts_the_typed_shape_and_names_the_violation() {
-        let r = EventSchemaRegistry::core();
+        let r = crate::vocabulary::Vocabulary::core();
         let ok = Envelope::typed::<WorkItemTransitioned>(
             "human",
             &WorkItemTransitionedV1 {

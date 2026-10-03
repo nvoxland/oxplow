@@ -19,6 +19,7 @@
 //! - commit:    `"<sha>"`
 //! - task_note: `"not<n>"`
 
+use oxplow_domain::refs::kind::KindRegistry;
 use oxplow_domain::refs::{extract, RefVersion};
 use oxplow_domain::{Task, TaskId, TaskImpact, TaskLink, TaskLinkType};
 
@@ -180,8 +181,8 @@ pub fn effort_impact_edges(source: &str, impacts: &[TaskImpact]) -> Vec<PageRefE
 }
 
 /// Edges contributed by a wiki page body. Owned by `wiki_pages` sync.
-pub fn wiki_edges(slug: &str, body: &str) -> Vec<PageRefEdge> {
-    let refs = extract(body);
+pub fn wiki_edges(kinds: &KindRegistry, slug: &str, body: &str) -> Vec<PageRefEdge> {
+    let refs = extract(kinds, body);
     let mut out = Vec::new();
     for fd in refs.files_detail {
         let extra = match fd.version {
@@ -240,8 +241,8 @@ pub fn wiki_edges(slug: &str, body: &str) -> Vec<PageRefEdge> {
 }
 
 /// Edges contributed by a task-note body. Single-owner source.
-pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
-    let refs = extract(body);
+pub fn note_edges(kinds: &KindRegistry, note_id: &str, body: &str) -> Vec<PageRefEdge> {
+    let refs = extract(kinds, body);
     let mut out = Vec::new();
     for fd in refs.files_detail {
         out.push(PageRefEdge::new(
@@ -301,12 +302,12 @@ pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
 }
 
 /// Edges contributed by a task's title + description text.
-pub fn task_edges(item: &Task) -> Vec<PageRefEdge> {
+pub fn task_edges(kinds: &KindRegistry, item: &Task) -> Vec<PageRefEdge> {
     let mut combined = String::new();
     combined.push_str(&item.title);
     combined.push('\n');
     combined.push_str(&item.description);
-    let refs = extract(&combined);
+    let refs = extract(kinds, &combined);
     let id = work_item_id(item.id);
     let mut out = Vec::new();
     for fd in refs.files_detail {
@@ -401,12 +402,16 @@ pub fn effort_touched_file_edges(source: &str, entries: &[(String, String)]) -> 
 /// from `(work_item, source)`.
 /// Owned slice = the `summary_*` ref_types above (paired with
 /// `RT_TOUCHED_FILE` under `effort_ref_types()`).
-pub fn effort_summary_edges(source: &str, summaries: &[String]) -> Vec<PageRefEdge> {
+pub fn effort_summary_edges(
+    kinds: &KindRegistry,
+    source: &str,
+    summaries: &[String],
+) -> Vec<PageRefEdge> {
     if summaries.is_empty() {
         return Vec::new();
     }
     let combined = summaries.join("\n\n");
-    let refs = extract(&combined);
+    let refs = extract(kinds, &combined);
     let task_id = source;
     let mut out = Vec::new();
     for fd in refs.files_detail {
@@ -507,6 +512,7 @@ pub fn finding_edges(finding_id: &str, path: &str) -> Vec<PageRefEdge> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_domain::refs::kind::core_kinds;
     use oxplow_domain::{
         Task, TaskActorKind, TaskAuthor, TaskId, TaskLinkType, TaskPriority, TaskStatus, Timestamp,
     };
@@ -538,7 +544,7 @@ mod tests {
     #[test]
     fn wiki_edges_cover_all_kinds() {
         let body = "[[src/app.rs]] [[dir:src]] [[architecture]] [[tsk7]] [[finding:fnd-1]] [[git:abcdef0]]";
-        let edges = wiki_edges("intro", body);
+        let edges = wiki_edges(&core_kinds(), "intro", body);
         let kinds: std::collections::BTreeSet<_> =
             edges.iter().map(|e| e.target_kind.as_str()).collect();
         assert!(kinds.contains("file"));
@@ -567,7 +573,7 @@ mod tests {
             "fix something",
             "see [[src/app.rs]] for context, blocked by tsk2, touches finding:fnd-9",
         );
-        let edges = task_edges(&it);
+        let edges = task_edges(&core_kinds(), &it);
         let targets: Vec<_> = edges
             .iter()
             .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
@@ -617,7 +623,7 @@ mod tests {
             "Filed [[url-schemes]] with refs to [[src/foo.rs]]".to_string(),
             "Resolved tsk99 and finding:fnd-2; see [[git:abcdef0]] and [[dir:src/x]]".to_string(),
         ];
-        let edges = effort_summary_edges("oxplow:tsk7", &summaries);
+        let edges = effort_summary_edges(&core_kinds(), "oxplow:tsk7", &summaries);
         let by_kind: std::collections::BTreeMap<_, Vec<_>> =
             edges
                 .iter()
@@ -648,7 +654,7 @@ mod tests {
     #[test]
     fn effort_summary_edges_filter_self_task() {
         let summaries = vec!["wraps up tsk7 itself and references tsk9".into()];
-        let edges = effort_summary_edges("oxplow:tsk7", &summaries);
+        let edges = effort_summary_edges(&core_kinds(), "oxplow:tsk7", &summaries);
         let task_ids: Vec<_> = edges
             .iter()
             .filter(|e| e.target_kind == "work_item")
@@ -659,7 +665,7 @@ mod tests {
 
     #[test]
     fn effort_summary_edges_empty_input_yields_no_edges() {
-        assert!(effort_summary_edges("oxplow:tsk7", &[]).is_empty());
+        assert!(effort_summary_edges(&core_kinds(), "oxplow:tsk7", &[]).is_empty());
     }
 
     #[test]

@@ -367,7 +367,7 @@ pub struct CollectionService {
     /// same answers as the engine's resolver (both are pure over the same DB).
     metric_visibility: Arc<crate::metric_visibility::VisibilityResolver>,
     /// Validates the `test.*` events a capture logs with it.
-    event_schemas: Arc<oxplow_domain::EventSchemaRegistry>,
+    vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
 }
 
 /// The `agent.tool.finished` event a collection reacts to (P3.6): its id
@@ -426,13 +426,16 @@ impl CollectionService {
             approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
             attribution,
             metric_visibility,
-            event_schemas: Arc::new(oxplow_domain::EventSchemaRegistry::core()),
+            vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
         }
     }
 
     /// The registry the `test.*` events are validated against.
-    pub fn with_event_schemas(mut self, schemas: Arc<oxplow_domain::EventSchemaRegistry>) -> Self {
-        self.event_schemas = schemas;
+    pub fn with_vocabulary(
+        mut self,
+        vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
+    ) -> Self {
+        self.vocabulary = vocabulary;
         self
     }
 
@@ -809,7 +812,7 @@ impl CollectionService {
             None => (None, None),
         };
         oxplow_db::fact_store::CaptureEvent {
-            schemas: self.event_schemas.clone(),
+            vocabulary: self.vocabulary.clone(),
             build: Box::new(move |capture_id| {
                 let run = format!("run:{capture_id}");
                 let env = oxplow_domain::Envelope::typed::<TestRunRecorded>(
@@ -1536,7 +1539,7 @@ impl CollectionService {
         let dedupe = cause.map(|c| format!("coverage:{}", c.event_id));
         let source = source.to_string();
         oxplow_db::fact_store::CaptureEvent {
-            schemas: self.event_schemas.clone(),
+            vocabulary: self.vocabulary.clone(),
             build: Box::new(move |capture_id| {
                 let env = oxplow_domain::Envelope::typed::<TestCoverageRecorded>(
                     oxplow_domain::refs::build::system_source("collection"),

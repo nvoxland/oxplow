@@ -48,6 +48,7 @@ fn str_to_link_type(s: &str) -> Result<TaskLinkType, DomainError> {
 /// `work_item.comment`, composing inside the bus's transaction.
 pub fn add_task_note_tx(
     conn: &rusqlite::Connection,
+    kinds: &oxplow_domain::refs::kind::KindRegistry,
     item: TaskId,
     body: &str,
     author: &str,
@@ -63,7 +64,7 @@ pub fn add_task_note_tx(
         conn,
         KIND_TASK_NOTE,
         &id.to_string(),
-        note_edges(&id.to_string(), body),
+        note_edges(kinds, &id.to_string(), body),
     )?;
     Ok(TaskNote {
         id,
@@ -184,6 +185,7 @@ fn thread_note_event(
 /// `knowledge.note.written` to log.
 pub fn add_thread_note_tx(
     conn: &rusqlite::Connection,
+    kinds: &oxplow_domain::refs::kind::KindRegistry,
     thread: ThreadId,
     body: &str,
     author: &str,
@@ -200,7 +202,7 @@ pub fn add_thread_note_tx(
         conn,
         KIND_TASK_NOTE,
         &note_id.to_string(),
-        note_edges(&note_id.to_string(), body),
+        note_edges(kinds, &note_id.to_string(), body),
     )?;
     Ok((
         TaskNote {
@@ -231,6 +233,7 @@ pub fn note_tx(conn: &rusqlite::Connection, id: NoteId) -> Result<Option<TaskNot
 /// it's a thread note.
 pub fn update_note_tx(
     conn: &rusqlite::Connection,
+    kinds: &oxplow_domain::refs::kind::KindRegistry,
     id: NoteId,
     body: &str,
 ) -> Result<Option<oxplow_domain::Envelope>, DomainError> {
@@ -243,7 +246,7 @@ pub fn update_note_tx(
         conn,
         KIND_TASK_NOTE,
         &id.to_string(),
-        note_edges(&id.to_string(), body),
+        note_edges(kinds, &id.to_string(), body),
     )?;
     thread_note_event(conn, id.value(), false).map_err(crate::database::map_sql_err)
 }
@@ -461,6 +464,7 @@ mod tests {
     use crate::stream_store::SqliteStreamStore;
     use crate::task_store::SqliteTaskStore;
     use crate::thread_store::SqliteThreadStore;
+    use oxplow_domain::refs::kind::core_kinds;
     use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
     use oxplow_domain::{
         Stream, StreamId, StreamKind, Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus,
@@ -539,14 +543,16 @@ mod tests {
 
     async fn thread_note(db: &Database, thread: ThreadId, body: &str, author: &str) -> TaskNote {
         let (body, author) = (body.to_string(), author.to_string());
-        db.transaction(move |tx| add_thread_note_tx(tx, thread, &body, &author).map(|(n, _)| n))
-            .await
-            .unwrap()
+        db.transaction(move |tx| {
+            add_thread_note_tx(tx, &core_kinds(), thread, &body, &author).map(|(n, _)| n)
+        })
+        .await
+        .unwrap()
     }
 
     async fn update_note(db: &Database, id: NoteId, body: &str) {
         let body = body.to_string();
-        db.transaction(move |tx| update_note_tx(tx, id, &body).map(|_| ()))
+        db.transaction(move |tx| update_note_tx(tx, &core_kinds(), id, &body).map(|_| ()))
             .await
             .unwrap()
     }
@@ -559,7 +565,7 @@ mod tests {
 
     async fn add_note(db: &Database, item: TaskId, body: &str, author: &str) -> TaskNote {
         let (body, author) = (body.to_string(), author.to_string());
-        db.transaction(move |tx| add_task_note_tx(tx, item, &body, &author))
+        db.transaction(move |tx| add_task_note_tx(tx, &core_kinds(), item, &body, &author))
             .await
             .unwrap()
     }

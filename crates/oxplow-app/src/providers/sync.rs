@@ -343,13 +343,13 @@ impl Instance {
         state: Option<Value>,
     ) -> Result<(), oxplow_domain::DomainError> {
         let (instance, collector) = (self.name.clone(), collector.to_string());
-        let schemas = self.deps.log.schemas().clone();
+        let vocabulary = self.deps.log.vocabulary().clone();
         let at = now();
         self.deps
             .db
             .transaction(move |tx| {
                 for envelope in &batch {
-                    oxplow_db::event_log_store::append_tx(tx, &schemas, envelope)?;
+                    oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), envelope)?;
                 }
                 oxplow_db::provider_collector_store::checkpoint_tx(
                     tx,

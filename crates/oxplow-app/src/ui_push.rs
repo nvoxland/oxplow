@@ -75,9 +75,8 @@ impl EventConsumer for UiPush {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use oxplow_domain::events::schema::{EventSchemaRegistry, SnapshotTaken, SnapshotTakenV1};
+    use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV1};
     use oxplow_domain::{Anchors, Envelope};
 
     use super::*;
@@ -113,12 +112,13 @@ mod tests {
         let mut ui = svc.events.subscribe_ui();
         use oxplow_domain::stores::StreamStore as _;
         let stream = svc.stream_store.list().await.unwrap().remove(0).id;
-        let schemas = Arc::new(EventSchemaRegistry::core());
+        let vocabulary = oxplow_domain::vocabulary::VocabularyHandle::core();
         for env in [taken(stream, 7, false), taken(stream, 7, true)] {
-            let schemas = schemas.clone();
+            let vocabulary = vocabulary.clone();
             svc.db
                 .transaction(move |tx| {
-                    oxplow_db::event_log_store::append_tx(tx, &schemas, &env).map(|_| ())
+                    oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &env)
+                        .map(|_| ())
                 })
                 .await
                 .unwrap();

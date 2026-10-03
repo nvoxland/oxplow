@@ -1136,8 +1136,9 @@ is STRICT too.
 **Schemas (P1.5, tsk407).** `oxplow_domain::events::schema` has one
 Rust type per `type@v` (`trait EventType { TYPE, V, Payload: JsonSchema,
 upcast }`) and `EventSchemaRegistry`, which holds every type the log
-accepts. `Services.event_schemas` is `EventSchemaRegistry::core()` —
-every core type; the golden files under `schemas/events/` are the
+accepts. It sits with the ref kinds in the running `Vocabulary { events,
+kinds }`, held in the swappable `VocabularyHandle` `Services.vocabulary`
+(P8.D1; see refs.md) — `Vocabulary::core()` is every core type; the golden files under `schemas/events/` are the
 authoritative list (the `core_registry_knows_every_core_type_and_version`
 test pins it). Plugin types will join it via `register_plugin(plugin)`
 once plugin `event_types` run (today the manifest parses and
@@ -1215,8 +1216,9 @@ CONFLICT DO NOTHING` — a redelivered event writes nothing). `decision` and
 `v_token_usage`, `v_agent_nudge`, `v_decision`, `v_claim`) exposes
 `turn_id`.
 
-**The contract is `append_tx(&Connection, &EventSchemaRegistry, &Envelope)
--> seq`**, composed inside the producer's `Database::transaction` closure. The async
+**The contract is `append_tx(&Connection, &Vocabulary, &Envelope)
+-> seq`** (`Vocabulary::validate_envelope` checks the type, the payload
+and every subject ref against the same snapshot), composed inside the producer's `Database::transaction` closure. The async
 `SqliteEventLogStore::append` opens a transaction of its own and is for
 activity with no state write (a tool call, a lens view). Reads:
 `read_after_tx(after_seq, limit)` (oldest first — the pump's cursor),

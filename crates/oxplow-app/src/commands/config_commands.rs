@@ -336,7 +336,7 @@ mod tests {
     use crate::event_pump::EventPump;
     use oxplow_config::load_project_config;
     use oxplow_db::{Database, SqliteEventLogStore};
-    use oxplow_domain::{EventSchemaRegistry, ThreadId};
+    use oxplow_domain::ThreadId;
 
     fn setup(initial_yaml: Option<&str>) -> (tempfile::TempDir, ConfigTarget, CommandBus) {
         let dir = tempfile::tempdir().unwrap();
@@ -352,7 +352,10 @@ mod tests {
             applied: Arc::new(tokio::sync::Notify::new()),
         };
         let db = Database::in_memory();
-        let log = SqliteEventLogStore::new(db.clone(), Arc::new(EventSchemaRegistry::core()));
+        let log = SqliteEventLogStore::new(
+            db.clone(),
+            oxplow_domain::vocabulary::VocabularyHandle::core(),
+        );
         let pump = Arc::new(EventPump::new(db.clone(), log.clone(), vec![]));
         let bus = CommandBus::new(db, log, Arc::new(AgentPolicy::default()), pump);
         for c in commands(target.clone()) {
@@ -388,12 +391,12 @@ mod tests {
             panic!("config.set is a Tx handler")
         };
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        let schemas = oxplow_domain::EventSchemaRegistry::core();
+        let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
         let actor = agent();
         let ctx = super::super::TxCtx {
             conn: &conn,
             actor: &actor,
-            events: oxplow_db::EventCtx::system(&schemas, "test"),
+            events: oxplow_db::EventCtx::system(&vocabulary, "test"),
             may_claim: true,
             confirmed: true,
             may_write: None,

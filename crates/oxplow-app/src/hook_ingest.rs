@@ -32,6 +32,7 @@
 //! one lock held from the transaction to the emit, so they reach the UI
 //! in commit order.
 
+use oxplow_domain::vocabulary::VocabularyHandle;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -52,8 +53,8 @@ use oxplow_domain::events::schema::{
 };
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::{
-    AgentKind, AgentStatus, AgentStatusState, AgentTurnId, DomainError, EventSchemaRegistry,
-    HookKind, StreamId, ThreadId, Timestamp,
+    AgentKind, AgentStatus, AgentStatusState, AgentTurnId, DomainError, HookKind, StreamId,
+    ThreadId, Timestamp,
 };
 
 use crate::events::{EventBus, OxplowEvent};
@@ -117,7 +118,7 @@ struct Applied {
 #[derive(Clone)]
 pub struct HookIngestService {
     db: Database,
-    schemas: Arc<EventSchemaRegistry>,
+    vocabulary: VocabularyHandle,
     /// Paths the tools name are made relative to the thread's worktree; a
     /// stream with none recorded works in the project directory.
     project_dir: PathBuf,
@@ -135,14 +136,14 @@ pub struct HookIngestService {
 impl HookIngestService {
     pub fn new(
         db: Database,
-        schemas: Arc<EventSchemaRegistry>,
+        vocabulary: VocabularyHandle,
         project_dir: PathBuf,
         events: EventBus,
     ) -> Self {
         Self {
-            log: oxplow_db::SqliteEventLogStore::new(db.clone(), schemas.clone()),
+            log: oxplow_db::SqliteEventLogStore::new(db.clone(), vocabulary.clone()),
             db,
-            schemas,
+            vocabulary,
             project_dir,
             status_order: Arc::new(tokio::sync::Mutex::new(())),
             events,
@@ -176,12 +177,13 @@ impl HookIngestService {
         };
 
         let order = self.status_order.lock().await;
-        let schemas = self.schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         let project_dir = self.project_dir.clone();
         let applied = self
             .db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "hook_ingest");
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "hook_ingest");
                 record_tx(tx, &ev, &project_dir, thread, &env, now)
             })
             .await?;
@@ -214,13 +216,14 @@ impl HookIngestService {
         detail: Option<String>,
     ) -> Result<(), HookIngestError> {
         let _order = self.status_order.lock().await;
-        let schemas = self.schemas.clone();
+        let vocabulary = self.vocabulary.clone();
         let (thread_c, detail_c) = (*thread, detail.clone());
         let logged = self
             .db
             .transaction(move |tx| {
-                let ev = EventCtx::system(&schemas, "hook_ingest");
-                let current = last_status_tx(tx, &schemas, thread_c)?;
+                let vocabulary = vocabulary.current();
+                let ev = EventCtx::system(&vocabulary, "hook_ingest");
+                let current = last_status_tx(tx, &vocabulary, thread_c)?;
                 if !changed(current.as_ref(), state, detail_c.as_deref()) {
                     return Ok(false);
                 }
@@ -251,7 +254,7 @@ impl HookIngestService {
         }
         let current = {
             use oxplow_domain::stores::AgentStatusStore as _;
-            oxplow_db::SqliteAgentStatusStore::new(self.db.clone(), self.schemas.clone())
+            oxplow_db::SqliteAgentStatusStore::new(self.db.clone(), self.vocabulary.clone())
                 .get(thread)
                 .await
                 .ok()
@@ -439,7 +442,7 @@ fn record_tx(
             status = Some(if env.kind == HookKind::Interrupt {
                 (AgentStatusState::Stopped, Some("interrupt".to_string()))
             } else {
-                stop_status(last_status_tx(conn, ev.schemas, thread)?.as_ref())
+                stop_status(last_status_tx(conn, ev.vocabulary, thread)?.as_ref())
             });
         }
         HookKind::SessionEnd => {
@@ -451,7 +454,7 @@ fn record_tx(
     }
     if let Some((state, detail)) = &status {
         if changed(
-            last_status_tx(conn, ev.schemas, thread)?.as_ref(),
+            last_status_tx(conn, ev.vocabulary, thread)?.as_ref(),
             *state,
             detail.as_deref(),
         ) {
@@ -532,7 +535,7 @@ fn track_session_tx(
     let first = env
         .clone()
         .with_dedupe_key(format!("session:{session}:started"));
-    if !append_unique_tx(conn, ev.schemas, &first)? && starts {
+    if !append_unique_tx(conn, ev.vocabulary, &first)? && starts {
         ev.append(conn, &env)?;
     }
     if row.resume_session_id != session {
@@ -640,7 +643,7 @@ fn log_tool_tx(
         .with_dedupe_key_opt(dedupe("finished"))
     };
     let envelope = envelope.with_anchors(anchors).with_subject([subject]);
-    append_unique_tx(conn, ev.schemas, &envelope)?;
+    append_unique_tx(conn, ev.vocabulary, &envelope)?;
     Ok(())
 }
 
@@ -697,7 +700,7 @@ mod tests {
         threads.upsert(&t).await.unwrap();
         let svc = HookIngestService::new(
             db,
-            Arc::new(oxplow_domain::EventSchemaRegistry::core()),
+            oxplow_domain::vocabulary::VocabularyHandle::core(),
             std::path::PathBuf::from("/p"),
             EventBus::new(),
         );
@@ -708,7 +711,7 @@ mod tests {
     fn restarted(svc: &HookIngestService) -> HookIngestService {
         HookIngestService::new(
             svc.db.clone(),
-            svc.schemas.clone(),
+            svc.vocabulary.clone(),
             svc.project_dir.clone(),
             EventBus::new(),
         )
@@ -730,7 +733,7 @@ mod tests {
     /// The thread's status as a freshly started daemon would read it.
     async fn status(svc: &HookIngestService, tid: ThreadId) -> Option<AgentStatus> {
         use oxplow_domain::stores::AgentStatusStore as _;
-        oxplow_db::SqliteAgentStatusStore::new(svc.db.clone(), svc.schemas.clone())
+        oxplow_db::SqliteAgentStatusStore::new(svc.db.clone(), svc.vocabulary.clone())
             .get(&tid)
             .await
             .unwrap()
@@ -742,7 +745,7 @@ mod tests {
 
     /// Every event in the log, oldest first.
     async fn logged(svc: &HookIngestService) -> Vec<oxplow_domain::StoredEvent> {
-        oxplow_db::SqliteEventLogStore::new(svc.db.clone(), svc.schemas.clone())
+        oxplow_db::SqliteEventLogStore::new(svc.db.clone(), svc.vocabulary.clone())
             .read_after(0, 1000)
             .await
             .unwrap()
