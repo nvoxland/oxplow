@@ -16,12 +16,8 @@ import { cardLinkButton } from "../components/Card.js";
 import type { TaskSectionKind } from "../components/Plan/plan-utils.js";
 import { backlogRef, doneWorkRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
-import {
-  listThreads,
-  type Stream,
-  type Thread,
-  type ThreadWorkState,
-} from "../api.js";
+import { type Stream, type Thread, type ThreadWorkState } from "../api.js";
+import { useStreamThreads } from "./useStreamThreads.js";
 import { readThreadWork } from "../workItems.js";
 import { unionReads, useRerunOnChange } from "../lens/lensRerun.js";
 
@@ -82,18 +78,12 @@ export function TasksPage({
     saveScope(next);
   }, []);
 
-  const [threadsByStream, setThreadsByStream] = useState<Record<string, Thread[]>>({});
   const [scopedWorkStates, setScopedWorkStates] = useState<Record<string, ThreadWorkState>>({});
   const [scopedError, setScopedError] = useState<string | null>(null);
   const [scopedLoading, setScopedLoading] = useState(false);
 
-  const requestThreads = useCallback((streamId: string) => {
-    if (!streamId) return;
-    if (threadsByStream[streamId]) return;
-    void listThreads(streamId)
-      .then((ts) => setThreadsByStream((prev) => ({ ...prev, [streamId]: ts })))
-      .catch((e) => setScopedError(String(e)));
-  }, [threadsByStream]);
+  // Each stream's threads, re-read when `v_thread` changes (tsk790).
+  const { threadsByStream, requestThreads, threadsFor } = useStreamThreads(undefined, setScopedError);
 
   // Pre-load thread lists used by the picker. The current stream is loaded
   // up-front so the "Specific thread" dropdown has options without a click.
@@ -131,12 +121,8 @@ export function TasksPage({
           setScopedWorkStates((prev) => ({ ...prev, [scope.threadId]: work }));
         } else if (scope.kind === "stream") {
           if (!scope.streamId) return;
-          let threads = threadsByStream[scope.streamId];
-          if (!threads) {
-            threads = await listThreads(scope.streamId);
-            if (cancelled) return;
-            setThreadsByStream((prev) => ({ ...prev, [scope.streamId]: threads! }));
-          }
+          const threads = await threadsFor(scope.streamId);
+          if (cancelled) return;
           setScopedLoading(true);
           const missing = threads.filter((t) => !scopedWorkStates[t.id]);
           const loaded = await Promise.all(
@@ -153,18 +139,9 @@ export function TasksPage({
         } else if (scope.kind === "all") {
           setScopedLoading(true);
           const allThreadLists = await Promise.all(
-            streams.map(async (s) => {
-              if (threadsByStream[s.id]) return [s.id, threadsByStream[s.id]!] as const;
-              const ts = await listThreads(s.id);
-              return [s.id, ts] as const;
-            }),
+            streams.map(async (s) => [s.id, await threadsFor(s.id)] as const),
           );
           if (cancelled) return;
-          setThreadsByStream((prev) => {
-            const next = { ...prev };
-            for (const [id, ts] of allThreadLists) next[id] = ts;
-            return next;
-          });
           const all = allThreadLists.flatMap(([streamId, ts]) =>
             ts.map((t) => ({ streamId, threadId: t.id })),
           );
