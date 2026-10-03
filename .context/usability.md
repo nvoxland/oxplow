@@ -122,6 +122,17 @@ Things I keep forgetting. Read this before adding any UI.
   `proposal-<id>`, `proposal-approve-<id>` (a destructive one's:
   `proposal-approve-<id>-trigger` / `-confirm`), `proposal-decline-<id>`,
   `proposal-error-<id>`, `rail-alert-proposals`.
+- **A proposal also waits where the conversation is** (P9.A3). A terminal
+  thread's Answers strip shows the thread's pending proposals in a
+  "Waiting for you (n)" group above its answers — never collapsed, and
+  the strip shows for them alone (`thread-proposals`). An ACP transcript
+  shows the card under the tool call that made the proposal
+  (`proposalOfTool`); once decided, a muted line stays there saying what
+  became of it — "Approved by you — it ran.", "Declined by you — nothing
+  ran.", "Replaced by a newer proposal." (`acp-proposal-<id>-decided`) —
+  so the transcript keeps what the agent asked. Only the thread's own
+  proposals show: a ref the transcript merely quotes shows nothing. The
+  Approvals panel stays the cross-thread list.
 
 ## Menus a page or row gets from extensions
 

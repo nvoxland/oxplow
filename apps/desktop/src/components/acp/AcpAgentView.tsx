@@ -15,8 +15,10 @@ import {
 import { WORKING } from "../../revision.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
+import { decide, proposalOfTool, useThreadProposals, type Proposal } from "../../proposals.js";
 import { answerOfTool, type AnswerRow } from "../../threadAnswers.js";
 import { ThreadAnswer } from "../Answers/ThreadAnswer.js";
+import { ProposalCard } from "../Proposals/ProposalCard.js";
 import { useThreadAnswers } from "../Answers/useThreadAnswers.js";
 import { MarkdownView } from "../Wiki/MarkdownView.js";
 import { AcpPromptBox } from "./AcpPromptBox.js";
@@ -282,6 +284,7 @@ function Transcript({
   const pinned = useRef(true);
   const answerList = useThreadAnswers(threadId);
   const answers = new Map(answerList.map((a) => [a.ref, a]));
+  const proposals = new Map(useThreadProposals(threadId).map((p) => [p.ref, p]));
   const last = items[items.length - 1];
   // Follow the conversation while the person is at the bottom.
   useEffect(() => {
@@ -314,6 +317,7 @@ function Transcript({
               item={item}
               threadId={threadId}
               answers={answers}
+              proposals={proposals}
               onOpenPage={onOpenPage}
               relPath={relPath}
               onOpenDiff={onOpenDiff}
@@ -327,10 +331,18 @@ function Transcript({
   );
 }
 
+/** What became of a proposal, as the transcript keeps it. */
+const DECIDED: Record<string, string> = {
+  approved: "Approved by you — it ran.",
+  declined: "Declined by you — nothing ran.",
+  superseded: "Replaced by a newer proposal.",
+};
+
 function Item({
   item,
   threadId,
   answers,
+  proposals,
   onOpenPage,
   relPath,
   onOpenDiff,
@@ -341,6 +353,8 @@ function Item({
   threadId: string;
   /** The thread's answers by ref: a `show_lens` call renders its own. */
   answers: ReadonlyMap<string, AnswerRow>;
+  /** The thread's proposals by ref: the call that made one shows it. */
+  proposals: ReadonlyMap<string, Proposal>;
   onOpenPage?(ref: TabRef): void;
   relPath(p: string): string;
   onOpenDiff?(spec: DiffSpec): void;
@@ -376,9 +390,24 @@ function Item({
     case "tool": {
       const answerRef = answerOfTool(item.call);
       const answer = answerRef === null ? undefined : answers.get(answerRef);
+      const proposalRef = proposalOfTool(item.call);
+      // Only this thread's: a ref the transcript merely quotes shows nothing.
+      const proposal = proposalRef === null ? undefined : proposals.get(proposalRef);
       return (
         <>
           <ToolCard call={item.call} itemId={item.id} relPath={relPath} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />
+          {proposal === undefined ? null : proposal.decision === "pending" ? (
+            <div style={{ marginTop: 6 }}>
+              <ProposalCard proposal={proposal} onDecide={decide} />
+            </div>
+          ) : (
+            <div
+              data-testid={`acp-proposal-${proposal.id}-decided`}
+              style={{ marginTop: 4, color: "var(--text-muted)", fontSize: "var(--text-xs)" }}
+            >
+              {DECIDED[proposal.decision] ?? proposal.decision}
+            </div>
+          )}
           {answer ? (
             <div style={{ marginTop: 6 }}>
               <ThreadAnswer answer={answer} onOpenPage={onOpenPage} />

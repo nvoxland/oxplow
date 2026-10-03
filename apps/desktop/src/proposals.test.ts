@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import { proposalForSetting, proposalsFromResult, summarizeProposal, type Proposal } from "./proposals.js";
+import { proposalForSetting, proposalOfTool, proposalsFromResult, summarizeProposal, type Proposal } from "./proposals.js";
 
 const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({
@@ -24,6 +24,8 @@ const proposal = (over: Partial<Proposal>): Proposal => ({
   key: "config:x",
   preview: { command: "config.set", summary: "Set one key.", input: {}, destructive: false },
   dryRun: null,
+  decision: "pending",
+  decidedAt: null,
   ...over,
 });
 
@@ -57,6 +59,8 @@ test("rows read as proposals, JSON columns parsed", () => {
     key: "config:agentPromptAppend",
     preview: { command: "config.set", summary: "Set one key.", input: {}, destructive: false },
     dryRun: { key: "agentPromptAppend", before: null, after: "be brief", changed: true },
+    decision: "pending",
+    decidedAt: null,
   });
 });
 
@@ -96,3 +100,36 @@ test("a setting's pending proposal is the one keyed on it", () => {
   expect(proposalForSetting(list, "ai")?.id).toBe(2);
   expect(proposalForSetting(list, "lsp")).toBeUndefined();
 });
+
+
+// P9.A3: a thread's proposals carry their decision, and a transcript finds
+// the proposal a tool call left.
+test("a row's decision reads through; a read that doesn't select it is pending", () => {
+  const withDecision = {
+    ...result([]),
+    columns: ["id", "ref", "command", "preview", "decision", "decided_at"],
+    rows: [[4, "proposal:4", "work_item.delete", "{}", "approved", "2026-10-03T00:00:00Z"]],
+  } as unknown as SqlQueryResult;
+  expect(proposalsFromResult(withDecision)[0]).toMatchObject({ id: 4, decision: "approved", decidedAt: "2026-10-03T00:00:00Z" });
+  const pendingOnly = { ...result([]), rows: [[5, "proposal:5", "t", "config.set", "{}", "agent", null, null, "k", "{}", null]] } as unknown as SqlQueryResult;
+  expect(proposalsFromResult(pendingOnly)[0]).toMatchObject({ id: 5, decision: "pending", decidedAt: null });
+});
+
+test("a tool call's proposal is found in its result, from oxplow's command tools only", () => {
+  const call = (name: string, text: string[], rawOutput: unknown = null, status = "completed") =>
+    ({ id: "t", name, title: name, kind: "other", status, locations: [], rawInput: null, rawOutput, diffs: [], text }) as never;
+  const proposed = JSON.stringify({ kind: "proposed", proposal: "proposal:12", message: "waits" });
+  expect(proposalOfTool(call("mcp__oxplow__run_command", [proposed]))).toBe("proposal:12");
+  // Wherever the agent's client puts the result: escaped inside a string, or raw output.
+  expect(proposalOfTool(call("mcp__oxplow__run_command", [JSON.stringify(proposed)]))).toBe("proposal:12");
+  expect(proposalOfTool(call("mcp__oxplow__run_command", [], { kind: "proposed", proposal: "proposal:3" }))).toBe("proposal:3");
+  // A lens action's proposal comes back as the refusal's message.
+  expect(
+    proposalOfTool(call("mcp__oxplow__run_lens_action", ["`work_item.delete` needs a person's approval; it is recorded as proposal:9 and waits"], null, "failed")),
+  ).toBe("proposal:9");
+  // A run that ran, and other tools quoting such text, name none.
+  expect(proposalOfTool(call("mcp__oxplow__run_command", [JSON.stringify({ result: { ok: true } })]))).toBeNull();
+  expect(proposalOfTool(call("Bash", [proposed]))).toBeNull();
+  expect(proposalOfTool(call("mcp__oxplow__query_sql", [proposed]))).toBeNull();
+});
+

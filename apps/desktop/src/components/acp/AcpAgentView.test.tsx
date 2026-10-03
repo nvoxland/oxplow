@@ -11,6 +11,8 @@ const prompts: Array<[string, string]> = [];
 const responses: Array<[string, string, string | null]> = [];
 let listener: ((e: AcpEvent) => void) | null = null;
 let snapshot: AcpSnapshot;
+/** `v_command_proposal`'s answer: the thread's proposals' decisions by id. */
+let proposalDecisions: Record<number, string> = {};
 
 mock.module("../../api.js", () => ({
   ...realApi,
@@ -31,13 +33,36 @@ mock.module("../../api.js", () => ({
     };
   },
   onRemoteReconnect: () => () => {},
-  querySql: async () => ({
-    columns: ["ref", "title", "lens", "kept_lens"],
-    rows: [["answer:7", "Churn", null, null]],
-    truncated: false,
-    reads: { models: ["v_thread_answer"], tables: [], measures: [] },
-    freshness: {},
-  }),
+  querySql: async (sql: string) =>
+    sql.includes("v_command_proposal")
+      ? {
+          columns: ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "key", "preview", "dry_run", "decision", "decided_at"],
+          rows: Object.entries(proposalDecisions).map(([id, decision]) => [
+            Number(id),
+            `proposal:${id}`,
+            "2026-10-03T00:00:00Z",
+            "work_item.delete",
+            "{}",
+            "agent",
+            "thr1",
+            1,
+            "k",
+            '{"command":"work_item.delete","summary":"Delete a work item","input":{},"destructive":false}',
+            null,
+            decision,
+            null,
+          ]),
+          truncated: false,
+          reads: { models: ["v_command_proposal"], tables: [], measures: [] },
+          freshness: {},
+        }
+      : {
+          columns: ["ref", "title", "lens", "kept_lens"],
+          rows: [["answer:7", "Churn", null, null]],
+          truncated: false,
+          reads: { models: ["v_thread_answer"], tables: [], measures: [] },
+          freshness: {},
+        },
   runAnswer: async () => ({
     lens: { id: "answer/7", title: "Churn", viz: "table", columns: [], actions: [], children: [], params: [] },
     params: {},
@@ -52,6 +77,7 @@ const thread = { id: "thr1", acp_agent: "fake", agent: "acp" } as unknown as Thr
 beforeEach(() => {
   prompts.length = 0;
   responses.length = 0;
+  proposalDecisions = {};
   snapshot = {
     agent: "fake",
     status: "idle",
@@ -137,6 +163,49 @@ describe("AcpAgentView", () => {
     // Another thread's event is ignored.
     expect(view.getByTestId("acp-status").textContent).toBe("Ready");
     expect(prompts).toEqual([]);
+  });
+
+  // P9.A3: a run that became a proposal waits under its tool call, and a
+  // decided one stays in the transcript as what happened.
+  test("a proposal waits under the call that made it, then reads as decided", async () => {
+    const proposing = (id: number, toolId: string, text: string[], status = "completed") => ({
+      id,
+      seq: id,
+      type: "tool" as const,
+      call: {
+        id: toolId,
+        title: "mcp__oxplow__run_command",
+        name: "mcp__oxplow__run_command",
+        kind: "other",
+        status,
+        locations: [],
+        rawInput: null,
+        rawOutput: null,
+        diffs: [],
+        text,
+      },
+    });
+    snapshot = {
+      ...snapshot,
+      directive: null,
+      headSeq: 3,
+      items: [
+        proposing(1, "t1", [JSON.stringify({ kind: "proposed", proposal: "proposal:7", message: "waits" })]),
+        proposing(2, "t2", [JSON.stringify({ kind: "proposed", proposal: "proposal:8", message: "waits" })]),
+        // Another thread's proposal, named in this transcript: no card.
+        proposing(3, "t3", [JSON.stringify({ kind: "proposed", proposal: "proposal:99", message: "waits" })]),
+      ] as never,
+    };
+    proposalDecisions = { 7: "pending", 8: "approved" };
+    const view = render(<AcpAgentView thread={thread} visible={true} />);
+    const card = await waitFor(() => view.getByTestId("proposal-7"));
+    expect(card.textContent).toContain("Delete a work item");
+    expect(view.getByTestId("proposal-approve-7")).toBeTruthy();
+    const done = await waitFor(() => view.getByTestId("acp-proposal-8-decided"));
+    expect(done.textContent).toContain("Approved");
+    expect(view.queryByTestId("proposal-approve-8")).toBeNull();
+    expect(view.queryByTestId("proposal-99")).toBeNull();
+    expect(view.queryByTestId("acp-proposal-99-decided")).toBeNull();
   });
 
   test("an agent's show_lens answer renders inline where the call is (P6.C2)", async () => {

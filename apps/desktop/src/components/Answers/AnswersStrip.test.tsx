@@ -9,6 +9,10 @@ import type { Lens, LensRun } from "../../tauri-bridge/generated/bindings.js";
 const realApi = await import("../../api.js");
 const commands: Array<[string, unknown]> = [];
 let answerRows: (string | null)[][] = [];
+/** `v_command_proposal` rows: id, thread_id, decision. */
+let proposalRows: Array<{ id: number; thread: number; decision: string }> = [];
+const decided: Array<[number, boolean]> = [];
+const PROPOSAL_COLUMNS = ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "key", "preview", "dry_run", "decision", "decided_at"];
 
 const lens = (title: string): Lens => ({
   id: "answer/1",
@@ -37,13 +41,43 @@ const lens = (title: string): Lens => ({
 
 mock.module("../../api.js", () => ({
   ...realApi,
-  querySql: async () => ({
-    columns: ["ref", "title", "lens", "kept_lens"],
-    rows: answerRows,
-    truncated: false,
-    reads: { models: ["v_thread_answer"], tables: [], measures: [] },
-    freshness: {},
-  }),
+  querySql: async (sql: string, params: unknown[] = []) =>
+    sql.includes("v_command_proposal")
+      ? {
+          columns: PROPOSAL_COLUMNS,
+          // The view's own filter: one thread's proposals.
+          rows: proposalRows
+            .filter((p) => p.thread === params[0])
+            .map((p) => [
+              p.id,
+              `proposal:${p.id}`,
+              "2026-10-03T00:00:00Z",
+              "work_item.delete",
+              '{"ref":"work_item:oxplow:tsk1"}',
+              "agent",
+              `thr${p.thread}`,
+              p.thread,
+              "k",
+              '{"command":"work_item.delete","summary":"Delete a work item","input":{},"destructive":false}',
+              null,
+              p.decision,
+              null,
+            ]),
+          truncated: false,
+          reads: { models: ["v_command_proposal"], tables: [], measures: [] },
+          freshness: {},
+        }
+      : {
+          columns: ["ref", "title", "lens", "kept_lens"],
+          rows: answerRows,
+          truncated: false,
+          reads: { models: ["v_thread_answer"], tables: [], measures: [] },
+          freshness: {},
+        },
+  decideProposal: async (id: number, approve: boolean) => {
+    decided.push([id, approve]);
+    return null;
+  },
   runAnswer: async (answer: string): Promise<LensRun> => ({
     lens: lens(answer),
     params: {},
@@ -65,6 +99,8 @@ const { ThreadAnswer } = await import("./ThreadAnswer.js");
 
 beforeEach(() => {
   commands.length = 0;
+  decided.length = 0;
+  proposalRows = [];
   answerRows = [
     ["answer:2", "Churn", null, null],
     ["answer:1", "Open tasks", "review/waiting", "review/waiting"],
@@ -121,3 +157,31 @@ test("a kept answer links to its lens", async () => {
   fireEvent.click(await waitFor(() => view.getByTestId("thread-answer-lens")));
   expect(opened).toEqual(["lens:review/waiting"]);
 });
+
+// P9.A3: what the agent asked for waits where the conversation is.
+test("a thread's pending proposals wait above its answers; Approve decides as the person", async () => {
+  answerRows = [];
+  proposalRows = [
+    { id: 1, thread: 1, decision: "pending" },
+    { id: 2, thread: 2, decision: "pending" },
+    { id: 3, thread: 1, decision: "declined" },
+  ];
+  const view = render(<AnswersStrip threadId="thr1" onOpenPage={() => {}} />);
+  const group = await waitFor(() => view.getByTestId("thread-proposals"));
+  expect(group.textContent).toContain("Waiting for you");
+  expect(view.getByTestId("proposal-1").textContent).toContain("Delete a work item");
+  // Another thread's, and one already decided, aren't waiting here.
+  expect(view.queryByTestId("proposal-2")).toBeNull();
+  expect(view.queryByTestId("proposal-3")).toBeNull();
+  fireEvent.click(view.getByTestId("proposal-approve-1"));
+  await waitFor(() => expect(decided).toEqual([[1, true]]));
+});
+
+test("no answers and nothing waiting, no strip", async () => {
+  answerRows = [];
+  proposalRows = [{ id: 2, thread: 2, decision: "pending" }];
+  const view = render(<AnswersStrip threadId="thr1" onOpenPage={() => {}} />);
+  await new Promise((r) => setTimeout(r, 20));
+  expect(view.queryByTestId("answers-strip")).toBeNull();
+});
+

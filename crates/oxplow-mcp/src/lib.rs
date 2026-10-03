@@ -2389,8 +2389,9 @@ impl OxplowMcp {
                        `{ result, audit_id, event_id, inverse? }`. Invalid input names the \
                        failing field; a denied command says why. A command that needs a \
                        person's confirmation is not run: it is recorded as a proposal and \
-                       this returns `{ proposal, message }` — tell the person it waits in \
-                       Approvals, and don't run it again. \
+                       this returns `{ proposal, message }` — tell the person it waits for \
+                       them in this thread and in Approvals, and don't run it again; its \
+                       `decision` is in `v_command_proposal`. \
                        Requires the connection's thread identity: an anonymous connection may \
                        not write."
     )]
@@ -3404,9 +3405,10 @@ fn proposed_message(command: &str, proposal: &str, supersedes: &[String]) -> Str
         )
     };
     format!(
-        "`{command}` needs a person's approval; it is recorded as {proposal} and waits in \
-         Approvals (and on the setting's row in Settings).{replaces} Tell the person; don't run \
-         it again."
+        "`{command}` needs a person's approval; it is recorded as {proposal} and waits for \
+         them in this thread and in Approvals (and on the setting's row in Settings).{replaces} \
+         Tell the person; don't run it again. To see what they decided, read its `decision` \
+         from `v_command_proposal` (`WHERE ref = '{proposal}'`)."
     )
 }
 
@@ -4390,6 +4392,8 @@ mod tests {
         let message = proposed["message"].as_str().unwrap();
         assert!(message.contains(&proposal), "{message}");
         assert!(message.contains("Approvals"), "{message}");
+        assert!(message.contains("in this thread"), "{message}");
+        assert!(message.contains("v_command_proposal"), "{message}");
         assert!(message.contains("don't run it again"), "{message}");
         let pending = services
             .commands

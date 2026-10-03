@@ -6,9 +6,10 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
-import { decideProposal, querySql } from "./api.js";
+import { decideProposal, querySql, type AcpToolCall } from "./api.js";
 import { recordOpError } from "./components/opErrorsStore.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
+import { threadRowId } from "./modelIds.js";
 import { valueText } from "./pages/settingsModel.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
@@ -40,6 +41,10 @@ export interface Proposal {
   /** What it would have done when proposed; `null` when it couldn't be
    *  dry-run (an External command). */
   dryRun: unknown;
+  /** `pending`, `approved`, `declined` or `superseded`. */
+  decision: string;
+  /** When it was decided or superseded. */
+  decidedAt: string | null;
 }
 
 /** How a card shows a proposal. */
@@ -76,6 +81,9 @@ export function proposalsFromResult(result: SqlQueryResult): Proposal[] {
     key: String(at(row, "key")),
     preview: json(at(row, "preview")) as ProposalPreview,
     dryRun: json(at(row, "dry_run")),
+    // A read of the pending ones needn't select it.
+    decision: String(at(row, "decision") ?? "pending"),
+    decidedAt: at(row, "decided_at") == null ? null : String(at(row, "decided_at")),
   }));
 }
 
@@ -144,4 +152,53 @@ export function proposalForSetting(proposals: Proposal[], key: string): Proposal
 /** Approve or decline `p` as the person. */
 export async function decide(p: Proposal, approve: boolean): Promise<void> {
   await decideProposal(p.id, approve);
+}
+
+const COLUMNS = "id, ref, created_at, command, input, actor_kind, actor_id, thread_id, key, preview, dry_run, decision, decided_at";
+
+/** A thread's proposals, newest first — pending and decided — and what
+ *  was read. */
+export async function readThreadProposals(threadId: string): Promise<{ proposals: Proposal[]; reads: Reads }> {
+  const res = await querySql(
+    `SELECT ${COLUMNS} FROM v_command_proposal WHERE thread_id = ?1 ORDER BY id DESC`,
+    [threadRowId(threadId)],
+    1_000,
+  );
+  return { proposals: proposalsFromResult(res), reads: res.reads };
+}
+
+/** A thread's proposals, re-read when the model changes: what waits for
+ *  the person where the conversation is (the Answers strip, an ACP
+ *  transcript), and what became of the ones they decided. */
+export function useThreadProposals(threadId: string): Proposal[] {
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [reads, setReads] = useState<Reads>(NO_READS);
+  const load = useCallback(() => {
+    void readThreadProposals(threadId)
+      .then((r) => {
+        setProposals(r.proposals);
+        setReads(r.reads);
+      })
+      .catch((e: unknown) => {
+        recordOpError({ label: "Read this thread's proposals", message: e instanceof Error ? e.message : String(e) });
+      });
+  }, [threadId]);
+  useEffect(() => {
+    setProposals([]);
+    load();
+  }, [load]);
+  useRerunOnChange(reads, load);
+  return proposals;
+}
+
+/** The proposal a tool call left (`proposal:N`), so an ACP transcript shows
+ *  it where the agent asked. `run_command` answers `{ kind: "proposed",
+ *  proposal }`; a lens action's refusal says "recorded as proposal:N".
+ *  Only oxplow's command tools: another tool quoting such text names none. */
+export function proposalOfTool(call: AcpToolCall): string | null {
+  const names = [call.name, call.title].filter((n): n is string => n !== null);
+  if (!names.some((n) => /^mcp__\S*__(run_command|run_lens_action)\b/.test(n))) return null;
+  const output = [...call.text, call.rawOutput === null ? "" : JSON.stringify(call.rawOutput)].join("\n");
+  const m = /\\*"proposal\\*"\s*:\s*\\*"(proposal:[0-9]+)\\*"|recorded as (proposal:[0-9]+)/.exec(output);
+  return m?.[1] ?? m?.[2] ?? null;
 }

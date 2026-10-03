@@ -1,11 +1,15 @@
 /// The Answers strip (P6.C2, target §13.3.1): beside a terminal thread's
 /// agent, the lenses it showed with `show_lens`, newest first, each live
 /// with Keep This. Collapsible — Escape inside it collapses it — and
-/// remembered per thread. Hidden while the thread has no answers.
+/// remembered per thread. Above them, what the agent asked for that waits
+/// for the person (P9.A3): its pending proposals, never collapsed. Hidden
+/// while the thread has neither.
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 
+import { decide, useThreadProposals } from "../../proposals.js";
 import type { TabRef } from "../../tabs/tabState.js";
+import { ProposalCard } from "../Proposals/ProposalCard.js";
 import { ThreadAnswer } from "./ThreadAnswer.js";
 import { useThreadAnswers } from "./useThreadAnswers.js";
 
@@ -33,6 +37,7 @@ function writeCollapsed(threadId: string, collapsed: boolean): void {
 
 export function AnswersStrip({ threadId, onOpenPage }: { threadId: string; onOpenPage?(ref: TabRef): void }) {
   const answers = useThreadAnswers(threadId);
+  const waiting = useThreadProposals(threadId).filter((p) => p.decision === "pending");
   const [collapsed, setCollapsedState] = useState(() => readCollapsed(threadId));
   useEffect(() => setCollapsedState(readCollapsed(threadId)), [threadId]);
   const setCollapsed = (next: boolean) => {
@@ -40,7 +45,7 @@ export function AnswersStrip({ threadId, onOpenPage }: { threadId: string; onOpe
     writeCollapsed(threadId, next);
   };
 
-  if (answers.length === 0) return null;
+  if (answers.length === 0 && waiting.length === 0) return null;
   return (
     <section
       data-testid="answers-strip"
@@ -49,18 +54,28 @@ export function AnswersStrip({ threadId, onOpenPage }: { threadId: string; onOpe
         if (e.key === "Escape" && !collapsed) setCollapsed(true);
       }}
     >
-      <h2 style={headingStyle}>
-        <button
-          type="button"
-          data-testid="answers-strip-toggle"
-          aria-expanded={!collapsed}
-          onClick={() => setCollapsed(!collapsed)}
-          style={toggleStyle}
-        >
-          {collapsed ? "▸" : "▾"} Answers ({answers.length})
-        </button>
-      </h2>
-      {collapsed ? null : (
+      {waiting.length === 0 ? null : (
+        <div data-testid="thread-proposals" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <h2 style={headingStyle}>Waiting for you ({waiting.length})</h2>
+          {waiting.map((p) => (
+            <ProposalCard key={p.id} proposal={p} onDecide={decide} />
+          ))}
+        </div>
+      )}
+      {answers.length === 0 ? null : (
+        <h2 style={headingStyle}>
+          <button
+            type="button"
+            data-testid="answers-strip-toggle"
+            aria-expanded={!collapsed}
+            onClick={() => setCollapsed(!collapsed)}
+            style={toggleStyle}
+          >
+            {collapsed ? "▸" : "▾"} Answers ({answers.length})
+          </button>
+        </h2>
+      )}
+      {collapsed || answers.length === 0 ? null : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, overflow: "auto", minHeight: 0 }}>
           {answers.map((a) => (
             <ThreadAnswer key={a.ref} answer={a} onOpenPage={onOpenPage} />
