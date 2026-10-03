@@ -10,7 +10,7 @@ import {
   flatten,
   type CommentRange,
 } from "./CommentDecorations.js";
-import { createComment, relinkComment, setCommentAnchor } from "../../api.js";
+import { createComment, relinkComment, relocateComment } from "../../api.js";
 import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
 import { extractContext } from "../Comments/anchor.js";
 import { partitionPageComments, stepComment } from "../Comments/pageCommentNav.js";
@@ -209,8 +209,9 @@ export function RichTextField({
   // resolved ranges into the decoration plugin. Recomputes when the
   // thread list changes or the document content is re-synced; live
   // typing in between is handled by the plugin mapping its set forward.
-  // A corrected/orphaned anchor is persisted via `setCommentAnchor`,
-  // which deliberately emits no event so this doesn't loop.
+  // A corrected/orphaned anchor is persisted via `relocateComment`; the
+  // stored anchor then equals the recomputed one, so the re-read it
+  // causes stops here.
   // Bumped (debounced) on every doc-changing transaction so the
   // re-anchor effect re-runs on live edits — not just on the debounced
   // `value` commit. Without this, deleting then retyping the quoted text
@@ -261,9 +262,9 @@ export function RichTextField({
         // location so the hint + context self-heal (and old comments
         // upgrade in place); guard keeps DB churn down.
         const aj = buildAnchorJson(doc, range.from, range.to, range.approx);
-        if (c.orphaned || c.selectors_json !== aj) void setCommentAnchor(c.id, aj, false);
+        if (c.orphaned || c.selectors_json !== aj) void relocateComment(c.id, aj, false);
       } else if (!c.orphaned) {
-        void setCommentAnchor(c.id, c.selectors_json, true);
+        void relocateComment(c.id, c.selectors_json, true);
       }
     }
     editor.view.dispatch(editor.state.tr.setMeta(commentDecorationsKey, ranges));

@@ -153,14 +153,6 @@ pub trait CommentStore: Send + Sync {
     async fn list_for_stream(&self, stream: &StreamId) -> Result<Vec<CommentThread>, DomainError>;
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<CommentThread>, DomainError>;
 
-    /// Persist a re-resolved selectors array (and whether it's orphaned).
-    async fn set_anchor(
-        &self,
-        id: CommentId,
-        selectors_json: &str,
-        orphaned: bool,
-    ) -> Result<(), DomainError>;
-
     /// Delete `resolved` and `orphaned` threads whose last activity is
     /// older than `retention_days`. Returns the number deleted.
     async fn cleanup(&self, retention_days: i64) -> Result<u64, DomainError>;

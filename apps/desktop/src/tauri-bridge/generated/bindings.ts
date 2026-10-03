@@ -364,11 +364,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setCommentAnchor: (commentId: CommentId, selectorsJson: string, orphaned: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_comment_anchor", { commentId, selectorsJson, orphaned })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listDeadLetters: (all: boolean | null) => typedError<DeadLetter[], IpcError>(__TAURI_INVOKE("list_dead_letters", { all })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

@@ -299,7 +299,6 @@ macro_rules! oxplow_command_table {
                 // comments
                 list_comments_for_target => $crate::commands::comments::list_comments_for_target { target_kind: String, target_id: String } -> Vec<::oxplow_domain::CommentThread>,
                 list_comments_for_stream => $crate::commands::comments::list_comments_for_stream { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::CommentThread>,
-                set_comment_anchor => $crate::commands::comments::set_comment_anchor { comment_id: ::oxplow_domain::CommentId, selectors_json: String, orphaned: bool } -> (),
                 // page_visit
                 record_page_visit => $crate::commands::page_visit::record_page_visit { page_kind: String, page_id: String, label: Option<String>, duration_ms: Option<i64>, thread_id: Option<String> } -> ::oxplow_db::PageVisit,
                 list_recent_page_visits => $crate::commands::page_visit::list_recent_page_visits { limit: u32, thread_id: Option<String> } -> Vec<::oxplow_db::PageVisit>,

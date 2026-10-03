@@ -1,11 +1,11 @@
 //! Cores for the `comments` command module — the reads of the threaded
-//! annotations anchored to a text selection on any page, and the
-//! renderer's passive anchor re-sync. Writes are the `knowledge.*`
-//! comment commands; views re-read `v_comment`.
+//! annotations anchored to a text selection on any page. Writes are the
+//! `knowledge.*` comment commands (the renderer's anchor re-locate
+//! included); views re-read `v_comment`.
 
 use oxplow_app::Services;
 use oxplow_domain::stores::CommentStore;
-use oxplow_domain::{CommentId, CommentTarget, CommentThread, StreamId};
+use oxplow_domain::{CommentTarget, CommentThread, StreamId};
 
 use crate::error::IpcError;
 
@@ -26,22 +26,6 @@ pub async fn list_comments_for_stream(
     stream_id: StreamId,
 ) -> Result<Vec<CommentThread>, IpcError> {
     Ok(svc.comment_store.list_for_stream(&stream_id).await?)
-}
-
-/// Persist a re-resolved anchor hint (and orphan flag) after the
-/// renderer re-locates — or fails to re-locate — the quote in current
-/// content. Off the bus:
-/// a passive sync of where the quote is now, not a person's edit.
-pub async fn set_comment_anchor(
-    svc: &Services,
-    comment_id: CommentId,
-    selectors_json: String,
-    orphaned: bool,
-) -> Result<(), IpcError> {
-    Ok(svc
-        .comment_store
-        .set_anchor(comment_id, &selectors_json, orphaned)
-        .await?)
 }
 
 #[cfg(test)]

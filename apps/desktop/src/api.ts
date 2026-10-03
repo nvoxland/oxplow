@@ -1486,12 +1486,14 @@ export async function setCommentStatus(commentId: string, status: CommentStatus)
   await runCommand("knowledge.update_comment", { comment: commentId, status });
 }
 
-export async function setCommentAnchor(
+/// Store where the renderer re-found a comment's quote (or that it is
+/// gone). An anchor already where it was leaves no record.
+export async function relocateComment(
   commentId: string,
   selectorsJson: string,
   orphaned: boolean,
 ): Promise<void> {
-  unwrap(await commands.setCommentAnchor(commentId, selectorsJson, orphaned));
+  await runCommand("knowledge.relocate_comment", { comment: commentId, selectors_json: selectorsJson, orphaned });
 }
 
 /// Re-attach an orphaned comment to a freshly-selected span: rewrites

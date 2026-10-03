@@ -298,9 +298,8 @@ pub const MANIFEST: &[Capability] = &[
     // (both); the rest are pure-UI edits (tsk140). ----
     both("list_dashboards"),
     both("get_dashboard"),
-    // ---- ui-only: comments (reads + the passive anchor re-sync; writes are knowledge.*) ----
+    // ---- ui-only: comments (reads; writes are knowledge.*) ----
     ui("list_comments_for_target"),
-    ui("set_comment_anchor"),
     // ---- ui-only: wiki (writes are the knowledge.* commands) ----
     // ---- ui-only: wiki freshness ----
     // ---- ui-only: page visits ----

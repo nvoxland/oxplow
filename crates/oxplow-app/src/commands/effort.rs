@@ -203,6 +203,7 @@ pub fn open_command(registry: WorkItemsRegistry) -> Command {
             inverse: None,
             events: Vec::new(),
             after_commit: None,
+            unchanged: false,
         })
     }));
     Command::new(
@@ -265,6 +266,7 @@ pub fn close_command(registry: WorkItemsRegistry) -> Command {
             inverse: None,
             events: Vec::new(),
             after_commit: None,
+            unchanged: false,
         })
     }));
     Command::new(

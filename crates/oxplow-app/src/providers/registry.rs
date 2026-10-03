@@ -2611,6 +2611,7 @@ fn commands(instance: &Arc<Instance>) -> Result<Vec<Command>, String> {
                             }),
                             events,
                             after_commit: None,
+                            unchanged: false,
                         })
                     })
                 })),

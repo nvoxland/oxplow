@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
-import { createComment, relinkComment, setCommentAnchor } from "../../api.js";
+import { createComment, relinkComment, relocateComment } from "../../api.js";
 import {
   clearCommentReveal,
   peekPendingCommentReveal,
@@ -160,10 +160,10 @@ export const MonacoCommentLayer = forwardRef<
         // location so the position hint + context self-heal (and old
         // comments upgrade in place). The equality guard keeps churn down.
         const aj = buildAnchorJson(model, text, range, approx);
-        if (c.orphaned || c.selectors_json !== aj) void setCommentAnchor(c.id, aj, false);
+        if (c.orphaned || c.selectors_json !== aj) void relocateComment(c.id, aj, false);
         map.push({ decoId: "", commentId: c.id });
       } else if (!c.orphaned) {
-        void setCommentAnchor(c.id, c.selectors_json, true);
+        void relocateComment(c.id, c.selectors_json, true);
       }
     }
 

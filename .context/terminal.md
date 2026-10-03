@@ -327,7 +327,7 @@ surface, the xterm analog of `MonacoCommentLayer`.
 - **Orphaning is expected.** Scrollback wraps and evicts (5000-line cap),
   so terminal anchors orphan far more readily than editor anchors —
   acceptable; the comment still lists in the inbox and the agent still
-  answers it. No `set_comment_anchor` self-heal loop here (unlike the
+  answers it. No `relocateComment` self-heal loop here (unlike the
   editors): the buffer is too volatile to persist a re-resolved hint.
 
 ## Adding a new link kind

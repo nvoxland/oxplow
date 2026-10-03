@@ -239,6 +239,7 @@ fn show(target: LensTarget) -> Command {
             inverse: None,
             events: vec![event],
             after_commit: None,
+            unchanged: false,
         })
     }));
     Command::new(
@@ -357,6 +358,7 @@ fn keep(target: LensTarget) -> Command {
                 inverse: None,
                 events: vec![event],
                 after_commit: None,
+                unchanged: false,
             })
         })
     }));

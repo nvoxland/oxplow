@@ -25,7 +25,6 @@ command):
 | Write | Why it isn't a command |
 |---|---|
 | select a thread, switch stream, report the open page | UI selection pointers, not project facts |
-| a comment's anchor re-locate (`set_comment_anchor`) | a passive sync of where the quote sits in the current content, run by the renderer on load — not a person's edit (relinking an orphan is `knowledge.update_comment`) |
 | page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit`. Their views re-read `v_page_visit` / `v_usage_event` on `ModelsChanged` (P8.A10) |
 | follow-ups, background-task progress | in memory and transient |
 | hook ingest, ACP prompt / cancel / permission answers, terminal input, `await_user` | agent-session activity, born as `agent.*` events (§5.1 of target-architecture.md); oxplow never synthesizes agent input |
@@ -38,14 +37,18 @@ command):
 | AI providers and roles, credentials, approving a program or source | secrets and consent: unreachable from `run_command`, so no invoker list can ever open them to an agent, and no audit row holds a secret |
 | a person's global provider instances (`instances.yaml`, P9.B2: `add_provider_instance` / `set_provider_instance` / `remove_provider_instance` on a global one) | the person's own machine-level settings, like `ai.yaml`: what runs in every project of theirs is theirs alone to say — the registry writes the file only for `Actor::Human` (a project's instances still go through `config.set`) |
 
-**Guards** (`crates/oxplow-app/src/source_guards.rs`):
-`rpc_and_mcp_never_write_the_database_themselves` fails on a
-transaction, a rehearsal or a store's `_tx` core in oxplow-rpc or
-oxplow-mcp; `rpc_and_mcp_store_writes_are_listed_off_the_bus` fails on a
-call to any store method that isn't a read (`get…`, `list…`, …) unless
+**Guards** (`crates/oxplow-app/src/source_guards.rs`), over the thin
+callers — oxplow-rpc, oxplow-mcp and oxplow-control-plane:
+`thin_callers_never_write_the_database_themselves` fails on a
+transaction, a rehearsal or a store's `_tx` core;
+`thin_caller_store_writes_are_listed_off_the_bus` fails on a call to any
+store method that isn't a read (`get…`, `list…`, `recent…`, …) unless
 its `(file, call)` is in `OFF_BUS` with a reason this table gives — the
 stores keep their async write methods for the services and tests that
-own them, so the scan, not the compiler, holds the line (tsk785);
+own them, so the scan, not the compiler, holds the line (tsk785). The
+scan reads code with comments dropped and the whitespace around each
+`.` removed, so a chain laid out over several lines
+(`svc⏎.comment_store⏎.set_anchor(`) is one call (tsk861);
 `ui_events_have_their_pinned_sources` pins which file may
 push each UI event (its `EMITTERS` table), and
 `every_ui_event_has_an_emitter` fails on a variant with none (a listener
@@ -723,9 +726,11 @@ surface passes one. The reads stay RPCs (`list_comments_for_target`,
 `list_comments_for_stream`; MCP `list_comments`).
 
 Views re-read on `ModelsChanged` naming `v_comment` (comments and their
-messages) — `subscribeCommentEvents` in `api.ts`. The one write left off
-the bus is `set_comment_anchor`, the renderer's passive re-anchor sync
-(see the table above).
+messages) — `subscribeCommentEvents` in `api.ts`. The renderer's
+re-anchor after it re-finds a quote is `knowledge.relocate_comment`
+(`relocateComment`, tsk861): recorded when the anchor moved; one already
+where it was is `HandlerOutput::unchanged` and leaves no audit row and no
+event (commands.md step 5), so the re-read it causes ends the loop.
 
 ## Search index (read model + indexer)
 

@@ -1,7 +1,7 @@
 //! Source-scan guards over the workspace's production code (P7.B6,
 //! P8.A1, `.context/ipc-and-stores.md`): what the compiler can't hold —
-//! who may push which UI event, and that the RPC and MCP layers never
-//! write the database themselves.
+//! who may push which UI event, and that the thin callers (the RPC, MCP
+//! and control-plane layers) never write the database themselves.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -189,15 +189,26 @@ fn ui_events_have_their_pinned_sources() {
     );
 }
 
-/// P8.A1: the RPC and MCP layers are thin callers — a write is a command
-/// on the bus, never a transaction or a store's `_tx` core of their own.
+/// The layers that only call into oxplow-app: the RPC dispatch, the MCP
+/// tools and the control plane (hooks, OTLP). A write from one of them is
+/// a command on the bus, or a service's own ingest — never its own.
+fn thin_caller(path: &str) -> bool {
+    [
+        "crates/oxplow-rpc/",
+        "crates/oxplow-mcp/",
+        "crates/oxplow-control-plane/",
+    ]
+    .iter()
+    .any(|p| path.starts_with(p))
+}
+
+/// P8.A1: the thin callers never open a transaction or call a store's
+/// `_tx` core of their own.
 #[test]
-fn rpc_and_mcp_never_write_the_database_themselves() {
+fn thin_callers_never_write_the_database_themselves() {
     let offenders: Vec<String> = production_sources()
         .into_iter()
-        .filter(|(path, _)| {
-            path.starts_with("crates/oxplow-rpc/") || path.starts_with("crates/oxplow-mcp/")
-        })
+        .filter(|(path, _)| thin_caller(path))
         .flat_map(|(path, text)| {
             text.lines()
                 .enumerate()
@@ -216,9 +227,9 @@ fn rpc_and_mcp_never_write_the_database_themselves() {
     assert_eq!(offenders, Vec::<String>::new());
 }
 
-/// The writes oxplow-rpc and oxplow-mcp make through a store themselves,
-/// each with the off-bus reason the doc's table gives (`ipc-and-stores.md`
-/// "What stays off the bus") — the needle that table must contain.
+/// The writes the thin callers make through a store themselves, each with
+/// the off-bus reason the doc's table gives (`ipc-and-stores.md` "What
+/// stays off the bus") — the needle that table must contain.
 const OFF_BUS: &[(&str, &str, &str)] = &[
     (
         "crates/oxplow-rpc/src/commands/semantic.rs",
@@ -230,57 +241,110 @@ const OFF_BUS: &[(&str, &str, &str)] = &[
         "usage_store.record",
         "usage recording",
     ),
+    (
+        "crates/oxplow-rpc/src/commands/page_visit.rs",
+        "page_visit_store.record",
+        "page visits",
+    ),
+    (
+        "crates/oxplow-rpc/src/commands/page_visit.rs",
+        "page_visit_store.forget_page",
+        "forgetting a page",
+    ),
 ];
 
 /// A store method that only reads, by its name.
 fn reads(method: &str) -> bool {
-    const READS: [&str; 10] = [
-        "get", "list", "read", "primary", "current", "selected", "stats", "find", "count", "search",
+    const READS: [&str; 11] = [
+        "get", "list", "read", "primary", "current", "selected", "stats", "find", "count",
+        "search", "recent",
     ];
     READS
         .iter()
         .any(|r| method == *r || method.starts_with(&format!("{r}_")))
 }
 
-/// tsk785: a store call in oxplow-rpc / oxplow-mcp is a read, or a write
-/// listed in `OFF_BUS` with its reason — and the doc's off-bus table names
-/// each listed one. A write through a store's async method used to slip
-/// past the transaction scan above.
+/// `text`'s code with its `//` comments gone and the whitespace around
+/// each `.` removed, so a call chain split across lines
+/// (`svc\n    .comment_store\n    .set_anchor(`) reads as one.
+fn joined_code(text: &str) -> String {
+    let code: String = text
+        .lines()
+        .map(|line| line.split("//").next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut out = String::with_capacity(code.len());
+    let mut chars = code.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c.is_whitespace() {
+            while chars.peek().is_some_and(|n| n.is_whitespace()) {
+                chars.next();
+            }
+            // Before a `.` or after one, it is the chain's own layout.
+            if chars.peek() == Some(&'.') || out.ends_with('.') {
+                continue;
+            }
+            out.push(' ');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The store writes in `text`: each `<x>_store.<method>(` call whose
+/// method doesn't read, however the chain is laid out.
+fn store_writes(text: &str) -> Vec<String> {
+    let code = joined_code(text);
+    let mut out = Vec::new();
+    for (i, _) in code.match_indices("_store.") {
+        let start = code[..i]
+            .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .map_or(0, |p| p + 1);
+        let rest = &code[i + "_store.".len()..];
+        let method: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if rest[method.len()..].starts_with('(') && !reads(&method) {
+            out.push(format!("{}_store.{method}", &code[start..i]));
+        }
+    }
+    out
+}
+
+/// tsk861: a call chain laid out over several lines is one call.
 #[test]
-fn rpc_and_mcp_store_writes_are_listed_off_the_bus() {
+fn a_multiline_store_write_is_caught() {
+    let text = "Ok(svc\n        .comment_store // where it is now\n        .set_anchor(id, &s, o)\n        .await?)\nsvc.thread_store.get(id)";
+    assert_eq!(store_writes(text), vec!["comment_store.set_anchor"]);
+}
+
+/// tsk785: a store call in a thin caller is a read, or a write listed in
+/// `OFF_BUS` with its reason — and the doc's off-bus table names each
+/// listed one. A write through a store's async method used to slip past
+/// the transaction scan above, and one laid out over several lines past
+/// this one (tsk861).
+#[test]
+fn thin_caller_store_writes_are_listed_off_the_bus() {
     let mut found: BTreeSet<(String, String)> = BTreeSet::new();
     let mut offenders = Vec::new();
     for (path, text) in production_sources() {
-        if !(path.starts_with("crates/oxplow-rpc/") || path.starts_with("crates/oxplow-mcp/")) {
+        if !thin_caller(&path) {
             continue;
         }
-        for (n, line) in text.lines().enumerate() {
-            let code = line.split("//").next().unwrap_or("");
-            for (i, _) in code.match_indices("_store.") {
-                let start = code[..i]
-                    .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
-                    .map_or(0, |p| p + 1);
-                let rest = &code[i + "_store.".len()..];
-                let method: String = rest
-                    .chars()
-                    .take_while(|c| c.is_alphanumeric() || *c == '_')
-                    .collect();
-                if !rest[method.len()..].starts_with('(') || reads(&method) {
-                    continue;
-                }
-                let call = format!("{}_store.{method}", &code[start..i]);
-                if OFF_BUS.iter().any(|(p, c, _)| *p == path && *c == call) {
-                    found.insert((path.clone(), call));
-                } else {
-                    offenders.push(format!("{path}:{}: {}", n + 1, line.trim()));
-                }
+        for call in store_writes(&text) {
+            if OFF_BUS.iter().any(|(p, c, _)| *p == path && *c == call) {
+                found.insert((path.clone(), call));
+            } else {
+                offenders.push(format!("{path}: {call}"));
             }
         }
     }
     assert_eq!(
         offenders,
         Vec::<String>::new(),
-        "a write through a store from RPC/MCP: make it a command, or list it in OFF_BUS and the doc's table"
+        "a write through a store from a thin caller: make it a command, or list it in OFF_BUS and the doc's table"
     );
     let stale: Vec<_> = OFF_BUS
         .iter()

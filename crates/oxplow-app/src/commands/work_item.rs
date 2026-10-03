@@ -421,6 +421,7 @@ fn dispatching(
                 inverse,
                 events: out.events,
                 after_commit: None,
+                unchanged: false,
             })
         }) as super::ExternalFuture
     });
@@ -557,6 +558,7 @@ fn tx_transition(registry: WorkItemsRegistry) -> Arc<TxHandler> {
             }),
             events: Vec::new(),
             after_commit: None,
+            unchanged: false,
         })
     })
 }
@@ -682,6 +684,7 @@ fn tx_create(registry: WorkItemsRegistry) -> Arc<TxHandler> {
             inverse: None,
             events: Vec::new(),
             after_commit: None,
+            unchanged: false,
         })
     })
 }
@@ -808,6 +811,7 @@ fn tx_update(registry: WorkItemsRegistry) -> Arc<TxHandler> {
             }),
             events: Vec::new(),
             after_commit: None,
+            unchanged: false,
         })
     })
 }
@@ -892,6 +896,7 @@ fn tx_link(registry: WorkItemsRegistry) -> Arc<TxHandler> {
             inverse: None,
             events: vec![event],
             after_commit: None,
+            unchanged: false,
         })
     })
 }
@@ -964,6 +969,7 @@ fn tx_comment(registry: WorkItemsRegistry) -> Arc<TxHandler> {
             inverse: None,
             events: vec![event],
             after_commit: None,
+            unchanged: false,
         })
     })
 }
@@ -1015,6 +1021,7 @@ fn tx_delete(registry: WorkItemsRegistry) -> Arc<TxHandler> {
             inverse: None,
             events: Vec::new(),
             after_commit: None,
+            unchanged: false,
         })
     })
 }
@@ -1207,6 +1214,7 @@ pub fn reorder_command(registry: WorkItemsRegistry) -> Command {
             }),
             events: Vec::new(),
             after_commit: None,
+            unchanged: false,
         })
     }));
     Command::new(spec, handler).expect("work_item.reorder registers")
@@ -1242,6 +1250,7 @@ pub fn move_command(registry: WorkItemsRegistry) -> Command {
             }),
             events: Vec::new(),
             after_commit: None,
+            unchanged: false,
         })
     }));
     Command::new(spec, handler).expect("work_item.move registers")

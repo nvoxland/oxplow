@@ -72,6 +72,7 @@ impl Compose {
                 inverse: nested.inverse,
                 events: nested.events.into_iter().chain(events).collect(),
                 after_commit: nested.after_commit,
+                unchanged: false,
             })
         });
         Handler::Compose(Arc::new(Compose { compose, tx }))

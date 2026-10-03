@@ -211,6 +211,7 @@ pub(crate) fn change(
         after_commit: Some(Box::new(move || {
             apply_committed(&committed, &key_owned, value.as_ref())
         })),
+        unchanged: false,
     })
 }
 

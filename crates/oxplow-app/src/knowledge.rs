@@ -728,6 +728,7 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
             inverse: None,
             events: Vec::new(),
             after_commit: None,
+            unchanged: false,
         })
     }));
 
@@ -755,6 +756,7 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
             inverse: None,
             events: Vec::new(),
             after_commit: None,
+            unchanged: false,
         })
     }));
 
@@ -792,6 +794,7 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
             inverse: None,
             events: Vec::new(),
             after_commit: None,
+            unchanged: false,
         })
     }));
 
@@ -833,6 +836,7 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
             inverse: None,
             events: Vec::new(),
             after_commit: None,
+            unchanged: false,
         })
     }));
 

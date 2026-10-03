@@ -4,15 +4,15 @@
 //! `oxplow_db::comment_store::*_tx`, logging `knowledge.comment.*` caused
 //! by the run. The author is the actor — a person `user`, an agent
 //! `agent` — never something a caller names. An agent comments on its own
-//! stream, its comments in its own thread. Re-locating a comment's anchor
-//! after a render is a passive sync, not an intent, so it stays off the
-//! bus (`set_comment_anchor`).
+//! stream, its comments in its own thread. The renderer re-locating a
+//! comment's anchor is `knowledge.relocate_comment`: recorded when the
+//! anchor moved, nothing when it is where it was.
 
 use std::sync::Arc;
 
 use oxplow_db::comment_store::{
-    add_message_tx, create_tx, delete_tx, get_tx, relink_tx, set_intent_tx, set_status_tx,
-    NewComment,
+    add_message_tx, create_tx, delete_tx, get_tx, relink_tx, set_anchor_tx, set_intent_tx,
+    set_status_tx, NewComment,
 };
 use oxplow_domain::refs::build::{stream_ref, thread_ref};
 use oxplow_domain::{
@@ -31,6 +31,7 @@ pub const ADD: &str = "knowledge.add_comment";
 pub const REPLY: &str = "knowledge.reply_comment";
 pub const UPDATE: &str = "knowledge.update_comment";
 pub const DELETE: &str = "knowledge.delete_comment";
+pub const RELOCATE: &str = "knowledge.relocate_comment";
 
 /// A person, or a lens acting for one.
 const PEOPLE: Invokers = Invokers {
@@ -94,6 +95,18 @@ pub struct UpdateInput {
     /// … and its anchor (both, or neither).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selectors_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RelocateInput {
+    /// The comment (`cmt12`).
+    pub comment: String,
+    /// Where its quote sits in the content as rendered now (the W3C
+    /// selectors array, as JSON) — its last known place when `orphaned`.
+    pub selectors_json: String,
+    /// The quote is no longer in the content.
+    pub orphaned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -376,6 +389,45 @@ pub fn delete_command() -> Command {
     .expect("knowledge.delete_comment is a valid command")
 }
 
+/// `knowledge.relocate_comment { comment, selectors_json, orphaned }`:
+/// the renderer, having found a comment's quote in the content as it is
+/// now (or not), stores where. Not a relink — that is a person choosing a
+/// new span (`update_comment`). An anchor already where it was changes
+/// nothing and leaves no record (`HandlerOutput::unchanged`).
+pub fn relocate_command() -> Command {
+    Command::new(
+        spec(
+            RELOCATE,
+            "Store where a comment's quote (`cmt12`) sits in its page's content now \
+             (`selectors_json`), or that it is gone (`orphaned`). The renderer's, after it \
+             re-finds the quote.",
+            schema::<RelocateInput>(),
+            PEOPLE,
+            Confirm::Never,
+            false,
+        ),
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            let input: RelocateInput = parse(input)?;
+            let id = comment_id(&input.comment)?;
+            let before = load(ctx, id)?.comment;
+            if before.selectors_json == input.selectors_json && before.orphaned == input.orphaned {
+                return Ok(HandlerOutput {
+                    result: json!({ "comment": input.comment, "moved": false }),
+                    unchanged: true,
+                    ..HandlerOutput::default()
+                });
+            }
+            let events = set_anchor_tx(ctx.conn, id, &input.selectors_json, input.orphaned)?;
+            Ok(HandlerOutput {
+                result: json!({ "comment": input.comment, "moved": true }),
+                events,
+                ..HandlerOutput::default()
+            })
+        })),
+    )
+    .expect("knowledge.relocate_comment is a valid command")
+}
+
 /// The comment commands, for the bus.
 pub fn commands() -> Vec<Command> {
     vec![
@@ -383,6 +435,7 @@ pub fn commands() -> Vec<Command> {
         reply_command(),
         update_command(),
         delete_command(),
+        relocate_command(),
     ]
 }
 
@@ -453,6 +506,98 @@ mod tests {
             e.envelope.event_type == "knowledge.comment.written"
                 && e.envelope.cause.as_ref() == out.event_id.as_ref()
         }));
+    }
+
+    /// tsk861: a moved anchor is stored and recorded; one already where
+    /// it was writes nothing — no audit row, no event — and an agent can't
+    /// relocate (it is the renderer's).
+    #[tokio::test]
+    async fn an_unchanged_anchor_writes_nothing() {
+        let fx = services_with_effort().await;
+        let c = add(
+            &fx,
+            &Actor::Human,
+            comment_on(&stream_ref(StreamId::new(1)), None),
+        )
+        .await
+        .unwrap();
+        let id = c["comment"]["id"].as_str().unwrap().to_string();
+        let cid = CommentId::try_from_str(&id).unwrap();
+        let relocate = |selectors: &str, orphaned: bool| json!({ "comment": id, "selectors_json": selectors, "orphaned": orphaned });
+        let run = |actor: Actor, input: Value| {
+            let bus = fx.svc.commands.clone();
+            async move { bus.run(&actor, RELOCATE, input, false).await }
+        };
+
+        let moved = run(Actor::Human, relocate("{\"from\":4}", false))
+            .await
+            .unwrap();
+        assert_eq!(moved.result["moved"], true);
+        assert!(moved.audit_id.is_some());
+        let stored = fx.svc.comment_store.get(cid).await.unwrap().unwrap();
+        assert_eq!(stored.comment.selectors_json, "{\"from\":4}");
+
+        let audits = fx
+            .svc
+            .commands
+            .audit_store()
+            .list_recent(500)
+            .await
+            .unwrap()
+            .len();
+        let events = fx
+            .svc
+            .event_log_store
+            .read_after(0, 5000)
+            .await
+            .unwrap()
+            .len();
+        let again = run(Actor::Human, relocate("{\"from\":4}", false))
+            .await
+            .unwrap();
+        assert_eq!(again.result["moved"], false);
+        assert_eq!((again.audit_id, again.event_id), (None, None));
+        assert_eq!(
+            fx.svc
+                .commands
+                .audit_store()
+                .list_recent(500)
+                .await
+                .unwrap()
+                .len(),
+            audits
+        );
+        assert_eq!(
+            fx.svc
+                .event_log_store
+                .read_after(0, 5000)
+                .await
+                .unwrap()
+                .len(),
+            events
+        );
+        let after = fx.svc.comment_store.get(cid).await.unwrap().unwrap();
+        assert_eq!(after.comment.updated_at, stored.comment.updated_at);
+
+        let orphaned = run(Actor::Human, relocate("{\"from\":4}", true))
+            .await
+            .unwrap();
+        assert!(orphaned.audit_id.is_some());
+        assert!(
+            fx.svc
+                .comment_store
+                .get(cid)
+                .await
+                .unwrap()
+                .unwrap()
+                .comment
+                .orphaned
+        );
+
+        let err = run(agent(&fx), relocate("{\"from\":5}", false))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
     }
 
     /// Resolving undoes to open; deleting is a person's and asks first.

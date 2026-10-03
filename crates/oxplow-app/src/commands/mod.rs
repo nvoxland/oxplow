@@ -85,6 +85,12 @@ pub struct HandlerOutput {
     /// already recorded. The handler itself must stay pure: it can run
     /// more than once (`Database::transaction` retries on SQLITE_BUSY).
     pub after_commit: Option<Box<dyn FnOnce() + Send + Sync>>,
+    /// The run found nothing to change and wrote nothing (a re-located
+    /// comment anchor already where it was). A call that changed nothing
+    /// leaves no record — no audit row, no `command.executed` — like a
+    /// read; an undo, an approval or an effect's reaction is still
+    /// recorded, since its row must be marked.
+    pub unchanged: bool,
 }
 
 /// One child of a composite run (`CommandBus::run_nested`): what ran,
@@ -846,6 +852,9 @@ impl CommandBus {
                             depth: 0,
                         };
                         let out = match handler(&ctx, input_c.clone()) {
+                            Ok(out) if out.unchanged && matches!(origin_tx, RunOrigin::Call) => {
+                                return Ok((out, None));
+                            }
                             Ok(out) => out,
                             // A lock blip retries the whole run.
                             Err(CommandError::Busy { message }) => {
@@ -903,11 +912,12 @@ impl CommandBus {
                                 &recorded,
                             )?;
                         }
-                        Ok((out, recorded))
+                        Ok((out, Some(recorded)))
                     })
                     .await;
                 match ran {
-                    Ok((out, recorded)) => Ok(finish(out, recorded)),
+                    Ok((out, Some(recorded))) => Ok(finish(out, recorded)),
+                    Ok((out, None)) => Ok(unrecorded(out)),
                     Err(db_err) => {
                         if let Some(e) = lost.lock().take() {
                             return Err(e);
@@ -923,6 +933,9 @@ impl CommandBus {
             Resolved::External(handler) => {
                 self.claim(&origin).await?;
                 match handler(actor.clone(), input.clone()).await {
+                    Ok(out) if out.unchanged && matches!(origin, RunOrigin::Call) => {
+                        Ok(unrecorded(out))
+                    }
                     Ok(out) => Ok(self
                         .record_external(actor, spec, &input, out, origin.clone())
                         .await),
@@ -1532,6 +1545,7 @@ impl CommandBus {
             inverse: out.inverse.clone(),
             events: out.events.clone(),
             after_commit: None,
+            unchanged: false,
         };
         let recorded = self
             .db
@@ -1712,6 +1726,20 @@ fn finish_undo_claim_tx(
 struct Recorded {
     audit_id: i64,
     event_id: oxplow_domain::EventId,
+}
+
+/// A call that changed nothing (`HandlerOutput::unchanged`): its answer,
+/// with no record.
+fn unrecorded(mut out: HandlerOutput) -> CommandOutcome {
+    if let Some(after) = out.after_commit.take() {
+        after();
+    }
+    CommandOutcome {
+        result: out.result,
+        audit_id: None,
+        event_id: None,
+        inverse: None,
+    }
 }
 
 fn finish(mut out: HandlerOutput, recorded: Recorded) -> CommandOutcome {
@@ -1925,6 +1953,7 @@ mod tests {
                 inverse: None,
                 events: Vec::new(),
                 after_commit: None,
+                unchanged: false,
             })
         }));
         bus.register(
@@ -2018,6 +2047,7 @@ mod tests {
                     },
                 )],
                 after_commit: None,
+                unchanged: false,
             })
         }))
     }
@@ -2144,6 +2174,7 @@ mod tests {
                         inverse: nested.inverse,
                         events: nested.events,
                         after_commit: nested.after_commit,
+                        unchanged: false,
                     })
                 })),
             )

@@ -157,6 +157,7 @@ fn set_evidence(
         inverse: Some(inverse),
         events: vec![event],
         after_commit: None,
+        unchanged: false,
     })
 }
 
@@ -288,6 +289,7 @@ fn review_decision(
         }),
         events: vec![event],
         after_commit: None,
+        unchanged: false,
     })
 }
 

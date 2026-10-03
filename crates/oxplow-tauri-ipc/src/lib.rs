@@ -161,7 +161,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // comments
             commands::generated::list_comments_for_target,
             commands::generated::list_comments_for_stream,
-            commands::generated::set_comment_anchor,
             // wiki
             // events (dead-letter queue)
             commands::generated::list_dead_letters,

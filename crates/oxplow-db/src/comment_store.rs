@@ -464,6 +464,27 @@ pub fn relink_tx(
     written(conn, id.value()).map_err(sql)
 }
 
+/// Persist a re-resolved anchor (and whether its quote is gone).
+pub fn set_anchor_tx(
+    conn: &rusqlite::Connection,
+    id: CommentId,
+    selectors_json: &str,
+    orphaned: bool,
+) -> Result<Vec<Envelope>, DomainError> {
+    conn.execute(
+        "UPDATE comment SET selectors_json = ?2, orphaned = ?3, updated_at = ?4
+             WHERE id = ?1",
+        params![
+            id.value(),
+            selectors_json,
+            orphaned as i64,
+            ts_to_string(Timestamp::now())
+        ],
+    )
+    .map_err(sql)?;
+    written(conn, id.value()).map_err(sql)
+}
+
 /// Delete a comment; its messages cascade.
 pub fn delete_tx(conn: &rusqlite::Connection, id: CommentId) -> Result<Vec<Envelope>, DomainError> {
     let gone = deleted(conn, "id = ?1", params![id.value()]).map_err(sql)?;
@@ -537,29 +558,6 @@ impl CommentStore for SqliteCommentStore {
         self.db
             .call(move |conn| list_threads(conn, "thread_id = ?1", &[&thread.value()]))
             .await
-    }
-
-    async fn set_anchor(
-        &self,
-        id: CommentId,
-        selectors_json: &str,
-        orphaned: bool,
-    ) -> Result<(), DomainError> {
-        let selectors_json = selectors_json.to_string();
-        self.logged(move |conn| {
-            conn.execute(
-                "UPDATE comment SET selectors_json = ?2, orphaned = ?3, updated_at = ?4
-                     WHERE id = ?1",
-                params![
-                    id.value(),
-                    selectors_json,
-                    orphaned as i64,
-                    ts_to_string(Timestamp::now())
-                ],
-            )?;
-            Ok(((), written(conn, id.value())?))
-        })
-        .await
     }
 
     async fn cleanup(&self, retention_days: i64) -> Result<u64, DomainError> {
@@ -675,6 +673,14 @@ mod tests {
 
     fn now() -> Timestamp {
         Timestamp::from_unix_ms(1_700_000_000_000)
+    }
+
+    /// `set_anchor_tx` in a transaction of its own.
+    async fn set_anchor(db: &Database, id: CommentId, selectors: &str, orphaned: bool) {
+        let selectors = selectors.to_string();
+        db.transaction(move |tx| set_anchor_tx(tx, id, &selectors, orphaned))
+            .await
+            .unwrap();
     }
 
     async fn fixture() -> (Database, StreamId, ThreadId) {
@@ -950,8 +956,10 @@ mod tests {
     #[tokio::test]
     async fn relink_rewrites_quote_and_clears_orphan() {
         let (db, stream, thread) = fixture().await;
-        let store =
-            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
+        let store = SqliteCommentStore::new(
+            db.clone(),
+            oxplow_domain::vocabulary::VocabularyHandle::core(),
+        );
         let c = store
             .create(
                 &stream,
@@ -968,10 +976,7 @@ mod tests {
             .await
             .unwrap();
         // Mark it orphaned (quote vanished).
-        store
-            .set_anchor(c.comment.id, c.comment.selectors_json.as_str(), true)
-            .await
-            .unwrap();
+        set_anchor(&db, c.comment.id, &c.comment.selectors_json, true).await;
         assert!(
             store
                 .get(c.comment.id)
@@ -1160,8 +1165,10 @@ mod tests {
     #[tokio::test]
     async fn set_anchor_marks_orphaned() {
         let (db, stream, thread) = fixture().await;
-        let store =
-            SqliteCommentStore::new(db, oxplow_domain::vocabulary::VocabularyHandle::core());
+        let store = SqliteCommentStore::new(
+            db.clone(),
+            oxplow_domain::vocabulary::VocabularyHandle::core(),
+        );
         let c = store
             .create(
                 &stream,
@@ -1177,10 +1184,7 @@ mod tests {
             )
             .await
             .unwrap();
-        store
-            .set_anchor(c.comment.id, "{\"from\":9,\"to\":9}", true)
-            .await
-            .unwrap();
+        set_anchor(&db, c.comment.id, "{\"from\":9,\"to\":9}", true).await;
         let got = store.get(c.comment.id).await.unwrap().unwrap();
         assert!(got.comment.orphaned);
         assert_eq!(got.comment.selectors_json, "{\"from\":9,\"to\":9}");

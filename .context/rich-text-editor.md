@@ -202,7 +202,8 @@ item.thread_id }`.
   **cross-block selections match** (capture uses the same flatten, so
   stored quote/context agree). `buildAnchorJson` re-persists the enriched
   anchor (from/to + textOffset + prefix/suffix + `approx`) via
-  `setCommentAnchor` (no event → no loop); fuzzy matches get the dashed
+  `relocateComment` (`knowledge.relocate_comment`; the stored anchor
+  then equals the recomputed one, so the re-read stops); fuzzy matches get the dashed
   `--approx` highlight.
 - **Typed context on create.** When composing a comment,
   `startCommentForSelection` captures `referencedRefs` from the live DOM

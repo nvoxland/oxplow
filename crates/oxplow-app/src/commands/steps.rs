@@ -349,6 +349,7 @@ impl CommandBus {
             inverse: None,
             events,
             after_commit: None,
+            unchanged: false,
         };
         let (actor_c, spec_c, input_c) = (actor.clone(), spec.clone(), input.clone());
         let vocabulary = self.log.vocabulary().clone();
