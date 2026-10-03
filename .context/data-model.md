@@ -42,7 +42,8 @@ a changed contract at the same version is refused) and `model_test`
 
 **Changed tables per commit** (P4.6, `crates/oxplow-db/src/changes.rs`):
 every pooled connection's init installs SQLite's preupdate, commit and
-rollback hooks; a commit's touched tables are published after each
+rollback hooks; a commit's touched tables — and which of them it
+rewrote (updated or deleted in, P8.B3) — are published after each
 `Database::call` / `call_mut` / `transaction` / `read`
 (`Database::subscribe_changes`), and `models_changed` maps them to models
 through `model_input`. A write needs nothing to be seen — the hooks see

@@ -4,7 +4,9 @@
 //! - a **preupdate** hook notes each table a row change touches — unlike the
 //!   plain update hook it fires for WITHOUT ROWID tables, and while it is set
 //!   SQLite skips the truncate shortcut, so a bare `DELETE FROM t` reports
-//!   too;
+//!   too — and whether the change only inserted or **rewrote** (an UPDATE or
+//!   a DELETE, P8.B3): appending to an incremental model is only right when
+//!   none of its inputs was rewritten;
 //! - a **commit** hook moves the connection's noted tables to the committed
 //!   set;
 //! - a **rollback** hook forgets them.
@@ -20,15 +22,54 @@ use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 use tokio::sync::broadcast;
 
-/// The tables one or more commits touched.
-pub type TablesChanged = Arc<BTreeSet<String>>;
+/// What one or more commits touched.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Changed {
+    /// Every table a row changed in.
+    pub tables: BTreeSet<String>,
+    /// The ones it updated or deleted rows in, not only inserted into.
+    pub rewrote: BTreeSet<String>,
+}
+
+impl Changed {
+    /// Only inserts, into `tables`.
+    pub fn inserted<I: IntoIterator<Item = String>>(tables: I) -> Self {
+        Self {
+            tables: tables.into_iter().collect(),
+            rewrote: BTreeSet::new(),
+        }
+    }
+
+    pub fn contains(&self, table: &str) -> bool {
+        self.tables.contains(table)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tables.is_empty()
+    }
+
+    fn note(&mut self, table: &str, rewrote: bool) {
+        self.tables.insert(table.to_string());
+        if rewrote {
+            self.rewrote.insert(table.to_string());
+        }
+    }
+
+    fn extend(&mut self, other: Changed) {
+        self.tables.extend(other.tables);
+        self.rewrote.extend(other.rewrote);
+    }
+}
+
+/// What one or more commits touched, as published.
+pub type TablesChanged = Arc<Changed>;
 
 #[derive(Default)]
 struct State {
-    /// Per connection: tables touched by its open transaction.
-    pending: HashMap<u64, BTreeSet<String>>,
+    /// Per connection: what its open transaction touched.
+    pending: HashMap<u64, Changed>,
     /// Touched by a commit, not yet published.
-    committed: BTreeSet<String>,
+    committed: Changed,
 }
 
 pub struct Changes {
@@ -53,7 +94,7 @@ impl Changes {
         let id = self.next_conn.fetch_add(1, Ordering::Relaxed);
         let state = self.state.clone();
         conn.preupdate_hook(Some(
-            move |_: rusqlite::hooks::Action,
+            move |action: rusqlite::hooks::Action,
                   db: &str,
                   table: &str,
                   _: &rusqlite::hooks::PreUpdateCase| {
@@ -64,15 +105,15 @@ impl Changes {
                         .pending
                         .entry(id)
                         .or_default()
-                        .insert(table.to_string());
+                        .note(table, action != rusqlite::hooks::Action::SQLITE_INSERT);
                 }
             },
         ))?;
         let state = self.state.clone();
         conn.commit_hook(Some(move || {
             let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(tables) = s.pending.remove(&id) {
-                s.committed.extend(tables);
+            if let Some(changed) = s.pending.remove(&id) {
+                s.committed.extend(changed);
             }
             false // don't turn the commit into a rollback
         }))?;
@@ -89,16 +130,16 @@ impl Changes {
 
     /// Publish what has been committed since the last publish.
     pub(crate) fn flush(&self) {
-        let tables = std::mem::take(
+        let changed = std::mem::take(
             &mut self
                 .state
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .committed,
         );
-        if !tables.is_empty() {
+        if !changed.is_empty() {
             // No subscriber is fine: nothing is waiting to hear.
-            let _ = self.tx.send(Arc::new(tables));
+            let _ = self.tx.send(Arc::new(changed));
         }
     }
 
@@ -115,7 +156,7 @@ mod tests {
     fn tables(rx: &mut tokio::sync::broadcast::Receiver<super::TablesChanged>) -> Vec<String> {
         let mut out = std::collections::BTreeSet::new();
         while let Ok(t) = rx.try_recv() {
-            out.extend(t.iter().cloned());
+            out.extend(t.tables.iter().cloned());
         }
         out.into_iter().collect()
     }
@@ -173,5 +214,51 @@ mod tests {
         .await
         .unwrap();
         assert!(tables(&mut rx).is_empty());
+    }
+
+    /// P8.B3: a commit also says which tables it rewrote — updated or
+    /// deleted rows in, not only inserted — so an incremental model knows
+    /// when appending isn't enough.
+    #[tokio::test]
+    async fn commits_say_which_tables_they_rewrote() {
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            tx.execute_batch("CREATE TABLE a (x INTEGER); CREATE TABLE b (x INTEGER);")
+                .map_err(sql)
+        })
+        .await
+        .unwrap();
+        let mut rx = db.subscribe_changes();
+        let next = |rx: &mut tokio::sync::broadcast::Receiver<super::TablesChanged>| {
+            rx.try_recv().expect("a commit was published")
+        };
+        db.transaction(|tx| {
+            tx.execute_batch("INSERT INTO a VALUES (1); INSERT INTO b VALUES (1);")
+                .map_err(sql)
+        })
+        .await
+        .unwrap();
+        let only_inserts = next(&mut rx);
+        assert_eq!(
+            only_inserts.tables.iter().cloned().collect::<Vec<_>>(),
+            vec!["a".to_string(), "b".to_string()]
+        );
+        assert!(only_inserts.rewrote.is_empty(), "{only_inserts:?}");
+
+        db.transaction(|tx| {
+            tx.execute_batch("UPDATE a SET x = 2; INSERT INTO b VALUES (2);")
+                .map_err(sql)
+        })
+        .await
+        .unwrap();
+        let updated = next(&mut rx);
+        assert_eq!(
+            updated.rewrote.iter().cloned().collect::<Vec<_>>(),
+            vec!["a".to_string()]
+        );
+        assert!(updated.contains("b"));
+
+        db.call(|c| c.execute("DELETE FROM b", [])).await.unwrap();
+        assert!(next(&mut rx).rewrote.contains("b"));
     }
 }

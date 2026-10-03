@@ -84,7 +84,7 @@ mod tests {
         register(&f.svc);
         f.svc
             .assets
-            .changed(&std::collections::BTreeSet::from(["fact".to_string()]));
+            .changed(&oxplow_db::changes::Changed::inserted(["fact".to_string()]));
         let computed = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 let at: Option<String> = f

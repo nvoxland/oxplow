@@ -182,15 +182,15 @@ impl Assets {
         Ok(())
     }
 
-    /// `tables` changed: mark every asset reading one dirty.
-    pub fn changed(&self, tables: &BTreeSet<String>) {
+    /// A commit changed some tables: mark every asset reading one dirty.
+    pub fn changed(&self, changed: &oxplow_db::changes::Changed) {
         for entry in self
             .entries
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
         {
-            if entry.inputs.iter().any(|t| tables.contains(t)) {
+            if entry.inputs.iter().any(|t| changed.contains(t)) {
                 entry.dirty.notify_one();
             }
         }
@@ -439,7 +439,7 @@ mod tests {
         assert_eq!(runs.load(Ordering::SeqCst), 1, "the first build");
         assert_eq!(state(&db).await, Some((0, Some(7))));
 
-        let task: BTreeSet<String> = ["task".to_string()].into();
+        let task = oxplow_db::changes::Changed::inserted(["task".to_string()]);
         for _ in 0..5 {
             assets.changed(&task);
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -451,7 +451,9 @@ mod tests {
             "one recompute for the burst"
         );
 
-        assets.changed(&["thread".to_string()].into());
+        assets.changed(&oxplow_db::changes::Changed::inserted([
+            "thread".to_string()
+        ]));
         settle().await;
         assert_eq!(runs.load(Ordering::SeqCst), 2, "not one of its inputs");
     }
@@ -491,7 +493,7 @@ mod tests {
         }));
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(runs.load(Ordering::SeqCst), 1, "the first build");
-        assets.changed(&["task".to_string()].into());
+        assets.changed(&oxplow_db::changes::Changed::inserted(["task".to_string()]));
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(
             runs.load(Ordering::SeqCst),

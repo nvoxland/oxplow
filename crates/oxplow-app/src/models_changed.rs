@@ -245,7 +245,7 @@ pub fn spawn(
                     }
                     assets.changed(&tables);
                     (
-                        lineage.affected(tables.iter()),
+                        lineage.affected(tables.tables.iter()),
                         tables.contains("metric_capture") || tables.contains("fact"),
                     )
                 }

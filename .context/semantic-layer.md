@@ -374,7 +374,11 @@ What a query read is what it subscribes to.
   transaction commits (a rollback forgets it); temp tables never do. After
   each `Database::call` / `call_mut` / `transaction` / `read` the committed
   set is published — after the commit, so a subscriber that reads on
-  hearing it sees the change: `Database::subscribe_changes()`.
+  hearing it sees the change: `Database::subscribe_changes()`. What's
+  published is a `Changed { tables, rewrote }` (P8.B3): `rewrote` names
+  the tables the commits updated or deleted rows in — not only inserted
+  into — which is what tells an incremental model that appending isn't
+  enough.
 - **Models:** `crates/oxplow-app/src/models_changed.rs` follows
   `model_input` from those tables to every model that reads them, directly
   or through other models (reloading the lineage when `model_input`
