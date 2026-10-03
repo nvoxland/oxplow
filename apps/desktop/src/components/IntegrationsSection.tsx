@@ -17,12 +17,14 @@ import type { CSSProperties } from "react";
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  addProviderInstance,
   beginOauthSignIn,
   checkProviderInstance,
   effectiveConfig,
   listExtensions,
   listProviderInstances,
   openInSystemBrowser,
+  removeProviderInstance,
   runCommand,
   setInstanceCredential,
   setProviderInstance,
@@ -33,7 +35,16 @@ import { REPLACEABLE_LABELS } from "../lens/useReplacement.js";
 import type { SignInState, UiReplacement } from "../tauri-bridge/generated/bindings.js";
 import { CredentialRow } from "./ExtensionsSection.js";
 import { InlineConfirm } from "./InlineConfirm.js";
-import { activeProviderProblem, collectorLine, integrationRow, signInLine, workItemsChoices } from "./integrationsModel.js";
+import {
+  activeProviderProblem,
+  canRemoveInstance,
+  collectorLine,
+  integrationRow,
+  newInstanceProblem,
+  providerPrograms,
+  signInLine,
+  workItemsChoices,
+} from "./integrationsModel.js";
 import { SchemaForm } from "./SchemaForm/SchemaForm.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
@@ -87,6 +98,7 @@ export function IntegrationsSection() {
       {views.map((v) => (
         <IntegrationRow key={v.instance} view={v} onChanged={setViews} onCredentialChanged={() => void refresh()} />
       ))}
+      <AddInstance views={views} onChanged={setViews} />
     </div>
   );
 }
@@ -200,6 +212,87 @@ function Replacements({
   );
 }
 
+/** Add another instance of a provider (P9.B6): a second team or
+ *  workspace, under its own name — the project's (shared with the team in
+ *  its config), or the person's own on this machine, in every project
+ *  that has the extension. It starts off: configure it, then Enable. */
+function AddInstance({ views, onChanged }: { views: ProviderInstanceView[]; onChanged(views: ProviderInstanceView[]): void }) {
+  const programs = providerPrograms(views);
+  const [program, setProgram] = useState("");
+  const [name, setName] = useState("");
+  const [scope, setScope] = useState<"project" | "global">("project");
+  const [adding, setAdding] = useState(false);
+  if (programs.length === 0) return null;
+  const of = programs.find((p) => p.key === program) ?? programs[0];
+  const id = name.trim();
+  const problem = newInstanceProblem(views, id);
+
+  async function add() {
+    if (problem !== null || adding) return;
+    setAdding(true);
+    try {
+      onChanged(await addProviderInstance(`${of.extension}/${id}`, of.provider, scope));
+      setName("");
+      showToast({ message: `Added ${of.extension}/${id}. Configure it, then Enable.` });
+    } catch (e) {
+      recordOpError({ label: `Add ${of.extension}/${id}`, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  return (
+    <form
+      data-testid="integrations-add-instance"
+      style={{ ...fieldsetStyle, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        void add();
+      }}
+    >
+      <span style={mutedStyle}>Add another instance of</span>
+      {programs.length === 1 ? (
+        <code>{of.key}</code>
+      ) : (
+        <select data-testid="integrations-add-provider" value={of.key} onChange={(e) => setProgram(e.target.value)}>
+          {programs.map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.key}
+            </option>
+          ))}
+        </select>
+      )}
+      <input
+        data-testid="integrations-add-name"
+        value={name}
+        placeholder="its name, e.g. linear_acme"
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setName("");
+        }}
+      />
+      {(["project", "global"] as const).map((s) => (
+        <label key={s} style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <input
+            type="radio"
+            name="integrations-add-scope"
+            data-testid={`integrations-add-scope-${s}`}
+            checked={scope === s}
+            onChange={() => setScope(s)}
+          />
+          {s === "project" ? "This project's" : "Mine, in every project"}
+        </label>
+      ))}
+      <button type="submit" data-testid="integrations-add-submit" disabled={problem !== null || adding}>
+        {adding ? "Adding…" : "Add"}
+      </button>
+      {problem ? <div style={{ ...errorStyle, flexBasis: "100%" }}>{problem}</div> : null}
+    </form>
+  );
+}
+
 /** A credential the person signs in for (P9.B3): never typed. Sign in
  *  opens the service's page in their own browser; oxplow hears when it is
  *  done (`credentialChanged`) and the section reads the instances again. */
@@ -283,7 +376,7 @@ function IntegrationRow({
   const saved = view.config as Record<string, unknown>;
   const [config, setConfig] = useState<Record<string, unknown> | null>(saved);
   const [checked, setChecked] = useState<ProviderInstanceView | null>(null);
-  const [busy, setBusy] = useState<"check" | "toggle" | "sync" | null>(null);
+  const [busy, setBusy] = useState<"check" | "toggle" | "sync" | "remove" | null>(null);
   useEffect(() => setConfig(saved), [saved]);
 
   const shown = checked ?? view;
@@ -315,6 +408,20 @@ function IntegrationRow({
     } finally {
       setBusy(null);
       onCredentialChanged();
+    }
+  }
+
+  // Remove the instance: it stops, and its config entry and its
+  // credentials on this machine go.
+  async function remove() {
+    setBusy("remove");
+    try {
+      onChanged(await removeProviderInstance(view.instance));
+      showToast({ message: `Removed ${view.instance}.` });
+    } catch (e) {
+      recordOpError({ label: `Remove ${view.instance}`, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -365,6 +472,15 @@ function IntegrationRow({
         >
           {busy === "toggle" ? "Saving…" : m.enableLabel}
         </button>
+        {canRemoveInstance(view) ? (
+          <InlineConfirm
+            triggerLabel="Remove"
+            confirmLabel="Remove"
+            testIdPrefix={`integration-remove-${m.key}`}
+            disabled={busy !== null}
+            onConfirm={() => void remove()}
+          />
+        ) : null}
       </div>
       {view.collectors.map((c) => {
         const line = collectorLine(c);

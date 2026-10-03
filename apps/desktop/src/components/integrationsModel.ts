@@ -72,6 +72,48 @@ export function integrationRow(v: ProviderInstanceView, now: Date = new Date()):
   };
 }
 
+/** A provider an instance can be added of (P9.B6): its extension and its
+ *  id — one program, however many instances run it. */
+export interface ProviderProgram {
+  /** `<extension>/<provider>`. */
+  key: string;
+  extension: string;
+  provider: string;
+}
+
+/** Each declared provider once, whatever its instances. */
+export function providerPrograms(views: ProviderInstanceView[]): ProviderProgram[] {
+  const seen = new Map<string, ProviderProgram>();
+  for (const v of views) {
+    // An instance whose provider is gone names none to add another of.
+    if (v.health.state.state === "missing" || !v.provider) continue;
+    const key = `${v.extension}/${v.provider}`;
+    if (!seen.has(key)) seen.set(key, { key, extension: v.extension, provider: v.provider });
+  }
+  return [...seen.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+/** What's wrong with `id` as a new instance's id: `null` when it will do,
+ *  `""` when there is nothing to say yet (nothing typed). The core checks
+ *  again; this is so the form says it first. */
+export function newInstanceProblem(views: ProviderInstanceView[], id: string): string | null {
+  if (id === "") return "";
+  if (!/^[a-z][a-z0-9_]*$/.test(id)) {
+    return "An instance's name is lowercase letters, digits and underscores, starting with a letter: it is the id its refs and commands carry.";
+  }
+  if (id === "oxplow") return "`oxplow` is oxplow's own";
+  if (views.some((v) => v.instanceId === id)) return `\`${id}\` is already an instance`;
+  return null;
+}
+
+/** Whether Remove is offered: a named instance, a project's replacement
+ *  of the person's own (removing it lets theirs show through), or one
+ *  whose provider is gone. A provider's own instance is turned off, not
+ *  removed. */
+export function canRemoveInstance(v: ProviderInstanceView): boolean {
+  return v.health.state.state === "missing" || v.instanceId !== v.provider || v.overridden;
+}
+
 /** A credential the person signs in for (P9.B3): where the sign-in stands
  *  and what its button does. */
 export function signInLine(s: SignInState): { text: string; action: "Sign in" | "Sign in again"; signedIn: boolean; problem: boolean } {

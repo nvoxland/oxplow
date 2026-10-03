@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { ProviderInstanceView } from "../tauri-bridge/generated/bindings.js";
-import { integrationRow, signInLine } from "./integrationsModel.js";
+import { canRemoveInstance, integrationRow, newInstanceProblem, providerPrograms, signInLine } from "./integrationsModel.js";
 
 const view = (over: Partial<ProviderInstanceView>): ProviderInstanceView => ({
   instance: "tracker/linear",
@@ -155,4 +155,36 @@ test("signInLine says where a sign-in stands", () => {
     signedIn: false,
     problem: true,
   });
+});
+
+// P9.B6: another instance of a provider is added by naming it; a named
+// one (or a project's replacement of the person's own) can be removed.
+test("providerPrograms lists each provider once, whatever its instances", () => {
+  const views = [
+    view({}),
+    view({ instance: "tracker/linear_acme", instanceId: "linear_acme" }),
+    view({ instance: "notes/notes", extension: "notes", provider: "notes", instanceId: "notes" }),
+  ];
+  expect(providerPrograms(views)).toEqual([
+    { key: "notes/notes", extension: "notes", provider: "notes" },
+    { key: "tracker/linear", extension: "tracker", provider: "linear" },
+  ]);
+});
+
+test("newInstanceProblem says what's wrong with a new instance's name", () => {
+  const views = [view({}), view({ instance: "tracker/linear_acme", instanceId: "linear_acme" })];
+  expect(newInstanceProblem(views, "linear_two")).toBeNull();
+  expect(newInstanceProblem(views, "")).toBe("");
+  expect(newInstanceProblem(views, "Linear-Two")).toContain("lowercase letters, digits and underscores");
+  expect(newInstanceProblem(views, "2nd")).toContain("starting with a letter");
+  expect(newInstanceProblem(views, "linear_acme")).toBe("`linear_acme` is already an instance");
+  expect(newInstanceProblem(views, "linear")).toBe("`linear` is already an instance");
+  expect(newInstanceProblem(views, "oxplow")).toBe("`oxplow` is oxplow's own");
+});
+
+test("canRemoveInstance: a named instance, a project's replacement, or one whose provider is gone", () => {
+  expect(canRemoveInstance(view({}))).toBe(false);
+  expect(canRemoveInstance(view({ instance: "tracker/linear_acme", instanceId: "linear_acme" }))).toBe(true);
+  expect(canRemoveInstance(view({ scope: "global", overridden: true }))).toBe(true);
+  expect(canRemoveInstance(view({ health: { ...view({}).health, state: { state: "missing", reason: "gone" } } }))).toBe(true);
 });

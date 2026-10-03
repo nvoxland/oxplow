@@ -14,6 +14,10 @@ let replacements: unknown[] = [];
 const credentialSaves: Array<[string, string, string | null]> = [];
 const STATIC_CREDENTIALS: unknown[] = [{ name: "FAKE_TOKEN", set: false, signIn: null }];
 const signIns: Array<[string, string]> = [];
+const added: Array<[string, string, string]> = [];
+const removed: string[] = [];
+/** Further instances the listing returns after the provider's own. */
+let more: unknown[] = [];
 const browsed: string[] = [];
 const listeners = new Set<(event: Record<string, unknown>) => void>();
 const instance = {
@@ -34,7 +38,17 @@ const instance = {
 };
 mock.module("../api.js", () => ({
   ...realApi,
-  listProviderInstances: async () => [instance],
+  listProviderInstances: async () => [instance, ...more],
+  addProviderInstance: async (inst: string, provider: string, scope: string) => {
+    added.push([inst, provider, scope]);
+    more = [{ ...instance, instance: inst, instanceId: inst.split("/")[1], scope, enabled: false }];
+    return [instance, ...more];
+  },
+  removeProviderInstance: async (inst: string) => {
+    removed.push(inst);
+    more = [];
+    return [instance];
+  },
   effectiveConfig: async () => [
     { key: "activeProviders", doc: "", value: active, origin: "default", extension: null, humanOnly: true, schema: {} },
     { key: "replacementsOff", doc: "", value: replacementsOff, origin: "default", extension: null, humanOnly: true, schema: {} },
@@ -74,6 +88,9 @@ afterEach(() => {
   ran.length = 0;
   credentialSaves.length = 0;
   signIns.length = 0;
+  added.length = 0;
+  removed.length = 0;
+  more = [];
   browsed.length = 0;
   instance.credentials = STATIC_CREDENTIALS;
   active = null;
@@ -185,4 +202,36 @@ test("a signed-in credential has a Sign in button and no value box", async () =>
   fireEvent.click(view.getByTestId("sign-out-tracker/fake-FAKE_TOKEN-trigger"));
   fireEvent.click(view.getByTestId("sign-out-tracker/fake-FAKE_TOKEN-confirm"));
   await waitFor(() => expect(credentialSaves).toEqual([["tracker/fake", "FAKE_TOKEN", null]]));
+});
+
+// P9.B6: another instance of a provider is added by name and scope — the
+// project's, or the person's own in every project — and a named one can
+// be removed; a provider's own instance can't.
+test("an instance is added by name and scope, and a named one removed", async () => {
+  const view = render(<IntegrationsSection />);
+  const form = await waitFor(() => view.getByTestId("integrations-add-instance"));
+  const name = view.getByTestId("integrations-add-name") as HTMLInputElement;
+  const add = view.getByTestId("integrations-add-submit") as HTMLButtonElement;
+  expect(add.disabled).toBe(true);
+  expect(view.queryByTestId("integration-remove-tracker/fake-trigger")).toBeNull();
+
+  fireEvent.change(name, { target: { value: "Fake Two" } });
+  expect(add.disabled).toBe(true);
+  expect(form.textContent).toContain("lowercase letters, digits and underscores");
+  // Escape clears what was typed.
+  fireEvent.keyDown(name, { key: "Escape" });
+  expect(name.value).toBe("");
+
+  fireEvent.change(name, { target: { value: "fake_two" } });
+  fireEvent.click(view.getByTestId("integrations-add-scope-global"));
+  expect(add.disabled).toBe(false);
+  fireEvent.submit(form);
+  await waitFor(() => expect(added).toEqual([["tracker/fake_two", "fake", "global"]]));
+  await waitFor(() => view.getByTestId("integration-row-tracker/fake_two"));
+  expect(name.value).toBe("");
+
+  fireEvent.click(view.getByTestId("integration-remove-tracker/fake_two-trigger"));
+  fireEvent.click(view.getByTestId("integration-remove-tracker/fake_two-confirm"));
+  await waitFor(() => expect(removed).toEqual(["tracker/fake_two"]));
+  await waitFor(() => expect(view.queryByTestId("integration-row-tracker/fake_two")).toBeNull());
 });

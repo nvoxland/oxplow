@@ -740,7 +740,19 @@ the config as a form from the provider's `config_schema`
 the actions), Check and Enable / Disable / Enable again, and each
 collector's line (`collectorLine`: records delivered, last read, a
 failed read's error; the view's `collectors`) with **Sync Now** while it
-runs. Approving the
+runs. **Instances** (P9.B6): under the rows, "Add another instance of
+`<ext>/<provider>`" takes a name (the instance id: snake_case, not
+already an instance — `newInstanceProblem` says so before the core
+does) and a scope ("This project's" / "Mine, in every project") and calls
+`add_provider_instance`; Enter adds, Escape clears. A named instance, a
+project's replacement of the person's own, and one whose provider is
+gone have **Remove** (`InlineConfirm`, `remove_provider_instance`:
+`canRemoveInstance`); a provider's own instance is turned off, not
+removed. There is no automated browser test of this page — the repo's
+Playwright scripts (`tests-e2e/`) are run by hand against a daemon — so
+the page is covered by `IntegrationsSection.test.tsx` and
+`integrationsModel.test.ts`, the core by `providers/tests.rs`, and the
+whole by the in-app walk (tsk469). Approving the
 program stays in Data → Programs; approving a provider restarts its
 running instance on what was approved (`ProviderRegistry::approved`,
 called by `approve_project_program`), so updated declarations take
