@@ -1250,7 +1250,6 @@ impl Services {
             .chain(commands::extension_install::commands(
                 commands::extension_install::InstallDeps {
                     worktrees: worktrees.clone(),
-                    threads: thread_store.clone(),
                 },
             ))
             .chain([commands::snapshot::restore_file_command(

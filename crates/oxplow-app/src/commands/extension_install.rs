@@ -10,7 +10,6 @@
 use std::sync::Arc;
 
 use oxplow_domain::refs::build::stream_ref;
-use oxplow_domain::stores::ThreadStore as _;
 use oxplow_domain::{
     Actor, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, DomainError, Invokers,
     Lifecycle, StreamId,
@@ -35,8 +34,8 @@ pub struct InstallInput {
     pub git_ref: Option<String>,
     /// The commit the person reviewed — the only one installed.
     pub reviewed_sha: String,
-    /// The stream whose worktree takes it (`stream:str2`); absent, an
-    /// agent's own, else the primary checkout.
+    /// The stream whose worktree takes it (`stream:str2`); absent, the
+    /// primary checkout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream: Option<String>,
 }
@@ -57,7 +56,6 @@ pub struct UpdateInput {
 #[derive(Clone)]
 pub struct InstallDeps {
     pub worktrees: Arc<WorktreeRouter>,
-    pub threads: Arc<oxplow_db::SqliteThreadStore>,
 }
 
 fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError> {
@@ -67,26 +65,21 @@ fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError
     })
 }
 
-/// The stream named, else an agent's own; `None` is the primary checkout.
-async fn stream_for(
-    deps: &InstallDeps,
-    actor: &Actor,
-    named: Option<&str>,
-) -> Result<Option<StreamId>, CommandError> {
-    if let Some(value) = named {
-        return value
-            .strip_prefix("stream:")
-            .and_then(StreamId::try_from_str)
-            .map(Some)
-            .ok_or_else(|| CommandError::Invalid {
-                field: Some("/stream".into()),
-                message: format!("`{value}` isn't a stream ref (stream:<id>)"),
-            });
-    }
-    match actor.agent_thread().flatten() {
-        Some(thread) => Ok(deps.threads.get(&thread).await?.map(|t| t.stream_id)),
-        None => Ok(None),
-    }
+/// The stream named; `None` is the primary checkout. Never the actor's:
+/// these commands always ask, so the handler only runs as the person who
+/// confirmed — and the approval shows the input as it will run (tsk786).
+fn stream_for(named: Option<&str>) -> Result<Option<StreamId>, CommandError> {
+    named
+        .map(|value| {
+            value
+                .strip_prefix("stream:")
+                .and_then(StreamId::try_from_str)
+                .ok_or_else(|| CommandError::Invalid {
+                    field: Some("/stream".into()),
+                    message: format!("`{value}` isn't a stream ref (stream:<id>)"),
+                })
+        })
+        .transpose()
 }
 
 fn spec(name: &str, summary: &str, schema: Value) -> CommandSpec {
@@ -125,11 +118,11 @@ pub fn install_command(deps: InstallDeps) -> Command {
              agent's run becomes a proposal. Refuses to overwrite — `extension.update` does that.",
             schema::<InstallInput>(),
         ),
-        Handler::External(Arc::new(move |actor: Actor, input| {
+        Handler::External(Arc::new(move |_: Actor, input| {
             let deps = deps.clone();
             Box::pin(async move {
                 let input: InstallInput = parse(input)?;
-                let stream = stream_for(&deps, &actor, input.stream.as_deref()).await?;
+                let stream = stream_for(input.stream.as_deref())?;
                 let root = deps
                     .worktrees
                     .resolve(stream.map(|s| s.to_string()).as_deref())
@@ -163,11 +156,11 @@ pub fn update_command(deps: InstallDeps) -> Command {
              written in this repo are edited in place. Always a person's decision.",
             schema::<UpdateInput>(),
         ),
-        Handler::External(Arc::new(move |actor: Actor, input| {
+        Handler::External(Arc::new(move |_: Actor, input| {
             let deps = deps.clone();
             Box::pin(async move {
                 let input: UpdateInput = parse(input)?;
-                let stream = stream_for(&deps, &actor, input.stream.as_deref()).await?;
+                let stream = stream_for(input.stream.as_deref())?;
                 let root = deps
                     .worktrees
                     .resolve(stream.map(|s| s.to_string()).as_deref())
@@ -205,6 +198,21 @@ pub fn commands(deps: InstallDeps) -> Vec<Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// tsk786: where an install lands is the input's `stream`, or the
+    /// primary checkout — never the actor's: the handler only runs as the
+    /// person who confirmed (an agent's run is a proposal), so "an agent's
+    /// own stream" could never apply, and the approval shows the input as
+    /// it will run.
+    #[test]
+    fn an_install_lands_in_the_named_stream_or_the_primary_checkout() {
+        assert_eq!(
+            stream_for(Some("stream:str2")).unwrap(),
+            Some(StreamId::new(2))
+        );
+        assert_eq!(stream_for(None).unwrap(), None);
+        assert!(stream_for(Some("str2")).is_err());
+    }
     use crate::test_fixtures::services_with_effort;
     use serde_json::json;
 
