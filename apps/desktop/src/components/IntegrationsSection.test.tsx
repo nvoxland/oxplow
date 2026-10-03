@@ -235,3 +235,22 @@ test("an instance is added by name and scope, and a named one removed", async ()
   await waitFor(() => expect(removed).toEqual(["tracker/fake_two"]));
   await waitFor(() => expect(view.queryByTestId("integration-row-tracker/fake_two")).toBeNull());
 });
+
+// tsk824: where a credential signs in is part of what a person approves, so
+// an unapproved provider's Sign in is off (the core refuses it too).
+test("Sign in is off while the provider isn't approved", async () => {
+  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" } }];
+  const approved = instance.approved;
+  instance.approved = false;
+  try {
+    const view = render(<IntegrationsSection />);
+    const button = (await waitFor(() => view.getByTestId("sign-in-button-tracker/fake-FAKE_TOKEN"))) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toContain("Approve");
+    fireEvent.click(button);
+    expect(signIns).toEqual([]);
+  } finally {
+    instance.approved = approved;
+  }
+});
+

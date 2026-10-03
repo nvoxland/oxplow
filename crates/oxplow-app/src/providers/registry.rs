@@ -1814,6 +1814,22 @@ impl ProviderRegistry {
                 "`{name}` isn't a credential you sign in for; paste its value instead"
             )));
         };
+        // Where it signs in, and where the code, the verifier and the
+        // client secret go, are part of what a person approved: only as
+        // they were approved (tsk824). The declaration used below is the
+        // one this checks.
+        if !crate::exec_consent::may_run_provider(
+            &self.deps.approvals,
+            &self.deps.project_dir,
+            &resolved.ext,
+            &resolved.spec,
+        ) {
+            return Err(DomainError::Invalid(format!(
+                "provider `{}` isn't approved as it is now (where `{name}` signs in is part of \
+                 what you approve): approve it on Settings → Data → Programs first",
+                resolved.spec.approval_name(&resolved.ext.name)
+            )));
+        }
         let client_secret = match &oauth_decl.client_secret {
             None => None,
             Some(secret) => {

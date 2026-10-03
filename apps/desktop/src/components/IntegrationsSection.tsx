@@ -300,11 +300,14 @@ function SignInRow({
   instance,
   name,
   state,
+  approved,
   onChanged,
 }: {
   instance: string;
   name: string;
   state: SignInState;
+  /** Its program is approved as it is: where it signs in is part of that. */
+  approved: boolean;
   onChanged(): void;
 }) {
   const [waiting, setWaiting] = useState(false);
@@ -352,7 +355,12 @@ function SignInRow({
       <button
         type="button"
         data-testid={`sign-in-button-${id}`}
-        title="Open the service's sign-in page in your browser; the token it gives is kept in this machine's keychain"
+        disabled={!approved}
+        title={
+          approved
+            ? "Open the service's sign-in page in your browser; the token it gives is kept in this machine's keychain"
+            : "Approve its program on Settings → Data → Programs first: where it signs in is part of what you approve"
+        }
         onClick={() => void signIn()}
       >
         {line.action}
@@ -506,7 +514,14 @@ function IntegrationRow({
       ) : null}
       {view.credentials.map((c) =>
         c.signIn ? (
-          <SignInRow key={c.name} instance={view.instance} name={c.name} state={c.signIn} onChanged={onCredentialChanged} />
+          <SignInRow
+            key={c.name}
+            instance={view.instance}
+            name={c.name}
+            state={c.signIn}
+            approved={view.approved}
+            onChanged={onCredentialChanged}
+          />
         ) : (
           <CredentialRow
             key={c.name}

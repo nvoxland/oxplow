@@ -556,7 +556,11 @@ form; sign-in is a provider's.
   that's still good is used as it is.
 - **Signing in** is a person's: IPC `begin_oauth_sign_in { instance,
   name }` (`ProviderRegistry::begin_sign_in`, UI-only) returns the page
-  to open; the renderer opens it in **the person's own browser**
+  to open — **only for a provider approved as it is now** (tsk824): the
+  endpoints, client id and client-secret name are part of the approval,
+  and a sign-in sends the code, the PKCE verifier and the client secret
+  to them, so an edited endpoint is refused until a person approves it
+  again (the row's Sign in is off meanwhile); the renderer opens it in **the person's own browser**
   (`tauri-bridge/systemBrowser.ts`, not the sandboxed external-URL
   window — their sessions live there and services refuse embedded
   webviews). When the redirect lands the token is stored,

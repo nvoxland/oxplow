@@ -3091,3 +3091,48 @@ async fn a_url_servers_approval_covers_the_url_its_pins_mapping_and_credentials(
         std::fs::write(&path, text).unwrap();
     }
 }
+
+/// tsk824: signing in sends a code, a PKCE verifier and a client secret to
+/// the endpoints the manifest names, so they must be the approved ones. An
+/// edited endpoint makes the provider unapproved, and its sign-in is
+/// refused until a person approves it again — nothing listens, nothing is
+/// sent.
+#[tokio::test]
+async fn sign_in_is_refused_until_the_endpoints_are_approved() {
+    let (fx, sim) = signing_in("", "").await;
+    let project = fx.svc.layout.project_dir.clone();
+    configure(&fx, true, json!({ "team": "core" }));
+    // Someone points the token endpoint elsewhere.
+    write_oauth_extension(
+        &project,
+        "",
+        &sim.authorize_url,
+        "https://elsewhere.example/token",
+        "",
+    );
+    let refused = fx
+        .svc
+        .providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN")
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("approv"), "{refused}");
+    assert!(
+        sim.grants().is_empty(),
+        "nothing reached any token endpoint"
+    );
+    // The row says so: no Sign in on an unapproved instance.
+    let view = fx
+        .svc
+        .providers
+        .list()
+        .await
+        .into_iter()
+        .find(|v| v.instance == INSTANCE)
+        .unwrap();
+    assert!(!view.approved);
+    // Approved as it is now, it signs in.
+    write_oauth_extension(&project, "", &sim.authorize_url, &sim.token_url, "");
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+}
