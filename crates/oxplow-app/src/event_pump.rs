@@ -620,11 +620,15 @@ enum Delivery {
 /// The event as a consumer reads it: carried to the newest registered
 /// version of its type (P3.1), so a consumer is written against one shape
 /// and rows logged at an older version still reach it. A row that can't
-/// be upcast fails the delivery, which parks it as a dead letter.
+/// be upcast fails the delivery, which parks it as a dead letter. A type
+/// the running vocabulary doesn't know (its extension was removed) passes
+/// through as logged: there is no newer shape to carry it to.
 fn at_latest(vocabulary: &Vocabulary, event: &StoredEvent) -> Result<StoredEvent, DomainError> {
     let env = &event.envelope;
-    if vocabulary.latest(&env.event_type) == Some(env.v) {
-        return Ok(event.clone());
+    match vocabulary.latest(&env.event_type) {
+        None => return Ok(event.clone()),
+        Some(latest) if latest == env.v => return Ok(event.clone()),
+        Some(_) => {}
     }
     let (v, payload) = vocabulary.upcast_to_latest(&env.event_type, env.v, env.payload.clone())?;
     let mut out = event.clone();
@@ -1158,6 +1162,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(seen(&db, "versions").await, vec!["v2 transcript=false"]);
+    }
+
+    /// A row whose type the running vocabulary no longer knows (its
+    /// extension was removed) is delivered as logged, not dead-lettered.
+    #[tokio::test]
+    async fn an_unregistered_type_is_delivered_at_its_logged_version() {
+        use oxplow_domain::events::schema::EventSchemaRegistry;
+        use oxplow_domain::refs::kind::core_kinds;
+        use oxplow_domain::vocabulary::Vocabulary;
+        let (db, _) = setup().await;
+        let vocabulary = VocabularyHandle::core();
+        let store = SqliteEventLogStore::new(db.clone(), vocabulary.clone());
+        store.append(config_changed("a")).await.unwrap();
+        vocabulary.swap(Vocabulary::new(EventSchemaRegistry::new(), core_kinds()));
+        let report = pump(&db, &store, vec![Recorder::new("rec", None)])
+            .run_once()
+            .await
+            .unwrap();
+        assert_eq!((report.handled, report.dead_lettered), (1, 0));
+        assert_eq!(seen(&db, "rec").await, vec!["a"]);
     }
 
     #[tokio::test]

@@ -11,9 +11,11 @@
 //! edit. Run the test with `OXPLOW_BLESS=1` to write a new golden.
 //!
 //! **Namespaces.** Core types live in the namespaces of
-//! `.context/target-architecture.md` §5.3 ([`CORE_NAMESPACES`]). A plugin
-//! registers types only under its own name as namespace; registering
-//! into a core namespace, or under another plugin's, is refused.
+//! `.context/target-architecture.md` §5.3 ([`CORE_NAMESPACES`]). An
+//! extension declares types (a JSON Schema each, not a Rust type —
+//! [`DeclaredEventType`]) only under its own namespace
+//! ([`plugin_namespace`]); declaring into a core namespace, or under
+//! another extension's, is refused.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -71,13 +73,36 @@ pub fn schema_for<T: EventType>() -> Value {
     serde_json::to_value(schemars::schema_for!(T::Payload)).expect("schema serializes")
 }
 
-type Upcast = Arc<dyn Fn(u32, Value) -> Result<Value, DomainError> + Send + Sync>;
+/// Carries a payload written at an older version (the `u32`) to the
+/// version that declares it.
+pub type Upcast = Arc<dyn Fn(u32, Value) -> Result<Value, DomainError> + Send + Sync>;
+
+/// An extension's event type at one version: what its manifest's
+/// `event_types:` declares, with the upcast its Starlark compiles to.
+#[derive(Clone)]
+pub struct DeclaredEventType {
+    pub event_type: String,
+    pub v: u32,
+    /// The payload's JSON Schema.
+    pub schema: Value,
+    pub summary: String,
+    /// Required past v1: carries every older version to this one.
+    pub upcast: Option<Upcast>,
+}
+
+/// The namespace an extension's types live under: its name, `-` read as
+/// `_` (a type name is snake_case).
+pub fn plugin_namespace(extension: &str) -> String {
+    extension.replace('-', "_")
+}
 
 struct Registered {
     validator: jsonschema::Validator,
     schema: Value,
-    /// Who registered it: `None` for core, `Some(plugin)` otherwise.
+    /// Who registered it: `None` for core, `Some(extension)` otherwise.
     owner: Option<String>,
+    /// What it records; core types say so in their Rust docs instead.
+    summary: Option<String>,
 }
 
 /// Every event type the log accepts, by `type@v`, with the newest version
@@ -177,60 +202,100 @@ impl EventSchemaRegistry {
         let ns = namespace_of(T::TYPE);
         if !CORE_NAMESPACES.contains(&ns) {
             return Err(DomainError::Invalid(format!(
-                "`{}` is not in a core namespace; a plugin registers it with `register_plugin`",
+                "`{}` is not in a core namespace; an extension declares it with `register_declared`",
                 T::TYPE
             )));
         }
-        self.insert::<T>(None)
+        let upcast: Upcast = Arc::new(|from, payload| T::upcast(from, payload));
+        self.insert(T::TYPE, T::V, schema_for::<T>(), None, None, Some(upcast))
     }
 
-    /// Register a plugin's type. Its namespace must be the plugin's own
-    /// name — never a core namespace, never another plugin's.
-    pub fn register_plugin<T: EventType>(&mut self, plugin: &str) -> Result<(), DomainError> {
-        let ns = namespace_of(T::TYPE);
+    /// Register an extension's declared type. Its namespace must be the
+    /// extension's own — never a core namespace, never another
+    /// extension's; its schema must compile; past v1 it must carry an
+    /// upcast.
+    pub fn register_declared(
+        &mut self,
+        extension: &str,
+        declared: DeclaredEventType,
+    ) -> Result<(), DomainError> {
+        let DeclaredEventType {
+            event_type,
+            v,
+            schema,
+            summary,
+            upcast,
+        } = declared;
+        validate_type_name(&event_type)?;
+        let ns = namespace_of(&event_type);
         if CORE_NAMESPACES.contains(&ns) {
             return Err(DomainError::Invalid(format!(
-                "plugin `{plugin}` may not register `{}`: `{ns}` is a core namespace",
-                T::TYPE
+                "extension `{extension}` may not declare `{event_type}`: `{ns}` is a core namespace"
             )));
         }
-        if ns != plugin {
+        let own = plugin_namespace(extension);
+        if ns != own {
             return Err(DomainError::Invalid(format!(
-                "plugin `{plugin}` may only register types under `{plugin}.*`, not `{}`",
-                T::TYPE
+                "extension `{extension}` may only declare types under `{own}.*`, not `{event_type}`"
             )));
         }
-        self.insert::<T>(Some(plugin.to_string()))
+        if v == 0 {
+            return Err(DomainError::Invalid(format!(
+                "`{event_type}@{v}`: versions start at 1, not v0"
+            )));
+        }
+        if v > 1 && upcast.is_none() {
+            return Err(DomainError::Invalid(format!(
+                "`{event_type}@{v}` needs an `upcast` carrying older versions to v{v}"
+            )));
+        }
+        self.insert(
+            &event_type,
+            v,
+            schema,
+            Some(extension.to_string()),
+            Some(summary),
+            upcast,
+        )
     }
 
-    fn insert<T: EventType>(&mut self, owner: Option<String>) -> Result<(), DomainError> {
-        validate_type_name(T::TYPE)?;
-        let key = (T::TYPE.to_string(), T::V);
+    fn insert(
+        &mut self,
+        event_type: &str,
+        v: u32,
+        schema: Value,
+        owner: Option<String>,
+        summary: Option<String>,
+        upcast: Option<Upcast>,
+    ) -> Result<(), DomainError> {
+        validate_type_name(event_type)?;
+        let key = (event_type.to_string(), v);
         if self.by_version.contains_key(&key) {
             return Err(DomainError::Invalid(format!(
-                "event type `{}@{}` is already registered",
-                T::TYPE,
-                T::V
+                "event type `{event_type}@{v}` is already registered"
             )));
         }
-        let schema = schema_for::<T>();
-        let validator = jsonschema::validator_for(&schema)
-            .map_err(|e| DomainError::Invariant(format!("schema for `{}`: {e}", T::TYPE)))?;
+        let validator = jsonschema::validator_for(&schema).map_err(|e| {
+            DomainError::Invalid(format!(
+                "the schema for `{event_type}@{v}` doesn't compile: {e}"
+            ))
+        })?;
         self.by_version.insert(
             key,
             Registered {
                 validator,
                 schema,
                 owner,
+                summary,
             },
         );
-        let latest = self.latest.entry(T::TYPE.to_string()).or_insert(0);
-        if T::V >= *latest {
-            *latest = T::V;
-            self.upcasts.insert(
-                T::TYPE.to_string(),
-                Arc::new(|from, payload| T::upcast(from, payload)),
-            );
+        let latest = self.latest.entry(event_type.to_string()).or_insert(0);
+        if v >= *latest {
+            *latest = v;
+            match upcast {
+                Some(up) => self.upcasts.insert(event_type.to_string(), up),
+                None => self.upcasts.remove(event_type),
+            };
         }
         Ok(())
     }
@@ -250,7 +315,14 @@ impl EventSchemaRegistry {
             .map(|r| &r.schema)
     }
 
-    /// Who registered `type@v`: `Some(None)` for core, `Some(Some(plugin))`
+    /// What a declared `type@v` records; `None` for core or unregistered.
+    pub fn summary(&self, event_type: &str, v: u32) -> Option<&str> {
+        self.by_version
+            .get(&(event_type.to_string(), v))
+            .and_then(|r| r.summary.as_deref())
+    }
+
+    /// Who registered `type@v`: `Some(None)` for core, `Some(Some(extension))`
     /// for a plugin, `None` when unregistered.
     pub fn owner(&self, event_type: &str, v: u32) -> Option<Option<&str>> {
         self.by_version
@@ -301,7 +373,11 @@ impl EventSchemaRegistry {
         let value = if from_v == latest {
             payload
         } else if from_v < latest {
-            let up = self.upcasts.get(event_type).expect("latest has an upcast");
+            let up = self.upcasts.get(event_type).ok_or_else(|| {
+                DomainError::Invalid(format!(
+                    "`{event_type}@{from_v}` has no upcast to the registered v{latest}"
+                ))
+            })?;
             up(from_v, payload)?
         } else {
             return Err(DomainError::Invalid(format!(
@@ -1554,6 +1630,17 @@ mod tests {
         assert!(e.to_string().contains("not registered"), "{e}");
     }
 
+    /// A declared type with `T`'s schema and no upcast.
+    fn declared<T: EventType>() -> DeclaredEventType {
+        DeclaredEventType {
+            event_type: T::TYPE.into(),
+            v: T::V,
+            schema: schema_for::<T>(),
+            summary: format!("{}, for the test", T::TYPE),
+            upcast: None,
+        }
+    }
+
     struct AcmeDecided;
     impl EventType for AcmeDecided {
         const TYPE: &'static str = "acme_review.decided";
@@ -1568,16 +1655,62 @@ mod tests {
     }
 
     #[test]
-    fn plugins_register_only_under_their_own_namespace() {
+    fn a_plugin_declares_types_only_under_its_own_namespace() {
         let mut r = EventSchemaRegistry::core();
-        r.register_plugin::<AcmeDecided>("acme_review").unwrap();
-        assert_eq!(r.owner("acme_review.decided", 1), Some(Some("acme_review")));
-        assert!(r.register_plugin::<Squatter>("acme_review").is_err());
-        assert!(r.register_plugin::<AcmeDecided>("other_plugin").is_err());
+        // The namespace is the extension's name with `-` read as `_`.
+        r.register_declared("acme-review", declared::<AcmeDecided>())
+            .unwrap();
+        assert_eq!(r.owner("acme_review.decided", 1), Some(Some("acme-review")));
+        assert_eq!(
+            r.summary("acme_review.decided", 1),
+            Some("acme_review.decided, for the test")
+        );
+        let core = r
+            .register_declared("acme-review", declared::<Squatter>())
+            .unwrap_err();
+        assert!(core.to_string().contains("core namespace"), "{core}");
+        let foreign = r
+            .register_declared("other-plugin", declared::<AcmeDecided>())
+            .unwrap_err();
+        assert!(foreign.to_string().contains("other_plugin.*"), "{foreign}");
+        let dup = r
+            .register_declared("acme-review", declared::<AcmeDecided>())
+            .unwrap_err();
+        assert!(dup.to_string().contains("already registered"), "{dup}");
         // Core can't register into a plugin namespace either, and a
         // second registration of the same type@v collides.
         assert!(r.register::<AcmeDecided>().is_err());
         assert!(r.register::<WorkItemTransitioned>().is_err());
+    }
+
+    #[test]
+    fn a_declared_type_needs_a_schema_that_compiles_and_an_upcast_past_v1() {
+        let mut r = EventSchemaRegistry::new();
+        let bad = r
+            .register_declared(
+                "acme",
+                DeclaredEventType {
+                    schema: json!({"type": "nonsense"}),
+                    ..declared::<Thing1>()
+                },
+            )
+            .unwrap_err();
+        assert!(bad.to_string().contains("acme.thing@1"), "{bad}");
+        let no_upcast = r
+            .register_declared("acme", declared::<Thing2>())
+            .unwrap_err();
+        assert!(no_upcast.to_string().contains("upcast"), "{no_upcast}");
+        let zero = r
+            .register_declared(
+                "acme",
+                DeclaredEventType {
+                    v: 0,
+                    ..declared::<Thing1>()
+                },
+            )
+            .unwrap_err();
+        assert!(zero.to_string().contains("v0"), "{zero}");
+        assert!(r.versions().is_empty());
     }
 
     // A two-version type: v2 renamed `count` to `n`.
@@ -1615,8 +1748,15 @@ mod tests {
     #[test]
     fn upcast_carries_an_old_payload_to_the_newest_version_and_validates_it() {
         let mut r = EventSchemaRegistry::new();
-        r.register_plugin::<Thing1>("acme").unwrap();
-        r.register_plugin::<Thing2>("acme").unwrap();
+        r.register_declared("acme", declared::<Thing1>()).unwrap();
+        r.register_declared(
+            "acme",
+            DeclaredEventType {
+                upcast: Some(Arc::new(Thing2::upcast)),
+                ..declared::<Thing2>()
+            },
+        )
+        .unwrap();
         assert_eq!(r.latest("acme.thing"), Some(2));
         // Both versions still validate as written.
         r.validate("acme.thing", 1, &json!({"count": 3})).unwrap();

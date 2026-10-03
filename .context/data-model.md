@@ -1140,10 +1140,15 @@ accepts. It sits with the ref kinds in the running `Vocabulary { events,
 kinds }`, held in the swappable `VocabularyHandle` `Services.vocabulary`
 (P8.D1; see refs.md) — `Vocabulary::core()` is every core type; the golden files under `schemas/events/` are the
 authoritative list (the `core_registry_knows_every_core_type_and_version`
-test pins it). Plugin types will join it via `register_plugin(plugin)`
-once plugin `event_types` run (today the manifest parses and
-lifecycle-checks them only) and may only use the plugin's own name as
-namespace — never a core namespace (`CORE_NAMESPACES`, §5.3). `append_tx`
+test pins it). An extension's types join it as data, not Rust types:
+`register_declared(extension, DeclaredEventType { event_type, v, schema,
+summary, upcast })` (P8.D2) refuses a core namespace (`CORE_NAMESPACES`,
+§5.3), any namespace but the extension's own (`plugin_namespace`: its
+name with `-` read as `_`), a schema that doesn't compile, a duplicate
+`type@v`, v0, and a version past 1 without an upcast. The upcast is the
+extension's Starlark (`extension_event_types::starlark_upcast`:
+`transform({from_v, payload})`, sandboxed with the command-script budget,
+no host); its output is validated against the newest schema. `append_tx`
 refuses an unregistered `type@v` or a payload that fails its schema
 (`DomainError::Invalid`, naming the JSON path) before writing. Core
 producers build envelopes with `Envelope::typed::<T>(source, &payload)`
@@ -1169,7 +1174,10 @@ delivers the newest shape** (P3.1): `at_latest` in
 `crates/oxplow-app/src/event_pump.rs` upcasts each row before any
 handler, sync or async, and before a dead-letter retry, so a row logged
 at an older version still reaches a consumer written against the current
-one; a row that can't be upcast dead-letters. The first versioned type is
+one; a row that can't be upcast dead-letters. A type the running
+vocabulary doesn't know at all (its extension was removed) passes through
+at its logged version instead (P8.D2): there is no newer shape to carry
+it to, and the row was valid when it was appended. The first versioned type is
 `agent.turn.ended@2` (adds `transcript_path?`, `usage?`); its v1 stays
 registered (`AgentTurnEndedAtV1`) and upcasts unchanged. A superseded
 version's Rust doc comment is part of its published schema — don't edit
