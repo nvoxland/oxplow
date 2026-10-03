@@ -472,7 +472,7 @@ impl SqliteEventLogStore {
 mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
-        ActorKind, CommandExecuted, CommandExecutedV1, CommandOutcome, ConfigChanged,
+        ActorKind, CommandExecuted, CommandExecutedV2, CommandOutcome, ConfigChanged,
         ConfigChangedV1, WorkItemTransitioned, WorkItemTransitionedV1,
     };
     use oxplow_domain::TaskStatus;
@@ -556,7 +556,7 @@ mod tests {
         .with_subject(["work_item:oxplow:tsk4", "effort:eff9"]);
         let e2 = Envelope::typed::<CommandExecuted>(
             "agent:thr4",
-            &CommandExecutedV1 {
+            &CommandExecutedV2 {
                 command: "work_item.transition".into(),
                 actor_kind: ActorKind::Agent,
                 actor_id: Some("thr4".into()),

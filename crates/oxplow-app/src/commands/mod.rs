@@ -50,7 +50,7 @@ use oxplow_db::{
 };
 use oxplow_domain::events::schema::{
     CommandApproved, CommandApprovedV1, CommandDeclined, CommandDeclinedV1, CommandExecuted,
-    CommandExecutedV1, CommandOutcome as Outcome, CommandProposed, CommandProposedV1,
+    CommandExecutedV2, CommandOutcome as Outcome, CommandProposed, CommandProposedV2,
 };
 use oxplow_domain::refs::build::{command_ref, proposal_ref};
 use oxplow_domain::{
@@ -674,9 +674,10 @@ impl CommandBus {
                 }
             },
         };
-        // 4. A person confirms; an agent never can. Nothing is written: a
-        // person is asked, an agent's run is kept as a proposal.
-        let confirmed = confirmed && !actor.is_agent_driven();
+        // 4. A person confirms; an agent or an effect never can. Nothing is
+        // written: a person is asked, an agent's or effect's run is kept as
+        // a proposal.
+        let confirmed = confirmed && actor.may_confirm();
         let confirm = command.confirm(&input);
         if confirm.required() && !confirmed {
             let preview = Preview {
@@ -893,8 +894,8 @@ impl CommandBus {
     }
 
     /// A run that needs a confirmation it doesn't have. A person (or the
-    /// system) is asked: `NeedsConfirmation`. An agent's run is kept for a
-    /// person instead: dry-run (a `Tx` handler, confirmed, in a rolled-back
+    /// system) is asked: `NeedsConfirmation`. An agent's or an effect's run
+    /// (`Actor::proposes`) is kept for a person instead: dry-run (a `Tx` handler, confirmed, in a rolled-back
     /// transaction — what it would have done; an `External` one never
     /// runs), then the proposal and `command.proposed` in one transaction,
     /// and `Proposed`. A dry run that fails is the run's failure, audited
@@ -909,7 +910,7 @@ impl CommandBus {
         gates: Gates,
     ) -> CommandError {
         let Prepared { command, resolved } = run;
-        if !actor.is_agent_driven() {
+        if !actor.proposes() {
             return CommandError::NeedsConfirmation {
                 preview: Box::new(preview),
             };
@@ -969,7 +970,7 @@ impl CommandBus {
                     .collect();
                 let proposed = Envelope::typed::<CommandProposed>(
                     actor_c.source(),
-                    &CommandProposedV1 {
+                    &CommandProposedV2 {
                         proposal: proposal_ref(inserted.id),
                         command: row.command.clone(),
                         actor_kind: actor_c.kind(),
@@ -1632,7 +1633,7 @@ fn record_tx(
     )?;
     let mut executed = Envelope::typed::<CommandExecuted>(
         actor.source(),
-        &CommandExecutedV1 {
+        &CommandExecutedV2 {
             command: spec.name.clone(),
             actor_kind: actor.kind(),
             actor_id: actor.id(),
@@ -3369,6 +3370,52 @@ mod tests {
         assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
     }
 
+    fn effect() -> Actor {
+        Actor::Effect {
+            effect: "acme/notify".into(),
+        }
+    }
+
+    /// P8.D8: an effect runs with an agent's rights — a command that asks
+    /// becomes a proposal (even when it says it confirmed), and a
+    /// person-only command is denied; the audit says it was the effect.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_effect_runs_with_an_agents_rights_and_never_confirms() {
+        let (db, bus) = confirming_bus();
+        for confirmed in [false, true] {
+            let err = bus
+                .run(
+                    &effect(),
+                    "kv.set",
+                    json!({ "k": "a", "v": "1" }),
+                    confirmed,
+                )
+                .await
+                .unwrap_err();
+            assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
+        }
+        assert_eq!(kv_value(&db, "a").await, None);
+        bus.register(
+            Command::new(
+                kv_spec("kv.mine", Invokers::HUMAN_ONLY, Confirm::Never),
+                kv_set(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let err = bus
+            .run(&effect(), "kv.mine", json!({ "k": "b", "v": "1" }), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+        let rows = audits_of(&db, "kv.mine").await;
+        assert_eq!(
+            rows[0].actor_kind,
+            oxplow_domain::events::schema::ActorKind::Effect
+        );
+        assert_eq!(rows[0].actor_id.as_deref(), Some("acme/notify"));
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn only_a_person_decides_a_proposal() {
         let (db, bus) = confirming_bus();
@@ -3377,7 +3424,7 @@ mod tests {
             lens_id: "acme/x".into(),
             on_behalf_of: Box::new(agent()),
         };
-        for actor in [agent(), lens_for_agent, Actor::System] {
+        for actor in [agent(), lens_for_agent, Actor::System, effect()] {
             let err = bus.approve(&actor, id).await.unwrap_err();
             assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
             let err = bus.decline(&actor, id).await.unwrap_err();

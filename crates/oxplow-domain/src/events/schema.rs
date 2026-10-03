@@ -124,6 +124,8 @@ impl EventSchemaRegistry {
         let mut r = Self::new();
         r.register::<WorkItemTransitioned>()
             .expect("core type registers");
+        r.register::<CommandExecutedAtV1>()
+            .expect("core type registers");
         r.register::<CommandExecuted>()
             .expect("core type registers");
         r.register::<ConfigChanged>().expect("core type registers");
@@ -188,6 +190,8 @@ impl EventSchemaRegistry {
         r.register::<PluginDisabled>().expect("core type registers");
         r.register::<LensShown>().expect("core type registers");
         r.register::<LensKept>().expect("core type registers");
+        r.register::<CommandProposedAtV1>()
+            .expect("core type registers");
         r.register::<CommandProposed>()
             .expect("core type registers");
         r.register::<CommandApproved>()
@@ -435,6 +439,22 @@ pub enum ActorKind {
     Agent,
     Lens,
     System,
+    /// An extension's effect (P8.D8).
+    Effect,
+}
+
+// The kinds `command.executed@1` and `command.proposed@1` were published
+// with, before effects: frozen, since a published schema never changes
+// (its doc comment, which is part of the schema, included).
+/// Who ran a command (`.context/target-architecture.md` §7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename = "ActorKind")]
+pub enum ActorKindV1 {
+    Human,
+    Agent,
+    Lens,
+    System,
 }
 
 /// How a command run ended.
@@ -453,6 +473,31 @@ pub enum CommandOutcome {
 pub struct CommandExecutedV1 {
     /// The command's name (`work_item.transition`, `config.set`).
     pub command: String,
+    pub actor_kind: ActorKindV1,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_id: Option<String>,
+    pub outcome: CommandOutcome,
+    /// The `command_audit` row, which holds the input and the inverse.
+    pub audit_id: i64,
+    /// Whether an inverse was recorded, i.e. `commands.undo` can apply.
+    pub undoable: bool,
+}
+
+/// The v1 shape of `command.executed`, as a registry entry.
+pub struct CommandExecutedAtV1;
+impl EventType for CommandExecutedAtV1 {
+    const TYPE: &'static str = "command.executed";
+    const V: u32 = 1;
+    type Payload = CommandExecutedV1;
+}
+
+/// `command.executed@2`: the bus ran a command — v1, with an effect among
+/// the actor kinds (P8.D8). A v1 payload is a v2 one as is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommandExecutedV2 {
+    /// The command's name (`work_item.transition`, `config.set`).
+    pub command: String,
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor_id: Option<String>,
@@ -466,8 +511,16 @@ pub struct CommandExecutedV1 {
 pub struct CommandExecuted;
 impl EventType for CommandExecuted {
     const TYPE: &'static str = "command.executed";
-    const V: u32 = 1;
-    type Payload = CommandExecutedV1;
+    const V: u32 = 2;
+    type Payload = CommandExecutedV2;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            1 => Ok(payload),
+            _ => Err(DomainError::Invalid(format!(
+                "no upcast of command.executed from v{from_v}"
+            ))),
+        }
+    }
 }
 
 /// `command.proposed@1`: an agent ran a command that needs a person's
@@ -475,6 +528,36 @@ impl EventType for CommandExecuted {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommandProposedV1 {
+    /// `proposal:<id>`.
+    pub proposal: String,
+    /// The command's name (`config.set`).
+    pub command: String,
+    pub actor_kind: ActorKindV1,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_id: Option<String>,
+    /// Whether the command is destructive.
+    pub destructive: bool,
+    /// The pending proposals of the same call (`proposal:<id>`) this one
+    /// replaced — marked superseded in the same transaction.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supersedes: Vec<String>,
+}
+
+/// The v1 shape of `command.proposed`, as a registry entry.
+pub struct CommandProposedAtV1;
+impl EventType for CommandProposedAtV1 {
+    const TYPE: &'static str = "command.proposed";
+    const V: u32 = 1;
+    type Payload = CommandProposedV1;
+}
+
+/// `command.proposed@2`: an agent or an effect ran a command that needs a
+/// person's confirmation; it is kept as a proposal until a person decides
+/// — v1, with an effect among the actor kinds (P8.D8). A v1 payload is a
+/// v2 one as is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommandProposedV2 {
     /// `proposal:<id>`.
     pub proposal: String,
     /// The command's name (`config.set`).
@@ -493,8 +576,16 @@ pub struct CommandProposedV1 {
 pub struct CommandProposed;
 impl EventType for CommandProposed {
     const TYPE: &'static str = "command.proposed";
-    const V: u32 = 1;
-    type Payload = CommandProposedV1;
+    const V: u32 = 2;
+    type Payload = CommandProposedV2;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            1 => Ok(payload),
+            _ => Err(DomainError::Invalid(format!(
+                "no upcast of command.proposed from v{from_v}"
+            ))),
+        }
+    }
 }
 
 /// `command.approved@1`: a person approved a proposal and the command ran
@@ -1508,7 +1599,9 @@ mod tests {
                 ("command.approved", 1),
                 ("command.declined", 1),
                 ("command.executed", 1),
+                ("command.executed", 2),
                 ("command.proposed", 1),
+                ("command.proposed", 2),
                 ("config.changed", 1),
                 ("effect.result", 1),
                 ("effort.claim_verified", 1),

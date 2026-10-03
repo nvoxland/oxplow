@@ -155,6 +155,13 @@ pub enum Actor {
         on_behalf_of: Box<Actor>,
     },
     System,
+    /// An extension's effect reacting to an event (`effects:`, P8.D8):
+    /// an agent's invoker rights, no thread, and never a confirmation —
+    /// a command that asks becomes a proposal for a person.
+    Effect {
+        /// `<extension>/<effect id>`.
+        effect: String,
+    },
 }
 
 impl Actor {
@@ -164,6 +171,28 @@ impl Actor {
             Actor::Agent { .. } => ActorKind::Agent,
             Actor::Lens { .. } => ActorKind::Lens,
             Actor::System => ActorKind::System,
+            Actor::Effect { .. } => ActorKind::Effect,
+        }
+    }
+
+    /// Whether this actor may confirm a run that asks: a person, directly
+    /// or through a lens they used. An agent, an effect and oxplow itself
+    /// never can.
+    pub fn may_confirm(&self) -> bool {
+        match self {
+            Actor::Human => true,
+            Actor::Lens { on_behalf_of, .. } => on_behalf_of.may_confirm(),
+            Actor::Agent { .. } | Actor::System | Actor::Effect { .. } => false,
+        }
+    }
+
+    /// Whether a run of this actor's that asks is kept as a proposal for
+    /// a person (an agent's, an effect's) rather than asking it directly.
+    pub fn proposes(&self) -> bool {
+        match self {
+            Actor::Agent { .. } | Actor::Effect { .. } => true,
+            Actor::Lens { on_behalf_of, .. } => on_behalf_of.proposes(),
+            Actor::Human | Actor::System => false,
         }
     }
 
@@ -173,7 +202,7 @@ impl Actor {
         match self {
             Actor::Agent { .. } => true,
             Actor::Lens { on_behalf_of, .. } => on_behalf_of.is_agent_driven(),
-            Actor::Human | Actor::System => false,
+            Actor::Human | Actor::System | Actor::Effect { .. } => false,
         }
     }
 
@@ -182,20 +211,20 @@ impl Actor {
         match self {
             Actor::Agent { thread_id, .. } => Some(*thread_id),
             Actor::Lens { on_behalf_of, .. } => on_behalf_of.agent_thread(),
-            Actor::Human | Actor::System => None,
+            Actor::Human | Actor::System | Actor::Effect { .. } => None,
         }
     }
 
     pub fn invoker(&self) -> Invoker {
         match self {
             Actor::Human | Actor::System => Invoker::Human,
-            Actor::Agent { .. } => Invoker::Agent,
+            Actor::Agent { .. } | Actor::Effect { .. } => Invoker::Agent,
             Actor::Lens { .. } => Invoker::Lens,
         }
     }
 
     /// The `source` an event or audit row records: `human`, `agent:thr3`,
-    /// `lens:acme/blocked`, `system`.
+    /// `lens:acme/blocked`, `system`, `effect:acme/notify`.
     pub fn source(&self) -> String {
         match self {
             Actor::Human => "human".into(),
@@ -207,6 +236,7 @@ impl Actor {
             } => "agent".into(),
             Actor::Lens { lens_id, .. } => format!("lens:{lens_id}"),
             Actor::System => "system".into(),
+            Actor::Effect { effect } => format!("effect:{effect}"),
         }
     }
 
@@ -217,6 +247,7 @@ impl Actor {
                 thread_id: Some(t), ..
             } => Some(t.to_string()),
             Actor::Lens { lens_id, .. } => Some(lens_id.clone()),
+            Actor::Effect { effect } => Some(effect.clone()),
             _ => None,
         }
     }
@@ -421,6 +452,38 @@ mod tests {
         assert_eq!(lens.thread_id(), Some(ThreadId::new(3)));
         assert_eq!(Actor::Human.source(), "human");
         assert_eq!(Actor::System.invoker(), Invoker::Human);
+        let effect = Actor::Effect {
+            effect: "acme/notify".into(),
+        };
+        assert_eq!(effect.invoker(), Invoker::Agent);
+        assert_eq!(effect.source(), "effect:acme/notify");
+        assert_eq!(effect.id().as_deref(), Some("acme/notify"));
+        assert_eq!(effect.kind(), ActorKind::Effect);
+    }
+
+    /// Only a person confirms — directly or through a lens they used.
+    #[test]
+    fn only_a_person_may_confirm() {
+        let agent = Actor::Agent {
+            thread_id: None,
+            stream_id: None,
+        };
+        let lens = |on: Actor| Actor::Lens {
+            lens_id: "acme/x".into(),
+            on_behalf_of: Box::new(on),
+        };
+        assert!(Actor::Human.may_confirm());
+        assert!(lens(Actor::Human).may_confirm());
+        for actor in [
+            agent.clone(),
+            lens(agent),
+            Actor::System,
+            Actor::Effect {
+                effect: "acme/notify".into(),
+            },
+        ] {
+            assert!(!actor.may_confirm(), "{actor:?}");
+        }
     }
 
     #[test]

@@ -66,7 +66,7 @@ A command is a typed operation named `<capability|plugin>.<verb>`
 5. **Run and record in one transaction**: the handler, a `command_audit`
    row (`crates/oxplow-db/src/command_audit_store.rs`: actor, input,
    outcome, the handler's `result` — V114, so a run's answer, such as a
-   merge's conflicts, stays readable after the fact — and inverse), `command.executed@1` in the event log pointing at
+   merge's conflicts, stays readable after the fact — and inverse), `command.executed@2` in the event log pointing at
    the audit row, the handler's domain events (with `cause` = the
    executed event, and the actor's thread/stream — `Actor::anchors()` —
    filled into any anchor the handler left empty), and the audit row's
@@ -94,6 +94,21 @@ fail, it was beaten to it. An approval's lost race is the same.
 **Agent rules follow the agent.** An `Actor::Lens { on_behalf_of }`
 whose chain ends at an agent (`Actor::is_agent_driven`) gets the agent
 policy and can never confirm, exactly like the agent.
+
+**Only a person confirms; an effect runs with an agent's rights**
+(P8.D8). `Actor::may_confirm()` is true for `Human` and a lens acting for
+one — never an agent, an effect or `System` (step 4 drops a `confirmed`
+from anyone else). `Actor::proposes()` — an agent's or an
+`Actor::Effect { effect: "<extension>/<id>" }`'s run, directly or through
+a lens — turns a run that asks into a proposal; `System` is asked
+(`NeedsConfirmation`). An effect's invoker is `Agent` (a person-only
+command is `Denied`), it has no thread (no write gate, nothing
+thread-scoped), its source is `effect:<extension>/<id>`, and only a
+`Human` approves or declines a proposal. The audit and events say so:
+`actor_kind = 'effect'` (V147 rebuilds `command_audit`'s CHECK, keeping
+proposals' `audit_id`), carried by `command.executed@2` and
+`command.proposed@2` — v1 plus `effect` in `ActorKind`, upcast as is; the
+v1 schemas keep the frozen `ActorKindV1`.
 
 **An `External` run whose recording fails** (its effects already
 committed in the service's own transaction) is reported as done and

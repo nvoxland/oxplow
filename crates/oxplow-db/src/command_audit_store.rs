@@ -19,6 +19,7 @@ pub(crate) fn actor_kind_str(k: ActorKind) -> &'static str {
         ActorKind::Agent => "agent",
         ActorKind::Lens => "lens",
         ActorKind::System => "system",
+        ActorKind::Effect => "effect",
     }
 }
 
@@ -28,6 +29,7 @@ pub(crate) fn parse_actor_kind(s: &str) -> Result<ActorKind, DomainError> {
         "agent" => ActorKind::Agent,
         "lens" => ActorKind::Lens,
         "system" => ActorKind::System,
+        "effect" => ActorKind::Effect,
         other => return Err(DomainError::Invalid(format!("actor kind `{other}`"))),
     })
 }
@@ -225,6 +227,49 @@ impl SqliteCommandAuditStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// P8.D8: V147 lets an effect be an audited actor, keeping every row
+    /// and every proposal's link to its approving run.
+    #[test]
+    fn v147_admits_an_effect_and_keeps_the_proposals_audit_rows() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        crate::database::migrate_to_for_tests(&mut conn, 146);
+        conn.execute_batch(
+            "INSERT INTO command_audit (id, at, command, actor_kind, input_json, outcome)
+               VALUES (7, 't', 'config.set', 'human', '{}', 'ok');
+             INSERT INTO command_proposal (id, created_at, command, input_json, actor_kind, key,
+                                           preview_json, decision, audit_id)
+               VALUES (1, 't', 'config.set', '{}', 'agent', 'k', '{}', 'approved', 7);",
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "INSERT INTO command_audit (at, command, actor_kind, input_json, outcome)
+                   VALUES ('t', 'x.y', 'effect', '{}', 'ok')",
+                [],
+            )
+            .is_err());
+        crate::database::migrate_and_compile(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO command_audit (at, command, actor_kind, input_json, outcome)
+               VALUES ('t', 'x.y', 'effect', '{}', 'ok')",
+            [],
+        )
+        .unwrap();
+        let linked: i64 = conn
+            .query_row(
+                "SELECT audit_id FROM command_proposal WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(linked, 7);
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM command_audit", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 2);
+    }
     use serde_json::json;
 
     #[tokio::test]

@@ -1,0 +1,72 @@
+{
+  "$defs": {
+    "ActorKind": {
+      "description": "Who ran a command (`.context/target-architecture.md` §7).",
+      "oneOf": [
+        {
+          "enum": [
+            "human",
+            "agent",
+            "lens",
+            "system"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "effect",
+          "description": "An extension's effect (P8.D8).",
+          "type": "string"
+        }
+      ]
+    },
+    "CommandOutcome": {
+      "description": "How a command run ended.",
+      "enum": [
+        "ok",
+        "denied",
+        "invalid",
+        "error"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`command.executed@2`: the bus ran a command — v1, with an effect among\nthe actor kinds (P8.D8). A v1 payload is a v2 one as is.",
+  "properties": {
+    "actor_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actor_kind": {
+      "$ref": "#/$defs/ActorKind"
+    },
+    "audit_id": {
+      "description": "The `command_audit` row, which holds the input and the inverse.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "command": {
+      "description": "The command's name (`work_item.transition`, `config.set`).",
+      "type": "string"
+    },
+    "outcome": {
+      "$ref": "#/$defs/CommandOutcome"
+    },
+    "undoable": {
+      "description": "Whether an inverse was recorded, i.e. `commands.undo` can apply.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "command",
+    "actor_kind",
+    "outcome",
+    "audit_id",
+    "undoable"
+  ],
+  "title": "CommandExecutedV2",
+  "type": "object"
+}

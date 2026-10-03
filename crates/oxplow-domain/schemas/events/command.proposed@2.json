@@ -1,0 +1,64 @@
+{
+  "$defs": {
+    "ActorKind": {
+      "description": "Who ran a command (`.context/target-architecture.md` §7).",
+      "oneOf": [
+        {
+          "enum": [
+            "human",
+            "agent",
+            "lens",
+            "system"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "effect",
+          "description": "An extension's effect (P8.D8).",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`command.proposed@2`: an agent or an effect ran a command that needs a\nperson's confirmation; it is kept as a proposal until a person decides\n— v1, with an effect among the actor kinds (P8.D8). A v1 payload is a\nv2 one as is.",
+  "properties": {
+    "actor_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actor_kind": {
+      "$ref": "#/$defs/ActorKind"
+    },
+    "command": {
+      "description": "The command's name (`config.set`).",
+      "type": "string"
+    },
+    "destructive": {
+      "description": "Whether the command is destructive.",
+      "type": "boolean"
+    },
+    "proposal": {
+      "description": "`proposal:<id>`.",
+      "type": "string"
+    },
+    "supersedes": {
+      "description": "The pending proposals of the same call (`proposal:<id>`) this one\nreplaced — marked superseded in the same transaction.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "proposal",
+    "command",
+    "actor_kind",
+    "destructive"
+  ],
+  "title": "CommandProposedV2",
+  "type": "object"
+}

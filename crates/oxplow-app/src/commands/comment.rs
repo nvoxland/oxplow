@@ -154,6 +154,7 @@ pub(super) fn author_of(actor: &Actor) -> &'static str {
         Actor::Agent { .. } => "agent",
         Actor::Lens { on_behalf_of, .. } => author_of(on_behalf_of),
         Actor::System => "system",
+        Actor::Effect { .. } => "effect",
     }
 }
 
