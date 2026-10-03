@@ -1268,7 +1268,7 @@ fn provider_grants(p: &ProviderSpec) -> Grants {
         runtime: CollectorRuntime::Exec,
         args,
         hosts: p.network.clone(),
-        credentials: p.credentials.clone(),
+        credentials: p.credential_grants(),
         env: p.env.clone(),
     }
 }

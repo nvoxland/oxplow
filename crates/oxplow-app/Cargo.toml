@@ -9,6 +9,8 @@ license.workspace = true
 [dependencies]
 time = { workspace = true }
 url = { workspace = true }
+# The OAuth token endpoint calls (providers/oauth.rs): two form POSTs.
+reqwest = { workspace = true }
 oxplow-domain = { workspace = true }
 oxplow-plugin = { workspace = true }
 oxplow-db = { workspace = true }

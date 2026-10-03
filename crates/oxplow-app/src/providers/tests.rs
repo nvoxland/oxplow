@@ -2504,3 +2504,435 @@ async fn a_call_finishing_after_its_instance_stopped_changes_nothing() {
         .await;
     assert_eq!(state(), Some((InstanceState::Ready, 0)));
 }
+
+/// The tracker extension, its provider's credential `FAKE_TOKEN` obtained
+/// by signing in at `authorize` / `token` (P9.B3), plus `more` credential
+/// entries (YAML list items, indented six spaces).
+fn write_oauth_extension(project: &Path, hooks: &str, authorize: &str, token: &str, more: &str) {
+    write_extension(project, hooks);
+    let manifest = project
+        .join("oxplow/extensions")
+        .join(EXT)
+        .join("extension.yaml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            "{text}    credentials:\n      - name: FAKE_TOKEN\n        oauth:\n          authorize_url: {authorize}\n          token_url: {token}\n          client_id: oxplow-test\n          scopes: [read, write]\n{more}"
+        ),
+    )
+    .unwrap();
+}
+
+/// P9.B3: a credential may be one the person signs in for. It is declared
+/// with its endpoints, checked at load, and what approving the provider
+/// shows.
+#[tokio::test]
+async fn an_oauth_credential_is_declared_checked_and_shown_for_approval() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    let (authorize, token) = (
+        "https://auth.example.com/authorize",
+        "https://auth.example.com/token",
+    );
+    write_oauth_extension(&project, "", authorize, token, "      - PLAIN\n");
+    let ext = extension(&project);
+    let spec = &ext.providers[0];
+    assert_eq!(spec.credential_names(), vec!["FAKE_TOKEN", "PLAIN"]);
+    let oauth = spec.credentials[0].oauth.as_ref().expect("signs in");
+    assert_eq!(
+        (
+            oauth.authorize_url.as_str(),
+            oauth.client_id.as_str(),
+            oauth.scopes.len()
+        ),
+        (authorize, "oxplow-test", 2)
+    );
+    assert!(
+        spec.credentials[1].oauth.is_none(),
+        "a bare name is a static one"
+    );
+    // What a person approves names where it signs in.
+    let listed = program(&fx, &ext);
+    assert_eq!(
+        listed.credentials,
+        vec![
+            format!("FAKE_TOKEN (signs in at {authorize}; tokens from {token}; client oxplow-test; scopes read, write)"),
+            "PLAIN".to_string()
+        ]
+    );
+    let before = listed.version.clone();
+    write_oauth_extension(
+        &project,
+        "",
+        authorize,
+        "https://auth.example.com/token2",
+        "      - PLAIN\n",
+    );
+    assert_ne!(program(&fx, &extension(&project)).version, before);
+
+    let refused = |authorize: &str, more: &str, says: &str| {
+        write_oauth_extension(&project, "", authorize, token, more);
+        let loaded = crate::extensions::load_extensions(&project)
+            .into_iter()
+            .find(|e| e.name == EXT)
+            .unwrap();
+        assert!(loaded.providers.is_empty(), "{says}");
+        assert!(
+            loaded.errors.iter().any(|e| e.contains(says)),
+            "{says}: {:?}",
+            loaded.errors
+        );
+    };
+    // The token never crosses the network in the clear.
+    refused("http://auth.example.com/authorize", "", "must be https");
+    refused(authorize, "      - FAKE_TOKEN\n", "declared twice");
+    // A client secret is another credential's value, by name — a static one.
+    let secret_of = |name: &str| {
+        format!("      - name: OTHER\n        oauth: {{ authorize_url: {authorize}, token_url: {token}, client_id: x, client_secret: {name} }}\n")
+    };
+    refused(authorize, &secret_of("NOPE"), "`client_secret: NOPE`");
+    refused(
+        authorize,
+        &secret_of("FAKE_TOKEN"),
+        "`client_secret: FAKE_TOKEN`",
+    );
+    refused(
+        authorize,
+        "      - name: BAD\n        oauth: { authorize_url: x }\n",
+        "token_url",
+    );
+    // On loopback, plain http is what a local service speaks.
+    write_oauth_extension(
+        &project,
+        "",
+        "http://127.0.0.1:9/authorize",
+        "http://localhost:9/token",
+        "",
+    );
+    extension(&project);
+}
+
+/// The fixture with the tracker extension approved, its `FAKE_TOKEN` one
+/// the person signs in for at a stand-in authorization server (`more`:
+/// further lines of the manifest, continuing the `oauth:` block).
+async fn signing_in(hooks: &str, more: &str) -> (EffortFixture, oauth_sim::OAuthSim) {
+    let fx = services_with_effort().await;
+    let sim = oauth_sim::OAuthSim::start().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_oauth_extension(&project, hooks, &sim.authorize_url, &sim.token_url, more);
+    approve(&fx, &extension(&project));
+    (fx, sim)
+}
+
+/// Start a sign-in and do what the person's browser does: open the page,
+/// follow it back to oxplow. What the renderer then hears.
+async fn sign_in(fx: &EffortFixture, name: &str) -> Option<String> {
+    let mut ui = fx.svc.events.subscribe_ui();
+    let url = fx
+        .svc
+        .providers
+        .begin_sign_in(INSTANCE, name)
+        .await
+        .expect("the sign-in begins");
+    reqwest::get(&url)
+        .await
+        .expect("the browser follows it back");
+    let heard = async {
+        loop {
+            if let Ok(crate::events::OxplowEvent::CredentialChanged {
+                instance,
+                name: of,
+                error,
+            }) = ui.recv().await
+            {
+                assert_eq!((instance.as_str(), of.as_str()), (INSTANCE, name));
+                return error;
+            }
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(20), heard)
+        .await
+        .expect("the renderer hears the sign-in finished")
+}
+
+fn sign_in_state(views: &[ProviderInstanceView], name: &str) -> (bool, Option<oauth::SignInState>) {
+    let c = views
+        .iter()
+        .find(|v| v.instance == INSTANCE)
+        .unwrap()
+        .credentials
+        .iter()
+        .find(|c| c.name == name)
+        .unwrap();
+    (c.set, c.sign_in.clone())
+}
+
+fn unconfigured_at(fx: &EffortFixture) -> (String, String) {
+    match fx.svc.providers.health(INSTANCE).map(|h| h.state) {
+        Some(InstanceState::Unconfigured { problems }) => {
+            (problems[0].path.clone(), problems[0].message.clone())
+        }
+        other => panic!("expected it unconfigured: {other:?}"),
+    }
+}
+
+/// P9.B3: a credential the person signs in for. Until they have, the
+/// instance is unconfigured naming it; signing in keeps the token in the
+/// keychain and starts the instance on the access token alone.
+#[tokio::test]
+async fn signing_in_starts_the_instance_on_the_access_token_alone() {
+    // The fake's service takes the first access token the stand-in issues
+    // and nothing else — not the keychain's record of it.
+    let (fx, sim) = signing_in("accepts:FAKE_TOKEN=at-2", "      - PLAIN\n").await;
+    let providers = &fx.svc.providers;
+    configure(&fx, true, json!({ "team": "core" }));
+    providers.reconcile().await;
+    let (path, message) = unconfigured_at(&fx);
+    assert_eq!(path, "/credentials/FAKE_TOKEN");
+    assert!(message.contains("isn't signed in"), "{message}");
+    assert!(fx.svc.work_items.get("fake").is_err(), "nothing registered");
+    assert_eq!(
+        sign_in_state(&providers.list().await, "FAKE_TOKEN"),
+        (false, Some(oauth::SignInState::NotSignedIn))
+    );
+    assert_eq!(
+        sign_in_state(&providers.list().await, "PLAIN"),
+        (false, None)
+    );
+
+    // A signed-in credential is never given a value; a pasted one is
+    // never signed in for.
+    let refused = providers
+        .set_credential(INSTANCE, "FAKE_TOKEN", Some("pasted"))
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("sign in"), "{refused}");
+    let refused = providers
+        .begin_sign_in(INSTANCE, "PLAIN")
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        refused.contains("isn't a credential you sign in for"),
+        "{refused}"
+    );
+
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+    assert_eq!(
+        providers.health(INSTANCE).map(|h| h.state),
+        Some(InstanceState::Ready)
+    );
+    create_on_fake(&fx).await.unwrap();
+    assert_eq!(sim.grants(), vec!["authorization_code"]);
+    assert_eq!(
+        sign_in_state(&providers.list().await, "FAKE_TOKEN"),
+        (true, Some(oauth::SignInState::SignedIn { until: None }))
+    );
+
+    // Forgetting it signs the person out: the instance stops on it.
+    providers
+        .set_credential(INSTANCE, "FAKE_TOKEN", None)
+        .unwrap();
+    providers.credential_changed(INSTANCE).await;
+    assert_eq!(unconfigured_at(&fx).0, "/credentials/FAKE_TOKEN");
+    assert!(fx.svc.work_items.get("fake").is_err());
+}
+
+/// P9.B3: a token about to lapse is renewed before the process starts.
+#[tokio::test]
+async fn a_lapsed_token_is_renewed_before_the_instance_starts() {
+    // The service takes only the renewed token.
+    let (fx, sim) = signing_in("accepts:FAKE_TOKEN=at-3", "").await;
+    // Signed in while the instance is off; the token it got has lapsed.
+    configure(&fx, false, json!({ "team": "core" }));
+    sim.set_ttl(-10);
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+    sim.set_ttl(3600);
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    assert_eq!(
+        fx.svc.providers.health(INSTANCE).map(|h| h.state),
+        Some(InstanceState::Ready)
+    );
+    assert_eq!(sim.grants(), vec!["authorization_code", "refresh_token"]);
+}
+
+/// P9.B3: a token its service refuses (`Auth`) although it looks good is
+/// renewed, the process restarted on the new one, and the call tried once
+/// more — none of which counts as a failure.
+#[tokio::test]
+async fn a_refused_token_is_renewed_and_the_call_tried_once_more() {
+    let (fx, sim) = signing_in("", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+    first_read(&fx).await;
+    // Its service now takes only the next token; the process holds at-2.
+    set_hooks(&fx, "accepts:FAKE_TOKEN=at-3").await;
+    create_on_fake(&fx).await.unwrap();
+    assert_eq!(sim.grants(), vec!["authorization_code", "refresh_token"]);
+    let health = fx.svc.providers.health(INSTANCE).unwrap();
+    assert_eq!(
+        (health.state, health.consecutive_failures),
+        (InstanceState::Ready, 0)
+    );
+    // The process that answered was started on the renewed token.
+    set_hooks(&fx, "accepts:FAKE_TOKEN=at-3").await;
+    create_on_fake(&fx).await.unwrap();
+    assert_eq!(sim.grants().len(), 2);
+
+    // A read is retried the same way.
+    set_hooks(&fx, "accepts:FAKE_TOKEN=at-4").await;
+    fx.svc
+        .commands
+        .run(
+            &Actor::Human,
+            sync::SYNC,
+            json!({ "instance": INSTANCE }),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(sim.grants().len(), 3);
+    assert_eq!(
+        fx.svc
+            .providers
+            .health(INSTANCE)
+            .unwrap()
+            .consecutive_failures,
+        0
+    );
+}
+
+/// P9.B3: renewed once, not for ever — a service that refuses the renewed
+/// token too is a failure like any other.
+#[tokio::test]
+async fn a_token_refused_again_after_renewal_is_a_failure() {
+    let (fx, sim) = signing_in("accepts:FAKE_TOKEN=never", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+    let health = fx.svc.providers.health(INSTANCE).unwrap();
+    match &health.state {
+        InstanceState::Failing { errors } => {
+            assert!(errors[0].contains("check"), "{errors:?}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(health.consecutive_failures, 1);
+    assert_eq!(sim.grants(), vec!["authorization_code", "refresh_token"]);
+}
+
+/// P9.B3: a sign-in the service revoked can't be renewed: the instance
+/// stops, unconfigured, saying to sign in again — never a silent failure,
+/// and the keychain's record stays so the row can say so.
+#[tokio::test]
+async fn a_revoked_sign_in_stops_the_instance_and_says_sign_in_again() {
+    let (fx, sim) = signing_in("", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+    first_read(&fx).await;
+    assert!(fx.svc.work_items.get("fake").is_ok());
+    sim.revoke();
+    set_hooks(&fx, "accepts:FAKE_TOKEN=never").await;
+    let err = create_on_fake(&fx).await.unwrap_err().to_string();
+    assert!(err.contains("sign in again"), "{err}");
+    let (path, message) = unconfigured_at(&fx);
+    assert_eq!(path, "/credentials/FAKE_TOKEN");
+    assert!(message.contains("sign in again"), "{message}");
+    assert!(fx.svc.work_items.get("fake").is_err(), "nothing registered");
+    assert!(fx.svc.commands.namespace_owner("fake").is_none());
+    assert_eq!(
+        sign_in_state(&fx.svc.providers.list().await, "FAKE_TOKEN"),
+        (false, Some(oauth::SignInState::SignInAgain))
+    );
+    assert_eq!(
+        fx.svc
+            .providers
+            .health(INSTANCE)
+            .unwrap()
+            .consecutive_failures,
+        0,
+        "the person's to fix, not a failure of the program"
+    );
+    // Signing in again is all it takes.
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+    assert_eq!(
+        fx.svc.providers.health(INSTANCE).map(|h| h.state),
+        Some(InstanceState::Ready)
+    );
+}
+
+/// P9.B3: a client secret is another credential's value, sent with the
+/// token requests by oxplow — the provider's process never holds it.
+#[tokio::test]
+async fn a_client_secret_goes_to_the_token_endpoint_and_not_to_the_process() {
+    // `needs`: the fake's `check` reports the credential if it lacks it.
+    let (fx, sim) = signing_in(
+        "needs:CLIENT_SECRET",
+        "          client_secret: CLIENT_SECRET\n      - CLIENT_SECRET\n",
+    )
+    .await;
+    let providers = &fx.svc.providers;
+    configure(&fx, true, json!({ "team": "core" }));
+    let refused = providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN")
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("set `CLIENT_SECRET` first"), "{refused}");
+    providers.reconcile().await;
+    assert_eq!(unconfigured_at(&fx).0, "/credentials/CLIENT_SECRET");
+    providers
+        .set_credential(INSTANCE, "CLIENT_SECRET", Some("s3cret"))
+        .unwrap();
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+    assert_eq!(sim.secrets(), vec![Some("s3cret".to_string())]);
+    // The process started (signed in) without it.
+    let (path, message) = unconfigured_at(&fx);
+    assert_eq!(path, "/credentials/CLIENT_SECRET");
+    assert!(
+        message.contains("isn't set"),
+        "the fake's own check: {message}"
+    );
+}
+
+/// P9.B3: starting a sign-in again abandons the one under way — its
+/// listener stops at once (a fixed `redirect_port` is free for the new
+/// one) and it stores nothing; removing the instance abandons it too.
+#[tokio::test]
+async fn a_newer_sign_in_replaces_the_one_under_way() {
+    let port = {
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let (fx, sim) = signing_in("", &format!("          redirect_port: {port}\n")).await;
+    let providers = &fx.svc.providers;
+    configure(&fx, true, json!({ "team": "core" }));
+    let first = providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN")
+        .await
+        .unwrap();
+    assert!(first.contains(&format!("127.0.0.1%3A{port}")), "{first}");
+    // The second takes the same port: the first no longer listens.
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+    assert_eq!(sim.grants(), vec!["authorization_code"]);
+    // The first's page now leads nowhere of ours: its `state` is refused.
+    let stale = reqwest::get(&first).await;
+    assert!(
+        stale.map(|r| r.status().as_u16()).unwrap_or(0) != 200,
+        "nobody answers the abandoned sign-in"
+    );
+    assert_eq!(sim.grants().len(), 1);
+
+    // Removing the instance abandons a sign-in under way: the port is
+    // free again, and nothing is kept for what's gone.
+    providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN")
+        .await
+        .unwrap();
+    providers
+        .remove_instance(&Actor::Human, INSTANCE)
+        .await
+        .unwrap();
+    std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
+}

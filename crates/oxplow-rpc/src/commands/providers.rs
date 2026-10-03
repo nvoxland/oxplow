@@ -85,6 +85,19 @@ pub async fn set_instance_credential(
     Ok(svc.providers.list().await)
 }
 
+/// Start signing in for one of `instance`'s credentials (one its
+/// provider declares with `oauth:`): the page the person signs in on, to
+/// open in their browser. When they have, the token is kept in this
+/// machine's keychain, the instance restarts on it, and the renderer
+/// hears `credentialChanged`. UI only: an agent never signs in.
+pub async fn begin_oauth_sign_in(
+    svc: &Services,
+    instance: String,
+    name: String,
+) -> Result<String, IpcError> {
+    Ok(svc.providers.begin_sign_in(&instance, &name).await?)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -121,6 +134,10 @@ mod tests {
             (
                 "remove_provider_instance",
                 json!({ "instance": "tracker/fake" }),
+            ),
+            (
+                "begin_oauth_sign_in",
+                json!({ "instance": "tracker/fake", "name": "TOKEN" }),
             ),
         ] {
             let refused = crate::dispatch(name, input, &svc).await.unwrap_err();

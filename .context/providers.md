@@ -92,7 +92,11 @@ than `declarations()`, for the host's handshake check), `progress` (a
 read sends `$/progress` before each record, then takes 100 ms over it), `read-fail-after:<n>` (a
 read fails after `n` checkpointed records) and `bad-record` (a read
 streams another provider's item), `rate-limit:<ms>` (its next invoke or
-read is refused `RateLimited`).
+read is refused `RateLimited`), `needs:<NAME>` (`check` reports
+`/credentials/<NAME>` unless that credential reached the process) and
+`accepts:<NAME>=<value>` (check, invoke and read answer `Auth` unless the
+credential `<NAME>` the process holds is `<value>` — a service that
+takes one token and no other, for the sign-in tests).
 `tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
 notifications against the goldens.
 
@@ -279,7 +283,8 @@ providers:
     entry: bin/provider          # a program in the extension folder
     args: [--stdio]
     env: [TRACKER_URL]           # host variables passed through by name
-    credentials: [token]         # keychain values, as env
+    credentials: [token]         # keychain values, as env; or
+                                 # `{ name, oauth }` — "Credentials and sign-in"
     network: [api.example.com]   # hosts it may reach
     declarations: provider.json  # its InitializeResult, checked in
 ```
@@ -301,7 +306,10 @@ extension folder but the manifest and `lenses/` — dot-files, the entry
 and the declarations file among them; a symlink anywhere makes it
 unapprovable — plus the entry path, `args` (hashed relative to the
 folder, where it runs; an arg path leaving the folder is refused at
-load), `env` names, `credentials` and `network`. So a changed declaration is a new version,
+load), `env` names, `credentials` (each as `CredentialDecl::grant` renders
+it — a signed-in one with its endpoints, client id, scopes, client secret's
+name and redirect port, so changing where it signs in asks again) and
+`network`. So a changed declaration is a new version,
 shown unapproved in Settings → Data → Programs (with its grants listed)
 until a person approves it again. Every start re-checks it, restarts
 included.
@@ -422,6 +430,87 @@ config, provider? } }`, the same entries and the same validation):
   per-minute sync tick (`reconcile_if_global_changed`); the one that
   wrote it reconciles at once. A file that doesn't load keeps what was
   last read, with a warning.
+
+**Credentials and sign-in** (P9.B3; `spec.rs` `CredentialDecl`,
+`oauth.rs`). A credential is a name (a value the person pastes) or one
+they **sign in** for:
+
+```yaml
+credentials:
+  - CLIENT_SECRET                  # pasted
+  - name: TRACKER_TOKEN            # signed in for; the env var holds the access token
+    oauth:
+      authorize_url: https://tracker.example/oauth/authorize
+      token_url: https://tracker.example/oauth/token
+      client_id: oxplow
+      scopes: [read, write]
+      client_secret: CLIENT_SECRET # optional: the NAME of a pasted credential
+      redirect_port: 8123          # optional: for a service that wants a fixed redirect
+```
+
+The loader refuses a name declared twice, an endpoint that isn't https
+(plain http only on loopback), and a `client_secret` that doesn't name a
+pasted credential of the same provider. Collectors keep the bare-name
+form; sign-in is a provider's.
+
+- **oxplow runs the flow, not the provider.** Authorization code with
+  PKCE (S256, always) and a loopback redirect (RFC 8252): `oauth::begin`
+  listens on `127.0.0.1` (an ephemeral port, or `redirect_port`), and
+  answers only `GET /callback` carrying this sign-in's `state` — anything
+  else is refused and the wait goes on — then exchanges the code with the
+  verifier only this process holds. It is hand-rolled (two form POSTs
+  over reqwest), one mechanism for every provider. The listener is its
+  own, not a daemon route: the daemon is per project and bearer-gated,
+  and a global instance's sign-in belongs to no project. It waits five
+  minutes; a sign-in nobody waits for any more stops listening.
+- **The token is one keychain secret** — JSON `{ access_token,
+  refresh_token?, expires_at?, scope? }` under the credential's instance
+  account. The provider's process is handed **the access token alone**,
+  as the env var of the credential's name. A credential named as a
+  `client_secret` is the host's to send with token requests and is
+  **never** in the process's environment (nor the kit's).
+- **Renewal** (`oauth::access_token`): before every start a token
+  within 60 s of lapsing is renewed and kept; a `check` that answers
+  `Auth` is tried once more on renewed tokens (`Instance::start`); an
+  `invoke` or `read` that answers `Auth` renews, ends the process and
+  tries the call once more on a fresh one (`Instance::reauthorize` — a
+  process started since the refused call is left alone, so two callers
+  renew once). None of that counts as a failure; an `Auth` after the
+  renewal does, like any other. A provider with no signed-in credential
+  gets no retry.
+- **A renewal the service refuses for good** (`invalid_grant`, or no
+  refresh token to renew with) rewrites the kept token as lapsed with no
+  refresh token — never deleted — so the credential reads
+  `sign_in_again`, and the instance is **unconfigured** at
+  `/credentials/<NAME>` ("sign in again"): it stops and registers
+  nothing, and that is not a failure of the program. Not signed in at
+  all is the same state with "isn't signed in". A token endpoint that
+  can't be reached is an ordinary failed start (backoff), and a token
+  that's still good is used as it is.
+- **Signing in** is a person's: IPC `begin_oauth_sign_in { instance,
+  name }` (`ProviderRegistry::begin_sign_in`, UI-only) returns the page
+  to open; the renderer opens it in **the person's own browser**
+  (`tauri-bridge/systemBrowser.ts`, not the sandboxed external-URL
+  window — their sessions live there and services refuse embedded
+  webviews). When the redirect lands the token is stored,
+  `credential_changed` restarts the instance on it, and the renderer
+  hears `CredentialChanged { instance, name, error }` — the keychain is
+  no model, so this is one of the bus's UI-only signals. A second
+  sign-in for the same credential abandons the first.
+  `set_instance_credential` refuses a value for a signed-in credential;
+  with no value it signs out.
+- **The view**: `ProviderInstanceView.credentials` is
+  `InstanceCredential { name, set, sign_in? }`, `sign_in` being
+  `not_signed_in | signed_in { until? } | sign_in_again` (`until` only
+  for a token that can't renew itself). The Integrations row shows a
+  **Sign in** / **Sign in again** button and **Sign out** instead of a
+  value box (`signInLine`).
+- **Limits.** With a remote daemon the redirect lands on the daemon's
+  machine, so sign-in works only where the browser and the core share a
+  host (a tunnel to `redirect_port` otherwise). No real OAuth service
+  has been exercised: the tests run against `oauth_sim.rs`, a stand-in
+  authorization server that checks the PKCE verifier, issues refresh
+  tokens, and can expire, rotate and revoke them.
 
 The key is human-only (`HUMAN_ONLY_KEYS`: enabling runs a program) and
 shared with the team; whether it *runs* is per machine (approval,
@@ -577,8 +666,8 @@ nothing, with the problem's field as `/config/<path>`; then `config.set`
 of `extensionInstances` — to enable, `plugin.enable` runs **first**, so
 a failed enable writes nothing and the config never says enabled for
 an instance that wasn't — then a reconcile). Each row
-shows its state, its credentials (set into the keychain through
-`set_credential`, which takes a collector's or a provider's),
+shows its state, its credentials (each set into the keychain through
+`set_instance_credential`, or signed in for — "Credentials and sign-in"),
 the config as a form from the provider's `config_schema`
 (`SchemaForm`, P6.B2: Escape resets an edit; a field's problem disables
 the actions), Check and Enable / Disable / Enable again, and each
@@ -627,7 +716,8 @@ What `oxplow plugin test <name> [--bless] [--json]` runs for each
 provider an extension declares, after its check and its lens and
 collector examples ([extensions.md](./extensions.md) "The SDK"). The person running it runs their own program, so there is no
 approval check; credentials come from the environment (the declared
-names).
+names — for a signed-in credential, an access token the author got
+themselves: the kit never signs in — and never a client secret).
 
 - **`ReferenceClient`** spawns the provider exactly as the host does
   (`host::spawn`: scrubbed env, sandbox, kill on drop) and taps both

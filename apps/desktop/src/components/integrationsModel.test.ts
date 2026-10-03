@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { ProviderInstanceView } from "../tauri-bridge/generated/bindings.js";
-import { integrationRow } from "./integrationsModel.js";
+import { integrationRow, signInLine } from "./integrationsModel.js";
 
 const view = (over: Partial<ProviderInstanceView>): ProviderInstanceView => ({
   instance: "tracker/linear",
@@ -140,4 +140,19 @@ test("integrationRow shows a read's progress and a rate limit", () => {
   expect(limited.status).toContain("Ready · rate limited until");
   expect(limited.problem).toBe(false);
   expect(ready({ rateLimitedUntil: "2026-10-01T11:00:00Z" }).status).toBe("Ready");
+});
+
+// P9.B3: a credential the person signs in for says where the sign-in
+// stands, and what the button does.
+test("signInLine says where a sign-in stands", () => {
+  expect(signInLine({ state: "not_signed_in" })).toEqual({ text: "Not signed in", action: "Sign in", signedIn: false, problem: false });
+  expect(signInLine({ state: "signed_in", until: null })).toEqual({ text: "Signed in", action: "Sign in again", signedIn: true, problem: false });
+  const until = signInLine({ state: "signed_in", until: "2026-10-04T12:00:00Z" });
+  expect(until.text).toBe(`Signed in until ${new Date("2026-10-04T12:00:00Z").toLocaleString()}`);
+  expect(signInLine({ state: "sign_in_again" })).toEqual({
+    text: "Sign in again: the sign-in lapsed or was withdrawn",
+    action: "Sign in again",
+    signedIn: false,
+    problem: true,
+  });
 });

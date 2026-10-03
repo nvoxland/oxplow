@@ -72,14 +72,159 @@ pub struct ProviderSpec {
     /// Host environment variables passed through by name.
     #[serde(default)]
     pub env: Vec<String>,
-    /// Credentials it gets from the keychain, as environment variables.
+    /// Credentials it gets from the keychain, as environment variables:
+    /// each a name (a value the person pastes) or `{ name, oauth }` (one
+    /// they sign in for; the variable holds the access token).
     #[serde(default)]
-    pub credentials: Vec<String>,
+    pub credentials: Vec<CredentialDecl>,
     /// Hosts it may reach (enforced where the OS can).
     #[serde(default)]
     pub network: Vec<String>,
     /// The checked-in `InitializeResult` (JSON), relative to the folder.
     pub declarations: String,
+}
+
+/// How a credential is obtained by signing in (P9.B3): OAuth 2.1's
+/// authorization-code flow with PKCE, run by oxplow — the provider only
+/// ever sees the access token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct OAuthDecl {
+    /// Where the person signs in.
+    pub authorize_url: String,
+    /// Where a code, or a refresh token, is exchanged for an access token.
+    pub token_url: String,
+    pub client_id: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    /// The **name** of another (static) credential of this provider that
+    /// holds the client secret, for a service that requires one.
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    /// The loopback port the redirect comes back on, for a service that
+    /// wants one registered; any free port otherwise.
+    #[serde(default)]
+    pub redirect_port: Option<u16>,
+}
+
+/// One credential a provider declares.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+pub struct CredentialDecl {
+    /// Its name: the environment variable the provider reads it from, and
+    /// what its keychain account is named for.
+    pub name: String,
+    /// Obtained by signing in rather than pasted (P9.B3).
+    pub oauth: Option<OAuthDecl>,
+}
+
+impl CredentialDecl {
+    /// What a person approves, and what the approval's hash covers: the
+    /// name, and for a signed-in one where it signs in, where its tokens
+    /// come from, as which client and for what — so changing any of them
+    /// asks again.
+    pub fn grant(&self) -> String {
+        let Some(oauth) = &self.oauth else {
+            return self.name.clone();
+        };
+        let mut parts = vec![
+            format!("signs in at {}", oauth.authorize_url),
+            format!("tokens from {}", oauth.token_url),
+            format!("client {}", oauth.client_id),
+        ];
+        if !oauth.scopes.is_empty() {
+            parts.push(format!("scopes {}", oauth.scopes.join(", ")));
+        }
+        if let Some(secret) = &oauth.client_secret {
+            parts.push(format!("client secret {secret}"));
+        }
+        if let Some(port) = oauth.redirect_port {
+            parts.push(format!("redirect port {port}"));
+        }
+        format!("{} ({})", self.name, parts.join("; "))
+    }
+}
+
+/// In the manifest a credential is a bare name or `{ name, oauth? }`.
+impl<'de> Deserialize<'de> for CredentialDecl {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Full {
+            name: String,
+            #[serde(default)]
+            oauth: Option<OAuthDecl>,
+        }
+        struct Either;
+        impl<'de> serde::de::Visitor<'de> for Either {
+            type Value = CredentialDecl;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a credential's name, or `{ name, oauth }`")
+            }
+            fn visit_str<E: serde::de::Error>(self, name: &str) -> Result<CredentialDecl, E> {
+                Ok(CredentialDecl {
+                    name: name.to_string(),
+                    oauth: None,
+                })
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                map: A,
+            ) -> Result<CredentialDecl, A::Error> {
+                let full = Full::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
+                Ok(CredentialDecl {
+                    name: full.name,
+                    oauth: full.oauth,
+                })
+            }
+        }
+        deserializer.deserialize_any(Either)
+    }
+}
+
+/// What's wrong with how `spec` declares its credentials: a name twice,
+/// an OAuth endpoint that isn't https (plain http only on loopback), or a
+/// `client_secret` that doesn't name a static credential of its own.
+fn credentials_problem(spec: &ProviderSpec) -> Option<String> {
+    let id = &spec.id;
+    let loopback =
+        |url: &url::Url| matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
+    for (i, c) in spec.credentials.iter().enumerate() {
+        if spec.credentials[..i].iter().any(|o| o.name == c.name) {
+            return Some(format!(
+                "provider `{id}`: credential `{}` is declared twice",
+                c.name
+            ));
+        }
+        let Some(oauth) = &c.oauth else { continue };
+        for (key, value) in [
+            ("authorize_url", &oauth.authorize_url),
+            ("token_url", &oauth.token_url),
+        ] {
+            let ok = url::Url::parse(value)
+                .is_ok_and(|u| u.scheme() == "https" || (u.scheme() == "http" && loopback(&u)));
+            if !ok {
+                return Some(format!(
+                    "provider `{id}`: credential `{}`'s `{key}` must be https (http only on \
+                     loopback): `{value}`",
+                    c.name
+                ));
+            }
+        }
+        if let Some(secret) = &oauth.client_secret {
+            let is_static = spec
+                .credentials
+                .iter()
+                .any(|o| o.name == *secret && o.oauth.is_none());
+            if !is_static {
+                return Some(format!(
+                    "provider `{id}`: credential `{}`'s `client_secret: {secret}` must name \
+                     another credential of this provider whose value is pasted, not signed in for",
+                    c.name
+                ));
+            }
+        }
+    }
+    None
 }
 
 /// An MCP server as a provider (P7.A6): oxplow's adapter runs `mcp`'s
@@ -113,6 +258,26 @@ pub fn instance_name(extension: &str, id: &str) -> String {
 }
 
 impl ProviderSpec {
+    /// Its credentials' names.
+    pub fn credential_names(&self) -> Vec<String> {
+        self.credentials.iter().map(|c| c.name.clone()).collect()
+    }
+
+    /// Its credentials as an approval lists them ([`CredentialDecl::grant`]).
+    pub fn credential_grants(&self) -> Vec<String> {
+        self.credentials.iter().map(CredentialDecl::grant).collect()
+    }
+
+    /// Whether `name` is a client secret: a credential a signed-in one's
+    /// token requests carry. It is the host's to use, never the
+    /// provider's process's.
+    pub fn is_client_secret(&self, name: &str) -> bool {
+        self.credentials
+            .iter()
+            .filter_map(|c| c.oauth.as_ref())
+            .any(|o| o.client_secret.as_deref() == Some(name))
+    }
+
     /// Its program's approval key: `provider:<extension>/<id>` — one
     /// approval however many instances run it (consent is about the code;
     /// instances differ in config and credential values, which it never
@@ -465,6 +630,8 @@ pub fn parse_providers(
                 CAPABILITIES.join(", ")
             ))
         } else if let Some(problem) = program_problem(&spec, read) {
+            Some(problem)
+        } else if let Some(problem) = credentials_problem(&spec) {
             Some(problem)
         } else if !inside(&spec.declarations) {
             Some(format!(

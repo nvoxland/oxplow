@@ -207,6 +207,8 @@ pub const MANIFEST: &[Capability] = &[
     ui("add_provider_instance"),
     ui("remove_provider_instance"),
     ui("set_instance_credential"),
+    // Signing in is a person's, in their browser (P9.B3).
+    ui("begin_oauth_sign_in"),
     both("ensure_change"),
     both_named("ai.settings", "ai_settings", "list_ai_roles"),
     ui("save_ai_provider"),

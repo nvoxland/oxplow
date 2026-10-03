@@ -154,6 +154,16 @@ pub enum OxplowEvent {
     /// rail row vanished. `title` carries the archived stream's display
     /// name.
     StreamOrphaned { stream_id: StreamId, title: String },
+    /// A sign-in for provider instance `instance`'s credential `name`
+    /// finished (P9.B3): its token is in the keychain and the instance
+    /// restarted on it — or, with `error`, it came to nothing and why.
+    /// The keychain is no model, so there is nothing to re-read but the
+    /// instances themselves (`list_provider_instances`).
+    CredentialChanged {
+        instance: String,
+        name: String,
+        error: Option<String>,
+    },
 }
 
 /// Cheap-to-clone broadcast hub. Capacity is small — subscribers

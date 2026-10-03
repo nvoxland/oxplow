@@ -302,6 +302,13 @@ names the file and line and says what to change.
    match the protocol, the session must match the golden
    `fixtures/transcripts/<id>.jsonl` (`--bless` writes it when a change is
    intended — commit it), and the work-items conformance suite must pass.
+   A provider's `credentials:` entry is a name (the person pastes its
+   value) or `{ name, oauth: { authorize_url, token_url, client_id,
+   scopes } }` (the person signs in on Settings → Integrations; oxplow
+   runs the flow and renews the token, and your program reads the access
+   token from the env var of that name — answer `Auth` (-32002) when the
+   service refuses it and oxplow renews it and calls again). You can't
+   sign in or set a credential yourself.
    A person approves the provider in Settings → Data → Programs and
    enables it in Settings → Integrations; you can't do either.
    `examples/extensions/linear/` in the oxplow repo (the Linear provider,

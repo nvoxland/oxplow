@@ -12,6 +12,9 @@
 //!   schedule), checkpointed.
 
 pub mod host;
+pub mod oauth;
+#[cfg(test)]
+pub mod oauth_sim;
 pub mod registry;
 pub mod spec;
 pub mod sync;

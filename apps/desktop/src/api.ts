@@ -925,6 +925,15 @@ export async function setInstanceCredential(
   return unwrap(await commands.setInstanceCredential(instance, name, value));
 }
 
+/// Start signing in for one of an instance's credentials (one its provider
+/// declares with `oauth:`): the page to open in the person's browser. The
+/// outcome arrives as the `credentialChanged` event.
+export async function beginOauthSignIn(instance: string, name: string): Promise<string> {
+  return unwrap(await commands.beginOauthSignIn(instance, name));
+}
+
+export { openInSystemBrowser } from "./tauri-bridge/systemBrowser.js";
+
 /// The ACP agents this project can run (the new-thread picker).
 export async function listAcpAgents(): Promise<AcpAgentListing[]> {
   return unwrap(await commands.listAcpAgents());

@@ -2,7 +2,7 @@
 /// extension provider's instance on this machine — where it stands and
 /// what the person can do about it.
 
-import type { CollectorView, ProviderInstanceView } from "../tauri-bridge/generated/bindings.js";
+import type { CollectorView, ProviderInstanceView, SignInState } from "../tauri-bridge/generated/bindings.js";
 
 export interface IntegrationRowModel {
   key: string;
@@ -70,6 +70,25 @@ export function integrationRow(v: ProviderInstanceView, now: Date = new Date()):
     needsApproval: !v.approved,
     problem: ["missing", "unapproved", "unconfigured", "failing", "disabled"].includes(s.state),
   };
+}
+
+/** A credential the person signs in for (P9.B3): where the sign-in stands
+ *  and what its button does. */
+export function signInLine(s: SignInState): { text: string; action: "Sign in" | "Sign in again"; signedIn: boolean; problem: boolean } {
+  switch (s.state) {
+    case "not_signed_in":
+      return { text: "Not signed in", action: "Sign in", signedIn: false, problem: false };
+    case "signed_in":
+      return {
+        // One that renews itself has no date worth showing.
+        text: s.until ? `Signed in until ${new Date(s.until).toLocaleString()}` : "Signed in",
+        action: "Sign in again",
+        signedIn: true,
+        problem: false,
+      };
+    case "sign_in_again":
+      return { text: "Sign in again: the sign-in lapsed or was withdrawn", action: "Sign in again", signedIn: false, problem: true };
+  }
 }
 
 /** A provider instance the project's work items can be filed on (P7.A2;

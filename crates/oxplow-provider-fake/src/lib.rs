@@ -40,7 +40,12 @@
 //! - `stale-read` — a `read` streams each item with its title prefixed
 //!   `stale ` (what it reads back isn't what its writes recorded);
 //! - `stuck-cursor` — every `$/state` checkpoint is `{ cursor: 0 }`, so a
-//!   read from it streams everything again.
+//!   read from it streams everything again;
+//! - `needs:<NAME>` — `check` reports a problem unless the credential
+//!   `<NAME>` reached the process;
+//! - `accepts:<NAME>=<value>` — `check`, `invoke` and `read` answer `Auth`
+//!   unless the credential `<NAME>` the process holds is `<value>` (its
+//!   service takes that token and no other).
 
 use oxplow_domain::vocabulary::Vocabulary;
 use std::collections::{BTreeMap, HashMap};
@@ -75,6 +80,9 @@ pub struct Hooks {
     /// `needs:<NAME>`: `check` reports a problem unless the credential
     /// `<NAME>` reached it (as an environment variable).
     pub needs: Option<String>,
+    /// `accepts:<NAME>=<value>`: every `check`, `invoke` and `read` is
+    /// refused `Auth` unless the credential `<NAME>` is `<value>`.
+    pub accepts: Option<(String, String)>,
 }
 
 impl Hooks {
@@ -93,6 +101,11 @@ impl Hooks {
                 Some(("read-fail-after", n)) => self.read_fail_after = n.parse().ok(),
                 Some(("rate-limit", ms)) => self.rate_limit_ms = ms.parse().ok(),
                 Some(("needs", name)) => self.needs = Some(name.to_string()),
+                Some(("accepts", pair)) => {
+                    self.accepts = pair
+                        .split_once('=')
+                        .map(|(name, value)| (name.to_string(), value.to_string()))
+                }
                 None if part == "fail-next" => self.fail_next = 1,
                 None if part == "crash" => self.crash = true,
                 None if part == "bad-declarations" => self.bad_declarations = true,
@@ -335,6 +348,16 @@ async fn take_rate_limit(world: &Shared) -> Result<(), ProtocolError> {
     }
 }
 
+/// The `accepts` hook: the service refuses any token but the one named.
+async fn require_token(world: &Shared) -> Result<(), ProtocolError> {
+    match &world.lock().await.hooks.accepts {
+        Some((name, value)) if std::env::var(name).ok().as_deref() != Some(value) => Err(
+            ProtocolError::Auth(format!("scripted: `{name}` isn't the token it accepts")),
+        ),
+        _ => Ok(()),
+    }
+}
+
 async fn take_failure(world: &Shared) -> Result<(), ProtocolError> {
     let mut w = world.lock().await;
     if w.hooks.fail_next > 0 {
@@ -397,6 +420,7 @@ async fn handle(
         }
         method::CHECK => {
             take_failure(world).await?;
+            require_token(world).await?;
             let ms = world.lock().await.hooks.slow_check_ms;
             if ms > 0 {
                 tokio::time::sleep(Duration::from_millis(ms)).await;
@@ -447,6 +471,7 @@ async fn handle(
         method::INVOKE => {
             take_rate_limit(world).await?;
             take_failure(world).await?;
+            require_token(world).await?;
             let p: InvokeParams = parse(params)?;
             require_handle(&p.handle)?;
             slow(world).await;
@@ -455,6 +480,7 @@ async fn handle(
         method::READ => {
             take_rate_limit(world).await?;
             take_failure(world).await?;
+            require_token(world).await?;
             let p: ReadParams = parse(params)?;
             require_handle(&p.handle)?;
             if p.collector != "work_items" {

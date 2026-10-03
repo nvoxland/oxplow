@@ -1160,6 +1160,7 @@ impl Services {
                 copies: machine.provider_copies.clone(),
                 call_timeout: machine.provider_call_timeout,
                 global_dir: machine.config_dir.clone(),
+                events: event_bus.clone(),
             },
             &commands,
             work_items.clone(),

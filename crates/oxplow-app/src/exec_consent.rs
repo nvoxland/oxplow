@@ -561,7 +561,7 @@ pub fn provider_program(
         program: format!("{dir}/{program}"),
         args,
         env: spec.env.clone(),
-        credentials: spec.credentials.clone(),
+        credentials: spec.credential_grants(),
         network: spec.network.clone(),
         tree: Some(dir.to_string()),
         approved: false,

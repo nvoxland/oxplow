@@ -55,6 +55,8 @@ struct ReadFailure {
     counts: bool,
     /// The provider's service said to wait: its message and how long.
     rate_limit: Option<(String, Option<u64>)>,
+    /// The provider's service refused its credentials.
+    auth: bool,
 }
 
 impl ReadFailure {
@@ -63,6 +65,7 @@ impl ReadFailure {
             error: CommandError::Failed { message },
             counts: true,
             rate_limit: None,
+            auth: false,
         }
     }
 
@@ -71,6 +74,7 @@ impl ReadFailure {
             error,
             counts: false,
             rate_limit: None,
+            auth: false,
         }
     }
 }
@@ -118,7 +122,9 @@ impl Instance {
         let store = oxplow_db::SqliteProviderCollectorStore::new(self.deps.db.clone());
         let started = Instant::now();
         let mut retried = false;
+        let mut reauthorized = false;
         let outcome = loop {
+            let called = Instant::now();
             // From the last checkpoint — a retry resumes where the
             // rate-limited read's last batch landed.
             let resume = store
@@ -146,6 +152,14 @@ impl Instance {
                     }
                     Some(error) => break Err(ReadFailure::uncounted(error)),
                 }
+            }
+            // Its service refused its credentials: once, on renewed ones.
+            if matches!(&outcome, Err(ReadFailure { auth: true, .. }))
+                && !reauthorized
+                && self.reauthorize(called).await
+            {
+                reauthorized = true;
+                continue;
             }
             break outcome;
         };
@@ -264,6 +278,7 @@ impl Instance {
                     },
                     counts: false,
                     rate_limit: Some((message, retry_after_ms)),
+                    auth: false,
                 });
             }
             Err(e) => {
@@ -271,10 +286,12 @@ impl Instance {
                     e,
                     ProtocolError::InvalidInput { .. } | ProtocolError::Cancelled
                 );
+                let auth = matches!(e, ProtocolError::Auth(_));
                 return Err(ReadFailure {
                     error: self.command_error(e),
                     counts,
                     rate_limit: None,
+                    auth,
                 });
             }
         };

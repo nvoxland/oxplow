@@ -4401,6 +4401,7 @@ dependencies = [
  "proptest",
  "prost",
  "rayon",
+ "reqwest",
  "rusqlite",
  "schemars 1.2.2",
  "serde",

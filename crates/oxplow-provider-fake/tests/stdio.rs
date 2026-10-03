@@ -373,4 +373,38 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
     let (_c2, with, _i2) = spawn_as("fake", "needs:FAKE_TOKEN", Some("s3cret"));
     initialize(&with).await;
     assert!(checked(with).await.handle.is_some());
+
+    // P9.B3: under `accepts:<NAME>=<value>` its service takes that token
+    // and no other — `check` and `invoke` answer `Auth` otherwise.
+    let (_c3, stale, _i3) = spawn_as("fake", "accepts:FAKE_TOKEN=at-2", Some("at-1"));
+    initialize(&stale).await;
+    let refused = stale
+        .call::<_, CheckResult>(
+            method::CHECK,
+            &CheckParams {
+                config: json!({ "team": "core" }),
+                credentials: vec!["FAKE_TOKEN".into()],
+            },
+        )
+        .await;
+    assert!(
+        matches!(refused, Err(ProtocolError::Auth(_))),
+        "{refused:?}"
+    );
+    let (_c4, fresh, _i4) = spawn_as("fake", "accepts:FAKE_TOKEN=at-2", Some("at-2"));
+    initialize(&fresh).await;
+    let handle = check(&fresh).await;
+    assert!(invoke(&fresh, &handle, "create", json!({ "title": "x" }))
+        .await
+        .is_ok());
+    // Told mid-session that the service moved on, the same process is refused.
+    fresh
+        .notify("fake/hooks", json!({ "hooks": "accepts:FAKE_TOKEN=at-3" }))
+        .await
+        .unwrap();
+    let refused = invoke(&fresh, &handle, "create", json!({ "title": "y" })).await;
+    assert!(
+        matches!(refused, Err(ProtocolError::Auth(_))),
+        "{refused:?}"
+    );
 }

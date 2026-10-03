@@ -53,7 +53,8 @@ no one wakes — tsk789). What's left there is a signal no model carries —
 the config swap, agent status, a stall alert, an orphaned stream
 (`StreamOrphaned`), background tasks, a thread's in-memory follow-ups
 (`FollowupsChanged` bridged from `FollowupStore` like background tasks), the LSP server list, a snapshot take, VCS refs, the
-workspace; every other view re-reads a model on `ModelsChanged`
+workspace, a provider sign-in finishing (`CredentialChanged`: the token
+is in the keychain, which no model reads); every other view re-reads a model on `ModelsChanged`
 (P8.A2–A10).
 
 **Then: is it a read of data a model can publish?** Reads are SQL

@@ -707,11 +707,15 @@ fn fixture_config(dir: &Path, rel: &str, spec: &ProviderSpec) -> Result<Value, S
 }
 
 /// Credentials the kit hands the provider: the declared names, read from
-/// the environment it runs in (the author's own).
+/// the environment it runs in (the author's own). For one the person
+/// signs in for, that is an access token the author got themselves — the
+/// kit never signs in — and a client secret is never the process's, here
+/// as in the host.
 fn env_credentials(spec: &ProviderSpec) -> std::collections::BTreeMap<String, String> {
-    spec.credentials
-        .iter()
-        .filter_map(|n| std::env::var(n).ok().map(|v| (n.clone(), v)))
+    spec.credential_names()
+        .into_iter()
+        .filter(|n| !spec.is_client_secret(n))
+        .filter_map(|n| std::env::var(&n).ok().map(|v| (n, v)))
         .collect()
 }
 

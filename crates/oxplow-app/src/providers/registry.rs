@@ -42,6 +42,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::host::{self, Connection, HostError, Launch};
+use super::oauth;
 use super::spec::{self, ProviderSpec};
 use crate::commands::{Command, CommandBus, Handler, HandlerOutput};
 use crate::exec_consent::ApprovalStore;
@@ -82,6 +83,8 @@ pub struct HostDeps {
     /// This machine's global config dir, where the person's global
     /// instances are kept (`instances.yaml`); none, there are none.
     pub global_dir: Option<PathBuf>,
+    /// Where the renderer hears that a sign-in finished.
+    pub events: crate::events::EventBus,
 }
 
 /// Whose an instance is (P9.B2).
@@ -181,6 +184,18 @@ impl InstanceHealth {
     }
 }
 
+/// One of an instance's credentials, as Settings → Integrations shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct InstanceCredential {
+    pub name: String,
+    /// This machine has a value for it (a signed-in one: a token).
+    pub set: bool,
+    /// For one the person signs in for, where that stands; none, its
+    /// value is pasted.
+    pub sign_in: Option<oauth::SignInState>,
+}
+
 /// An instance as Settings → Integrations shows it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -208,8 +223,8 @@ pub struct ProviderInstanceView {
     pub config_schema: Value,
     /// This machine approved it as it is now.
     pub approved: bool,
-    /// Each credential it declares and whether this machine has a value.
-    pub credentials: Vec<crate::collector_runner::CredentialStatus>,
+    /// Each credential it declares and where it stands on this machine.
+    pub credentials: Vec<InstanceCredential>,
     pub health: InstanceHealth,
     /// Each collector it declares and where its reads stand (P7.A3).
     pub collectors: Vec<CollectorView>,
@@ -234,6 +249,8 @@ pub struct CollectorView {
 struct Live {
     conn: Connection,
     handle: Handle,
+    /// When it started: a call older than it wasn't refused by it.
+    since: Instant,
 }
 
 /// One enabled instance.
@@ -264,38 +281,131 @@ pub struct Instance {
 }
 
 impl Instance {
-    /// Consent (a verified copy of the approved folder), spawn from that
-    /// copy, handshake, check.
-    async fn start(&self) -> Result<Live, HostError> {
-        let copy = copy_approved(&self.deps, &self.ext, &self.spec).await?;
-        if copy.declared != self.declared {
-            return Err(HostError::DeclarationsChanged {
-                name: self.name.clone(),
-                detail: "its declarations changed since it was enabled".into(),
-            });
-        }
-        let (dir, declared) = (copy.ext_dir, copy.declared);
-        let mut credentials = BTreeMap::new();
-        for name in &self.spec.credentials {
-            let account = crate::collector_runner::instance_credential_account(
-                credential_scope(&self.deps, self.scope),
-                &self.ext.name,
-                &self.id,
-                name,
-            );
-            match self.deps.secrets.get(&account) {
-                Ok(Some(v)) => {
-                    credentials.insert(name.clone(), v);
+    /// Whether any of its credentials is one the person signs in for.
+    fn signs_in(&self) -> bool {
+        self.spec.credentials.iter().any(|c| c.oauth.is_some())
+    }
+
+    /// The keychain account of its credential `name`.
+    fn account(&self, name: &str) -> String {
+        crate::collector_runner::instance_credential_account(
+            credential_scope(&self.deps, self.scope),
+            &self.ext.name,
+            &self.id,
+            name,
+        )
+    }
+
+    /// What its process is given: each pasted credential this machine has
+    /// a value for, and each signed-in one's access token — renewed first
+    /// when it is about to lapse or, with `renew`, because its service
+    /// refused it. A client secret is the host's to send with a token
+    /// request, never the process's. A signed-in credential with no token
+    /// to give is a problem with the instance, at `/credentials/<NAME>`.
+    async fn credentials(&self, renew: bool) -> Result<BTreeMap<String, String>, HostError> {
+        let failed = |name: &str, why: String| HostError::Failed {
+            name: self.name.clone(),
+            message: format!("credential `{name}`: {why}"),
+        };
+        let problem = |name: &str, message: String| oxplow_provider_protocol::model::Problem {
+            path: format!("/credentials/{name}"),
+            message,
+        };
+        let secrets = self.deps.secrets.as_ref();
+        let mut out = BTreeMap::new();
+        let mut problems = Vec::new();
+        for c in &self.spec.credentials {
+            let name = c.name.as_str();
+            let Some(decl) = &c.oauth else {
+                if self.spec.is_client_secret(name) {
+                    continue;
                 }
-                Ok(None) => {}
-                Err(e) => {
-                    return Err(HostError::Failed {
-                        name: self.name.clone(),
-                        message: format!("credential `{name}`: {e}"),
-                    })
+                if let Some(value) = secrets
+                    .get(&self.account(name))
+                    .map_err(|e| failed(name, e.to_string()))?
+                {
+                    out.insert(name.to_string(), value);
                 }
+                continue;
+            };
+            let client_secret = match &decl.client_secret {
+                None => None,
+                Some(secret) => match secrets
+                    .get(&self.account(secret))
+                    .map_err(|e| failed(secret, e.to_string()))?
+                {
+                    Some(value) => Some(value),
+                    None => {
+                        problems.push(problem(
+                            secret,
+                            format!("isn't set — `{name}`'s sign-in needs it"),
+                        ));
+                        continue;
+                    }
+                },
+            };
+            match oauth::access_token(
+                secrets,
+                &self.account(name),
+                decl,
+                client_secret.as_deref(),
+                renew,
+            )
+            .await
+            {
+                Ok(token) => {
+                    out.insert(name.to_string(), token);
+                }
+                Err(oauth::CredentialProblem::NotSignedIn) => problems.push(problem(
+                    name,
+                    "isn't signed in — sign in on Settings → Integrations".into(),
+                )),
+                Err(oauth::CredentialProblem::SignInAgain(why)) => problems.push(problem(
+                    name,
+                    format!(
+                        "its sign-in is no longer good ({why}) — sign in again on Settings → \
+                         Integrations"
+                    ),
+                )),
+                Err(oauth::CredentialProblem::Failed(why)) => return Err(failed(name, why)),
             }
         }
+        if problems.is_empty() {
+            Ok(out)
+        } else {
+            Err(HostError::Unconfigured {
+                name: self.name.clone(),
+                problems,
+            })
+        }
+    }
+
+    /// Consent (a verified copy of the approved folder), spawn from that
+    /// copy, handshake, check. A `check` its service refuses for its
+    /// credentials (`Auth`) is tried once more on renewed tokens, when it
+    /// has any to renew.
+    async fn start(&self) -> Result<Live, HostError> {
+        match self.start_once(false).await {
+            Err((_, true)) if self.signs_in() => self.start_once(true).await.map_err(|(e, _)| e),
+            other => other.map_err(|(e, _)| e),
+        }
+    }
+
+    /// One start; the error says whether it was its `check` answering
+    /// `Auth`.
+    async fn start_once(&self, renew: bool) -> Result<Live, (HostError, bool)> {
+        let plain = |e: HostError| (e, false);
+        let copy = copy_approved(&self.deps, &self.ext, &self.spec)
+            .await
+            .map_err(plain)?;
+        if copy.declared != self.declared {
+            return Err(plain(HostError::DeclarationsChanged {
+                name: self.name.clone(),
+                detail: "its declarations changed since it was enabled".into(),
+            }));
+        }
+        let (dir, declared) = (copy.ext_dir, copy.declared);
+        let credentials = self.credentials(renew).await.map_err(plain)?;
         let names: Vec<String> = credentials.keys().cloned().collect();
         let conn = host::connect(&Launch {
             name: self.name.clone(),
@@ -306,7 +416,9 @@ impl Instance {
             credentials,
             host_env: self.deps.host_env.clone(),
         })
-        .await?;
+        .await
+        .map_err(plain)?;
+        let since = Instant::now();
         let checked: CheckResult = call_within(
             &conn.peer,
             method::CHECK,
@@ -317,17 +429,53 @@ impl Instance {
             self.deps.call_timeout,
         )
         .await
-        .map_err(|e| HostError::Failed {
-            name: self.name.clone(),
-            message: format!("check: {e}"),
+        .map_err(|e| {
+            let auth = matches!(e, ProtocolError::Auth(_));
+            (
+                HostError::Failed {
+                    name: self.name.clone(),
+                    message: format!("check: {e}"),
+                },
+                auth,
+            )
         })?;
         match checked.handle {
-            Some(handle) if checked.problems.is_empty() => Ok(Live { conn, handle }),
-            _ => Err(HostError::Unconfigured {
+            Some(handle) if checked.problems.is_empty() => Ok(Live {
+                conn,
+                handle,
+                since,
+            }),
+            _ => Err(plain(HostError::Unconfigured {
                 name: self.name.clone(),
                 problems: checked.problems,
-            }),
+            })),
         }
+    }
+
+    /// Its service refused its credentials (`Auth`) on a call made at
+    /// `called`: renew each signed-in credential's token and end the
+    /// process, so the next call starts on them. False when it has none
+    /// to renew. A process started since `called` is already on newer
+    /// tokens than the refused call's and is left alone.
+    pub(super) async fn reauthorize(&self, called: Instant) -> bool {
+        if !self.signs_in() {
+            return false;
+        }
+        let _one = self.starting.lock().await;
+        {
+            let mut live = self.live.lock().await;
+            if live.as_ref().is_some_and(|l| l.since > called) {
+                return true;
+            }
+            live.take();
+        }
+        // What can't be renewed shows when it next starts (its `check`
+        // names the credential); here the only question is whether to
+        // try again.
+        if let Err(e) = self.credentials(true).await {
+            tracing::info!(instance = %self.name, error = %e, "renewing its sign-in failed");
+        }
+        true
     }
 
     /// The running process's peer and handle, starting it when it isn't
@@ -404,6 +552,7 @@ impl Instance {
     /// Run one of its declared commands.
     pub async fn invoke(&self, command: &str, input: Value) -> Result<InvokeResult, CommandError> {
         let mut retried = false;
+        let mut reauthorized = false;
         loop {
             let (peer, handle) = self.connection().await?;
             let started = Instant::now();
@@ -432,6 +581,14 @@ impl Instance {
                         continue;
                     }
                 }
+            }
+            // Its service refused its credentials: once, on renewed ones.
+            if matches!(result, Err(ProtocolError::Auth(_)))
+                && !reauthorized
+                && self.reauthorize(started).await
+            {
+                reauthorized = true;
+                continue;
             }
             return self.after_call(result, started).await;
         }
@@ -577,6 +734,9 @@ pub struct ProviderRegistry {
     pub(super) plugins: crate::plugin_health::PluginHealth,
     /// This machine's global instances, re-read when their file changes.
     global: parking_lot::Mutex<GlobalFile>,
+    /// Sign-ins under way, by `(instance, credential)`: a newer one for
+    /// the same credential replaces the older.
+    sign_ins: parking_lot::Mutex<BTreeMap<(String, String), tokio::task::JoinHandle<()>>>,
 }
 
 /// Where `scope`'s credentials are kept: the project's key, or the
@@ -631,6 +791,7 @@ impl ProviderRegistry {
             reconciling: tokio::sync::Mutex::new(()),
             disables: parking_lot::Mutex::new(BTreeMap::new()),
             global: parking_lot::Mutex::new(GlobalFile::default()),
+            sign_ins: parking_lot::Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -869,20 +1030,25 @@ impl ProviderRegistry {
             credentials: spec
                 .credentials
                 .iter()
-                .map(|name| crate::collector_runner::CredentialStatus {
-                    name: name.clone(),
-                    set: self
-                        .deps
-                        .secrets
-                        .get(&crate::collector_runner::instance_credential_account(
-                            credential_scope(&self.deps, scope),
-                            &ext.name,
-                            id,
-                            name,
-                        ))
-                        .ok()
-                        .flatten()
-                        .is_some(),
+                .map(|c| {
+                    let account = crate::collector_runner::instance_credential_account(
+                        credential_scope(&self.deps, scope),
+                        &ext.name,
+                        id,
+                        &c.name,
+                    );
+                    let secrets = self.deps.secrets.as_ref();
+                    let sign_in = c.oauth.as_ref().map(|_| oauth::state(secrets, &account));
+                    InstanceCredential {
+                        name: c.name.clone(),
+                        set: match &sign_in {
+                            Some(state) => {
+                                matches!(state, oauth::SignInState::SignedIn { .. })
+                            }
+                            None => secrets.get(&account).ok().flatten().is_some(),
+                        },
+                        sign_in,
+                    }
                 })
                 .collect(),
             health: self
@@ -1504,7 +1670,9 @@ impl ProviderRegistry {
             scope,
         }) = resolved
         {
-            for name in &spec.credentials {
+            // A sign-in under way would store a token for what's gone.
+            self.abandon_sign_ins(|(of, _)| of == instance).await;
+            for name in &spec.credential_names() {
                 let account = crate::collector_runner::instance_credential_account(
                     credential_scope(&self.deps, scope),
                     &ext.name,
@@ -1568,38 +1736,58 @@ impl ProviderRegistry {
         Ok(())
     }
 
-    /// Set (or, with `None`, forget) `instance`'s credential `name` in
-    /// this machine's keychain — a credential its provider declares. The
+    /// `instance`'s declared credential `name`: its keychain account on
+    /// this machine, how it is declared, and the instance it is of. The
     /// instance must exist: a credential is an instance's own.
+    fn credential(
+        &self,
+        instance: &str,
+        name: &str,
+    ) -> Result<(String, spec::CredentialDecl, Resolved), DomainError> {
+        let resolved = self.resolve(instance).map_err(DomainError::Invalid)?;
+        let Resolved {
+            ext,
+            spec,
+            id,
+            scope,
+        } = &resolved;
+        let Some(decl) = spec.credentials.iter().find(|c| c.name == name).cloned() else {
+            let names = spec.credential_names();
+            return Err(DomainError::Invalid(format!(
+                "provider `{}` declares no credential `{name}` (it declares: {})",
+                spec.approval_name(&ext.name),
+                if names.is_empty() {
+                    "none".to_string()
+                } else {
+                    names.join(", ")
+                }
+            )));
+        };
+        let account = crate::collector_runner::instance_credential_account(
+            credential_scope(&self.deps, *scope),
+            &ext.name,
+            id,
+            name,
+        );
+        Ok((account, decl, resolved))
+    }
+
+    /// Set (or, with `None`, forget) `instance`'s credential `name` in
+    /// this machine's keychain. One the person signs in for is never
+    /// given a value — forgetting it signs them out.
     pub fn set_credential(
         &self,
         instance: &str,
         name: &str,
         value: Option<&str>,
     ) -> Result<(), DomainError> {
-        let Resolved {
-            ext,
-            spec,
-            id,
-            scope,
-        } = self.resolve(instance).map_err(DomainError::Invalid)?;
-        if !spec.credentials.iter().any(|c| c == name) {
+        let (account, decl, _) = self.credential(instance, name)?;
+        if decl.oauth.is_some() && value.is_some() {
             return Err(DomainError::Invalid(format!(
-                "provider `{}` declares no credential `{name}` (it declares: {})",
-                spec.approval_name(&ext.name),
-                if spec.credentials.is_empty() {
-                    "none".to_string()
-                } else {
-                    spec.credentials.join(", ")
-                }
+                "`{name}` is a credential you sign in for (Settings → Integrations → Sign \
+                 in); it isn't given a value"
             )));
         }
-        let account = crate::collector_runner::instance_credential_account(
-            credential_scope(&self.deps, scope),
-            &ext.name,
-            &id,
-            name,
-        );
         match value {
             Some(v) => self.deps.secrets.set(&account, v),
             None => self.deps.secrets.delete(&account),
@@ -1612,6 +1800,92 @@ impl ProviderRegistry {
     pub async fn credential_changed(&self, instance: &str) {
         self.stop(instance).await;
         self.reconcile().await;
+    }
+
+    /// Start signing in for `instance`'s credential `name` (one declared
+    /// with `oauth:`): where the person goes to do it. When they have, the
+    /// token is kept in the keychain, the instance restarts on it, and the
+    /// renderer hears `CredentialChanged` — with why, when it came to
+    /// nothing. A sign-in already under way for it is abandoned.
+    pub async fn begin_sign_in(&self, instance: &str, name: &str) -> Result<String, DomainError> {
+        let (account, decl, resolved) = self.credential(instance, name)?;
+        let Some(oauth_decl) = decl.oauth else {
+            return Err(DomainError::Invalid(format!(
+                "`{name}` isn't a credential you sign in for; paste its value instead"
+            )));
+        };
+        let client_secret = match &oauth_decl.client_secret {
+            None => None,
+            Some(secret) => {
+                let of_secret = crate::collector_runner::instance_credential_account(
+                    credential_scope(&self.deps, resolved.scope),
+                    &resolved.ext.name,
+                    &resolved.id,
+                    secret,
+                );
+                match self
+                    .deps
+                    .secrets
+                    .get(&of_secret)
+                    .map_err(|e| DomainError::Storage(format!("credential `{secret}`: {e}")))?
+                {
+                    Some(value) => Some(value),
+                    None => {
+                        return Err(DomainError::Invalid(format!(
+                            "set `{secret}` first: `{name}`'s sign-in needs it"
+                        )))
+                    }
+                }
+            }
+        };
+        let key = (instance.to_string(), name.to_string());
+        // Before the new one listens: a fixed `redirect_port` is the old
+        // one's until it stops.
+        self.abandon_sign_ins(|k| *k == key).await;
+        let sign_in = oauth::begin(&oauth_decl, client_secret)
+            .await
+            .map_err(DomainError::Invalid)?;
+        let (me, deps) = (self.me.clone(), self.deps.clone());
+        let (instance, name) = key.clone();
+        let done = sign_in.done;
+        let waiting = tokio::spawn(async move {
+            let outcome = match done.await {
+                Ok(token) => oauth::store(deps.secrets.as_ref(), &account, &token),
+                Err(why) => Err(why),
+            };
+            if let Some(registry) = me.upgrade() {
+                registry
+                    .sign_ins
+                    .lock()
+                    .remove(&(instance.clone(), name.clone()));
+                if outcome.is_ok() {
+                    registry.credential_changed(&instance).await;
+                }
+            }
+            deps.events
+                .emit(crate::events::OxplowEvent::CredentialChanged {
+                    instance,
+                    name,
+                    error: outcome.err(),
+                });
+        });
+        self.sign_ins.lock().insert(key, waiting);
+        Ok(sign_in.authorize_url)
+    }
+
+    /// Stop waiting for the sign-ins `which` picks: each stops listening
+    /// before this returns (its port is free), and stores nothing.
+    async fn abandon_sign_ins(&self, which: impl Fn(&(String, String)) -> bool) {
+        let abandoned: Vec<_> = {
+            let mut sign_ins = self.sign_ins.lock();
+            let keys: Vec<_> = sign_ins.keys().filter(|k| which(k)).cloned().collect();
+            keys.iter().filter_map(|k| sign_ins.remove(k)).collect()
+        };
+        for waiting in abandoned {
+            waiting.abort();
+            // Ended (or cancelled): its listener is dropped with it.
+            let _ = waiting.await;
+        }
     }
 
     /// Check `instance` with `config` for a person (Settings' Check): its

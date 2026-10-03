@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 /// shell, repo-relative, with its text before its test module.
 pub fn production_sources() -> Vec<(String, String)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut out = Vec::new();
+    let mut files: Vec<(PathBuf, String)> = Vec::new();
     let mut stack: Vec<PathBuf> =
         vec![root.join("crates"), root.join("apps/desktop/src-tauri/src")];
     while let Some(dir) = stack.pop() {
@@ -26,16 +26,74 @@ pub fn production_sources() -> Vec<(String, String)> {
                 }
             } else if name.ends_with(".rs") && name != "source_guards.rs" {
                 let text = std::fs::read_to_string(&path).unwrap_or_default();
-                let rel = path
-                    .strip_prefix(&root)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                out.push((rel, production_part(&text).to_string()));
+                files.push((path, text));
             }
         }
     }
+    // A module declared `#[cfg(test)] mod x;` is test code wherever its
+    // file is: `x.rs` and everything under `x/`.
+    let test_only: Vec<PathBuf> = files
+        .iter()
+        .flat_map(|(path, text)| {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            let parent = path.parent().unwrap_or(Path::new("")).to_path_buf();
+            let dir = if matches!(stem.as_ref(), "mod" | "lib" | "main") {
+                parent
+            } else {
+                parent.join(stem.as_ref())
+            };
+            test_only_modules(text)
+                .into_iter()
+                .map(move |name| dir.join(name))
+        })
+        .collect();
+    let mut out: Vec<(String, String)> = files
+        .iter()
+        .filter(|(path, _)| {
+            !test_only
+                .iter()
+                .any(|m| *path == m.with_extension("rs") || path.starts_with(m))
+        })
+        .map(|(path, text)| {
+            let rel = path
+                .strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            (rel, production_part(text).to_string())
+        })
+        .collect();
     out.sort();
+    out
+}
+
+/// The modules `text` declares for tests only: each `#[cfg(test)]`
+/// followed by `mod <name>;` (whatever its visibility).
+fn test_only_modules(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(i) = text[at..].find("#[cfg(test)]") {
+        at += i + "#[cfg(test)]".len();
+        let rest = text[at..].trim_start();
+        let rest = match rest.strip_prefix("pub") {
+            Some(r) => match r.strip_prefix('(') {
+                Some(scoped) => scoped.split_once(')').map_or(r, |(_, after)| after),
+                None => r,
+            },
+            None => rest,
+        }
+        .trim_start();
+        let Some(decl) = rest.strip_prefix("mod ") else {
+            continue;
+        };
+        let name: String = decl
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if decl[name.len()..].trim_start().starts_with(';') {
+            out.push(name);
+        }
+    }
     out
 }
 
@@ -100,6 +158,7 @@ const EMITTERS: &[(&str, &str)] = &[
     ("ConfigChanged", "crates/oxplow-app/src/commands/config_commands.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/lib.rs"),
     ("ConfigChanged", "crates/oxplow-rpc/src/commands/ai.rs"),
+    ("CredentialChanged", "crates/oxplow-app/src/providers/registry.rs"),
     ("LspServersChanged", "crates/oxplow-app/src/commands/lsp.rs"),
     ("MetricSamplesChanged", "crates/oxplow-app/src/models_changed.rs"),
     ("ModelsChanged", "crates/oxplow-app/src/models_changed.rs"),
@@ -323,4 +382,22 @@ fn the_bus_has_one_listener() {
         .map(|(path, _)| path)
         .collect();
     assert_eq!(listeners, Vec::<String>::new());
+}
+
+/// The scan's own rule: a module declared for tests only isn't production,
+/// whatever its file is called (`providers/tests.rs`, `test_fixtures.rs`).
+#[test]
+fn a_test_only_module_is_not_production() {
+    assert_eq!(
+        test_only_modules(
+            "pub mod a;\n#[cfg(test)]\npub mod sim;\n#[cfg(test)]\nmod tests;\n#[cfg(test)]\npub(crate) mod fixtures;\n#[cfg(test)]\nmod inline { }\n#[cfg(test)]\nfn helper() {}\n"
+        ),
+        vec!["sim", "tests", "fixtures"]
+    );
+    let sources: Vec<String> = production_sources().into_iter().map(|(p, _)| p).collect();
+    let has = |p: &str| sources.iter().any(|s| s == p);
+    assert!(has("crates/oxplow-app/src/providers/registry.rs"));
+    assert!(!has("crates/oxplow-app/src/providers/tests.rs"));
+    assert!(!has("crates/oxplow-app/src/providers/oauth_sim.rs"));
+    assert!(!has("crates/oxplow-app/src/test_fixtures.rs"));
 }

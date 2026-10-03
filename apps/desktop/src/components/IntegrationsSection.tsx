@@ -17,10 +17,12 @@ import type { CSSProperties } from "react";
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  beginOauthSignIn,
   checkProviderInstance,
   effectiveConfig,
   listExtensions,
   listProviderInstances,
+  openInSystemBrowser,
   runCommand,
   setInstanceCredential,
   setProviderInstance,
@@ -28,9 +30,10 @@ import {
   type ProviderInstanceView,
 } from "../api.js";
 import { REPLACEABLE_LABELS } from "../lens/useReplacement.js";
-import type { UiReplacement } from "../tauri-bridge/generated/bindings.js";
+import type { SignInState, UiReplacement } from "../tauri-bridge/generated/bindings.js";
 import { CredentialRow } from "./ExtensionsSection.js";
-import { activeProviderProblem, collectorLine, integrationRow, workItemsChoices } from "./integrationsModel.js";
+import { InlineConfirm } from "./InlineConfirm.js";
+import { activeProviderProblem, collectorLine, integrationRow, signInLine, workItemsChoices } from "./integrationsModel.js";
 import { SchemaForm } from "./SchemaForm/SchemaForm.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
@@ -63,7 +66,9 @@ export function IntegrationsSection() {
   useEffect(() => {
     void refresh();
     return subscribeOxplowEvents((event) => {
-      if (event.kind === "configChanged") void refresh();
+      // A sign-in finishing changes only the keychain: there is no model
+      // to re-read, so the instances are read again.
+      if (event.kind === "configChanged" || event.kind === "credentialChanged") void refresh();
     });
   }, [refresh]);
 
@@ -195,6 +200,77 @@ function Replacements({
   );
 }
 
+/** A credential the person signs in for (P9.B3): never typed. Sign in
+ *  opens the service's page in their own browser; oxplow hears when it is
+ *  done (`credentialChanged`) and the section reads the instances again. */
+function SignInRow({
+  instance,
+  name,
+  state,
+  onChanged,
+}: {
+  instance: string;
+  name: string;
+  state: SignInState;
+  onChanged(): void;
+}) {
+  const [waiting, setWaiting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const id = `${instance}-${name}`;
+  const line = signInLine(state);
+
+  useEffect(
+    () =>
+      subscribeOxplowEvents((event) => {
+        if (event.kind !== "credentialChanged" || event.instance !== instance || event.name !== name) return;
+        setWaiting(false);
+        setError(typeof event.error === "string" ? event.error : null);
+      }),
+    [instance, name],
+  );
+
+  async function signIn() {
+    setError(null);
+    try {
+      await openInSystemBrowser(await beginOauthSignIn(instance, name));
+      setWaiting(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function signOut() {
+    try {
+      await setInstanceCredential(instance, name, null);
+      showToast({ message: `Signed out of ${name}.` });
+      onChanged();
+    } catch (e) {
+      recordOpError({ label: `Sign out of ${name}`, message: String(e) });
+    }
+  }
+
+  return (
+    <div data-testid={`sign-in-${id}`} style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+      <code>{name}</code>
+      <span style={line.problem ? errorStyle : mutedStyle}>{line.text}</span>
+      {waiting ? <span style={mutedStyle}>Finish signing in in your browser…</span> : null}
+      {error ? <span style={errorStyle}>{error}</span> : null}
+      <span style={{ flex: 1 }} />
+      <button
+        type="button"
+        data-testid={`sign-in-button-${id}`}
+        title="Open the service's sign-in page in your browser; the token it gives is kept in this machine's keychain"
+        onClick={() => void signIn()}
+      >
+        {line.action}
+      </button>
+      {line.signedIn ? (
+        <InlineConfirm triggerLabel="Sign out" confirmLabel="Sign out" testIdPrefix={`sign-out-${id}`} onConfirm={() => void signOut()} />
+      ) : null}
+    </div>
+  );
+}
+
 function IntegrationRow({
   view,
   onChanged,
@@ -312,16 +388,20 @@ function IntegrationRow({
       {m.needsApproval ? (
         <div style={mutedStyle}>Its program isn&apos;t approved on this machine yet: see Data → Programs.</div>
       ) : null}
-      {view.credentials.map((c) => (
-        <CredentialRow
-          key={c.name}
-          owner={view.instance}
-          name={c.name}
-          set={c.set}
-          store={(v) => setInstanceCredential(view.instance, c.name, v)}
-          onChanged={onCredentialChanged}
-        />
-      ))}
+      {view.credentials.map((c) =>
+        c.signIn ? (
+          <SignInRow key={c.name} instance={view.instance} name={c.name} state={c.signIn} onChanged={onCredentialChanged} />
+        ) : (
+          <CredentialRow
+            key={c.name}
+            owner={view.instance}
+            name={c.name}
+            set={c.set}
+            store={(v) => setInstanceCredential(view.instance, c.name, v)}
+            onChanged={onCredentialChanged}
+          />
+        ),
+      )}
       {missing ? null : (
         <SchemaForm
           schema={view.configSchema as Record<string, unknown>}

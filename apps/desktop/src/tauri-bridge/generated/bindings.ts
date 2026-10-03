@@ -305,6 +305,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	beginOauthSignIn: (instance: string, name: string) => typedError<string, IpcError>(__TAURI_INVOKE("begin_oauth_sign_in", { instance, name })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	ensureChange: (target: ChangeTarget) => typedError<ChangeRow, IpcError>(__TAURI_INVOKE("ensure_change", { target })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1932,6 +1937,17 @@ export type ContextUsage = {
 	costCurrency: string | null,
 };
 
+// One credential a provider declares.
+export type CredentialDecl = {
+	/**
+	 *  Its name: the environment variable the provider reads it from, and
+	 *  what its keychain account is named for.
+	 */
+	name: string,
+	// Obtained by signing in rather than pasted (P9.B3).
+	oauth: OAuthDecl | null,
+};
+
 export type CredentialStatus = {
 	name: string,
 	set: boolean,
@@ -2996,6 +3012,18 @@ export type InstalledLspPackage = {
 	binary: string,
 };
 
+// One of an instance's credentials, as Settings → Integrations shows it.
+export type InstanceCredential = {
+	name: string,
+	// This machine has a value for it (a signed-in one: a token).
+	set: boolean,
+	/**
+	 *  For one the person signs in for, where that stands; none, its
+	 *  value is pasted.
+	 */
+	signIn: SignInState | null,
+};
+
 export type InstanceHealth = {
 	state: InstanceState,
 	// Its failures in a row (`plugin_health`'s count, shown here).
@@ -3900,6 +3928,30 @@ export type ModelSource = {
 export type NoteId = string;
 
 /**
+ *  How a credential is obtained by signing in (P9.B3): OAuth 2.1's
+ *  authorization-code flow with PKCE, run by oxplow — the provider only
+ *  ever sees the access token.
+ */
+export type OAuthDecl = {
+	// Where the person signs in.
+	authorize_url: string,
+	// Where a code, or a refresh token, is exchanged for an access token.
+	token_url: string,
+	client_id: string,
+	scopes?: string[],
+	/**
+	 *  The **name** of another (static) credential of this provider that
+	 *  holds the client secret, for a service that requires one.
+	 */
+	client_secret?: string | null,
+	/**
+	 *  The loopback port the redirect comes back on, for a service that
+	 *  wants one registered; any free port otherwise.
+	 */
+	redirect_port?: number | null,
+};
+
+/**
  *  What a mutation did. `log` is the provider's own account (a CLI's
  *  output) for the person to read.
  */
@@ -4171,7 +4223,15 @@ detail: string | null } |
  *  rail row vanished. `title` carries the archived stream's display
  *  name.
  */
-{ kind: "streamOrphaned"; streamId: StreamId; title: string };
+{ kind: "streamOrphaned"; streamId: StreamId; title: string } | 
+/**
+ *  A sign-in for provider instance `instance`'s credential `name`
+ *  finished (P9.B3): its token is in the keychain and the instance
+ *  restarted on it — or, with `error`, it came to nothing and why.
+ *  The keychain is no model, so there is nothing to re-read but the
+ *  instances themselves (`list_provider_instances`).
+ */
+{ kind: "credentialChanged"; instance: string; name: string; error: string | null };
 
 export type PageVisit = {
 	id: string,
@@ -4373,8 +4433,8 @@ export type ProviderInstanceView = {
 	configSchema: unknown,
 	// This machine approved it as it is now.
 	approved: boolean,
-	// Each credential it declares and whether this machine has a value.
-	credentials: CredentialStatus[],
+	// Each credential it declares and where it stands on this machine.
+	credentials: InstanceCredential[],
 	health: InstanceHealth,
 	// Each collector it declares and where its reads stand (P7.A3).
 	collectors: CollectorView[],
@@ -4417,8 +4477,12 @@ export type ProviderSpec = {
 	adapter?: AdapterSpec | null,
 	// Host environment variables passed through by name.
 	env?: string[],
-	// Credentials it gets from the keychain, as environment variables.
-	credentials?: string[],
+	/**
+	 *  Credentials it gets from the keychain, as environment variables:
+	 *  each a name (a value the person pastes) or `{ name, oauth }` (one
+	 *  they sign in for; the variable holds the access token).
+	 */
+	credentials?: CredentialDecl[],
 	// Hosts it may reach (enforced where the OS can).
 	network?: string[],
 	// The checked-in `InitializeResult` (JSON), relative to the folder.
@@ -4643,6 +4707,16 @@ export type SelectThreadRequest = {
  *  kinds only and must name the engine it targets.
  */
 export type Sharing = "private" | "shared";
+
+// Where a signed-in credential stands on this machine.
+export type SignInState = { state: "not_signed_in" } | 
+/**
+ *  `until` (RFC 3339): when it lapses, for one that can't renew
+ *  itself; none, it lasts until the service refuses it.
+ */
+{ state: "signed_in"; until: string | null } | 
+// Its token lapsed or was revoked, and it can't renew itself.
+{ state: "sign_in_again" };
 
 /**
  *  `snapshot` row — one per `request_snapshot()` call that had
