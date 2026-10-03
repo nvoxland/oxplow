@@ -121,7 +121,10 @@ survive.
 
 A composite is a command made of other commands' calls: a
 `Handler::Compose` (`commands/compose.rs`) whose **composer** says, for
-an input, which calls to run (`Composition { calls, result }`). It is the
+an input, which calls to run (`Composition { calls, result, events }` —
+`events` are the composite's own, appended after the children's and
+caused by its `command.executed`; on the steps path only when every step
+landed; an extension command's declared types, P8.D4). It is the
 one mechanism: `command.sequence { calls: [{ name, input }] }` composes
 its input's calls; an extension's own command (P6b.B2) composes what its
 script returns over its `input` rows. Its atomicity is `Dispatch` — its

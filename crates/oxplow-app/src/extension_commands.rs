@@ -296,8 +296,9 @@ pub fn refuse_shared_namespaces(extensions: &mut [Extension]) {
     }
 }
 
-/// The commands a script composed, and its optional `result`:
-/// `{ commands: [{ name, input }], result? }`.
+/// The commands a script composed, its optional `result`, and the events
+/// it emits: `{ commands: [{ name, input }], result?, events?: [{ type,
+/// payload, subject? }] }`.
 pub fn composed(value: Value) -> Result<Composed, String> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -308,6 +309,8 @@ pub fn composed(value: Value) -> Result<Composed, String> {
         result: Option<Value>,
         #[serde(default)]
         refuse: Option<String>,
+        #[serde(default)]
+        events: Vec<ComposedEvent>,
     }
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -320,10 +323,13 @@ pub fn composed(value: Value) -> Result<Composed, String> {
         json!({})
     }
     const SHAPE: &str =
-        "the script must return `{ commands: [{ name, input }], result? }` or `{ refuse: \"why\" }`";
+        "the script must return `{ commands: [{ name, input }], result?, events? }` \
+                         or `{ refuse: \"why\" }`";
     let out: Out = serde_json::from_value(value).map_err(|e| format!("{SHAPE}: {e}"))?;
     match (out.refuse, out.commands) {
-        (Some(why), None) if out.result.is_none() => Ok(Composed::Refused(why)),
+        (Some(why), None) if out.result.is_none() && out.events.is_empty() => {
+            Ok(Composed::Refused(why))
+        }
         (Some(_), _) => Err(format!("{SHAPE}: a refusal composes nothing")),
         (None, None) => Err(format!("{SHAPE}: it returned neither")),
         (None, Some(commands)) => Ok(Composed::Run {
@@ -335,17 +341,69 @@ pub fn composed(value: Value) -> Result<Composed, String> {
                 })
                 .collect(),
             result: out.result,
+            events: out.events,
         }),
     }
+}
+
+/// An event a script emits: one of its own extension's declared types, at
+/// that type's newest version, appended caused by the run's
+/// `command.executed`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComposedEvent {
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub payload: Value,
+    /// Refs it is about.
+    #[serde(default)]
+    pub subject: Vec<String>,
+}
+
+/// `events` as `extension` may emit them: each one of its own declared
+/// types (by the vocabulary), at its newest version, from `source`.
+pub fn own_events(
+    vocabulary: &oxplow_domain::vocabulary::Vocabulary,
+    extension: &str,
+    source: &str,
+    events: Vec<ComposedEvent>,
+) -> Result<Vec<oxplow_domain::Envelope>, oxplow_domain::CommandError> {
+    let invalid = |message: String| oxplow_domain::CommandError::Invalid {
+        field: None,
+        message,
+    };
+    events
+        .into_iter()
+        .map(|e| {
+            let v = vocabulary
+                .latest(&e.event_type)
+                .filter(|&v| vocabulary.owner(&e.event_type, v) == Some(Some(extension)))
+                .ok_or_else(|| {
+                    invalid(format!(
+                        "the script may emit only the event types `{extension}` declares \
+                         (`{}.*`); `{}` isn't one",
+                        oxplow_domain::events::schema::plugin_namespace(extension),
+                        e.event_type
+                    ))
+                })?;
+            Ok(
+                oxplow_domain::Envelope::new(e.event_type, v, source, e.payload)
+                    .map_err(|err| invalid(err.to_string()))?
+                    .with_subject(e.subject),
+            )
+        })
+        .collect()
 }
 
 /// What a command's script decided.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Composed {
-    /// Run these, in order; the run's result is `result`.
+    /// Run these, in order, and emit `events`; the run's result is
+    /// `result`.
     Run {
         calls: Vec<CommandCall>,
         result: Option<Value>,
+        events: Vec<ComposedEvent>,
     },
     /// Decline, for this reason.
     Refused(String),
@@ -453,6 +511,8 @@ pub fn extension_command(
         effect: decl.effect,
     };
     let (script, query) = (decl.script.clone(), decl.input.clone());
+    let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
+    let source = format!("extension:{extension}/{}", decl.name);
     let compose: std::sync::Arc<Composer> =
         std::sync::Arc::new(move |conn: &rusqlite::Connection, input: &Value| {
             let rows = match &query {
@@ -471,7 +531,15 @@ pub fn extension_command(
                 None => Vec::new(),
             };
             match compose_calls(&script, input.clone(), rows)? {
-                Composed::Run { calls, result } => Ok(Composition { calls, result }),
+                Composed::Run {
+                    calls,
+                    result,
+                    events,
+                } => Ok(Composition {
+                    calls,
+                    result,
+                    events: own_events(&vocabulary.current(), &extension, &source, events)?,
+                }),
                 Composed::Refused(message) => Err(CommandError::Invalid {
                     field: None,
                     message,
@@ -1162,6 +1230,92 @@ mod tests {
     async fn task(fx: &crate::test_fixtures::EffortFixture) -> oxplow_domain::Task {
         use oxplow_domain::stores::TaskStore as _;
         fx.svc.task_store.get(fx.task).await.unwrap().unwrap()
+    }
+
+    /// `my-review`, declaring `my_review.finished@1`, with a `finish`
+    /// command whose script emits `{type}` for its `ref`; registered.
+    async fn with_emitting_finish(fx: &crate::test_fixtures::EffortFixture, event_type: &str) {
+        let root = fx._dir.path();
+        write(
+            root,
+            "oxplow/extensions/my-review/extension.yaml",
+            "manifest: 2\nname: my-review\nintent:\n  purpose: p\nevent_types:\n  types:\n    - { type: my_review.finished, v: 1, schema: finished.json, summary: A review finished. }\ncommands:\n  - name: finish\n    summary: Finish the review.\n    input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }\n    entry: finish.star\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/my-review/finished.json",
+            r#"{"type": "object", "required": ["ref"], "properties": {"ref": {"type": "string"}}}"#,
+        );
+        write(
+            root,
+            "oxplow/extensions/my-review/finish.star",
+            &format!(
+                "def transform(x):\n    return {{\"commands\": [], \"events\": [{{\"type\": \"{event_type}\", \"payload\": {{\"ref\": x[\"input\"][\"ref\"]}}, \"subject\": [x[\"input\"][\"ref\"]]}}]}}\n"
+            ),
+        );
+        fx.svc.vocabulary_service.sync().await.unwrap();
+        fx.svc.extension_commands.reconcile().await;
+    }
+
+    /// P8.D4: a script's `events` append its extension's own types,
+    /// caused by the run's `command.executed`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_command_emits_its_own_extensions_event_type() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        with_emitting_finish(&fx, "my_review.finished").await;
+        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "my_review.finish",
+                json!({ "ref": r }),
+                false,
+            )
+            .await
+            .unwrap();
+        let executed = out.event_id.unwrap().to_string();
+        let rows = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT subject, cause FROM v_event WHERE type = 'my_review.finished'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows.rows.len(), 1, "{rows:?}");
+        assert!(format!("{:?}", rows.rows[0][0]).contains(&r), "{rows:?}");
+        assert_eq!(rows.rows[0][1], oxplow_db::SqlCell::Text(executed));
+    }
+
+    /// Only its own declared types: a core type, or one in its namespace
+    /// that it doesn't declare, refuses the run, which writes nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_command_may_not_emit_a_foreign_or_undeclared_type() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        for foreign in ["work_item.created", "my_review.undeclared"] {
+            with_emitting_finish(&fx, foreign).await;
+            let err = fx
+                .svc
+                .commands
+                .run(
+                    &oxplow_domain::Actor::Human,
+                    "my_review.finish",
+                    json!({ "ref": r }),
+                    false,
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("only the event types `my-review` declares"),
+                "{foreign}: {err}"
+            );
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

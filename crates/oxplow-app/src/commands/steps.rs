@@ -55,6 +55,8 @@ pub(super) struct Step {
 pub(super) struct Plan {
     steps: Vec<Step>,
     result: Option<Value>,
+    /// The composite's own events, recorded with the run.
+    events: Vec<oxplow_domain::Envelope>,
 }
 
 /// Steps 3 and 4's answers for a run, and what it is: what its steps run
@@ -157,6 +159,7 @@ fn route(
         Routed::Steps(Plan {
             steps,
             result: composition.result,
+            events: composition.events,
         })
     } else {
         Routed::Tx
@@ -326,7 +329,11 @@ impl CommandBus {
             }
         }
 
-        // 3. Recorded once, with what landed (and what failed).
+        // 3. Recorded once, with what landed (and what failed); the
+        // composite's own events only when every step landed.
+        if failure.is_none() {
+            events.extend(plan.events.iter().cloned());
+        }
         let mut result = json!({ "result": plan.result, "children": &landed });
         let stop = failure.as_ref().map(|(step, err)| {
             result["failed"] = json!({

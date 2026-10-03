@@ -2702,6 +2702,79 @@ mod tests {
         }
     }
 
+    /// P8.D4: a composite's own events, on the steps path, are recorded
+    /// with the run — caused by its `command.executed` — and only when
+    /// every step landed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_composites_own_events_land_with_its_steps_only_when_all_landed() {
+        use super::compose::{Compose, Composer, Composition};
+        let (db, bus) = composing_bus();
+        let spec = CommandSpec {
+            name: "kv.announce".into(),
+            summary: "Set over an external step and announce it.".into(),
+            input_schema: json!({ "type": "object" }),
+            invokers: Invokers::ALL,
+            confirm: Confirm::Never,
+            undoable: true,
+            lifecycle: oxplow_domain::Lifecycle::Experimental,
+            atomicity: oxplow_domain::Atomicity::Dispatch,
+            effect: oxplow_domain::CommandEffect::Write,
+        };
+        let compose: Arc<Composer> = Arc::new(|_conn, input: &Value| {
+            Ok(Composition {
+                calls: vec![CommandCall {
+                    name: "kv.external".into(),
+                    input: input.clone(),
+                }],
+                result: None,
+                events: vec![Envelope::typed::<
+                    oxplow_domain::events::schema::ConfigChanged,
+                >(
+                    "test",
+                    &oxplow_domain::events::schema::ConfigChangedV1 {
+                        key: "announced".into(),
+                        before: Value::Null,
+                        after: input["v"].clone(),
+                    },
+                )],
+            })
+        });
+        bus.register(Command::new(spec.clone(), Compose::handler(&bus, spec, compose)).unwrap())
+            .unwrap();
+        let log = oxplow_db::SqliteEventLogStore::new(db.clone(), bus.vocabulary().clone());
+        let announced = || async {
+            log.read_after(0, 1000)
+                .await
+                .unwrap()
+                .into_iter()
+                .filter(|e| e.envelope.event_type == "config.changed")
+                .collect::<Vec<_>>()
+        };
+
+        let out = bus
+            .run(
+                &Actor::Human,
+                "kv.announce",
+                json!({ "k": "a", "v": "1" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let got = announced().await;
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].envelope.cause, out.event_id);
+
+        bus.run(
+            &Actor::Human,
+            "kv.announce",
+            json!({ "k": "b", "v": "fail" }),
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(announced().await.len(), 1, "a failed run announces nothing");
+    }
+
     /// P7 review (tsk713): a step that fails stops the run; the steps
     /// before it stand, and the one audit row says what landed and what
     /// failed.

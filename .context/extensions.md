@@ -1218,6 +1218,19 @@ extension's types stay listed with `registered = 0`: their rows can't be
 appended any more but still read, and the pump delivers them at their
 logged version (`data-model.md` "event_log").
 
+**Appending them (P8.D4).** Nothing else appends an extension's types:
+a command script's result (and, from P8.D10, an effect's) may carry
+`events: [{ type, payload, subject? }]`. `own_events` turns each into an
+envelope at its type's newest version, from
+`extension:<extension>/<command>`, refusing (the run is `Invalid` and
+writes nothing) any type the running vocabulary doesn't list as this
+extension's own — a core type, another extension's, or one in its
+namespace it doesn't declare. They ride the run's `Composition.events`
+and are appended after the children's events, caused by the run's
+`command.executed`, in the run's transaction; on the steps path (a call
+outside the transaction) they're recorded with the run only when every
+step landed.
+
 A collector's `trigger: { on: [...] }` may name its own extension's
 declared types as well as core ones; another extension's are refused.
 **Health is the extension's errors, not `plugin_health`** — a refused
@@ -1244,7 +1257,7 @@ commands:
       - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [work_item.transition] }
 ```
 
-`transform` returns `{ commands: [{ name, input }], result? }`, or
+`transform` returns `{ commands: [{ name, input }], result?, events? }`, or
 `{ refuse: "<why>" }` to decline — the run is `Invalid` with that reason
 and writes nothing (`composed` → `Composed::{Run, Refused}`). An example
 may give `rows:` — standing in for the `input` query's result, so it

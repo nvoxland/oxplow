@@ -26,12 +26,15 @@ use serde_json::{json, Value};
 
 use super::{Command, CommandBus, Handler, HandlerOutput, TxCtx, TxHandler};
 
-/// What a composite runs for one input: its calls, in order, and the
-/// run's own `result` (beside the children's).
+/// What a composite runs for one input: its calls, in order, the run's
+/// own `result` (beside the children's), and events of its own, appended
+/// after the children's and caused by the run's `command.executed` (an
+/// extension command's declared types, P8.D4).
 #[derive(Debug, Clone, Default)]
 pub struct Composition {
     pub calls: Vec<CommandCall>,
     pub result: Option<Value>,
+    pub events: Vec<oxplow_domain::Envelope>,
 }
 
 /// Say what a composite runs for `input`, reading on `conn` (the run's
@@ -58,12 +61,16 @@ impl Compose {
             let bus = bus.upgrade().ok_or_else(|| CommandError::Failed {
                 message: "the command bus is gone".into(),
             })?;
-            let Composition { calls, result } = composer(ctx.conn, &input)?;
+            let Composition {
+                calls,
+                result,
+                events,
+            } = composer(ctx.conn, &input)?;
             let nested = bus.run_nested(ctx, &parent, &calls)?;
             Ok(HandlerOutput {
                 result: json!({ "result": result, "children": nested.children }),
                 inverse: nested.inverse,
-                events: nested.events,
+                events: nested.events.into_iter().chain(events).collect(),
                 after_commit: nested.after_commit,
             })
         });
@@ -124,6 +131,7 @@ pub fn sequence_command(bus: &Arc<CommandBus>) -> Command {
                 })
                 .collect(),
             result: None,
+            events: Vec::new(),
         })
     });
     let handler = Compose::handler(bus, spec.clone(), compose);
