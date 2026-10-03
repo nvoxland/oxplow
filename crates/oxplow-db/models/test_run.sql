@@ -16,7 +16,8 @@ SELECT c.id,
        c.source,
        c.branch,
        c.closest_vcs_rev,
-       c.captured_at
+       c.captured_at,
+       c.turn_id
 FROM source('metric_capture') c
 WHERE c.producer IN ('tests', 'test-run')
   AND json_extract(c.detail_json, '$.kind') = 'test-detail'

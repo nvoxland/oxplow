@@ -1573,7 +1573,9 @@ The V38 metric cluster + `metric_store.rs` are **gone**. The fact substrate
 (`measure`/`dimension`/`metric_spec`/`metric_capture`/`fact`, V43+) is the sole
 metric store: producers write facts on captures, metrics are SPECS aggregated
 at read time by `MetricEngine`, and the run identity for attribution is the
-capture id. See `.context/metrics.md`.
+capture id. See `.context/metrics.md`. A capture names its stream, thread,
+producing effort (`effort_id`) and — V157 — the agent turn it was measured
+in (`turn_id`, FK `agent_turn`, SET NULL; NULL when no turn produced it).
 
 > **Timestamps are fixed-width by construction (tsk243 → tsk387/tsk419).**
 > Timestamps are RFC 3339 TEXT that SQLite compares lexicographically. The

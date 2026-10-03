@@ -314,6 +314,7 @@ mod tests {
             detail_json: None,
             producer_version: None,
             scan_kind: "delta".into(),
+            turn_id: None,
         }
     }
 

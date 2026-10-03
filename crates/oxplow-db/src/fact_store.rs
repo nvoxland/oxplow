@@ -380,6 +380,8 @@ pub struct MetricCapture {
     /// `asserted` — exactly the paths it emitted facts for (a snapshot, when
     /// present, is provenance only). See the V58 migration header.
     pub scan_kind: String,
+    /// The agent turn it was measured in (V157), when one produced it.
+    pub turn_id: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -416,6 +418,9 @@ pub struct NewMetricCapture {
     /// coerces a snapshot-less `delta` to `asserted` (delta/full semantics
     /// REQUIRE a snapshot to anchor their scanned set on).
     pub scan_kind: String,
+    /// See [`MetricCapture::turn_id`]: the turn the producer knows it was
+    /// measured in (its causing event's anchor), never guessed here.
+    pub turn_id: Option<i64>,
 }
 
 impl NewMetricCapture {
@@ -443,13 +448,14 @@ impl NewMetricCapture {
             idempotency_key: None,
             producer_version: None,
             scan_kind: "delta".into(),
+            turn_id: None,
         }
     }
 }
 
 const CAPTURE_COLS: &str = "id, stream_id, thread_id, effort_id, producer, status, error, scope, \
      trigger, basis_ref, provenance, source, snapshot_id, closest_vcs_rev, vcs_rev_exact, \
-     branch, captured_at, ended_at, detail_json, producer_version, scan_kind";
+     branch, captured_at, ended_at, detail_json, producer_version, scan_kind, turn_id";
 
 fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
     let captured_at: String = row.get(16)?;
@@ -479,6 +485,7 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
         detail_json: row.get(18)?,
         producer_version: row.get(19)?,
         scan_kind: row.get(20)?,
+        turn_id: row.get(21)?,
     })
 }
 
@@ -651,8 +658,9 @@ fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite:
         "INSERT INTO metric_capture
            (stream_id, thread_id, effort_id, producer, status, error, scope, trigger, basis_ref,
             provenance, source, snapshot_id, closest_vcs_rev, vcs_rev_exact, branch,
-            captured_at, ended_at, detail_json, idempotency_key, producer_version, scan_kind)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+            captured_at, ended_at, detail_json, idempotency_key, producer_version, scan_kind,
+            turn_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         params![
             c.stream_id,
             c.thread_id,
@@ -675,6 +683,7 @@ fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite:
             c.idempotency_key,
             c.producer_version,
             scan_kind,
+            c.turn_id,
         ],
     )?;
     Ok(conn.last_insert_rowid())

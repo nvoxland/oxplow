@@ -358,4 +358,58 @@ mod tests {
             .expect("the run is logged");
         assert_eq!(run.envelope.anchors.thread_id, Some(fx.thread));
     }
+
+    /// tsk483: a run an agent reports by command is in the turn open on
+    /// its thread — on the capture and on its event alike.
+    #[tokio::test]
+    async fn a_reported_run_carries_the_open_turn() {
+        let fx = services_with_effort().await;
+        fx.svc
+            .hook_ingest
+            .ingest(crate::hook_ingest::HookEnvelope {
+                kind: oxplow_domain::HookKind::UserPromptSubmit,
+                thread_id: Some(fx.thread),
+                stream_id: None,
+                session_id: Some("s".into()),
+                payload_json: "{}".into(),
+                prompt: Some("go".into()),
+                decision: None,
+            })
+            .await
+            .unwrap();
+        fx.svc
+            .commands
+            .run(
+                &Actor::Agent {
+                    thread_id: Some(fx.thread),
+                    stream_id: None,
+                },
+                RECORD_RUN,
+                json!({ "command": "cargo test", "passed": 1, "failed": 0, "total": 1 }),
+                false,
+            )
+            .await
+            .unwrap();
+        let (open, on_capture): (i64, Option<i64>) = fx
+            .svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT (SELECT id FROM agent_turn WHERE ended_at IS NULL), \
+                            (SELECT turn_id FROM metric_capture WHERE producer IN ('tests', 'test-run'))",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(on_capture, Some(open));
+        let events = fx.svc.event_log_store.read_after(0, 1000).await.unwrap();
+        let run = events
+            .iter()
+            .find(|e| e.envelope.event_type == "test.run.recorded")
+            .unwrap();
+        assert_eq!(run.envelope.anchors.turn_id, Some(open));
+    }
 }

@@ -598,6 +598,91 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Capture id."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream captured in."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread, if known."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Producing effort, when unambiguous."
+        },
+        {
+          "name": "producer",
+          "type": "TEXT",
+          "doc": "What produced it (collector, gauge, hook…)."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`running`, `done` or `failed`."
+        },
+        {
+          "name": "trigger",
+          "type": "TEXT",
+          "doc": "What started it."
+        },
+        {
+          "name": "provenance",
+          "type": "TEXT",
+          "doc": "`observed` (measured) or `asserted` (an agent claimed it)."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "Source identifier."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot it was taken against, if any."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Git branch at capture."
+        },
+        {
+          "name": "closest_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision (a git sha) the capture's tree was at or nearest to."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "When the capture finished."
+        },
+        {
+          "name": "scan_kind",
+          "type": "TEXT",
+          "doc": "`delta` or `full`."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it was measured in (v_agent_turn.id), when one produced it."
+        }
+      ],
+      "key": []
     }
   },
   "change": {
@@ -4324,6 +4409,96 @@
           "name": "captured_at",
           "type": "TEXT",
           "doc": "When it was recorded (RFC 3339)."
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Run id; `run:<id>` is how claims and decisions cite it."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream it ran in (v_stream.id)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread whose agent ran it, if known."
+        },
+        {
+          "name": "effort_id",
+          "type": "",
+          "doc": "Effort it belongs to: the one that claimed it, else the one open when it ran."
+        },
+        {
+          "name": "command",
+          "type": "",
+          "doc": "The command that was run."
+        },
+        {
+          "name": "exit_code",
+          "type": "",
+          "doc": "Its exit code, if known."
+        },
+        {
+          "name": "passed",
+          "type": "",
+          "doc": "Tests passed (NULL when not reported)."
+        },
+        {
+          "name": "failed",
+          "type": "",
+          "doc": "Tests failed (NULL when not reported)."
+        },
+        {
+          "name": "skipped",
+          "type": "",
+          "doc": "Tests skipped (NULL when not reported)."
+        },
+        {
+          "name": "total",
+          "type": "",
+          "doc": "Tests run in total (NULL when not reported)."
+        },
+        {
+          "name": "duration_ms",
+          "type": "",
+          "doc": "Wall-clock duration, if known."
+        },
+        {
+          "name": "provenance",
+          "type": "TEXT",
+          "doc": "`observed` (oxplow parsed a report) or `asserted` (an agent reported counts)."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "What recorded it (`hook`, `mcp`, …)."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Branch checked out when it ran."
+        },
+        {
+          "name": "closest_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision (a git sha) the tested tree was at or nearest to."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "When it was recorded (RFC 3339)."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it ran in (v_agent_turn.id), if it ran in one."
         }
       ],
       "key": []

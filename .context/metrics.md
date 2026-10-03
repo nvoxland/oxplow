@@ -1348,8 +1348,19 @@ the deferred backfill (tsk38). The now-orphaned legacy reads
 > event that ran it: the capture is keyed `test-run:<event id>` (a
 > redelivery records nothing new), the effort the command ran in owns it
 > (the event's effort anchor, after an `OXPLOW_TASK=` token), and its
-> `test.run.recorded` is anchored to the turn. `metric_capture` itself has
-> no turn column yet (tsk483), so turn-grain reads go through the event.
+> `test.run.recorded` is anchored to the turn.
+>
+> **P10 (tsk483):** the capture carries that turn too —
+> `metric_capture.turn_id` (V157, SET NULL when the turn goes), exposed as
+> `v_capture.turn_id` and `v_test_run.turn_id`. A producer stamps what it
+> knows, never a guess: a run, coverage, analysis or nudge capture takes
+> its causing tool event's turn anchor however late the reactor records it
+> (`CollectionService::turn_of` — none when the event had none), a run
+> reported by command (`test.record_run`) takes the thread's open turn
+> (and its `test.run.recorded` is anchored to it), and the per-turn
+> `oxplow.turn` facts' capture takes the turn whose `agent.turn.ended`
+> counted them. A capture no turn produced (a scheduled collector, a
+> baseline scan) has none.
 
 **The capture IS the run (T-E1, tsk48).** Agent-work runs — tests, coverage,
 analysis — are **observe-always**: every run writes its `metric_capture` + facts

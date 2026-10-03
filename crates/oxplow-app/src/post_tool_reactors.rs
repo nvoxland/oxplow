@@ -196,6 +196,58 @@ mod tests {
         assert_eq!(run.payload["command"], "cargo test");
     }
 
+    /// tsk483: a run's capture carries the turn its tool call was made in
+    /// — the event's own anchor, however late the reactor records it (here
+    /// after that turn ended and another began) — and `v_test_run` and
+    /// `v_capture` expose it.
+    #[tokio::test]
+    async fn a_run_capture_carries_the_tools_turn() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        svc.hook_ingest
+            .ingest(hook(f.thread, HookKind::UserPromptSubmit, json!({})))
+            .await
+            .unwrap();
+        svc.hook_ingest
+            .ingest(hook(f.thread, HookKind::PostToolUse, bash("cargo test")))
+            .await
+            .unwrap();
+        svc.hook_ingest
+            .ingest(hook(f.thread, HookKind::Stop, json!({})))
+            .await
+            .unwrap();
+        svc.hook_ingest
+            .ingest(hook(f.thread, HookKind::UserPromptSubmit, json!({})))
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        let events = svc.event_log_store.read_after(0, 1000).await.unwrap();
+        let ran_in = events
+            .iter()
+            .find(|e| e.envelope.event_type == "agent.tool.finished")
+            .and_then(|e| e.envelope.anchors.turn_id)
+            .expect("the tool call was in a turn");
+        assert_eq!(
+            count(svc, "SELECT turn_id FROM v_test_run").await,
+            ran_in,
+            "v_test_run"
+        );
+        assert_eq!(
+            count(
+                svc,
+                "SELECT turn_id FROM v_capture WHERE producer IN ('tests', 'test-run')"
+            )
+            .await,
+            ran_in,
+            "v_capture"
+        );
+        assert_ne!(
+            count(svc, "SELECT max(id) FROM v_agent_turn").await,
+            ran_in,
+            "a later turn is open by then"
+        );
+    }
+
     /// The effort the command ran in owns the run, even when the reactor
     /// records it after that effort closed.
     #[tokio::test]

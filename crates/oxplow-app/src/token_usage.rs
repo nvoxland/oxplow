@@ -671,6 +671,7 @@ impl TokenUsageService {
                 capture.thread_id = Some(thread.value());
                 capture.trigger = Some("continuous".into());
                 capture.effort_id = effort_val;
+                capture.turn_id = rec.turn_id;
                 capture.idempotency_key = rec.cause.as_ref().map(|c| format!("turn-tokens:{c}"));
                 self.facts.record_facts(capture, facts).await?;
             }
@@ -1184,6 +1185,23 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(turn_ids, vec![Some(turn.value())]);
+        // tsk483: the turn facts' capture carries its turn too.
+        let capture_turns: Vec<Option<i64>> = {
+            let sl = crate::sql_gateway::SqlGateway::new(svc.db.clone());
+            let r = sl
+                .query_sql(
+                    "SELECT turn_id FROM v_capture WHERE producer = 'token-parse'",
+                    vec![],
+                    None,
+                )
+                .await
+                .unwrap()
+                .rows;
+            serde_json::from_value(serde_json::to_value(r).unwrap())
+                .map(|v: Vec<Vec<Option<i64>>>| v.into_iter().map(|r| r[0]).collect())
+                .unwrap()
+        };
+        assert_eq!(capture_turns, vec![Some(turn.value())]);
     }
 
     /// An ACP turn reports its own counts; they ride its `agent.turn.ended`

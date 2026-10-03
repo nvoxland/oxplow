@@ -87,7 +87,7 @@
     - { name: "updated_at", type: "TEXT", doc: "When oxplow last read it (RFC 3339)." }
     - { name: "is_default", type: "INTEGER", doc: "1 for the repository's default branch (`main`), else 0." }
 - name: capture
-  version: 2
+  version: 3
   description: "Captures: one scan or run that produced facts, with its when/where/who context."
   columns:
     - { name: "id", type: "INTEGER", doc: "Capture id." }
@@ -105,6 +105,7 @@
     - { name: "captured_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "ended_at", type: "TEXT", doc: "When the capture finished." }
     - { name: "scan_kind", type: "TEXT", doc: "`delta` or `full`." }
+    - { name: "turn_id", type: "INTEGER", doc: "The agent turn it was measured in (v_agent_turn.id), when one produced it." }
 - name: change
   version: 3
   description: "Analyzed changes: a commit (vs its parent), an effort (start → end snapshot, or → working tree while open), an agent turn (start → end snapshot: what the turn changed) or a stream's working tree (vs HEAD). Created on demand by `ensure_change`; a working tree's and an open effort's are recomputed by the `change.analyze` consumer as the stream moves. The v_change_* views hold its analysis."
@@ -772,7 +773,7 @@
     - { name: "status", type: "", doc: "`passed`, `failed` or `skipped`." }
     - { name: "time_ms", type: "", doc: "Its duration, when the report gave one." }
 - name: test_run
-  version: 2
+  version: 3
   description: "Every test run oxplow saw (hook-observed or reported by an agent), with its counts."
   columns:
     - { name: "id", type: "INTEGER", doc: "Run id; `run:<id>` is how claims and decisions cite it." }
@@ -791,6 +792,7 @@
     - { name: "branch", type: "TEXT", doc: "Branch checked out when it ran." }
     - { name: "closest_vcs_rev", type: "TEXT", doc: "The VCS revision (a git sha) the tested tree was at or nearest to." }
     - { name: "captured_at", type: "TEXT", doc: "When it was recorded (RFC 3339)." }
+    - { name: "turn_id", type: "INTEGER", doc: "The agent turn it ran in (v_agent_turn.id), if it ran in one." }
 - name: thread
   version: 1
   description: "Threads: independent lines of thought inside a stream, each with its own agent session."

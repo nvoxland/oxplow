@@ -384,6 +384,23 @@ pub struct RunCause {
 }
 
 impl CollectionService {
+    /// The agent turn a run on `thread` was made in (tsk483): its causing
+    /// tool event's — however late that event is delivered, and none when
+    /// the event had none — else, for a run reported by command, the
+    /// thread's open turn.
+    async fn turn_of(&self, thread: &ThreadId, cause: Option<&RunCause>) -> Option<i64> {
+        if let Some(cause) = cause {
+            return cause.anchors.turn_id;
+        }
+        let thread = *thread;
+        self.facts
+            .database()
+            .read(move |tx| oxplow_db::agent_stores::open_turn_ids_tx(tx, thread))
+            .await
+            .ok()
+            .and_then(|open| open.first().map(|t| t.value()))
+    }
+
     /// The branch the project checkout has checked out (`None` when
     /// detached or unreadable).
     async fn current_branch(&self) -> Option<String> {
@@ -726,6 +743,8 @@ impl CollectionService {
                 capture.closest_vcs_rev = version.as_ref().and_then(|v| v.closest_vcs_rev.clone());
                 capture.vcs_rev_exact = version.as_ref().map(|v| v.vcs_rev_exact).unwrap_or(false);
                 capture.effort_id = owning_val;
+                let turn = self.turn_of(thread, cause).await;
+                capture.turn_id = turn;
                 capture.detail_json = Self::capture_detail(
                     "test-detail",
                     &serde_json::Value::Object(payload.clone()),
@@ -735,6 +754,7 @@ impl CollectionService {
                     thread,
                     stream_val,
                     owning_val,
+                    turn,
                     cause,
                     oxplow_domain::events::schema::TestRunRecordedV1 {
                         run: String::new(), // filled with the capture id
@@ -788,6 +808,7 @@ impl CollectionService {
         thread: &ThreadId,
         stream_val: i64,
         owning: Option<i64>,
+        turn: Option<i64>,
         cause: Option<&RunCause>,
         payload: oxplow_domain::events::schema::TestRunRecordedV1,
     ) -> oxplow_db::fact_store::CaptureEvent {
@@ -801,6 +822,7 @@ impl CollectionService {
                 stream_id: Some(oxplow_domain::StreamId::new(stream_val)),
                 thread_id: Some(*thread),
                 effort_id: owning.map(EffortId::new),
+                turn_id: turn,
                 ..oxplow_domain::Anchors::default()
             },
         };
@@ -1147,6 +1169,7 @@ impl CollectionService {
         vcs_rev: Option<String>,
         vcs_rev_exact: bool,
         detail: Option<serde_json::Value>,
+        turn: Option<i64>,
     ) -> Option<i64> {
         let stream_val = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())?;
         let branch = self.current_branch().await;
@@ -1214,6 +1237,7 @@ impl CollectionService {
             capture.vcs_rev_exact = vcs_rev_exact;
             capture.branch = branch.clone();
             capture.effort_id = owning_val;
+            capture.turn_id = turn;
             capture.detail_json = capture_detail_json;
             capture.idempotency_key = Self::ingest_idempotency_key(
                 &analyzer,
@@ -1384,6 +1408,8 @@ impl CollectionService {
                 capture.basis_ref = version.closest_vcs_rev.clone();
                 capture.branch = branch;
                 capture.effort_id = owning_val;
+                let turn = self.turn_of(thread, cause).await;
+                capture.turn_id = turn;
                 capture.detail_json = Self::capture_detail("coverage-detail", &payload);
                 capture.idempotency_key = Self::ingest_idempotency_key(
                     "coverage",
@@ -1391,8 +1417,14 @@ impl CollectionService {
                     snapshot_id,
                     capture.detail_json.as_deref(),
                 );
-                let log =
-                    self.coverage_event(thread, stream_val, owning_val, cause, abs_pct, source);
+                let log = self.coverage_event(
+                    thread,
+                    stream_val,
+                    (owning_val, turn),
+                    cause,
+                    abs_pct,
+                    source,
+                );
                 let id = self
                     .facts
                     .record_facts_logged(capture, facts, Some(log))
@@ -1512,7 +1544,7 @@ impl CollectionService {
         &self,
         thread: &ThreadId,
         stream_val: i64,
-        owning: Option<i64>,
+        (owning, turn): (Option<i64>, Option<i64>),
         cause: Option<&RunCause>,
         lines_pct: f64,
         source: &str,
@@ -1527,6 +1559,7 @@ impl CollectionService {
                 stream_id: Some(oxplow_domain::StreamId::new(stream_val)),
                 thread_id: Some(*thread),
                 effort_id: owning.map(EffortId::new),
+                turn_id: turn,
                 ..oxplow_domain::Anchors::default()
             },
         };
@@ -1616,6 +1649,7 @@ impl CollectionService {
         capture.error = Some(error.to_string());
         capture.thread_id = Some(thread.value());
         capture.trigger = Some("on-report".into());
+        capture.turn_id = self.turn_of(thread, cause).await;
         capture.idempotency_key = cause.map(|c| format!("coverage-failure:{}", c.event_id));
         if let Err(e) = self.facts.record_facts(capture, Vec::new()).await {
             tracing::warn!(error = %e, "coverage failure record write failed");
@@ -2039,6 +2073,7 @@ impl CollectionService {
                 capture.trigger = Some("continuous".into());
                 capture.branch = branch;
                 capture.effort_id = owning_val;
+                capture.turn_id = self.turn_of(thread, cause).await;
                 self.facts.record_facts(capture, vec![fact]).await?;
             }
             Ok::<(), DomainError>(())
@@ -2360,6 +2395,7 @@ impl CollectionService {
                 closest_vcs_rev.clone(),
                 vcs_rev_exact,
                 Some(serde_json::Value::Object(payload.clone())),
+                self.turn_of(thread, cause).await,
             )
             .await
         } else {
