@@ -785,7 +785,7 @@ start or call counts (a refused input or a cancel doesn't); a success
 resets the count and updates `last_ok_at` and the moving-average
 `mean_invoke_ms`. The count and the disable are the policy every plugin
 contribution shares (P7.C1, `plugin_health.rs`; [extensions.md](./extensions.md)):
-the `plugin_health` row keyed `<extension>` / `<provider id>`, kind
+the `plugin_health` row keyed `<extension>` / `<instance id>`, kind
 `provider` (`v_plugin_health`). **Three failures in a row disable the
 instance**: it stops, and the row (`disabled`, its reason) and
 `plugin.disabled@1 { plugin, contribution, kind, reason }` commit

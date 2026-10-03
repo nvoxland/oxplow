@@ -521,7 +521,8 @@ impl ProviderRegistry {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct SyncInput {
-    /// `<extension>/<provider id>`.
+    /// The instance, `<extension>/<instance id>` (a provider's default
+    /// instance has the provider's id).
     instance: String,
     /// One collector; absent, every collector it declares.
     #[serde(default, skip_serializing_if = "Option::is_none")]

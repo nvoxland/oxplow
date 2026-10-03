@@ -134,7 +134,8 @@ pub enum CollectorSync {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProviderRead {
-    /// `<extension>/<provider id>`.
+    /// The instance, `<extension>/<instance id>` (a provider's default
+    /// instance has the provider's id).
     pub instance: String,
     pub collector: String,
 }

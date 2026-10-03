@@ -1,7 +1,7 @@
 //! The provider instances (`Services.providers`): one long-lived process
 //! per enabled instance, its health, and restart with backoff.
 //!
-//! An instance is `<extension>/<provider id>`, configured in the
+//! An instance is `<extension>/<instance id>`, configured in the
 //! project's `extensionInstances` (`{ enabled, config }`, a person's key).
 //! [`ProviderRegistry::reconcile`] makes the running set match it — at
 //! boot and on every config change. Starting an instance checks consent,

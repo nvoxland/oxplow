@@ -4517,7 +4517,10 @@ export type ProviderKind =
 
 // A provider's collector a `read` collector runs.
 export type ProviderRead = {
-	// `<extension>/<provider id>`.
+	/**
+	 *  The instance, `<extension>/<instance id>` (a provider's default
+	 *  instance has the provider's id).
+	 */
 	instance: string,
 	collector: string,
 };
