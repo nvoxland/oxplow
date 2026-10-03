@@ -2568,6 +2568,12 @@ export type ExtensionUi = {
 	 *  extension's only; valid ones).
 	 */
 	decorators: UiDecorator[],
+	/**
+	 *  Lenses that take the place of a core sub-component while its
+	 *  provider is the capability's active one (experimental: a private
+	 *  extension's only; valid ones).
+	 */
+	replacements: UiReplacement[],
 };
 
 // A loaded extension and anything wrong with it.
@@ -4029,6 +4035,12 @@ export type OxplowConfig = {
 	 */
 	activeProviders: { [key in string]: string },
 	/**
+	 *  Core components no extension's replacement may take over
+	 *  (`replacementsOff: [work_item.board]`): oxplow's own shows there
+	 *  even when the active provider's extension replaces it.
+	 */
+	replacementsOff: string[],
+	/**
 	 *  This project's AI role assignments (`ai: { roles: … }`), layered
 	 *  over the user-global `ai.yaml`. Keyed by role name (one of
 	 *  [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
@@ -5001,6 +5013,25 @@ export type UiPlacement =
 "menu" | 
 // A row's right-click menu, for the row's ref.
 "context";
+
+/**
+ *  A replacement (valid ones; invalid ones are in the extension's
+ *  `errors`).
+ */
+export type UiReplacement = {
+	// `<extension>/<target>`.
+	id: string,
+	extension: string,
+	// The core sub-component it replaces (`work_item.board`).
+	target: string,
+	/**
+	 *  The capability whose active provider must be this extension's for
+	 *  it to render.
+	 */
+	capability: string,
+	// The lens that renders instead, given the target's props.
+	lensId: string,
+};
 
 export type UsageEvent = {
 	id: string,

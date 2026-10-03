@@ -574,7 +574,7 @@ ui:                  # what it adds to the core UI
     - { slot: effort.review.details, lens: change-review }
   commands: …        # its commands in core menus (stable; P6b)
   decorators: …      # experimental: a private extension only
-  replacements: …    # experimental, parsed as data only (left for P9)
+  replacements: …    # experimental: a lens in place of a named core component (see "Replacements")
 advisories:  [...]   # see "Advisories"
 launcher:            # entries for non-lens targets; a lens uses its own launcher: block
   - { label: …, category: Data, target: { ref: page:… } }        # a page (a ref of a kind that opens as one)
@@ -911,6 +911,45 @@ manifest still using top-level `slot_mounts:` / `decorators:` /
 | `settings.section` | Settings: a section per mounting extension, titled with its name, before AI (tsk330; `SettingsSlotSections`, `slotRuns(…, extension)`) | none |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
+
+## Replacements (experimental)
+
+`ui.replacements` (a private extension only; P9.A1,
+`extensions/replacements.rs`) puts a **lens in place of a named core
+sub-component** — never a whole page:
+
+```yaml
+ui:
+  replacements:
+    - { target: work_item.board, lens: board }
+```
+
+The targets are one table, `oxplow_domain::replaceable::REPLACEABLE`:
+each a `target`, the `capability` it belongs to, and its **props
+contract** — the params the replacement lens is given instead of any
+host state.
+
+| Target | Core component | Capability | Props |
+|---|---|---|---|
+| `work_item.board` | the Board's columns of cards (`WorkBoard`) | `work_items` | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null), `stream_id` |
+
+The first target is the only one; the history graph and the conflict
+resolver §11.2 names wait for a provider that needs them.
+
+**At load** (`parse_replacements`, errors at the entry's line): the
+target is in the table; the lens is one of the extension's and declares
+**every** prop (a slot's lens declares at least one; a replacement takes
+the whole contract — a Board that ignores `scope` isn't the Board); the
+extension brings a provider of the target's capability (`providers:`);
+a target is replaced once per extension. Valid ones are
+`Extension.ui.replacements` (`UiReplacement { id: <ext>/<target>,
+extension, target, capability, lensId }`).
+
+**A person can turn one off**: the project key `replacementsOff:
+[work_item.board]` (person-only, like `activeProviders` — it decides
+what renders a core region; validated against the table, an unknown
+target is an error listing the real ones). Listed, oxplow's own
+component shows.
 
 ## Reviewing by effect
 

@@ -780,6 +780,11 @@ pub struct OxplowConfig {
     /// here keeps oxplow's own.
     #[serde(rename = "activeProviders")]
     pub active_providers: std::collections::BTreeMap<String, String>,
+    /// Core components no extension's replacement may take over
+    /// (`replacementsOff: [work_item.board]`): oxplow's own shows there
+    /// even when the active provider's extension replaces it.
+    #[serde(rename = "replacementsOff")]
+    pub replacements_off: std::collections::BTreeSet<String>,
     /// This project's AI role assignments (`ai: { roles: … }`), layered
     /// over the user-global `ai.yaml`. Keyed by role name (one of
     /// [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
@@ -979,6 +984,9 @@ struct RawConfig {
     /// Each capability's active provider, by provider id: `{ work_items: linear }`. New work items file there; absent, oxplow's own. A provider that isn't running is a failure, never a fallback.
     #[serde(rename = "activeProviders", default)]
     active_providers: Option<std::collections::BTreeMap<String, String>>,
+    /// Core components that stay oxplow's own, by target: `[work_item.board]`. Listed, an extension's replacement of it (the active provider's `ui.replacements`) isn't shown.
+    #[serde(rename = "replacementsOff", default)]
+    replacements_off: Option<Vec<String>>,
     /// AI role assignments `{ roles: { <role>: { provider, model } } }`, layered over the user's ai.yaml.
     #[serde(default)]
     ai: Option<RawAiBlock>,
@@ -1412,6 +1420,11 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         to_yaml(&config.active_providers),
         !config.active_providers.is_empty(),
     );
+    put(
+        "replacementsOff",
+        to_yaml(&config.replacements_off),
+        !config.replacements_off.is_empty(),
+    );
     {
         let mut ext = serde_yaml::Mapping::new();
         ext.insert("disabled".into(), to_yaml(&config.extensions_disabled));
@@ -1534,6 +1547,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         acp_agents: Vec::new(),
         extension_instances: std::collections::BTreeMap::new(),
         active_providers: std::collections::BTreeMap::new(),
+        replacements_off: std::collections::BTreeSet::new(),
         ai_roles: Default::default(),
         extensions_disabled: Vec::new(),
     }
@@ -1620,6 +1634,22 @@ fn validate_extension_instances(
 /// The capabilities whose active provider a project may choose
 /// (`activeProviders`).
 pub const SWAPPABLE_CAPABILITIES: &[&str] = &["work_items"];
+
+/// Validate `replacementsOff:`: each a replaceable component's target
+/// ([`oxplow_domain::replaceable`]); a repeat is one.
+fn validate_replacements_off(
+    raw: Vec<String>,
+) -> Result<std::collections::BTreeSet<String>, ConfigError> {
+    for target in &raw {
+        if oxplow_domain::replaceable::replaceable(target).is_none() {
+            return Err(ConfigError::Invalid(format!(
+                "replacementsOff: `{target}` isn't a replaceable component ({})",
+                oxplow_domain::replaceable::targets()
+            )));
+        }
+    }
+    Ok(raw.into_iter().collect())
+}
 
 /// Validate `activeProviders:`: a swappable capability each, naming a
 /// provider id (lowercase snake_case, as `providers:` ids are).
@@ -1819,6 +1849,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
     let extension_instances =
         validate_extension_instances(raw.extension_instances.unwrap_or_default())?;
     let active_providers = validate_active_providers(raw.active_providers.unwrap_or_default())?;
+    let replacements_off = validate_replacements_off(raw.replacements_off.unwrap_or_default())?;
 
     let lsp_servers = match raw.lsp.and_then(|l| l.servers) {
         Some(servers) => {
@@ -1886,6 +1917,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         acp_agents,
         extension_instances,
         active_providers,
+        replacements_off,
         ai_roles: validate_ai_roles(raw.ai)?,
         extensions_disabled: raw.extensions.map(|b| b.disabled).unwrap_or_default(),
     })
@@ -3102,6 +3134,37 @@ mod tests {
             .unwrap()
             .active_providers
             .is_empty());
+    }
+
+    /// P9.A1: `replacementsOff` names core components a replacement may
+    /// not take over; an unknown target is an error listing the real ones.
+    #[test]
+    fn replacements_off_names_replaceable_components() {
+        let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
+        let config = parse("replacementsOff: [work_item.board, work_item.board]\n").unwrap();
+        assert_eq!(
+            config.replacements_off.iter().collect::<Vec<_>>(),
+            vec!["work_item.board"]
+        );
+        let doc = render_project_config(&config, "demo");
+        let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
+        assert!(
+            yaml.contains("replacementsOff:\n- work_item.board"),
+            "{yaml}"
+        );
+        let err = parse("replacementsOff: [vcs.history.graph]\n").unwrap_err();
+        assert!(
+            err.to_string().contains("work_item.board"),
+            "lists what can be: {err}"
+        );
+        let plain = parse("agents: [claude]\n").unwrap();
+        assert!(plain.replacements_off.is_empty());
+        let doc = render_project_config(&plain, "demo");
+        let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
+        assert!(!yaml.contains("replacementsOff"), "{yaml}");
+        // What renders a core region is a person's call, like the active
+        // provider.
+        assert!(crate::keys::HUMAN_ONLY_KEYS.contains(&"replacementsOff"));
     }
 
     #[test]

@@ -20,6 +20,7 @@ pub mod custom_components;
 pub mod decorators;
 pub mod manifest_v2;
 pub mod migrate_v1;
+pub mod replacements;
 pub mod ui_commands;
 use manifest_v2::{at, entry_line, key_line, line_under, ManifestV2};
 pub use manifest_v2::{
@@ -982,6 +983,10 @@ pub struct ExtensionUi {
     /// Labels from its models on core refs (experimental: a private
     /// extension's only; valid ones).
     pub decorators: Vec<decorators::UiDecorator>,
+    /// Lenses that take the place of a core sub-component while its
+    /// provider is the capability's active one (experimental: a private
+    /// extension's only; valid ones).
+    pub replacements: Vec<replacements::UiReplacement>,
 }
 
 /// Provenance of an installed extension, kept in its `source.yaml`.
@@ -1493,6 +1498,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         m.ui.decorators
             .clone()
             .filter(|_| m.sharing == Sharing::Private);
+    // An experimental kind: a shared manifest's is refused by `check`.
+    let replacement_files =
+        m.ui.replacements
+            .clone()
+            .filter(|_| m.sharing == Sharing::Private);
     let page_files = m.pages.clone();
     // An experimental kind: a shared manifest's is refused by `check`.
     let ref_kind_files = m
@@ -1939,6 +1949,20 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         let (decorators, errors) =
             decorators::parse_decorators(name, &ext.models, &v, &file, &manifest);
         ext.ui.decorators = decorators;
+        ext.errors.extend(errors);
+    }
+    if let Some(v) = replacement_files {
+        let capabilities: Vec<String> =
+            ext.providers.iter().map(|p| p.capability.clone()).collect();
+        let (replaced, errors) = replacements::parse_replacements(
+            name,
+            &capabilities,
+            &ext.lenses,
+            &v,
+            &file,
+            &manifest,
+        );
+        ext.ui.replacements = replaced;
         ext.errors.extend(errors);
     }
     if let Some(v) = page_files {

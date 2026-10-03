@@ -85,7 +85,7 @@ pub struct SlotMount {
 /// mounted into core pages (`slots`, stable), its commands in core menus
 /// (`commands`, stable), decorations on core refs (`decorators`,
 /// experimental) and replaced sub-components (`replacements`,
-/// experimental, parsed as data until P7).
+/// experimental; `extensions/replacements.rs`).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiBlock {

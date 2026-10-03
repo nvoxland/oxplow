@@ -16,6 +16,7 @@ pub mod ids;
 pub mod json;
 pub mod knowledge;
 pub mod refs;
+pub mod replaceable;
 pub mod snapshot;
 pub mod stores;
 pub mod stream;
