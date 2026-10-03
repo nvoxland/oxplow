@@ -1002,8 +1002,11 @@ side's rows read through that side's own overlay (up to 10 000 — the read gate
 `ROW_DIFF_LIMIT`). When both versions declare the same non-empty `key`
 (P8.B1) it's a merge-join by key — `KeyedDiff { key, added, removed,
 changed, samples }`, up to 20 sample rows in key order, each with its key
-and its row before and after; otherwise, or past the limit, counts with a
-note saying why (or that a side's query failed). An unchanged model has
+and its row before and after (key order is SQLite's: numbers by value,
+then text); otherwise, or past the limit, or when a side's key has a
+NULL part or repeats (one row would stand for several — the key test
+runs only at publish, tsk792), counts with a note saying why (or that a
+side's query failed). An unchanged model has
 none. The rows are the review's only reads of model data; nothing is
 written.
 

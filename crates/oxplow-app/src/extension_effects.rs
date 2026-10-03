@@ -168,21 +168,13 @@ pub fn row_diff(before: Option<(&Rows, &[String])>, after: Option<(&Rows, &[Stri
         );
         return diff;
     }
-    let keyed = |rows: &Rows| -> BTreeMap<String, (Value, Value)> {
-        rows.rows
-            .iter()
-            .map(|row| {
-                let object = rows.object(row);
-                let key: serde_json::Map<String, Value> = bk
-                    .iter()
-                    .map(|k| (k.clone(), object.get(k).cloned().unwrap_or(Value::Null)))
-                    .collect();
-                let key = Value::Object(key);
-                (key.to_string(), (key, Value::Object(object)))
-            })
-            .collect()
+    let (old, new) = match (keyed(b, bk, "before"), keyed(a, bk, "after")) {
+        (Ok(old), Ok(new)) => (old, new),
+        (Err(why), _) | (_, Err(why)) => {
+            diff.note = Some(format!("{why}: counts only"));
+            return diff;
+        }
     };
-    let (old, new) = (keyed(b), keyed(a));
     let mut out = KeyedDiff {
         key: bk.to_vec(),
         added: 0,
@@ -190,35 +182,119 @@ pub fn row_diff(before: Option<(&Rows, &[String])>, after: Option<(&Rows, &[Stri
         changed: 0,
         samples: Vec::new(),
     };
-    let keys: BTreeSet<&String> = old.keys().chain(new.keys()).collect();
-    for k in keys {
-        let (change, key, before, after) = match (old.get(k), new.get(k)) {
-            (Some((key, x)), Some((_, y))) if x != y => {
-                out.changed += 1;
-                (Change::Changed, key, Some(x), Some(y))
-            }
-            (Some(_), Some(_)) => continue,
-            (Some((key, x)), None) => {
+    let (mut old, mut new) = (old.into_iter().peekable(), new.into_iter().peekable());
+    loop {
+        let order = match (old.peek(), new.peek()) {
+            (None, None) => break,
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (Some(x), Some(y)) => cmp_key(&x.parts, &y.parts),
+        };
+        let (change, row) = match order {
+            std::cmp::Ordering::Less => {
+                let x = old.next().expect("peeked");
                 out.removed += 1;
-                (Change::Removed, key, Some(x), None)
+                (Change::Removed, (x.key, Some(x.row), None))
             }
-            (None, Some((key, y))) => {
+            std::cmp::Ordering::Greater => {
+                let y = new.next().expect("peeked");
                 out.added += 1;
-                (Change::Added, key, None, Some(y))
+                (Change::Added, (y.key, None, Some(y.row)))
             }
-            (None, None) => continue,
+            std::cmp::Ordering::Equal => {
+                let (x, y) = (old.next().expect("peeked"), new.next().expect("peeked"));
+                if x.row == y.row {
+                    continue;
+                }
+                out.changed += 1;
+                (Change::Changed, (x.key, Some(x.row), Some(y.row)))
+            }
         };
         if out.samples.len() < ROW_DIFF_SAMPLES {
+            let (key, before, after) = row;
             out.samples.push(RowSample {
                 change,
-                key: key.clone(),
-                before: before.cloned(),
-                after: after.cloned(),
+                key,
+                before,
+                after,
             });
         }
     }
     diff.keyed = Some(out);
     diff
+}
+
+/// A row by its key: the key's parts (for order), the key as an object,
+/// the row as an object.
+struct KeyedRow {
+    parts: Vec<Value>,
+    key: Value,
+    row: Value,
+}
+
+/// `rows` in key order — or why they can't be joined on `key`: a NULL
+/// part, or a key two rows share (one row would stand for several).
+fn keyed(rows: &Rows, key: &[String], side: &str) -> Result<Vec<KeyedRow>, String> {
+    let mut out = Vec::with_capacity(rows.rows.len());
+    for row in &rows.rows {
+        let object = rows.object(row);
+        let parts: Vec<Value> = key
+            .iter()
+            .map(|k| object.get(k).cloned().unwrap_or(Value::Null))
+            .collect();
+        if parts.iter().any(Value::is_null) {
+            return Err(format!("a NULL in key `{}` {side}", key.join(", ")));
+        }
+        let key_object = Value::Object(key.iter().cloned().zip(parts.iter().cloned()).collect());
+        out.push(KeyedRow {
+            parts,
+            key: key_object,
+            row: Value::Object(object),
+        });
+    }
+    out.sort_by(|x, y| cmp_key(&x.parts, &y.parts));
+    if let Some(w) = out
+        .windows(2)
+        .find(|w| cmp_key(&w[0].parts, &w[1].parts).is_eq())
+    {
+        return Err(format!("key {} repeats {side}", w[0].key));
+    }
+    Ok(out)
+}
+
+/// Keys in SQLite's order: numbers (by value), then text, then the rest
+/// by their JSON text.
+fn cmp_key(a: &[Value], b: &[Value]) -> std::cmp::Ordering {
+    fn rank(v: &Value) -> u8 {
+        match v {
+            Value::Number(_) | Value::Bool(_) => 0,
+            Value::String(_) => 1,
+            _ => 2,
+        }
+    }
+    fn number(v: &Value) -> Option<f64> {
+        match v {
+            Value::Bool(b) => Some(f64::from(u8::from(*b))),
+            Value::Number(n) => n.as_f64(),
+            _ => None,
+        }
+    }
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| {
+            rank(x).cmp(&rank(y)).then_with(|| match (x, y) {
+                (Value::Number(m), Value::Number(n)) if m.is_i64() && n.is_i64() => {
+                    m.as_i64().cmp(&n.as_i64())
+                }
+                (Value::String(m), Value::String(n)) => m.cmp(n),
+                _ => match (number(x), number(y)) {
+                    (Some(m), Some(n)) => m.total_cmp(&n),
+                    _ => x.to_string().cmp(&y.to_string()),
+                },
+            })
+        })
+        .find(|o| o.is_ne())
+        .unwrap_or_else(|| a.len().cmp(&b.len()))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -2157,6 +2233,47 @@ mod tests {
 
         let added = row_diff(None, Some((&after, &key)));
         assert_eq!((added.before, added.after), (None, Some(2)));
+    }
+
+    /// tsk792: a key that repeats or has a NULL part can't be joined on —
+    /// one row would stand for several — so the diff is counts, saying why.
+    #[test]
+    fn a_repeated_or_null_key_is_counts_with_a_note() {
+        let key = vec!["id".to_string()];
+        let before = side(&["id", "v"], vec![vec![json!(1), json!("a")]], false);
+        let repeats = side(
+            &["id", "v"],
+            vec![vec![json!(1), json!("a")], vec![json!(1), json!("b")]],
+            false,
+        );
+        let diff = row_diff(Some((&before, &key)), Some((&repeats, &key)));
+        assert!(diff.keyed.is_none(), "{diff:?}");
+        assert_eq!((diff.before, diff.after), (Some(1), Some(2)));
+        let note = diff.note.unwrap();
+        assert!(note.contains("repeats") && note.contains("after"), "{note}");
+
+        let null = side(&["id", "v"], vec![vec![json!(null), json!("a")]], false);
+        let diff = row_diff(Some((&null, &key)), Some((&before, &key)));
+        assert!(diff.keyed.is_none(), "{diff:?}");
+        let note = diff.note.unwrap();
+        assert!(note.contains("NULL") && note.contains("before"), "{note}");
+    }
+
+    /// tsk792: samples come in key order — 2 before 10 — not text order.
+    #[test]
+    fn samples_are_in_key_order() {
+        let key = vec!["id".to_string()];
+        let before = side(&["id"], vec![], false);
+        let after = side(&["id"], vec![vec![json!(10)], vec![json!(2)]], false);
+        let diff = row_diff(Some((&before, &key)), Some((&after, &key)));
+        let keys: Vec<Value> = diff
+            .keyed
+            .unwrap()
+            .samples
+            .into_iter()
+            .map(|s| s.key)
+            .collect();
+        assert_eq!(keys, vec![json!({"id": 2}), json!({"id": 10})]);
     }
 
     /// One version of the `acme` extension under `root`: a Starlark
