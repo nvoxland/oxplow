@@ -26,6 +26,7 @@ const proposal = (over: Partial<Proposal>): Proposal => ({
   dryRun: null,
   decision: "pending",
   decidedAt: null,
+  auditId: null,
   ...over,
 });
 
@@ -61,6 +62,7 @@ test("rows read as proposals, JSON columns parsed", () => {
     dryRun: { key: "agentPromptAppend", before: null, after: "be brief", changed: true },
     decision: "pending",
     decidedAt: null,
+    auditId: null,
   });
 });
 

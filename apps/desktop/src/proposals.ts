@@ -45,6 +45,10 @@ export interface Proposal {
   decision: string;
   /** When it was decided or superseded. */
   decidedAt: string | null;
+  /** The approving run's audit row: none while an approved one still
+   *  runs (an External command is claimed `approved` first, and goes back
+   *  to `pending` if the run fails). */
+  auditId: number | null;
 }
 
 /** How a card shows a proposal. */
@@ -84,6 +88,7 @@ export function proposalsFromResult(result: SqlQueryResult): Proposal[] {
     // A read of the pending ones needn't select it.
     decision: String(at(row, "decision") ?? "pending"),
     decidedAt: at(row, "decided_at") == null ? null : String(at(row, "decided_at")),
+    auditId: at(row, "audit_id") == null ? null : Number(at(row, "audit_id")),
   }));
 }
 
@@ -154,7 +159,8 @@ export async function decide(p: Proposal, approve: boolean): Promise<void> {
   await decideProposal(p.id, approve);
 }
 
-const COLUMNS = "id, ref, created_at, command, input, actor_kind, actor_id, thread_id, key, preview, dry_run, decision, decided_at";
+const COLUMNS =
+  "id, ref, created_at, command, input, actor_kind, actor_id, thread_id, key, preview, dry_run, decision, decided_at, audit_id";
 
 /** A thread's proposals, newest first — pending and decided — and what
  *  was read. */

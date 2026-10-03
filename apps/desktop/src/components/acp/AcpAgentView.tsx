@@ -331,12 +331,21 @@ function Transcript({
   );
 }
 
-/** What became of a proposal, as the transcript keeps it. */
-const DECIDED: Record<string, string> = {
-  approved: "Approved by you — it ran.",
-  declined: "Declined by you — nothing ran.",
-  superseded: "Replaced by a newer proposal.",
-};
+/** What became of a proposal, as the transcript keeps it. An approved
+ *  one ran once its run is recorded (`auditId`); until then it is still
+ *  running — and goes back to waiting if the run fails (tsk858). */
+function decidedLine(p: Proposal): string {
+  switch (p.decision) {
+    case "approved":
+      return p.auditId === null ? "Approved by you — running…" : "Approved by you — it ran.";
+    case "declined":
+      return "Declined by you — nothing ran.";
+    case "superseded":
+      return "Replaced by a newer proposal.";
+    default:
+      return p.decision;
+  }
+}
 
 function Item({
   item,
@@ -405,7 +414,7 @@ function Item({
               data-testid={`acp-proposal-${proposal.id}-decided`}
               style={{ marginTop: 4, color: "var(--text-muted)", fontSize: "var(--text-xs)" }}
             >
-              {DECIDED[proposal.decision] ?? proposal.decision}
+              {decidedLine(proposal)}
             </div>
           )}
           {answer ? (

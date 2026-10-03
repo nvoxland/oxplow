@@ -130,7 +130,11 @@ Things I keep forgetting. Read this before adding any UI.
   (`proposalOfTool`); once decided, a muted line stays there saying what
   became of it — "Approved by you — it ran.", "Declined by you — nothing
   ran.", "Replaced by a newer proposal." (`acp-proposal-<id>-decided`) —
-  so the transcript keeps what the agent asked. Only the thread's own
+  so the transcript keeps what the agent asked. An approved one says it
+  ran only once its run is recorded (`audit_id`): until then it says
+  "Approved by you — running…", since an External command is claimed
+  approved before it runs and goes back to waiting if the run fails
+  (tsk858). Only the thread's own
   proposals show: a ref the transcript merely quotes shows nothing. The
   Approvals panel stays the cross-thread list.
 
