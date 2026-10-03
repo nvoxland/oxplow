@@ -98,11 +98,15 @@ struct ModelAsset {
     materialize: String,
 }
 
+/// What time it is, for an asset's clock and its records.
+pub type Now = Arc<dyn Fn() -> Timestamp + Send + Sync>;
+
 /// The registered assets. Cloning shares them.
 #[derive(Clone)]
 pub struct Assets {
     db: Database,
     coalesce: Duration,
+    now: Now,
     entries: Arc<std::sync::RwLock<Vec<Arc<Entry>>>>,
     /// The materialized models registered from the model registry
     /// ([`Assets::sync_models`]), by view.
@@ -114,9 +118,16 @@ impl Assets {
         Self {
             db,
             coalesce,
+            now: Arc::new(Timestamp::now),
             entries: Arc::default(),
             models: Arc::default(),
         }
+    }
+
+    /// These assets on clock `now` (tests: one that follows tokio's
+    /// paused clock).
+    pub fn with_now(self, now: Now) -> Self {
+        Self { now, ..self }
     }
 
     /// Add `materializer` and start its recompute loop: once now (its
@@ -133,7 +144,12 @@ impl Assets {
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .push(entry.clone());
-        let (db, coalesce, looping) = (self.db.clone(), self.coalesce, entry.clone());
+        let (db, coalesce, now, looping) = (
+            self.db.clone(),
+            self.coalesce,
+            self.now.clone(),
+            entry.clone(),
+        );
         let task = tokio::spawn(async move {
             let entry = looping;
             if let Some(every) = entry.materializer.every() {
@@ -142,15 +158,16 @@ impl Assets {
                     entry.materializer.asset(),
                     entry.materializer.definition(),
                     every,
+                    now(),
                 )
                 .await;
                 loop {
                     tokio::time::sleep(wait).await;
-                    recompute(&db, &entry).await;
+                    recompute(&db, &entry, &now).await;
                     wait = every;
                 }
             }
-            recompute(&db, &entry).await;
+            recompute(&db, &entry, &now).await;
             loop {
                 entry.dirty.notified().await;
                 // Wait until its inputs have been quiet for the window.
@@ -158,7 +175,7 @@ impl Assets {
                     .await
                     .is_ok()
                 {}
-                recompute(&db, &entry).await;
+                recompute(&db, &entry, &now).await;
             }
         });
         *entry.task.lock().unwrap_or_else(|e| e.into_inner()) = Some(task);
@@ -461,6 +478,7 @@ async fn until_due(
     asset: &str,
     definition: Option<String>,
     every: Duration,
+    now: Timestamp,
 ) -> Duration {
     let asset = asset.to_string();
     let last = db
@@ -482,13 +500,13 @@ async fn until_due(
     let Some(last) = last else {
         return Duration::ZERO;
     };
-    let age_ms = (Timestamp::now().unix_ms() - last.unix_ms()).max(0) as u64;
+    let age_ms = (now.unix_ms() - last.unix_ms()).max(0) as u64;
     every.saturating_sub(Duration::from_millis(age_ms))
 }
 
 /// Recompute one asset — whole when it needs it — and record it in
-/// `asset_state`.
-async fn recompute(db: &Database, entry: &Entry) {
+/// `asset_state` at `now` (the clock `until_due` reads too).
+async fn recompute(db: &Database, entry: &Entry, now: &Now) {
     let m = entry.materializer.as_ref();
     let full = entry
         .needs_full
@@ -519,7 +537,7 @@ async fn recompute(db: &Database, entry: &Entry) {
     match m.recompute(full).await {
         Ok(done) => {
             let elapsed = started.elapsed().as_millis() as i64;
-            let at = Timestamp::now().to_string();
+            let at = now().to_string();
             let recorded = db
                 .transaction(move |tx| {
                     tx.execute(
@@ -560,11 +578,8 @@ async fn recompute(db: &Database, entry: &Entry) {
                     .store(true, std::sync::atomic::Ordering::SeqCst);
             }
             tracing::warn!(asset = %m.asset(), %error, "an asset's recompute failed; the next change tries again");
-            let (asset, at, message) = (
-                m.asset().to_string(),
-                Timestamp::now().to_string(),
-                error.to_string(),
-            );
+            let (asset, at, message) =
+                (m.asset().to_string(), now().to_string(), error.to_string());
             let recorded = db
                 .transaction(move |tx| {
                     tx.execute(
@@ -684,86 +699,113 @@ mod tests {
         }
     }
 
+    /// A clock that follows tokio's (paused, in these tests): what the
+    /// assets record and what they wait on agree.
+    fn paused_now() -> Now {
+        let (base, at) = (Timestamp::now(), tokio::time::Instant::now());
+        Arc::new(move || Timestamp::from_unix_ms(base.unix_ms() + at.elapsed().as_millis() as i64))
+    }
+
+    const HOUR: Duration = Duration::from_secs(3600);
+    const MINUTE: Duration = Duration::from_secs(60);
+
+    async fn record(db: &Database, at: Timestamp, definition: Option<&'static str>) {
+        let at = at.to_string();
+        db.transaction(move |tx| {
+            tx.execute(
+                "INSERT INTO asset_state (asset, computed_at, events_to, elapsed_ms, definition)
+                 VALUES ('counting', ?1, 0, 1, ?2)",
+                rusqlite::params![at, definition],
+            )
+            .map(|_| ())
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+    }
+
+    fn clocked(runs: &Arc<AtomicUsize>, definition: Option<&'static str>) -> Arc<Clocked> {
+        Arc::new(Clocked {
+            runs: runs.clone(),
+            every: HOUR,
+            definition,
+        })
+    }
+
     /// P8.B2: a clocked asset builds when it never ran, then on its clock —
     /// its inputs' changes don't recompute it.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_clocked_asset_recomputes_on_its_clock_not_on_changes() {
         let db = Database::in_memory();
         let runs = Arc::new(AtomicUsize::new(0));
-        let assets = Assets::new(db.clone(), Duration::from_millis(10));
-        assets.register(Arc::new(Clocked {
-            runs: runs.clone(),
-            every: Duration::from_millis(400),
-            definition: None,
-        }));
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        let assets = Assets::new(db.clone(), Duration::from_millis(10)).with_now(paused_now());
+        assets.register(clocked(&runs, None));
+        tokio::time::sleep(MINUTE).await;
         assert_eq!(runs.load(Ordering::SeqCst), 1, "the first build");
         assets.changed(&oxplow_db::changes::Changed::inserted(["task".to_string()]));
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(10 * MINUTE).await;
         assert_eq!(
             runs.load(Ordering::SeqCst),
             1,
             "a change doesn't recompute it"
         );
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        tokio::time::sleep(50 * MINUTE).await;
         assert_eq!(runs.load(Ordering::SeqCst), 2, "the clock does");
     }
 
     /// A restart with a fresh `computed_at` waits out the rest of the
     /// clock instead of rebuilding.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_fresh_clocked_asset_waits_after_a_restart() {
         let db = Database::in_memory();
-        let at = Timestamp::now().to_string();
-        db.transaction(move |tx| {
-            tx.execute(
-                "INSERT INTO asset_state (asset, computed_at, events_to, elapsed_ms)
-                 VALUES ('counting', ?1, 0, 1)",
-                [&at],
-            )
-            .map(|_| ())
-            .map_err(oxplow_db::map_sql_err)
-        })
-        .await
-        .unwrap();
+        let now = paused_now();
+        record(&db, now(), None).await;
         let runs = Arc::new(AtomicUsize::new(0));
-        let assets = Assets::new(db.clone(), Duration::from_millis(10));
-        assets.register(Arc::new(Clocked {
-            runs: runs.clone(),
-            every: Duration::from_millis(500),
-            definition: None,
-        }));
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        let assets = Assets::new(db.clone(), Duration::from_millis(10)).with_now(now);
+        assets.register(clocked(&runs, None));
+        tokio::time::sleep(30 * MINUTE).await;
         assert_eq!(runs.load(Ordering::SeqCst), 0, "still fresh");
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(31 * MINUTE).await;
         assert_eq!(runs.load(Ordering::SeqCst), 1, "due, so recomputed");
+    }
+
+    /// tsk794: what a recompute records is on the same clock it waits on,
+    /// so a restart 50 minutes after a build waits the other 10, not an
+    /// hour.
+    #[tokio::test(start_paused = true)]
+    async fn a_restart_waits_only_the_rest_of_the_clock() {
+        let db = Database::in_memory();
+        let now = paused_now();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let first = Assets::new(db.clone(), Duration::from_millis(10)).with_now(now.clone());
+        first.register(clocked(&runs, None));
+        tokio::time::sleep(MINUTE).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "the first build");
+        tokio::time::sleep(50 * MINUTE).await;
+        first.remove("counting");
+        let restarted = Assets::new(db.clone(), Duration::from_millis(10)).with_now(now);
+        restarted.register(clocked(&runs, None));
+        tokio::time::sleep(5 * MINUTE).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "not due yet");
+        tokio::time::sleep(6 * MINUTE).await;
+        assert_eq!(
+            runs.load(Ordering::SeqCst),
+            2,
+            "due an hour after the build"
+        );
     }
 
     /// tsk780: a fresh record of a *different* definition (the model's
     /// SELECT was edited) doesn't hold the clock: it rebuilds at once.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_clocked_asset_whose_definition_changed_rebuilds_at_once() {
         let db = Database::in_memory();
-        let at = Timestamp::now().to_string();
-        db.transaction(move |tx| {
-            tx.execute(
-                "INSERT INTO asset_state (asset, computed_at, events_to, elapsed_ms, definition)
-                 VALUES ('counting', ?1, 0, 1, 'old')",
-                [&at],
-            )
-            .map(|_| ())
-            .map_err(oxplow_db::map_sql_err)
-        })
-        .await
-        .unwrap();
+        let now = paused_now();
+        record(&db, now(), Some("old")).await;
         let runs = Arc::new(AtomicUsize::new(0));
-        let assets = Assets::new(db.clone(), Duration::from_millis(10));
-        assets.register(Arc::new(Clocked {
-            runs: runs.clone(),
-            every: Duration::from_secs(3600),
-            definition: Some("new"),
-        }));
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        let assets = Assets::new(db.clone(), Duration::from_millis(10)).with_now(now);
+        assets.register(clocked(&runs, Some("new")));
+        tokio::time::sleep(MINUTE).await;
         assert_eq!(runs.load(Ordering::SeqCst), 1, "rebuilt for its new SQL");
         let recorded: Option<String> = db
             .read(|tx| {
@@ -777,6 +819,75 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(recorded.as_deref(), Some("new"));
+    }
+
+    /// Records whether each recompute was whole.
+    struct Recording {
+        fulls: Arc<std::sync::Mutex<Vec<bool>>>,
+    }
+
+    #[async_trait]
+    impl Materializer for Recording {
+        fn asset(&self) -> &str {
+            "recording"
+        }
+        fn inputs(&self) -> Vec<String> {
+            vec!["src".into()]
+        }
+        async fn recompute(&self, full: bool) -> Result<Recomputed, DomainError> {
+            self.fulls.lock().unwrap().push(full);
+            Ok(Recomputed::default())
+        }
+    }
+
+    /// tsk794: the wiring end to end — a real write, the database's change
+    /// hook, `Assets::changed`: an insert appends, an update forces a
+    /// whole recompute.
+    #[tokio::test(start_paused = true)]
+    async fn a_real_update_to_an_input_forces_a_whole_recompute() {
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            tx.execute_batch("CREATE TABLE src (id INTEGER PRIMARY KEY, v TEXT)")
+                .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+        let mut rx = db.subscribe_changes();
+        let fulls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let assets = Assets::new(db.clone(), Duration::from_millis(10));
+        assets.register(Arc::new(Recording {
+            fulls: fulls.clone(),
+        }));
+        tokio::time::sleep(MINUTE).await;
+        let write = |sql: &'static str| {
+            let db = db.clone();
+            async move {
+                db.transaction(move |tx| tx.execute_batch(sql).map_err(oxplow_db::map_sql_err))
+                    .await
+                    .unwrap()
+            }
+        };
+        // The assets' own records (`asset_state`) come through too: hand
+        // on everything up to the write's.
+        async fn deliver(
+            rx: &mut tokio::sync::broadcast::Receiver<oxplow_db::changes::TablesChanged>,
+            assets: &Assets,
+        ) {
+            loop {
+                let changed = rx.recv().await.unwrap();
+                assets.changed(&changed);
+                if changed.contains("src") {
+                    return;
+                }
+            }
+        }
+        write("INSERT INTO src (id, v) VALUES (1, 'a')").await;
+        deliver(&mut rx, &assets).await;
+        tokio::time::sleep(MINUTE).await;
+        write("UPDATE src SET v = 'b' WHERE id = 1").await;
+        deliver(&mut rx, &assets).await;
+        tokio::time::sleep(MINUTE).await;
+        assert_eq!(*fulls.lock().unwrap(), vec![true, false, true]);
     }
 
     /// A table `src` and the table of an incremental model over it, keyed

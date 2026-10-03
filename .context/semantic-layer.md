@@ -303,7 +303,10 @@ recompute records the asset's `definition` (a model's SELECT, hashed —
 `Materializer::definition`, V151), and a record of another definition
 doesn't hold the clock: an edited SELECT rebuilds at once rather than
 serving the old SQL's rows until the clock comes round (tsk780).
-`model.materialize` records `every 1h` (V142 rebuilt `model` for the
+What a recompute records and what the clock waits on are one clock,
+`Assets`' `Now` (`Timestamp::now`; tests pass one that follows tokio's
+paused clock with `with_now`, so the `every:` tests run hours of virtual
+time instead of sleeping, tsk794). `model.materialize` records `every 1h` (V142 rebuilt `model` for the
 wider CHECK); `v_model` is v4. oxplow-analytics' `co_change_pair` is
 `every: 1h`.
 
