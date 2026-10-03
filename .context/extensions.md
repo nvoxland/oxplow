@@ -1172,6 +1172,58 @@ lens cell that links to a listed ref. A color is used only when it's a
 plain one (`#rgb…` or a CSS color name, `safeColor`). Decorations are
 additive: a decorator whose query fails shows nothing.
 
+## Event types (experimental)
+
+`event_types:` (a private extension only, P8.D3;
+`extension_event_types.rs`, `vocabulary_reactor.rs`) declares event types
+the log accepts, under the extension's own namespace — its name with `-`
+read as `_` (`acme-pr` → `acme_pr.*`):
+
+```yaml
+event_types:
+  types:
+    - type: acme_pr.merged
+      v: 1
+      schema: event_types/merged.v1.json   # the payload's JSON Schema, in the folder
+      summary: A pull request merged.
+    - type: acme_pr.merged
+      v: 2
+      schema: event_types/merged.v2.json
+      summary: A pull request merged, with its reviewers.
+      upcast: event_types/merged.star      # required past v1: transform({from_v, payload}) → the v2 payload
+```
+
+**Loading** checks each type the way the vocabulary registers it (a
+scratch `register_declared`): a core or foreign namespace, a schema file
+that's missing, isn't JSON or doesn't compile, v0, a version past 1
+without an upcast, an upcast that's missing or doesn't define
+`transform`, a duplicate — each `extension.yaml:<line>`.
+
+**The vocabulary follows the catalog.** `VocabularyService` (on
+`Services`, spawned at boot) rebuilds the whole `Vocabulary` — core
+types and kinds plus every enabled extension's declarations — on the
+catalog's change signal and swaps it in (`VocabularyHandle`); a writer
+already in a transaction keeps its snapshot. Refused at that point,
+listed among the extension's errors (`Services::listed_extensions`, the
+one listing that adds model and vocabulary health):
+- a schema that differs from the one `event_type_contract` recorded at
+  that `type@v` — a published shape is a contract, so a new shape is a
+  new version with an upcast;
+- two extensions whose names make one namespace (`acme-pr`, `acme_pr`) —
+  neither registers.
+
+The same pass restates `event_type_contract` (read as `v_event_type`:
+type, v, extension, summary, `registered`, `latest`, schema). A removed
+extension's types stay listed with `registered = 0`: their rows can't be
+appended any more but still read, and the pump delivers them at their
+logged version (`data-model.md` "event_log").
+
+A collector's `trigger: { on: [...] }` may name its own extension's
+declared types as well as core ones; another extension's are refused.
+**Health is the extension's errors, not `plugin_health`** — a refused
+declaration is a load problem, like a model's contract drift, not a
+failing run that counts toward a disable.
+
 ## Commands
 
 An extension's `commands:` (a stable kind, P6b; `extension_commands.rs`)

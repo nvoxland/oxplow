@@ -1151,11 +1151,7 @@ impl OxplowMcp {
             .stream_or_callers(&caller_of(&extensions), params.0.stream_id.clone())
             .await;
         let root = self.services.worktrees.resolve(stream.as_deref()).await;
-        let listed = self
-            .services
-            .extension_models
-            .with_health(&root, self.services.extension_catalog.get(&root).to_vec())
-            .await;
+        let listed = self.services.listed_extensions(&root).await;
         json_result(&listed)
     }
 

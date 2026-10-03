@@ -1466,7 +1466,8 @@ impl EventType for EffortFinished {
 }
 
 /// Whether `event_type` is one of core's types (any version) — what a
-/// collector's `on:` trigger may name today. Built once.
+/// collector's `on:` trigger may name besides its own extension's
+/// declared types. Built once.
 pub fn is_core_type(event_type: &str) -> bool {
     static CORE: std::sync::OnceLock<std::collections::BTreeSet<String>> =
         std::sync::OnceLock::new();

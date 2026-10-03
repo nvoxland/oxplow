@@ -366,6 +366,13 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // Each stream's recorded branch follows its checkout.
     state.branch_reconciler.clone().spawn();
 
+    // The vocabulary (P8.D3): core plus what extensions declare, rebuilt
+    // now and on every change.
+    state
+        .vocabulary_service
+        .clone()
+        .spawn(state.extension_catalog.changes());
+
     // Extensions' SQL models (P4.9): compiled now and on every change.
     state
         .extension_models

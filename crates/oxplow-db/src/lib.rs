@@ -24,6 +24,7 @@ pub mod effort_store;
 pub mod event_content_store;
 pub mod event_log_store;
 pub mod event_retention;
+pub mod event_type_store;
 pub mod fact_store;
 pub mod git_store;
 pub mod models;

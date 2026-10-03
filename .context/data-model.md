@@ -1148,7 +1148,11 @@ name with `-` read as `_`), a schema that doesn't compile, a duplicate
 `type@v`, v0, and a version past 1 without an upcast. The upcast is the
 extension's Starlark (`extension_event_types::starlark_upcast`:
 `transform({from_v, payload})`, sandboxed with the command-script budget,
-no host); its output is validated against the newest schema. `append_tx`
+no host); its output is validated against the newest schema. What the
+running vocabulary registered is restated, per `type@v`, into
+`event_type_contract` (V144; `v_event_type`), which keeps a declared
+type's first schema as its contract and a removed extension's types as
+`registered = 0` (P8.D3, extensions.md "Event types"). `append_tx`
 refuses an unregistered `type@v` or a payload that fails its schema
 (`DomainError::Invalid`, naming the JSON path) before writing. Core
 producers build envelopes with `Envelope::typed::<T>(source, &payload)`

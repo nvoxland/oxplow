@@ -128,6 +128,7 @@ pub mod ui_push;
 pub mod vcs;
 #[cfg(test)]
 pub mod vcs_conformance;
+pub mod vocabulary_reactor;
 pub mod wiki_drift;
 pub mod wiki_pages;
 pub mod wiki_pages_watch;
@@ -475,6 +476,9 @@ pub struct Services {
     pub extension_catalog: Arc<extension_catalog::ExtensionCatalog>,
     /// The primary worktree's extensions' SQL models, and their errors (P4.9).
     pub extension_models: Arc<extension_models::ExtensionModelsService>,
+    /// Rebuilds `vocabulary` from the primary worktree's extensions, and
+    /// their refused declarations (P8.D3).
+    pub vocabulary_service: Arc<vocabulary_reactor::VocabularyService>,
     /// The command bus: the one write path (`.context/commands.md`).
     pub commands: Arc<commands::CommandBus>,
     /// The work-items providers, by name (`.context/work-items.md`).
@@ -623,6 +627,15 @@ pub struct Services {
 }
 
 impl Services {
+    /// The extensions under `root` as listed: loaded, with what the
+    /// primary worktree's model compile and vocabulary refused added to
+    /// each one's errors.
+    pub async fn listed_extensions(&self, root: &std::path::Path) -> Vec<extensions::Extension> {
+        let loaded = self.extension_catalog.get(root).to_vec();
+        let loaded = self.extension_models.with_health(root, loaded).await;
+        self.vocabulary_service.with_health(root, loaded).await
+    }
+
     /// Reading and restoring captured files (`snapshot_files`).
     pub fn snapshot_files(&self) -> snapshot_files::SnapshotFiles {
         snapshot_files::SnapshotFiles {
@@ -988,6 +1001,12 @@ impl Services {
             extension_catalog.clone(),
             layout.project_dir.clone(),
         ));
+        let vocabulary_service = Arc::new(vocabulary_reactor::VocabularyService::new(
+            db.clone(),
+            extension_catalog.clone(),
+            layout.project_dir.clone(),
+            vocabulary.clone(),
+        ));
         let metrics = metrics_service::MetricsService::new(
             snapshot_store.clone(),
             thread_store.clone(),
@@ -1310,6 +1329,7 @@ impl Services {
             vocabulary,
             event_pump,
             extension_models,
+            vocabulary_service,
             extension_catalog,
             extension_commands,
             commands,

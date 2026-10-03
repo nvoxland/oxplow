@@ -2280,6 +2280,27 @@ export type EventBodyKey = "input" | "output" |
  */
 export type EventId = string;
 
+/**
+ *  One `type@v` an extension declares, as loaded: the schema and the
+ *  upcast's script read from its folder.
+ */
+export type EventTypeDecl = {
+	eventType: string,
+	v: number,
+	// The payload's JSON Schema (from the declared file).
+	schema: unknown,
+	summary: string,
+	// The upcast script's path in the folder, required past v1.
+	upcast: string | null,
+	// Its source.
+	upcastSource: string | null,
+	/**
+	 *  `file:line` of the declaration, for what's wrong with it later (a
+	 *  schema changed at a recorded version).
+	 */
+	declaredAt: string,
+};
+
 // A loaded extension and anything wrong with it.
 export type Extension = Extension_Serialize | Extension_Deserialize;
 
@@ -2493,6 +2514,11 @@ export type Extension_Deserialize = {
 	 */
 	customComponents: CustomComponent[],
 	/**
+	 *  Event types it declares (experimental: a private extension's only;
+	 *  valid ones — the vocabulary registers them, `vocabulary_reactor`).
+	 */
+	eventTypes: EventTypeDecl[],
+	/**
 	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).
 	 */
@@ -2586,6 +2612,11 @@ export type Extension_Serialize = {
 	 *  a private extension's only; valid ones).
 	 */
 	customComponents: CustomComponent[],
+	/**
+	 *  Event types it declares (experimental: a private extension's only;
+	 *  valid ones — the vocabulary registers them, `vocabulary_reactor`).
+	 */
+	eventTypes: EventTypeDecl[],
 	/**
 	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).

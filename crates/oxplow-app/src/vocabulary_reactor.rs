@@ -1,0 +1,406 @@
+//! The running vocabulary follows the primary worktree's extensions
+//! (P8.D3, `.context/refs.md` "There is no process-wide registry"): core
+//! event types and ref kinds, plus what each enabled private extension
+//! declares (`event_types:`). A pass rebuilds the whole vocabulary and
+//! swaps it into `Services.vocabulary`; writers already in a transaction
+//! keep the snapshot they took.
+//!
+//! A pass runs at boot and on the extension catalog's signal, settled
+//! like `extension_models`, and does nothing when the declarations didn't
+//! change. What it refuses is that extension's health (an error in the
+//! list), never a boot failure:
+//! - a declaration the registry refuses (`register_declared`);
+//! - a schema that differs from the one recorded at that `type@v`
+//!   (`event_type_contract`): a new shape is a new version;
+//! - two extensions whose names make one namespace (`acme-pr`,
+//!   `acme_pr`): neither registers.
+//!
+//! The pass restates `event_type_contract` (read as `v_event_type`) in
+//! the same transaction that checks it.
+
+use std::collections::{BTreeMap, HashMap};
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+use oxplow_db::event_type_store::{recorded_schema_tx, restate_tx, EventTypeRow};
+use oxplow_db::Database;
+use oxplow_domain::events::schema::{plugin_namespace, EventSchemaRegistry};
+use oxplow_domain::refs::kind::core_kinds;
+use oxplow_domain::vocabulary::{Vocabulary, VocabularyHandle};
+use oxplow_domain::DomainError;
+use tokio::sync::Mutex;
+
+use crate::extension_catalog::ExtensionCatalog;
+use crate::extension_event_types::EventTypeDecl;
+use crate::extensions::Extension;
+
+/// A burst of file events is one pass.
+const SETTLE: Duration = Duration::from_millis(250);
+
+#[derive(Default)]
+struct State {
+    fingerprint: Option<u64>,
+    errors: BTreeMap<String, Vec<String>>,
+}
+
+pub struct VocabularyService {
+    db: Database,
+    catalog: Arc<ExtensionCatalog>,
+    /// The primary worktree, whose extensions declare the vocabulary.
+    root: PathBuf,
+    vocabulary: VocabularyHandle,
+    state: Mutex<State>,
+}
+
+/// Each extension's declared types, by name.
+type Declared = Vec<(String, Vec<EventTypeDecl>)>;
+
+impl VocabularyService {
+    pub fn new(
+        db: Database,
+        catalog: Arc<ExtensionCatalog>,
+        root: PathBuf,
+        vocabulary: VocabularyHandle,
+    ) -> Self {
+        Self {
+            db,
+            catalog,
+            root,
+            vocabulary,
+            state: Mutex::new(State::default()),
+        }
+    }
+
+    /// Rebuild and swap the vocabulary if what extensions declare changed.
+    /// Passes are serialized.
+    pub async fn sync(&self) -> Result<(), DomainError> {
+        let mut state = self.state.lock().await;
+        let declared: Declared = self
+            .catalog
+            .get(&self.root)
+            .iter()
+            .filter(|e| e.enabled && !e.event_types.is_empty())
+            .map(|e| (e.name.clone(), e.event_types.clone()))
+            .collect();
+        let fingerprint = {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            serde_json::to_string(&declared)
+                .map_err(|e| DomainError::Invalid(e.to_string()))?
+                .hash(&mut h);
+            h.finish()
+        };
+        if state.fingerprint == Some(fingerprint) {
+            return Ok(());
+        }
+        let now = oxplow_domain::Timestamp::now().to_string();
+        let (vocabulary, errors) = self
+            .db
+            .transaction(move |tx| build_tx(tx, &declared, &now))
+            .await?;
+        for (extension, errs) in &errors {
+            for e in errs {
+                tracing::warn!(extension, error = %e, "extension event type not registered");
+            }
+        }
+        self.vocabulary.swap(vocabulary);
+        state.errors = errors;
+        state.fingerprint = Some(fingerprint);
+        Ok(())
+    }
+
+    /// `extensions` with what each one's declarations were refused for
+    /// added to its `errors` — for the primary worktree's list.
+    pub async fn with_health(&self, root: &Path, mut extensions: Vec<Extension>) -> Vec<Extension> {
+        if root != self.root {
+            return extensions;
+        }
+        let state = self.state.lock().await;
+        for ext in &mut extensions {
+            if let Some(errs) = state.errors.get(&ext.name) {
+                ext.errors.extend(errs.iter().cloned());
+            }
+        }
+        extensions
+    }
+
+    /// Build now, then again whenever the primary worktree's extensions
+    /// may have changed, for the life of the process.
+    pub fn spawn(self: Arc<Self>, mut changes: tokio::sync::broadcast::Receiver<()>) {
+        tokio::spawn(async move {
+            if let Err(error) = self.sync().await {
+                tracing::warn!(%error, "the vocabulary didn't build at boot");
+            }
+            loop {
+                match changes.recv().await {
+                    Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                }
+                tokio::time::sleep(SETTLE).await;
+                while changes.try_recv().is_ok() {}
+                if let Err(error) = self.sync().await {
+                    tracing::warn!(%error, "the vocabulary didn't build");
+                }
+            }
+        });
+    }
+}
+
+/// The vocabulary `declared` makes, checked against and restated into
+/// `event_type_contract`, and each extension's refusals.
+fn build_tx(
+    tx: &rusqlite::Connection,
+    declared: &Declared,
+    now: &str,
+) -> Result<(Vocabulary, BTreeMap<String, Vec<String>>), DomainError> {
+    let mut events = EventSchemaRegistry::core();
+    let mut errors: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut by_namespace: HashMap<String, Vec<&str>> = HashMap::new();
+    for (extension, _) in declared {
+        by_namespace
+            .entry(plugin_namespace(extension))
+            .or_default()
+            .push(extension);
+    }
+    for (extension, types) in declared {
+        let namespace = plugin_namespace(extension);
+        let others: Vec<&str> = by_namespace[&namespace]
+            .iter()
+            .copied()
+            .filter(|o| o != extension)
+            .collect();
+        if !others.is_empty() {
+            errors.entry(extension.clone()).or_default().push(format!(
+                "event types: `{namespace}.*` is also {}'s namespace; rename one extension",
+                others
+                    .iter()
+                    .map(|o| format!("`{o}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+            continue;
+        }
+        for d in types {
+            let refused = match recorded_schema_tx(tx, &d.event_type, d.v)? {
+                Some(recorded) if recorded != d.schema => Some(format!(
+                    "{}: the schema of `{}@{}` changed since that version was recorded; declare \
+                     the new shape as v{} with an upcast",
+                    d.declared_at,
+                    d.event_type,
+                    d.v,
+                    d.v + 1
+                )),
+                _ => events
+                    .register_declared(extension, d.declared())
+                    .err()
+                    .map(|e| format!("{}: {e}", d.declared_at)),
+            };
+            if let Some(e) = refused {
+                errors.entry(extension.clone()).or_default().push(e);
+            }
+        }
+    }
+    let rows: Vec<EventTypeRow> = events
+        .versions()
+        .into_iter()
+        .map(|(event_type, v)| EventTypeRow {
+            extension: events.owner(&event_type, v).flatten().map(str::to_string),
+            schema: events.schema(&event_type, v).cloned().unwrap_or_default(),
+            summary: events.summary(&event_type, v).map(str::to_string),
+            event_type,
+            v,
+        })
+        .collect();
+    restate_tx(tx, &rows, now)?;
+    Ok((Vocabulary::new(events, core_kinds()), errors))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxplow_db::event_log_store::SqliteEventLogStore;
+    use oxplow_db::SqlCell;
+    use oxplow_domain::Envelope;
+    use serde_json::json;
+
+    fn write(root: &Path, rel: &str, body: &str) {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    }
+
+    const MANIFEST: &str = "manifest: 2\nname: acme-pr\nsharing: private\nintent: { purpose: PRs., origin: null, examples: [] }\nevent_types:\n  types:\n    - type: acme_pr.merged\n      v: 1\n      schema: merged.json\n      summary: A pull request merged.\n";
+
+    fn merged(number: i64) -> Envelope {
+        Envelope::new("acme_pr.merged", 1, "test", json!({ "number": number })).unwrap()
+    }
+
+    fn schema(required: &str) -> String {
+        format!(
+            r#"{{"type": "object", "required": ["{required}"], "properties": {{"{required}": {{"type": "integer"}}}}}}"#
+        )
+    }
+
+    /// The whole life of a declared type: it appends once registered, a
+    /// changed schema at the same version is refused (and named in the
+    /// extension's errors), and once the extension is gone appends fail
+    /// while the rows already logged still read.
+    #[tokio::test]
+    async fn a_declared_type_registers_keeps_its_contract_and_outlives_its_extension() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        let log = SqliteEventLogStore::new(svc.db.clone(), svc.vocabulary.clone());
+        assert!(log.append(merged(1)).await.is_err());
+
+        write(&root, "oxplow/extensions/acme-pr/extension.yaml", MANIFEST);
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/merged.json",
+            &schema("number"),
+        );
+        svc.vocabulary_service.sync().await.unwrap();
+        log.append(merged(12)).await.unwrap();
+        let listed = svc
+            .sql
+            .query_sql(
+                "SELECT extension, summary, registered, latest FROM v_event_type \
+                 WHERE event_type = 'acme_pr.merged'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            listed.rows,
+            vec![vec![
+                SqlCell::Text("acme-pr".into()),
+                SqlCell::Text("A pull request merged.".into()),
+                SqlCell::Int(1),
+                SqlCell::Int(1)
+            ]]
+        );
+
+        // The same version, a new shape: refused; the old one is gone too.
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/merged.json",
+            &schema("pr"),
+        );
+        svc.vocabulary_service.sync().await.unwrap();
+        let errors = svc
+            .listed_extensions(&root)
+            .await
+            .into_iter()
+            .find(|e| e.name == "acme-pr")
+            .unwrap()
+            .errors;
+        assert!(
+            errors.iter().any(|e| e.contains("extension.yaml:7")
+                && e.contains("changed since that version was recorded")),
+            "{errors:?}"
+        );
+        assert!(log.append(merged(13)).await.is_err());
+
+        // Removed: no appends, the logged row still reads, the type stays
+        // listed unregistered.
+        std::fs::remove_dir_all(root.join("oxplow/extensions/acme-pr")).unwrap();
+        svc.vocabulary_service.sync().await.unwrap();
+        assert!(log.append(merged(14)).await.is_err());
+        let rows = log.read_after(0, 10_000).await.unwrap();
+        assert!(rows.iter().any(
+            |r| r.envelope.event_type == "acme_pr.merged" && r.envelope.payload["number"] == 12
+        ));
+        let registered = svc
+            .sql
+            .query_sql(
+                "SELECT registered FROM v_event_type WHERE event_type = 'acme_pr.merged'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(registered.rows, vec![vec![SqlCell::Int(0)]]);
+    }
+
+    /// A collector may follow its own extension's declared types, never
+    /// another extension's.
+    #[test]
+    fn a_collector_follows_its_own_extensions_types() {
+        let dir = tempfile::tempdir().unwrap();
+        let collector = |on: &str| {
+            format!(
+                "{MANIFEST}collectors:\n  - {{ id: tally, runtime: starlark, entry: tally.star, trigger: {{ on: [{on}] }}, entities: [{{ name: tally, key: id, columns: {{ id: int }} }}] }}\n"
+            )
+        };
+        write(
+            dir.path(),
+            "oxplow/extensions/acme-pr/merged.json",
+            &schema("number"),
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/acme-pr/tally.star",
+            "def transform(x):\n    return []\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/acme-pr/extension.yaml",
+            &collector("acme_pr.merged"),
+        );
+        let loaded = crate::extensions::load_extensions(dir.path());
+        let ext = loaded.iter().find(|e| e.name == "acme-pr").unwrap();
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(ext.collectors.len(), 1);
+        write(
+            dir.path(),
+            "oxplow/extensions/acme-pr/extension.yaml",
+            &collector("other_ext.thing"),
+        );
+        let loaded = crate::extensions::load_extensions(dir.path());
+        let ext = loaded.iter().find(|e| e.name == "acme-pr").unwrap();
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("isn't a registered event type")),
+            "{:?}",
+            ext.errors
+        );
+    }
+
+    #[tokio::test]
+    async fn two_extensions_sharing_a_namespace_both_fail() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        write(&root, "oxplow/extensions/acme-pr/extension.yaml", MANIFEST);
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/merged.json",
+            &schema("number"),
+        );
+        write(
+            &root,
+            "oxplow/extensions/acme_pr/extension.yaml",
+            &MANIFEST.replace("name: acme-pr", "name: acme_pr"),
+        );
+        write(
+            &root,
+            "oxplow/extensions/acme_pr/merged.json",
+            &schema("number"),
+        );
+        svc.vocabulary_service.sync().await.unwrap();
+        let listed = svc.listed_extensions(&root).await;
+        for name in ["acme-pr", "acme_pr"] {
+            let errors = &listed.iter().find(|e| e.name == name).unwrap().errors;
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| e.contains("also") && e.contains("namespace")),
+                "{name}: {errors:?}"
+            );
+        }
+        assert!(!svc.vocabulary.current().is_registered("acme_pr.merged", 1));
+    }
+}

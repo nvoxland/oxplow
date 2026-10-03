@@ -220,10 +220,7 @@ mod tests {
             .query_sql("SELECT id FROM v_late_blocked", vec![], None)
             .await
             .unwrap();
-        let listed = svc
-            .extension_models
-            .with_health(&root, svc.extension_catalog.get(&root).to_vec())
-            .await;
+        let listed = svc.listed_extensions(&root).await;
         let late = listed.iter().find(|e| e.name == "late").unwrap();
         assert!(
             late.errors.iter().any(|e| e.contains("models/broken.sql")),

@@ -920,6 +920,9 @@ pub struct Extension {
     /// Web components its `custom` lenses render, sandboxed (experimental:
     /// a private extension's only; valid ones).
     pub custom_components: Vec<custom_components::CustomComponent>,
+    /// Event types it declares (experimental: a private extension's only;
+    /// valid ones — the vocabulary registers them, `vocabulary_reactor`).
+    pub event_types: Vec<crate::extension_event_types::EventTypeDecl>,
     /// `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
     /// read-only).
     pub origin: String,
@@ -1388,6 +1391,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         collectors: Vec::new(),
         providers: Vec::new(),
         custom_components: Vec::new(),
+        event_types: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
         enabled: true,
@@ -1491,12 +1495,30 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 ),
             ));
         }
-        if let Some(v) = &m.collectors {
-            let (collectors, errors) = oxplow_config::collectors::parse_collectors(
+        // An experimental kind: a shared manifest's is refused by `check`.
+        if let Some(v) = m
+            .event_types
+            .as_ref()
+            .filter(|_| m.sharing == Sharing::Private)
+        {
+            let (types, errors) = crate::extension_event_types::parse_event_types(
                 name,
                 v,
-                &oxplow_domain::events::schema::is_core_type,
+                &file,
+                &manifest,
+                &|rel| files.read(rel),
             );
+            ext.event_types = types;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = &m.collectors {
+            // A collector may follow core types and its own extension's.
+            let declared = ext.event_types.clone();
+            let (collectors, errors) =
+                oxplow_config::collectors::parse_collectors(name, v, &|t: &str| {
+                    oxplow_domain::events::schema::is_core_type(t)
+                        || declared.iter().any(|d| d.event_type == t)
+                });
             let line = key_line(&manifest, "collectors");
             ext.errors
                 .extend(errors.into_iter().map(|e| at(&file, line, e)));
@@ -2206,6 +2228,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.collectors.clear();
         ext.providers.clear();
         ext.custom_components.clear();
+        ext.event_types.clear();
         ext.advisories.clear();
         ext.measures.clear();
         ext.dimensions.clear();
