@@ -532,7 +532,16 @@ config, provider? } }`, the same entries and the same validation):
   replacement removes its own credentials, never the global one's;
 - its credentials are the person's, set once:
   `instance:global:<ext>/<id>:<name>` (a project instance's are
-  `instance:<project>:…`);
+  `instance:<project>:…`). Changing one — a pasted value, a sign-in, a
+  sign-out — restarts it in **every** project, not only where it was
+  changed (tsk842): the keychain can't be watched, so
+  `credential_changed` bumps the instance's count in
+  `instance-credentials.yaml` beside `instances.yaml`
+  (`oxplow_config::CredentialGenerations`: counts only, never a value,
+  under the same kind of machine-wide lock), and every other oxplow, on
+  its per-minute tick (`reconcile_if_global_changed`), restarts a global
+  instance whose count moved since it last started it — so a rotated and
+  revoked token never keeps running elsewhere on the old value;
 - **consent stays per project**: the hash is of *this* project's
   extension folder and approvals are kept per project, so a global
   instance in a project that hasn't approved the program is `unapproved`

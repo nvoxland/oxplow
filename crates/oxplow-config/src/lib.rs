@@ -1598,6 +1598,62 @@ impl Default for ExtensionInstanceConfig {
 /// global config dir ([`global_config_dir`]).
 pub const INSTANCES_FILE: &str = "instances.yaml";
 
+/// Beside [`INSTANCES_FILE`]: how many times each global instance's
+/// credentials changed (tsk842). The values are in the keychain, which
+/// no oxplow can watch; each bumps the instance's count when it changes
+/// one, and every other restarts the instance when it sees the count
+/// move. Counts only — never a value.
+pub const CREDENTIAL_GENERATIONS_FILE: &str = "instance-credentials.yaml";
+
+/// The [`CREDENTIAL_GENERATIONS_FILE`]: `generations: { "<ext>/<id>": n }`.
+pub struct CredentialGenerations;
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GenerationsDoc {
+    #[serde(default)]
+    generations: std::collections::BTreeMap<String, u64>,
+}
+
+impl CredentialGenerations {
+    /// Each global instance's count; a missing or unreadable file is
+    /// none (no change is ever lost by that: the next bump writes it).
+    pub fn load(dir: &Path) -> std::collections::BTreeMap<String, u64> {
+        std::fs::read_to_string(dir.join(CREDENTIAL_GENERATIONS_FILE))
+            .ok()
+            .and_then(|text| serde_yaml::from_str::<GenerationsDoc>(&text).ok())
+            .map(|doc| doc.generations)
+            .unwrap_or_default()
+    }
+
+    /// Count a change of `instance`'s credentials, under the file's lock
+    /// (every oxplow on the machine takes it): its new count.
+    pub fn bump(dir: &Path, instance: &str) -> Result<u64, ConfigError> {
+        use fs2::FileExt;
+        let failed = |e: std::io::Error| ConfigError::Instances(e.to_string());
+        let path = dir.join(CREDENTIAL_GENERATIONS_FILE);
+        std::fs::create_dir_all(dir).map_err(failed)?;
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(atomic::lock_path(&path))
+            .map_err(failed)?;
+        lock.lock_exclusive().map_err(failed)?;
+        let mut doc = GenerationsDoc {
+            generations: Self::load(dir),
+        };
+        let n = doc.generations.entry(instance.to_string()).or_default();
+        *n += 1;
+        let now = *n;
+        let text =
+            serde_yaml::to_string(&doc).map_err(|e| ConfigError::Instances(e.to_string()))?;
+        atomic::write_atomic(&path, text.as_bytes()).map_err(failed)?;
+        Ok(now)
+    }
+}
+
 /// Provider instances that belong to the person rather than a project
 /// (P9.B2): `instances: { "<extension>/<instance id>": { enabled, config,
 /// provider? } }`, the same entries as a project's `extensionInstances`.

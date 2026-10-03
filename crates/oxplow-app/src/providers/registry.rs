@@ -111,6 +111,10 @@ struct GlobalFile {
     instances: BTreeMap<String, oxplow_config::ExtensionInstanceConfig>,
     /// The file's time at the last reconcile.
     reconciled_at: Option<std::time::SystemTime>,
+    /// Each global instance's credential count
+    /// ([`oxplow_config::CredentialGenerations`]) as this oxplow last
+    /// started it (tsk842).
+    credentials_seen: BTreeMap<String, u64>,
 }
 
 /// A config problem `check` reported.
@@ -888,6 +892,16 @@ impl ProviderRegistry {
     pub fn new(deps: HostDeps, bus: &Arc<CommandBus>, work_items: WorkItemsRegistry) -> Arc<Self> {
         let plugins =
             crate::plugin_health::PluginHealth::new(deps.db.clone(), deps.log.vocabulary().clone());
+        // What this oxplow starts on: a credential change counted later is
+        // one it hasn't started on.
+        let global = GlobalFile {
+            credentials_seen: deps
+                .global_dir
+                .as_deref()
+                .map(oxplow_config::CredentialGenerations::load)
+                .unwrap_or_default(),
+            ..GlobalFile::default()
+        };
         Arc::new_cyclic(|me| Self {
             plugins,
             deps,
@@ -898,7 +912,7 @@ impl ProviderRegistry {
             health: parking_lot::Mutex::new(BTreeMap::new()),
             reconciling: tokio::sync::Mutex::new(()),
             disables: parking_lot::Mutex::new(BTreeMap::new()),
-            global: parking_lot::Mutex::new(GlobalFile::default()),
+            global: parking_lot::Mutex::new(global),
             sign_ins: parking_lot::Mutex::new(BTreeMap::new()),
             sign_in_gate: tokio::sync::Mutex::new(()),
             instances_gate: tokio::sync::Mutex::new(()),
@@ -1058,7 +1072,30 @@ impl ProviderRegistry {
     /// (another project's oxplow wrote it): reconcile. Called on the sync
     /// timer; `true` when it did.
     pub async fn reconcile_if_global_changed(&self) -> bool {
-        if self.global.lock().reconciled_at == self.global_mtime() {
+        // A global instance whose credentials another oxplow changed
+        // restarts on them (tsk842): their values are in the keychain,
+        // which nothing here can watch, so the other bumped a count.
+        let changed: Vec<String> = match self.deps.global_dir.as_ref() {
+            None => Vec::new(),
+            Some(dir) => {
+                let now = oxplow_config::CredentialGenerations::load(dir);
+                let mut file = self.global.lock();
+                let changed = now
+                    .iter()
+                    .filter(|(name, n)| file.credentials_seen.get(*name) != Some(n))
+                    .map(|(name, _)| name.clone())
+                    .collect();
+                file.credentials_seen = now;
+                changed
+            }
+        };
+        let mut restarted = false;
+        for instance in changed {
+            if self.scope_of(&instance).0 == Scope::Global {
+                restarted |= self.stop(&instance).await;
+            }
+        }
+        if !restarted && self.global.lock().reconciled_at == self.global_mtime() {
             return false;
         }
         self.reconcile().await;
@@ -2002,8 +2039,24 @@ impl ProviderRegistry {
     }
 
     /// `instance`'s credential changed: it restarts on the new value (a
-    /// running one), or starts if the credential was what it lacked.
+    /// running one), or starts if the credential was what it lacked. A
+    /// global instance's runs in every project: the change is counted
+    /// where every other oxplow on the machine looks, and each restarts
+    /// it on its next tick (tsk842).
     pub async fn credential_changed(&self, instance: &str) {
+        if let (Scope::Global, Some(dir)) = (self.scope_of(instance).0, &self.deps.global_dir) {
+            match oxplow_config::CredentialGenerations::bump(dir, instance) {
+                Ok(n) => {
+                    self.global
+                        .lock()
+                        .credentials_seen
+                        .insert(instance.to_string(), n);
+                }
+                Err(e) => {
+                    tracing::warn!(%instance, error = %e, "telling other projects its credentials changed failed")
+                }
+            }
+        }
         self.stop(instance).await;
         self.reconcile().await;
     }

@@ -2473,29 +2473,92 @@ async fn sibling_project(
         .unwrap(),
     );
     if with_tracker {
-        let ext = extension(dir.path());
-        let config = svc.config.read().unwrap().clone();
-        let program = exec_consent::list(
-            &svc.approvals,
-            &svc.layout.project_dir,
-            &config,
-            std::slice::from_ref(&ext),
-        )
-        .into_iter()
-        .find(|p| p.kind == ProgramKind::Provider)
-        .unwrap();
-        exec_consent::approve_program(
-            &svc.approvals,
-            &svc.layout.project_dir,
-            &config,
-            std::slice::from_ref(&ext),
-            ProgramKind::Provider,
-            &program.name,
-            program.version.as_deref().unwrap(),
-        )
-        .unwrap();
+        approve_in(&svc);
     }
     (svc, dir)
+}
+
+/// Approve the tracker's provider program as it is in `svc`'s project.
+fn approve_in(svc: &crate::Services) {
+    let ext = extension(&svc.layout.project_dir);
+    let config = svc.config.read().unwrap().clone();
+    let program = exec_consent::list(
+        &svc.approvals,
+        &svc.layout.project_dir,
+        &config,
+        std::slice::from_ref(&ext),
+    )
+    .into_iter()
+    .find(|p| p.kind == ProgramKind::Provider)
+    .unwrap();
+    exec_consent::approve_program(
+        &svc.approvals,
+        &svc.layout.project_dir,
+        &config,
+        std::slice::from_ref(&ext),
+        ProgramKind::Provider,
+        &program.name,
+        program.version.as_deref().unwrap(),
+    )
+    .unwrap();
+}
+
+/// The tracker's provider in `root` declares the credential `FAKE_TOKEN`.
+fn declare_token(root: &Path) {
+    let manifest = root
+        .join("oxplow/extensions")
+        .join(EXT)
+        .join("extension.yaml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+}
+
+/// tsk842: a global instance's credential is the person's in every
+/// project, so changing it in one restarts it in every other — on their
+/// next tick — not only here: a rotated token must never keep running on
+/// the old value elsewhere.
+#[tokio::test]
+async fn a_global_credential_change_restarts_it_in_every_project() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_extension(&project, "needs:FAKE_TOKEN");
+    declare_token(&project);
+    approve(&fx, &extension(&project));
+    let providers = &fx.svc.providers;
+    providers
+        .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
+        .await
+        .unwrap();
+    providers
+        .set_credential(SHARED, "FAKE_TOKEN", Some("one"))
+        .unwrap();
+    providers
+        .set_instance(&Actor::Human, SHARED, true, json!({ "team": "shared" }))
+        .await
+        .unwrap();
+    let (other, _other_dir) = sibling_project(&fx, "needs:FAKE_TOKEN", false).await;
+    write_extension(&other.layout.project_dir, "needs:FAKE_TOKEN");
+    declare_token(&other.layout.project_dir);
+    approve_in(&other);
+    other.providers.reconcile().await;
+    assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Ready));
+    let before = other.providers.get(SHARED).await.unwrap();
+    assert!(
+        !other.providers.reconcile_if_global_changed().await,
+        "nothing changed"
+    );
+
+    providers
+        .set_credential(SHARED, "FAKE_TOKEN", Some("two"))
+        .unwrap();
+    providers.credential_changed(SHARED).await;
+    assert!(other.providers.reconcile_if_global_changed().await);
+    let after = other.providers.get(SHARED).await.unwrap();
+    assert!(
+        !std::sync::Arc::ptr_eq(&before, &after),
+        "it restarted there"
+    );
+    assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Ready));
 }
 
 const SHARED: &str = "tracker/fake_shared";
