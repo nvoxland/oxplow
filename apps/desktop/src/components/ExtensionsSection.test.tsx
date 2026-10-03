@@ -68,6 +68,7 @@ test("a changed lens shows both texts in the review", () => {
       collectors: [],
       providers: [],
       config: null,
+      lines: ["Lens shared/count: changed"],
     },
   };
   const view = render(<ReviewPanel review={changed} action="Update" busy={false} onConfirm={() => {}} onCancel={() => {}} />);

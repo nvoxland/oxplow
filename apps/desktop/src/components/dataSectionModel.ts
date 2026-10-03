@@ -2,7 +2,6 @@
 /// semantic layer holds, who provides it, and how much. See
 /// `.context/semantic-layer.md`.
 import type { DataEntity, ProjectProgram, ProviderEffect } from "../tauri-bridge/generated/bindings.js";
-import { providerChanges } from "./providerEffectText.js";
 
 export interface EntityRowModel {
   name: string;
@@ -97,12 +96,10 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
   };
 }
 
-/** What approving a provider would change, as lines (P6b.E3): against
- *  what was approved last (`providerChanges`), or everything it declares
- *  at a first approval. */
+/** What approving a provider would change, as lines (P6b.E3): the
+ *  server's wording (`extension_effects::approval_lines`). */
 export function providerEffectLines(e: ProviderEffect): string[] {
-  const lines = providerChanges(e).map((l) => l.charAt(0).toUpperCase() + l.slice(1));
-  return lines.length > 0 ? lines : ["Nothing changed since it was last approved."];
+  return e.lines;
 }
 
 /** A provider's Approve waits until its declaration diff has loaded: a

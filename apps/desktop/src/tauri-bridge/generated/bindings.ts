@@ -2082,6 +2082,11 @@ export type EffectReport = {
 	collectors: CollectorEffect[],
 	providers: ProviderEffect[],
 	config: ConfigEffect | null,
+	/**
+	 *  The report as lines ([`summary`]): what the install review, `plugin
+	 *  check --effects` and an effort's review say, in one wording.
+	 */
+	lines: string[],
 };
 
 // One setting as the Settings view shows it.
@@ -4108,6 +4113,11 @@ export type ProviderEffect = {
 	 *  line shows the change.
 	 */
 	firstDifference: string | null,
+	/**
+	 *  What approving it would change, as sentences ([`approval_lines`]):
+	 *  what Settings → Data shows before a person approves.
+	 */
+	lines: string[],
 };
 
 // An instance as Settings → Integrations shows it.

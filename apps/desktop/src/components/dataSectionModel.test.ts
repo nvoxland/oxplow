@@ -98,39 +98,17 @@ test("a provider's approve waits for its declaration diff", () => {
   expect(canApprove(collector, undefined)).toBe(true);
 });
 
-test("a provider's declaration diff reads as lines", () => {
-  const grants = (hosts: string[]) => ({ entry: "bin/p", runtime: "exec", args: [], hosts, credentials: ["token"], env: [] });
-  const first: ProviderEffect = {
+// P8.C5: the wording is the server's (`extension_effects::approval_lines`,
+// tested in Rust); the approval row shows the lines it sends.
+test("a provider's declaration diff shows the server's lines", () => {
+  const effect = {
     id: "fake",
-    capability: "work_items",
-    change: "added",
-    before: null,
-    after: grants(["api.example.com"]),
-    commands: [
-      { name: "create", change: "added", before: null, after: { confirm: "never" } },
-      { name: "delete", change: "added", before: null, after: { confirm: "destructive" } },
-    ],
-    tools: [],
-    featuresBefore: null,
-    featuresAfter: { comments: true },
-    firstDifference: null,
-  };
-  expect(providerEffectLines(first)).toEqual([
-    "Added — runs bin/p · reaches api.example.com · reads token",
-    "Commands: create, delete (destructive)",
-  ]);
-  const changed: ProviderEffect = {
-    ...first,
     change: "changed",
-    before: grants([]),
-    commands: [
-      { name: "create", change: "unchanged", before: {}, after: {} },
-      { name: "archive", change: "added", before: null, after: { confirm: "destructive" } },
-    ],
-    featuresBefore: { comments: true },
-  };
-  expect(providerEffectLines(changed)).toEqual(["Now reaches api.example.com (was none)", "Command `archive` added (destructive)"]);
-  expect(providerEffectLines({ ...changed, change: "unchanged", before: grants(["api.example.com"]), commands: [] })).toEqual([
-    "Nothing changed since it was last approved.",
+    lines: ["Now reaches api.example.com (was none)", "Command `archive` added (destructive)"],
+  } as unknown as ProviderEffect;
+  expect(providerEffectLines(effect)).toEqual([
+    "Now reaches api.example.com (was none)",
+    "Command `archive` added (destructive)",
   ]);
 });
+

@@ -1,7 +1,6 @@
 /** Pure row presentation for the Settings → Extensions list. */
-import type { CollectorListing, EffectReport, Extension, ExtensionReview, Trigger } from "../tauri-bridge/generated/bindings.js";
+import type { CollectorListing, Extension, ExtensionReview, Trigger } from "../tauri-bridge/generated/bindings.js";
 import { readsChanged } from "../lens/lensRerun.js";
-import { grantChanges, grantsLine, providerChanges } from "./providerEffectText.js";
 
 export interface ExtensionRowModel {
   name: string;
@@ -153,35 +152,6 @@ export interface ReviewModel {
   canInstall: boolean;
 }
 
-/** The report as lines: collectors' and providers' grants first (what a
- *  person approves), then models, lenses and the config schema. */
-export function effectLines(report: EffectReport): string[] {
-  const out: string[] = [];
-  for (const c of report.collectors) {
-    if (c.change === "added") out.push(`Collector ${c.id}: added — ${c.after ? grantsLine(c.after) : "no grants"}`);
-    else if (c.change === "removed") out.push(`Collector ${c.id}: removed`);
-    else for (const g of grantChanges(c.before, c.after)) out.push(`Collector ${c.id}: ${g}`);
-  }
-  for (const p of report.providers) {
-    for (const line of providerChanges(p)) out.push(`Provider ${p.id}: ${line}`);
-  }
-  for (const m of report.models) {
-    if (m.change === "unchanged") continue;
-    const what = m.change === "changed" ? (m.contractChange ?? `its ${listed(m.changed)} changed (same columns)`) : m.change;
-    const downstream = m.downstream.length > 0 ? `; read by ${m.downstream.join(", ")}` : "";
-    out.push(`Model ${m.view}: ${what}${downstream}`);
-  }
-  for (const l of report.lenses) {
-    if (l.error) out.push(`Lens ${l.id}: ${l.change === "unchanged" ? "" : `${l.change}; `}its query fails: ${l.error}`);
-    else if (l.change !== "unchanged") out.push(`Lens ${l.id}: ${l.change}`);
-  }
-  if (report.config?.otherChange) out.push(`Config: ${report.config.otherChange}`);
-  if (report.config && report.config.changedKeys.length > 0) {
-    out.push(`Config: ${report.config.changedKeys.join(", ")} changed`);
-  }
-  return out;
-}
-
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export function reviewModel(review: ExtensionReview): ReviewModel {
@@ -219,16 +189,12 @@ export function reviewModel(review: ExtensionReview): ReviewModel {
     declares,
     errors: ext.errors,
     problems: review.problems,
-    // No report when the candidate doesn't load; its errors say why.
-    effects: review.effects ? effectLines(review.effects) : [],
+    // The server's wording (`extension_effects::summary`); no report when
+    // the candidate doesn't load — its errors say why.
+    effects: review.effects?.lines ?? [],
     lensDiffs: (review.effects?.lenses ?? [])
       .filter((l) => l.change === "changed" && l.before !== null && l.after !== null)
       .map((l) => ({ id: l.id, before: l.before!, after: l.after! })),
     canInstall: ext.errors.length === 0,
   };
-}
-
-/** `a`, `a and b`, `a, b and c`. */
-function listed(parts: string[]): string {
-  return parts.length <= 1 ? (parts[0] ?? "definition") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }

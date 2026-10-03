@@ -315,8 +315,8 @@ that stopped the instance, or a restart, still shows what changed — or
 everything it declares when it never ran; read, never run) and lists
 its hosts, credentials, commands added, removed or changed (destructive
 ones marked), features, or — when none of those shows the change — where
-the declarations first differ (`providerEffectLines` over the shared
-`providerChanges`). Its Approve stays disabled
+the declarations first differ (`ProviderEffect.lines`, worded in Rust
+by `extension_effects::approval_lines`, P8.C5). Its Approve stays disabled
 until that diff has loaded (`canApprove`), on top of the reviewed
 `version` round trip; a diff that fails to load is shown on the row
 ("Couldn't compare its declarations: …") and Approve stays disabled with

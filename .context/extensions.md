@@ -912,10 +912,11 @@ with a `Change` (`added`, `removed`, `changed`, `unchanged`):
 
 `extension_effects::json_difference` is the one "where do two JSON
 values first differ" walk (the provider host's `first_difference` uses
-it too). The desktop renders a provider's changes once
-(`components/providerEffectText.ts`, `providerChanges`): the Extensions
-review prefixes each phrase with `Provider <id>:`, the Data section's
-approval row capitalizes them.
+it too). A provider's changes are worded once, in Rust
+(`extension_effects::provider_phrases`, P8.C5): the review's `summary`
+prefixes each phrase with `Provider <id>:`, and `approval_lines` — sent
+as `ProviderEffect.lines` — capitalizes them for the Data section's
+approval row.
 
 The report is built from the two loaded versions: **it never runs a
 collector or a provider** — consent forbids running a version nobody
@@ -936,7 +937,9 @@ a provider's declarations are read from each version's files.
 version as `before` when it replaces one (`review_update`), else none
 (everything is `added`); a candidate that doesn't load gets **no**
 report (`effects: None` — its errors say why, and it can't be
-installed). Settings → Extensions shows it (`effectLines`:
+installed). Settings → Extensions shows `EffectReport.lines` —
+`extension_effects::summary` (P8.C5), the one wording the install
+review, `plugin check --effects` and an effort's review share:
 collectors' and providers' grants first — "now reaches x (was y)", a
 provider command added (destructive) — then models with their readers,
 lenses, the config keys) and each changed lens's text before and after,

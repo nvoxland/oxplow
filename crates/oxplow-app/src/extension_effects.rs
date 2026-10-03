@@ -327,6 +327,9 @@ pub struct ProviderEffect {
     /// differ — what a person reads when no grant, command or feature
     /// line shows the change.
     pub first_difference: Option<String>,
+    /// What approving it would change, as sentences ([`approval_lines`]):
+    /// what Settings → Data shows before a person approves.
+    pub lines: Vec<String>,
 }
 
 /// The instance config schema (`config:`), by property.
@@ -351,6 +354,298 @@ pub struct EffectReport {
     pub collectors: Vec<CollectorEffect>,
     pub providers: Vec<ProviderEffect>,
     pub config: Option<ConfigEffect>,
+    /// The report as lines ([`summary`]): what the install review, `plugin
+    /// check --effects` and an effort's review say, in one wording.
+    pub lines: Vec<String>,
+}
+
+/// `none` for an empty list, else `a, b`.
+fn listed_or_none(xs: &[String]) -> String {
+    if xs.is_empty() {
+        "none".into()
+    } else {
+        xs.join(", ")
+    }
+}
+
+/// `definition`, `a`, `a and b`, `a, b and c`.
+fn listed_and(parts: &[String]) -> String {
+    match parts {
+        [] => "definition".into(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+fn run_line(g: &Grants) -> String {
+    std::iter::once(g.entry.clone())
+        .chain(g.args.iter().cloned())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A program's grants: "runs x · reaches y · reads z".
+pub fn grants_line(g: &Grants) -> String {
+    format!(
+        "runs {} · reaches {} · reads {}",
+        run_line(g),
+        listed_or_none(&g.hosts),
+        listed_or_none(&g.credentials)
+    )
+}
+
+/// What a program's grants became, as phrases ("now reaches x (was y)").
+pub fn grant_changes(before: Option<&Grants>, after: Option<&Grants>) -> Vec<String> {
+    let (Some(b), Some(a)) = (before, after) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if b.entry != a.entry || b.runtime != a.runtime || b.args != a.args {
+        out.push(format!("now runs {} (was {})", run_line(a), run_line(b)));
+    }
+    let pairs = [
+        ("now reaches", &b.hosts, &a.hosts),
+        ("now reads", &b.credentials, &a.credentials),
+        ("now reads env", &b.env, &a.env),
+    ];
+    for (what, was, now) in pairs {
+        if was != now {
+            out.push(format!(
+                "{what} {} (was {})",
+                listed_or_none(now),
+                listed_or_none(was)
+            ));
+        }
+    }
+    out
+}
+
+fn destructive(c: &CommandChange) -> &'static str {
+    match c
+        .after
+        .as_ref()
+        .and_then(|a| a.get("confirm"))
+        .and_then(Value::as_str)
+    {
+        Some("destructive") => " (destructive)",
+        _ => "",
+    }
+}
+
+/// A provider's changes as phrases: everything it declares when it's new,
+/// else its grants, commands, MCP tools and features that differ — and,
+/// when none of those shows a change, where its declarations first differ.
+pub fn provider_phrases(e: &ProviderEffect) -> Vec<String> {
+    match e.change {
+        Change::Added => {
+            let commands: Vec<String> = e
+                .commands
+                .iter()
+                .map(|c| format!("{}{}", c.name, destructive(c)))
+                .collect();
+            let mut out = vec![
+                format!(
+                    "added — {}",
+                    e.after.as_ref().map_or("no grants".into(), grants_line)
+                ),
+                format!("commands: {}", listed_or_none(&commands)),
+            ];
+            // Behind oxplow's MCP adapter: the server's tools, as pinned.
+            if !e.tools.is_empty() {
+                let tools: Vec<String> = e.tools.iter().map(|t| t.name.clone()).collect();
+                out.push(format!("MCP tools: {}", listed_or_none(&tools)));
+            }
+            out
+        }
+        Change::Removed => vec!["removed".into()],
+        Change::Changed | Change::Unchanged => {
+            let mut out = grant_changes(e.before.as_ref(), e.after.as_ref());
+            for c in e.commands.iter().filter(|c| c.change != Change::Unchanged) {
+                let tail = if c.change == Change::Removed {
+                    ""
+                } else {
+                    destructive(c)
+                };
+                out.push(format!(
+                    "command `{}` {}{tail}",
+                    c.name,
+                    change_word(c.change)
+                ));
+            }
+            for t in e.tools.iter().filter(|t| t.change != Change::Unchanged) {
+                out.push(format!("MCP tool `{}` {}", t.name, change_word(t.change)));
+            }
+            if e.features_before != e.features_after {
+                let shown = |v: &Option<Value>| v.as_ref().map_or("null".into(), Value::to_string);
+                out.push(format!(
+                    "features now {} (were {})",
+                    shown(&e.features_after),
+                    shown(&e.features_before)
+                ));
+            }
+            if out.is_empty() && e.change == Change::Changed {
+                out.push(
+                    e.first_difference
+                        .clone()
+                        .unwrap_or_else(|| "its declarations changed".into()),
+                );
+            }
+            out
+        }
+    }
+}
+
+/// What approving a provider would change, as sentences: against what was
+/// approved last, or everything it declares at a first approval.
+pub fn approval_lines(e: &ProviderEffect) -> Vec<String> {
+    let lines: Vec<String> = provider_phrases(e)
+        .into_iter()
+        .map(|l| {
+            let mut chars = l.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().chain(chars).collect(),
+                None => l,
+            }
+        })
+        .collect();
+    if lines.is_empty() {
+        vec!["Nothing changed since it was last approved.".into()]
+    } else {
+        lines
+    }
+}
+
+fn change_word(c: Change) -> &'static str {
+    match c {
+        Change::Added => "added",
+        Change::Removed => "removed",
+        Change::Changed => "changed",
+        Change::Unchanged => "unchanged",
+    }
+}
+
+fn counts(c: &BTreeMap<String, i64>) -> String {
+    if c.is_empty() {
+        return "nothing".into();
+    }
+    c.iter()
+        .map(|(e, n)| format!("{n} {e}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn ran_text(r: Option<&Ran>) -> String {
+    match r {
+        None => "—".into(),
+        Some(Ran { error: Some(e), .. }) => format!("fails ({e})"),
+        Some(r) => counts(&r.counts),
+    }
+}
+
+/// The report as lines: collectors' and providers' grants first (what a
+/// person approves), then what the collectors make of their inputs, the
+/// models (and their rows), the lenses and the config schema.
+pub fn summary(report: &EffectReport) -> Vec<String> {
+    let mut out = Vec::new();
+    for c in &report.collectors {
+        match c.change {
+            Change::Added => out.push(format!(
+                "Collector {}: added — {}",
+                c.id,
+                c.after.as_ref().map_or("no grants".into(), grants_line)
+            )),
+            Change::Removed => out.push(format!("Collector {}: removed", c.id)),
+            _ => out.extend(
+                grant_changes(c.before.as_ref(), c.after.as_ref())
+                    .into_iter()
+                    .map(|g| format!("Collector {}: {g}", c.id)),
+            ),
+        }
+    }
+    for p in &report.providers {
+        out.extend(
+            provider_phrases(p)
+                .into_iter()
+                .map(|l| format!("Provider {}: {l}", p.id)),
+        );
+    }
+    for c in &report.collectors {
+        if let Some(why) = &c.not_run {
+            out.push(format!("Collector {}: not run — {why}", c.id));
+        }
+        for o in c.outputs.iter().filter(|o| o.change != Change::Unchanged) {
+            out.push(format!(
+                "Collector {} on {}: {} → {}",
+                c.id,
+                o.input,
+                ran_text(o.before.as_ref()),
+                ran_text(o.after.as_ref())
+            ));
+        }
+    }
+    for m in report
+        .models
+        .iter()
+        .filter(|m| m.change != Change::Unchanged)
+    {
+        let what = match m.change {
+            Change::Changed => m.contract_change.clone().unwrap_or_else(|| {
+                format!("its {} changed (same columns)", listed_and(&m.changed))
+            }),
+            other => change_word(other).into(),
+        };
+        let read_by = if m.downstream.is_empty() {
+            String::new()
+        } else {
+            format!("; read by {}", m.downstream.join(", "))
+        };
+        out.push(format!("Model {}: {what}{read_by}", m.view));
+        if let Some(rows) = &m.rows {
+            let side = |n: Option<i64>| n.map_or("—".into(), |n| n.to_string());
+            let detail = match (&rows.keyed, &rows.note) {
+                (Some(k), _) => format!(
+                    " ({} added, {} removed, {} changed)",
+                    k.added, k.removed, k.changed
+                ),
+                (None, Some(note)) => format!(" ({note})"),
+                (None, None) => String::new(),
+            };
+            out.push(format!(
+                "Model {} rows: {} → {}{detail}",
+                m.view,
+                side(rows.before),
+                side(rows.after)
+            ));
+        }
+    }
+    for l in &report.lenses {
+        match &l.error {
+            Some(e) => {
+                let change = if l.change == Change::Unchanged {
+                    String::new()
+                } else {
+                    format!("{}; ", change_word(l.change))
+                };
+                out.push(format!("Lens {}: {change}its query fails: {e}", l.id));
+            }
+            None if l.change != Change::Unchanged => {
+                out.push(format!("Lens {}: {}", l.id, change_word(l.change)))
+            }
+            None => {}
+        }
+    }
+    if let Some(config) = &report.config {
+        if let Some(other) = &config.other_change {
+            out.push(format!("Config: {other}"));
+        }
+        if !config.changed_keys.is_empty() {
+            out.push(format!(
+                "Config: {} changed",
+                config.changed_keys.join(", ")
+            ));
+        }
+    }
+    out
 }
 
 /// Pair two lists by key: every key either side has, in order.
@@ -659,7 +954,7 @@ pub fn providers_diff(
                 (Some(x), Some(y)) => described_difference(x, y),
                 _ => None,
             };
-            ProviderEffect {
+            let mut effect = ProviderEffect {
                 id,
                 capability: a
                     .or(b)
@@ -673,7 +968,10 @@ pub fn providers_diff(
                 tools: named_changes(tools(b), tools(a)),
                 features_before: b.and_then(features_of),
                 features_after: a.and_then(features_of),
-            }
+                lines: Vec::new(),
+            };
+            effect.lines = approval_lines(&effect);
+            effect
         })
         .collect()
 }
@@ -972,13 +1270,16 @@ pub async fn effects(
         before.as_ref().and_then(config_schema).as_ref(),
         config_schema(&after).as_ref(),
     );
-    EffectReport {
+    let mut report = EffectReport {
         lenses,
         models,
         collectors,
         providers,
         config,
-    }
+        lines: Vec::new(),
+    };
+    report.lines = summary(&report);
+    report
 }
 
 #[cfg(test)]
@@ -1616,5 +1917,271 @@ mod tests {
             .clone()
             .unwrap();
         assert!(error.contains("refused"), "{error}");
+    }
+
+    // ---- P8.C5: the wording, ported from the desktop's line tests ----
+
+    fn grants(hosts: &[&str], credentials: &[&str]) -> Grants {
+        Grants {
+            entry: "bin/p".into(),
+            runtime: CollectorRuntime::Exec,
+            args: vec![],
+            hosts: hosts.iter().map(|h| h.to_string()).collect(),
+            credentials: credentials.iter().map(|c| c.to_string()).collect(),
+            env: vec![],
+        }
+    }
+
+    fn command(name: &str, change: Change, after: Option<Value>) -> CommandChange {
+        CommandChange {
+            name: name.into(),
+            change,
+            before: None,
+            after,
+        }
+    }
+
+    fn effect(change: Change) -> ProviderEffect {
+        ProviderEffect {
+            id: "fake".into(),
+            capability: "work_items".into(),
+            change,
+            before: Some(grants(&[], &["token"])),
+            after: Some(grants(&[], &["token"])),
+            commands: vec![],
+            tools: vec![],
+            features_before: None,
+            features_after: None,
+            first_difference: None,
+            lines: vec![],
+        }
+    }
+
+    #[test]
+    fn a_new_provider_reads_as_everything_it_declares() {
+        let added = ProviderEffect {
+            before: None,
+            after: Some(grants(&["api.example.com"], &["token"])),
+            commands: vec![
+                command("create", Change::Added, Some(json!({"confirm": "never"}))),
+                command(
+                    "delete",
+                    Change::Added,
+                    Some(json!({"confirm": "destructive"})),
+                ),
+            ],
+            ..effect(Change::Added)
+        };
+        assert_eq!(
+            provider_phrases(&added),
+            vec![
+                "added — runs bin/p · reaches api.example.com · reads token",
+                "commands: create, delete (destructive)"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_changed_provider_reads_as_what_differs() {
+        let changed = ProviderEffect {
+            after: Some(grants(&["api.example.com"], &["token"])),
+            commands: vec![
+                command("create", Change::Unchanged, Some(json!({}))),
+                command(
+                    "archive",
+                    Change::Added,
+                    Some(json!({"confirm": "destructive"})),
+                ),
+            ],
+            ..effect(Change::Changed)
+        };
+        assert_eq!(
+            provider_phrases(&changed),
+            vec![
+                "now reaches api.example.com (was none)",
+                "command `archive` added (destructive)"
+            ]
+        );
+        assert_eq!(
+            approval_lines(&changed)[0],
+            "Now reaches api.example.com (was none)"
+        );
+        assert_eq!(
+            approval_lines(&effect(Change::Unchanged)),
+            vec!["Nothing changed since it was last approved."]
+        );
+    }
+
+    #[test]
+    fn a_change_no_grant_command_or_feature_shows_names_its_first_difference() {
+        let quiet = ProviderEffect {
+            first_difference: Some("`/declarations/version` was 1, now 2".into()),
+            ..effect(Change::Changed)
+        };
+        assert_eq!(
+            provider_phrases(&quiet),
+            vec!["`/declarations/version` was 1, now 2"]
+        );
+        assert!(provider_phrases(&effect(Change::Unchanged)).is_empty());
+    }
+
+    #[test]
+    fn an_mcp_adapter_provider_names_its_pinned_tools_and_each_that_changed() {
+        let tool = |name: &str, change: Change| command(name, change, Some(json!({"name": name})));
+        let added = ProviderEffect {
+            before: None,
+            after: Some(Grants {
+                entry: "bin/server".into(),
+                args: vec!["--stdio".into()],
+                ..grants(&[], &["token"])
+            }),
+            tools: vec![
+                tool("create_item", Change::Added),
+                tool("list_items", Change::Added),
+            ],
+            ..effect(Change::Added)
+        };
+        assert_eq!(
+            provider_phrases(&added),
+            vec![
+                "added — runs bin/server --stdio · reaches none · reads token",
+                "commands: none",
+                "MCP tools: create_item, list_items"
+            ]
+        );
+        let changed = ProviderEffect {
+            tools: vec![
+                tool("list_items", Change::Changed),
+                tool("drop_all", Change::Added),
+                tool("create_item", Change::Unchanged),
+            ],
+            ..effect(Change::Changed)
+        };
+        assert_eq!(
+            provider_phrases(&changed),
+            vec!["MCP tool `list_items` changed", "MCP tool `drop_all` added"]
+        );
+    }
+
+    /// The report as lines, grants first — what the install review, the
+    /// CLI and an effort's review all say.
+    #[test]
+    fn effects_spell_out_each_change_grants_first() {
+        let lens = |id: &str, change: Change, error: Option<&str>| LensEffect {
+            id: id.into(),
+            change,
+            before: None,
+            after: None,
+            error: error.map(str::to_string),
+        };
+        let model = |view: &str, changed: &[&str], contract: Option<&str>, downstream: &[&str]| {
+            ModelEffect {
+                view: view.into(),
+                change: Change::Changed,
+                changed: changed.iter().map(|c| c.to_string()).collect(),
+                before_columns: vec![],
+                after_columns: vec![],
+                contract_change: contract.map(str::to_string),
+                downstream: downstream.iter().map(|d| d.to_string()).collect(),
+                rows: None,
+            }
+        };
+        let mut rows_model = model("v_shared_r", &["query"], None, &[]);
+        rows_model.rows = Some(RowDiff {
+            before: Some(3),
+            after: Some(3),
+            keyed: Some(KeyedDiff {
+                key: vec!["id".into()],
+                added: 1,
+                removed: 1,
+                changed: 1,
+                samples: vec![],
+            }),
+            note: None,
+        });
+        let report = EffectReport {
+            lenses: vec![
+                lens("shared/count", Change::Changed, None),
+                lens("shared/same", Change::Unchanged, None),
+                lens("shared/new", Change::Added, None),
+                lens("shared/bad", Change::Added, Some("no such table")),
+            ],
+            models: vec![
+                model(
+                    "v_shared_x",
+                    &["columns"],
+                    Some("column `y` added"),
+                    &["v_b_y"],
+                ),
+                model("v_shared_z", &["query"], None, &[]),
+                model("v_shared_t", &["description", "tests"], None, &[]),
+                rows_model,
+            ],
+            collectors: vec![CollectorEffect {
+                id: "gh".into(),
+                change: Change::Changed,
+                before: Some(Grants {
+                    entry: "sync.sh".into(),
+                    ..grants(&[], &[])
+                }),
+                after: Some(Grants {
+                    entry: "sync.sh".into(),
+                    ..grants(&["api.example.com"], &[])
+                }),
+                entities: vec![],
+                outputs: vec![CollectorOutput {
+                    input: "fixture two".into(),
+                    change: Change::Changed,
+                    before: Some(Ran {
+                        counts: [("thing".to_string(), 2)].into(),
+                        rows: Value::Null,
+                        error: None,
+                    }),
+                    after: Some(Ran {
+                        counts: BTreeMap::new(),
+                        rows: Value::Null,
+                        error: Some("boom".into()),
+                    }),
+                }],
+                not_run: None,
+            }],
+            providers: vec![ProviderEffect {
+                commands: vec![
+                    command(
+                        "delete",
+                        Change::Added,
+                        Some(json!({"name": "delete", "confirm": "destructive"})),
+                    ),
+                    command("create", Change::Unchanged, Some(json!({}))),
+                ],
+                features_before: Some(json!({"comments": false})),
+                features_after: Some(json!({"comments": false})),
+                ..effect(Change::Changed)
+            }],
+            config: Some(ConfigEffect {
+                before: None,
+                after: Some(json!({})),
+                changed_keys: vec!["team".into()],
+                other_change: None,
+            }),
+            lines: vec![],
+        };
+        assert_eq!(
+            summary(&report),
+            vec![
+                "Collector gh: now reaches api.example.com (was none)",
+                "Provider fake: command `delete` added (destructive)",
+                "Collector gh on fixture two: 2 thing → fails (boom)",
+                "Model v_shared_x: column `y` added; read by v_b_y",
+                "Model v_shared_z: its query changed (same columns)",
+                "Model v_shared_t: its description and tests changed (same columns)",
+                "Model v_shared_r: its query changed (same columns)",
+                "Model v_shared_r rows: 3 → 3 (1 added, 1 removed, 1 changed)",
+                "Lens shared/count: changed",
+                "Lens shared/new: added",
+                "Lens shared/bad: added; its query fails: no such table",
+                "Config: team changed",
+            ]
+        );
     }
 }

@@ -193,7 +193,7 @@ describe("reviewModel", () => {
     gitRef: null,
     sha: "0123456789abcdef0123456789abcdef01234567",
     problems,
-    effects: { lenses: [], models: [], collectors: [], providers: [], config: null },
+    effects: { lenses: [], models: [], collectors: [], providers: [], config: null, lines: [] },
   });
 
   test("spells out what runs, where it reaches and what it reads", () => {
@@ -222,54 +222,25 @@ describe("reviewModel", () => {
     expect(m.problems).toHaveLength(1);
   });
 
-  // P6b.E2: a review says what installing would change, grants first.
-  test("effects spell out each change, grants first", () => {
-    const grants = (hosts: string[], credentials: string[] = []) => ({ entry: "sync.sh", runtime: "exec", args: [], hosts, credentials, env: [] });
+  // P6b.E2 / P8.C5: a review says what installing would change in the
+  // server's wording (the lines are `extension_effects::summary`'s, tested
+  // in Rust); a changed lens shows its text before and after.
+  test("effects are the server's lines, and changed lenses diff", () => {
     const m = reviewModel({
       ...review(),
       effects: {
         lenses: [
           { id: "shared/count", change: "changed", before: "1", after: "2", error: null },
           { id: "shared/same", change: "unchanged", before: "x", after: "x", error: null },
-          { id: "shared/new", change: "added", before: null, after: "3", error: null },
-          { id: "shared/bad", change: "added", before: null, after: null, error: "no such table" },
         ],
-        models: [
-          { view: "v_shared_x", change: "changed", changed: ["columns"], beforeColumns: ["a"], afterColumns: ["a", "y"], contractChange: "column `y` added", downstream: ["v_b_y"] },
-          { view: "v_shared_z", change: "changed", changed: ["query"], beforeColumns: ["a"], afterColumns: ["a"], contractChange: null, downstream: [] },
-          { view: "v_shared_t", change: "changed", changed: ["description", "tests"], beforeColumns: ["a"], afterColumns: ["a"], contractChange: null, downstream: [] },
-        ],
-        collectors: [{ id: "gh", change: "changed", before: grants([]), after: grants(["api.example.com"]), entities: [] }],
-        providers: [
-          {
-            id: "fake",
-            capability: "work_items",
-            change: "changed",
-            before: grants([]),
-            after: grants([]),
-            commands: [
-              { name: "delete", change: "added", before: null, after: { name: "delete", confirm: "destructive" } },
-              { name: "create", change: "unchanged", before: {}, after: {} },
-            ],
-            tools: [],
-            featuresBefore: { comments: false },
-            featuresAfter: { comments: false },
-          },
-        ],
-        config: { before: null, after: {}, changedKeys: ["team"] },
+        models: [],
+        collectors: [],
+        providers: [],
+        config: null,
+        lines: ["Collector gh: now reaches api.example.com (was none)", "Lens shared/count: changed"],
       },
     } as never);
-    expect(m.effects).toEqual([
-      "Collector gh: now reaches api.example.com (was none)",
-      "Provider fake: command `delete` added (destructive)",
-      "Model v_shared_x: column `y` added; read by v_b_y",
-      "Model v_shared_z: its query changed (same columns)",
-      "Model v_shared_t: its description and tests changed (same columns)",
-      "Lens shared/count: changed",
-      "Lens shared/new: added",
-      "Lens shared/bad: added; its query fails: no such table",
-      "Config: team changed",
-    ]);
+    expect(m.effects).toEqual(["Collector gh: now reaches api.example.com (was none)", "Lens shared/count: changed"]);
     expect(m.lensDiffs).toEqual([{ id: "shared/count", before: "1", after: "2" }]);
   });
 });
