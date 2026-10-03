@@ -206,6 +206,69 @@ impl CaptureListener {
     }
 }
 
+/// What the listener heard: the tables a batch of commits touched, or —
+/// when it lagged and missed some — that anything may have changed.
+pub(crate) enum Changed {
+    Tables(oxplow_db::changes::TablesChanged),
+    Everything,
+}
+
+impl Changed {
+    fn touched(&self, table: &str) -> bool {
+        match self {
+            Changed::Tables(tables) => tables.contains(table),
+            Changed::Everything => true,
+        }
+    }
+}
+
+/// Act on `changed`: wake the pump for new events, re-register the
+/// materialized models and the searchable kinds' indexes when the model
+/// registry or `ref_kind` changed, and tell the assets what changed. The
+/// models it changed, and whether metric samples landed.
+pub(crate) async fn react(
+    db: &Database,
+    lineage: &mut Lineage,
+    assets: &crate::assets::Assets,
+    pump: &crate::event_pump::EventPump,
+    changed: &Changed,
+) -> (Vec<String>, bool) {
+    if changed.touched("event_log") {
+        pump.wake();
+    }
+    if changed.touched("model_input") || changed.touched("model") {
+        if let Ok(fresh) = Lineage::load(db).await {
+            *lineage = fresh;
+        }
+        if let Err(error) = assets.sync_models().await {
+            tracing::warn!(%error, "the materialized models didn't resync");
+        }
+    }
+    // A searchable kind's index follows the kinds declared (`ref_kind`)
+    // and the tables behind each one's view.
+    if ["ref_kind", "model_input", "model"]
+        .iter()
+        .any(|t| changed.touched(t))
+    {
+        if let Err(error) = assets.sync_search_kinds().await {
+            tracing::warn!(%error, "the searchable ref kinds' indexes didn't resync");
+        }
+    }
+    match changed {
+        Changed::Tables(tables) => {
+            assets.changed(tables);
+            (
+                lineage.affected(tables.tables.iter()),
+                tables.contains("metric_capture") || tables.contains("fact"),
+            )
+        }
+        Changed::Everything => {
+            assets.all_changed();
+            (lineage.all(), true)
+        }
+    }
+}
+
 /// Follow the database's changes — models, metric samples, assets, and
 /// new events for the pump (a commit that logged one wakes it, whoever
 /// made it) — for the life of the process.
@@ -233,43 +296,14 @@ pub fn spawn(
             CaptureListener::default()
         });
         loop {
-            let (models, samples) = match rx.recv().await {
-                Ok(tables) => {
-                    if tables.contains("event_log") {
-                        pump.wake();
-                    }
-                    if tables.contains("model_input") || tables.contains("model") {
-                        if let Ok(fresh) = Lineage::load(&db).await {
-                            lineage = fresh;
-                        }
-                        if let Err(error) = assets.sync_models().await {
-                            tracing::warn!(%error, "the materialized models didn't resync");
-                        }
-                    }
-                    // A searchable kind's index follows the kinds declared
-                    // (`ref_kind`) and the tables behind each one's view.
-                    if ["ref_kind", "model_input", "model"]
-                        .iter()
-                        .any(|t| tables.contains(t))
-                    {
-                        if let Err(error) = assets.sync_search_kinds().await {
-                            tracing::warn!(%error, "the searchable ref kinds' indexes didn't resync");
-                        }
-                    }
-                    assets.changed(&tables);
-                    (
-                        lineage.affected(tables.tables.iter()),
-                        tables.contains("metric_capture") || tables.contains("fact"),
-                    )
-                }
-                // Missed some: anything may have changed.
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    pump.wake();
-                    assets.all_changed();
-                    (lineage.all(), true)
-                }
+            let changed = match rx.recv().await {
+                Ok(tables) => Changed::Tables(tables),
+                // Missed some: anything may have changed — the registry
+                // too, whose change re-registers assets (tsk854).
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => Changed::Everything,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             };
+            let (models, samples) = react(&db, &mut lineage, &assets, &pump, &changed).await;
             if !models.is_empty() {
                 watermarks.mark(&models, Timestamp::now());
                 events.emit(OxplowEvent::ModelsChanged { models });

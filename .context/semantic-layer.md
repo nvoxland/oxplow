@@ -430,7 +430,11 @@ What a query read is what it subscribes to.
 - **Models:** `crates/oxplow-app/src/models_changed.rs` follows
   `model_input` from those tables to every model that reads them, directly
   or through other models (reloading the lineage when `model_input`
-  itself changes, and treating a lagged channel as "everything changed"),
+  itself changes, and treating a lagged channel as "everything changed" —
+  every table touched, the registry included: one `react` for both, so a
+  missed batch that held a `model`, `model_input` or `ref_kind` write
+  still re-registers the materialized models and the searchable kinds'
+  indexes, tsk854),
   stamps each one's in-memory watermark (`ModelWatermarks`, derivable, so
   not persisted) and emits `OxplowEvent::ModelsChanged { models }`.
 - **Results:** `SqlQueryResult.freshness` is the watermark of each model

@@ -491,6 +491,39 @@ ref_kinds:
         assert_eq!(state, 0);
     }
 
+    /// tsk854: when the change listener lags it missed some batches — one
+    /// may have held the `ref_kind` or `model` write — so it resyncs the
+    /// registry as if those changed, not only the assets' inputs.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_lagged_listener_resyncs_the_searchable_kinds() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        acme(&root, "    searchable: found\n");
+        rows(
+            &root,
+            r#"[{"n": "12", "title": "Widget frobnicator", "body": "Frobs."}]"#,
+        );
+        collect(svc).await;
+        svc.extension_models.sync().await.unwrap();
+        svc.vocabulary_service.sync().await.unwrap();
+        // Nothing heard the `ref_kind` write: the listener missed it.
+        let assets = Assets::new(svc.db.clone(), Duration::from_millis(50));
+        let mut lineage = crate::models_changed::Lineage::load(&svc.db).await.unwrap();
+        crate::models_changed::react(
+            &svc.db,
+            &mut lineage,
+            &assets,
+            &svc.event_pump,
+            &crate::models_changed::Changed::Everything,
+        )
+        .await;
+        assert_eq!(
+            found(svc, "widget", &["12"]).await,
+            vec![("12".to_string(), "Widget frobnicator".to_string())]
+        );
+    }
+
     /// tsk852: at start, extension models are dropped and compiled again,
     /// so for a moment a searchable kind's view isn't there. That is "not
     /// compiled yet", not "gone": its entries stay until `ref_kind` stops
