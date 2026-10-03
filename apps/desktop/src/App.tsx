@@ -1,3 +1,4 @@
+import { useRefKindsLoader } from "./refKinds.js";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -1138,6 +1139,8 @@ export function App() {
   // Backend-event subscription wiring (workspace context, backlog, task
   // events, followup/thread/stream changes, config, agent status) lives
   // in this hook so App doesn't carry ~10 inline subscription effects.
+  // Extensions' ref kinds (P8.D7): icons, labels, routes and wikilinks.
+  useRefKindsLoader();
   useBackendSubscriptions({
     threadWorkStatesRef,
     threadStatesRef,
@@ -2844,12 +2847,24 @@ export function App() {
         };
       },
       "ext-page": (ref, nav) => {
-        const { extension, page } = ref.payload as { extension: string; page: string };
+        const { extension, page, params } = ref.payload as {
+          extension: string;
+          page: string;
+          params?: Record<string, string>;
+        };
         return {
           id: ref.id,
           label: page,
           closable: true,
-          render: () => <ExtensionPageView extension={extension} page={page} stream={stream} onOpenPage={nav.navOpen} />,
+          render: () => (
+            <ExtensionPageView
+              extension={extension}
+              page={page}
+              params={params}
+              stream={stream}
+              onOpenPage={nav.navOpen}
+            />
+          ),
         };
       },
       lens: (ref, nav) => {

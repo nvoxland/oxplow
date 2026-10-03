@@ -275,6 +275,28 @@ ref_kinds:
             .unwrap()
     }
 
+    /// The desktop draws exactly the icons a ref kind may name: its
+    /// `REF_KIND_ICONS` map (`apps/desktop/src/refKinds.ts`) has a key for
+    /// each, and no other.
+    #[test]
+    fn the_desktop_draws_every_allowed_icon() {
+        let ts = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../apps/desktop/src/refKinds.ts"),
+        )
+        .unwrap();
+        let start = ts.find("REF_KIND_ICONS").unwrap();
+        let body = &ts[start..start + ts[start..].find("};").unwrap()];
+        let mut drawn: Vec<&str> = body
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix('"')?.split('"').next())
+            .collect();
+        drawn.sort();
+        let mut allowed = super::REF_KIND_ICONS.to_vec();
+        allowed.sort();
+        assert_eq!(drawn, allowed);
+    }
+
     #[test]
     fn a_ref_kind_loads_with_its_model_and_page() {
         let ext = acme(MANIFEST);

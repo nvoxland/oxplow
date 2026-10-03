@@ -1,6 +1,8 @@
 /// An extension's page (`page:ext.<extension>.<page>`, P6.G2): the lens
-/// its manifest's `pages:` entry names, full-page. The page resolves from
-/// the stream's extensions, so a restored tab (its id alone) opens too.
+/// its manifest's `pages:` entry names, full-page, starting with the page
+/// id's params (`?ref=` when it opens one of the extension's refs, P8.D7).
+/// The page resolves from the stream's extensions, so a restored tab (its
+/// id alone) opens too.
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { useExtensions } from "../extensionsStore.js";
 import { Page } from "../tabs/Page.js";
@@ -11,11 +13,13 @@ import { LensPage } from "./LensPage.js";
 export function ExtensionPageView({
   extension,
   page,
+  params,
   stream,
   onOpenPage,
 }: {
   extension: string;
   page: string;
+  params?: Record<string, string>;
   stream: Stream | null;
   onOpenPage(ref: TabRef): void;
 }) {
@@ -36,5 +40,7 @@ export function ExtensionPageView({
       </Page>
     );
   }
-  return <LensPage lensId={found.lens} title={found.title} stream={stream} onOpenPage={onOpenPage} />;
+  return (
+    <LensPage lensId={found.lens} title={found.title} initialParams={params} stream={stream} onOpenPage={onOpenPage} />
+  );
 }

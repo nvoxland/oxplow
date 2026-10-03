@@ -16,6 +16,7 @@
  * covers every constructor).
  */
 
+import { refKindInfo } from "../refKinds.js";
 import type { PageKind, RoutePageKind, TabRef } from "./tabState.js";
 import {
   WORKING,
@@ -274,9 +275,22 @@ export function duplicateBlockRef(payload: DuplicateBlockPayload): TabRef {
   });
 }
 
-/** An extension's page: `page:ext.<extension>.<page>` (P6.G2). */
-export function extPageRef(extension: string, page: string): TabRef {
-  return { id: `page:ext.${extension}.${page}`, kind: "ext-page", payload: { extension, page } };
+/** An extension's page: `page:ext.<extension>.<page>` (P6.G2), with the
+ *  params its lens starts with — `ref`, when it opens one of the
+ *  extension's refs (P8.D7). */
+export function extPageRef(extension: string, page: string, params?: Record<string, string>): TabRef {
+  const qs = params ? encodeParams(params) : "";
+  const id = `page:ext.${extension}.${page}${qs ? `?${qs}` : ""}`;
+  return { id, kind: "ext-page", payload: params ? { extension, page, params } : { extension, page } };
+}
+
+/** The page that opens a ref of an extension's kind: the page its
+ *  `ref_kinds:` entry names, given `?ref=`. Null for any other ref. */
+function pluginRefPage(ref: string, kind: string): TabRef | null {
+  const info = refKindInfo(kind);
+  if (!info) return null;
+  const ext = extPageOf(splitParams(info.page.slice("page:".length)).head);
+  return ext ? extPageRef(ext.extension, ext.page, { ref }) : null;
 }
 
 /** The extension and page of a `page:ext.<extension>.<page>` id (the page
@@ -621,10 +635,12 @@ export function refFromTabId(id: string): TabRef | null {
       const { head, params } = splitParams(id.slice("page:".length));
       if (isRoute(head)) return ROUTES[head](params);
       const ext = extPageOf(head);
-      return ext ? extPageRef(ext.extension, ext.page) : null;
+      if (!ext) return null;
+      const extParams = Object.fromEntries(params.entries());
+      return extPageRef(ext.extension, ext.page, Object.keys(extParams).length ? extParams : undefined);
     }
     default:
-      return null;
+      return pluginRefPage(id, kind);
   }
 }
 

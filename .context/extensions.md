@@ -1277,6 +1277,22 @@ label, id pattern, revisioned, wikilinks, resolve, page, icon); unlike
 event types, a removed extension's kinds leave, and refs to them are
 unrecognized again.
 
+**The desktop** (P8.D7, `apps/desktop/src/refKinds.ts`) reads
+`v_ref_kind`'s extension rows once (`useRefKindsLoader`, in `App`,
+re-read on `ModelsChanged`) into one process-wide list that the pure
+helpers consult and `useRefKinds` subscribes to:
+- `pageKindIconComponent` / `pageKindLabel` fall back to a kind's icon
+  (`REF_KIND_ICONS`, a lucide component per allowed name — a Rust test
+  keeps the two lists equal) and label;
+- `refFromTabId("acme_pr:12")` opens `page:ext.acme.pr?ref=acme_pr:12`
+  (`extPageRef` carries params; `ExtensionPageView` hands them to the
+  lens as `initialParams`);
+- `preprocessWikilinks` turns `[[acme_pr:12]]` / `[[pr:12]]` into a link
+  when the id matches the kind's pattern (`pluginWikilinkRef`, as the
+  backend's `canonical_wikilink` does), `urlTransform` lets the kind's
+  scheme through, and the link's text becomes its title from the
+  `resolve` model (`usePluginRefTitle`) unless the author labelled it.
+
 ## Commands
 
 An extension's `commands:` (a stable kind, P6b; `extension_commands.rs`)

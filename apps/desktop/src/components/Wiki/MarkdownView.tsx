@@ -15,17 +15,22 @@ import { MediaLightbox, type LightboxContent } from "./MediaLightbox.js";
 const APP_SCHEMES = /^(file|dir|commit|work_item|oxplow-invalid):/i;
 function urlTransform(value: string): string {
   if (APP_SCHEMES.test(value)) return value;
+  // An extension's ref kind (P8.D7) is a scheme of ours while installed.
+  const kind = parseRef(value)?.kind;
+  if (kind && refKindInfo(kind)) return value;
   return defaultUrlTransform(value);
 }
 import { useRowContextMenu } from "../useRowContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
-import { fileRef, directoryRef, gitCommitRef, wikiPageRef, taskRef } from "../../tabs/pageRefs.js";
+import { fileRef, directoryRef, gitCommitRef, wikiPageRef, taskRef, refFromTabId } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { WORKING, gitRevision, type Revision } from "../../revision.js";
 import { useWikiRef } from "../../wikiTitleCache.js";
 import { useTaskRef } from "../../taskTitleCache.js";
+import { parseRef } from "../../refs/ref.js";
+import { pluginWikilinkRef, refKindInfo, usePluginRefTitle, useRefKinds } from "../../refKinds.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
 
 // Mermaid + svg-pan-zoom load lazily inside mermaidRender, so this module
@@ -52,6 +57,8 @@ export type ParsedLink =
   /** A task: `id` is the `tsk<n>` id (the href carries the provider,
    *  `work_item:oxplow:tsk42`). */
   | { kind: "work_item"; id: string }
+  /** A ref of an extension's kind (`acme_pr:12`, P8.D7). */
+  | { kind: "ref"; ref: string }
   /** A `[[…]]` whose target matches no known ref shape (e.g. the GitHub
    *  `[[#13]]` form). Rendered as a broken, non-clickable link. */
   | { kind: "broken"; reason: string };
@@ -85,8 +92,10 @@ export function parseGitRefTarget(target: string): string | null {
  * shared `PageKindIcon` understands. Returns `null` for kinds that
  * shouldn't carry a leading glyph.
  */
-function parsedLinkIconKind(kind: ParsedLink["kind"]): string | null {
-  switch (kind) {
+function parsedLinkIconKind(parsed: ParsedLink): string | null {
+  switch (parsed.kind) {
+    case "ref":
+      return parseRef(parsed.ref)?.kind ?? null;
     case "internal":
       return "wiki";
     case "file":
@@ -167,6 +176,10 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
     const id = rest.startsWith(OXPLOW_PROVIDER) ? rest.slice(OXPLOW_PROVIDER.length) : rest;
     if (!id) return { kind: "empty" };
     return { kind: "work_item", id };
+  }
+  {
+    const kind = parseRef(rawHref)?.kind;
+    if (kind && refKindInfo(kind)) return { kind: "ref", ref: rawHref };
   }
   if (rawHref.startsWith("oxplow-invalid:")) {
     const target = decodeURIComponent(rawHref.slice("oxplow-invalid:".length));
@@ -372,6 +385,11 @@ function rewriteWikilinksOutsideInlineCode(text: string): string {
       if (/^tsk\d+$/i.test(target)) {
         return `[${display}](${WORK_ITEM_HREF}${target})`;
       }
+      // An extension's ref kind, by its kind or its `wikilink:` prefix.
+      const pluginRef = pluginWikilinkRef(target);
+      if (pluginRef) {
+        return `[${display}](${pluginRef})`;
+      }
       if (looksLikeFilePath(target)) {
         // The target may carry a `@<version>` segment; the file:
         // URL preserves it verbatim and parseMarkdownLink decodes it
@@ -402,6 +420,7 @@ function WikiLinkSpan({
   iconKind,
   internalSlug,
   taskId,
+  pluginRef,
 }: {
   anchorProps: React.AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown };
   handleLinkClick: (event: React.MouseEvent<HTMLAnchorElement>) => void;
@@ -409,9 +428,12 @@ function WikiLinkSpan({
   iconKind: string | null;
   internalSlug: string | null;
   taskId: string | null;
+  /** A ref of an extension's kind: titled from its kind's model. */
+  pluginRef: string | null;
 }) {
   const wiki = useWikiRef(internalSlug);
   const task = useTaskRef(taskId);
+  const pluginTitle = usePluginRefTitle(pluginRef);
   const cm = useRowContextMenu(items);
   const { children, ...rest } = anchorProps;
   // The link text is swapped for the resolved title when the link was
@@ -425,7 +447,9 @@ function WikiLinkSpan({
       ? wiki.title
       : taskId && task.title && childrenText === taskId
         ? task.title
-        : null;
+        : pluginRef && pluginTitle && pluginWikilinkRef(childrenText) === pluginRef
+          ? pluginTitle
+          : null;
   // A recognized ref whose object doesn't exist (deleted page / task,
   // stale wikilink) renders broken and non-clickable. `loading` and
   // `found` both stay a live link so a not-yet-resolved ref isn't
@@ -485,6 +509,8 @@ export function linkTarget(parsed: ParsedLink): TabRef | null {
       return taskRef(parsed.id);
     case "internal":
       return wikiPageRef(parsed.slug);
+    case "ref":
+      return refFromTabId(parsed.ref);
     default:
       return null;
   }
@@ -569,7 +595,9 @@ export function MarkdownView({
   style,
   className,
 }: MarkdownViewProps) {
-  const processedBody = useMemo(() => preprocessWikilinks(body), [body]);
+  // Extensions' ref kinds change what a `[[…]]` names.
+  const refKinds = useRefKinds();
+  const processedBody = useMemo(() => preprocessWikilinks(body), [body, refKinds]);
   const ref = useRef<HTMLDivElement | null>(null);
   const [lightbox, setLightbox] = useState<LightboxContent | null>(null);
   // Keep a stable handle to setLightbox so the imperative mermaid
@@ -624,8 +652,8 @@ export function MarkdownView({
       onOpenCommit?.(parsed.sha);
       return;
     }
-    if (parsed.kind === "work_item") {
-      return; // tasks were never a wikilink target before the chokepoint
+    if (parsed.kind === "work_item" || parsed.kind === "ref") {
+      return; // only the chokepoint opens a task or an extension's ref
     }
     if (newTab && onOpenInNewTab) onOpenInNewTab(parsed.slug);
     else if (onNavigateInternal) onNavigateInternal(parsed.slug);
@@ -845,13 +873,14 @@ export function MarkdownView({
               return <a {...props} onClick={handleLinkClick} onAuxClick={handleLinkClick} />;
             }
             const items = buildLinkMenu(href);
-            const iconKind = parsedLinkIconKind(parsed.kind);
+            const iconKind = parsedLinkIconKind(parsed);
             // For internal wiki links written as bare `[[slug]]` (no
             // `|label`), swap the rendered text from the slug to the
             // page title so readers see "Local Snapshots" not
             // `local-snapshots`. Author-supplied labels are preserved.
             const internalSlug = parsed.kind === "internal" ? parsed.slug : null;
             const taskId = parsed.kind === "work_item" ? parsed.id : null;
+            const pluginRef = parsed.kind === "ref" ? parsed.ref : null;
             return (
               <WikiLinkSpan
                 anchorProps={props}
@@ -860,6 +889,7 @@ export function MarkdownView({
                 iconKind={iconKind}
                 internalSlug={internalSlug}
                 taskId={taskId}
+                pluginRef={pluginRef}
               />
             );
           },

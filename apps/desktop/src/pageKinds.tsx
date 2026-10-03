@@ -46,6 +46,7 @@ import {
   Terminal,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
+import { refKindIcon, refKindInfo } from "./refKinds.js";
 import { pageKindOf } from "./tabs/pageRefs.js";
 import { parseRef } from "./refs/ref.js";
 
@@ -158,8 +159,9 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     case "new-task":
       return Plus;
 
+    // An extension's ref kind (`ref_kinds:`, P8.D7) draws its declared icon.
     default:
-      return null;
+      return refKindIcon(kind);
   }
 }
 
@@ -249,7 +251,7 @@ export function pageKindLabel(kind: string): string {
     case "custom-dashboard":
       return "dashboard";
     default:
-      return kind;
+      return refKindInfo(kind)?.label ?? kind;
   }
 }
 
