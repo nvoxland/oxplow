@@ -17,6 +17,8 @@ let extensions: unknown[] = [];
 let activeExtension: string | null = null;
 let off: string[] = [];
 let lensFails: string | null = null;
+/** How long each next active-provider read takes to answer (ms). */
+const providerDelays: number[] = [];
 /** The replacement lens's viz: a `custom` one is a sandboxed bundle. */
 let lensViz = "table";
 const lensRuns: Array<[string, unknown]> = [];
@@ -36,16 +38,22 @@ mock.module("../api.js", () => ({
     return () => listeners.delete(l);
   },
   effectiveConfig: async () => [{ key: "replacementsOff", value: off }],
-  querySql: async (sql: string) =>
-    sql.includes("v_capability_provider")
-      ? {
-          columns: ["capability", "provider", "extension", "features", "active"],
-          rows: providerRows(),
-          truncated: false,
-          reads: { models: ["v_capability_provider"], tables: [], measures: [] },
-          freshness: {},
-        }
-      : { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} },
+  querySql: async (sql: string) => {
+    if (!sql.includes("v_capability_provider")) {
+      return { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} };
+    }
+    // What is active when it is asked, answered after its delay.
+    const rows = providerRows();
+    const delay = providerDelays.shift() ?? 0;
+    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    return {
+      columns: ["capability", "provider", "extension", "features", "active"],
+      rows,
+      truncated: false,
+      reads: { models: ["v_capability_provider"], tables: [], measures: [] },
+      freshness: {},
+    };
+  },
   runLens: async (id: string, params: unknown) => {
     lensRuns.push([id, params]);
     if (lensFails) throw new Error(lensFails);
@@ -101,6 +109,7 @@ beforeEach(() => {
   off = [];
   lensFails = null;
   lensViz = "table";
+  providerDelays.length = 0;
   lensRuns.length = 0;
   usage.length = 0;
 });
@@ -186,5 +195,28 @@ test("a custom replacement that can't load falls back outside its frame", async 
   expect(view.queryByTestId("replacement-work_item.board")).toBeNull();
   expect(view.queryByTestId("replacement-badge")).toBeNull();
   expect(usage).toEqual([]);
+});
+
+// tsk857: reads of who is active can overlap (a change each); the newest
+// one asked decides, however they resolve.
+test("an older active-provider read answering late doesn't win", async () => {
+  extensions = [replacing("x"), replacing("y")];
+  activeExtension = "x";
+  const view = render(board());
+  await waitFor(() => expect(view.getByTestId("replacement-work_item.board").textContent).toContain("replaced by x"));
+
+  // A change starts a read once a burst is over (`COALESCE_MS`, 100).
+  providerDelays.push(300, 0);
+  activeExtension = "y";
+  emit({ kind: "modelsChanged", models: ["v_capability_provider"] });
+  // That read is under way (slow) when the next change is heard.
+  await act(() => new Promise((r) => setTimeout(r, 150)));
+  activeExtension = null;
+  emit({ kind: "modelsChanged", models: ["v_capability_provider"] });
+  await waitFor(() => expect(view.getByTestId("core-board")).toBeTruthy());
+  // The older read answers last.
+  await act(() => new Promise((r) => setTimeout(r, 400)));
+  expect(view.getByTestId("core-board")).toBeTruthy();
+  expect(view.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
 });
 

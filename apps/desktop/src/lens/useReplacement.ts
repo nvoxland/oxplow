@@ -61,15 +61,20 @@ export function useReplacement(target: string, props: Record<string, SqlCell>, s
   const [activeExtension, setActiveExtension] = useState<string | null | undefined>(undefined);
   const [providerReads, setProviderReads] = useState<Reads>(NO_READS);
   const [off, setOff] = useState<string[] | undefined>(undefined);
+  // Reads overlap (one per change): the newest one asked decides, however
+  // they resolve (tsk857).
+  const providersSeq = useRef(0);
   const readProviders = useCallback(async () => {
     if (capability === null) return;
+    const mine = ++providersSeq.current;
     try {
       const out = await readCapabilityProviders(capability);
+      if (providersSeq.current !== mine) return;
       setActiveExtension(out.providers.find((p) => p.active)?.extension ?? null);
       setProviderReads(out.reads);
     } catch {
       // Unknown who's active: oxplow's own is always right to show.
-      setActiveExtension(null);
+      if (providersSeq.current === mine) setActiveExtension(null);
     }
   }, [capability]);
   const readOff = useCallback(async () => {

@@ -980,7 +980,9 @@ when it changes) and `replacementsOff` (re-read on `configChanged`):
   `replacement-fallback`) — never the lens's table, and **outside** the
   replacement's frame: no badge, none of the lens's toolbar (tsk855);
 - while any of that isn't known yet, nothing renders, so the wrong
-  component never flashes.
+  component never flashes. Reads of who is active overlap (one per
+  change); the newest one asked decides, however they resolve
+  (`useReplacement`'s sequence, as its lens run has, tsk857).
 Showing one records `usage { kind: "replacement", key: <ext>/<target> }`
 (the evidence a kind needs to be promoted) — a kit lens when it ran, a
 custom one when its component says `ready` (`onCustomReady` → `shown`),
