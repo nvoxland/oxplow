@@ -37,7 +37,7 @@ use serde_json::{json, Value};
 
 use super::registry::{Instance, ProviderRegistry, Refusal};
 use super::spec;
-use crate::commands::{Command, Handler, HandlerOutput};
+use crate::commands::{Command, Handler, HandlerOutput, Invocation};
 
 /// The command that reads a provider's collectors.
 pub const SYNC: &str = "provider.sync";
@@ -557,7 +557,7 @@ pub fn sync_command(registry: &Arc<ProviderRegistry>) -> Command {
             atomicity: Atomicity::External,
             effect: CommandEffect::Record,
         },
-        Handler::External(Arc::new(move |actor, input| {
+        Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
             let registry = registry.clone();
             Box::pin(async move {
                 let SyncInput {

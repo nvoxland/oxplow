@@ -41,7 +41,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{Command, Handler, HandlerOutput};
+use super::{Command, Handler, HandlerOutput, Invocation};
 use crate::effect_triggers::{self, run_reaction, Reacted};
 use crate::effects::EffectDecl;
 use crate::extensions::Extension;
@@ -363,7 +363,7 @@ pub fn backfill_command(services: Weak<Services>) -> Command {
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
         },
-        Handler::External(Arc::new(move |_actor, input| {
+        Handler::External(Arc::new(move |_: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
                 let input: BackfillInput =
@@ -473,7 +473,7 @@ pub fn retry_command(services: Weak<Services>) -> Command {
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
         },
-        Handler::External(Arc::new(move |_actor, input| {
+        Handler::External(Arc::new(move |_: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
                 let RetryInput { effect, event } =

@@ -54,9 +54,15 @@ fn write_extension(project: &Path, hooks: &str) {
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // `plain-writes` declares no `idempotent_writes`: what is approved.
+    let declared = if hooks.split(',').any(|h| h.trim() == "plain-writes") {
+        oxplow_provider_fake::plain_declarations()
+    } else {
+        oxplow_provider_fake::declarations()
+    };
     std::fs::write(
         dir.join("provider.json"),
-        serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
+        serde_json::to_string_pretty(&declared).unwrap(),
     )
     .unwrap();
 }
@@ -3977,4 +3983,38 @@ async fn calls_refused_together_renew_once() {
         call.await.unwrap().unwrap();
     }
     assert_eq!(sim.grants(), vec!["authorization_code", "refresh_token"]);
+}
+
+/// P10: a call cut off because a renewal ended its process may have
+/// landed: it is sent again only to a provider that keeps
+/// `idempotent_writes` (under the same key); toward any other the cut-off
+/// is the call's failure. A call its service refused (`Auth`) never
+/// landed, and is sent again either way.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_cut_off_by_a_renewal_is_not_resent_without_a_key() {
+    for (hooks, resent) in [("", true), ("plain-writes", false)] {
+        let (fx, _sim) = signing_in(hooks, "").await;
+        configure(&fx, true, json!({ "team": "core" }));
+        assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+        first_read(&fx).await;
+        // One call under way (it waits before it writes) ...
+        set_hooks(&fx, "slow:500").await;
+        let svc = fx.svc.clone();
+        let under_way = tokio::spawn(async move {
+            svc.commands
+                .run(
+                    &Actor::Human,
+                    "work_item.create",
+                    json!({ "provider": "fake", "title": "cut off" }),
+                    false,
+                )
+                .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        // ... when another is refused, and its renewal ends the process.
+        set_hooks(&fx, "accepts:FAKE_TOKEN=at-3").await;
+        create_on_fake(&fx).await.unwrap();
+        let cut_off = under_way.await.unwrap();
+        assert_eq!(cut_off.is_ok(), resent, "{hooks:?}: {cut_off:?}");
+    }
 }

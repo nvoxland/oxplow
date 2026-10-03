@@ -977,8 +977,15 @@ config change.
 **Status (P10):** the wire contract and the fake are built —
 `InvokeParams.idempotency_key`, `WorkItemsFeatures.idempotent_writes`,
 `PROTOCOL_VERSION` `"2"`, and the fake declaring and keeping the promise
-(see the fake). The host's keys, the kit's check and automatic retry are
-the rest of P10; until they land the rules below stand.
+(see the fake) — and **the host sends keys**: every `Instance::invoke`
+sends one, the caller's (an effect's step: `effect_step_key`, the same
+on every attempt — [commands.md](./commands.md)) or one it mints, and
+the same key goes with each of its re-sends. A call refused (`Auth`,
+`RateLimited`) never landed and is sent again as before; one cut off
+under way because a renewal ended its process may have landed, so it is
+sent again **only to a provider declaring `idempotent_writes`** — to any
+other the cut-off is the call's failure. The kit's check and automatic
+retry are the rest of P10; until they land the rules below stand.
 
 A write to a provider may land without oxplow learning it did (a crash, a
 timeout, a dropped pipe after the service accepted it). Sending it again

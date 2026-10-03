@@ -25,7 +25,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Command, Handler, HandlerOutput, TxCtx};
+use super::{Command, Handler, HandlerOutput, Invocation, TxCtx};
 use crate::extension_catalog::ExtensionCatalog;
 use crate::extensions::{self, LensContext, LensOrigin, LensSpec};
 
@@ -305,7 +305,7 @@ fn kept_lens_tx(
 /// when that fails the file is removed again, so nothing is left half
 /// done. The bus records the run and its `lens.kept@1` after it returns.
 fn keep(target: LensTarget) -> Command {
-    let handler = Handler::External(Arc::new(move |actor, input| {
+    let handler = Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
         let target = target.clone();
         Box::pin(async move {
             let input: KeepInput = parse(input)?;
@@ -386,7 +386,7 @@ fn keep(target: LensTarget) -> Command {
 /// filesystem work that must happen before the check can run, so it's an
 /// `External` command (see `keep`).
 fn share(target: LensTarget) -> Command {
-    let handler = Handler::External(Arc::new(move |_actor, input| {
+    let handler = Handler::External(Arc::new(move |_: Invocation, input| {
         let target = target.clone();
         Box::pin(async move {
             let input: ShareInput = parse(input)?;

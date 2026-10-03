@@ -278,7 +278,7 @@ impl CommandBus {
         let mut landed: Vec<NestedChild> = Vec::with_capacity(plan.steps.len());
         let mut events = Vec::new();
         let mut failure: Option<(&Step, CommandError)> = None;
-        for step in &plan.steps {
+        for (index, step) in plan.steps.iter().enumerate() {
             let ran = match &step.run {
                 StepRun::Tx(handler) => {
                     self.run_step_tx(
@@ -291,7 +291,11 @@ impl CommandBus {
                     )
                     .await
                 }
-                StepRun::External(handler) => handler(actor.clone(), step.call.input.clone()).await,
+                StepRun::External(handler) => {
+                    let invocation =
+                        origin.invocation(actor, index, &step.call.name, &step.call.input);
+                    handler(invocation, step.call.input.clone()).await
+                }
             };
             match ran {
                 Ok(mut out) => {

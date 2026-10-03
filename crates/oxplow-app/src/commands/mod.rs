@@ -167,7 +167,39 @@ impl TxCtx<'_> {
 
 pub type TxHandler = dyn Fn(&TxCtx<'_>, Value) -> Result<HandlerOutput, CommandError> + Send + Sync;
 pub type ExternalFuture = Pin<Box<dyn Future<Output = Result<HandlerOutput, CommandError>> + Send>>;
-pub type ExternalHandler = dyn Fn(Actor, Value) -> ExternalFuture + Send + Sync;
+pub type ExternalHandler = dyn Fn(Invocation, Value) -> ExternalFuture + Send + Sync;
+
+/// Who runs an `External` handler, and the write's idempotency key (P10,
+/// `.context/providers.md` "Idempotency"): for a step of an effect's
+/// reaction, the same on every attempt at it ([`effect_step_key`]), so a
+/// provider that keeps `idempotent_writes` does it once. `None` for any
+/// other run: the system the handler calls mints one per call where it
+/// re-sends (`providers::Instance::invoke`).
+#[derive(Debug, Clone)]
+pub struct Invocation {
+    pub actor: Actor,
+    pub idempotency_key: Option<String>,
+}
+
+/// The idempotency key of step `index` (calling `call` with `input`) of
+/// the reaction `run`: `effect:<effect>:<event id>:<index>:<hash>`. Every
+/// attempt at the reaction composes it again, so the step's position
+/// alone isn't enough — the hash of what it calls is part of it.
+pub fn effect_step_key(
+    run: &oxplow_db::effect_run_store::EffectRunKey,
+    index: usize,
+    call: &str,
+    input: &Value,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(call.as_bytes());
+    hash.update([0]);
+    hash.update(input.to_string().as_bytes());
+    let digest = hash.finalize();
+    let short: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
+    format!("effect:{}:{}:{index}:{short}", run.effect, run.event_id)
+}
 
 pub enum Handler {
     /// Runs inside the bus's transaction.
@@ -414,6 +446,17 @@ impl RunOrigin {
         match self {
             RunOrigin::Effect(key) => Some(oxplow_domain::EventId(key.event_id.clone())),
             _ => None,
+        }
+    }
+    /// How an `External` call at `index` of this run is invoked: an
+    /// effect's step carries its key.
+    fn invocation(&self, actor: &Actor, index: usize, call: &str, input: &Value) -> Invocation {
+        Invocation {
+            actor: actor.clone(),
+            idempotency_key: match self {
+                RunOrigin::Effect(run) => Some(effect_step_key(run, index, call, input)),
+                _ => None,
+            },
         }
     }
 }
@@ -932,7 +975,8 @@ impl CommandBus {
             Resolved::Steps(_) => unreachable!("composite steps ran above"),
             Resolved::External(handler) => {
                 self.claim(&origin).await?;
-                match handler(actor.clone(), input.clone()).await {
+                let invocation = origin.invocation(actor, 0, &spec.name, &input);
+                match handler(invocation, input.clone()).await {
                     Ok(out) if out.unchanged && matches!(origin, RunOrigin::Call) => {
                         Ok(unrecorded(out))
                     }
@@ -1478,7 +1522,13 @@ impl CommandBus {
                             .unwrap_or_else(|| CommandError::from(db_err))
                     })?
             }
-            Resolved::External(handler) => handler(actor.clone(), input).await?,
+            Resolved::External(handler) => {
+                let invocation = Invocation {
+                    actor: actor.clone(),
+                    idempotency_key: None,
+                };
+                handler(invocation, input).await?
+            }
             Resolved::Steps(_) => {
                 return Err(CommandError::Invalid {
                     field: None,
@@ -2488,7 +2538,7 @@ mod tests {
         bus.register(
             Command::new(
                 spec,
-                Handler::External(Arc::new(move |_actor, input| {
+                Handler::External(Arc::new(move |_: Invocation, input| {
                     let db = writes.clone();
                     Box::pin(async move {
                         db.transaction(|tx| {
@@ -2737,7 +2787,7 @@ mod tests {
         bus.register(
             Command::new(
                 ext,
-                Handler::External(Arc::new(move |_actor, input| {
+                Handler::External(Arc::new(move |_: Invocation, input| {
                     let db = outside.clone();
                     Box::pin(async move {
                         let k = input["k"].as_str().unwrap_or_default().to_string();

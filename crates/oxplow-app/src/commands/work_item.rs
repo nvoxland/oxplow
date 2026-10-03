@@ -32,8 +32,8 @@ use oxplow_domain::work_items::{
     provider_of, CanonicalState, WorkItemsProvider, WorkItemsRegistry, OXPLOW, VERBS,
 };
 use oxplow_domain::{
-    Actor, Atomicity, CommandCall, CommandError, CommandSpec, Confirm, Invokers, Lifecycle, Task,
-    TaskId, TaskLinkType, TaskPriority, TaskStatus, ThreadId, Timestamp,
+    Atomicity, CommandCall, CommandError, CommandSpec, Confirm, Invokers, Lifecycle, Task, TaskId,
+    TaskLinkType, TaskPriority, TaskStatus, ThreadId, Timestamp,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -42,7 +42,7 @@ use std::sync::Arc;
 
 use oxplow_db::task_store::EffortTransition;
 
-use super::{Command, Dispatch, Handler, HandlerOutput, Route, TxCtx, TxHandler};
+use super::{Command, Dispatch, Handler, HandlerOutput, Invocation, Route, TxCtx, TxHandler};
 
 /// oxplow's status for a canonical state.
 pub fn native_status(state: CanonicalState) -> TaskStatus {
@@ -383,7 +383,7 @@ fn dispatching(
             Some(_) => Route::External(format!("provider `{}`", p.id)),
         })
     });
-    let external = Arc::new(move |actor: Actor, input: Value| {
+    let external = Arc::new(move |invocation: Invocation, input: Value| {
         let registry = registry.clone();
         Box::pin(async move {
             let provider = target(&registry, &input)?;
@@ -398,7 +398,9 @@ fn dispatching(
             if let Value::Object(fields) = &mut input {
                 fields.remove("provider");
             }
-            let out = verbs.invoke(&actor, verb, input).await?;
+            let out = verbs
+                .invoke(&invocation.actor, verb, input, invocation.idempotency_key)
+                .await?;
             let inverse = out
                 .inverse
                 .map(|c| {
@@ -1268,6 +1270,7 @@ pub fn move_command(registry: WorkItemsRegistry) -> Command {
 mod tests {
     use super::*;
     use oxplow_db::EffortStore as _;
+    use oxplow_domain::Actor;
     use oxplow_domain::StreamId;
 
     /// tsk775: filing or editing an oxplow task answers with the

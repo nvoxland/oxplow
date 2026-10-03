@@ -11,14 +11,14 @@ use std::sync::Arc;
 
 use oxplow_domain::refs::build::stream_ref;
 use oxplow_domain::{
-    Actor, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, DomainError, Invokers,
-    Lifecycle, StreamId,
+    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, DomainError, Invokers, Lifecycle,
+    StreamId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{Command, Handler, HandlerOutput};
+use super::{Command, Handler, HandlerOutput, Invocation};
 use crate::worktrees::WorktreeRouter;
 
 pub const INSTALL: &str = "extension.install";
@@ -118,7 +118,7 @@ pub fn install_command(deps: InstallDeps) -> Command {
              agent's run becomes a proposal. Refuses to overwrite — `extension.update` does that.",
             schema::<InstallInput>(),
         ),
-        Handler::External(Arc::new(move |_: Actor, input| {
+        Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
                 let input: InstallInput = parse(input)?;
@@ -156,7 +156,7 @@ pub fn update_command(deps: InstallDeps) -> Command {
              written in this repo are edited in place. Always a person's decision.",
             schema::<UpdateInput>(),
         ),
-        Handler::External(Arc::new(move |_: Actor, input| {
+        Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
                 let input: UpdateInput = parse(input)?;
@@ -198,6 +198,7 @@ pub fn commands(deps: InstallDeps) -> Vec<Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_domain::Actor;
 
     /// tsk786: where an install lands is the input's `stream`, or the
     /// primary checkout — never the actor's: the handler only runs as the

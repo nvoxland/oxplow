@@ -44,7 +44,7 @@ use serde_json::{json, Value};
 use super::host::{self, Connection, HostError, Launch};
 use super::oauth;
 use super::spec::{self, ProviderSpec};
-use crate::commands::{Command, CommandBus, Handler, HandlerOutput};
+use crate::commands::{Command, CommandBus, Handler, HandlerOutput, Invocation};
 use crate::exec_consent::ApprovalStore;
 use crate::extension_catalog::ExtensionCatalog;
 use crate::extensions::Extension;
@@ -341,6 +341,15 @@ pub struct Instance {
 }
 
 impl Instance {
+    /// Whether it keeps `idempotent_writes` (its declarations): a write
+    /// sent again with its key is done once.
+    fn idempotent_writes(&self) -> bool {
+        self.declared
+            .capabilities
+            .iter()
+            .any(|c| c.features.get("idempotent_writes").and_then(Value::as_bool) == Some(true))
+    }
+
     /// The keychain account of its credential `name`.
     fn account(&self, name: &str) -> String {
         crate::collector_runner::instance_credential_account(
@@ -685,7 +694,22 @@ impl Instance {
     }
 
     /// Run one of its declared commands.
-    pub async fn invoke(&self, command: &str, input: Value) -> Result<InvokeResult, CommandError> {
+    /// Run `command`. `idempotency_key` is the write's key (an effect's
+    /// step's); without one a key is minted here. Either way the same key
+    /// goes with every re-send below, so a provider that keeps
+    /// `idempotent_writes` does the write once. A call refused (`Auth`,
+    /// `RateLimited`) never landed and is sent again; one cut off under
+    /// way (its process ended for another caller's renewal) may have
+    /// landed, and is sent again only to a provider that keeps the
+    /// promise.
+    pub async fn invoke(
+        &self,
+        command: &str,
+        input: Value,
+        idempotency_key: Option<String>,
+    ) -> Result<InvokeResult, CommandError> {
+        let key =
+            idempotency_key.unwrap_or_else(|| format!("call:{}", uuid::Uuid::new_v4().simple()));
         let mut retried = false;
         let mut reauthorized = false;
         loop {
@@ -698,8 +722,7 @@ impl Instance {
                     handle,
                     command: command.into(),
                     input: input.clone(),
-                    // The host sends keys from P7 (tsk871).
-                    idempotency_key: None,
+                    idempotency_key: Some(key.clone()),
                 },
                 self.deps.call_timeout,
             )
@@ -726,7 +749,11 @@ impl Instance {
                 Err(ProtocolError::Auth { credential, .. }) => {
                     Some(Refusal::Auth(credential.clone()))
                 }
-                Err(_) if peer.is_closed() && self.renewed_since(started) => {
+                Err(_)
+                    if peer.is_closed()
+                        && self.renewed_since(started)
+                        && self.idempotent_writes() =>
+                {
                     Some(Refusal::RenewedUnder)
                 }
                 _ => None,
@@ -2786,27 +2813,33 @@ fn commands(instance: &Arc<Instance>) -> Result<Vec<Command>, String> {
             let (instance, verb, id) = (instance.clone(), decl.name.clone(), id.clone());
             Command::new(
                 spec,
-                Handler::External(Arc::new(move |actor, input| {
-                    let (instance, verb, id) = (instance.clone(), verb.clone(), id.clone());
-                    Box::pin(async move {
-                        let out = instance.invoke(&verb, input).await?;
-                        let events = out
-                            .events
-                            .into_iter()
-                            .map(|d| instance.envelope(&actor, d))
-                            .collect::<Result<Vec<_>, _>>()?;
-                        Ok(HandlerOutput {
-                            result: out.result,
-                            inverse: out.inverse.map(|c| CommandCall {
-                                name: format!("{id}.{}", c.command),
-                                input: c.input,
-                            }),
-                            events,
-                            after_commit: None,
-                            unchanged: false,
+                Handler::External(Arc::new(
+                    move |Invocation {
+                              actor,
+                              idempotency_key,
+                          },
+                          input| {
+                        let (instance, verb, id) = (instance.clone(), verb.clone(), id.clone());
+                        Box::pin(async move {
+                            let out = instance.invoke(&verb, input, idempotency_key).await?;
+                            let events = out
+                                .events
+                                .into_iter()
+                                .map(|d| instance.envelope(&actor, d))
+                                .collect::<Result<Vec<_>, _>>()?;
+                            Ok(HandlerOutput {
+                                result: out.result,
+                                inverse: out.inverse.map(|c| CommandCall {
+                                    name: format!("{id}.{}", c.command),
+                                    input: c.input,
+                                }),
+                                events,
+                                after_commit: None,
+                                unchanged: false,
+                            })
                         })
-                    })
-                })),
+                    },
+                )),
             )
             .map_err(|e| e.to_string())
         })

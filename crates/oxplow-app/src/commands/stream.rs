@@ -11,15 +11,15 @@ use std::sync::Arc;
 use oxplow_db::stream_store::{get_tx, upsert_tx};
 use oxplow_domain::refs::build::stream_ref;
 use oxplow_domain::{
-    Actor, Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Invokers,
-    Lifecycle, Stream, StreamId, Timestamp,
+    Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
+    Stream, StreamId, Timestamp,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::thread::agent_scope;
-use super::{Command, Handler, HandlerOutput, TxCtx};
+use super::{Command, Handler, HandlerOutput, Invocation, TxCtx};
 
 pub const CREATE_WORKTREE: &str = "stream.create_worktree";
 pub const ADOPT_WORKTREE: &str = "stream.adopt_worktree";
@@ -213,7 +213,7 @@ pub fn create_worktree_command(deps: StreamDeps) -> Command {
             schema::<CreateWorktreeInput>(),
             Confirm::Never,
         ),
-        Handler::External(Arc::new(move |_actor: Actor, input| {
+        Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
                 let input: CreateWorktreeInput = parse(input)?;
@@ -239,7 +239,7 @@ pub fn adopt_worktree_command(deps: StreamDeps) -> Command {
             schema::<AdoptWorktreeInput>(),
             Confirm::Never,
         ),
-        Handler::External(Arc::new(move |_actor: Actor, input| {
+        Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
                 let input: AdoptWorktreeInput = parse(input)?;
@@ -268,7 +268,7 @@ pub fn archive_command(deps: StreamDeps) -> Command {
             schema::<ArchiveInput>(),
             Confirm::Destructive,
         ),
-        Handler::External(Arc::new(move |_actor: Actor, input| {
+        Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
                 use crate::agent_status_derive::{derive_thread_status, recent_activity};
@@ -397,6 +397,7 @@ mod tests {
     use super::*;
     use crate::test_fixtures::{services_with_effort, EffortFixture};
     use oxplow_domain::stores::StreamStore as _;
+    use oxplow_domain::Actor;
 
     async fn primary(fx: &EffortFixture) -> Stream {
         fx.svc.stream_store.primary().await.unwrap().unwrap()

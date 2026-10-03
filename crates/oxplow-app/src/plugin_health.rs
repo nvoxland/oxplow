@@ -25,7 +25,7 @@ use oxplow_domain::{
 };
 use serde::Deserialize;
 
-use crate::commands::{Command, Handler, HandlerOutput};
+use crate::commands::{Command, Handler, HandlerOutput, Invocation};
 
 /// Failures in a row that disable a contribution.
 pub const FAILURES_TO_DISABLE: i64 = 3;
@@ -278,7 +278,7 @@ pub fn enable_command(
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
         },
-        Handler::External(Arc::new(move |actor, input| {
+        Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
             let (health, providers) = (health.clone(), providers.clone());
             Box::pin(async move {
                 let EnableInput {

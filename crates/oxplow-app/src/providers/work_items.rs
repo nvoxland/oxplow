@@ -75,6 +75,7 @@ impl ExternalVerbs for ExternalWorkItems {
         actor: &Actor,
         verb: &str,
         input: Value,
+        idempotency_key: Option<String>,
     ) -> Result<VerbOutcome, CommandError> {
         let id = &self.instance.id;
         let validator = self.inputs.get(verb).ok_or_else(|| CommandError::Invalid {
@@ -88,7 +89,7 @@ impl ExternalVerbs for ExternalWorkItems {
             },
             other => other,
         })?;
-        let out = self.instance.invoke(verb, input).await?;
+        let out = self.instance.invoke(verb, input, idempotency_key).await?;
         let events = out
             .events
             .into_iter()

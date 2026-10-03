@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::thread::parse_thread_ref;
-use super::{Command, Handler, HandlerOutput};
+use super::{Command, Handler, HandlerOutput, Invocation};
 use crate::file_ref_version::ResolvedFileVersion;
 use crate::sql_gateway::SqlGateway;
 use crate::task_service::{compute_effort_file_review, TaskService};
@@ -375,7 +375,7 @@ pub fn report_command(deps: EffortDeps) -> Command {
              it with `effort.amend`, or leave it if your list was right.",
             schema::<ReportInput>(),
         ),
-        Handler::External(Arc::new(move |actor: Actor, input| {
+        Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
             let deps = deps.clone();
             Box::pin(async move {
                 let input: ReportInput = parse(input)?;
@@ -400,7 +400,7 @@ pub fn amend_command(deps: EffortDeps) -> Command {
              EFFORT REVIEW names). An agent amends only its own thread's efforts.",
             schema::<AmendInput>(),
         ),
-        Handler::External(Arc::new(move |actor: Actor, input| {
+        Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
             let deps = deps.clone();
             Box::pin(async move {
                 let input: AmendInput = parse(input)?;

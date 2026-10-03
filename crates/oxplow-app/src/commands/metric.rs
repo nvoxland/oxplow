@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::config_commands::{change, ConfigTarget};
-use super::{Command, Handler, HandlerOutput, TxCtx};
+use super::{Command, Handler, HandlerOutput, Invocation, TxCtx};
 use crate::metric_engine::FactFilter;
 use crate::metrics_service::MetricsService;
 
@@ -306,7 +306,7 @@ pub fn commands(target: MetricTarget) -> Vec<Command> {
                 Atomicity::External,
                 CommandEffect::Write,
             ),
-            Handler::External(Arc::new(move |_actor, input| {
+            Handler::External(Arc::new(move |_: Invocation, input| {
                 let metrics = metrics.clone();
                 Box::pin(async move {
                     let input: RebuildInput = parse(input)?;

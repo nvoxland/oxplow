@@ -8,13 +8,13 @@
 use std::sync::Arc;
 
 use oxplow_domain::{
-    Actor, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
+    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{Command, Handler, HandlerOutput};
+use super::{Command, Handler, HandlerOutput, Invocation};
 use crate::background_task::{BackgroundTaskKind, BackgroundTaskStore, StartInput};
 use crate::events::{EventBus, OxplowEvent};
 use crate::lsp_installer::LspInstallerService;
@@ -73,7 +73,7 @@ pub fn install_command(deps: LspDeps) -> Command {
             "Download and install a language server (a Mason package) and register its \
              binary. A person's decision: an agent's run becomes a proposal.",
         ),
-        Handler::External(Arc::new(move |_actor: Actor, input| {
+        Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
                 let input = parse(input)?;
@@ -116,7 +116,7 @@ pub fn remove_command(deps: LspDeps) -> Command {
             "Uninstall a language server: delete its files, manifest entry and registrations. \
              A person's decision.",
         ),
-        Handler::External(Arc::new(move |_actor: Actor, input| {
+        Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
                 let input = parse(input)?;
@@ -140,6 +140,7 @@ pub fn commands(deps: LspDeps) -> Vec<Command> {
 mod tests {
     use super::*;
     use crate::test_fixtures::services_with_effort;
+    use oxplow_domain::Actor;
 
     /// What oxplow downloads and runs is a person's call.
     #[tokio::test]

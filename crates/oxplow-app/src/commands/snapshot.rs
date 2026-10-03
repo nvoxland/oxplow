@@ -6,13 +6,13 @@
 use std::sync::Arc;
 
 use oxplow_domain::{
-    Actor, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
+    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{Command, Handler, HandlerOutput};
+use super::{Command, Handler, HandlerOutput, Invocation};
 use crate::snapshot_files::{SnapshotFileError, SnapshotFiles};
 
 pub const RESTORE_FILE: &str = "snapshot.restore_file";
@@ -41,7 +41,7 @@ pub fn restore_file_command(files: SnapshotFiles) -> Command {
             atomicity: Atomicity::External,
             effect: CommandEffect::Write,
         },
-        Handler::External(Arc::new(move |_actor: Actor, input: Value| {
+        Handler::External(Arc::new(move |_: Invocation, input: Value| {
             let files = files.clone();
             Box::pin(async move {
                 let input: RestoreInput =
@@ -75,6 +75,7 @@ pub fn restore_file_command(files: SnapshotFiles) -> Command {
 mod tests {
     use super::*;
     use crate::test_fixtures::services_with_effort;
+    use oxplow_domain::Actor;
 
     /// A restore overwrites the worktree: unconfirmed, a person is asked
     /// and an agent's run is a proposal.

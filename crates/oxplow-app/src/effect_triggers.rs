@@ -840,6 +840,91 @@ mod tests {
             .unwrap();
     }
 
+    /// A reaction of two steps: the item marked inside oxplow, then a
+    /// write outside it (`probe.write`).
+    const PROBE: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": ref, \"title\": \"probed\"}}, {\"name\": \"probe.write\", \"input\": {\"n\": 1}}]}\n";
+
+    /// `probe.write`: a write outside oxplow that keeps each idempotency
+    /// key it is sent, and fails while `fail` is set.
+    fn register_probe(
+        svc: &Services,
+        keys: Arc<parking_lot::Mutex<Vec<Option<String>>>>,
+        fail: Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        use crate::commands::{Command, Handler, HandlerOutput, Invocation};
+        use oxplow_domain::{Atomicity, CommandEffect, CommandSpec, Confirm, Invokers, Lifecycle};
+        let command = Command::new(
+            CommandSpec {
+                name: "probe.write".into(),
+                summary: "Write outside oxplow (a test probe).".into(),
+                input_schema: json!({ "type": "object" }),
+                invokers: Invokers::ALL,
+                confirm: Confirm::Never,
+                undoable: false,
+                lifecycle: Lifecycle::Stable,
+                atomicity: Atomicity::External,
+                effect: CommandEffect::Write,
+            },
+            Handler::External(Arc::new(move |invocation: Invocation, _input| {
+                keys.lock().push(invocation.idempotency_key);
+                let failing = fail.load(std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    if failing {
+                        return Err(CommandError::Failed {
+                            message: "the probe's system is down".into(),
+                        });
+                    }
+                    Ok(HandlerOutput::default())
+                })
+            })),
+        )
+        .unwrap();
+        svc.commands.register(command).unwrap();
+    }
+
+    /// P10: a step outside oxplow carries an idempotency key derived from
+    /// the reaction — its effect, its event, the step's position and what
+    /// it calls — so every attempt at it sends the same one, and a
+    /// provider that keeps `idempotent_writes` does it once. A person's
+    /// own run of the command carries none.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_effect_step_sends_the_same_key_on_every_attempt() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", PROBE)]);
+        approve(svc).await;
+        register(svc);
+        let keys: Arc<parking_lot::Mutex<Vec<Option<String>>>> = Arc::default();
+        let fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        register_probe(svc, keys.clone(), fail.clone());
+        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        EffectTriggers::new(Arc::downgrade(svc))
+            .handle(&ev)
+            .await
+            .unwrap();
+        assert_eq!(
+            rows(svc, "SELECT state FROM v_effect_run").await,
+            json!([["failed"]])
+        );
+        fail.store(false, std::sync::atomic::Ordering::SeqCst);
+        let human = oxplow_domain::Actor::Human;
+        let retried = retry(svc, &human, &ev, true).await.unwrap();
+        assert_eq!(retried.result["outcome"], json!("ok"));
+        let sent = keys.lock().clone();
+        assert_eq!(sent.len(), 2, "{sent:?}");
+        assert_eq!(sent[0], sent[1], "both attempts sent one key");
+        let key = sent[0].clone().unwrap_or_default();
+        assert!(
+            key.starts_with(&format!("effect:acme/mark-done:{}:1:", ev.envelope.id)),
+            "{key}"
+        );
+        svc.commands
+            .run(&human, "probe.write", json!({ "n": 1 }), false)
+            .await
+            .unwrap();
+        assert_eq!(keys.lock().last(), Some(&None));
+    }
+
     async fn retry(
         svc: &Services,
         actor: &oxplow_domain::Actor,

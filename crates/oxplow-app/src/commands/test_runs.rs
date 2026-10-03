@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use oxplow_domain::refs::build::{task_of_work_item_ref, validate_work_item_ref};
 use oxplow_domain::{
-    Actor, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
+    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 
 use super::comment::author_of;
 use super::thread::acting_thread_of;
-use super::{Command, Handler, HandlerOutput};
+use super::{Command, Handler, HandlerOutput, Invocation};
 use crate::collection::CollectionService;
 
 pub const RECORD_RUN: &str = "test.record_run";
@@ -82,7 +82,7 @@ pub fn record_run_command(collection: CollectionService) -> Command {
              sibling efforts open. Returns `{ recorded, observationId }`.",
             schema::<RecordRunInput>(),
         ),
-        Handler::External(Arc::new(move |actor: Actor, input| {
+        Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
             let collection = collection.clone();
             Box::pin(async move {
                 let input: RecordRunInput = parse(input)?;
@@ -131,6 +131,7 @@ pub fn commands(collection: CollectionService) -> Vec<Command> {
 mod tests {
     use super::*;
     use crate::test_fixtures::services_with_effort;
+    use oxplow_domain::Actor;
 
     const COBERTURA: &str = r#"<?xml version="1.0"?>
 <coverage><packages><package name="p"><classes>

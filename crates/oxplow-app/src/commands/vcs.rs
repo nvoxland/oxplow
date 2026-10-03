@@ -26,7 +26,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{Command, Handler, HandlerOutput};
+use super::{Command, Handler, HandlerOutput, Invocation};
 use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
 use crate::vcs::GitProvider;
 use crate::worktrees::WorktreeRouter;
@@ -109,7 +109,7 @@ where
     let op = Arc::new(op);
     Command::new(
         spec,
-        Handler::External(Arc::new(move |_actor, input: Value| {
+        Handler::External(Arc::new(move |_: Invocation, input: Value| {
             let target = target.clone();
             let op = op.clone();
             Box::pin(async move {

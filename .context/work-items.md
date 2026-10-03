@@ -115,9 +115,11 @@ item).
   `features`, and `external: Option<Arc<dyn ExternalVerbs>>` — `None`
   for oxplow's own (its verbs are the `work_item.*` commands' `Tx`
   cores), the provider's verbs for an external one.
-- **`ExternalVerbs::invoke(actor, verb, input) -> VerbOutcome { result,
-  events, inverse? }`**: a provider outside the bus's transaction; its
-  inverse is named by its **verb**.
+- **`ExternalVerbs::invoke(actor, verb, input, idempotency_key) ->
+  VerbOutcome { result, events, inverse? }`**: a provider outside the
+  bus's transaction; its inverse is named by its **verb**. The key is
+  the caller's when it has one (an effect's step), else the host mints
+  one ([providers.md](./providers.md) "Idempotency").
 - **`WorkItemsFeatures`**: `hierarchy`, `comments`, `links`, `delete`,
   `in_progress_opens_effort` (moving an item to `in_progress` opens its
   effort itself), `idempotent_writes` (a write sent twice with one

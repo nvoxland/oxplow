@@ -16,14 +16,14 @@ use oxplow_db::dashboard_store::{
 };
 use oxplow_db::Database;
 use oxplow_domain::{
-    Actor, Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, DashboardId,
+    Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, DashboardId,
     DashboardItemId, Invokers, Lifecycle,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{Command, Handler, HandlerOutput, TxCtx};
+use super::{Command, Handler, HandlerOutput, Invocation, TxCtx};
 use crate::dashboard_tiles::{new_tile, TileInput};
 use crate::sql_gateway::SqlGateway;
 
@@ -282,7 +282,7 @@ pub fn add_item_command(db: Database, sql: SqlGateway) -> Command {
             true,
             Atomicity::External,
         ),
-        Handler::External(Arc::new(move |_actor: Actor, input| {
+        Handler::External(Arc::new(move |_: Invocation, input| {
             let (db, sql) = (db.clone(), sql.clone());
             Box::pin(async move {
                 let input: AddItemInput = parse(input)?;
@@ -338,7 +338,7 @@ pub fn update_item_command(db: Database, sql: SqlGateway) -> Command {
             true,
             Atomicity::External,
         ),
-        Handler::External(Arc::new(move |_actor: Actor, input| {
+        Handler::External(Arc::new(move |_: Invocation, input| {
             let (db, sql) = (db.clone(), sql.clone());
             Box::pin(async move {
                 let input: UpdateItemInput = parse(input)?;
@@ -479,6 +479,7 @@ pub fn commands(db: Database, sql: SqlGateway) -> Vec<Command> {
 mod tests {
     use super::*;
     use crate::test_fixtures::{services_with_effort, EffortFixture};
+    use oxplow_domain::Actor;
 
     fn agent(fx: &EffortFixture) -> Actor {
         Actor::Agent {

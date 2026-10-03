@@ -354,7 +354,13 @@ handler (P5.A1) is an async call against a system the bus doesn't own —
 a VCS, a provider process, a collector script, the lens files on disk —
 whose state can't join the bus's transaction; the bus audits it after it returns (a failure to
 record is logged, never reported as the run failing); its audit row
-holds the handler's `result` like a `Tx` run's. It is the right
+holds the handler's `result` like a `Tx` run's. It is
+`Fn(Invocation, Value)`: `Invocation { actor, idempotency_key }`, the key
+set for a step of an effect's reaction (`effect_step_key`:
+`effect:<effect>:<event id>:<index>:<hash of the call>`, the same on
+every attempt at it — P10) and `None` otherwise; a provider's handlers
+pass it to the provider ([providers.md](./providers.md)
+"Idempotency"). It is the right
 kind for exactly those commands, not a shortcut: `CommandBus::
 external_commands()` is pinned by `the_external_commands_are_the_reviewed_ones`,
 and adding one means naming its system in the summary. A

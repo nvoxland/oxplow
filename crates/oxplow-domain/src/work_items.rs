@@ -143,7 +143,9 @@ pub struct VerbOutcome {
 /// own system (a process, a tracker) and are recorded after they return.
 /// `input` is the `work_item.<verb>` input, less the host-side
 /// `provider`; the implementation checks it against what the provider
-/// declared and refuses anything else before calling.
+/// declared and refuses anything else before calling. `idempotency_key`
+/// is the write's key when the caller has one (an effect's step: the same
+/// on every attempt); without one the provider's host mints one.
 #[async_trait]
 pub trait ExternalVerbs: Send + Sync {
     async fn invoke(
@@ -151,6 +153,7 @@ pub trait ExternalVerbs: Send + Sync {
         actor: &Actor,
         verb: &str,
         input: Value,
+        idempotency_key: Option<String>,
     ) -> Result<VerbOutcome, CommandError>;
 }
 
