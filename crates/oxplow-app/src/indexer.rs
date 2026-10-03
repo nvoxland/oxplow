@@ -29,6 +29,10 @@ pub const KIND_NOTE: &str = "note";
 pub const KIND_WIKI: &str = "wiki";
 pub const KIND_FILE: &str = "file";
 
+/// Every kind core indexes; any other in the index is a plugin kind's
+/// (`kind_search`).
+pub const CORE_KINDS: &[&str] = &[KIND_TASK, KIND_COMMENT, KIND_NOTE, KIND_WIKI, KIND_FILE];
+
 /// The pump consumer's name.
 pub const SEARCH_INDEX: &str = "search.index";
 

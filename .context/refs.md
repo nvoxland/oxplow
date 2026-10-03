@@ -131,7 +131,12 @@ one of those tables. A kind's entries leave only when `ref_kind` stops
 declaring it searchable (its extension removed, its `searchable:`
 dropped) — never because its view isn't published at the moment: at
 start the extension models are dropped and compiled again, and "not
-compiled yet" isn't "gone" (tsk852).
+compiled yet" isn't "gone" (tsk852). What a gone kind left is found
+wherever it is (tsk853): its `asset_state`, its `asset_failure` (a kind
+whose recomputes only ever failed has nothing else), or entries in the
+index with neither — a restate can commit after a removal's cleanup, or
+a process die between the two — every kind in `search_entry` that isn't
+core's (`indexer::CORE_KINDS`) or declared searchable.
 
 `refs::validate_ref` parses a ref and checks it against the kind
 registry. The event log's `append_tx` runs it on every `subject`

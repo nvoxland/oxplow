@@ -217,24 +217,36 @@ impl Assets {
             }));
             have.insert(kind.clone(), spec.clone());
         }
-        // What was indexed for a kind that is no longer searchable goes.
-        let keep: Vec<String> = declared.iter().map(|k| asset_name(k)).collect();
+        // What was indexed for a kind that is no longer searchable goes —
+        // found wherever it is left: its state, its failure, or entries
+        // with neither (a restate that committed after a cleanup, or a
+        // process that died between the two), core's kinds aside (tsk853).
+        let keep: Vec<String> = declared.into_iter().collect();
         self.db()
             .transaction(move |tx| {
                 let mut st = tx
-                    .prepare("SELECT asset FROM asset_state WHERE asset LIKE 'search:%'")
+                    .prepare(
+                        "SELECT substr(asset, 8) FROM asset_state WHERE asset LIKE 'search:%' \
+                         UNION SELECT substr(asset, 8) FROM asset_failure WHERE asset LIKE 'search:%' \
+                         UNION SELECT kind FROM search_entry",
+                    )
                     .map_err(oxplow_db::map_sql_err)?;
-                let recorded: Vec<String> = st
+                let found: Vec<String> = st
                     .query_map([], |r| r.get(0))
                     .map_err(oxplow_db::map_sql_err)?
                     .collect::<rusqlite::Result<_>>()
                     .map_err(oxplow_db::map_sql_err)?;
-                for asset in recorded.iter().filter(|a| !keep.contains(a)) {
-                    let kind = asset.trim_start_matches("search:");
+                let gone = found.iter().filter(|kind| {
+                    !keep.contains(kind) && !crate::indexer::CORE_KINDS.contains(&kind.as_str())
+                });
+                for kind in gone {
                     oxplow_db::search_store::restate_kind_tx(tx, kind, &BTreeMap::new())?;
                     for table in ["asset_state", "asset_failure"] {
-                        tx.execute(&format!("DELETE FROM {table} WHERE asset = ?1"), [asset])
-                            .map_err(oxplow_db::map_sql_err)?;
+                        tx.execute(
+                            &format!("DELETE FROM {table} WHERE asset = ?1"),
+                            [asset_name(kind)],
+                        )
+                        .map_err(oxplow_db::map_sql_err)?;
                     }
                 }
                 Ok(())
@@ -522,6 +534,60 @@ ref_kinds:
             .map(|h| h.kind)
             .collect();
         assert_eq!(left, vec!["acme_pr"]);
+    }
+
+    /// tsk853: what a gone kind left is found from the index and the
+    /// failures too, not only `asset_state`: a restate that committed
+    /// after the cleanup (or a process that died between the two) left
+    /// entries with no state row, and a kind whose recomputes only ever
+    /// failed has a failure row and nothing else.
+    #[tokio::test]
+    async fn a_gone_kinds_orphaned_entries_and_failures_leave() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        for (kind, id) in [("acme_pr", "12"), ("wiki", "widgets"), ("task", "7")] {
+            svc.search_store
+                .upsert(kind, id, None, "Widget", "")
+                .await
+                .unwrap();
+        }
+        svc.db
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO asset_failure (asset, failed_at, error) \
+                     VALUES ('search:acme_bad', '2026-01-01T00:00:00Z', 'no such view')",
+                    [],
+                )
+                .map(|_| ())
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        Assets::new(svc.db.clone(), Duration::from_millis(50))
+            .sync_search_kinds()
+            .await
+            .unwrap();
+        let mut left: Vec<String> = svc
+            .search_store
+            .search("widget", None, &[], 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|h| h.kind)
+            .collect();
+        left.sort();
+        assert_eq!(left, vec!["task", "wiki"], "core's entries are untouched");
+        let failures = svc
+            .db
+            .read(|tx| {
+                tx.query_row("SELECT count(*) FROM asset_failure", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(failures, 0);
     }
 
     /// A kind that went while oxplow wasn't running (its index recorded,
