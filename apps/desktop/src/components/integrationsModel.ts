@@ -27,6 +27,9 @@ export function integrationRow(v: ProviderInstanceView, now: Date = new Date()):
     case "missing":
       status = s.reason;
       break;
+    case "refused":
+      status = `Not started: ${s.reason}`;
+      break;
     case "unapproved":
       // A global instance runs in every project, but consent is about the
       // code in this one.
@@ -68,7 +71,7 @@ export function integrationRow(v: ProviderInstanceView, now: Date = new Date()):
     status,
     enableLabel,
     needsApproval: !v.approved,
-    problem: ["missing", "unapproved", "unconfigured", "failing", "disabled"].includes(s.state),
+    problem: ["missing", "refused", "unapproved", "unconfigured", "failing", "disabled"].includes(s.state),
   };
 }
 

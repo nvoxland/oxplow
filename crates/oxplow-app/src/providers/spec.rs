@@ -564,14 +564,6 @@ fn program_problem(spec: &ProviderSpec, read: &dyn Fn(&str) -> Option<String>) -
     }
 }
 
-/// A provider id: lowercase snake_case (it is a command namespace).
-fn valid_id(id: &str) -> bool {
-    id.chars().next().is_some_and(|c| c.is_ascii_lowercase())
-        && id
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-}
-
 /// A path inside the extension folder that the approval's tree hash
 /// covers: relative, no `..`, not the manifest, not under `lenses/`.
 fn inside(path: &str) -> bool {
@@ -733,14 +725,8 @@ pub fn parse_providers(
             }
         };
         let id = spec.id.clone();
-        let problem = if !valid_id(&id) {
-            Some(format!(
-                "provider id `{id}` must be lowercase letters, digits and underscores"
-            ))
-        } else if id == crate::work_items::PROVIDER
-            || oxplow_domain::events::schema::CORE_NAMESPACES.contains(&id.as_str())
-        {
-            Some(format!("provider id `{id}` is reserved for oxplow"))
+        let problem = if let Some(why) = oxplow_domain::work_items::provider_id_problem(&id) {
+            Some(format!("provider id {why}"))
         } else if specs.iter().any(|s| s.id == id) {
             Some(format!("provider id `{id}` is declared twice"))
         } else if !CAPABILITIES.contains(&spec.capability.as_str()) {

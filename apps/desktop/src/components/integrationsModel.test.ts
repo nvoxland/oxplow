@@ -190,3 +190,20 @@ test("canRemoveInstance: a named instance, a project's replacement, or one whose
   expect(canRemoveInstance(view({ scope: "global", overridden: true }))).toBe(true);
   expect(canRemoveInstance(view({ health: { ...view({}).health, state: { state: "missing", reason: "gone" } } }))).toBe(true);
 });
+
+// tsk840: an instance oxplow won't run as configured says why, as a problem.
+test("a refused instance's row says why it didn't start", () => {
+  const refused = integrationRow(
+    view({
+      enabled: true,
+      health: {
+        ...view({}).health,
+        state: { state: "refused", reason: "the command namespace `notes` is already provider:acme/notes's — give the instance another id" },
+      },
+    }),
+  );
+  expect(refused.status).toBe(
+    "Not started: the command namespace `notes` is already provider:acme/notes's — give the instance another id",
+  );
+  expect(refused.problem).toBe(true);
+});

@@ -3083,6 +3083,13 @@ export type InstanceState =
  *  declares; `reason` says what's wrong and how to fix it.
  */
 { state: "missing"; reason: string } | 
+/**
+ *  Enabled, but oxplow won't run it as configured: its id is a
+ *  command namespace or provider something else already has, or it
+ *  declares an event type oxplow doesn't know with that schema.
+ *  `reason` says which (tsk840).
+ */
+{ state: "refused"; reason: string } | 
 // Enabled, but this machine hasn't approved this version of it.
 { state: "unapproved" } | 
 // Enabled, but its `check` found problems with its config.

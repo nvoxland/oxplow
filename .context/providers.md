@@ -459,7 +459,15 @@ extensionInstances:
   tracker/linear_acme: { enabled: true, provider: linear, config: { team: ACME } }
 ```
 
-**An instance id** is lowercase snake_case. A provider's **default
+**An instance id** follows the provider id's rule — one rule,
+`oxplow_domain::work_items::provider_id_problem` (tsk840): lowercase
+letters, digits and underscores, starting with a letter, and none of
+oxplow's own (`oxplow`, a core namespace such as `code` or `config`),
+checked wherever an id is written (`extensionInstances`, `instances.yaml`,
+a manifest's `providers`). An instance oxplow still won't run — its id is
+a namespace or provider something else registered first, or it declares
+an event type oxplow doesn't know with that schema — is `refused { reason
+}` on its row, never "enabled" and silently off. A provider's **default
 instance** has the provider's own id; any other instance names its
 provider (`provider:`) — without it, an id that isn't a declared
 provider's is `Missing { reason }`, and the reason says what to add.
@@ -749,8 +757,8 @@ start, before the instance runs, reports by name (`made_by: None`).
 **Health** (`InstanceHealth { state, consecutive_failures, last_ok_at,
 mean_invoke_ms, rate_limited_until, activity }`, per machine, in memory): `state` is `off`,
 `missing { reason }` (configured, but it names no provider an enabled
-extension declares; the reason says what to add),
-`unapproved`, `unconfigured { problems }`, `checking`, `ready`,
+extension declares; the reason says what to add), `refused { reason }`
+(enabled, but it can't run as configured — above), `unapproved`, `unconfigured { problems }`, `checking`, `ready`,
 `failing { errors }` (the last five) or `disabled { reason }`. A failed
 start or call counts (a refused input or a cancel doesn't); a success
 resets the count and updates `last_ok_at` and the moving-average

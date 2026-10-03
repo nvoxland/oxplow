@@ -132,6 +132,13 @@ pub enum InstanceState {
     Missing {
         reason: String,
     },
+    /// Enabled, but oxplow won't run it as configured: its id is a
+    /// command namespace or provider something else already has, or it
+    /// declares an event type oxplow doesn't know with that schema.
+    /// `reason` says which (tsk840).
+    Refused {
+        reason: String,
+    },
     /// Enabled, but this machine hasn't approved this version of it.
     Unapproved,
     /// Enabled, but its `check` found problems with its config.
@@ -1373,6 +1380,16 @@ impl ProviderRegistry {
             name: name.clone(),
             message,
         };
+        // What it is as configured can't run: its row says why (tsk840).
+        let refused = |reason: String| {
+            self.set_state(
+                &name,
+                InstanceState::Refused {
+                    reason: reason.clone(),
+                },
+            );
+            refuse(reason)
+        };
         let bus = self
             .bus
             .upgrade()
@@ -1382,12 +1399,14 @@ impl ProviderRegistry {
         }
         let epoch = self.disable_epoch(&name);
         if let Some(owner) = bus.namespace_owner(id) {
-            return Err(refuse(format!(
-                "the command namespace `{id}` is already {owner}'s"
+            return Err(refused(format!(
+                "the command namespace `{id}` is already {owner}'s — give the instance another id"
             )));
         }
         if self.work_items.get(id).is_ok() {
-            return Err(refuse(format!("`{id}` is already a provider")));
+            return Err(refused(format!(
+                "`{id}` is already a provider — give the instance another id"
+            )));
         }
         let instance = match self.instance(ext, spec, id, scope, config).await {
             Ok(i) => i,
@@ -1399,7 +1418,7 @@ impl ProviderRegistry {
         let vocabulary = bus.vocabulary().current();
         for t in &instance.declared.event_types {
             if vocabulary.schema(&t.event_type, t.v) != Some(&t.schema) {
-                return Err(refuse(format!(
+                return Err(refused(format!(
                     "it declares `{}@{}`, which isn't an event type oxplow knows with that schema \
                      (a provider emits core types only, for now)",
                     t.event_type, t.v

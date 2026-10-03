@@ -2019,6 +2019,41 @@ fn configure_named(
 
 const SECOND: &str = "tracker/fake_second";
 
+/// tsk840: an instance oxplow can't run as configured — its id is a
+/// command namespace something else already owns — says so on its row,
+/// rather than showing enabled and "Off" with no reason.
+#[tokio::test]
+async fn a_refused_enable_says_why() {
+    let (fx, _ext) = approved("").await;
+    fx.svc
+        .commands
+        .register_namespace("fake_second", "a test", Vec::new())
+        .unwrap();
+    configure_named(&fx, SECOND, Some("fake"), json!({ "team": "second" }));
+    fx.svc.providers.reconcile().await;
+    match fx.svc.providers.health(SECOND).map(|h| h.state) {
+        Some(InstanceState::Refused { reason }) => {
+            assert!(
+                reason.contains("`fake_second` is already a test's"),
+                "{reason}"
+            )
+        }
+        other => panic!("{other:?}"),
+    }
+    // A reserved id is refused when it's added.
+    let refused = fx
+        .svc
+        .providers
+        .add_instance(&Actor::Human, "tracker/code", "fake", Scope::Project)
+        .await;
+    assert!(
+        refused
+            .as_ref()
+            .is_err_and(|e| e.to_string().contains("`code` is reserved for oxplow")),
+        "{refused:?}"
+    );
+}
+
 /// tsk839: instances of one program start at once — each makes its
 /// approved copy. None removes another's copy under way (a temp folder
 /// it is about to keep) or the one another kept: each start gets an

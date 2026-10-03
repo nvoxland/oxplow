@@ -1730,13 +1730,16 @@ fn validate_extension_instances(
     raw: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
 ) -> Result<std::collections::BTreeMap<String, ExtensionInstanceConfig>, ConfigError> {
     for (key, instance) in &raw {
-        let well_formed = key
-            .split_once('/')
-            .is_some_and(|(ext, id)| !ext.is_empty() && is_instance_id(id));
-        if !well_formed {
+        let Some((_, id)) = key.split_once('/').filter(|(ext, _)| !ext.is_empty()) else {
             return Err(ConfigError::Invalid(format!(
                 "extensionInstances: `{key}` must be `<extension>/<instance id>` (the id lowercase \
                  snake_case: a provider's own, or another instance's with `provider: <id>`)"
+            )));
+        };
+        if let Some(why) = oxplow_domain::work_items::provider_id_problem(id) {
+            return Err(ConfigError::Invalid(format!(
+                "extensionInstances: `{key}` must be `<extension>/<instance id>`, and the \
+                 instance id {why} (it is its refs' segment and its command namespace)"
             )));
         }
         if let Some(provider) = instance.provider.as_deref().filter(|p| !is_instance_id(p)) {
@@ -3400,6 +3403,28 @@ mod tests {
             GlobalInstances::update(dir.path(), |_| Err("no")).unwrap(),
             Err("no")
         );
+    }
+
+    /// tsk840: an instance's id is a provider id's kind of name — its refs'
+    /// segment and its command namespace — so the same names are oxplow's
+    /// own: `oxplow`, and a core namespace.
+    #[test]
+    fn an_instance_id_may_not_be_oxplows_own() {
+        for id in ["oxplow", "code", "config", "work_item"] {
+            let mut all = std::collections::BTreeMap::new();
+            all.insert(
+                format!("tracker/{id}"),
+                ExtensionInstanceConfig {
+                    provider: Some("linear".into()),
+                    ..ExtensionInstanceConfig::default()
+                },
+            );
+            let err = validate_extension_instances(all).unwrap_err().to_string();
+            assert!(
+                err.contains(&format!("`{id}` is reserved for oxplow")),
+                "{err}"
+            );
+        }
     }
 
     /// tsk837: each change to the machine's instances is one
