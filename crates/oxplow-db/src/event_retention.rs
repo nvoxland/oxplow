@@ -8,7 +8,7 @@
 //! |---|---|---|
 //! | `agent` | 30 days | 14 days |
 //! | `test`, `code`, `collector`, `effect` | 90 days | 30 days |
-//! | a plugin's (any namespace core doesn't own) | 30 days | 14 days |
+//! | a plugin's (any namespace core doesn't own) | 30 days, or its declared window | 14 days, or its declared window |
 //! | core's state (`snapshot`, `vcs`, `effort`, `work_item`, `command`, `config`, …) | kept | kept |
 //!
 //! An expired payload is replaced by `{}` and stamped `payload_expired_at`
@@ -34,20 +34,98 @@ pub const POLICY: &[(&str, i64, i64)] = &[
 ];
 
 /// Every plugin namespace's window (§5.4): payloads 30 days, large
-/// content 14. A plugin's own, shorter window comes with its declared
-/// event types (P8).
+/// content 14 — unless its extension declares a shorter one
+/// (`event_types.retention`, P8.D5; `plugin_event_retention`).
 pub const PLUGIN_DEFAULT: (i64, i64) = (30, 14);
+
+/// Whether an extension may declare this window: at least a day, and no
+/// longer than [`PLUGIN_DEFAULT`] — a plugin may keep its rows for less,
+/// never more.
+pub fn check_declared(payload_days: i64, content_days: i64) -> Result<(), String> {
+    let (p, c) = PLUGIN_DEFAULT;
+    if payload_days < 1 || content_days < 1 {
+        return Err("retention windows are at least 1 day".into());
+    }
+    if payload_days > p {
+        return Err(format!(
+            "`payload_days: {payload_days}` is longer than the {p}-day default; a plugin may \
+             only keep its events for less"
+        ));
+    }
+    if content_days > c {
+        return Err(format!(
+            "`content_days: {content_days}` is longer than the {c}-day default; a plugin may \
+             only keep its events for less"
+        ));
+    }
+    Ok(())
+}
+
+/// An extension present in the catalog, with its declared window (`None`:
+/// the default).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclaredRetention {
+    pub namespace: String,
+    pub extension: String,
+    /// `(payload days, content days)`.
+    pub window: Option<(i64, i64)>,
+}
+
+/// Restate the declared windows from the extensions present: each one's
+/// window recorded, or dropped when it declares none. An extension not
+/// present keeps the window it last declared.
+pub fn restate_declared_tx(
+    conn: &rusqlite::Connection,
+    present: &[DeclaredRetention],
+    now: &str,
+) -> Result<(), DomainError> {
+    for d in present {
+        match d.window {
+            Some((payload_days, content_days)) => conn.execute(
+                "INSERT INTO plugin_event_retention
+                     (namespace, extension, payload_days, content_days, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT (namespace) DO UPDATE SET
+                     extension = excluded.extension,
+                     payload_days = excluded.payload_days,
+                     content_days = excluded.content_days,
+                     updated_at = excluded.updated_at",
+                params![d.namespace, d.extension, payload_days, content_days, now],
+            ),
+            None => conn.execute(
+                "DELETE FROM plugin_event_retention WHERE namespace = ?1",
+                [&d.namespace],
+            ),
+        }
+        .map_err(map_sql_err)?;
+    }
+    Ok(())
+}
 
 /// The namespaces the sweep expires and their windows: core's
 /// [`POLICY`], then every namespace in the log or the content store
-/// that core doesn't own, at [`PLUGIN_DEFAULT`].
+/// that core doesn't own, at its declared window or [`PLUGIN_DEFAULT`].
 async fn windows(db: &Database) -> Result<Vec<(String, i64, i64)>, DomainError> {
     let mut out: Vec<(String, i64, i64)> = POLICY
         .iter()
         .map(|(ns, p, c)| (ns.to_string(), *p, *c))
         .collect();
+    let declared: std::collections::HashMap<String, (i64, i64)> = db
+        .read(|tx| {
+            let mut st = tx
+                .prepare("SELECT namespace, payload_days, content_days FROM plugin_event_retention")
+                .map_err(map_sql_err)?;
+            let rows = st
+                .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))
+                .map_err(map_sql_err)?
+                .collect::<rusqlite::Result<_>>()
+                .map_err(map_sql_err)?;
+            Ok(rows)
+        })
+        .await?;
     for ns in plugin_namespaces(db).await? {
-        out.push((ns, PLUGIN_DEFAULT.0, PLUGIN_DEFAULT.1));
+        let (p, c) = declared.get(&ns).copied().unwrap_or(PLUGIN_DEFAULT);
+        out.push((ns, p, c));
     }
     Ok(out)
 }
@@ -243,6 +321,79 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(kept, "{\"a\":1}");
+    }
+
+    /// P8.D5: an extension's declared window replaces the plugin default
+    /// for its namespace, and is kept when the extension goes; one present
+    /// without a window goes back to the default.
+    #[tokio::test]
+    async fn a_declared_window_expires_its_namespace_sooner_and_outlives_the_extension() {
+        let db = Database::in_memory();
+        let now = oxplow_domain::Timestamp::from_unix_ms(100 * DAY_MS);
+        let days_ago = |d: i64| {
+            crate::database::ts_to_string(oxplow_domain::Timestamp::from_unix_ms(
+                now.unix_ms() - d * DAY_MS,
+            ))
+        };
+        let (old8, old6) = (days_ago(8), days_ago(6));
+        db.transaction(move |tx| {
+            restate_declared_tx(
+                tx,
+                &[DeclaredRetention {
+                    namespace: "acme_pr".into(),
+                    extension: "acme-pr".into(),
+                    window: Some((7, 3)),
+                }],
+                "t",
+            )?;
+            // The extension is gone: its window stays.
+            restate_declared_tx(tx, &[], "t")?;
+            for (id, at) in [("old", &old8), ("new", &old6)] {
+                tx.execute(
+                    "INSERT INTO event_log (id, type, v, at, source, subject, payload)
+                       VALUES (?1, 'acme_pr.merged', 1, ?2, 'test', '[]', '{\"number\":1}')",
+                    rusqlite::params![id, at],
+                )
+                .map_err(crate::map_sql_err)?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let report = sweep(&db, now).await.unwrap();
+        assert_eq!(report.payloads_expired, 1, "only the 8-day-old payload");
+
+        // Back without a window: the default (30 days) again.
+        db.transaction(|tx| {
+            restate_declared_tx(
+                tx,
+                &[DeclaredRetention {
+                    namespace: "acme_pr".into(),
+                    extension: "acme-pr".into(),
+                    window: None,
+                }],
+                "t",
+            )?;
+            let n: i64 = tx
+                .query_row("SELECT count(*) FROM plugin_event_retention", [], |r| {
+                    r.get(0)
+                })
+                .map_err(crate::map_sql_err)?;
+            assert_eq!(n, 0);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    #[test]
+    fn a_declared_window_may_only_be_shorter() {
+        assert!(check_declared(7, 3).is_ok());
+        assert!(check_declared(30, 14).is_ok());
+        let long = check_declared(60, 14).unwrap_err();
+        assert!(long.contains("60") && long.contains("30"), "{long}");
+        assert!(check_declared(7, 15).is_err());
+        assert!(check_declared(0, 1).is_err());
     }
 
     /// A parked event whose payload expires can never be retried, so its

@@ -2280,6 +2280,12 @@ export type EventBodyKey = "input" | "output" |
  */
 export type EventId = string;
 
+// How long its events' payloads and large content are kept, in days.
+export type EventRetention = {
+	payloadDays: number,
+	contentDays: number,
+};
+
 /**
  *  One `type@v` an extension declares, as loaded: the schema and the
  *  upcast's script read from its folder.
@@ -2299,6 +2305,19 @@ export type EventTypeDecl = {
 	 *  schema changed at a recorded version).
 	 */
 	declaredAt: string,
+};
+
+/**
+ *  An extension's `event_types:` as loaded: its valid types, and the
+ *  retention window it declares for its namespace.
+ */
+export type EventTypes = {
+	types: EventTypeDecl[],
+	/**
+	 *  Shorter than the plugin default (`event_retention::check_declared`);
+	 *  `None`: the default.
+	 */
+	retention: EventRetention | null,
 };
 
 // A loaded extension and anything wrong with it.
@@ -2517,7 +2536,7 @@ export type Extension_Deserialize = {
 	 *  Event types it declares (experimental: a private extension's only;
 	 *  valid ones — the vocabulary registers them, `vocabulary_reactor`).
 	 */
-	eventTypes: EventTypeDecl[],
+	eventTypes: EventTypes,
 	/**
 	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).
@@ -2616,7 +2635,7 @@ export type Extension_Serialize = {
 	 *  Event types it declares (experimental: a private extension's only;
 	 *  valid ones — the vocabulary registers them, `vocabulary_reactor`).
 	 */
-	eventTypes: EventTypeDecl[],
+	eventTypes: EventTypes,
 	/**
 	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).

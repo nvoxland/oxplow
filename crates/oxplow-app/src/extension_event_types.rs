@@ -10,7 +10,26 @@ use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::extensions::manifest_v2::{at, entry_line, key_line};
+use crate::extensions::manifest_v2::{at, entry_line, key_line, line_under};
+
+/// An extension's `event_types:` as loaded: its valid types, and the
+/// retention window it declares for its namespace.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EventTypes {
+    pub types: Vec<EventTypeDecl>,
+    /// Shorter than the plugin default (`event_retention::check_declared`);
+    /// `None`: the default.
+    pub retention: Option<EventRetention>,
+}
+
+/// How long its events' payloads and large content are kept, in days.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EventRetention {
+    pub payload_days: u32,
+    pub content_days: u32,
+}
 
 /// One `type@v` an extension declares, as loaded: the schema and the
 /// upcast's script read from its folder.
@@ -51,7 +70,17 @@ impl EventTypeDecl {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EventTypesFile {
+    #[serde(default)]
     types: Vec<serde_yaml::Value>,
+    #[serde(default)]
+    retention: Option<RetentionFile>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RetentionFile {
+    payload_days: Option<u32>,
+    content_days: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -68,29 +97,48 @@ struct TypeFile {
 
 /// Parse an `event_types:` block. Each type is checked the way the
 /// vocabulary will register it (namespace, schema, version, upcast) and
-/// its files read through `read`; what's wrong is `file:line`.
+/// its files read through `read`; a retention window may only be shorter
+/// than the default; what's wrong is `file:line`.
 pub fn parse_event_types(
     extension: &str,
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
     read: &dyn Fn(&str) -> Option<String>,
-) -> (Vec<EventTypeDecl>, Vec<String>) {
+) -> (EventTypes, Vec<String>) {
     let block_line = key_line(manifest, "event_types");
     let block: EventTypesFile = match serde_yaml::from_value(value.clone()) {
         Ok(b) => b,
         Err(e) => {
             return (
-                Vec::new(),
+                EventTypes::default(),
                 vec![at(file, block_line, format!("event_types: {e}"))],
             )
         }
     };
+    let mut errors = Vec::new();
+    let retention = block.retention.and_then(|r| {
+        let (p, c) = oxplow_db::event_retention::PLUGIN_DEFAULT;
+        let window = EventRetention {
+            payload_days: r.payload_days.unwrap_or(p as u32),
+            content_days: r.content_days.unwrap_or(c as u32),
+        };
+        match oxplow_db::event_retention::check_declared(
+            window.payload_days.into(),
+            window.content_days.into(),
+        ) {
+            Ok(()) => Some(window),
+            Err(e) => {
+                let line = line_under(manifest, "event_types", "retention").or(block_line);
+                errors.push(at(file, line, format!("event_types.retention: {e}")));
+                None
+            }
+        }
+    });
     // Registering into a scratch registry is the check: what it refuses,
     // the running vocabulary would.
     let mut scratch = EventSchemaRegistry::new();
     let mut out = Vec::new();
-    let mut errors = Vec::new();
     for item in block.types {
         let t: TypeFile = match serde_yaml::from_value(item) {
             Ok(t) => t,
@@ -105,7 +153,13 @@ pub fn parse_event_types(
             Err(e) => errors.push(at(file, line, e)),
         }
     }
-    (out, errors)
+    (
+        EventTypes {
+            types: out,
+            retention,
+        },
+        errors,
+    )
 }
 
 fn decl_of(
@@ -176,7 +230,7 @@ mod tests {
 
     const FILE: &str = "oxplow/extensions/acme-pr/extension.yaml";
 
-    fn parse(manifest: &str, files: &[(&str, &str)]) -> (Vec<EventTypeDecl>, Vec<String>) {
+    fn parse(manifest: &str, files: &[(&str, &str)]) -> (EventTypes, Vec<String>) {
         let doc: serde_yaml::Value = serde_yaml::from_str(manifest).unwrap();
         let files: Vec<(String, String)> = files
             .iter()
@@ -192,8 +246,9 @@ mod tests {
     #[test]
     fn a_declared_type_loads_with_its_schema() {
         let manifest = "name: acme-pr\nevent_types:\n  types:\n    - type: acme_pr.merged\n      v: 1\n      schema: merged.json\n      summary: A pull request merged.\n";
-        let (types, errors) = parse(manifest, &[("merged.json", SCHEMA)]);
+        let (declared, errors) = parse(manifest, &[("merged.json", SCHEMA)]);
         assert!(errors.is_empty(), "{errors:?}");
+        let types = declared.types;
         assert_eq!(types.len(), 1);
         assert_eq!(types[0].schema["required"], json!(["number"]));
         assert_eq!(types[0].declared_at, format!("{FILE}:4"));
@@ -202,8 +257,8 @@ mod tests {
     #[test]
     fn a_malformed_declaration_is_an_error_at_its_line() {
         let manifest = "name: acme-pr\nevent_types:\n  types:\n    - type: acme_pr.merged\n      v: 1\n      schema: merged.json\n      summary: ok\n    - type: work_item.stolen\n      v: 1\n      schema: merged.json\n      summary: no\n    - type: acme_pr.closed\n      v: 1\n      schema: missing.json\n      summary: no\n    - type: acme_pr.opened\n      v: 2\n      schema: merged.json\n      summary: no\n";
-        let (types, errors) = parse(manifest, &[("merged.json", SCHEMA)]);
-        assert_eq!(types.len(), 1);
+        let (declared, errors) = parse(manifest, &[("merged.json", SCHEMA)]);
+        assert_eq!(declared.types.len(), 1);
         assert_eq!(errors.len(), 3, "{errors:?}");
         assert!(
             errors[0].starts_with(&format!("{FILE}:8:")) && errors[0].contains("core namespace"),
@@ -232,6 +287,33 @@ mod tests {
             summary: "a pull request merged".into(),
             upcast,
         }
+    }
+
+    #[test]
+    fn a_retention_window_may_only_be_shorter_than_the_default() {
+        let (declared, errors) = parse(
+            "name: acme-pr\nevent_types:\n  retention: { payload_days: 7 }\n",
+            &[],
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            declared.retention,
+            Some(EventRetention {
+                payload_days: 7,
+                content_days: 14
+            })
+        );
+        let (declared, errors) = parse(
+            "name: acme-pr\nevent_types:\n  types: []\n  retention: { payload_days: 60 }\n",
+            &[],
+        );
+        assert_eq!(declared.retention, None);
+        assert!(
+            errors.len() == 1
+                && errors[0].starts_with(&format!("{FILE}:4:"))
+                && errors[0].contains("60"),
+            "{errors:?}"
+        );
     }
 
     #[test]

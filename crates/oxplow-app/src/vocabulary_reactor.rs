@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use oxplow_db::event_retention::{restate_declared_tx, DeclaredRetention};
 use oxplow_db::event_type_store::{recorded_schema_tx, restate_tx, EventTypeRow};
 use oxplow_db::Database;
 use oxplow_domain::events::schema::{plugin_namespace, EventSchemaRegistry};
@@ -33,7 +34,7 @@ use oxplow_domain::DomainError;
 use tokio::sync::Mutex;
 
 use crate::extension_catalog::ExtensionCatalog;
-use crate::extension_event_types::EventTypeDecl;
+use crate::extension_event_types::EventTypes;
 use crate::extensions::Extension;
 
 /// A burst of file events is one pass.
@@ -54,8 +55,8 @@ pub struct VocabularyService {
     state: Mutex<State>,
 }
 
-/// Each extension's declared types, by name.
-type Declared = Vec<(String, Vec<EventTypeDecl>)>;
+/// Each enabled extension's `event_types:`, by name.
+type Declared = Vec<(String, EventTypes)>;
 
 impl VocabularyService {
     pub fn new(
@@ -77,11 +78,13 @@ impl VocabularyService {
     /// Passes are serialized.
     pub async fn sync(&self) -> Result<(), DomainError> {
         let mut state = self.state.lock().await;
+        // Every enabled extension: one that declares nothing restates its
+        // retention back to the default.
         let declared: Declared = self
             .catalog
             .get(&self.root)
             .iter()
-            .filter(|e| e.enabled && !e.event_types.is_empty())
+            .filter(|e| e.enabled)
             .map(|e| (e.name.clone(), e.event_types.clone()))
             .collect();
         let fingerprint = {
@@ -156,21 +159,25 @@ fn build_tx(
 ) -> Result<(Vocabulary, BTreeMap<String, Vec<String>>), DomainError> {
     let mut events = EventSchemaRegistry::core();
     let mut errors: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let declares = |t: &EventTypes| !t.types.is_empty() || t.retention.is_some();
     let mut by_namespace: HashMap<String, Vec<&str>> = HashMap::new();
-    for (extension, _) in declared {
+    for (extension, _) in declared.iter().filter(|(_, t)| declares(t)) {
         by_namespace
             .entry(plugin_namespace(extension))
             .or_default()
             .push(extension);
     }
-    for (extension, types) in declared {
+    let mut retention = Vec::new();
+    for (extension, declared) in declared {
         let namespace = plugin_namespace(extension);
-        let others: Vec<&str> = by_namespace[&namespace]
-            .iter()
+        let others: Vec<&str> = by_namespace
+            .get(&namespace)
+            .into_iter()
+            .flatten()
             .copied()
             .filter(|o| o != extension)
             .collect();
-        if !others.is_empty() {
+        if declares(declared) && !others.is_empty() {
             errors.entry(extension.clone()).or_default().push(format!(
                 "event types: `{namespace}.*` is also {}'s namespace; rename one extension",
                 others
@@ -181,7 +188,14 @@ fn build_tx(
             ));
             continue;
         }
-        for d in types {
+        retention.push(DeclaredRetention {
+            namespace,
+            extension: extension.clone(),
+            window: declared
+                .retention
+                .map(|r| (r.payload_days.into(), r.content_days.into())),
+        });
+        for d in &declared.types {
             let refused = match recorded_schema_tx(tx, &d.event_type, d.v)? {
                 Some(recorded) if recorded != d.schema => Some(format!(
                     "{}: the schema of `{}@{}` changed since that version was recorded; declare \
@@ -201,6 +215,7 @@ fn build_tx(
             }
         }
     }
+    restate_declared_tx(tx, &retention, now)?;
     let rows: Vec<EventTypeRow> = events
         .versions()
         .into_iter()
@@ -322,6 +337,47 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(registered.rows, vec![vec![SqlCell::Int(0)]]);
+    }
+
+    /// P8.D5: a declared retention window is recorded for the namespace
+    /// and stays after the extension is removed.
+    #[tokio::test]
+    async fn a_declared_retention_window_outlives_its_extension() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/extension.yaml",
+            &MANIFEST.replace(
+                "event_types:\n",
+                "event_types:\n  retention: { payload_days: 7, content_days: 3 }\n",
+            ),
+        );
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/merged.json",
+            &schema("number"),
+        );
+        let window = || async {
+            svc.db
+                .read(|tx| {
+                    tx.query_row(
+                        "SELECT payload_days, content_days FROM plugin_event_retention \
+                         WHERE namespace = 'acme_pr'",
+                        [],
+                        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+        };
+        svc.vocabulary_service.sync().await.unwrap();
+        assert_eq!(window().await, (7, 3));
+        std::fs::remove_dir_all(root.join("oxplow/extensions/acme-pr")).unwrap();
+        svc.vocabulary_service.sync().await.unwrap();
+        assert_eq!(window().await, (7, 3));
     }
 
     /// A collector may follow its own extension's declared types, never

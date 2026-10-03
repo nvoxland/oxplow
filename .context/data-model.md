@@ -1212,7 +1212,12 @@ can't use a BINARY index; windows in its `POLICY`: `agent` 30 d payload / 14 d b
 `test`, `code`, `collector` and `effect` 90 / 30, and every namespace core
 doesn't own — a plugin's, found by skipping through that index one
 namespace per probe, and in `event_content` — `PLUGIN_DEFAULT` 30 / 14
-(P7.B7); core's state namespaces are kept). **An expired event is
+(P7.B7), or the shorter window its extension declares
+(`event_types.retention`, P8.D5: kept in `plugin_event_retention`, V145,
+restated by the vocabulary reactor, longer than the default refused by
+`check_declared` at load, and **kept when the extension is unloaded** —
+its rows stay under the window it promised; an extension present without
+a window drops back to the default); core's state namespaces are kept). **An expired event is
 history only** (tsk501): `StoredEvent.payload_expired_at` carries the
 stamp; the pump checkpoints past it without calling any consumer (a new or
 renamed consumer replaying the log never sees `{}`); `retry_dead_letter`

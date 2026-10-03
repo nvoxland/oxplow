@@ -1181,6 +1181,7 @@ read as `_` (`acme-pr` → `acme_pr.*`):
 
 ```yaml
 event_types:
+  retention: { payload_days: 7, content_days: 3 }   # optional; only shorter than 30 / 14
   types:
     - type: acme_pr.merged
       v: 1
@@ -1192,6 +1193,11 @@ event_types:
       summary: A pull request merged, with its reviewers.
       upcast: event_types/merged.star      # required past v1: transform({from_v, payload}) → the v2 payload
 ```
+
+**Retention** (P8.D5) is the namespace's window for payloads and large
+content (data-model.md "event_log" retention): either omitted part is the
+default, and a longer one is a load error. The reactor records it in
+`plugin_event_retention`, which keeps it after the extension is gone.
 
 **Loading** checks each type the way the vocabulary registers it (a
 scratch `register_declared`): a core or foreign namespace, a schema file
