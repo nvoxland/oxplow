@@ -487,6 +487,15 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   provider approvals are reviewed by what they change ("Reviewing by
   effect"). An agent's run that needs a person waits as a proposal
   ([commands.md](./commands.md), "Proposals").
+- **P8 (2026-10-02).** The experimental kinds run, in a private
+  extension: `event_types:` ("Event types"), `ref_kinds:` ("Ref kinds")
+  and `effects:` ("Effects"), through one swappable vocabulary. A change
+  is reviewed by its rows, collector outputs and effects at any revision,
+  on the CLI (`plugin check --effects`) and in an effort's review
+  ("Reviewing by effect"). Models declare keys and may materialize on a
+  clock or incrementally ([semantic-layer.md](./semantic-layer.md)).
+  Installs and updates are the `extension.install` / `extension.update`
+  commands.
 
 ## The rules
 
@@ -565,19 +574,23 @@ ui:                  # what it adds to the core UI
     - { slot: effort.review.details, lens: change-review }
   commands: …        # its commands in core menus (stable; P6b)
   decorators: …      # experimental: a private extension only
-  replacements: …    # experimental, parsed as data only (P8)
+  replacements: …    # experimental, parsed as data only (left for P9)
 advisories:  [...]   # see "Advisories"
 launcher:            # entries for non-lens targets; a lens uses its own launcher: block
   - { label: …, category: Data, target: { ref: page:… } }        # a page (a ref of a kind that opens as one)
   - { label: …, category: Work, target: { command: …, input: { … } } }   # a command, run as the person
   - { label: …, category: Code, target: { prompt: … } }          # a one-line prompt, put in the agent's input
-models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name>; `materialize: on_change` stores one (semantic-layer.md "Extension models", "Materialized models")
+models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name>; `key: [cols]`; `materialize: on_change | { every: 1h } | { incremental: <col> }` stores one (semantic-layer.md "Extension models", "Materialized models")
 pages: …  panels: …  # running (P6.G1/G2): see "Panels" and "Pages"
 commands:  [...]   # Starlark scripts composing core commands (see "Commands")
 config: …          # parsed as data
 # experimental kinds — a PRIVATE extension only
-providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md); the others below are parsed as data only
-effects: … event_types: … ref_kinds: … custom_components: …   # and ui.decorators / ui.replacements
+providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md)
+event_types: …      # its own namespace's event types (see "Event types", P8)
+ref_kinds: …        # kinds of thing a ref can name (see "Ref kinds", P8)
+effects: …          # scripts reacting to logged events by composing commands (see "Effects", P8)
+custom_components: …   # sandboxed components for `viz: custom` lenses (see "Custom components")
+# and ui.decorators / ui.replacements above
 ```
 
 Lenses aren't listed here: every `lenses/*.yaml` file in the folder is
@@ -894,7 +907,7 @@ manifest still using top-level `slot_mounts:` / `decorators:` /
 | `vcs.status.header` | UncommittedChangesPage, a strip above everything | `stream_id` |
 | `vcs.status.details` | UncommittedChangesPage | `change_id` |
 | `vcs.history.sidebar` | GitHistoryPage, a side column shown only when something mounts there (`useSlotMounted`) | `stream_id` |
-| (`diff.file.header`, a file diff's header strip, isn't a slot yet — P8: the file diff has a header strip above Monaco (the path, the base, Prev / Next, Open File) a lens could mount in; it waits for a lens that needs it) | | |
+| (`diff.file.header`, a file diff's header strip, isn't a slot yet — left for P9: the file diff has a header strip above Monaco (the path, the base, Prev / Next, Open File) a lens could mount in; it waits for a lens that needs it) | | |
 | `settings.section` | Settings: a section per mounting extension, titled with its name, before AI (tsk330; `SettingsSlotSections`, `slotRuns(…, extension)`) | none |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
@@ -1249,7 +1262,7 @@ appended any more but still read, and the pump delivers them at their
 logged version (`data-model.md` "event_log").
 
 **Appending them (P8.D4).** Nothing else appends an extension's types:
-a command script's result (and, from P8.D10, an effect's) may carry
+a command script's result (and an effect's, P8.D10) may carry
 `events: [{ type, payload, subject? }]`. `own_events` turns each into an
 envelope at its type's newest version, from
 `extension:<extension>/<command>`, refusing (the run is `Invalid` and

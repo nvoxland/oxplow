@@ -182,7 +182,7 @@ binary must live in it); enable the extension, approve its program on
 Settings → Data → Programs, then on Settings → Integrations set
 `LINEAR_API_KEY` and the team, Check and Enable. Two `providers:` entries
 with different ids give two instances (two teams); several instances of
-one provider are P8.
+one provider are left for P9.
 
 ## The MCP adapter (`crates/oxplow-provider-mcp`)
 
@@ -213,7 +213,7 @@ credentials. The loader refuses an adapter whose server, mapping or tools
 isn't inside the folder (a path check: a server that doesn't exist fails
 when the adapter spawns it, at `check`), an `args:` beside it, tools
 that aren't a JSON list of named tools, and a server by `url` (not yet,
-P8). **The approval covers it all**: the program hashed is the server's
+left for P9). **The approval covers it all**: the program hashed is the server's
 file, the mapping and tools are named in its args, and the tree hash
 covers the folder, so changing the mapping, a pin or the server needs
 approving again; the approval row lists the server and each pinned tool
