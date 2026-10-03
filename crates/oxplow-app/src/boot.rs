@@ -153,6 +153,8 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     crate::plugin_repair::register(state);
     // `on:` collectors (P7.B3), after the consumers they may name.
     crate::collector_triggers::register(state);
+    // Extensions' effects (P8.D10), approved ones only.
+    crate::effect_triggers::register(state);
     // Config changes reach the extension catalog, the provider registry and
     // the metric catalog (P7.B6).
     crate::config_reactors::register(state);

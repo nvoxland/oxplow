@@ -108,7 +108,13 @@ thread-scoped), its source is `effect:<extension>/<id>`, and only a
 `actor_kind = 'effect'` (V147 rebuilds `command_audit`'s CHECK, keeping
 proposals' `audit_id`), carried by `command.executed@2` and
 `command.proposed@2` — v1 plus `effect` in `ActorKind`, upcast as is; the
-v1 schemas keep the frozen `ActorKindV1`.
+v1 schemas keep the frozen `ActorKindV1`. An effect's reaction runs
+through `CommandBus::run_effect` (P8.D10) with `RunOrigin::Effect`, the
+fourth origin beside a call, an undo and an approval: like those, its
+record (`effect_run` + `effect.result@2`) lands in the run's transaction,
+or is claimed before a step outside it (`claim`), and its
+`command.executed` is caused by the triggering event (extensions.md
+"Effects").
 
 **An `External` run whose recording fails** (its effects already
 committed in the service's own transaction) is reported as done and

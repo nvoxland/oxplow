@@ -1,0 +1,4 @@
+SELECT r.id, r.effect, substr(r.effect, 1, instr(r.effect, '/') - 1) AS extension,
+       r.event_id, r.event_seq, r.state, r.reason, r.audit_id, r.proposal_id,
+       r.started_at, r.finished_at
+FROM source('effect_run') r

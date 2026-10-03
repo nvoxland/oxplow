@@ -246,6 +246,63 @@ pub async fn start_after(
         .await
 }
 
+/// How a reaction whose commands ran ended: `ok`, or `failed` with the
+/// step error when a step outside the transaction failed partway.
+pub fn ran(audit_id: i64, failed: Option<String>) -> oxplow_db::effect_run_store::Finished {
+    use oxplow_db::effect_run_store::{Finished, RunState};
+    Finished {
+        state: if failed.is_some() {
+            RunState::Failed
+        } else {
+            RunState::Ok
+        },
+        reason: failed,
+        audit_id: Some(audit_id),
+        proposal_id: None,
+    }
+}
+
+/// An effect's reaction to one event ended: its `effect_run` row (its
+/// `started` claim finished) and `effect.result@2`, from the effect,
+/// about the event and the extension, caused by `cause` (its run's
+/// `command.executed`, its proposal's `command.proposed`; none when no
+/// command ran). `Invalid` when the reaction already ended.
+pub fn finished_tx(
+    tx: &rusqlite::Connection,
+    vocabulary: &oxplow_domain::vocabulary::Vocabulary,
+    key: &oxplow_db::effect_run_store::EffectRunKey,
+    done: &oxplow_db::effect_run_store::Finished,
+    cause: Option<oxplow_domain::EventId>,
+) -> Result<(), oxplow_domain::DomainError> {
+    use oxplow_db::effect_run_store::RunState;
+    use oxplow_domain::events::schema::{EffectOutcome, EffectResult, EffectResultV2};
+    let now = oxplow_domain::Timestamp::now().to_string();
+    oxplow_db::effect_run_store::finish_tx(tx, key, done, &now)?;
+    let outcome = match done.state {
+        RunState::Ok => EffectOutcome::Ok,
+        RunState::Skipped => EffectOutcome::Skipped,
+        RunState::Proposed => EffectOutcome::Proposed,
+        RunState::Started | RunState::Failed => EffectOutcome::Failed,
+    };
+    let extension = key.effect.split('/').next().unwrap_or_default();
+    let event_ref = format!("event:{}", key.event_id);
+    let mut result = oxplow_domain::Envelope::typed::<EffectResult>(
+        format!("effect:{}", key.effect),
+        &EffectResultV2 {
+            effect: key.effect.clone(),
+            event: Some(event_ref.clone()),
+            outcome,
+            reason: done.reason.clone(),
+            proposal: done.proposal_id.map(|id| format!("proposal:{id}")),
+            detail: serde_json::Value::Null,
+        },
+    )
+    .with_subject([event_ref, crate::plugin_health::plugin_ref(extension)]);
+    result.cause = cause;
+    oxplow_db::event_log_store::append_tx(tx, vocabulary, &result)?;
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

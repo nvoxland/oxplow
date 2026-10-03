@@ -1787,6 +1787,71 @@
       "key": []
     }
   },
+  "effect_run": {
+    "1": {
+      "columns": [
+        {
+          "doc": "Reaction id.",
+          "name": "id",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "The effect: `<extension>/<id>`.",
+          "name": "effect",
+          "type": "TEXT"
+        },
+        {
+          "doc": "The extension that declares it.",
+          "name": "extension",
+          "type": ""
+        },
+        {
+          "doc": "The event it reacted to (`v_event.id`).",
+          "name": "event_id",
+          "type": "TEXT"
+        },
+        {
+          "doc": "That event's log position.",
+          "name": "event_seq",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`.",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "doc": "Why it skipped or failed.",
+          "name": "reason",
+          "type": "TEXT"
+        },
+        {
+          "doc": "Its run's `command_audit` row, when its commands ran.",
+          "name": "audit_id",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "The proposal it left, when a command asked a person.",
+          "name": "proposal_id",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "When it started (RFC 3339).",
+          "name": "started_at",
+          "type": "TEXT"
+        },
+        {
+          "doc": "When it ended; NULL while `started`.",
+          "name": "finished_at",
+          "type": "TEXT"
+        }
+      ],
+      "key": [
+        "effect",
+        "event_id"
+      ]
+    }
+  },
   "effort": {
     "1": {
       "columns": [

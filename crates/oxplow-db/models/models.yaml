@@ -548,6 +548,24 @@
   tests:
     - { not_null: id }
     - { unique: id }
+- name: effect_run
+  version: 1
+  key: [effect, event_id]
+  description: "Each extension effect's reaction to each event (P8.D10): at most one per effect and event — ran (`ok`), `skipped`, left a `proposal` for a person, or `failed` (an interrupted run included, never sent again)."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Reaction id." }
+    - { name: "effect", type: "TEXT", doc: "The effect: `<extension>/<id>`." }
+    - { name: "extension", type: "", doc: "The extension that declares it." }
+    - { name: "event_id", type: "TEXT", doc: "The event it reacted to (`v_event.id`)." }
+    - { name: "event_seq", type: "INTEGER", doc: "That event's log position." }
+    - { name: "state", type: "TEXT", doc: "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`." }
+    - { name: "reason", type: "TEXT", doc: "Why it skipped or failed." }
+    - { name: "audit_id", type: "INTEGER", doc: "Its run's `command_audit` row, when its commands ran." }
+    - { name: "proposal_id", type: "INTEGER", doc: "The proposal it left, when a command asked a person." }
+    - { name: "started_at", type: "TEXT", doc: "When it started (RFC 3339)." }
+    - { name: "finished_at", type: "TEXT", doc: "When it ended; NULL while `started`." }
+  tests:
+    - { not_null: effect }
 - name: event_type
   version: 1
   key: [event_type, v]

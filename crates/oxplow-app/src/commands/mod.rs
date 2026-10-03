@@ -362,11 +362,26 @@ struct Gates {
     may_write: Option<bool>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum RunOrigin {
     Call,
     Undo(i64),
     Approval(i64),
+    /// An extension's effect reacting to an event (P8.D10): the run's
+    /// `effect_run` row and `effect.result` land with it, and its
+    /// `command.executed` is caused by the event.
+    Effect(Arc<oxplow_db::effect_run_store::EffectRunKey>),
+}
+
+impl RunOrigin {
+    /// What the run's `command.executed` is caused by: the event an
+    /// effect reacted to.
+    fn cause(&self) -> Option<oxplow_domain::EventId> {
+        match self {
+            RunOrigin::Effect(key) => Some(oxplow_domain::EventId(key.event_id.clone())),
+            _ => None,
+        }
+    }
 }
 
 pub struct CommandBus {
@@ -577,6 +592,31 @@ impl CommandBus {
             .await
     }
 
+    /// Run an extension effect's reaction to one event (P8.D10): `command`
+    /// (a composite of what its script composed) as
+    /// `Actor::Effect { effect }`, with the reaction's `effect_run` row and
+    /// `effect.result` landing with the run — in its transaction, after a
+    /// `started` claim when a step leaves it, or with its proposal when a
+    /// command asks — and its `command.executed` caused by the event.
+    pub(crate) async fn run_effect(
+        &self,
+        key: oxplow_db::effect_run_store::EffectRunKey,
+        command: Command,
+        input: Value,
+    ) -> Result<CommandOutcome, CommandError> {
+        let actor = Actor::Effect {
+            effect: key.effect.clone(),
+        };
+        self.run_prepared(
+            &actor,
+            Arc::new(command),
+            input,
+            false,
+            RunOrigin::Effect(Arc::new(key)),
+        )
+        .await
+    }
+
     /// [`Self::run`] as `origin`: the undo of an audit row, or a person's
     /// approval of a proposal. The row is marked (undone; approved) in the
     /// same transaction as the run (a `Tx` handler) or claimed before it
@@ -598,6 +638,20 @@ impl CommandBus {
                 .ok_or_else(|| CommandError::Unknown {
                     name: name.to_string(),
                 })?;
+        self.run_prepared(actor, command, input, confirmed, origin)
+            .await
+    }
+
+    /// The pipeline (`.context/commands.md` "Running a command") for a
+    /// command already looked up — or, for an effect, made for the run.
+    async fn run_prepared(
+        &self,
+        actor: &Actor,
+        command: Arc<Command>,
+        input: Value,
+        confirmed: bool,
+        origin: RunOrigin,
+    ) -> Result<CommandOutcome, CommandError> {
         let spec = &command.spec;
 
         // 1. The input must match the schema — and, for a `Dispatch`
@@ -705,7 +759,7 @@ impl CommandBus {
             let admitted = steps::Admitted {
                 confirmed,
                 gates,
-                origin,
+                origin: origin.clone(),
             };
             return match self
                 .run_steps(actor, spec, &input, plan.clone(), admitted)
@@ -740,6 +794,7 @@ impl CommandBus {
                 // so it leaves no audit row.
                 let lost: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
                 let lost_c = lost.clone();
+                let origin_tx = origin.clone();
                 let ran = self
                     .db
                     .transaction(move |tx| {
@@ -777,27 +832,35 @@ impl CommandBus {
                             &spec_c,
                             &input_c,
                             &out,
-                            Executed::ok(executed_id),
+                            Executed::ok(executed_id, &origin_tx),
                         )?;
                         // Fails (and rolls the whole run back) when the row
-                        // was undone, or the proposal decided, meanwhile.
-                        let marked = match origin {
+                        // was undone, the proposal decided, or the effect's
+                        // reaction recorded, meanwhile.
+                        let marked = match &origin_tx {
                             RunOrigin::Call => Ok(()),
                             RunOrigin::Undo(original) => {
-                                mark_undone_tx(tx, original, recorded.audit_id)
+                                mark_undone_tx(tx, *original, recorded.audit_id)
                             }
                             RunOrigin::Approval(id) => {
-                                proposal_store::approve_tx(tx, id, recorded.audit_id).map(|_| ())
+                                proposal_store::approve_tx(tx, *id, recorded.audit_id).map(|_| ())
                             }
+                            RunOrigin::Effect(key) => crate::effects::finished_tx(
+                                tx,
+                                &vocabulary.current(),
+                                key,
+                                &crate::effects::ran(recorded.audit_id, None),
+                                Some(recorded.event_id.clone()),
+                            ),
                         };
                         if let Err(e) = marked {
-                            let e = lost_race(origin, e)?;
+                            let e = lost_race(&origin_tx, e)?;
                             *lost_c.lock() = Some(e);
                             return Err(oxplow_domain::DomainError::Invariant(
                                 "decided meanwhile; rolled back".into(),
                             ));
                         }
-                        if let RunOrigin::Approval(id) = origin {
+                        if let RunOrigin::Approval(id) = origin_tx {
                             log_approved_tx(
                                 tx,
                                 &vocabulary.current(),
@@ -825,11 +888,13 @@ impl CommandBus {
             }
             Resolved::Steps(_) => unreachable!("composite steps ran above"),
             Resolved::External(handler) => {
-                self.claim(origin).await?;
+                self.claim(&origin).await?;
                 match handler(actor.clone(), input.clone()).await {
-                    Ok(out) => Ok(self.record_external(actor, spec, &input, out, origin).await),
+                    Ok(out) => Ok(self
+                        .record_external(actor, spec, &input, out, origin.clone())
+                        .await),
                     Err(err) => {
-                        self.release(origin).await;
+                        self.release(&origin).await;
                         Err(err)
                     }
                 }
@@ -915,9 +980,10 @@ impl CommandBus {
                 preview: Box::new(preview),
             };
         }
-        // A proposal is a plain call; an undo kept as one would lose the
-        // row it undoes (an approval is a person's, so never here).
-        if !matches!(origin, RunOrigin::Call) {
+        // A proposal is a plain call (an effect's included); an undo kept
+        // as one would lose the row it undoes (an approval is a person's,
+        // so never here).
+        if !matches!(origin, RunOrigin::Call | RunOrigin::Effect(_)) {
             return CommandError::Denied {
                 reason: format!(
                     "`{}` needs a person's confirmation; ask them to undo it",
@@ -959,6 +1025,10 @@ impl CommandBus {
             self.log.vocabulary().clone(),
             preview.destructive,
         );
+        let effect = match &origin {
+            RunOrigin::Effect(key) => Some(key.clone()),
+            _ => None,
+        };
         let stored = self
             .db
             .transaction(move |tx| {
@@ -982,6 +1052,21 @@ impl CommandBus {
                 .with_anchors(actor_c.anchors())
                 .with_subject([proposal_ref(inserted.id), command_ref(&row.command)]);
                 append_tx(tx, &vocabulary.current(), &proposed)?;
+                // An effect's reaction ends here: a person decides the rest.
+                if let Some(key) = &effect {
+                    crate::effects::finished_tx(
+                        tx,
+                        &vocabulary.current(),
+                        key,
+                        &oxplow_db::effect_run_store::Finished {
+                            state: oxplow_db::effect_run_store::RunState::Proposed,
+                            reason: None,
+                            audit_id: None,
+                            proposal_id: Some(inserted.id),
+                        },
+                        Some(proposed.id.clone()),
+                    )?;
+                }
                 Ok((inserted.id, supersedes))
             })
             .await;
@@ -1425,14 +1510,22 @@ impl CommandBus {
                     &spec_c,
                     &input_c,
                     &shadow,
-                    Executed::ok(oxplow_domain::EventId::generate()),
+                    Executed::ok(oxplow_domain::EventId::generate(), &origin),
                 )?;
-                match origin {
+                match &origin {
                     RunOrigin::Call => {}
                     RunOrigin::Undo(original) => {
-                        finish_undo_claim_tx(tx, original, recorded.audit_id)?;
+                        finish_undo_claim_tx(tx, *original, recorded.audit_id)?;
                     }
+                    RunOrigin::Effect(key) => crate::effects::finished_tx(
+                        tx,
+                        &vocabulary.current(),
+                        key,
+                        &crate::effects::ran(recorded.audit_id, None),
+                        Some(recorded.event_id.clone()),
+                    )?,
                     RunOrigin::Approval(id) => {
+                        let id = *id;
                         proposal_store::finish_claim_tx(tx, id, recorded.audit_id)?;
                         log_approved_tx(
                             tx,
@@ -1472,27 +1565,42 @@ impl CommandBus {
     /// being undone (`undone_by = UNDO_PENDING`), or the proposal as being
     /// approved (approved, no audit row yet). Fails when it's already
     /// undone or decided, or being so.
-    async fn claim(&self, origin: RunOrigin) -> Result<(), CommandError> {
+    async fn claim(&self, origin: &RunOrigin) -> Result<(), CommandError> {
         match origin {
             RunOrigin::Call => Ok(()),
-            RunOrigin::Undo(audit_id) => self
-                .db
-                .transaction(move |tx| mark_undone_tx(tx, audit_id, UNDO_PENDING))
-                .await
-                .map_err(|e| lost_race(origin, e).unwrap_or_else(CommandError::from)),
-            RunOrigin::Approval(id) => self
-                .db
-                .transaction(move |tx| proposal_store::claim_tx(tx, id))
-                .await
-                .map_err(|e| lost_race(origin, e).unwrap_or_else(CommandError::from)),
+            RunOrigin::Undo(audit_id) => {
+                let audit_id = *audit_id;
+                self.db
+                    .transaction(move |tx| mark_undone_tx(tx, audit_id, UNDO_PENDING))
+                    .await
+                    .map_err(|e| lost_race(origin, e).unwrap_or_else(CommandError::from))
+            }
+            RunOrigin::Approval(id) => {
+                let id = *id;
+                self.db
+                    .transaction(move |tx| proposal_store::claim_tx(tx, id))
+                    .await
+                    .map_err(|e| lost_race(origin, e).unwrap_or_else(CommandError::from))
+            }
+            // A step will leave the transaction: claim the reaction first,
+            // so a redelivery finds it and never sends the steps again.
+            RunOrigin::Effect(key) => {
+                let (key, now) = (key.clone(), oxplow_domain::Timestamp::now().to_string());
+                self.db
+                    .transaction(move |tx| oxplow_db::effect_run_store::claim_tx(tx, &key, &now))
+                    .await
+                    .map_err(|e| lost_race(origin, e).unwrap_or_else(CommandError::from))
+            }
         }
     }
 
     /// The `External` run failed: the row is undoable again, the proposal
     /// pending again.
-    async fn release(&self, origin: RunOrigin) {
-        let released = match origin {
-            RunOrigin::Call => return,
+    async fn release(&self, origin: &RunOrigin) {
+        let released = match *origin {
+            // A claimed reaction stays `started`: the effect's runner
+            // records it failed (`effect_triggers`), never runs it again.
+            RunOrigin::Call | RunOrigin::Effect(_) => return,
             RunOrigin::Undo(audit_id) => {
                 self.db
                     .transaction(move |tx| {
@@ -1523,7 +1631,7 @@ impl CommandBus {
 /// `Invalid` from the store), the `Invalid` this run answers — not a failed
 /// run, so it is never audited; anything else (storage) passes through.
 fn lost_race(
-    origin: RunOrigin,
+    origin: &RunOrigin,
     e: oxplow_domain::DomainError,
 ) -> Result<CommandError, oxplow_domain::DomainError> {
     use oxplow_domain::DomainError as D;
@@ -1533,6 +1641,10 @@ fn lost_race(
     let message = match origin {
         RunOrigin::Undo(audit_id) => format!("audit row {audit_id} was already undone"),
         RunOrigin::Approval(id) => format!("proposal:{id} was already decided"),
+        RunOrigin::Effect(key) => format!(
+            "effect `{}` already reacted to event {}",
+            key.effect, key.event_id
+        ),
         RunOrigin::Call => return Err(e),
     };
     Ok(CommandError::Invalid {
@@ -1582,11 +1694,17 @@ fn finish(mut out: HandlerOutput, recorded: Recorded) -> CommandOutcome {
 pub(super) struct Executed {
     pub id: oxplow_domain::EventId,
     pub failed: Option<String>,
+    /// What caused the run: the event an effect reacted to.
+    pub cause: Option<oxplow_domain::EventId>,
 }
 
 impl Executed {
-    fn ok(id: oxplow_domain::EventId) -> Self {
-        Self { id, failed: None }
+    fn ok(id: oxplow_domain::EventId, origin: &RunOrigin) -> Self {
+        Self {
+            id,
+            failed: None,
+            cause: origin.cause(),
+        }
     }
 }
 
@@ -1604,6 +1722,7 @@ fn record_tx(
     let Executed {
         id: executed_id,
         failed,
+        cause,
     } = executed;
     // A run that failed partway (a composite's steps, some landed) is
     // recorded with what landed, as an error.
@@ -1645,6 +1764,7 @@ fn record_tx(
     .with_anchors(actor.anchors())
     .with_subject([command_ref(&spec.name)]);
     executed.id = executed_id;
+    executed.cause = cause;
     append_tx(tx, vocabulary, &executed)?;
     // A handler's own events carry the actor's thread and stream unless
     // it anchored them itself.

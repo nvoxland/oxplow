@@ -61,7 +61,7 @@ pub(super) struct Plan {
 
 /// Steps 3 and 4's answers for a run, and what it is: what its steps run
 /// with.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct Admitted {
     pub confirmed: bool,
     pub gates: Gates,
@@ -273,7 +273,7 @@ impl CommandBus {
         }
 
         // 2. In order, each landing as it runs; the first failure stops.
-        self.claim(origin).await?;
+        self.claim(&origin).await?;
         let executed_id = oxplow_domain::EventId::generate();
         let mut landed: Vec<NestedChild> = Vec::with_capacity(plan.steps.len());
         let mut events = Vec::new();
@@ -316,7 +316,7 @@ impl CommandBus {
         // for its audit row (a late confirmation isn't audited at all).
         if landed.is_empty() {
             if let Some((_, err)) = failure {
-                self.release(origin).await;
+                self.release(&origin).await;
                 if !matches!(err, CommandError::NeedsConfirmation { .. }) {
                     let recorded = match err {
                         CommandError::Denied { .. } => Outcome::Denied,
@@ -366,14 +366,23 @@ impl CommandBus {
                     Executed {
                         id: executed_id.clone(),
                         failed: failed_c.clone(),
+                        cause: origin.cause(),
                     },
                 )?;
-                match origin {
+                match &origin {
                     RunOrigin::Call => {}
                     RunOrigin::Undo(original) => {
-                        finish_undo_claim_tx(tx, original, recorded.audit_id)?;
+                        finish_undo_claim_tx(tx, *original, recorded.audit_id)?;
                     }
+                    RunOrigin::Effect(key) => crate::effects::finished_tx(
+                        tx,
+                        &vocabulary.current(),
+                        key,
+                        &crate::effects::ran(recorded.audit_id, failed_c.clone()),
+                        Some(recorded.event_id.clone()),
+                    )?,
                     RunOrigin::Approval(id) => {
+                        let id = *id;
                         proposal_store::finish_claim_tx(tx, id, recorded.audit_id)?;
                         log_approved_tx(
                             tx,

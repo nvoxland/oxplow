@@ -1,0 +1,72 @@
+{
+  "$defs": {
+    "EffectOutcome": {
+      "description": "How an effect's reaction to one event ended.",
+      "oneOf": [
+        {
+          "const": "ok",
+          "description": "Its commands ran.",
+          "type": "string"
+        },
+        {
+          "const": "skipped",
+          "description": "Its script decided there was nothing to do.",
+          "type": "string"
+        },
+        {
+          "const": "proposed",
+          "description": "A command it composed needs a person's confirmation: kept as a\nproposal.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "It failed (or was interrupted), and its steps aren't sent again.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`effect.result@2`: an extension's effect reacted to a logged event\n(P8.D10) — caused by its run's `command.executed` when its commands\nran.",
+  "properties": {
+    "detail": {
+      "default": null,
+      "description": "Effect-specific detail, opaque to the log."
+    },
+    "effect": {
+      "description": "The effect: `<extension>/<id>`.",
+      "type": "string"
+    },
+    "event": {
+      "description": "The event it reacted to (`event:<id>`); absent on a v1 result.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "outcome": {
+      "$ref": "#/$defs/EffectOutcome"
+    },
+    "proposal": {
+      "description": "The proposal it left for a person (`proposal:<id>`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reason": {
+      "description": "Why it skipped or failed.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "effect",
+    "outcome"
+  ],
+  "title": "EffectResultV2",
+  "type": "object"
+}

@@ -1329,6 +1329,38 @@ its latest approval — not the backlog, not what happened while it waited
 to be re-approved. `effects::gate(...)` is the one check: `Unapproved`,
 `BeforeApproval` or `Runs`.
 
+**Running** (P8.D10, `effect_triggers.rs`): one async pump consumer,
+`effect.triggers` (registered at boot beside `collector.triggers`, with
+the same `after`/`after_for` handling of each effect's `after:`). Per
+event, each enabled effect whose `on`/`where` match **reacts at most
+once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
+1. a row exists — a redelivery: nothing. A `started` row is a run that
+   claimed a step outside oxplow and was interrupted: recorded `failed`
+   ("interrupted") and **never sent again**;
+2. `effects::gate` isn't `Runs`: nothing;
+3. the loop guard (`lineage`, walking the event's `cause` chain): an
+   event its own run caused (source `effect:<extension>/<id>`) never
+   triggers it; one that `MAX_CHAIN` (4) effect runs already led to is
+   `skipped`;
+4. the script runs sandboxed over `{ event: { id, type, v, seq, source,
+   subject, payload }, rows }` (`input` with the payload's fields bound):
+   `{ skip: "why" }` is `skipped`; `{ commands, events? }` runs.
+
+A run is `command.sequence`'s spec over what the script composed (calls,
+and its own events through `own_events`), run by
+`CommandBus::run_effect` as `Actor::Effect` with
+`RunOrigin::Effect(key)`: its `command.executed@2` is caused by the
+triggering event, and the reaction's `effect_run` row and
+`effect.result@2 { effect, event, outcome, reason?, proposal? }` (caused by
+that run) land **in the run's transaction**; with a step outside it, a
+`started` claim commits first (`claim`) and the record finishes it; a
+command that asks becomes a proposal whose transaction records
+`proposed`. A failure before any command ran (the script, the input,
+denied, invalid) is recorded `failed` by the consumer. An effect that
+fails never dead-letters the event. An approved proposal runs its calls
+as the person; the script's own events go only with a run that doesn't
+ask.
+
 ## Commands
 
 An extension's `commands:` (a stable kind, P6b; `extension_commands.rs`)

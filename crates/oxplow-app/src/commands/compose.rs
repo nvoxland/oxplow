@@ -96,8 +96,10 @@ pub struct SequenceCall {
     pub input: Value,
 }
 
-pub fn sequence_command(bus: &Arc<CommandBus>) -> Command {
-    let spec = CommandSpec {
+/// `command.sequence`'s spec: also what an extension effect's run is
+/// audited as (`effect_triggers`).
+pub fn sequence_spec() -> CommandSpec {
+    CommandSpec {
         name: SEQUENCE.into(),
         summary: "Run several commands as one, each one's own policy and confirmation \
                   checked before any runs; the run has one audit row. In oxplow's own \
@@ -114,7 +116,11 @@ pub fn sequence_command(bus: &Arc<CommandBus>) -> Command {
         // In the transaction, or as steps outside it: its calls decide.
         atomicity: Atomicity::Dispatch,
         effect: CommandEffect::Write,
-    };
+    }
+}
+
+pub fn sequence_command(bus: &Arc<CommandBus>) -> Command {
+    let spec = sequence_spec();
     let compose: Arc<Composer> = Arc::new(|_conn, input: &Value| {
         let input: SequenceInput =
             serde_json::from_value(input.clone()).map_err(|e| CommandError::Invalid {

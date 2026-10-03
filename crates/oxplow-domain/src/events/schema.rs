@@ -129,6 +129,8 @@ impl EventSchemaRegistry {
         r.register::<CommandExecuted>()
             .expect("core type registers");
         r.register::<ConfigChanged>().expect("core type registers");
+        r.register::<EffectResultAtV1>()
+            .expect("core type registers");
         r.register::<EffectResult>().expect("core type registers");
         r.register::<SnapshotTaken>().expect("core type registers");
         r.register::<VcsHeadMoved>().expect("core type registers");
@@ -660,11 +662,90 @@ pub struct EffectResultV1 {
     pub detail: Value,
 }
 
-pub struct EffectResult;
-impl EventType for EffectResult {
+/// The v1 shape of `effect.result`, as a registry entry.
+pub struct EffectResultAtV1;
+impl EventType for EffectResultAtV1 {
     const TYPE: &'static str = "effect.result";
     const V: u32 = 1;
     type Payload = EffectResultV1;
+}
+
+/// How an effect's reaction to one event ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectOutcome {
+    /// Its commands ran.
+    Ok,
+    /// Its script decided there was nothing to do.
+    Skipped,
+    /// A command it composed needs a person's confirmation: kept as a
+    /// proposal.
+    Proposed,
+    /// It failed (or was interrupted), and its steps aren't sent again.
+    Failed,
+}
+
+/// `effect.result@2`: an extension's effect reacted to a logged event
+/// (P8.D10) — caused by its run's `command.executed` when its commands
+/// ran.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EffectResultV2 {
+    /// The effect: `<extension>/<id>`.
+    pub effect: String,
+    /// The event it reacted to (`event:<id>`); absent on a v1 result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<String>,
+    pub outcome: EffectOutcome,
+    /// Why it skipped or failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The proposal it left for a person (`proposal:<id>`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<String>,
+    /// Effect-specific detail, opaque to the log.
+    #[serde(default)]
+    pub detail: Value,
+}
+
+pub struct EffectResult;
+impl EventType for EffectResult {
+    const TYPE: &'static str = "effect.result";
+    const V: u32 = 2;
+    type Payload = EffectResultV2;
+    /// A v1 result's `ok` is its outcome, its `error` the reason, and its
+    /// `target` moves into `detail`.
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        if from_v != 1 {
+            return Err(DomainError::Invalid(format!(
+                "no upcast of effect.result from v{from_v}"
+            )));
+        }
+        let v1: EffectResultV1 = serde_json::from_value(payload)
+            .map_err(|e| DomainError::Invalid(format!("effect.result@1: {e}")))?;
+        let mut detail = v1.detail;
+        if let Some(target) = v1.target {
+            match &mut detail {
+                Value::Object(map) => {
+                    map.insert("target".into(), Value::String(target));
+                }
+                other => *other = serde_json::json!({ "target": target, "detail": other.take() }),
+            }
+        }
+        serde_json::to_value(EffectResultV2 {
+            effect: v1.effect,
+            event: None,
+            outcome: if v1.ok {
+                EffectOutcome::Ok
+            } else {
+                EffectOutcome::Failed
+            },
+            reason: v1.error,
+            proposal: None,
+            detail,
+        })
+        .map_err(|e| DomainError::Invariant(e.to_string()))
+    }
 }
 
 /// `snapshot.taken@1`: one snapshot take (one `snapshot_op` row). Refs
@@ -1604,6 +1685,7 @@ mod tests {
                 ("command.proposed", 2),
                 ("config.changed", 1),
                 ("effect.result", 1),
+                ("effect.result", 2),
                 ("effort.claim_verified", 1),
                 ("effort.closed", 1),
                 ("effort.decision_reviewed", 1),
