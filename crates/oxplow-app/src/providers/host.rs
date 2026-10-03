@@ -308,6 +308,13 @@ pub struct ApprovedCopy {
 /// copy's hash is approved on this machine. An existing copy is re-hashed
 /// (it lives outside the repo, but a process running as the person can
 /// still write there), and older copies of the provider are removed.
+///
+/// One start of a program copies at a time (tsk839): instances of one
+/// program start together routinely, and each start's cleanup removes
+/// what isn't its own hash — another's temp copy, or a kept copy it
+/// replaced — so the whole copy, keep and cleanup runs under an advisory
+/// lock on `copies/<ext>/<id>.lock`, which threads and processes alike
+/// wait on. A temp copy found under the lock was abandoned.
 pub fn approved_copy(
     project_dir: &Path,
     copies: &Path,
@@ -323,6 +330,8 @@ pub fn approved_copy(
     let program = crate::exec_consent::provider_program(ext, spec);
     let rel = ext.path.trim_end_matches('/');
     let base = copies.join(&ext.name).join(&spec.id);
+    let _one_at_a_time =
+        lock_copies(&base).map_err(|e| failed(format!("copying it to run: {e}")))?;
     let tmp = base.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
     let copied =
         copy_tree(&project_dir.join(rel), &tmp.join(rel)).and_then(|()| program.hash(&tmp));
@@ -358,6 +367,24 @@ pub fn approved_copy(
         super::spec::read_declarations(spec, &|f| std::fs::read_to_string(ext_dir.join(f)).ok())
             .map_err(&failed)?;
     Ok(ApprovedCopy { ext_dir, declared })
+}
+
+/// The advisory lock on a program's copies (`<base>.lock`, beside the
+/// folder its cleanup empties), held until the file is dropped.
+fn lock_copies(base: &Path) -> std::io::Result<std::fs::File> {
+    use fs2::FileExt;
+    let parent = base.parent().unwrap_or(base);
+    std::fs::create_dir_all(parent)?;
+    let mut name = base.file_name().unwrap_or_default().to_os_string();
+    name.push(".lock");
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(parent.join(name))?;
+    lock.lock_exclusive()?;
+    Ok(lock)
 }
 
 /// The copy of `spec` a start last ran (`copies/<ext>/<id>/<hash>`, kept

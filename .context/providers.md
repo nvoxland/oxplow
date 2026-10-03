@@ -429,7 +429,13 @@ live tree between the check and the exec, or under a provider that
 loads its modules lazily, can't slip in. An existing copy is re-hashed
 before each run (a process running as the person can still write
 there) and replaced if it changed; older copies go. The provider's
-working directory and `OXPLOW_EXTENSION_DIR` are the copy.
+working directory and `OXPLOW_EXTENSION_DIR` are the copy. Instances of
+one program share its copies and start together routinely, so one start
+of a program copies at a time (tsk839): the copy, keep and cleanup run
+under an advisory lock on `<ext>/<id>.lock` (`fs2`, beside the folder
+the cleanup empties) that threads and processes alike wait on — no
+start removes another's temp copy or the copy another just kept, and a
+temp copy found under the lock was abandoned.
 
 **The spawn** (`host.rs`, `connect`) mirrors an `exec` source: a
 scrubbed environment (PATH, HOME, the declared `env` names, the

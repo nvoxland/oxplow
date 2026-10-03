@@ -2019,6 +2019,42 @@ fn configure_named(
 
 const SECOND: &str = "tracker/fake_second";
 
+/// tsk839: instances of one program start at once — each makes its
+/// approved copy. None removes another's copy under way (a temp folder
+/// it is about to keep) or the one another kept: each start gets an
+/// intact copy, and one copy of the program is left.
+#[tokio::test(flavor = "multi_thread")]
+async fn starts_of_one_program_at_once_each_get_their_copy() {
+    let (fx, ext) = approved("").await;
+    let spec = ext.providers[0].clone();
+    let deps = fx.svc.providers.deps.clone();
+    let starts: Vec<_> = (0..12)
+        .map(|_| {
+            let (deps, ext, spec) = (deps.clone(), ext.clone(), spec.clone());
+            tokio::task::spawn_blocking(move || {
+                host::approved_copy(
+                    &deps.project_dir,
+                    &deps.copies,
+                    &deps.approvals,
+                    &ext,
+                    &spec,
+                )
+                .map(|copy| copy.ext_dir)
+            })
+        })
+        .collect();
+    for start in starts {
+        let dir = start.await.unwrap().expect("each start gets its copy");
+        assert!(dir.join("extension.yaml").is_file(), "{}", dir.display());
+    }
+    let kept: Vec<_> = std::fs::read_dir(deps.copies.join(EXT).join("fake"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+}
+
 /// tsk837: a person's Enables on two rows at once — the second while the
 /// first still checks — both stand. Each write is a read-modify-write of
 /// the instances as they are when it writes, not as they were before its
