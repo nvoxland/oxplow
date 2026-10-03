@@ -246,6 +246,148 @@ pub async fn start_after(
         .await
 }
 
+/// What an effect's script decided.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Reaction {
+    /// Nothing to do, and why.
+    Skip(String),
+    /// Run these commands, and append these of its extension's events.
+    Run {
+        calls: Vec<oxplow_domain::CommandCall>,
+        events: Vec<crate::extension_commands::ComposedEvent>,
+    },
+}
+
+impl Reaction {
+    /// The names of the commands it runs.
+    pub fn command_names(&self) -> Vec<String> {
+        match self {
+            Reaction::Skip(_) => Vec::new(),
+            Reaction::Run { calls, .. } => calls.iter().map(|c| c.name.clone()).collect(),
+        }
+    }
+}
+
+/// `{ skip: "why" }` or `{ commands: [{ name, input }], events?: [...] }`.
+pub fn reaction(value: serde_json::Value) -> Result<Reaction, String> {
+    use serde_json::{json, Value};
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Out {
+        #[serde(default)]
+        commands: Option<Vec<Call>>,
+        #[serde(default)]
+        events: Vec<crate::extension_commands::ComposedEvent>,
+        #[serde(default)]
+        skip: Option<String>,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Call {
+        name: String,
+        #[serde(default = "empty_object")]
+        input: Value,
+    }
+    fn empty_object() -> Value {
+        json!({})
+    }
+    const SHAPE: &str = "an effect's script returns `{ commands: [{ name, input }], events? }` \
+                         or `{ skip: \"why\" }`";
+    let out: Out = serde_json::from_value(value).map_err(|e| format!("{SHAPE}: {e}"))?;
+    match (out.skip, out.commands) {
+        (Some(why), None) if out.events.is_empty() => Ok(Reaction::Skip(why)),
+        (Some(_), _) => Err(format!("{SHAPE}: a skip composes nothing")),
+        (None, None) => Err(format!("{SHAPE}: it returned neither")),
+        (None, Some(commands)) => Ok(Reaction::Run {
+            calls: commands
+                .into_iter()
+                .map(|c| oxplow_domain::CommandCall {
+                    name: c.name,
+                    input: c.input,
+                })
+                .collect(),
+            events: out.events,
+        }),
+    }
+}
+
+/// An event as an effect's script sees it.
+pub fn event_json(event: &oxplow_domain::StoredEvent) -> serde_json::Value {
+    let env = &event.envelope;
+    serde_json::json!({
+        "id": env.id.to_string(),
+        "type": env.event_type,
+        "v": env.v,
+        "seq": event.seq,
+        "source": env.source,
+        "subject": env.subject,
+        "payload": env.payload,
+    })
+}
+
+/// Whether `decl` reacts to an event of `event_type` with `payload`: its
+/// `on` names the type and its `where` matches.
+pub fn reacts_to(decl: &EffectDecl, event_type: &str, payload: &serde_json::Value) -> bool {
+    decl.on.iter().any(|t| t == event_type)
+        && crate::collector_triggers::payload_matches(&decl.filter, payload)
+}
+
+/// Run `script` over `{ event, rows }`, sandboxed with a command script's
+/// budget and no host (no files, no `ai_*`). Blocks: call it off the
+/// async runtime.
+pub fn run_script(
+    script: &str,
+    event: serde_json::Value,
+    rows: Vec<serde_json::Value>,
+) -> Result<Reaction, String> {
+    use oxplow_collect_plugin::runtime::{run_sandboxed, run_starlark};
+    let (script, input) = (
+        script.to_string(),
+        serde_json::json!({ "event": event, "rows": rows }),
+    );
+    let out = run_sandboxed(
+        &crate::extension_commands::COMMAND_SCRIPT_BUDGET,
+        move || run_starlark(&script, &input),
+    )
+    .map_err(|e| format!("the script failed: {e}"))?;
+    reaction(out)
+}
+
+/// What `decl` would do with `event` (a fixture's, or a logged one's
+/// [`event_json`]) — its `input` rows (`rows` stands in for them when
+/// given), its script, the commands it composes checked against
+/// `registry` — running nothing: `plugin test` and a change's review.
+pub async fn dry_run(
+    layer: &crate::sql_gateway::SqlGateway,
+    decl: &EffectDecl,
+    script: &str,
+    event: serde_json::Value,
+    rows: Option<Vec<serde_json::Value>>,
+    registry: Option<crate::extensions::CommandSchemas<'_>>,
+) -> Result<Reaction, String> {
+    let rows = match (rows, &decl.input) {
+        (Some(rows), _) => rows,
+        (None, Some(sql)) => {
+            let payload = event.get("payload").cloned().unwrap_or_default();
+            crate::extension_commands::rows_json(
+                &layer
+                    .run(crate::extension_commands::input_query(sql, &payload))
+                    .await
+                    .map_err(|e| format!("`input`: {e}"))?,
+            )
+        }
+        (None, None) => Vec::new(),
+    };
+    let script = script.to_string();
+    let reaction = tokio::task::spawn_blocking(move || run_script(&script, event, rows))
+        .await
+        .map_err(|e| format!("the script's worker failed: {e}"))??;
+    if let (Some(registry), Reaction::Run { calls, .. }) = (registry, &reaction) {
+        crate::extension_commands::check_calls(registry, calls)?;
+    }
+    Ok(reaction)
+}
+
 /// What a reaction that another delivery already recorded answers (the
 /// bus's lost race, `RunOrigin::Effect`): not a failure of the effect.
 pub const ALREADY_REACTED: &str = "already reacted to event";

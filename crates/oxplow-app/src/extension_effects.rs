@@ -236,6 +236,235 @@ pub struct CollectorEffect {
     pub not_run: Option<String>,
 }
 
+/// An effect before and after: when it reacts, and what it composes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectEffect {
+    pub id: String,
+    pub change: Change,
+    pub before: Option<EffectTrigger>,
+    pub after: Option<EffectTrigger>,
+    /// What each version composes on the same inputs — its fixtures and
+    /// the latest events it'd react to — when its script or declaration
+    /// changed; running nothing.
+    pub outputs: Vec<EffectOutput>,
+}
+
+/// When an effect reacts, and what it reads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectTrigger {
+    pub on: Vec<String>,
+    /// Its `where`.
+    pub filter: BTreeMap<String, String>,
+    pub input: Option<String>,
+}
+
+/// One input, composed by each version.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectOutput {
+    /// `fixture <name>` or `event #<seq>`.
+    pub input: String,
+    pub change: Change,
+    pub before: Option<Composes>,
+    pub after: Option<Composes>,
+}
+
+/// What one version's effect makes of an event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Composes {
+    /// The commands it runs, by name.
+    pub commands: Vec<String>,
+    /// Why it skips.
+    pub skip: Option<String>,
+    /// Why it fails.
+    pub error: Option<String>,
+}
+
+fn effect_trigger(d: &crate::effects::EffectDecl) -> EffectTrigger {
+    EffectTrigger {
+        on: d.on.clone(),
+        filter: d.filter.clone(),
+        input: d.input.clone(),
+    }
+}
+
+/// Effects before and after, by id: their triggers.
+pub fn effects_diff(
+    before: &[crate::effects::EffectDecl],
+    after: &[crate::effects::EffectDecl],
+) -> Vec<EffectEffect> {
+    pair_by(before, after, |d| d.id.clone())
+        .into_iter()
+        .map(|(id, b, a)| {
+            let (tb, ta) = (b.map(effect_trigger), a.map(effect_trigger));
+            EffectEffect {
+                id,
+                change: match change_of(tb.as_ref(), ta.as_ref()) {
+                    Change::Unchanged if b.map(|d| &d.script) != a.map(|d| &d.script) => {
+                        Change::Changed
+                    }
+                    other => other,
+                },
+                before: tb,
+                after: ta,
+                outputs: Vec::new(),
+            }
+        })
+        .collect()
+}
+
+/// The fixtures of `v`'s intent examples that run effect `id`: the
+/// example's name, its event and its `rows`.
+fn effect_fixtures(v: &Version<'_>, id: &str) -> Vec<(String, Value, Option<Vec<Value>>)> {
+    let examples = v
+        .extension
+        .intent
+        .as_ref()
+        .map(|i| i.examples.clone())
+        .unwrap_or_default();
+    examples
+        .into_iter()
+        .filter_map(|ex| {
+            let text = (v.read)(&format!("fixtures/{}.yaml", ex.name))?;
+            let doc: Value = serde_yaml::from_str(&text).ok()?;
+            let input = doc.get("input")?;
+            (input.get("effect")?.as_str()? == id).then(|| {
+                let event = input.get("event").cloned().unwrap_or_default();
+                let rows = input.get("rows").and_then(Value::as_array).cloned();
+                (
+                    ex.name.clone(),
+                    serde_json::json!({
+                        "id": "fixture",
+                        "type": event.get("type").cloned().unwrap_or_default(),
+                        "v": 1,
+                        "seq": 0,
+                        "source": "fixture",
+                        "subject": event.get("subject").cloned().unwrap_or_else(|| serde_json::json!([])),
+                        "payload": event.get("payload").cloned().unwrap_or_else(|| serde_json::json!({})),
+                    }),
+                    rows,
+                )
+            })
+        })
+        .collect()
+}
+
+/// Fill an effect's outputs when it changed: each input — both versions'
+/// fixtures for it, the latest events it'd react to — composed by each
+/// version that reacts to it.
+async fn effect_outputs(
+    layer: &crate::sql_gateway::SqlGateway,
+    before: Option<&Version<'_>>,
+    after: &Version<'_>,
+    effect: &mut EffectEffect,
+) {
+    if effect.change == Change::Unchanged {
+        return;
+    }
+    let decl_of = |v: &Version<'_>| {
+        v.extension
+            .effects
+            .iter()
+            .find(|d| d.id == effect.id)
+            .cloned()
+    };
+    let (db, da) = (before.and_then(decl_of), decl_of(after));
+    let mut inputs: BTreeMap<String, (Value, Option<Vec<Value>>)> = BTreeMap::new();
+    for v in before.into_iter().chain(std::iter::once(after)) {
+        for (name, event, rows) in effect_fixtures(v, &effect.id) {
+            inputs.insert(format!("fixture {name}"), (event, rows));
+        }
+    }
+    let types: Vec<String> = da
+        .iter()
+        .chain(db.iter())
+        .flat_map(|d| d.on.clone())
+        .collect();
+    for e in layer
+        .recent_events(types, COLLECTOR_EVENTS)
+        .await
+        .unwrap_or_default()
+    {
+        inputs.insert(
+            format!("event #{}", e.seq),
+            (crate::effects::event_json(&e), None),
+        );
+    }
+    for (label, (event, rows)) in inputs {
+        let run = |decl: &Option<crate::effects::EffectDecl>| {
+            let (decl, event, rows) = (decl.clone(), event.clone(), rows.clone());
+            async move {
+                let decl = decl?;
+                let event_type = event["type"].as_str().unwrap_or_default().to_string();
+                if !crate::effects::reacts_to(&decl, &event_type, &event["payload"]) {
+                    return None;
+                }
+                Some(
+                    match crate::effects::dry_run(layer, &decl, &decl.script, event, rows, None)
+                        .await
+                    {
+                        Ok(crate::effects::Reaction::Skip(why)) => Composes {
+                            commands: Vec::new(),
+                            skip: Some(why),
+                            error: None,
+                        },
+                        Ok(r) => Composes {
+                            commands: r.command_names(),
+                            skip: None,
+                            error: None,
+                        },
+                        Err(e) => Composes {
+                            commands: Vec::new(),
+                            skip: None,
+                            error: Some(e),
+                        },
+                    },
+                )
+            }
+        };
+        let (b, a) = (run(&db).await, run(&da).await);
+        if b.is_none() && a.is_none() {
+            continue;
+        }
+        effect.outputs.push(EffectOutput {
+            input: label,
+            change: change_of(b.as_ref(), a.as_ref()),
+            before: b,
+            after: a,
+        });
+    }
+}
+
+fn trigger_text(t: &EffectTrigger) -> String {
+    let filter = if t.filter.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " where {}",
+            t.filter
+                .iter()
+                .map(|(k, v)| format!("{k} = {v}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    format!("on {}{filter}", t.on.join(", "))
+}
+
+fn composes_text(c: Option<&Composes>) -> String {
+    match c {
+        None => "doesn't react".into(),
+        Some(Composes { error: Some(e), .. }) => format!("fails ({e})"),
+        Some(Composes {
+            skip: Some(why), ..
+        }) => format!("skips ({why})"),
+        Some(c) => format!("runs [{}]", c.commands.join(", ")),
+    }
+}
+
 /// The most inputs a collector's outputs are compared on, and the most
 /// rows shown per entity.
 pub const COLLECTOR_EVENTS: usize = 5;
@@ -353,6 +582,9 @@ pub struct EffectReport {
     pub models: Vec<ModelEffect>,
     pub collectors: Vec<CollectorEffect>,
     pub providers: Vec<ProviderEffect>,
+    /// Its effects (P8.D12): what each reacts to, and what each version
+    /// composes on the same events.
+    pub effects: Vec<EffectEffect>,
     pub config: Option<ConfigEffect>,
     /// The report as lines ([`summary`]): what the install review, `plugin
     /// check --effects` and an effort's review say, in one wording.
@@ -568,6 +800,31 @@ pub fn summary(report: &EffectReport) -> Vec<String> {
                 .into_iter()
                 .map(|l| format!("Provider {}: {l}", p.id)),
         );
+    }
+    for e in &report.effects {
+        match (e.change, &e.before, &e.after) {
+            (Change::Added, _, Some(a)) => {
+                out.push(format!("Effect {}: added — {}", e.id, trigger_text(a)))
+            }
+            (Change::Removed, _, _) => out.push(format!("Effect {}: removed", e.id)),
+            (Change::Changed, Some(b), Some(a)) if b != a => out.push(format!(
+                "Effect {}: {} → {}",
+                e.id,
+                trigger_text(b),
+                trigger_text(a)
+            )),
+            (Change::Changed, _, _) => out.push(format!("Effect {}: its script changed", e.id)),
+            _ => {}
+        }
+        for o in e.outputs.iter().filter(|o| o.change != Change::Unchanged) {
+            out.push(format!(
+                "Effect {} on {}: {} → {}",
+                e.id,
+                o.input,
+                composes_text(o.before.as_ref()),
+                composes_text(o.after.as_ref())
+            ));
+        }
     }
     for c in &report.collectors {
         if let Some(why) = &c.not_run {
@@ -1255,6 +1512,15 @@ pub async fn effects(
     for c in &mut collectors {
         collector_outputs(layer, before.as_ref(), &after, c).await;
     }
+    let mut effects = effects_diff(
+        before
+            .as_ref()
+            .map_or(&[][..], |b| b.extension.effects.as_slice()),
+        &after.extension.effects,
+    );
+    for e in &mut effects {
+        effect_outputs(layer, before.as_ref(), &after, e).await;
+    }
     let declared = |v: &Version<'_>| -> Vec<DeclaredProvider> {
         v.extension
             .providers
@@ -1275,6 +1541,7 @@ pub async fn effects(
         models,
         collectors,
         providers,
+        effects,
         config,
         lines: Vec::new(),
     };
@@ -1836,6 +2103,83 @@ mod tests {
         );
     }
 
+    /// P8.D12: a changed effect shows what it reacts to and what each
+    /// version composes on its fixture — nothing runs.
+    #[tokio::test]
+    async fn an_effects_trigger_and_composed_commands_are_compared() {
+        let (old, new) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let write = |root: &std::path::Path, filter: &str, script: &str| {
+            let dir = root.join("oxplow/extensions/acme");
+            std::fs::create_dir_all(dir.join("fixtures")).unwrap();
+            std::fs::write(
+                dir.join("extension.yaml"),
+                format!(
+                    "manifest: 2\nname: acme\nsharing: private\nintent:\n  purpose: p\n  examples:\n    - {{ name: basic, input: x, expect: y }}\neffects:\n  - {{ id: on-done, summary: s, on: [work_item.transitioned]{filter}, entry: e.star }}\n"
+                ),
+            )
+            .unwrap();
+            std::fs::write(dir.join("e.star"), script).unwrap();
+            std::fs::write(
+                dir.join("fixtures/basic.yaml"),
+                "input: { effect: on-done, event: { type: work_item.transitioned, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } } }\nexpect: { commands: [work_item.comment] }\n",
+            )
+            .unwrap();
+        };
+        write(
+            old.path(),
+            "",
+            "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.comment\", \"input\": {}}]}\n",
+        );
+        write(
+            new.path(),
+            ", where: { to: done }",
+            "def transform(x):\n    return {\"skip\": \"not today\"}\n",
+        );
+        let (eb, ea) = (
+            crate::extensions::load_project_extension(old.path(), "acme"),
+            crate::extensions::load_project_extension(new.path(), "acme"),
+        );
+        assert!(ea.errors.is_empty(), "{:?}", ea.errors);
+        let reader = |root: std::path::PathBuf| {
+            move |rel: &str| {
+                std::fs::read_to_string(root.join("oxplow/extensions/acme").join(rel)).ok()
+            }
+        };
+        let (rb, ra) = (
+            reader(old.path().to_path_buf()),
+            reader(new.path().to_path_buf()),
+        );
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let runs = crate::extensions::LensRuns::new();
+        let report = effects(
+            &layer,
+            Some(Version {
+                extension: &eb,
+                read: &rb,
+                lenses: &runs,
+                overlay: &[],
+            }),
+            Version {
+                extension: &ea,
+                read: &ra,
+                lenses: &runs,
+                overlay: &[],
+            },
+        )
+        .await;
+        assert_eq!(
+            report
+                .lines
+                .iter()
+                .filter(|l| l.starts_with("Effect"))
+                .collect::<Vec<_>>(),
+            vec![
+                "Effect on-done: on work_item.transitioned → on work_item.transitioned where to = done",
+                "Effect on-done on fixture basic: runs [work_item.comment] → skips (not today)",
+            ]
+        );
+    }
+
     /// P8.C4: a review runs each changed derived collector on the same
     /// inputs in both versions — here its fixture — and shows how the
     /// output differs; it never runs an exec collector's program (approved
@@ -2158,6 +2502,47 @@ mod tests {
                 features_after: Some(json!({"comments": false})),
                 ..effect(Change::Changed)
             }],
+            effects: vec![
+                EffectEffect {
+                    id: "on-done".into(),
+                    change: Change::Changed,
+                    before: Some(EffectTrigger {
+                        on: vec!["work_item.transitioned".into()],
+                        filter: BTreeMap::new(),
+                        input: None,
+                    }),
+                    after: Some(EffectTrigger {
+                        on: vec!["work_item.transitioned".into()],
+                        filter: [("to".to_string(), "done".to_string())].into(),
+                        input: None,
+                    }),
+                    outputs: vec![EffectOutput {
+                        input: "fixture basic".into(),
+                        change: Change::Changed,
+                        before: Some(Composes {
+                            commands: vec!["work_item.comment".into()],
+                            skip: None,
+                            error: None,
+                        }),
+                        after: Some(Composes {
+                            commands: vec![],
+                            skip: Some("not today".into()),
+                            error: None,
+                        }),
+                    }],
+                },
+                EffectEffect {
+                    id: "ping".into(),
+                    change: Change::Added,
+                    before: None,
+                    after: Some(EffectTrigger {
+                        on: vec!["vcs.head.moved".into()],
+                        filter: BTreeMap::new(),
+                        input: None,
+                    }),
+                    outputs: vec![],
+                },
+            ],
             config: Some(ConfigEffect {
                 before: None,
                 after: Some(json!({})),
@@ -2171,6 +2556,9 @@ mod tests {
             vec![
                 "Collector gh: now reaches api.example.com (was none)",
                 "Provider fake: command `delete` added (destructive)",
+                "Effect on-done: on work_item.transitioned → on work_item.transitioned where to = done",
+                "Effect on-done on fixture basic: runs [work_item.comment] → skips (not today)",
+                "Effect ping: added — on vcs.head.moved",
                 "Collector gh on fixture two: 2 thing → fails (boom)",
                 "Model v_shared_x: column `y` added; read by v_b_y",
                 "Model v_shared_z: its query changed (same columns)",

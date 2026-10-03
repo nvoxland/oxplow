@@ -14,7 +14,7 @@ use oxplow_sdk::{Format, Kind};
 
 const USAGE: &str = "\
 usage:
-  oxplow plugin new <lens|extension|provider|collector|command> <name> [--origin <ref>] [--root <dir>]
+  oxplow plugin new <lens|extension|provider|collector|command|effect> <name> [--origin <ref>] [--root <dir>]
       scaffold oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a lens with a row action; a
@@ -404,7 +404,7 @@ mod tests {
         assert_eq!(cli(&["frobnicate"]).0, 2);
         let (code, _, err) = cli(&["new", "widget", "x", "--root", root]);
         assert_eq!(code, 2);
-        assert!(err.contains("`collector` or `command`"), "{err}");
+        assert!(err.contains("`command` or `effect`"), "{err}");
         let (code, _, err) = cli(&["check", "nope", "--root", root]);
         assert_eq!(code, 1);
         assert!(err.contains("no extension `nope`"), "{err}");

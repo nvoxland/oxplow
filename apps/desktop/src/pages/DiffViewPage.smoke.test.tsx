@@ -40,6 +40,7 @@ const neutral: Record<string, (...args: unknown[]) => Promise<unknown>> = {
           models: [],
           collectors: [],
           providers: [],
+          effects: [],
           config: null,
           lines: ["Lens acme/count: changed"],
         },

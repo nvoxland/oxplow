@@ -169,6 +169,73 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_effect_checks_tests_and_once_approved_reacts() {
+    use oxplow_app::effect_triggers::EffectTriggers;
+    use oxplow_app::event_pump::AsyncEventConsumer as _;
+    use oxplow_app::exec_consent::{approve_program, ProgramKind};
+    let dir = project().await;
+    scaffolded(dir.path(), "effect", "done-notes").await;
+    assert!(tested(dir.path(), "done-notes")
+        .await
+        .contains(&"example basic".to_string()));
+    let svc = std::sync::Arc::new(booted(dir.path()).await);
+    let ext = loaded(&svc, dir.path(), "done-notes");
+    let decl = &ext.effects[0];
+    let program = oxplow_app::effects::effect_program(&ext, decl);
+    let config = svc.config.read().unwrap().clone();
+    approve_program(
+        &svc.approvals,
+        dir.path(),
+        &config,
+        std::slice::from_ref(&ext),
+        ProgramKind::Effect,
+        &program.name,
+        &program.hash(dir.path()).unwrap(),
+    )
+    .unwrap();
+    oxplow_app::effects::approved(&svc.db, &decl.name())
+        .await
+        .unwrap();
+    let human = oxplow_domain::Actor::Human;
+    let task = svc
+        .commands
+        .run(
+            &human,
+            "work_item.create",
+            serde_json::json!({ "title": "Look" }),
+            true,
+        )
+        .await
+        .unwrap();
+    let item = format!("work_item:oxplow:{}", task.result["id"].as_str().unwrap());
+    svc.commands
+        .run(
+            &human,
+            "work_item.transition",
+            serde_json::json!({ "ref": item, "to": "done" }),
+            true,
+        )
+        .await
+        .unwrap();
+    let consumer = EffectTriggers::new(std::sync::Arc::downgrade(&svc));
+    for e in svc.event_log_store.read_after(0, 10_000).await.unwrap() {
+        if consumer.handles(&e.envelope.event_type) {
+            consumer.handle(&e).await.unwrap();
+        }
+    }
+    let runs = svc
+        .sql
+        .query_sql("SELECT state FROM v_effect_run", vec![], None)
+        .await
+        .unwrap();
+    assert_eq!(
+        runs.rows,
+        vec![vec![oxplow_db::SqlCell::Text("ok".into())]],
+        "the effect commented on the finished item"
+    );
+}
+
 /// The fake provider's binary, built beside this test binary.
 fn fake_bin() -> PathBuf {
     let exe = std::env::current_exe().unwrap();

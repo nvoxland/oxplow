@@ -29,12 +29,11 @@ use std::sync::{Arc, Weak};
 use async_trait::async_trait;
 use oxplow_db::effect_run_store::{EffectRunKey, Finished, RunState};
 use oxplow_domain::{CommandCall, CommandError, DomainError, StoredEvent};
-use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 
-use crate::effects::{self, EffectDecl, Gate};
+use crate::effects::{self, EffectDecl, Gate, Reaction};
 use crate::event_pump::AsyncEventConsumer;
-use crate::extension_commands::{own_events, ComposedEvent};
+use crate::extension_commands::own_events;
 use crate::extensions::Extension;
 use crate::Services;
 
@@ -73,8 +72,7 @@ fn effects(svc: &Services) -> Vec<(Extension, EffectDecl)> {
 }
 
 fn reacts_to(decl: &EffectDecl, event: &StoredEvent) -> bool {
-    decl.on.contains(&event.envelope.event_type)
-        && crate::collector_triggers::payload_matches(&decl.filter, &event.envelope.payload)
+    effects::reacts_to(decl, &event.envelope.event_type, &event.envelope.payload)
 }
 
 impl EffectTriggers {
@@ -334,15 +332,6 @@ fn effect_command(
     crate::commands::Command::new(spec.clone(), Compose::handler(bus, spec, composer))
 }
 
-/// What an effect's script decided.
-enum Reaction {
-    Skip(String),
-    Run {
-        calls: Vec<CommandCall>,
-        events: Vec<ComposedEvent>,
-    },
-}
-
 /// Read the effect's `input` rows (the event's payload fields bound) and
 /// run its script over `{ event, rows }`, sandboxed. `Err` is why it
 /// failed.
@@ -351,10 +340,9 @@ async fn run_script(
     decl: &EffectDecl,
     event: &StoredEvent,
 ) -> Result<Reaction, String> {
-    let env = &event.envelope;
     let rows = match &decl.input {
         Some(sql) => {
-            let query = crate::extension_commands::input_query(sql, &env.payload);
+            let query = crate::extension_commands::input_query(sql, &event.envelope.payload);
             let result = svc
                 .db
                 .read(move |tx| oxplow_db::semantic_layer::read_on(tx, &query))
@@ -364,72 +352,10 @@ async fn run_script(
         }
         None => Vec::new(),
     };
-    let input = json!({
-        "event": {
-            "id": env.id.to_string(),
-            "type": env.event_type,
-            "v": env.v,
-            "seq": event.seq,
-            "source": env.source,
-            "subject": env.subject,
-            "payload": env.payload,
-        },
-        "rows": rows,
-    });
-    let script = decl.script.clone();
-    let out = tokio::task::spawn_blocking(move || {
-        use oxplow_collect_plugin::runtime::{run_sandboxed, run_starlark};
-        run_sandboxed(
-            &crate::extension_commands::COMMAND_SCRIPT_BUDGET,
-            move || run_starlark(&script, &input),
-        )
-    })
-    .await
-    .map_err(|e| format!("the script panicked: {e}"))?
-    .map_err(|e| format!("the script failed: {e}"))?;
-    reaction(out)
-}
-
-/// `{ skip: "why" }` or `{ commands: [{ name, input }], events?: [...] }`.
-fn reaction(value: Value) -> Result<Reaction, String> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Out {
-        #[serde(default)]
-        commands: Option<Vec<Call>>,
-        #[serde(default)]
-        events: Vec<ComposedEvent>,
-        #[serde(default)]
-        skip: Option<String>,
-    }
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Call {
-        name: String,
-        #[serde(default = "empty_object")]
-        input: Value,
-    }
-    fn empty_object() -> Value {
-        json!({})
-    }
-    const SHAPE: &str = "an effect's script returns `{ commands: [{ name, input }], events? }` \
-                         or `{ skip: \"why\" }`";
-    let out: Out = serde_json::from_value(value).map_err(|e| format!("{SHAPE}: {e}"))?;
-    match (out.skip, out.commands) {
-        (Some(why), None) if out.events.is_empty() => Ok(Reaction::Skip(why)),
-        (Some(_), _) => Err(format!("{SHAPE}: a skip composes nothing")),
-        (None, None) => Err(format!("{SHAPE}: it returned neither")),
-        (None, Some(commands)) => Ok(Reaction::Run {
-            calls: commands
-                .into_iter()
-                .map(|c| CommandCall {
-                    name: c.name,
-                    input: c.input,
-                })
-                .collect(),
-            events: out.events,
-        }),
-    }
+    let (script, event) = (decl.script.clone(), effects::event_json(event));
+    tokio::task::spawn_blocking(move || effects::run_script(&script, event, rows))
+        .await
+        .map_err(|e| format!("the script panicked: {e}"))?
 }
 
 /// Walk `event`'s causes: whether `source` (an effect's) caused it — its
@@ -477,6 +403,7 @@ mod tests {
         WorkItemTransitioned, WorkItemTransitionedV1,
     };
     use oxplow_domain::{Envelope, TaskStatus};
+    use serde_json::Value;
     use std::path::Path;
 
     const HEAD: &str = "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Effects., origin: null, examples: [] }\neffects:\n";

@@ -144,6 +144,13 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
         if let Some(slug) = ex.input.get("lens").and_then(Value::as_str) {
             report.ran.push(format!("example {}", ex.name));
             lens_example(host, ext, &ex, slug, report).await;
+        } else if let Some(id) = ex.input.get("effect").and_then(Value::as_str) {
+            effect_example(host, ext, &ex, id, report).await;
+        } else if let Some(t) = ex.input.get("event_type").and_then(Value::as_str) {
+            event_type_example(ext, &ex, t, report);
+        } else if let Some(link) = ex.input.get("wikilink").and_then(Value::as_str) {
+            report.ran.push(format!("example {}", ex.name));
+            ref_kind_example(ext, &ex, link, report);
         } else if let Some(id) = ex.input.get("collector").and_then(Value::as_str) {
             collector_example(host, ext, &ex, id, report).await;
         } else if let Some(cmd) = ex
@@ -156,9 +163,11 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
             command_example(host, &ex, cmd, report).await;
         } else if ex.input.get("command").is_none() || ext.providers.is_empty() {
             report.errors.push(format!(
-                "{shown}:1: example `{}`'s `input` names no lens, collector or provider command \
-                 — fix: `{{ lens: <slug>, params? }}`, `{{ collector: <id>, rows? }}`, or (with a \
-                 provider) `{{ command, input }}`",
+                "{shown}:1: example `{}`'s `input` names no lens, collector, command, effect, \
+                 event type, wikilink or provider command — fix: `{{ lens: <slug>, params? }}`, \
+                 `{{ collector: <id>, rows? }}`, `{{ command: <name>, input }}`, `{{ effect: <id>, \
+                 event: {{ type, payload }} }}`, `{{ event_type, v?, payload }}`, `{{ wikilink }}`, \
+                 or (with a provider) `{{ command, input }}`",
                 example.name
             ));
         }
@@ -262,6 +271,197 @@ async fn command_example(
             "{shown}:1: command `{}` {p} — fix: its script, or the example's `expect` \
              (`{{ commands: [names] }}` or `{{ refuses: <part of the reason> }}`)",
             cmd.name
+        ));
+    }
+}
+
+/// Dry-run effect `id` on the fixture's event (`input: { effect, event: {
+/// type, payload, subject? }, rows? }`): whether it reacts (`on`/`where`),
+/// and what its script composes — checked against the throwaway's
+/// registry — against `expect`: `{ commands: [names] }`, `{ skip: <part of
+/// the reason> }` or `{ reacts: false }`. Nothing runs.
+async fn effect_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    id: &str,
+    report: &mut TestReport,
+) {
+    use oxplow_app::effects::{dry_run, reacts_to, Reaction};
+    let (shown, example) = (ex.shown, ex.name);
+    let Some(decl) = ext.effects.iter().find(|e| e.id == id) else {
+        report.errors.push(format!(
+            "{shown}:1: example `{example}` names effect `{id}`, which `{}` doesn't declare — \
+             fix: the effect's `id`",
+            ext.name
+        ));
+        return;
+    };
+    report.ran.push(format!("example {example}"));
+    let event = ex.input.get("event").cloned().unwrap_or_default();
+    let event_type = event
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let payload = event.get("payload").cloned().unwrap_or_else(|| json!({}));
+    let reacts = reacts_to(decl, event_type, &payload);
+    let want_reacts = ex
+        .expect
+        .get("reacts")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    if reacts != want_reacts {
+        report.errors.push(format!(
+            "{shown}:1: effect `{id}` {} a `{event_type}` event like this one, the example \
+             expects it {} — fix: its `on`/`where`, or the example's `expect`",
+            if reacts {
+                "reacts to"
+            } else {
+                "doesn't react to"
+            },
+            if want_reacts { "to react" } else { "not to" },
+        ));
+        return;
+    }
+    if !reacts {
+        return;
+    }
+    let event = json!({
+        "id": "fixture",
+        "type": event_type,
+        "v": 1,
+        "seq": 0,
+        "source": "fixture",
+        "subject": event.get("subject").cloned().unwrap_or_else(|| json!([])),
+        "payload": payload,
+    });
+    let rows = ex
+        .input
+        .get("rows")
+        .and_then(Value::as_array)
+        .map(|r| r.to_vec());
+    let decided = dry_run(
+        &host.svc.sql,
+        decl,
+        &decl.script,
+        event,
+        rows,
+        Some(host.svc.commands.as_ref()),
+    )
+    .await;
+    let problem = match (decided, ex.expect.get("skip").and_then(Value::as_str)) {
+        (Err(e), _) => Some(format!("failed: {e}")),
+        (Ok(Reaction::Skip(why)), Some(want)) if why.contains(want) => None,
+        (Ok(Reaction::Skip(why)), _) => Some(format!("skipped ({why})")),
+        (Ok(r @ Reaction::Run { .. }), Some(want)) => Some(format!(
+            "composed [{}] but the example expects it to skip ({want})",
+            r.command_names().join(", ")
+        )),
+        (Ok(r @ Reaction::Run { .. }), None) => first_mismatch(
+            &ex.expect,
+            &json!({ "commands": r.command_names() }),
+        )
+        .map(|(path, want, got)| format!("composed {got} at `{path}`, the example expects {want}")),
+    };
+    if let Some(p) = problem {
+        report.errors.push(format!(
+            "{shown}:1: effect `{id}` {p} — fix: its script, or the example's `expect` \
+             (`{{ commands: [names] }}`, `{{ skip: <part of the reason> }}` or `{{ reacts: false }}`)"
+        ));
+    }
+}
+
+/// Check a payload against one of the extension's declared event types
+/// (`input: { event_type, v?, payload }`, the newest version when `v` is
+/// left out): `expect: { valid: true | false, upcast?: <payload at the
+/// newest version> }`.
+fn event_type_example(
+    ext: &Extension,
+    ex: &Example<'_>,
+    event_type: &str,
+    report: &mut TestReport,
+) {
+    use oxplow_domain::events::schema::EventSchemaRegistry;
+    let shown = ex.shown;
+    let mut registry = EventSchemaRegistry::new();
+    for d in &ext.event_types.types {
+        // What doesn't register is `check`'s finding already.
+        let _ = registry.register_declared(&ext.name, d.declared());
+    }
+    let Some(v) = ex
+        .input
+        .get("v")
+        .and_then(Value::as_u64)
+        .map(|v| v as u32)
+        .or_else(|| registry.latest(event_type))
+    else {
+        report.errors.push(format!(
+            "{shown}:1: example `{}` names event type `{event_type}`, which `{}` doesn't declare \
+             — fix: the type, or its `event_types:`",
+            ex.name, ext.name
+        ));
+        return;
+    };
+    report.ran.push(format!("example {}", ex.name));
+    let payload = ex
+        .input
+        .get("payload")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let valid = registry.validate(event_type, v, &payload);
+    let want_valid = ex
+        .expect
+        .get("valid")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    if valid.is_ok() != want_valid {
+        report.errors.push(format!(
+            "{shown}:1: `{event_type}@{v}` {} this payload{}, the example expects {} — fix: its \
+             schema, or the example",
+            if valid.is_ok() { "accepts" } else { "refuses" },
+            valid.err().map(|e| format!(" ({e})")).unwrap_or_default(),
+            if want_valid { "it valid" } else { "it refused" },
+        ));
+        return;
+    }
+    if let Some(want) = ex.expect.get("upcast") {
+        match registry.upcast_to_latest(event_type, v, payload) {
+            Ok((_, got)) => {
+                if let Some((path, want, got)) = first_mismatch(want, &got) {
+                    report.errors.push(format!(
+                        "{shown}:1: `{event_type}@{v}` upcasts to {got} at `{path}`, the example \
+                         expects {want} — fix: its upcast, or the example's `expect.upcast`"
+                    ));
+                }
+            }
+            Err(e) => report.errors.push(format!(
+                "{shown}:1: `{event_type}@{v}` doesn't upcast: {e} — fix: its upcast"
+            )),
+        }
+    }
+}
+
+/// What a `[[…]]` names with the extension's ref kinds beside core's
+/// (`input: { wikilink: "pr:12" }`): `expect: { ref: "acme_pr:12" | null }`.
+fn ref_kind_example(ext: &Extension, ex: &Example<'_>, link: &str, report: &mut TestReport) {
+    use oxplow_domain::refs::kind::{core_kinds, KindLifecycle, KindSpec};
+    let mut kinds = core_kinds();
+    for k in &ext.ref_kinds {
+        if let Ok(spec) = KindSpec::new(&k.kind, &k.id_pattern) {
+            let spec = spec.lifecycle(KindLifecycle::Experimental);
+            let spec = match &k.wikilink {
+                Some(w) => spec.wikilink_prefix(w),
+                None => spec,
+            };
+            let _ = kinds.register(spec);
+        }
+    }
+    let got = oxplow_domain::refs::canonical_wikilink(&kinds, link).map(|r| r.to_string());
+    if let Some((path, want, got)) = first_mismatch(&ex.expect, &json!({ "ref": got })) {
+        report.errors.push(format!(
+            "{}:1: `[[{link}]]` names {got} at `{path}`, the example expects {want} — fix: the \
+             ref kind's `id`/`wikilink`, or the example's `expect`",
+            ex.shown
         ));
     }
 }
@@ -1277,6 +1477,146 @@ after:
             errors.contains(
                 "oxplow/extensions/visits/extension.yaml:8: incremental model `long_visits`"
             ) && errors.contains("1 row(s) a full refill holds"),
+            "{errors}"
+        );
+    }
+
+    /// P8.D12: a scaffolded effect checks and tests clean; a fixture that
+    /// expects other commands is a finding at its `file:line`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_scaffolded_effect_tests_clean_and_a_mismatch_names_its_fixture() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Effect, "notes", None).unwrap();
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+        assert!(
+            report.ran.contains(&"example basic".to_string()),
+            "{:?}",
+            report.ran
+        );
+
+        let fixture = dir
+            .path()
+            .join("oxplow/extensions/notes/fixtures/basic.yaml");
+        let text = std::fs::read_to_string(&fixture).unwrap();
+        std::fs::write(
+            &fixture,
+            text.replace(
+                "commands: [work_item.comment]",
+                "commands: [knowledge.add_note]",
+            ),
+        )
+        .unwrap();
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        let errors = report.errors.join("\n");
+        assert!(
+            errors.contains(
+                "oxplow/extensions/notes/fixtures/basic.yaml:1: effect `on-done` composed"
+            ),
+            "{errors}"
+        );
+    }
+
+    /// Event-type and ref-kind fixtures: a payload checked against the
+    /// declared schema (and its upcast), a wikilink against the declared
+    /// kind; a wrong expectation is a finding at its fixture.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn event_type_and_ref_kind_fixtures_check_what_they_declare() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            "oxplow/extensions/acme/extension.yaml",
+            "manifest: 2
+name: acme
+sharing: private
+intent:
+  purpose: PRs.
+  examples:
+    - { name: merged, input: { event_type: acme.merged, payload: { pr: 12 } }, expect: valid }
+    - { name: old, input: { event_type: acme.merged, v: 1, payload: { number: 12 } }, expect: upcast }
+    - { name: link, input: { wikilink: pr:12 }, expect: the pull request }
+event_types:
+  types:
+    - { type: acme.merged, v: 1, schema: merged.v1.json, summary: Merged. }
+    - { type: acme.merged, v: 2, schema: merged.v2.json, summary: Merged., upcast: merged.star }
+models:
+  - name: prs
+    version: 1
+    description: PRs.
+    columns:
+      - { name: ref, type: \"\", doc: The ref. }
+      - { name: title, type: \"\", doc: Its title. }
+pages:
+  - { id: pr, title: Pull request, category: Work, lens: open }
+ref_kinds:
+  - { kind: acme_pr, label: Pull request, id: '^\\d+$', resolve: prs, page: pr, wikilink: pr, icon: git-pull-request }
+",
+        );
+        write(
+            root,
+            "oxplow/extensions/acme/merged.v1.json",
+            r#"{"type": "object", "required": ["number"]}"#,
+        );
+        write(
+            root,
+            "oxplow/extensions/acme/merged.v2.json",
+            r#"{"type": "object", "required": ["pr"]}"#,
+        );
+        write(
+            root,
+            "oxplow/extensions/acme/merged.star",
+            "def transform(x):\n    return {\"pr\": x[\"payload\"][\"number\"]}\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/acme/models/prs.sql",
+            "SELECT 'acme_pr:1' AS ref, 'One' AS title",
+        );
+        write(
+            root,
+            "oxplow/extensions/acme/lenses/open.yaml",
+            "title: Open\nquery: \"SELECT 1 AS n\"\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/acme/fixtures/merged.yaml",
+            "input: { event_type: acme.merged, payload: { pr: 12 } }\nexpect: { valid: true }\n",
+        );
+        write(root, "oxplow/extensions/acme/fixtures/old.yaml", "input: { event_type: acme.merged, v: 1, payload: { number: 12 } }\nexpect: { valid: true, upcast: { pr: 12 } }\n");
+        write(
+            root,
+            "oxplow/extensions/acme/fixtures/link.yaml",
+            "input: { wikilink: \"pr:12\" }\nexpect: { ref: \"acme_pr:12\" }\n",
+        );
+        let report = test_extension(root, "acme", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+        for name in ["merged", "old", "link"] {
+            assert!(
+                report.ran.contains(&format!("example {name}")),
+                "{:?}",
+                report.ran
+            );
+        }
+
+        write(root, "oxplow/extensions/acme/fixtures/merged.yaml", "input: { event_type: acme.merged, payload: { number: 12 } }\nexpect: { valid: true }\n");
+        write(
+            root,
+            "oxplow/extensions/acme/fixtures/link.yaml",
+            "input: { wikilink: \"pr:12\" }\nexpect: { ref: \"acme_pr:13\" }\n",
+        );
+        let errors = test_extension(root, "acme", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors
+                .contains("oxplow/extensions/acme/fixtures/merged.yaml:1: `acme.merged@2` refuses"),
+            "{errors}"
+        );
+        assert!(
+            errors.contains("oxplow/extensions/acme/fixtures/link.yaml:1: `[[pr:12]]` names"),
             "{errors}"
         );
     }

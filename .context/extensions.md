@@ -654,6 +654,10 @@ and one calling MCP read identical `file:line: what — fix` lines.
   - `command` — `commands: [note]` whose `handlers/note.star` composes
     `work_item.comment`, with an example and a `ui.commands` entry on
     `work_item`; its intent example dry-runs it;
+  - `effect` (P8.D12) — `effects: [on-done]` on `work_item.transitioned`
+    `where: { to: done }`, whose `effects/on-done.star` composes
+    `work_item.comment`; its intent example dry-runs it on a fixture
+    event;
   - `provider` — below; `extension` — the manifest only.
   It refuses an existing folder, a bad name and a non-ref origin. **What
   it writes passes `check` with no warnings and `plugin test` clean**
@@ -786,6 +790,16 @@ launcher commands are checked), then — only if `check` is clean — each
   warning, not run (it needs a person's approval);
 - `input: { command, input }` — a provider's, run in its session
   (providers.md "The conformance kit");
+- `input: { effect: <id>, event: { type, payload, subject? }, rows? }`,
+  `expect: { commands: [names] } | { skip: <part of the reason> } | {
+  reacts: false }` (P8.D12) — whether the effect reacts (`on`/`where`),
+  then `effects::dry_run`: its `input` rows (or `rows`), its script, the
+  composed calls checked against the registry; nothing runs;
+- `input: { event_type, v?, payload }`, `expect: { valid: true | false,
+  upcast?: <payload> }` — the payload against the extension's declared
+  schema (the newest version without `v`), and its upcast;
+- `input: { wikilink }`, `expect: { ref: <canonical ref> | null }` — what
+  `[[…]]` names with the extension's ref kinds beside core's;
 - no fixture is a warning; an `input` naming none of these is an error.
 
 Then `questions.yaml`, each provider's conformance kit, and (P8.B5) each
@@ -988,6 +1002,16 @@ with an error (a review never spends or sends). `CollectorEffect.outputs`
 holds each input's `Ran { counts, rows (20 per entity), error? }` before
 and after. An exec or read collector is never run — approved or not —
 and says so in `not_run`.
+
+**An effect's reactions** (P8.D12). `EffectReport.effects` lists each
+effect by id with its trigger before and after (`EffectTrigger { on,
+filter, input }`; a script-only change is `changed` too) and, when it
+changed, `outputs`: each input — both versions' fixtures that name it
+(`input: { effect, event, rows? }`) and the latest five events of its
+`on` types — composed by each version that reacts to it
+(`effects::dry_run`, nothing runs): `Composes { commands, skip?, error?
+}`. The lines read "Effect x: added — on t where k = v", "Effect x: on …
+→ on …", "Effect x on fixture basic: runs [a] → skips (why)".
 
 **`oxplow plugin check <name> --effects [--against <rev>]`** (P8.C6).
 The same review on the CLI: `oxplow_sdk::check_effects` loads the

@@ -802,17 +802,25 @@ pub async fn dry_run(
             other => other.to_string(),
         })?;
     if let Composed::Run { calls, .. } = &decided {
-        for call in calls {
-            let Some(schema) = registry.input_schema(&call.name) else {
-                return Err(format!("no command `{}`", call.name));
-            };
-            InputValidator::compile(&schema)
-                .map_err(|e| e.to_string())
-                .and_then(|v| v.check(&call.input).map_err(|e| e.to_string()))
-                .map_err(|e| format!("the input doesn't fit `{}`: {e}", call.name))?;
-        }
+        check_calls(registry, calls)?;
     }
     Ok(decided)
+}
+
+/// Each composed call names a registered command and fits its input
+/// schema — what a dry run (a command's examples, an effect's fixtures)
+/// checks without running anything.
+pub fn check_calls(registry: CommandSchemas<'_>, calls: &[CommandCall]) -> Result<(), String> {
+    for call in calls {
+        let Some(schema) = registry.input_schema(&call.name) else {
+            return Err(format!("no command `{}`", call.name));
+        };
+        InputValidator::compile(&schema)
+            .map_err(|e| e.to_string())
+            .and_then(|v| v.check(&call.input).map_err(|e| e.to_string()))
+            .map_err(|e| format!("the input doesn't fit `{}`: {e}", call.name))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

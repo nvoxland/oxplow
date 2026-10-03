@@ -27,7 +27,7 @@ const review = (over: Partial<Extension> = {}): ExtensionReview => ({
   gitRef: null,
   sha: "0123456789abcdef0123456789abcdef01234567",
   problems: [],
-  effects: { lenses: [], models: [], collectors: [], providers: [], config: null, lines: [] },
+  effects: { lenses: [], models: [], collectors: [], providers: [], effects: [], config: null, lines: [] },
 });
 
 // tsk378: an install shows what it brings in; the person confirms or cancels.
@@ -67,6 +67,7 @@ test("a changed lens shows both texts in the review", () => {
       models: [],
       collectors: [],
       providers: [],
+      effects: [],
       config: null,
       lines: ["Lens shared/count: changed"],
     },

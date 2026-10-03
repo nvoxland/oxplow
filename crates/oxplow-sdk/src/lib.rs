@@ -54,10 +54,14 @@ pub enum Kind {
     /// A command whose script composes core commands, on a work item's
     /// Commands menu.
     Command,
+    /// An effect (experimental, so private): a script reacting to a logged
+    /// event by composing commands, run once a person approves it.
+    Effect,
 }
 
 impl Kind {
-    pub const NAMES: &'static str = "`lens`, `extension`, `provider`, `collector` or `command`";
+    pub const NAMES: &'static str =
+        "`lens`, `extension`, `provider`, `collector`, `command` or `effect`";
 
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
@@ -66,6 +70,7 @@ impl Kind {
             "provider" => Some(Kind::Provider),
             "collector" => Some(Kind::Collector),
             "command" => Some(Kind::Command),
+            "effect" => Some(Kind::Effect),
             _ => None,
         }
     }
@@ -147,6 +152,12 @@ pub fn scaffold(
             "a comment on the work item",
             Some("{ commands: [work_item.comment] }".to_string()),
         ),
+        Kind::Effect => (
+            "{ effect: on-done, event: { type: work_item.transitioned, payload: { work_item: \"work_item:oxplow:tsk1\", from: in_progress, to: done } } }"
+                .to_string(),
+            "a comment on the finished work item",
+            Some("{ commands: [work_item.comment] }".to_string()),
+        ),
     };
     let provider_id = name.replace('-', "_");
     let mut manifest = extensions::scaffold_manifest(&extensions::ManifestScaffold {
@@ -202,6 +213,17 @@ pub fn scaffold(
              \x20   # On a work item's page (Commands) and a row's right-click.\n\
              \x20   - {{ command: {ns}.note, label: Add Note, about: work_item }}\n"
         )),
+        Kind::Effect => manifest.push_str(
+            "effects:\n\
+             \x20 # Reacts to a logged event by composing commands, run with an agent's\n\
+             \x20 # rights only once a person approves it (Settings → Data), and only on\n\
+             \x20 # events logged after; a command that asks becomes a proposal.\n\
+             \x20 - id: on-done\n\
+             \x20   summary: \"TODO: what it does. Here: comment on a work item when it's done.\"\n\
+             \x20   on: [work_item.transitioned]\n\
+             \x20   where: { to: done }\n\
+             \x20   entry: effects/on-done.star\n",
+        ),
         Kind::Lens | Kind::Extension => {}
     }
     write(&format!("{rel_dir}/extension.yaml"), manifest)?;
@@ -305,6 +327,17 @@ pub fn scaffold(
              def transform(x):\n\
              \x20   return {\"commands\": [\n\
              \x20       {\"name\": \"work_item.comment\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"body\": \"TODO: the note\"}},\n\
+             \x20   ]}\n"
+                .to_string(),
+        )?,
+        Kind::Effect => write(
+            &format!("{rel_dir}/effects/on-done.star"),
+            "# Gets {\"event\": {type, payload, subject, ...}, \"rows\": [...]} and returns the\n\
+             # commands to run — or {\"skip\": \"why\"}. No I/O.\n\
+             def transform(x):\n\
+             \x20   ref = x[\"event\"][\"payload\"][\"work_item\"]\n\
+             \x20   return {\"commands\": [\n\
+             \x20       {\"name\": \"work_item.comment\", \"input\": {\"ref\": ref, \"body\": \"TODO: the note\"}},\n\
              \x20   ]}\n"
                 .to_string(),
         )?,

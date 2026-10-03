@@ -1867,6 +1867,16 @@ export type CommitRefLabel = {
 
 export type CommitRefLabelKind = "branch" | "tag";
 
+// What one version's effect makes of an event.
+export type Composes = {
+	// The commands it runs, by name.
+	commands: string[],
+	// Why it skips.
+	skip: string | null,
+	// Why it fails.
+	error: string | null,
+};
+
 // The instance config schema (`config:`), by property.
 export type ConfigEffect = {
 	before: unknown | null,
@@ -2121,18 +2131,54 @@ export type EffectDecl = {
 	declaredAt: string,
 };
 
+// An effect before and after: when it reacts, and what it composes.
+export type EffectEffect = {
+	id: string,
+	change: Change,
+	before: EffectTrigger | null,
+	after: EffectTrigger | null,
+	/**
+	 *  What each version composes on the same inputs — its fixtures and
+	 *  the latest events it'd react to — when its script or declaration
+	 *  changed; running nothing.
+	 */
+	outputs: EffectOutput[],
+};
+
+// One input, composed by each version.
+export type EffectOutput = {
+	// `fixture <name>` or `event #<seq>`.
+	input: string,
+	change: Change,
+	before: Composes | null,
+	after: Composes | null,
+};
+
 // Everything installing or updating an extension would change.
 export type EffectReport = {
 	lenses: LensEffect[],
 	models: ModelEffect[],
 	collectors: CollectorEffect[],
 	providers: ProviderEffect[],
+	/**
+	 *  Its effects (P8.D12): what each reacts to, and what each version
+	 *  composes on the same events.
+	 */
+	effects: EffectEffect[],
 	config: ConfigEffect | null,
 	/**
 	 *  The report as lines ([`summary`]): what the install review, `plugin
 	 *  check --effects` and an effort's review say, in one wording.
 	 */
 	lines: string[],
+};
+
+// When an effect reacts, and what it reads.
+export type EffectTrigger = {
+	on: string[],
+	// Its `where`.
+	filter: { [key in string]: string },
+	input: string | null,
 };
 
 // One setting as the Settings view shows it.
