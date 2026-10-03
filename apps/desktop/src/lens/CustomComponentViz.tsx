@@ -28,7 +28,8 @@ export function CustomComponentViz({
   streamId,
   onOpenPage,
   fallback,
-  failure,
+  onFailure,
+  onReady,
   base = remoteBaseUrl(),
   readyTimeoutMs = 3000,
 }: {
@@ -37,9 +38,13 @@ export function CustomComponentViz({
   onOpenPage?(ref: TabRef): void;
   /** The lens's table: shown when the component can't be. */
   fallback: ReactNode;
-  /** What to show instead when the component can't be — in place of the
-   *  note and `fallback` (a replacement shows the core component). */
-  failure?(reason: string): ReactNode;
+  /** Told why when the component can't be shown — and then it shows
+   *  nothing itself: the caller shows what stands in (a replacement, the
+   *  core component, outside this frame). Without it, the note and
+   *  `fallback`. */
+  onFailure?(reason: string): void;
+  /** Its component said `ready`. */
+  onReady?(): void;
   /** The daemon that serves bundles; none means no component. */
   base?: string | null;
   readyTimeoutMs?: number;
@@ -47,10 +52,16 @@ export function CustomComponentViz({
   const component = run.lens.custom?.component ?? null;
   // Why the frame at `src` was given up on; a new `src` starts afresh.
   const [failed, setFailed] = useState<{ src: string; reason: string } | null>(null);
-  if (!base || !component) return <>{failure ? failure("Its component can't be shown here.") : fallback}</>;
-  const src = componentBundleUrl(base, run.lens.extension, component, streamId);
-  if (failed?.src === src) {
-    if (failure) return <>{failure(failed.reason)}</>;
+  const src = base && component ? componentBundleUrl(base, run.lens.extension, component, streamId) : null;
+  const reason = src === null ? "Its component can't be shown here." : failed?.src === src ? failed.reason : null;
+  useEffect(() => {
+    if (reason !== null) onFailure?.(reason);
+    // Once per reason; `onFailure` is the caller's, not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reason]);
+  if (reason !== null && onFailure) return null;
+  if (src === null) return <>{fallback}</>;
+  if (reason !== null) {
     return (
       <div>
         <div data-testid="custom-component-fallback" style={noteStyle}>
@@ -75,7 +86,8 @@ export function CustomComponentViz({
         streamId={streamId}
         onOpenPage={onOpenPage}
         readyTimeoutMs={readyTimeoutMs}
-        onFail={(reason) => setFailed({ src, reason })}
+        onFail={(why) => setFailed({ src, reason: why })}
+        onReady={onReady}
       />
     </div>
   );
@@ -90,6 +102,7 @@ function ComponentFrame({
   onOpenPage,
   readyTimeoutMs,
   onFail,
+  onReady,
 }: {
   src: string;
   component: string;
@@ -98,6 +111,7 @@ function ComponentFrame({
   onOpenPage?(ref: TabRef): void;
   readyTimeoutMs: number;
   onFail(reason: string): void;
+  onReady?(): void;
 }) {
   const [asking, setAsking] = useState<{ command: string; answer(ok: boolean): void } | null>(null);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -151,6 +165,7 @@ function ComponentFrame({
           ready = true;
           clearTimeout(timer);
           void recordUsage({ kind: "custom_component", key: `${initial.lens.extension}/${component}`, streamId }).catch(() => {});
+          onReady?.();
         },
       },
       initial,

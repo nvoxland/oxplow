@@ -51,7 +51,9 @@ export function Replaceable({
       >
         replaced by {extension}
       </span>
-      <LensResultView run={r.run} streamId={streamId} onOpenPage={onOpenPage} customFailure={(reason) => failed(sentence(reason))} />
+      {/* A custom component that can't load says so here, and the whole
+          replacement gives way to oxplow's own above (tsk855). */}
+      <LensResultView run={r.run} streamId={streamId} onOpenPage={onOpenPage} onCustomFailure={r.fail} onCustomReady={r.shown} />
     </div>
   );
 }

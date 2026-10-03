@@ -17,6 +17,8 @@ let extensions: unknown[] = [];
 let activeExtension: string | null = null;
 let off: string[] = [];
 let lensFails: string | null = null;
+/** The replacement lens's viz: a `custom` one is a sandboxed bundle. */
+let lensViz = "table";
 const lensRuns: Array<[string, unknown]> = [];
 const usage: Array<Record<string, unknown>> = [];
 
@@ -48,7 +50,17 @@ mock.module("../api.js", () => ({
     lensRuns.push([id, params]);
     if (lensFails) throw new Error(lensFails);
     return {
-      lens: { id, extension: id.split("/")[0], title: "Their Board", viz: "table", columns: [], actions: [], children: [], params: [] },
+      lens: {
+        id,
+        extension: id.split("/")[0],
+        title: "Their Board",
+        viz: lensViz,
+        custom: lensViz === "custom" ? { component: "board", props: null } : null,
+        columns: [],
+        actions: [],
+        children: [],
+        params: [],
+      },
       params,
       result: { columns: ["title"], rows: [[`${id} row`]], truncated: false, reads: { models: ["v_work_item"], tables: [], measures: [] } },
       alert: null,
@@ -88,6 +100,7 @@ beforeEach(() => {
   activeExtension = null;
   off = [];
   lensFails = null;
+  lensViz = "table";
   lensRuns.length = 0;
   usage.length = 0;
 });
@@ -157,3 +170,21 @@ test("a replacement that can't load shows the core component and says why", asyn
   expect(view.getByTestId("core-board")).toBeTruthy();
   expect(view.queryByTestId("replacement-work_item.board")).toBeNull();
 });
+
+// tsk855: a custom replacement whose bundle can't load falls back the same
+// way — outside its frame: no badge, none of the lens's toolbar, just the
+// note and oxplow's own — and isn't counted as shown.
+test("a custom replacement that can't load falls back outside its frame", async () => {
+  extensions = [replacing("x")];
+  activeExtension = "x";
+  lensViz = "custom";
+  const view = render(board());
+  const note = await waitFor(() => view.getByTestId("replacement-fallback"));
+  expect(note.textContent).toContain("x's board couldn't load");
+  expect(note.textContent).toContain("Showing oxplow's");
+  expect(view.getByTestId("core-board")).toBeTruthy();
+  expect(view.queryByTestId("replacement-work_item.board")).toBeNull();
+  expect(view.queryByTestId("replacement-badge")).toBeNull();
+  expect(usage).toEqual([]);
+});
+

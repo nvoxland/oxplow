@@ -98,9 +98,12 @@ interface LensResultViewProps {
   /** Show the toolbar (Copy, Add to Agent Context, actions); a grid's
    *  children leave it to the grid. Default true. */
   toolbar?: boolean;
-  /** For a `viz: custom` lens: what to show when its component can't be,
-   *  instead of the lens's table (a replacement shows the core component). */
-  customFailure?(reason: string): ReactNode;
+  /** For a `viz: custom` lens whose component can't be shown: told why,
+   *  instead of the lens showing its table (a replacement falls back to
+   *  the core component, outside its own frame). */
+  onCustomFailure?(reason: string): void;
+  /** For a `viz: custom` lens: its component said `ready`. */
+  onCustomReady?(): void;
 }
 
 /** Pressing a lens's actions, with the confirmation a command may ask
@@ -200,7 +203,8 @@ function RowsBody({
   streamId = null,
   compact = false,
   runRowAction,
-  customFailure,
+  onCustomFailure,
+  onCustomReady,
 }: LensResultViewProps & { runRowAction?: RowActionRunner }) {
   const lens = run.lens;
   const result = limitRows(run.result, maxRows);
@@ -276,7 +280,7 @@ function RowsBody({
   });
   return (
     <>
-      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, customFailure }} />
+      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, onCustomFailure, onCustomReady }} />
       {ctxMenu.menu}
     </>
   );
@@ -299,7 +303,8 @@ function LensViz({
   streamId,
   onOpenPage,
   rowMenu,
-  customFailure,
+  onCustomFailure,
+  onCustomReady,
 }: {
   run: LensRun;
   result: LensRun["result"];
@@ -311,7 +316,8 @@ function LensViz({
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
   rowMenu: RowMenu;
-  customFailure?(reason: string): ReactNode;
+  onCustomFailure?(reason: string): void;
+  onCustomReady?(): void;
 }) {
   switch (lens.viz) {
     case "bar":
@@ -347,7 +353,8 @@ function LensViz({
           streamId={streamId}
           onOpenPage={onOpenPage}
           fallback={<TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} />}
-          failure={customFailure}
+          onFailure={onCustomFailure}
+          onReady={onCustomReady}
         />
       );
     case "table":

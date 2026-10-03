@@ -23,7 +23,16 @@ export type Replacement =
   | { state: "pending" }
   /** Oxplow's own component. */
   | { state: "core" }
-  | { state: "replaced"; replacement: UiReplacement; run: LensRun }
+  | {
+      state: "replaced";
+      replacement: UiReplacement;
+      run: LensRun;
+      /** Its custom component couldn't be shown, and why: from here it is
+       *  `failed`, and oxplow's own shows (tsk855). */
+      fail(reason: string): void;
+      /** Its custom component said `ready`: it is shown. */
+      shown(): void;
+    }
   /** The replacement couldn't load: oxplow's own, and why. */
   | { state: "failed"; replacement: UiReplacement; message: string };
 
@@ -112,12 +121,22 @@ export function useReplacement(target: string, props: Record<string, SqlCell>, s
     void run();
   });
 
-  // Usage is the evidence a kind needs to be promoted: once per replacement shown.
-  const shown = ran !== null && ran.run !== null && ran.key === runKey ? ran.id : null;
+  // A custom component that couldn't be shown, for the run it failed on.
+  const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
+  const failedHere = failure !== null && failure.key === runKey;
+
+  // Usage is the evidence a kind needs to be promoted: once per replacement
+  // actually shown — a kit lens when it ran, a custom one when its
+  // component says `ready` (one that never loads isn't shown).
+  const record = useCallback(
+    (id: string) => void recordUsage({ kind: "replacement", key: id, streamId }).catch(() => {}),
+    [streamId],
+  );
+  const ranOk = ran !== null && ran.run !== null && ran.key === runKey ? ran : null;
+  const shownNow = ranOk !== null && ranOk.run?.lens.viz !== "custom" && !failedHere ? ranOk.id : null;
   useEffect(() => {
-    if (shown !== null) void recordUsage({ kind: "replacement", key: shown, streamId }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown]);
+    if (shownNow !== null) record(shownNow);
+  }, [shownNow, record]);
 
   if (exts === null) return { state: "pending" };
   if (candidates.length === 0) return { state: "core" };
@@ -126,5 +145,14 @@ export function useReplacement(target: string, props: Record<string, SqlCell>, s
   if (lens === null) return { state: "failed", replacement: chosen, message: `its lens ${chosen.lensId} didn't load` };
   if (ran === null || ran.key !== runKey) return { state: "pending" };
   if (ran.run === null) return { state: "failed", replacement: chosen, message: ran.error ?? "it failed" };
-  return { state: "replaced", replacement: chosen, run: ran.run };
+  if (failedHere) return { state: "failed", replacement: chosen, message: failure.message };
+  const key = runKey;
+  const id = chosen.id;
+  return {
+    state: "replaced",
+    replacement: chosen,
+    run: ran.run,
+    fail: (message) => setFailure({ key, message }),
+    shown: () => record(id),
+  };
 }

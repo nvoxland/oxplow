@@ -55,20 +55,36 @@ test("a frame that never says ready, or navigates away, falls back to the table"
 
 // P9.A1: a replacement's lens says what stands in for a component that
 // can't be shown — the core component, not this lens's table.
-test("with `failure`, a component that can't be shown gives way to what it says, not the table", async () => {
-  const failure = (reason: string) => <div data-testid="core">core, because: {reason}</div>;
+test("with `onFailure`, a component that can't be shown is reported and shows nothing itself", async () => {
+  const reasons: string[] = [];
   const slow = render(
-    <CustomComponentViz run={run({ component: "burndown", props: null })} streamId={null} fallback={fallback} failure={failure} base="http://127.0.0.1:9" readyTimeoutMs={10} />,
+    <CustomComponentViz
+      run={run({ component: "burndown", props: null })}
+      streamId={null}
+      fallback={fallback}
+      onFailure={(reason) => reasons.push(reason)}
+      base="http://127.0.0.1:9"
+      readyTimeoutMs={10}
+    />,
   );
   fireEvent.load(slow.getByTestId("custom-component-frame"));
-  await waitFor(() => expect(slow.getByTestId("core").textContent).toContain("didn't start"));
+  await waitFor(() => expect(reasons).toEqual(["The component didn't start."]));
+  // The caller shows what stands in (a replacement: oxplow's own, outside).
+  expect(slow.queryByTestId("custom-component-frame")).toBeNull();
   expect(slow.queryByTestId("the-table")).toBeNull();
   expect(slow.queryByTestId("custom-component-fallback")).toBeNull();
   cleanup();
+  reasons.length = 0;
   const hostless = render(
-    <CustomComponentViz run={run({ component: "burndown", props: null })} streamId={null} fallback={fallback} failure={failure} base={null} />,
+    <CustomComponentViz
+      run={run({ component: "burndown", props: null })}
+      streamId={null}
+      fallback={fallback}
+      onFailure={(reason) => reasons.push(reason)}
+      base={null}
+    />,
   );
-  expect(hostless.getByTestId("core")).toBeTruthy();
+  await waitFor(() => expect(reasons).toEqual(["Its component can't be shown here."]));
   expect(hostless.queryByTestId("the-table")).toBeNull();
 });
 

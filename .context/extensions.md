@@ -973,14 +973,18 @@ when it changes) and `replacementsOff` (re-read on `configChanged`):
   re-running like any lens. The page's own chrome (the Board's scope
   picker) stays oxplow's;
 - it can't load — the lens run fails, or its custom component doesn't
-  start (`LensResultView.customFailure` → `CustomComponentViz.failure`)
-  → **the core component**, under a line saying whose it was and why
+  start (`CustomComponentViz.onFailure` → `LensResultView.onCustomFailure`
+  → `useReplacement`'s `fail`, which makes the replacement `failed`) →
+  **the core component**, under a line saying whose it was and why
   ("linear's board couldn't load: …. Showing oxplow's.",
-  `replacement-fallback`) — never the lens's table;
+  `replacement-fallback`) — never the lens's table, and **outside** the
+  replacement's frame: no badge, none of the lens's toolbar (tsk855);
 - while any of that isn't known yet, nothing renders, so the wrong
   component never flashes.
 Showing one records `usage { kind: "replacement", key: <ext>/<target> }`
-(the evidence a kind needs to be promoted). A replacement is a lens, so
+(the evidence a kind needs to be promoted) — a kit lens when it ran, a
+custom one when its component says `ready` (`onCustomReady` → `shown`),
+so one that never loads isn't counted. A replacement is a lens, so
 its text rendering is the lens's; agents read work items from
 `v_work_item` either way. The capability smoke test renders the Board
 with every enhancement off (no `replacement-*`), and with two extensions
