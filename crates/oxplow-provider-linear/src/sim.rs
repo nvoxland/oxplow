@@ -34,6 +34,10 @@ struct Issue {
     project: Option<String>,
     priority: i64,
     updated: u64,
+    /// When it was created, by the real clock (RFC 3339) — unlike
+    /// `updated`, a counter, so reads are the same every run. Only the
+    /// live suite's cleanup asks for it.
+    created: String,
     trashed: bool,
 }
 
@@ -158,6 +162,16 @@ impl LinearSim {
             .iter()
             .filter(|(i, _)| i == identifier)
             .map(|(_, b)| b.clone())
+            .collect()
+    }
+
+    /// The issues not in the trash, by identifier.
+    pub fn live_issues(&self) -> Vec<String> {
+        self.lock()
+            .issues
+            .iter()
+            .filter(|i| !i.trashed)
+            .map(|i| i.identifier.clone())
             .collect()
     }
 
@@ -384,6 +398,7 @@ fn op(w: &mut World, operation: &str, vars: &Value) -> Result<Value, String> {
                 project: None,
                 priority: 0,
                 updated: 0,
+                created: oxplow_domain::Timestamp::now().to_string(),
                 trashed: false,
             };
             apply(w, &mut issue, input)?;
@@ -466,6 +481,46 @@ fn op(w: &mut World, operation: &str, vars: &Value) -> Result<Value, String> {
             let more = start + page.len() < matching.len();
             let end = page.last().map(|i| i.identifier.clone());
             let nodes: Vec<Value> = page.iter().map(|i| issue_json(w, i)).collect();
+            Ok(json!({ "issues": { "nodes": nodes,
+                       "pageInfo": { "hasNextPage": more, "endCursor": end } } }))
+        }
+        // What the live suite's cleanup asks: the issues the key's user
+        // created in a team since a time. Trashed issues aren't listed,
+        // as in Linear; every issue here is the key's user's.
+        "IssuesCreated" => {
+            let filter = &vars["filter"];
+            if filter["team"]["key"]["eq"] != "ENG" {
+                return Err("the filter names no team".into());
+            }
+            if filter["creator"]["isMe"]["eq"] != true {
+                return Err("the filter doesn't keep to the key's user".into());
+            }
+            let since = filter["createdAt"]["gte"].as_str().unwrap_or_default();
+            let matching: Vec<&Issue> = w
+                .issues
+                .iter()
+                .filter(|i| !i.trashed && i.created.as_str() >= since)
+                .collect();
+            let start = match vars["after"].as_str() {
+                None => 0,
+                Some(cursor) => matching
+                    .iter()
+                    .position(|i| i.identifier == cursor)
+                    .map_or(matching.len(), |p| p + 1),
+            };
+            let first = vars["first"].as_u64().unwrap_or(50) as usize;
+            let page: Vec<&Issue> = matching
+                .iter()
+                .skip(start)
+                .take(first.min(w.max_page))
+                .copied()
+                .collect();
+            let more = start + page.len() < matching.len();
+            let end = page.last().map(|i| i.identifier.clone());
+            let nodes: Vec<Value> = page
+                .iter()
+                .map(|i| json!({ "id": i.id, "identifier": i.identifier }))
+                .collect();
             Ok(json!({ "issues": { "nodes": nodes,
                        "pageInfo": { "hasNextPage": more, "endCursor": end } } }))
         }

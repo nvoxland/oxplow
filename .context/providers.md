@@ -180,6 +180,30 @@ workspace** (the P7 walk): the simulator encodes this provider's
 reading of Linear's schema (issue ids accept the identifier, `trashed`
 marks a deleted issue), not Linear.
 
+**Live** (P9.B5; `tests/live.rs`). The same `plugin test` run against a
+real workspace, when asked for:
+
+```text
+OXPLOW_LIVE_LINEAR=1 LINEAR_API_KEY=lin_api_… LINEAR_TEAM=ENG \
+    cargo test -p oxplow-provider-linear --test live -- --nocapture
+```
+
+Without all three the test prints that it was skipped and passes; CI
+never sets them. It copies the example into a throwaway repo, points its
+fixture config at `LINEAR_TEAM`, runs `test_extension` with `bless` (a
+workspace's ids, numbers and times can't match the golden, so the
+transcript is written into the copy, not compared), and then **trashes
+every issue the key's user created in that team since the run began**
+(`IssuesCreated`: `team.key`, `createdAt >= start − 1 min`,
+`creator.isMe`; then `issueDelete`) — whatever the run came to. Use a
+scratch team: an issue filed there by hand during the run goes too.
+The suite is one function, and `the_live_suite_runs_and_cleans_up_against_the_simulator`
+runs it against `LinearSim` on every build, so the path a live run takes
+is exercised, cleanup included. **Nobody has run it against a workspace
+yet** (there is none; a decision, 2026-10-03): whether Linear accepts the
+cleanup's filter, and everything the simulator assumes, is what the first
+live run — or the GUI walk, tsk469 — will show.
+
 **Try it**: `scripts/install-linear.sh <project>` builds the binary into
 the project's copy of the example (consent hashes the folder, so the
 binary must live in it); enable the extension, approve its program on
