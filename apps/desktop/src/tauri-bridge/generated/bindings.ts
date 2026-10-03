@@ -2875,6 +2875,15 @@ export type ItemBody =
 // Something failed: the prompt, the agent process, the protocol.
 { type: "error"; message: string };
 
+export type KeyedDiff = {
+	key: string[],
+	added: number,
+	removed: number,
+	changed: number,
+	// Up to [`ROW_DIFF_SAMPLES`] of them, in key order.
+	samples: RowSample[],
+};
+
 /**
  *  Launcher (Cmd+K) sections a lens can be listed under. Mirrors the
  *  renderer's `PageCategory`.
@@ -3621,6 +3630,11 @@ export type ModelEffect = {
 	contractChange: string | null,
 	// Models that read it, which a contract change can break (P6b.E2).
 	downstream: string[],
+	/**
+	 *  What its rows would become (P8.C3), each side read through its own
+	 *  models; `None` for an unchanged model.
+	 */
+	rows: RowDiff | null,
 };
 
 // When one model last changed.
@@ -4267,6 +4281,25 @@ export type RoleStatus = {
 	binding: RoleBinding | null,
 	// The binding comes from the project, not the global `ai.yaml`.
 	overridden: boolean,
+};
+
+// A model's rows before and after (P8.C3).
+export type RowDiff = {
+	// Rows on each side (`None`: it isn't on that side).
+	before: number | null,
+	after: number | null,
+	// Row by row, when both sides declare the same key.
+	keyed: KeyedDiff | null,
+	// Why the diff is only counts, or that a side's query failed.
+	note: string | null,
+};
+
+export type RowSample = {
+	change: Change,
+	// The row's key, column → value.
+	key: unknown,
+	before: unknown | null,
+	after: unknown | null,
 };
 
 /**

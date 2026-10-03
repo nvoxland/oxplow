@@ -73,6 +73,149 @@ pub struct ModelEffect {
     pub contract_change: Option<String>,
     /// Models that read it, which a contract change can break (P6b.E2).
     pub downstream: Vec<String>,
+    /// What its rows would become (P8.C3), each side read through its own
+    /// models; `None` for an unchanged model.
+    pub rows: Option<RowDiff>,
+}
+
+/// The most rows a side's diff reads; past it, counts only.
+pub const ROW_DIFF_LIMIT: usize = 100_000;
+/// The most sample changes a keyed diff keeps.
+pub const ROW_DIFF_SAMPLES: usize = 20;
+
+/// A model's rows before and after (P8.C3).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RowDiff {
+    /// Rows on each side (`None`: it isn't on that side).
+    pub before: Option<i64>,
+    pub after: Option<i64>,
+    /// Row by row, when both sides declare the same key.
+    pub keyed: Option<KeyedDiff>,
+    /// Why the diff is only counts, or that a side's query failed.
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyedDiff {
+    pub key: Vec<String>,
+    pub added: i64,
+    pub removed: i64,
+    pub changed: i64,
+    /// Up to [`ROW_DIFF_SAMPLES`] of them, in key order.
+    pub samples: Vec<RowSample>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RowSample {
+    pub change: Change,
+    /// The row's key, column → value.
+    #[specta(type = oxplow_domain::Json)]
+    pub key: Value,
+    #[specta(type = Option<oxplow_domain::Json>)]
+    pub before: Option<Value>,
+    #[specta(type = Option<oxplow_domain::Json>)]
+    pub after: Option<Value>,
+}
+
+/// One side's rows of a model.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Rows {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<Value>>,
+    /// It has more than [`ROW_DIFF_LIMIT`].
+    pub truncated: bool,
+}
+
+impl Rows {
+    fn object(&self, row: &[Value]) -> serde_json::Map<String, Value> {
+        self.columns
+            .iter()
+            .cloned()
+            .zip(row.iter().cloned())
+            .collect()
+    }
+}
+
+/// Diff a model's rows: each side `(rows, its key)`. With the same
+/// non-empty key on both and neither past the limit, a merge-join by key;
+/// otherwise counts with a note saying why.
+pub fn row_diff(before: Option<(&Rows, &[String])>, after: Option<(&Rows, &[String])>) -> RowDiff {
+    let count = |s: Option<(&Rows, &[String])>| s.map(|(r, _)| r.rows.len() as i64);
+    let mut diff = RowDiff {
+        before: count(before),
+        after: count(after),
+        keyed: None,
+        note: None,
+    };
+    let (Some((b, bk)), Some((a, ak))) = (before, after) else {
+        return diff;
+    };
+    if b.truncated || a.truncated {
+        diff.note = Some(format!(
+            "over {ROW_DIFF_LIMIT} rows: counts only (at least that many)"
+        ));
+        return diff;
+    }
+    if bk.is_empty() || bk != ak {
+        diff.note = Some(
+            "no key the two versions share: counts only — declare the same `key:` on both to see rows".into(),
+        );
+        return diff;
+    }
+    let keyed = |rows: &Rows| -> BTreeMap<String, (Value, Value)> {
+        rows.rows
+            .iter()
+            .map(|row| {
+                let object = rows.object(row);
+                let key: serde_json::Map<String, Value> = bk
+                    .iter()
+                    .map(|k| (k.clone(), object.get(k).cloned().unwrap_or(Value::Null)))
+                    .collect();
+                let key = Value::Object(key);
+                (key.to_string(), (key, Value::Object(object)))
+            })
+            .collect()
+    };
+    let (old, new) = (keyed(b), keyed(a));
+    let mut out = KeyedDiff {
+        key: bk.to_vec(),
+        added: 0,
+        removed: 0,
+        changed: 0,
+        samples: Vec::new(),
+    };
+    let keys: BTreeSet<&String> = old.keys().chain(new.keys()).collect();
+    for k in keys {
+        let (change, key, before, after) = match (old.get(k), new.get(k)) {
+            (Some((key, x)), Some((_, y))) if x != y => {
+                out.changed += 1;
+                (Change::Changed, key, Some(x), Some(y))
+            }
+            (Some(_), Some(_)) => continue,
+            (Some((key, x)), None) => {
+                out.removed += 1;
+                (Change::Removed, key, Some(x), None)
+            }
+            (None, Some((key, y))) => {
+                out.added += 1;
+                (Change::Added, key, None, Some(y))
+            }
+            (None, None) => continue,
+        };
+        if out.samples.len() < ROW_DIFF_SAMPLES {
+            out.samples.push(RowSample {
+                change,
+                key: key.clone(),
+                before: before.cloned(),
+                after: after.cloned(),
+            });
+        }
+    }
+    diff.keyed = Some(out);
+    diff
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -208,6 +351,7 @@ pub fn models_diff(
                 after_columns: cols(a),
                 contract_change,
                 downstream: Vec::new(),
+                rows: None,
             }
         })
         .collect()
@@ -442,6 +586,39 @@ pub struct Version<'a> {
     pub read: &'a (dyn Fn(&str) -> Option<String> + Sync),
     /// Its lenses, already run once (`extensions::run_lenses`).
     pub lenses: &'a crate::extensions::LensRuns,
+    /// The temp views its models compile to (`extensions::Prepared`), so
+    /// its rows are its own version's.
+    pub overlay: &'a [oxplow_db::TempView],
+}
+
+/// A model's rows on one side, read through that side's overlay (up to
+/// [`ROW_DIFF_LIMIT`]); `Err` when the query failed.
+async fn rows_of(
+    layer: &crate::sql_gateway::SqlGateway,
+    overlay: &[oxplow_db::TempView],
+    view: &str,
+) -> Result<Rows, String> {
+    let result = layer
+        .with_overlay(overlay.to_vec())
+        .run(
+            oxplow_db::SqlQuery::new(format!("SELECT * FROM \"{}\"", view.replace('"', "\"\"")))
+                .limit(Some(ROW_DIFF_LIMIT)),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(Rows {
+        columns: result.columns,
+        rows: result
+            .rows
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|c| serde_json::to_value(c).unwrap_or(Value::Null))
+                    .collect()
+            })
+            .collect(),
+        truncated: result.truncated,
+    })
 }
 
 /// A version's instance config schema (its manifest's `config:`), read
@@ -532,12 +709,66 @@ pub async fn effects(
     // Readers outside this extension: its own views, by exact name (a
     // prefix would also drop another extension's `v_<name>_<…>` views).
     let own: BTreeSet<String> = models.iter().map(|m| m.view.clone()).collect();
+    let key_of = |v: &Version<'_>, view: &str| -> Vec<String> {
+        v.extension
+            .models
+            .iter()
+            .find(|m| extension_view(name, &m.decl.name) == view)
+            .map(|m| m.decl.key.clone())
+            .unwrap_or_default()
+    };
     for m in &mut models {
         m.downstream = downstream_of(layer, &m.view)
             .await
             .into_iter()
             .filter(|v| !own.contains(v))
             .collect();
+        if m.change == Change::Unchanged {
+            continue;
+        }
+        let read = |v: Option<&Version<'_>>| {
+            let view = m.view.clone();
+            let overlay = v.map(|v| v.overlay.to_vec());
+            async move {
+                match overlay {
+                    Some(o) => Some(rows_of(layer, &o, &view).await),
+                    None => None,
+                }
+            }
+        };
+        let side_b = if m.change == Change::Added {
+            None
+        } else {
+            before.as_ref()
+        };
+        let side_a = if m.change == Change::Removed {
+            None
+        } else {
+            Some(&after)
+        };
+        let (rb, ra) = (read(side_b).await, read(side_a).await);
+        let failed: Vec<String> = [("before", &rb), ("after", &ra)]
+            .into_iter()
+            .filter_map(|(side, r)| match r {
+                Some(Err(e)) => Some(format!("{side}: {e}")),
+                _ => None,
+            })
+            .collect();
+        let (kb, ka) = (
+            side_b.map(|v| key_of(v, &m.view)).unwrap_or_default(),
+            key_of(&after, &m.view),
+        );
+        let ok =
+            |r: &Option<Result<Rows, String>>| r.as_ref().and_then(|r| r.as_ref().ok()).cloned();
+        let (ob, oa) = (ok(&rb), ok(&ra));
+        let mut diff = row_diff(
+            ob.as_ref().map(|r| (r, kb.as_slice())),
+            oa.as_ref().map(|r| (r, ka.as_slice())),
+        );
+        if !failed.is_empty() {
+            diff.note = Some(format!("its query failed — {}", failed.join("; ")));
+        }
+        m.rows = Some(diff);
     }
     let no_collectors: Vec<CollectorSpec> = Vec::new();
     let collectors = collectors_diff(
@@ -898,11 +1129,13 @@ mod tests {
                 extension: &before,
                 read: &none,
                 lenses: &runs_before,
+                overlay: &[],
             }),
             Version {
                 extension: &after,
                 read: &none,
                 lenses: &runs_after,
+                overlay: &[],
             },
         )
         .await;
@@ -930,6 +1163,7 @@ mod tests {
                 extension: &after,
                 read: &none,
                 lenses: &runs_after,
+                overlay: &[],
             },
         )
         .await;
@@ -966,6 +1200,7 @@ mod tests {
                 extension: &ext,
                 read: &read,
                 lenses: &runs,
+                overlay: &[],
             },
         )
         .await;
@@ -988,5 +1223,96 @@ mod tests {
             "{readers:?}"
         );
         assert!(downstream_of(&fx.svc.sql, "v_nothing").await.is_empty());
+    }
+
+    fn side(columns: &[&str], rows: Vec<Vec<Value>>, truncated: bool) -> Rows {
+        Rows {
+            columns: columns.iter().map(|c| c.to_string()).collect(),
+            rows,
+            truncated,
+        }
+    }
+
+    /// P8.C3: with the same key on both sides, a changed model's rows are
+    /// merge-joined — added, removed and changed counted, with samples.
+    #[test]
+    fn a_keyed_row_diff_counts_and_samples_each_change() {
+        let key = vec!["id".to_string()];
+        let before = side(
+            &["id", "v"],
+            vec![
+                vec![json!(1), json!("a")],
+                vec![json!(2), json!("b")],
+                vec![json!(3), json!("c")],
+            ],
+            false,
+        );
+        let after = side(
+            &["id", "v"],
+            vec![
+                vec![json!(1), json!("a")],
+                vec![json!(2), json!("B")],
+                vec![json!(4), json!("d")],
+            ],
+            false,
+        );
+        let diff = row_diff(Some((&before, &key)), Some((&after, &key)));
+        assert_eq!(
+            (diff.before, diff.after, diff.note.as_deref()),
+            (Some(3), Some(3), None)
+        );
+        let keyed = diff.keyed.expect("keyed");
+        assert_eq!((keyed.added, keyed.removed, keyed.changed), (1, 1, 1));
+        let samples: Vec<(Change, Value, Option<Value>, Option<Value>)> = keyed
+            .samples
+            .into_iter()
+            .map(|s| (s.change, s.key, s.before, s.after))
+            .collect();
+        assert_eq!(
+            samples,
+            vec![
+                (
+                    Change::Changed,
+                    json!({"id": 2}),
+                    Some(json!({"id": 2, "v": "b"})),
+                    Some(json!({"id": 2, "v": "B"}))
+                ),
+                (
+                    Change::Removed,
+                    json!({"id": 3}),
+                    Some(json!({"id": 3, "v": "c"})),
+                    None
+                ),
+                (
+                    Change::Added,
+                    json!({"id": 4}),
+                    None,
+                    Some(json!({"id": 4, "v": "d"}))
+                ),
+            ]
+        );
+    }
+
+    /// Without the same key on both sides there's nothing to join on:
+    /// counts, and a note saying why; over the row limit, the same.
+    #[test]
+    fn an_unkeyed_or_oversized_row_diff_is_counts_with_a_note() {
+        let before = side(&["n"], vec![vec![json!(1)]], false);
+        let after = side(&["n"], vec![vec![json!(1)], vec![json!(2)]], false);
+        let diff = row_diff(Some((&before, &[])), Some((&after, &[])));
+        assert_eq!(
+            (diff.before, diff.after, diff.keyed.is_none()),
+            (Some(1), Some(2), true)
+        );
+        assert!(diff.note.unwrap().contains("no key"));
+
+        let key = vec!["n".to_string()];
+        let big = side(&["n"], vec![vec![json!(1)]], true);
+        let diff = row_diff(Some((&before, &key)), Some((&big, &key)));
+        assert!(diff.keyed.is_none());
+        assert!(diff.note.unwrap().contains("100000"), "names the limit");
+
+        let added = row_diff(None, Some((&after, &key)));
+        assert_eq!((added.before, added.after), (None, Some(2)));
     }
 }

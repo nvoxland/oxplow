@@ -2761,11 +2761,13 @@ pub async fn review_extension(
                         extension: e,
                         read: &read_installed,
                         lenses: before.as_ref().map_or(&no_runs, |p| &p.lenses),
+                        overlay: before.as_ref().map_or(&[], |p| p.overlay.as_slice()),
                     }),
                 crate::extension_effects::Version {
                     extension: &extension,
                     read: &read_candidate,
                     lenses: &after.lenses,
+                    overlay: &after.overlay,
                 },
             )
             .await,
@@ -3855,6 +3857,21 @@ empty: No tasks.
                 count.error.as_deref()
             ),
             (Some("1"), Some("2"), None)
+        );
+        // P8.C3: its rows, each side's own — counts, since it has no key.
+        let x = update
+            .effects
+            .as_ref()
+            .unwrap()
+            .models
+            .iter()
+            .find(|m| m.view == "v_shared_x")
+            .unwrap();
+        let rows = x.rows.as_ref().expect("a changed model's rows");
+        assert_eq!((rows.before, rows.after), (Some(1), Some(1)));
+        assert!(
+            rows.note.as_deref().unwrap_or("").contains("no key"),
+            "{rows:?}"
         );
     }
 

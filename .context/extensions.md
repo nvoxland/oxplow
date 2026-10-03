@@ -963,6 +963,17 @@ lens over a model whose SQL changed renders against each version's own
 SQL, whatever the database has published (a disabled extension, a model
 that failed, another worktree's copy).
 
+**A model's rows** (P8.C3). Each changed, added or removed model's
+`ModelEffect.rows` is a `RowDiff { before, after, keyed?, note? }`: each
+side's rows read through that side's own overlay (up to 100 000,
+`ROW_DIFF_LIMIT`). When both versions declare the same non-empty `key`
+(P8.B1) it's a merge-join by key — `KeyedDiff { key, added, removed,
+changed, samples }`, up to 20 sample rows in key order, each with its key
+and its row before and after; otherwise, or past the limit, counts with a
+note saying why (or that a side's query failed). An unchanged model has
+none. The rows are the review's only reads of model data; nothing is
+written.
+
 ## Commands in core menus (`ui.commands`)
 
 `ui.commands` (stable, P6b.C4; `extensions/ui_commands.rs`) puts a
