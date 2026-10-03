@@ -340,6 +340,9 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_workspace_files"),
     ui("read_workspace_file"),
     ui("files_at"),
+    // An effort review's "Extension Changes" (P8.C7); agents run
+    // `plugin check --effects`.
+    ui("extension_effects_between"),
     ui("vcs_head"),
     ui("vcs_status"),
     ui("vcs_revision"),

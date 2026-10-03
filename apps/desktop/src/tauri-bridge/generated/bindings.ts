@@ -474,6 +474,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	extensionEffectsBetween: (streamId: string | null, start: string | null, end: string) => typedError<ExtensionChange[], IpcError>(__TAURI_INVOKE("extension_effects_between", { streamId, start, end })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getSnapshotStats: (snapshotId: number) => typedError<SnapshotStats, IpcError>(__TAURI_INVOKE("get_snapshot_stats", { snapshotId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2277,6 +2282,20 @@ export type EventId = string;
 
 // A loaded extension and anything wrong with it.
 export type Extension = Extension_Serialize | Extension_Deserialize;
+
+/**
+ *  One extension that changed between two revisions of a workspace
+ *  (P8.C7): what an effort's review shows for it.
+ */
+export type ExtensionChange = {
+	name: string,
+	// `added`, `removed` or `changed`.
+	change: Change,
+	// What the change does; `None` for a removed extension.
+	effects: EffectReport | null,
+	// What's wrong with the later version.
+	errors: string[],
+};
 
 /**
  *  A command an extension declares (valid ones; invalid ones are in the

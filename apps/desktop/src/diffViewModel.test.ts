@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  changedExtensions,
   pickerBranch,
   previousSnapshotId,
   rangeDateLabel,
@@ -165,4 +166,16 @@ describe("inProgressNotice", () => {
     expect(inProgressNotice("effort")).toContain("Effort is in progress");
     expect(inProgressNotice("endpoints")).not.toMatch(/effort|turn/i);
   });
+});
+
+test("the extensions a change touches, by folder", () => {
+  expect(
+    changedExtensions([
+      "oxplow/extensions/b/lenses/x.yaml",
+      "src/a.rs",
+      "oxplow/extensions/a/extension.yaml",
+      "oxplow/extensions/b/models/y.sql",
+      "oxplow/extensions.yaml",
+    ]),
+  ).toEqual(["a", "b"]);
 });

@@ -1,5 +1,5 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
-import type { OpOutcome, ProviderEffect, Reads, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
+import type { ExtensionChange, OpOutcome, ProviderEffect, Reads, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
 import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
 export { onRemoteReconnect, triggerRemoteResync };
@@ -1925,6 +1925,17 @@ export async function diffRevisions(
   to: Revision,
 ): Promise<DiffEntry[]> {
   return unwrap(await commands.diff(streamId || null, from, to));
+}
+
+/** The extensions that changed between `start` (null: nothing before) and
+ *  `end` of the stream's workspace, each with what the change does
+ *  (P8.C7) — the "Extension Changes" section of an effort's review. */
+export async function extensionEffectsBetween(
+  streamId: string,
+  start: Revision | null,
+  end: Revision,
+): Promise<ExtensionChange[]> {
+  return unwrap(await commands.extensionEffectsBetween(streamId || null, start, end));
 }
 
 /** Every file in the stream's workspace at `revision`, sorted. */

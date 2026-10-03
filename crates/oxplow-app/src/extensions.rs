@@ -9,7 +9,7 @@
 //! reported in that extension's `errors` and everything else still
 //! loads.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use oxplow_db::{SqlCell, SqlQueryResult};
@@ -1204,6 +1204,93 @@ pub async fn extension_tree_at(
         .filter_map(|(path, text)| Some((path.strip_prefix(&prefix)?.to_string(), text)));
     let tree = Tree::new(files);
     Ok(tree.read("extension.yaml").is_some().then_some(tree))
+}
+
+/// One extension that changed between two revisions of a workspace
+/// (P8.C7): what an effort's review shows for it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionChange {
+    pub name: String,
+    /// `added`, `removed` or `changed`.
+    pub change: crate::extension_effects::Change,
+    /// What the change does; `None` for a removed extension.
+    pub effects: Option<crate::extension_effects::EffectReport>,
+    /// What's wrong with the later version.
+    pub errors: Vec<String>,
+}
+
+/// The extensions under `oxplow/extensions/` whose files differ between
+/// `start` (none: nothing before) and `end` of workspace `ws`, each with
+/// what the change does — both versions loaded as their revision holds
+/// them and reviewed on their own overlays.
+pub async fn extension_changes_between(
+    svc: &crate::Services,
+    ws: &Path,
+    start: Option<&oxplow_domain::vcs::Revision>,
+    end: &oxplow_domain::vcs::Revision,
+) -> Result<Vec<ExtensionChange>, DomainError> {
+    let prefix = format!("{EXTENSIONS_DIR}/");
+    let names: BTreeSet<String> = svc
+        .trees
+        .diff(ws, start, end)
+        .await?
+        .into_iter()
+        .filter_map(|e| {
+            let rest = e.path.strip_prefix(&prefix)?;
+            let (name, _) = rest.split_once('/')?;
+            Some(name.to_string())
+        })
+        .collect();
+    let mut out = Vec::new();
+    for name in names {
+        let rel = format!("{EXTENSIONS_DIR}/{name}");
+        let before = match start {
+            Some(rev) => extension_tree_at(&svc.trees, ws, rev, &name).await?,
+            None => None,
+        };
+        let after = extension_tree_at(&svc.trees, ws, end, &name).await?;
+        let Some(after) = after else {
+            if before.is_some() {
+                out.push(ExtensionChange {
+                    name,
+                    change: crate::extension_effects::Change::Removed,
+                    effects: None,
+                    errors: Vec::new(),
+                });
+            }
+            continue;
+        };
+        let read_before = |file: &str| before.as_ref().and_then(|t| t.file(file));
+        let read_after = |file: &str| after.file(file);
+        let mut side = ReviewSide {
+            extension: after.load(&name, &rel),
+            read: &read_after,
+        };
+        let effects = effects_between(
+            &svc.sql,
+            &svc.extension_catalog,
+            ws,
+            before.as_ref().map(|t| ReviewSide {
+                extension: t.load(&name, &rel),
+                read: &read_before,
+            }),
+            &mut side,
+            svc.commands.as_ref(),
+        )
+        .await;
+        out.push(ExtensionChange {
+            change: if before.is_some() {
+                crate::extension_effects::Change::Changed
+            } else {
+                crate::extension_effects::Change::Added
+            },
+            name,
+            effects: Some(effects),
+            errors: side.extension.errors,
+        });
+    }
+    Ok(out)
 }
 
 /// One version of an extension under review: as loaded, and how to read
@@ -6083,5 +6170,72 @@ commands:
             .unwrap()
             .expect("acme is in the snapshot");
         assert_eq!(at_snapshot.description, "Edited.");
+    }
+
+    /// P8.C7: an effort's review names the extensions that changed between
+    /// its two revisions, each with what the change does; files outside
+    /// `oxplow/extensions/` change nothing here.
+    #[tokio::test]
+    async fn an_effort_review_names_the_extensions_that_changed() {
+        use oxplow_domain::stores::StreamStore as _;
+        use oxplow_domain::vcs::Revision;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let ws = f.svc.layout.project_dir.clone();
+        let stream = f.svc.stream_store.list().await.unwrap()[0].id;
+        let snapshot = |files: Vec<(&'static str, String)>| {
+            let svc = f.svc.clone();
+            async move {
+                let id = svc.snapshot_store.create_snapshot(stream).await.unwrap();
+                for (path, body) in files {
+                    let hash = svc.blobs.write(body.as_bytes()).unwrap();
+                    svc.snapshot_store
+                        .capture(oxplow_db::FileSnapshot {
+                            id: 0,
+                            stream_id: stream,
+                            path: path.into(),
+                            blob_hash: Some(hash),
+                            size_bytes: body.len() as i64,
+                            captured_at: oxplow_domain::Timestamp::now(),
+                            storage: oxplow_db::SnapshotStorage::Oxplow,
+                            snapshot_id: Some(id),
+                            mtime_ms: None,
+                            content_hash: None,
+                        })
+                        .await
+                        .unwrap();
+                }
+                id
+            }
+        };
+        let manifest = "manifest: 2\nname: acme\nintent:\n  purpose: Count.\n  origin: thread:thr1\n  examples: []\n".to_string();
+        let lens = |n: u32| format!("title: Count\nquery: SELECT {n} AS n\nviz: number\n");
+        let start = snapshot(vec![
+            ("oxplow/extensions/acme/extension.yaml", manifest.clone()),
+            ("oxplow/extensions/acme/lenses/count.yaml", lens(1)),
+            ("src/a.rs", "fn a() {}\n".into()),
+        ])
+        .await;
+        let end = snapshot(vec![
+            ("oxplow/extensions/acme/lenses/count.yaml", lens(2)),
+            ("src/a.rs", "fn a() { 1 }\n".into()),
+        ])
+        .await;
+        let changes = extension_changes_between(
+            &f.svc,
+            &ws,
+            Some(&Revision::Snapshot(start)),
+            &Revision::Snapshot(end),
+        )
+        .await
+        .unwrap();
+        assert_eq!(changes.len(), 1, "{changes:?}");
+        assert_eq!(changes[0].name, "acme");
+        assert_eq!(changes[0].change, crate::extension_effects::Change::Changed);
+        let report = changes[0].effects.as_ref().unwrap();
+        assert!(
+            report.lines.iter().any(|l| l == "Lens acme/count: changed"),
+            "{:?}",
+            report.lines
+        );
     }
 }

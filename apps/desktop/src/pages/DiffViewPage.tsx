@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { DiffEntry, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
+import type { ExtensionChange } from "../tauri-bridge/generated/bindings.js";
+import { EffectReportView } from "../components/EffectReportView.js";
 import { readTask, readTasksById } from "../workItems.js";
 import {
+  extensionEffectsBetween,
   getAgentTurn,
   getEffort,
   listEffortFiles,
@@ -10,6 +13,7 @@ import {
   listSnapshots,
 } from "../api.js";
 import {
+  changedExtensions,
   pickerBranch,
   previousSnapshotId,
   rangeDateLabel,
@@ -318,6 +322,25 @@ function ResolvedEndpointDiff({
   // against the live working tree (the `working` endpoint); a small
   // header note flags that the end side is moving.
   const changed = useChangedFiles(stream ? { kind: "endpoints", streamId: stream.id, start, end } : null);
+
+  // An extension's files changed: what the change does (P8.C7), each
+  // version reviewed as its revision holds it.
+  const extensionNames = changedExtensions(changed.files.map((f) => f.path));
+  const extensionKey = extensionNames.join(",");
+  const [extensionChanges, setExtensionChanges] = useState<ExtensionChange[] | null>(null);
+  useEffect(() => {
+    setExtensionChanges(null);
+    if (!stream || extensionKey === "") return;
+    let cancelled = false;
+    void extensionEffectsBetween(stream.id, start, end)
+      .then((rows) => {
+        if (!cancelled) setExtensionChanges(rows);
+      })
+      .catch((err) => logUi("warn", "extension effects failed", { error: String(err) }));
+    return () => {
+      cancelled = true;
+    };
+  }, [stream?.id, start, end, extensionKey]);
 
   // Task title for the header (effort mode).
   const [taskTitle, setTaskTitle] = useState<string | null>(null);
@@ -713,6 +736,29 @@ function ResolvedEndpointDiff({
           />
         ) : null}
       </section>
+
+      {extensionNames.length > 0 ? (
+        <section data-testid="diff-view-extension-changes">
+          <h2 style={h2Style}>Extension Changes</h2>
+          {extensionChanges === null ? (
+            <div style={muted}>Reviewing {extensionNames.join(", ")}…</div>
+          ) : (
+            extensionChanges.map((c) => (
+              <div key={c.name} data-testid={`extension-change-${c.name}`} style={{ marginBottom: 10 }}>
+                <div style={{ fontWeight: 600 }}>
+                  {c.name} <span style={muted}>{c.change}</span>
+                </div>
+                {c.errors.map((e, i) => (
+                  <div key={i} style={{ color: "var(--severity-critical)", fontSize: "var(--text-xs)" }}>
+                    {e}
+                  </div>
+                ))}
+                {c.effects ? <EffectReportView report={c.effects} testId={`extension-change-${c.name}-effects`} /> : null}
+              </div>
+            ))
+          )}
+        </section>
+      ) : null}
 
     </div>
     </Page>

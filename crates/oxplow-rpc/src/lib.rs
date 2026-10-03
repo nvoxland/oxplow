@@ -361,6 +361,7 @@ macro_rules! oxplow_command_table {
                 list_files_for_snapshot => $crate::commands::snapshot::list_files_for_snapshot { snapshot_id: i64 } -> Vec<::oxplow_db::FileSnapshot>,
                 get_file_snapshot => $crate::commands::snapshot::get_file_snapshot { file_snapshot_id: i64 } -> Option<::oxplow_db::FileSnapshot>,
                 diff => $crate::commands::trees::diff { stream_id: Option<String>, from: Option<::oxplow_domain::vcs::Revision>, to: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::trees::DiffEntry>,
+                extension_effects_between => $crate::commands::trees::extension_effects_between { stream_id: Option<String>, start: Option<::oxplow_domain::vcs::Revision>, end: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::extensions::ExtensionChange>,
                 // background
                 list_background_tasks => $crate::commands::background::list_background_tasks {} -> Vec<::oxplow_app::BackgroundTask>,
                 get_background_task => $crate::commands::background::get_background_task { id: String } -> Option<::oxplow_app::BackgroundTask>,

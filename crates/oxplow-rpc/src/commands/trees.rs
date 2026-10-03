@@ -47,6 +47,19 @@ pub async fn diff(
     Ok(svc.trees.diff(&ws, from.as_ref(), &to).await?)
 }
 
+/// The extensions that changed between `start` and `end` of the stream's
+/// workspace, each with what the change does (P8.C7): the "Extension
+/// Changes" section of an effort's review.
+pub async fn extension_effects_between(
+    svc: &Services,
+    stream_id: Option<String>,
+    start: Option<Revision>,
+    end: Revision,
+) -> Result<Vec<oxplow_app::extensions::ExtensionChange>, IpcError> {
+    let ws = svc.worktrees.resolve(stream_id.as_deref()).await;
+    Ok(oxplow_app::extensions::extension_changes_between(svc, &ws, start.as_ref(), &end).await?)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;

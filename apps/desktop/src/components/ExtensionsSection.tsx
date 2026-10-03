@@ -34,7 +34,7 @@ import {
 import { NEW_LENS_PROMPT } from "../lens/lensModel.js";
 import { enableAgain, healthLine, healthOf, repairWithAgent, usePluginHealth, type PluginHealth } from "../pluginHealth.js";
 import { collectorRan, extensionCredentials, extensionRowModel, reviewModel } from "./extensionRowModel.js";
-import { EffectDiff } from "./EffectDiff.js";
+import { EffectReportView } from "./EffectReportView.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
@@ -303,19 +303,8 @@ export function ReviewPanel({
           <li key={i}>{line}</li>
         ))}
       </ul>
-      {m.effects.length > 0 ? (
-        <>
-          <div style={{ fontWeight: 600, marginTop: 6 }}>What it changes</div>
-          <ul data-testid="extension-review-effects" style={{ margin: "4px 0", paddingLeft: 18 }}>
-            {m.effects.map((line, i) => (
-              <li key={i}>{line}</li>
-            ))}
-          </ul>
-        </>
-      ) : null}
-      {m.lensDiffs.map((d) => (
-        <EffectDiff key={d.id} id={d.id} before={d.before} after={d.after} />
-      ))}
+      {/* No report when the candidate doesn't load; its errors say why. */}
+      {review.effects ? <EffectReportView report={review.effects} testId="extension-review-effects" /> : null}
       {m.errors.map((err, i) => (
         <div key={`e${i}`} style={errorStyle}>
           {err}

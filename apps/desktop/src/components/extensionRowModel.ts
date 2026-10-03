@@ -145,10 +145,6 @@ export interface ReviewModel {
   errors: string[];
   /** What a dry run of its lenses found; shown, not blocking. */
   problems: string[];
-  /** What installing it would change, one line each — grants first. */
-  effects: string[];
-  /** Lenses whose text changes: before and after, side by side. */
-  lensDiffs: { id: string; before: string; after: string }[];
   canInstall: boolean;
 }
 
@@ -189,12 +185,6 @@ export function reviewModel(review: ExtensionReview): ReviewModel {
     declares,
     errors: ext.errors,
     problems: review.problems,
-    // The server's wording (`extension_effects::summary`); no report when
-    // the candidate doesn't load — its errors say why.
-    effects: review.effects?.lines ?? [],
-    lensDiffs: (review.effects?.lenses ?? [])
-      .filter((l) => l.change === "changed" && l.before !== null && l.after !== null)
-      .map((l) => ({ id: l.id, before: l.before!, after: l.after! })),
     canInstall: ext.errors.length === 0,
   };
 }

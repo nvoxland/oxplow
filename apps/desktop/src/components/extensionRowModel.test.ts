@@ -215,32 +215,9 @@ describe("reviewModel", () => {
   test("load errors block the install; dry-run problems don't", () => {
     const broken = reviewModel({ ...review({ errors: ["extension.yaml: unknown field `bogus`"] }), effects: null });
     expect(broken.canInstall).toBe(false);
-    expect(broken.effects).toEqual([]);
-    expect(broken.lensDiffs).toEqual([]);
     const m = reviewModel(review({}, ["lens shared/x: column `y` isn't in the query result"]));
     expect(m.canInstall).toBe(true);
     expect(m.problems).toHaveLength(1);
   });
 
-  // P6b.E2 / P8.C5: a review says what installing would change in the
-  // server's wording (the lines are `extension_effects::summary`'s, tested
-  // in Rust); a changed lens shows its text before and after.
-  test("effects are the server's lines, and changed lenses diff", () => {
-    const m = reviewModel({
-      ...review(),
-      effects: {
-        lenses: [
-          { id: "shared/count", change: "changed", before: "1", after: "2", error: null },
-          { id: "shared/same", change: "unchanged", before: "x", after: "x", error: null },
-        ],
-        models: [],
-        collectors: [],
-        providers: [],
-        config: null,
-        lines: ["Collector gh: now reaches api.example.com (was none)", "Lens shared/count: changed"],
-      },
-    } as never);
-    expect(m.effects).toEqual(["Collector gh: now reaches api.example.com (was none)", "Lens shared/count: changed"]);
-    expect(m.lensDiffs).toEqual([{ id: "shared/count", before: "1", after: "2" }]);
-  });
 });

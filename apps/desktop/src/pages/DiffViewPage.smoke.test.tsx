@@ -18,11 +18,33 @@ const HEAD = "a".repeat(40);
 const reads = { models: ["v_commit"], tables: [], measures: [] };
 const gitCalls: string[] = [];
 const diffCalls: unknown[][] = [];
+let diffFiles: { path: string; status: string; additions: number; deletions: number }[] = [
+  { path: "a.ts", status: "modified", additions: 2, deletions: 1 },
+];
+const extensionCalls: unknown[][] = [];
 
 const neutral: Record<string, (...args: unknown[]) => Promise<unknown>> = {
   diff: async (...args) => {
     diffCalls.push(args);
-    return ok([{ path: "a.ts", status: "modified", additions: 2, deletions: 1 }]);
+    return ok(diffFiles);
+  },
+  extensionEffectsBetween: async (...args) => {
+    extensionCalls.push(args);
+    return ok([
+      {
+        name: "acme",
+        change: "changed",
+        errors: [],
+        effects: {
+          lenses: [{ id: "acme/count", change: "changed", before: "1", after: "2", error: null }],
+          models: [],
+          collectors: [],
+          providers: [],
+          config: null,
+          lines: ["Lens acme/count: changed"],
+        },
+      },
+    ]);
   },
   vcsRevision: async () =>
     ok({
@@ -132,4 +154,27 @@ test("history reads v_commit from the stream's head, not git log", async () => {
   await findByText("First commit");
   expect(sqlCalls.some((sql) => sql.includes("WITH RECURSIVE"))).toBe(true);
   expect(gitCalls).toEqual([]);
+});
+
+// P8.C7: an effort's review shows "Extension Changes" only when files under
+// `oxplow/extensions/` changed — what each change does, in the server's
+// lines, with a changed lens's text before and after.
+test("extension changes show only when an extension's files changed", async () => {
+  const first = render(
+    <DiffViewPage stream={STREAM} spec={{ mode: "endpoints", start: "snap:1", end: "snap:2" }} onOpenPage={() => {}} onOpenFile={() => {}} />,
+  );
+  await first.findByText(/a\.ts/);
+  expect(first.queryByTestId("diff-view-extension-changes")).toBeNull();
+  expect(extensionCalls).toEqual([]);
+  cleanup();
+
+  diffFiles = [{ path: "oxplow/extensions/acme/lenses/count.yaml", status: "modified", additions: 1, deletions: 1 }];
+  const second = render(
+    <DiffViewPage stream={STREAM} spec={{ mode: "endpoints", start: "snap:1", end: "snap:2" }} onOpenPage={() => {}} onOpenFile={() => {}} />,
+  );
+  const lines = await second.findByTestId("extension-change-acme-effects");
+  expect(lines.textContent).toContain("Lens acme/count: changed");
+  expect(second.getByTestId("effect-lens-acme/count")).toBeTruthy();
+  expect(extensionCalls[0]).toEqual(["str1", "snap:1", "snap:2"]);
+  diffFiles = [{ path: "a.ts", status: "modified", additions: 2, deletions: 1 }];
 });

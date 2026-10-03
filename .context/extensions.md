@@ -1000,6 +1000,18 @@ file is byte-identical after. Text output adds `effects against <rev>:`
 and the report's lines; `--json` adds `effects` (the `EffectReport`) and
 `against` to the check's JSON.
 
+**On an effort's review** (P8.C7). DiffViewPage shows an "Extension
+Changes" section when the change's files include `oxplow/extensions/**`
+(`changedExtensions`): RPC `extension_effects_between { streamId, start,
+end }` → `extensions::extension_changes_between` names each extension
+whose files differ between the two revisions (`Trees::diff`), loads both
+versions as those revisions hold them (`extension_tree_at`) and reviews
+them with `effects_between` — an `ExtensionChange { name, change,
+effects?, errors }` each (a removed one has no report). The section
+renders each with `EffectReportView` (the server's lines, then each
+changed lens before and after), the component the install review uses
+too.
+
 ## Commands in core menus (`ui.commands`)
 
 `ui.commands` (stable, P6b.C4; `extensions/ui_commands.rs`) puts a
