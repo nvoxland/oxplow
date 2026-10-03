@@ -738,31 +738,18 @@ event (commands.md step 5), so the re-read it causes ends the loop.
 
 The `search` command/tool is a read over `SqliteSearchStore`
 (`crates/oxplow-db/src/search_store.rs`) — a unified FTS5/BM25 index, not a
-per-domain store. It is **fed**, not written by its callers: the `Indexer`
-service (`crates/oxplow-app/src/indexer.rs`) backfills at boot and then keeps
-the index fresh two ways (P3.10): tasks and snapshot files from the **event
-log** — the `search.index` pump consumer on `work_item.created` / `edited` /
-`transitioned` / `deleted` and `snapshot.taken` (durable, redelivered after a
-crash; on any of them the task's rows are removed in every stream and it is
-re-indexed where it lives now, so a moved or deleted task leaves no stale
-row, tsk508) — wiki pages from `knowledge.page.written` / `deleted`, and
-thread notes and comments from `knowledge.note.written` / `deleted` and
-`knowledge.comment.written` / `deleted` (P7.B6: the note and comment
-stores log them in the write's transaction — `SqliteTaskNoteStore` for a
-thread note only, a task note being `work_item.commented`;
-`SqliteCommentStore` for every create, reply, intent/status/anchor
-change, relink, delete and retention sweep). It upserts/removes the
-affected rows; nothing reaches it on the in-memory bus.
-Every task field edit logs `work_item.edited` (the store's raw `update` goes
-through `update_with_status_tx`), and a move to another thread logs
-`work_item.edited{fields: [thread]}` (`move_task`), so the log sees them
-all. This is the inverse of the usual "command writes store + emits
-event" flow: the search index is a derived projection that *consumes* the same
-events the UI does, so no command needs a special "also reindex" step. It's
-spawned in `apps/desktop/src-tauri/src/main.rs` alongside the commit indexer.
-Stream archive/delete calls `search_store.purge_stream` so a removed worktree's
-file rows don't linger. Exposed identically on IPC (`search`) and MCP
-(`search`) — see the parity manifest (`crates/oxplow-surface-parity`).
+per-domain store. It is **fed**, not written by its callers. Tasks,
+comments, thread notes and wiki pages are search kinds derived from a model
+(`v_search_<kind>`): an asset per kind (`kind_search.rs`, tsk864)
+restates the kind whole when a table behind its model commits — a move, a
+soft delete, a thread delete included — writing nothing when the rows are
+unchanged. File contents come from snapshot blobs, so the `search.index`
+pump consumer indexes them on `snapshot.taken` (durable, redelivered after
+a crash). Nothing reaches the index on the in-memory bus. Archiving a
+stream purges its file rows (`purge_stream_files`). See
+[refs.md](./refs.md) "Searchable kinds". Exposed identically on IPC
+(`search`) and MCP (`search`) — see the parity manifest
+(`crates/oxplow-surface-parity`).
 
 ## Related
 

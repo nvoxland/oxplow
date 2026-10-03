@@ -161,7 +161,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.message.contains("read v_task"), "{}", err.message);
+        assert!(err.message.contains("v_task"), "{}", err.message);
         let out = crate::dispatch(
             "query_sql",
             json!({ "sql": "SELECT count(*) FROM task", "raw": true }),

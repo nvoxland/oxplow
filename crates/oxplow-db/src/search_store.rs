@@ -7,8 +7,11 @@
 //! or removed in place. Ranking is FTS5's built-in `bm25()` (title weighted
 //! above body); snippets via `snippet()`.
 //!
-//! The index is written by the `Indexer` service in `oxplow-app`; this store
-//! is the persistence layer it drives. See `.context/data-model.md`.
+//! Two writers drive it from `oxplow-app`: a kind indexed from a model
+//! (tasks, comments, notes, wiki pages, a plugin's searchable kind) is
+//! restated whole by its asset (`kind_search`, [`restate_kind_tx`]); file
+//! contents are upserted by the `search.index` consumer (`indexer`). See
+//! `.context/refs.md`.
 
 use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension};
@@ -58,16 +61,50 @@ pub fn sanitize_query(raw: &str) -> String {
         .join(" ")
 }
 
-/// Replace every project-global entry of `kind` with `entries` (`ref_id`
-/// → `(title, body)`), in the caller's transaction: what a kind whose
-/// whole index is derived from a model does on each recompute, and — with
-/// none — how a kind leaves the index.
+/// One entry of a restated kind: its id, and its stream (`str1`) when it
+/// belongs to one — `None` for a project-global entry.
+pub type EntryKey = (String, Option<String>);
+
+/// Replace every entry of `kind` with `entries` (`(ref_id, stream)` →
+/// `(title, body)`), in the caller's transaction: what a kind whose whole
+/// index is derived from a model does on each recompute, and — with none —
+/// how a kind leaves the index. Entries that hash the same as the last
+/// restate's (`search_kind_state`) write nothing (tsk864); returns whether
+/// it wrote.
 pub fn restate_kind_tx(
     conn: &rusqlite::Connection,
     kind: &str,
-    entries: &std::collections::BTreeMap<String, (String, String)>,
-) -> Result<(), DomainError> {
+    entries: &std::collections::BTreeMap<EntryKey, (String, String)>,
+) -> Result<bool, DomainError> {
     let sql = crate::database::map_sql_err;
+    let digest = (!entries.is_empty()).then(|| {
+        let mut h = xxhash_rust::xxh3::Xxh3::new();
+        for ((ref_id, stream), (title, body)) in entries {
+            for part in [
+                ref_id.as_str(),
+                stream.as_deref().unwrap_or("\u{0}"),
+                title,
+                body,
+            ] {
+                h.update(&(part.len() as u64).to_le_bytes());
+                h.update(part.as_bytes());
+            }
+        }
+        format!("{:032x}", h.digest128())
+    });
+    if let Some(digest) = &digest {
+        let last: Option<String> = conn
+            .query_row(
+                "SELECT digest FROM search_kind_state WHERE kind = ?1",
+                params![kind],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(sql)?;
+        if last.as_ref() == Some(digest) {
+            return Ok(false);
+        }
+    }
     conn.execute(
         "DELETE FROM search_fts WHERE rowid IN (SELECT rowid FROM search_entry WHERE kind = ?1)",
         params![kind],
@@ -76,17 +113,29 @@ pub fn restate_kind_tx(
     conn.execute("DELETE FROM search_entry WHERE kind = ?1", params![kind])
         .map_err(sql)?;
     let mut entry = conn
-        .prepare("INSERT INTO search_entry (kind, ref_id, stream_id) VALUES (?1, ?2, NULL)")
+        .prepare("INSERT INTO search_entry (kind, ref_id, stream_id) VALUES (?1, ?2, ?3)")
         .map_err(sql)?;
     let mut text = conn
         .prepare("INSERT INTO search_fts (rowid, title, body) VALUES (?1, ?2, ?3)")
         .map_err(sql)?;
-    for (ref_id, (title, body)) in entries {
-        entry.execute(params![kind, ref_id]).map_err(sql)?;
+    for ((ref_id, stream), (title, body)) in entries {
+        entry.execute(params![kind, ref_id, stream]).map_err(sql)?;
         text.execute(params![conn.last_insert_rowid(), title, body])
             .map_err(sql)?;
     }
-    Ok(())
+    match digest {
+        Some(digest) => conn.execute(
+            "INSERT INTO search_kind_state (kind, digest) VALUES (?1, ?2)
+               ON CONFLICT(kind) DO UPDATE SET digest = excluded.digest",
+            params![kind, digest],
+        ),
+        None => conn.execute(
+            "DELETE FROM search_kind_state WHERE kind = ?1",
+            params![kind],
+        ),
+    }
+    .map_err(sql)?;
+    Ok(true)
 }
 
 impl SqliteSearchStore {
@@ -185,44 +234,22 @@ impl SqliteSearchStore {
             .await
     }
 
-    /// Drop an entity's rows in every stream — for one that moved, or is gone.
-    pub async fn remove_everywhere(&self, kind: &str, ref_id: &str) -> Result<(), DomainError> {
-        let (kind, ref_id) = (kind.to_string(), ref_id.to_string());
-        self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
-                tx.execute(
-                    "DELETE FROM search_fts WHERE rowid IN \
-                     (SELECT rowid FROM search_entry WHERE kind = ?1 AND ref_id = ?2)",
-                    params![kind, ref_id],
-                )
-                .map_err(crate::database::map_sql_err)?;
-                tx.execute(
-                    "DELETE FROM search_entry WHERE kind = ?1 AND ref_id = ?2",
-                    params![kind, ref_id],
-                )
-                .map_err(crate::database::map_sql_err)?;
-                tx.commit().map_err(crate::database::map_sql_err)?;
-                Ok(())
-            })
-            .await
-    }
-
-    /// Drop every index row owned by a stream (called when a stream is
-    /// archived/deleted so its file rows don't linger).
-    pub async fn purge_stream(&self, stream_id: &str) -> Result<(), DomainError> {
+    /// Drop a stream's file rows (called when a stream is archived, so
+    /// its files don't linger). A kind indexed from a model follows the
+    /// model instead (`restate_kind_tx`).
+    pub async fn purge_stream_files(&self, stream_id: &str) -> Result<(), DomainError> {
         let stream_id = stream_id.to_string();
         self.db
             .call_mut(move |conn| {
                 let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
                 tx.execute(
                     "DELETE FROM search_fts WHERE rowid IN \
-                     (SELECT rowid FROM search_entry WHERE stream_id = ?1)",
+                     (SELECT rowid FROM search_entry WHERE kind = 'file' AND stream_id = ?1)",
                     params![stream_id],
                 )
                 .map_err(crate::database::map_sql_err)?;
                 tx.execute(
-                    "DELETE FROM search_entry WHERE stream_id = ?1",
+                    "DELETE FROM search_entry WHERE kind = 'file' AND stream_id = ?1",
                     params![stream_id],
                 )
                 .map_err(crate::database::map_sql_err)?;
@@ -446,7 +473,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn purge_stream_drops_only_that_stream() {
+    async fn purge_stream_files_drops_only_that_streams_files() {
         let s = store().await;
         s.upsert("file", "a.rs", Some("s-a"), "a.rs", "widget")
             .await
@@ -454,10 +481,49 @@ mod tests {
         s.upsert("file", "b.rs", Some("s-b"), "b.rs", "widget")
             .await
             .unwrap();
-        s.purge_stream("s-a").await.unwrap();
+        // A model-derived kind's rows follow its model, not the purge.
+        s.upsert("task", "tsk1", Some("s-a"), "widget task", "")
+            .await
+            .unwrap();
+        s.purge_stream_files("s-a").await.unwrap();
         let hits = s.search("widget", None, &[], 10).await.unwrap();
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].stream_id.as_deref(), Some("s-b"));
+        let mut got: Vec<(&str, Option<&str>)> = hits
+            .iter()
+            .map(|h| (h.kind.as_str(), h.stream_id.as_deref()))
+            .collect();
+        got.sort();
+        assert_eq!(got, vec![("file", Some("s-b")), ("task", Some("s-a"))]);
+    }
+
+    /// tsk864: a kind restated with what it already holds writes nothing;
+    /// different entries replace them; none removes the kind.
+    #[tokio::test]
+    async fn a_restate_of_the_same_entries_writes_nothing() {
+        let s = store().await;
+        let entries = |title: &str| {
+            std::collections::BTreeMap::from([(
+                ("tsk1".to_string(), Some("str1".to_string())),
+                (title.to_string(), "body".to_string()),
+            )])
+        };
+        let restate = |e: std::collections::BTreeMap<EntryKey, (String, String)>| {
+            let db = s.db.clone();
+            async move {
+                db.transaction(move |tx| restate_kind_tx(tx, "task", &e))
+                    .await
+                    .unwrap()
+            }
+        };
+        assert!(restate(entries("widget")).await);
+        assert!(!restate(entries("widget")).await, "the same entries");
+        assert!(restate(entries("gadget")).await);
+        let hits = s.search("gadget", Some("str1"), &[], 10).await.unwrap();
+        assert_eq!(
+            (hits[0].kind.as_str(), hits[0].ref_id.as_str()),
+            ("task", "tsk1")
+        );
+        assert!(restate(Default::default()).await);
+        assert!(s.search("gadget", None, &[], 10).await.unwrap().is_empty());
     }
 
     /// Multi-word semantics: tokens AND together (each as a quoted

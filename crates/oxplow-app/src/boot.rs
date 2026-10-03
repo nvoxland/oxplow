@@ -464,14 +464,9 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // LSP diagnostics → `v_diagnostic` (live state; cleared here first).
     crate::lsp_diagnostics::spawn(state.clone());
 
-    // Search indexer: backfill the unified FTS index from current state;
-    // the `search.index` pump consumer keeps it fresh from the event log.
-    {
-        let indexer = crate::indexer::Indexer::new(state.clone());
-        tokio::spawn(async move {
-            indexer.backfill().await;
-        });
-    }
+    // Search: the task / comment / note / wiki kinds are assets
+    // (`kind_search`, registered by the change loop); files are the
+    // `search.index` pump consumer's.
 
     // Metric catalog (tsk213, P7.B6): seed the declared metrics, then reseed
     // when the extensions may have changed (config changes reseed through

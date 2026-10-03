@@ -1135,7 +1135,8 @@ mod tests {
         };
         let msg = refused("SELECT * FROM task").await;
         assert!(
-            msg.contains("`task` is a physical table, not a published model; read v_task"),
+            msg.contains("`task` is a physical table, not a published model; read")
+                && msg.contains("v_task"),
             "{msg}"
         );
         assert!(!msg.contains("no such table"), "{msg}");

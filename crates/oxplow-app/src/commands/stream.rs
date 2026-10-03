@@ -295,7 +295,7 @@ pub fn archive_command(deps: StreamDeps) -> Command {
                     .await
                     .map_err(session)?;
                 // Its files leave the search index; nothing routes to it.
-                if let Err(e) = deps.search.purge_stream(&id.to_string()).await {
+                if let Err(e) = deps.search.purge_stream_files(&id.to_string()).await {
                     tracing::warn!(error = %e, stream = %id, "purging an archived stream's search rows failed");
                 }
                 deps.worktrees.forget(&id).await;

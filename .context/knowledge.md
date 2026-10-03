@@ -39,7 +39,7 @@ written — by an agent (`run_command`), by the desktop editor, and by
    commit to fail after it, the file is ahead of the row and the watcher
    converges them. The search index reads the body from the row
    (`wiki_page.body`, written in the same transaction), so it is the
-   committed one when the pump sees the event;
+   committed one when its asset recomputes;
 
 (the UI re-reads on the `modelsChanged` the row write produces; there is
 no wiki event of its own). `@version` literals in links are stripped from the
@@ -115,9 +115,9 @@ every page from its file. The file is still the page (and still written
 inside the run); the row now carries its text as well as its hash.
 
 `wiki_ref_drift` (MCP) shows one stale ref's diff. Bodies are searched
-with the site `search` tool: the `search.index` pump consumer indexes a
-page from `knowledge.page.written` / `deleted` (written by command or by
-hand alike), reading the body from the row. The old excerpt-only
+with the site `search` tool: the `wiki` search kind is an asset over
+`v_search_wiki` (tsk864), restated when `wiki_page` commits — a page
+written by command or by hand alike — reading the body from the row. The old excerpt-only
 `wiki_page_fts` mirror is gone (V125).
 
 **The desktop** (`apps/desktop/src/knowledge.ts`) reads the index, a

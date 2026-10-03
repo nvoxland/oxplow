@@ -1,7 +1,11 @@
-//! Search over plugin ref kinds (P9.D3, `.context/refs.md` "Searchable
-//! kinds"): a kind declared `searchable: <model>` has that model's rows
-//! (`ref`, `title`, `body`) in the site-wide index (`search_fts`) under
-//! its kind, so the launcher finds `[[pr:12]]` by its title.
+//! Search kinds whose rows come from a model (P9.D3, tsk864;
+//! `.context/refs.md` "Searchable kinds"): a plugin kind declared
+//! `searchable: <model>` has that model's rows (`ref`, `title`, `body`)
+//! in the site-wide index (`search_fts`) under its kind, so the launcher
+//! finds `[[pr:12]]` by its title; core's tasks, comments, thread notes and
+//! wiki pages are indexed the same way from `v_search_<kind>`
+//! ([`CORE_KINDS`]), each row with its stream. Files aren't: their input
+//! is snapshot blobs, so the `search.index` consumer indexes them.
 //!
 //! It is **index-time ingestion, as an asset** — not a query-time UNION:
 //! `search_fts` owns the text it ranks (BM25 and `snippet()` need it in
@@ -16,9 +20,12 @@
 //! is (re)registered, and a kind that is gone — its extension removed,
 //! its `searchable:` dropped — leaves the index with its entries.
 //!
-//! Bounded: at most [`MAX_ROWS`] rows a kind, each body cut at
-//! [`MAX_BODY`] bytes. A row whose `ref` isn't one of the kind's
-//! (`<kind>:<id>`, the id matching its pattern) is skipped.
+//! A plugin kind is bounded: at most [`MAX_ROWS`] rows, each body cut at
+//! [`MAX_BODY`] bytes; core's aren't. A row whose `ref` isn't one of the
+//! kind's (`<kind>:<id>`, the id matching its pattern) is skipped. A
+//! recompute whose rows are what the index already holds writes nothing
+//! (`restate_kind_tx`'s digest), so a start with nothing changed rebuilds
+//! nothing.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -26,6 +33,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use oxplow_db::Database;
 use oxplow_domain::DomainError;
+use rusqlite::OptionalExtension;
 
 use crate::assets::{Assets, Materializer, Recomputed};
 
@@ -33,6 +41,15 @@ use crate::assets::{Assets, Materializer, Recomputed};
 pub const MAX_ROWS: usize = 20_000;
 /// The most bytes of one row's body it indexes.
 pub const MAX_BODY: usize = 16 * 1024;
+
+/// Core's kinds indexed from a model: the kind, its view, and its id.
+/// The view's rows carry a `stream_id`.
+pub const CORE_KINDS: &[(&str, &str, &str)] = &[
+    ("task", "v_search_task", r"^tsk\d+$"),
+    ("comment", "v_search_comment", r"^cmt\d+$"),
+    ("note", "v_search_note", r"^not\d+$"),
+    ("wiki", "v_search_wiki", r"^.+$"),
+];
 
 /// The asset of a kind's index: `search:<kind>`.
 pub fn asset_name(kind: &str) -> String {
@@ -51,6 +68,8 @@ pub(crate) struct SearchableKind {
     id_pattern: String,
     /// The tables behind the view.
     tables: Vec<String>,
+    /// Core's: its rows carry their stream and aren't bounded.
+    core: bool,
 }
 
 /// The index of one kind.
@@ -72,31 +91,38 @@ impl Materializer for KindSearchIndex {
     }
 
     async fn recompute(&self, _full: bool) -> Result<Recomputed, DomainError> {
-        let (kind, view) = (self.kind.clone(), self.spec.view.clone());
+        let (kind, view, core) = (self.kind.clone(), self.spec.view.clone(), self.spec.core);
         let id = regex::Regex::new(&self.spec.id_pattern)
             .map_err(|e| DomainError::Invalid(format!("ref kind `{kind}`'s id pattern: {e}")))?;
         let indexed = self
             .db
             .transaction(move |tx| {
+                let (stream, limit) = if core {
+                    ("CAST(stream_id AS TEXT)", String::new())
+                } else {
+                    ("NULL", format!(" LIMIT {}", MAX_ROWS + 1))
+                };
                 let sql = format!(
-                    "SELECT CAST(ref AS TEXT), CAST(title AS TEXT), CAST(body AS TEXT) \
-                     FROM \"{}\" LIMIT {}",
+                    "SELECT CAST(ref AS TEXT), CAST(title AS TEXT), CAST(body AS TEXT), {stream} \
+                     FROM \"{}\"{limit}",
                     view.replace('"', "\"\""),
-                    MAX_ROWS + 1
                 );
                 let mut st = tx.prepare(&sql).map_err(oxplow_db::map_sql_err)?;
-                let rows: Vec<(Option<String>, Option<String>, Option<String>)> = st
-                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                type Row = (Option<String>, Option<String>, Option<String>, Option<String>);
+                let rows: Vec<Row> = st
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
                     .map_err(oxplow_db::map_sql_err)?
                     .collect::<rusqlite::Result<_>>()
                     .map_err(oxplow_db::map_sql_err)?;
-                if rows.len() > MAX_ROWS {
+                let bound = if core { usize::MAX } else { MAX_ROWS };
+                if rows.len() > bound {
                     tracing::warn!(%kind, %view, "more than {MAX_ROWS} rows; the rest aren't searchable");
                 }
                 let prefix = format!("{kind}:");
-                let mut entries: BTreeMap<String, (String, String)> = BTreeMap::new();
+                let mut entries: BTreeMap<oxplow_db::search_store::EntryKey, (String, String)> =
+                    BTreeMap::new();
                 let mut skipped = 0usize;
-                for (r, title, body) in rows.into_iter().take(MAX_ROWS) {
+                for (r, title, body, stream) in rows.into_iter().take(bound) {
                     // One of the kind's refs, or it isn't something a hit
                     // could open.
                     let Some(ref_id) = r
@@ -108,14 +134,17 @@ impl Materializer for KindSearchIndex {
                         continue;
                     };
                     let mut body = body.unwrap_or_default();
-                    if body.len() > MAX_BODY {
+                    if !core && body.len() > MAX_BODY {
                         let mut end = MAX_BODY;
                         while !body.is_char_boundary(end) {
                             end -= 1;
                         }
                         body.truncate(end);
                     }
-                    entries.insert(ref_id.to_string(), (title.unwrap_or_default(), body));
+                    entries.insert(
+                        (ref_id.to_string(), stream),
+                        (title.unwrap_or_default(), body),
+                    );
                 }
                 if skipped > 0 {
                     tracing::warn!(%kind, %view, skipped, "rows whose `ref` isn't one of the kind's weren't indexed");
@@ -161,6 +190,28 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
             Ok(rows)
         })
         .await?;
+    // Core's kinds, from their views as the registry has them.
+    let core: Vec<(String, String, String, Option<String>)> = db
+        .read(|tx| {
+            CORE_KINDS
+                .iter()
+                .map(|(kind, view, id)| {
+                    let sql: Option<String> = tx
+                        .query_row(
+                            "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = ?1",
+                            [view],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .map_err(oxplow_db::map_sql_err)?;
+                    Ok((kind.to_string(), view.to_string(), id.to_string(), sql))
+                })
+                .collect()
+        })
+        .await?;
+    let core_kinds: std::collections::BTreeSet<String> =
+        core.iter().map(|(kind, ..)| kind.clone()).collect();
+    let kinds: Vec<_> = kinds.into_iter().chain(core).collect();
     let views: Vec<String> = kinds.iter().map(|(_, view, _, _)| view.clone()).collect();
     let tables = crate::assets::tables_behind(db, &views).await?;
     let declared = kinds.iter().map(|(kind, ..)| kind.clone()).collect();
@@ -170,9 +221,11 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
         // nothing to index; it registers once the registry lists it.
         .filter_map(|(kind, view, id_pattern, sql)| {
             let tables = tables.get(&view)?.clone();
+            let core = core_kinds.contains(&kind);
             Some((
                 kind,
                 SearchableKind {
+                    core,
                     view,
                     sql: sql?,
                     id_pattern,
@@ -236,8 +289,11 @@ impl Assets {
                     .map_err(oxplow_db::map_sql_err)?
                     .collect::<rusqlite::Result<_>>()
                     .map_err(oxplow_db::map_sql_err)?;
+                // Core's kinds are always declared; files aren't a model's.
                 let gone = found.iter().filter(|kind| {
-                    !keep.contains(kind) && !crate::indexer::CORE_KINDS.contains(&kind.as_str())
+                    !keep.contains(kind)
+                        && !CORE_KINDS.iter().any(|(k, ..)| k == kind)
+                        && kind.as_str() != crate::indexer::KIND_FILE
                 });
                 for kind in gone {
                     oxplow_db::search_store::restate_kind_tx(tx, kind, &BTreeMap::new())?;
@@ -662,5 +718,358 @@ ref_kinds:
             .map(|h| h.kind)
             .collect();
         assert_eq!(left, vec!["wiki"], "core's entries are untouched");
+    }
+}
+
+/// Core's kinds (tsk864): tasks, comments, thread notes and wiki pages,
+/// indexed from `v_search_<kind>` by the same assets as a plugin kind.
+#[cfg(test)]
+mod core_tests {
+    use std::future::Future;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use oxplow_domain::stores::{TaskStore as _, ThreadStore as _};
+    use oxplow_domain::{CommentTarget, StreamId, ThreadId};
+
+    use crate::assets::Assets;
+    use crate::Services;
+
+    async fn services() -> (Arc<Services>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        git2::Repository::init(dir.path()).unwrap();
+        let svc = Arc::new(Services::in_memory(dir.path()).expect("in-memory services"));
+        (svc, dir)
+    }
+
+    /// The change loop, as boot runs it, over assets that settle fast.
+    fn change_loop(svc: &Services) -> Assets {
+        let assets = Assets::new(svc.db.clone(), Duration::from_millis(30));
+        crate::models_changed::spawn(
+            svc.db.clone(),
+            Arc::new(crate::models_changed::ModelWatermarks::default()),
+            svc.events.clone(),
+            assets.clone(),
+            svc.event_pump.clone(),
+        );
+        assets
+    }
+
+    /// Wait (up to 5 s) for `check` to hold.
+    async fn eventually<F, Fut>(what: &str, mut check: F)
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = bool>,
+    {
+        for _ in 0..200 {
+            if check().await {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("never: {what}");
+    }
+
+    /// The index's `(ref_id, stream)` entries of `kind`.
+    async fn entries(svc: &Services, kind: &'static str) -> Vec<(String, Option<String>)> {
+        svc.db
+            .read(move |c| {
+                let mut s = c
+                    .prepare(
+                        "SELECT ref_id, stream_id FROM search_entry WHERE kind = ?1 ORDER BY ref_id",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = s
+                    .query_map([kind], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(oxplow_db::map_sql_err)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// Whether searching `q` in `stream` finds a `kind` hit.
+    async fn found(svc: &Services, q: &str, stream: Option<StreamId>, kind: &str) -> bool {
+        let stream = stream.map(|s| s.to_string());
+        svc.search_store
+            .search(q, stream.as_deref(), &[], 10)
+            .await
+            .unwrap()
+            .iter()
+            .any(|h| h.kind == kind)
+    }
+
+    async fn task(svc: &Services, thread: ThreadId, title: &str) -> oxplow_domain::Task {
+        svc.tasks
+            .create(
+                Some(thread),
+                crate::CreateTaskInput {
+                    title: title.into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+    }
+
+    /// tsk864: a task is indexed from `v_search_task` — written, edited,
+    /// found by its id, gone when deleted — its kind restated as a whole.
+    #[tokio::test]
+    async fn a_task_edit_restates_its_kind() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        change_loop(&svc);
+        let t = task(&svc, thread.id, "Quux the sprocket").await;
+        eventually("the new task is found", || {
+            found(&svc, "sprocket", Some(stream.id), "task")
+        })
+        .await;
+        let id = t.id.to_string();
+        assert!(
+            found(&svc, &id, Some(stream.id), "task").await,
+            "its id finds it"
+        );
+
+        let mut edited = t.clone();
+        edited.title = "Quux the flange".into();
+        svc.task_store.update(&edited).await.unwrap();
+        eventually("the edit is found", || {
+            found(&svc, "flange", Some(stream.id), "task")
+        })
+        .await;
+        assert!(!found(&svc, "sprocket", Some(stream.id), "task").await);
+
+        svc.task_store.soft_delete(t.id).await.unwrap();
+        eventually("the deleted task leaves", || async {
+            entries(&svc, "task").await.is_empty()
+        })
+        .await;
+    }
+
+    /// tsk864: a thread's tasks go with it — what the old upsert-only
+    /// backfill never removed.
+    #[tokio::test]
+    async fn a_deleted_threads_tasks_leave_the_index() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let kept = crate::test_fixtures::new_thread(&svc, stream.id, "kept").await;
+        let gone = crate::test_fixtures::new_thread(&svc, stream.id, "gone").await;
+        change_loop(&svc);
+        let stays = task(&svc, kept.id, "Stays put").await;
+        task(&svc, gone.id, "Goes with its thread").await;
+        eventually("both are indexed", || async {
+            entries(&svc, "task").await.len() == 2
+        })
+        .await;
+        svc.thread_store.delete(&gone.id).await.unwrap();
+        eventually("only the kept thread's task is left", || async {
+            entries(&svc, "task").await == vec![(stays.id.to_string(), Some(stream.id.to_string()))]
+        })
+        .await;
+    }
+
+    /// A task moved to the backlog is indexed there and nowhere else
+    /// (tsk508): its entry's stream follows its thread.
+    #[tokio::test]
+    async fn a_moved_task_is_indexed_only_where_it_now_lives() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        change_loop(&svc);
+        let t = task(&svc, thread.id, "Quux the sprocket").await;
+        let id = t.id.to_string();
+        eventually("in its thread's stream", || async {
+            entries(&svc, "task").await == vec![(id.clone(), Some(stream.id.to_string()))]
+        })
+        .await;
+        svc.task_store.move_task(t.id, None).await.unwrap();
+        eventually("in the backlog", || async {
+            entries(&svc, "task").await == vec![(id.clone(), None)]
+        })
+        .await;
+    }
+
+    /// tsk864: a restart re-registers the kinds and recomputes them — and,
+    /// their rows unchanged, writes nothing: the index entries are the ones
+    /// already there.
+    #[tokio::test]
+    async fn boot_rebuilds_nothing_when_assets_are_fresh() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        task(&svc, thread.id, "Quux the sprocket").await;
+        change_loop(&svc);
+        eventually("indexed", || {
+            found(&svc, "sprocket", Some(stream.id), "task")
+        })
+        .await;
+        let rowids = |svc: Arc<Services>| async move {
+            svc.db
+                .read(|c| {
+                    let mut s = c
+                        .prepare("SELECT rowid FROM search_entry ORDER BY rowid")
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let r = s
+                        .query_map([], |r| r.get::<_, i64>(0))
+                        .map_err(oxplow_db::map_sql_err)?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .map_err(oxplow_db::map_sql_err)?;
+                    Ok(r)
+                })
+                .await
+                .unwrap()
+        };
+        let computed = |svc: Arc<Services>| async move {
+            svc.db
+                .read(|c| {
+                    c.query_row(
+                        "SELECT computed_at FROM asset_state WHERE asset = 'search:task'",
+                        [],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+        };
+        let before = rowids(svc.clone()).await;
+        let first = computed(svc.clone()).await;
+        // A restart: a new change loop registers every kind again, and each
+        // builds once.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        change_loop(&svc);
+        eventually("the restart recomputed the task kind", || async {
+            computed(svc.clone()).await != first
+        })
+        .await;
+        assert_eq!(rowids(svc.clone()).await, before, "nothing was rewritten");
+    }
+
+    /// Run `name` as a person; its result.
+    async fn run(svc: &Services, name: &str, input: serde_json::Value) -> serde_json::Value {
+        svc.commands
+            .run(&oxplow_domain::Actor::Human, name, input, true)
+            .await
+            .unwrap()
+            .result
+    }
+
+    /// Wiki pages: written by command or by hand, gone when deleted.
+    #[tokio::test]
+    async fn wiki_pages_are_indexed() {
+        let (svc, dir) = services().await;
+        svc.streams.ensure_primary().await.unwrap();
+        change_loop(&svc);
+        run(
+            &svc,
+            crate::knowledge::WRITE_PAGE,
+            serde_json::json!({ "slug": "gears", "body": "# Gears\n\nThe sprocket turns.\n" }),
+        )
+        .await;
+        eventually("the page is found", || {
+            found(&svc, "sprocket", None, "wiki")
+        })
+        .await;
+        std::fs::write(
+            crate::knowledge::page_path(dir.path(), "gears"),
+            "# Gears\n\nThe flange holds.\n",
+        )
+        .unwrap();
+        crate::wiki_pages::sync_page(&svc.db, &svc.vocabulary, dir.path(), "gears")
+            .await
+            .unwrap();
+        eventually("a hand edit is found", || {
+            found(&svc, "flange", None, "wiki")
+        })
+        .await;
+        run(
+            &svc,
+            crate::knowledge::DELETE_PAGE,
+            serde_json::json!({ "slug": "gears" }),
+        )
+        .await;
+        eventually("the deleted page leaves", || async {
+            entries(&svc, "wiki").await.is_empty()
+        })
+        .await;
+    }
+
+    /// Thread notes and comments: written, replied to, gone when deleted.
+    #[tokio::test]
+    async fn notes_and_comments_are_indexed() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        change_loop(&svc);
+        let out = run(
+            &svc,
+            crate::commands::note::ADD,
+            serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(thread.id), "body": "a note about the gadget" }),
+        )
+        .await;
+        let note: oxplow_domain::NoteId =
+            serde_json::from_value(out["note"]["id"].clone()).unwrap();
+        eventually("the note is found", || {
+            found(&svc, "gadget", Some(stream.id), "note")
+        })
+        .await;
+        let vocabulary = svc.vocabulary.clone();
+        svc.db
+            .transaction(move |tx| {
+                if let Some(e) = oxplow_db::task_satellite::delete_note_tx(tx, note)? {
+                    oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &e)?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        eventually("the deleted note leaves", || async {
+            entries(&svc, "note").await.is_empty()
+        })
+        .await;
+
+        let out = run(
+            &svc,
+            crate::commands::comment::ADD,
+            serde_json::json!({
+                "stream": oxplow_domain::refs::build::stream_ref(stream.id),
+                "thread": oxplow_domain::refs::build::thread_ref(thread.id),
+                "target": CommentTarget { kind: "file".into(), id: "src/lib.rs".into() },
+                "quote": "quoted text", "body": "this mentions the doohickey",
+            }),
+        )
+        .await;
+        let comment = out["comment"]["id"].clone();
+        eventually("the comment is found", || {
+            found(&svc, "doohickey", Some(stream.id), "comment")
+        })
+        .await;
+        assert!(
+            found(&svc, "quoted", Some(stream.id), "comment").await,
+            "by its quote too"
+        );
+        run(
+            &svc,
+            crate::commands::comment::REPLY,
+            serde_json::json!({ "comment": comment, "body": "and the thingamajig" }),
+        )
+        .await;
+        eventually("a reply is found", || {
+            found(&svc, "thingamajig", Some(stream.id), "comment")
+        })
+        .await;
+        run(
+            &svc,
+            crate::commands::comment::DELETE,
+            serde_json::json!({ "comment": comment }),
+        )
+        .await;
+        eventually("the deleted comment leaves", || async {
+            entries(&svc, "comment").await.is_empty()
+        })
+        .await;
     }
 }

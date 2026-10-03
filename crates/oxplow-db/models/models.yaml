@@ -538,6 +538,50 @@
   tests:
     - { not_null: id }
     - { unique: id }
+- name: search_comment
+  version: 1
+  description: "What site search indexes for each comment (tsk864): the `comment` kind's index is restated from these rows when they change."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`comment:cmt<n>`: the search kind and the comment." }
+    - { name: "title", type: "TEXT", doc: "The quote it's anchored to." }
+    - { name: "body", type: "TEXT", doc: "The quote, then every message, a line each." }
+    - { name: "stream_id", type: "TEXT", doc: "Its stream (`str1`)." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+- name: search_note
+  version: 1
+  description: "What site search indexes for each thread note (tsk864): the `note` kind's index is restated from these rows when they change."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`note:not<n>`: the search kind and the note." }
+    - { name: "title", type: "TEXT", doc: "Empty: a note has no title." }
+    - { name: "body", type: "TEXT", doc: "The note's markdown." }
+    - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+- name: search_task
+  version: 1
+  description: "What site search indexes for each task (tsk864): the `task` kind's index is restated from these rows when they change. Deleted tasks aren't in it."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`task:tsk<n>`: the search kind and the task." }
+    - { name: "title", type: "TEXT", doc: "The task's title." }
+    - { name: "body", type: "TEXT", doc: "Its id (so typing `tsk42` finds it), then its description." }
+    - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`); NULL for a backlog task." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+- name: search_wiki
+  version: 1
+  description: "What site search indexes for each wiki page (tsk864): the `wiki` kind's index is restated from these rows when they change."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`wiki:<slug>`." }
+    - { name: "title", type: "TEXT", doc: "The page's title." }
+    - { name: "body", type: "TEXT", doc: "The page's full markdown." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: wiki pages are project-global." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
 - name: usage_event
   version: 1
   description: "What the person used in oxplow, one row per use (a wiki page opened, a command run) — the telemetry behind the wiki's recent and most-used lists."

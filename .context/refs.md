@@ -118,8 +118,19 @@ through the vocabulary reactor, and `v_ref_kind` lists them all.
 <model>` has that model's rows (`ref`, `title`, `body`) in the site-wide
 index under its kind — an asset per kind (`kind_search.rs`), so search
 hits carry `{ kind, ref_id }` for plugin kinds as for core ones and the
-desktop routes them through `searchHitTarget`. Core kinds are indexed by
-core (`search.index`). A plugin kind is never `revisioned`: no plugin
+desktop routes them through `searchHitTarget`. Core's tasks, comments,
+thread notes and wiki pages are indexed the same way (tsk864): each an
+asset over its `v_search_<kind>` model (`kind_search::CORE_KINDS`),
+whose rows also carry their stream and aren't bounded; only files stay
+on the `search.index` pump consumer, since their text comes from
+snapshot blobs. A restate whose rows hash the same as the last
+(`search_kind_state`, V158) writes nothing — so a start, which registers
+every kind and builds each once, rewrites nothing when nothing changed,
+and a task edit that changes no indexed text costs a read. A thread or
+stream delete, a move, a soft delete: the kind follows its model, so
+nothing is left behind (the old upsert-only boot backfill kept orphans).
+Archiving a stream purges only its files (`purge_stream_files`). A plugin
+kind is never `revisioned`: no plugin
 kind has a reader for a revision (extensions.md "Ref kinds").
 
 A kind's index is re-registered — and recomputed whole — when anything
@@ -136,7 +147,7 @@ wherever it is (tsk853): its `asset_state`, its `asset_failure` (a kind
 whose recomputes only ever failed has nothing else), or entries in the
 index with neither — a restate can commit after a removal's cleanup, or
 a process die between the two — every kind in `search_entry` that isn't
-core's (`indexer::CORE_KINDS`) or declared searchable.
+core's (`kind_search::CORE_KINDS`, or files) or declared searchable.
 
 `refs::validate_ref` parses a ref and checks it against the kind
 registry. The event log's `append_tx` runs it on every `subject`

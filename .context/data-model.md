@@ -1291,7 +1291,7 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `advisories.post_tool` | async | `agent.tool.finished` | post-tool-use advisories, persisted as nudges | boot |
 | `token_usage.turns` | async | `agent.turn.ended` | a turn's token rows (transcript tail or reported counts) | boot |
 | `effort.evidence` / `effort.decisions` | async | `effort.finished` | evidence rows, inferred decisions | boot.rs |
-| `search.index` | async | `work_item.*`, `knowledge.page.*`, `knowledge.note.*`, `knowledge.comment.*`, `snapshot.taken` | the search index for tasks, wiki pages, thread notes, comments and snapshot files | boot.rs |
+| `search.index` | async | `snapshot.taken` | the search index's file contents (the other kinds are assets, `kind_search.rs`) | boot.rs |
 | `config.extensions` / `config.providers` / `config.metrics` | async | `config.changed` (`extensions`; `extensionInstances`, `activeProviders`; any key) | after the in-memory swap: the extension catalog's change signal; the provider registry reconciles; the metric catalog reseeds (P7.B6) | boot.rs |
 | `extension_models.entities` | async | `collector.synced` | the extension models compile again (a new entity may let one) (P7.B6) | boot.rs |
 | `change.analyze` | async | `snapshot.taken` (that recorded files), `vcs.head.moved` | re-analyzes the stream's working change and open efforts' changes, skipping an event a newer one supersedes; dead-letters a failure naming the stream (P7.B4) | boot.rs |
@@ -2013,21 +2013,19 @@ enforces identity, treating global rows' `NULL` stream as `''`).
 
 - `kind` ∈ `task | comment | note | wiki | file`, or a **searchable
   plugin ref kind** (`acme_pr`, P9.D3); `ref_id` is the task id, comment
-  id, note id, wiki slug, repo-relative path, or the plugin ref's id. A
-  plugin kind's entries are derived from its `searchable` model by an
-  asset per kind (`kind_search.rs`, `restate_kind_tx`: the kind's entries
-  replaced whole), not by the `Indexer`.
-- `stream_id` is `NULL` for project-global rows (wiki) and the owning stream
-  otherwise. Search filters `stream_id = ?  OR stream_id IS NULL`; BM25 weights
-  title above body (`bm25(search_fts, 5.0, 1.0)`).
-- The store is a **derived cache**, never a source of truth. It is written
-  exclusively by the `Indexer` service (`crates/oxplow-app/src/indexer.rs`),
-  which backfills at boot, indexes tasks and snapshot files from the event log
-  (the `search.index` pump consumer, P3.10), wiki pages from the event
-  log's `knowledge.page.written` / `deleted`, and thread notes / comments
-  from `knowledge.note.*` / `knowledge.comment.*` (P7.B6), which their
-  stores log with each write.
-  `purge_stream` is called when a stream is archived/deleted.
+  id, note id, wiki slug, repo-relative path, or the plugin ref's id.
+  Every kind but `file` is derived from a model by an asset per kind
+  (`kind_search.rs`, `restate_kind_tx`: the kind's entries replaced whole,
+  or nothing written when they hash the same as `search_kind_state`'s,
+  V158); core's read `v_search_task` / `_comment` / `_note` / `_wiki`
+  (tsk864). Files are upserted by the `search.index` pump consumer from
+  `snapshot.taken` (`indexer.rs`).
+- `stream_id` is `NULL` for project-global rows (wiki, a backlog task) and
+  the owning stream otherwise. Search filters `stream_id = ?  OR stream_id
+  IS NULL`; BM25 weights title above body (`bm25(search_fts, 5.0, 1.0)`).
+- The store is a **derived cache**, never a source of truth: those two
+  writers are its only ones. `purge_stream_files` is called when a stream
+  is archived.
 - `sanitize_query` turns arbitrary user input into a safe MATCH expression
   (each token double-quoted + `*` prefix), so junk input can't throw FTS5
   syntax errors. Exposed as the `search` IPC command + MCP tool.
