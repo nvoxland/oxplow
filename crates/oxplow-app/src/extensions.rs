@@ -1577,12 +1577,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 ),
             ));
         }
-        // An experimental kind: a shared manifest's is refused by `check`.
-        if let Some(v) = m
-            .event_types
-            .as_ref()
-            .filter(|_| m.sharing == Sharing::Private)
-        {
+        // A stable kind (P9.D6): a shared extension's load too.
+        if let Some(v) = m.event_types.as_ref() {
             let (declared, errors) = crate::extension_event_types::parse_event_types(
                 name,
                 v,

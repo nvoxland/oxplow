@@ -42,6 +42,12 @@ models:
       - { name: effort_id, type: INTEGER, doc: "The effort (v_effort.id)." }
       - { name: path, type: TEXT, doc: "Repo-relative file path." }
       - { name: change_kind, type: TEXT, doc: "`created`, `updated` or `deleted`." }
+event_types:
+  types:
+    - type: oxplow_review.verdict
+      v: 1
+      schema: event_types/verdict.v1.json
+      summary: A person's verdict on an effort's work — accepted, or changes requested.
 commands:
   - name: accept
     summary: Accept an effort's work — comment the review on its work item and mark it done. Refuses while a claim is unverified or an inferred decision unreviewed, unless forced.

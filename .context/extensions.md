@@ -1340,10 +1340,11 @@ lens cell that links to a listed ref. A color is used only when it's a
 plain one (`#rgb…` or a CSS color name, `safeColor`). Decorations are
 additive: a decorator whose query fails shows nothing.
 
-## Event types (experimental)
+## Event types
 
-`event_types:` (a private extension only, P8.D3;
-`extension_event_types.rs`, `vocabulary_reactor.rs`) declares event types
+`event_types:` (P8.D3; **stable since P9.D6**, so a shared or bundled
+extension may use it — below; `extension_event_types.rs`,
+`vocabulary_reactor.rs`) declares event types
 the log accepts, under the extension's own namespace — its name with `-`
 read as `_` (`acme-pr` → `acme_pr.*`):
 
@@ -1361,6 +1362,24 @@ event_types:
       summary: A pull request merged, with its reviewers.
       upcast: event_types/merged.star      # required past v1: transform({from_v, payload}) → the v2 payload
 ```
+
+**Promoted to stable (P9.D6)** on the evidence rule every kind is held to
+— a first-party, shared extension depending on it: oxplow-review's
+`oxplow_review.verdict@1 { effort, work_item, verdict: accepted |
+changes_requested, forced, unverified, inferred, deviated, note? }`, which
+`accept.star` and `request_changes.star` return in `events:` (subjects:
+the effort and its work item; caused by the run's `command.executed`).
+Before it, a verdict lived only in a comment's text; now the effort's
+timeline carries who decided what, and another extension can react to it
+("Reacting to another extension's types"). What makes the kind safe to
+promise is already built: a published `type@v` is a contract
+(`event_type_contract` refuses a changed schema — stronger than a
+model's drift warning), a new shape is a new version with an upcast, and
+a removed type's rows stay readable. `STABLE_KINDS` lists it;
+`EXPERIMENTAL_KINDS` keeps `effects` (its contract just changed —
+attempts, retry, backfill — and no first-party extension acts yet),
+`ref_kinds` (no shared extension needs a new kind), `providers`,
+`custom_components`, `ui.decorators` and `ui.replacements`.
 
 **Retention** (P8.D5) is the namespace's window for payloads and large
 content (data-model.md "event_log" retention): either omitted part is the

@@ -31,6 +31,15 @@ On an effort's page, **Commands**:
   each file outside the area, and the note — and moves the item back to
   todo (an oxplow task: ready).
 
+Each logs its verdict as an event, `oxplow_review.verdict` (`event_types:`
+in the manifest): `{ effort, work_item, verdict: accepted |
+changes_requested, forced, unverified, inferred, deviated, note? }`, about
+the effort and its work item, caused by the command's run. The counts are
+what stood at the verdict — claims unverified, inferred decisions
+unreviewed, files outside the area. Read them in `v_event` (`type =
+'oxplow_review.verdict'`), or react to one from another extension's
+effect (`on: [oxplow_review.verdict]`).
+
 Both work on any provider's item. On an oxplow task the comment and the
 move are one change you can undo; on another provider's item (Linear, …)
 they run in order through the provider — if the move fails the comment

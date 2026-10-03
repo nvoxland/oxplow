@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oxplow_review.verdict",
+  "description": "A person's verdict on an effort's work: accepted, or sent back with changes requested.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["effort", "work_item", "verdict", "forced", "unverified", "inferred", "deviated"],
+  "properties": {
+    "effort": { "type": "string", "description": "The effort reviewed (`effort:eff<id>`)." },
+    "work_item": { "type": "string", "description": "The work item it was for." },
+    "verdict": { "enum": ["accepted", "changes_requested"] },
+    "forced": { "type": "boolean", "description": "Accepted although claims were unverified or decisions unreviewed." },
+    "unverified": { "type": "integer", "minimum": 0, "description": "Claims unverified at the verdict." },
+    "inferred": { "type": "integer", "minimum": 0, "description": "Inferred decisions unreviewed at the verdict." },
+    "deviated": { "type": "integer", "minimum": 0, "description": "Files changed outside the work item's area." },
+    "note": { "type": "string", "description": "What the reviewer asked for, when changes were requested." }
+  }
+}

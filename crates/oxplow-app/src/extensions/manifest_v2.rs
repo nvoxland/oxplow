@@ -344,7 +344,6 @@ pub struct ManifestV2 {
 pub const EXPERIMENTAL_KINDS: &[&str] = &[
     "providers",
     "effects",
-    "event_types",
     "ref_kinds",
     "custom_components",
     "ui.decorators",
@@ -367,6 +366,7 @@ pub const STABLE_KINDS: &[&str] = &[
     "ui.commands",
     "config",
     "advisories",
+    "event_types",
 ];
 
 impl ManifestV2 {
@@ -379,9 +379,6 @@ impl ManifestV2 {
         }
         if present(&self.effects) {
             out.push("effects");
-        }
-        if present(&self.event_types) {
-            out.push("event_types");
         }
         if present(&self.ref_kinds) {
             out.push("ref_kinds");
@@ -687,6 +684,32 @@ mod tests {
             errors.iter().any(|e| e.contains("needs oxplow >=99.0")),
             "{errors:?}"
         );
+    }
+
+    /// P9.D6: `event_types` is a stable kind — a shared extension may
+    /// declare its own event types (oxplow-review's verdict is the one
+    /// that earned it) — while the kinds still experimental stay closed
+    /// to it. Every kind is in exactly one of the two tables.
+    #[test]
+    fn event_types_is_stable_and_the_tables_partition_the_kinds() {
+        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nevent_types:\n  types: []\n";
+        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(STABLE_KINDS.contains(&"event_types"));
+        assert!(
+            !STABLE_KINDS.iter().any(|k| EXPERIMENTAL_KINDS.contains(k)),
+            "a kind is stable or experimental, not both"
+        );
+        // A manifest using every experimental kind uses exactly those.
+        let all = "manifest: 2\nname: acme\nintent: { purpose: x, examples: [{ name: a }] }\nproviders: []\neffects: []\nref_kinds: []\ncustom_components: []\nevent_types: { types: [] }\nui:\n  decorators: []\n  replacements: []\n";
+        let mut used = parse(all).experimental_kinds_used();
+        used.sort();
+        let mut experimental = EXPERIMENTAL_KINDS.to_vec();
+        experimental.sort();
+        assert_eq!(used, experimental);
+        for kept in ["effects", "ref_kinds", "providers"] {
+            assert!(EXPERIMENTAL_KINDS.contains(&kept), "{kept}");
+        }
     }
 
     #[test]
