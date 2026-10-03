@@ -1217,7 +1217,9 @@ namespace per probe, and in `event_content` — `PLUGIN_DEFAULT` 30 / 14
 restated by the vocabulary reactor, longer than the default refused by
 `check_declared` at load, and **kept when the extension is unloaded** —
 its rows stay under the window it promised; an extension present without
-a window drops back to the default); core's state namespaces are kept). **An expired event is
+a window drops back to the default — unless a declaring extension holds
+the same namespace, which a namesake that declares nothing never speaks
+for, tsk796); core's state namespaces are kept). **An expired event is
 history only** (tsk501): `StoredEvent.payload_expired_at` carries the
 stamp; the pump checkpoints past it without calling any consumer (a new or
 renamed consumer replaying the log never sees `{}`); `retry_dead_letter`

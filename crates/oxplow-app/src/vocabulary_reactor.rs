@@ -190,6 +190,11 @@ fn build_tx(
             ));
             continue;
         }
+        // A namesake that declares nothing doesn't speak for a namespace a
+        // declaring extension holds: it would drop that one's window (tsk796).
+        if !declares(types) && by_namespace.contains_key(&namespace) {
+            continue;
+        }
         retention.push(DeclaredRetention {
             namespace,
             extension: extension.clone(),
@@ -537,6 +542,48 @@ mod tests {
         }
         let kinds = &svc.vocabulary.current().kinds;
         assert!(kinds.get("acme_pr").is_none() && kinds.get("beta_pr").is_none());
+    }
+
+    /// tsk796: a namesake that declares nothing (`acme_pr` beside
+    /// `acme-pr`) doesn't take the declaring one's retention window away.
+    #[tokio::test]
+    async fn a_namesake_that_declares_nothing_keeps_the_others_window() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/extension.yaml",
+            &MANIFEST.replace(
+                "event_types:\n",
+                "event_types:\n  retention: { payload_days: 7, content_days: 3 }\n",
+            ),
+        );
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/merged.json",
+            &schema("number"),
+        );
+        write(
+            &root,
+            "oxplow/extensions/acme_pr/extension.yaml",
+            "manifest: 2\nname: acme_pr\nsharing: private\nintent: { purpose: Other., origin: null, examples: [] }\n",
+        );
+        svc.vocabulary_service.sync().await.unwrap();
+        let window = svc
+            .db
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT payload_days, content_days FROM plugin_event_retention \
+                     WHERE namespace = 'acme_pr'",
+                    [],
+                    |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(window, (7, 3));
     }
 
     /// A collector may follow its own extension's declared types, never
