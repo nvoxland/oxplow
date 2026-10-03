@@ -371,9 +371,12 @@ pub(crate) async fn run_reaction(
             .read(move |tx| oxplow_db::effect_run_store::latest_tx(tx, &effect, &event_id))
             .await?
     };
-    let attempt = match (origin, latest) {
+    let attempt = match (origin, latest.map(|l| (l.attempt, l.state, l.origin))) {
         (ReactionOrigin::Live | ReactionOrigin::Backfill, None) => 1,
-        (ReactionOrigin::Live, Some((attempt, RunState::Started))) => {
+        // A live attempt left `started`: the run that claimed it was cut
+        // off. A person's (a retry, a backfill) under way is theirs to
+        // record — or the next start's, when it was cut off (tsk847).
+        (ReactionOrigin::Live, Some((attempt, RunState::Started, ReactionOrigin::Live))) => {
             let key = EffectRunKey {
                 effect,
                 event_id,
@@ -390,8 +393,8 @@ pub(crate) async fn run_reaction(
             );
         }
         (ReactionOrigin::Live | ReactionOrigin::Backfill, Some(_)) => return Ok(Reacted::Nothing),
-        (ReactionOrigin::Retry, Some((attempt, RunState::Failed))) => attempt + 1,
-        (ReactionOrigin::Retry, Some((_, state))) => {
+        (ReactionOrigin::Retry, Some((attempt, RunState::Failed, _))) => attempt + 1,
+        (ReactionOrigin::Retry, Some((_, state, _))) => {
             return Err(DomainError::Invalid(format!(
                 "effect `{effect}`'s reaction to event {event_id} {NOT_FAILED} (it is `{}`): \
                  only a failed reaction is retried",
@@ -1341,6 +1344,72 @@ mod tests {
             .run(&oxplow_domain::Actor::Human, name, input, true)
             .await
             .map(|o| o.result)
+    }
+
+    /// tsk847: what was logged after the effect's approval is the live
+    /// consumer's — a backfill stops at `start_after_seq`, so the two
+    /// never attempt one event at once — and a person's attempt under way
+    /// (`started` by a retry or a backfill) isn't the live consumer's to
+    /// call interrupted.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_backfill_and_the_live_consumer_keep_off_each_others_events() {
+        use crate::commands::effect::BACKFILL_PLAN;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        register(svc);
+        let past = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        approve(svc).await;
+        // The live consumer hasn't reached this one yet.
+        let after = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let plan = run_as_person(svc, BACKFILL_PLAN, json!({ "effect": "acme/mark-done" }))
+            .await
+            .unwrap();
+        assert_eq!(
+            (plan["planned"].clone(), plan["to_seq"].clone()),
+            (json!(1), json!(past.seq)),
+            "{plan}"
+        );
+        let plan = run_as_person(
+            svc,
+            BACKFILL_PLAN,
+            json!({ "effect": "acme/mark-done", "to_seq": after.seq }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            plan["planned"],
+            json!(1),
+            "a range past it is capped: {plan}"
+        );
+
+        // A person's attempt at `after` under way: the pump leaves it be.
+        let key = EffectRunKey::first(
+            "acme/mark-done",
+            after.envelope.id.to_string(),
+            after.seq,
+            ReactionOrigin::Backfill,
+        );
+        svc.db
+            .transaction(move |tx| oxplow_db::effect_run_store::claim_tx(tx, &key, "t"))
+            .await
+            .unwrap();
+        EffectTriggers::new(Arc::downgrade(svc))
+            .handle(&after)
+            .await
+            .unwrap();
+        assert_eq!(
+            rows(svc, "SELECT origin, state FROM v_effect_run").await,
+            json!([["backfill", "started"]])
+        );
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT count(*) FROM v_event WHERE type = 'effect.result'"
+            )
+            .await,
+            json!([[0]])
+        );
     }
 
     /// tsk846: an event the effect's own run led to is never its trigger

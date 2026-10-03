@@ -115,24 +115,39 @@ pub struct Finished {
     pub proposal_id: Option<i64>,
 }
 
+/// A reaction's latest attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Latest {
+    pub attempt: u32,
+    pub state: RunState,
+    /// What started it.
+    pub origin: ReactionOrigin,
+}
+
 /// The reaction of `effect` to `event_id` as it stands: its latest
-/// attempt's number and state, if it was ever attempted.
+/// attempt, if it was ever attempted.
 pub fn latest_tx(
     conn: &Connection,
     effect: &str,
     event_id: &str,
-) -> Result<Option<(u32, RunState)>, DomainError> {
-    let latest: Option<(u32, String)> = conn
+) -> Result<Option<Latest>, DomainError> {
+    let latest: Option<(u32, String, String)> = conn
         .query_row(
-            "SELECT attempt, state FROM effect_run WHERE effect = ?1 AND event_id = ?2
+            "SELECT attempt, state, origin FROM effect_run WHERE effect = ?1 AND event_id = ?2
               ORDER BY attempt DESC LIMIT 1",
             params![effect, event_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()
         .map_err(map_sql_err)?;
     latest
-        .map(|(attempt, state)| Ok((attempt, RunState::parse(&state)?)))
+        .map(|(attempt, state, origin)| {
+            Ok(Latest {
+                attempt,
+                state: RunState::parse(&state)?,
+                origin: ReactionOrigin::parse(&origin)?,
+            })
+        })
         .transpose()
 }
 
@@ -321,7 +336,11 @@ mod tests {
             finish_tx(tx, &key(), &failed, "t1")?;
             assert_eq!(
                 latest_tx(tx, "acme/notify", "e1")?,
-                Some((1, RunState::Failed))
+                Some(Latest {
+                    attempt: 1,
+                    state: RunState::Failed,
+                    origin: ReactionOrigin::Live
+                })
             );
             let retry = EffectRunKey {
                 attempt: 2,
@@ -331,14 +350,21 @@ mod tests {
             claim_tx(tx, &retry, "t2")?;
             assert_eq!(
                 latest_tx(tx, "acme/notify", "e1")?,
-                Some((2, RunState::Started))
+                Some(Latest {
+                    attempt: 2,
+                    state: RunState::Started,
+                    origin: ReactionOrigin::Retry
+                })
             );
             assert!(
                 claim_tx(tx, &retry, "t2").is_err(),
                 "an attempt is made once"
             );
             finish_tx(tx, &retry, &ok(), "t3")?;
-            assert_eq!(latest_tx(tx, "acme/notify", "e1")?, Some((2, RunState::Ok)));
+            assert_eq!(
+                latest_tx(tx, "acme/notify", "e1")?.map(|l| (l.attempt, l.state)),
+                Some((2, RunState::Ok))
+            );
             // The first attempt stands as it ended.
             assert_eq!(state_tx(tx, &key())?, Some(RunState::Failed));
             let origins: Vec<(i64, String)> = tx

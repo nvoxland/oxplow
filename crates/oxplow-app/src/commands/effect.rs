@@ -209,8 +209,12 @@ fn unreacted_tx(
         .iter()
         .map(|t| rusqlite::types::Value::Text(t.clone()))
         .collect();
+    // What was logged after its approval is the live consumer's: a
+    // backfill stops there, so the two never attempt one event at once
+    // (tsk847). Never approved, it has nothing to backfill.
+    let live_from = oxplow_db::effect_state_store::start_after_tx(tx, &decl.name())?.unwrap_or(-1);
     params.push(range.from_seq.unwrap_or(0).into());
-    params.push(range.to_seq.unwrap_or(i64::MAX).into());
+    params.push(range.to_seq.unwrap_or(i64::MAX).min(live_from).into());
     params.push(range.since.clone().unwrap_or_default().into());
     params.push(decl.name().into());
     let mut st = tx.prepare(&sql).map_err(oxplow_db::map_sql_err)?;
@@ -464,7 +468,7 @@ pub fn retry_command(services: Weak<Services>) -> Command {
                     svc.db
                         .read(move |tx| oxplow_db::effect_run_store::latest_tx(tx, &effect, &id))
                         .await?
-                        .map_or(0, |(attempt, _)| i64::from(attempt))
+                        .map_or(0, |latest| i64::from(latest.attempt))
                 };
                 Ok(HandlerOutput {
                     result: outcome(&effect, &event, attempt, &reacted),

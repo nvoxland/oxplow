@@ -1635,9 +1635,11 @@ naming no consumer is warned about once per effect and name, not on each
 ordering question the pump asks). Per
 event, each enabled effect whose `on`/`where` match **reacts at most
 once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
-1. a row exists — a redelivery: nothing. A `started` row is a run that
-   claimed a step outside oxplow and was interrupted: recorded `failed`
-   ("interrupted") and **never sent again**. A person's retry or
+1. a row exists — a redelivery: nothing. A `started` row the live
+   consumer claimed is a run that claimed a step outside oxplow and was
+   interrupted: recorded `failed` ("interrupted") and **never sent
+   again**; one a person's retry or backfill claimed is theirs, under
+   way, and the pump leaves it be (tsk847). A person's retry or
    backfill is no pump delivery, so nothing redelivers one cut off
    between its claim and its record: at start (`boot.rs`,
    `effect_triggers::recover_interrupted`) every attempt still `started`
@@ -1714,7 +1716,9 @@ delivers it — and that it **never reacted to** (`unreacted_tx`: no
 `event_lineage::lineage_tx`: such an event is never its trigger, so it
 isn't planned — an effect that changes what it reacts to would otherwise
 meet its own changes on every backfill and never get past them, tsk846),
-oldest first, each through
+oldest first, **up to the effect's `start_after_seq`** — what was logged
+after its approval is the live consumer's, so the two never attempt one
+event at once; a range past it is capped (tsk847) — each through
 `run_reaction(…, ReactionOrigin::Backfill)`: attempt 1 with `origin:
 backfill`, the same dedupe, loop guard, approval and health as a live
 reaction. So a second backfill finds nothing, the live consumer never
