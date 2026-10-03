@@ -355,9 +355,11 @@ fn decl_line(text: &str, model: &str) -> Option<usize> {
     })
 }
 
-/// An `every:` clock is one the grammar reads; an incremental model has a
-/// key (what keeps an appended row from repeating) and an INTEGER
-/// watermark column.
+/// An `every:` clock is one the grammar reads; an incremental model's
+/// watermark is its key — one INTEGER column, unique per row (a row id, a
+/// seq). Appending takes the rows past the table's highest watermark, so a
+/// value two rows shared would let the second slip under it unseen; a
+/// unique one can't (tsk777).
 fn check_materialize(decl: &ModelDecl, at: &str) -> Result<(), DomainError> {
     match &decl.materialize {
         Some(m @ Materialize::Every { every }) if m.every().is_none() => Err(invalid(format!(
@@ -378,6 +380,14 @@ fn check_materialize(decl: &ModelDecl, at: &str) -> Result<(), DomainError> {
                 return Err(invalid(format!(
                     "{at}: `{}`'s watermark `{}` must be an INTEGER column it declares",
                     decl.name,
+                    incremental.trim()
+                )));
+            }
+            if decl.key.as_slice() != [incremental.trim()] {
+                return Err(invalid(format!(
+                    "{at}: `{}`'s watermark `{}` must be its key (`key: [{}]`) — a value unique per row, like a row id or seq; rows sharing a watermark would be skipped",
+                    decl.name,
+                    incremental.trim(),
                     incremental.trim()
                 )));
             }
@@ -2209,10 +2219,23 @@ mod tests {
             "{}",
             err(decl(""), plain)
         );
-        let on_v = decl("  key: [id]\n").replace("incremental: id", "incremental: v");
+        let on_v = decl("  key: [v]\n").replace("incremental: id", "incremental: v");
         assert!(
             err(on_v, plain).contains("`a`'s watermark `v` must be an INTEGER column"),
             "watermark type"
+        );
+        // The watermark is the key: a value two rows share would let the
+        // second slip under `>` unseen (tsk777).
+        let yaml = decl("  key: [id]\n")
+            .replace("incremental: id", "incremental: n")
+            .replace(
+                "    - { name: v, type: TEXT, doc: \"A value.\" }\n",
+                "    - { name: v, type: TEXT, doc: \"A value.\" }\n    - { name: n, type: INTEGER, doc: \"A number.\" }\n",
+            );
+        let e = err(yaml, "SELECT id, v, 1 AS n FROM source('streams')");
+        assert!(
+            e.contains("models/models.yaml:1: `a`'s watermark `n` must be its key"),
+            "{e}"
         );
         for (sql, what) in [
             (

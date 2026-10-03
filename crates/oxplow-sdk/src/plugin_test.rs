@@ -1412,12 +1412,14 @@ commands:
 
     /// An extension with one incremental model over page visits, watermarked
     /// on `watermark`, and its `before` / `after` fixture.
-    fn visits(root: &Path, watermark: &str) {
+    /// The `visits` extension: an incremental model keyed and watermarked
+    /// on `id`, with a fixture whose `before` visit has id `before` and whose
+    /// later `after` visit has id `after`.
+    fn visits(root: &Path, before: i64, after: i64) {
         write(
             root,
             "oxplow/extensions/visits/extension.yaml",
-            &format!(
-                "manifest: 2
+            "manifest: 2
 name: visits
 intent:
   purpose: Long visits.
@@ -1428,12 +1430,11 @@ models:
     version: 1
     description: Visits and how long they lasted.
     key: [id]
-    materialize: {{ incremental: {watermark} }}
+    materialize: { incremental: id }
     columns:
-      - {{ name: id, type: INTEGER, doc: The visit. }}
-      - {{ name: duration_ms, type: INTEGER, doc: How long it lasted. }}
-"
-            ),
+      - { name: id, type: INTEGER, doc: The visit. }
+      - { name: duration_ms, type: INTEGER, doc: How long it lasted. }
+",
         );
         write(
             root,
@@ -1443,24 +1444,26 @@ models:
         write(
             root,
             "oxplow/extensions/visits/fixtures/model-long_visits.yaml",
-            "before:
+            &format!(
+                "before:
   page_visit:
-    - { id: 1, page_kind: task, page_id: \"task:1\", visited_at: \"2026-01-01T00:00:00.000000Z\", duration_ms: 50 }
+    - {{ id: {before}, page_kind: task, page_id: \"task:1\", visited_at: \"2026-01-01T00:00:00.000000Z\", duration_ms: 50 }}
 after:
   page_visit:
-    - { id: 2, page_kind: task, page_id: \"task:2\", visited_at: \"2026-01-01T00:00:01.000000Z\", duration_ms: 10 }
-",
+    - {{ id: {after}, page_kind: task, page_id: \"task:2\", visited_at: \"2026-01-01T00:00:01.000000Z\", duration_ms: 10 }}
+"
+            ),
         );
     }
 
     /// P8.B5: each incremental model is appended to on its fixture's
-    /// `after` rows and checked against a full refill — a watermark that
-    /// doesn't grow with arrivals (a row lands below it, unseen) fails at
-    /// the model's line; one that does passes.
+    /// `after` rows and checked against a full refill — a key that doesn't
+    /// grow with arrivals (a row lands below the watermark, unseen) fails
+    /// at the model's line; one that does passes.
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_test_checks_incremental_models_against_a_full_refill() {
         let dir = tempfile::tempdir().unwrap();
-        visits(dir.path(), "id");
+        visits(dir.path(), 1, 2);
         let report = test_extension(dir.path(), "visits", false).await.unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
         assert!(
@@ -1470,7 +1473,8 @@ after:
         );
 
         let dir = tempfile::tempdir().unwrap();
-        visits(dir.path(), "duration_ms");
+        // A visit that arrives with a smaller id than one already appended.
+        visits(dir.path(), 2, 1);
         let report = test_extension(dir.path(), "visits", false).await.unwrap();
         let errors = report.errors.join("\n");
         assert!(

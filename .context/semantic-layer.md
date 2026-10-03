@@ -308,8 +308,11 @@ a model by appending the rows past its watermark — the highest value of
 `<column>` its table holds — instead of refilling it:
 `INSERT INTO m_<view> SELECT * FROM (<sql>) WHERE <column> > :watermark`.
 It's for append-only inputs, and the compiler holds it to that, each
-refusal at `file:line` and pointing at `on_change`: it needs a `key`
-(its table's primary key) and an INTEGER `<column>` it declares, and its
+refusal at `file:line` and pointing at `on_change`: **`<column>` is its
+key** (`key: [<column>]`, the table's primary key) — one declared
+INTEGER, unique per row, like a row id or a seq. A watermark two rows
+shared would let the second slip under `>` unseen, since nothing reaches
+the primary key to catch it (tsk777); a unique one can't. Its
 SQL may not group, de-duplicate, window, cap or combine sets (`GROUP BY`,
 `DISTINCT`, `OVER`, `LIMIT`, `UNION` / `INTERSECT` / `EXCEPT`, an
 aggregate call) or read the clock (a date function, `CURRENT_*`,
@@ -318,9 +321,8 @@ aggregate call) or read the clock (a date function, `CURRENT_*`,
   (`Changed.rewrote`, P8.B3; an event payload expiring is an UPDATE);
 - it's the **first build** since it registered (an open, a changed
   SELECT or contract — which also recreates the table);
-- the append **hits the primary key** — a row past the watermark whose
-  key it already holds (output that replaces rows, like "the latest per
-  key") — logged, then refilled.
+- the append **hits the primary key** — its SQL emitted one key twice
+  in a batch — logged, then refilled.
 The flag is sticky until a recompute succeeds. A row that appears
 *below* the watermark is the case nothing at run time can see; `plugin
 test` checks each incremental model against a full refill (P8.B5).
