@@ -1527,6 +1527,8 @@ export type CollectorEffect = {
 	 *  review never does, approved or not.
 	 */
 	notRun: string | null,
+	// Its entry's text changed though its declaration didn't (tsk783).
+	scriptChanged: boolean,
 };
 
 // A declared collector with its last run and consent status.

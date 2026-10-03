@@ -1015,7 +1015,9 @@ storing nothing, with a `RefusingOracle` answering every `ai_*` builtin
 with an error (a review never spends or sends). `CollectorEffect.outputs`
 holds each input's `Ran { counts, rows (20 per entity), error? }` before
 and after. An exec or read collector is never run — approved or not —
-and says so in `not_run`.
+and says so in `not_run`. A collector whose entry's text changed though
+its declaration didn't is `changed` with `script_changed`, and says "its
+script changed" even when there's nothing to run it on (tsk783).
 
 **An effect's reactions** (P8.D12). `EffectReport.effects` lists each
 effect by id with its trigger before and after (`EffectTrigger { on,

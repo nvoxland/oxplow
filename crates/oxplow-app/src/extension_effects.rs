@@ -237,6 +237,8 @@ pub struct CollectorEffect {
     /// Why it wasn't run: it runs a program or reads a provider, which a
     /// review never does, approved or not.
     pub not_run: Option<String>,
+    /// Its entry's text changed though its declaration didn't (tsk783).
+    pub script_changed: bool,
 }
 
 /// An effect before and after: when it reacts, and what it composes.
@@ -798,11 +800,16 @@ pub fn summary(report: &EffectReport) -> Vec<String> {
                 c.after.as_ref().map_or("no grants".into(), grants_line)
             )),
             Change::Removed => out.push(format!("Collector {}: removed", c.id)),
-            _ => out.extend(
-                grant_changes(c.before.as_ref(), c.after.as_ref())
-                    .into_iter()
-                    .map(|g| format!("Collector {}: {g}", c.id)),
-            ),
+            _ => {
+                out.extend(
+                    grant_changes(c.before.as_ref(), c.after.as_ref())
+                        .into_iter()
+                        .map(|g| format!("Collector {}: {g}", c.id)),
+                );
+                if c.script_changed {
+                    out.push(format!("Collector {}: its script changed", c.id));
+                }
+            }
         }
     }
     for p in &report.providers {
@@ -1013,6 +1020,7 @@ pub fn collectors_diff(before: &[CollectorSpec], after: &[CollectorSpec]) -> Vec
                 .unwrap_or_default(),
             outputs: Vec::new(),
             not_run: None,
+            script_changed: false,
         })
         .collect()
 }
@@ -1064,6 +1072,13 @@ async fn collector_outputs(
     let (script_b, script_a) = (script(before, &spec_b), script(Some(after), &spec_a));
     if effect.change == Change::Unchanged && script_b == script_a {
         return;
+    }
+    // A rewritten script is a change even when nothing runs it here.
+    if spec_b.is_some() && spec_a.is_some() && script_b != script_a {
+        effect.script_changed = true;
+        if effect.change == Change::Unchanged {
+            effect.change = Change::Changed;
+        }
     }
     let Some(spec) = spec_a.clone().or(spec_b.clone()) else {
         return;
@@ -2204,6 +2219,68 @@ mod tests {
         assert_eq!(out[0].after.as_ref().unwrap().counts["thing"], 2, "{out:?}");
     }
 
+    /// tsk783: a collector whose script alone changed — no fixture, event or
+    /// `input:` to run it on — still says so.
+    #[tokio::test]
+    async fn a_collector_whose_script_alone_changed_says_so() {
+        let (old, new) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let write = |root: &std::path::Path, label: &str| {
+            let dir = root.join("oxplow/extensions/acme");
+            std::fs::create_dir_all(dir.join("collectors")).unwrap();
+            std::fs::write(
+                dir.join("extension.yaml"),
+                "manifest: 2\nname: acme\nintent:\n  purpose: Things.\n  origin: thread:thr1\n  examples: []\ncollectors:\n  - id: things\n    runtime: starlark\n    entry: collectors/things.star\n    entities:\n      - { name: thing, key: id, columns: { id: int, label: text } }\n",
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join("collectors/things.star"),
+                format!("def transform(input):\n    return {{\"entities\": {{\"thing\": [{{\"id\": 1, \"label\": \"{label}\"}}]}}}}\n"),
+            )
+            .unwrap();
+        };
+        write(old.path(), "a");
+        write(new.path(), "b");
+        let (eb, ea) = (
+            crate::extensions::load_project_extension(old.path(), "acme"),
+            crate::extensions::load_project_extension(new.path(), "acme"),
+        );
+        let reader = |root: std::path::PathBuf| {
+            move |rel: &str| {
+                std::fs::read_to_string(root.join("oxplow/extensions/acme").join(rel)).ok()
+            }
+        };
+        let (rb, ra) = (
+            reader(old.path().to_path_buf()),
+            reader(new.path().to_path_buf()),
+        );
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let runs = crate::extensions::LensRuns::new();
+        let report = effects(
+            &layer,
+            Some(Version {
+                extension: &eb,
+                read: &rb,
+                lenses: &runs,
+                overlay: &[],
+            }),
+            Version {
+                extension: &ea,
+                read: &ra,
+                lenses: &runs,
+                overlay: &[],
+            },
+        )
+        .await;
+        assert_eq!(report.collectors[0].change, Change::Changed);
+        assert!(
+            report
+                .lines
+                .contains(&"Collector things: its script changed".to_string()),
+            "{:?}",
+            report.lines
+        );
+    }
+
     /// tsk779: a side past the limit reads `limit` rows, truncated, and the
     /// limit is what the gateway really returns — the note's number is the
     /// count it reports, not a larger one the gateway never reaches.
@@ -2619,6 +2696,7 @@ mod tests {
                     }),
                 }],
                 not_run: None,
+                script_changed: false,
             }],
             providers: vec![ProviderEffect {
                 commands: vec![
