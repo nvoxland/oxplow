@@ -25,7 +25,7 @@ export function integrationRow(v: ProviderInstanceView, now: Date = new Date()):
       status = "Off";
       break;
     case "missing":
-      status = "No enabled extension declares it";
+      status = s.reason;
       break;
     case "unapproved":
       status = "Not approved on this machine: approve it under Data → Programs";
@@ -65,20 +65,23 @@ export function integrationRow(v: ProviderInstanceView, now: Date = new Date()):
   };
 }
 
-/** A provider the project's work items can be filed on (P7.A2). */
+/** A provider instance the project's work items can be filed on (P7.A2;
+ *  by instance since P9.B1). */
 export interface WorkItemsChoice {
-  provider: string;
+  /** The instance's id — what `activeProviders.work_items` names
+   *  (`oxplow` for oxplow's own tasks). */
+  id: string;
   label: string;
   /** Running on this machine: new items can be filed on it now. */
   running: boolean;
 }
 
-/** oxplow's own tasks, then every declared work-items provider. */
+/** oxplow's own tasks, then every work-items provider instance. */
 export function workItemsChoices(views: ProviderInstanceView[]): WorkItemsChoice[] {
-  const choices: WorkItemsChoice[] = [{ provider: "oxplow", label: "oxplow's tasks", running: true }];
+  const choices: WorkItemsChoice[] = [{ id: "oxplow", label: "oxplow's tasks", running: true }];
   for (const v of views) {
-    if (v.capability !== "work_items" || choices.some((c) => c.provider === v.provider)) continue;
-    choices.push({ provider: v.provider, label: `${v.provider} (${v.instance})`, running: v.health.state.state === "ready" });
+    if (v.capability !== "work_items" || choices.some((c) => c.id === v.instanceId)) continue;
+    choices.push({ id: v.instanceId, label: `${v.instanceId} (${v.instance})`, running: v.health.state.state === "ready" });
   }
   return choices;
 }
@@ -86,7 +89,7 @@ export function workItemsChoices(views: ProviderInstanceView[]): WorkItemsChoice
 /** What to say about the active provider when filing on it can't work:
  *  nothing when it can. Never a fallback — a `create` fails naming it. */
 export function activeProviderProblem(choices: WorkItemsChoice[], active: string): string | null {
-  const choice = choices.find((c) => c.provider === active);
+  const choice = choices.find((c) => c.id === active);
   if (!choice) return `No enabled extension declares \`${active}\`: new work items can't be filed until one does, or choose another.`;
   if (!choice.running) return `\`${active}\` isn't running on this machine: new work items can't be filed until it is.`;
   return null;

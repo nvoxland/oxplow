@@ -6,7 +6,9 @@ params: [{ name: scope }, { name: thread_id }]
 query: |
   SELECT w.ref, w.title, w.native_state, w.state
   FROM v_work_item w
-  WHERE w.provider = 'linear'
+  -- The active Linear instance's issues (a second instance has its own id).
+  WHERE w.provider IN (SELECT p.provider FROM v_capability_provider p
+                       WHERE p.extension = 'linear' AND p.capability = 'work_items' AND p.active = 1)
     AND CASE :scope
           -- This thread: the issues its efforts worked on.
           WHEN 'thread' THEN w.ref IN (SELECT e.work_item FROM v_effort e WHERE e.thread_id = :thread_id)

@@ -978,10 +978,10 @@ struct RawConfig {
     /// The project's ACP agents, layered over the presets. Runs programs.
     #[serde(rename = "acpAgents", default)]
     acp_agents: Option<Vec<AcpAgentConfig>>,
-    /// Instances of extension providers, by `<extension>/<provider id>`: `{ enabled, config }` (the provider's instance config). Enabling one runs its program once this machine approved it.
+    /// Instances of extension providers, by `<extension>/<instance id>`: `{ enabled, config, provider? }` (the provider's instance config; `provider` names which of the extension's providers an instance with its own id is). Enabling one runs its program once this machine approved it.
     #[serde(rename = "extensionInstances", default)]
     extension_instances: Option<std::collections::BTreeMap<String, ExtensionInstanceConfig>>,
-    /// Each capability's active provider, by provider id: `{ work_items: linear }`. New work items file there; absent, oxplow's own. A provider that isn't running is a failure, never a fallback.
+    /// Each capability's active provider, by instance id: `{ work_items: linear }` (a provider's default instance has the provider's id). New work items file there; absent, oxplow's own. A provider that isn't running is a failure, never a fallback.
     #[serde(rename = "activeProviders", default)]
     active_providers: Option<std::collections::BTreeMap<String, String>>,
     /// Core components that stay oxplow's own, by target: `[work_item.board]`. Listed, an extension's replacement of it (the active provider's `ui.replacements`) isn't shown.
@@ -1571,6 +1571,12 @@ pub struct ExtensionInstanceConfig {
     // `render_project_config` leaves an absent one out of the file.
     #[serde(rename = "syncMinutes", default)]
     pub sync_minutes: Option<u32>,
+    /// Which of the extension's providers this is an instance of, for an
+    /// instance whose id isn't a provider's own (`tracker/linear_acme:
+    /// { provider: linear }` — a second Linear workspace). Absent, the
+    /// instance id is the provider id.
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 /// How often an instance's collectors are read when its config doesn't
@@ -1608,18 +1614,35 @@ fn instances_as_written(
     value
 }
 
-/// Validate `extensionInstances:`: keyed `<extension>/<provider id>`, each
-/// config an object.
+/// A provider or instance id: lowercase snake_case, starting with a
+/// letter — a ref's provider segment and a command namespace as it stands.
+fn is_instance_id(id: &str) -> bool {
+    id.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// Validate `extensionInstances:`: keyed `<extension>/<instance id>` (the
+/// id lowercase snake_case — a provider's own for its default instance),
+/// each config an object, `provider` (when given) a provider id.
 fn validate_extension_instances(
     raw: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
 ) -> Result<std::collections::BTreeMap<String, ExtensionInstanceConfig>, ConfigError> {
     for (key, instance) in &raw {
         let well_formed = key
             .split_once('/')
-            .is_some_and(|(ext, id)| !ext.is_empty() && !id.is_empty() && !id.contains('/'));
+            .is_some_and(|(ext, id)| !ext.is_empty() && is_instance_id(id));
         if !well_formed {
             return Err(ConfigError::Invalid(format!(
-                "extensionInstances: `{key}` must be `<extension>/<provider id>`"
+                "extensionInstances: `{key}` must be `<extension>/<instance id>` (the id lowercase \
+                 snake_case: a provider's own, or another instance's with `provider: <id>`)"
+            )));
+        }
+        if let Some(provider) = instance.provider.as_deref().filter(|p| !is_instance_id(p)) {
+            return Err(ConfigError::Invalid(format!(
+                "extensionInstances.{key}: `provider` names one of the extension's providers by \
+                 id (lowercase snake_case), not `{provider}`"
             )));
         }
         if !instance.config.is_object() {
@@ -1651,8 +1674,8 @@ fn validate_replacements_off(
     Ok(raw.into_iter().collect())
 }
 
-/// Validate `activeProviders:`: a swappable capability each, naming a
-/// provider id (lowercase snake_case, as `providers:` ids are).
+/// Validate `activeProviders:`: a swappable capability each, naming an
+/// instance by its id (a provider's default instance has the provider's).
 fn validate_active_providers(
     raw: std::collections::BTreeMap<String, String>,
 ) -> Result<std::collections::BTreeMap<String, String>, ConfigError> {
@@ -1664,17 +1687,10 @@ fn validate_active_providers(
                 SWAPPABLE_CAPABILITIES.join(", ")
             )));
         }
-        let id_like = provider
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_lowercase())
-            && provider
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
-        if !id_like {
+        if !is_instance_id(provider) {
             return Err(ConfigError::Invalid(format!(
-                "activeProviders.{capability}: `{provider}` isn't a provider id (lowercase \
-                 snake_case)"
+                "activeProviders.{capability}: `{provider}` isn't an instance id (lowercase \
+                 snake_case; a provider's default instance has the provider's id)"
             )));
         }
     }
@@ -3129,7 +3145,7 @@ mod tests {
         let err = parse("activeProviders: { vcs: jj }\n").unwrap_err();
         assert!(err.to_string().contains("work_items"), "{err}");
         let err = parse("activeProviders: { work_items: Linear-App }\n").unwrap_err();
-        assert!(err.to_string().contains("provider id"), "{err}");
+        assert!(err.to_string().contains("instance id"), "{err}");
         assert!(parse("agents: [claude]\n")
             .unwrap()
             .active_providers
@@ -3167,6 +3183,59 @@ mod tests {
         assert!(crate::keys::HUMAN_ONLY_KEYS.contains(&"replacementsOff"));
     }
 
+    /// P9.B1: an instance is `<extension>/<instance id>`; a provider's
+    /// default instance has the provider's id, and another one says which
+    /// provider it is.
+    #[test]
+    fn an_instance_key_is_an_extension_and_a_snake_case_instance_id() {
+        let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
+        let config = parse(
+            "extensionInstances:\n  my-tracker/linear: { enabled: true }\n  my-tracker/linear_acme: { enabled: true, provider: linear }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config.extension_instances["my-tracker/linear"].provider,
+            None
+        );
+        assert_eq!(
+            config.extension_instances["my-tracker/linear_acme"]
+                .provider
+                .as_deref(),
+            Some("linear")
+        );
+        let doc = render_project_config(&config, "demo");
+        let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
+        assert!(yaml.contains("provider: linear"), "{yaml}");
+        assert_eq!(
+            yaml.matches("provider:").count(),
+            1,
+            "absent, it isn't written: {yaml}"
+        );
+        for bad in [
+            "tracker/Linear",
+            "tracker/linear-acme",
+            "tracker/1st",
+            "tracker/",
+            "/linear",
+            "tracker/a/b",
+            "linear",
+        ] {
+            let err = parse(&format!(
+                "extensionInstances:\n  \"{bad}\": {{ enabled: true }}\n"
+            ))
+            .unwrap_err()
+            .to_string();
+            assert!(err.contains("<extension>/<instance id>"), "{bad}: {err}");
+        }
+        let err = parse("extensionInstances:\n  tracker/acme: { provider: Lin-ear }\n")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("`provider`") && err.contains("Lin-ear"),
+            "{err}"
+        );
+    }
+
     #[test]
     fn rendered_config_holds_plain_numbers_from_json_values() {
         let mut config = default_config("demo".into());
@@ -3176,6 +3245,7 @@ mod tests {
                 enabled: true,
                 config: serde_json::json!({ "pollMinutes": 5, "ratio": 0.5 }),
                 sync_minutes: None,
+                provider: None,
             },
         );
         let doc = render_project_config(&config, "demo");

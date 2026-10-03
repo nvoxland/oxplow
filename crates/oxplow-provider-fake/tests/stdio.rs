@@ -300,3 +300,77 @@ async fn the_read_hooks_stream_progress_fail_midway_and_misreport() {
     let (_, seen) = read(&peer, &handle, &mut incoming).await;
     assert_eq!(seen[0].1["row"]["ref"], "work_item:other:X-1");
 }
+
+/// P9.B1: the fake is whichever instance the host says it is — its refs
+/// carry `OXPLOW_PROVIDER_ID` — and, under `needs:<NAME>`, its `check`
+/// says when the credential `<NAME>` didn't reach it.
+#[tokio::test]
+async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() {
+    let spawn_as = |id: &str, hooks: &str, token: Option<&str>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_oxplow-provider-fake"));
+        command
+            .env("OXPLOW_FAKE_HOOKS", hooks)
+            .env("OXPLOW_PROVIDER_ID", id)
+            .env_remove("FAKE_TOKEN")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true);
+        if let Some(token) = token {
+            command.env("FAKE_TOKEN", token);
+        }
+        let mut child = command.spawn().expect("spawn the fake");
+        let stdout = child.stdout.take().expect("piped stdout");
+        let stdin = child.stdin.take().expect("piped stdin");
+        let (peer, incoming) = Peer::spawn(stdout, stdin);
+        (child, peer, incoming)
+    };
+    let (_child, peer, _incoming) = spawn_as("fake_second", "", None);
+    initialize(&peer).await;
+    let handle = check(&peer).await;
+    let created = invoke(&peer, &handle, "create", json!({ "title": "First" }))
+        .await
+        .unwrap();
+    assert_eq!(created.result["ref"], "work_item:fake_second:W-1");
+    let moved = invoke(
+        &peer,
+        &handle,
+        "transition",
+        json!({ "ref": "work_item:fake_second:W-1", "to": "done" }),
+    )
+    .await;
+    assert!(moved.is_ok(), "{moved:?}");
+    // Another instance's ref isn't one of its items.
+    let foreign = invoke(
+        &peer,
+        &handle,
+        "transition",
+        json!({ "ref": "work_item:fake:W-1", "to": "done" }),
+    )
+    .await;
+    assert!(
+        matches!(foreign, Err(ProtocolError::InvalidInput { .. })),
+        "{foreign:?}"
+    );
+
+    let checked = |peer: Peer| async move {
+        let result: CheckResult = peer
+            .call(
+                method::CHECK,
+                &CheckParams {
+                    config: json!({ "team": "core" }),
+                    credentials: vec!["FAKE_TOKEN".into()],
+                },
+            )
+            .await
+            .expect("check");
+        result
+    };
+    let (_c1, without, _i1) = spawn_as("fake", "needs:FAKE_TOKEN", None);
+    initialize(&without).await;
+    let result = checked(without).await;
+    assert!(result.handle.is_none());
+    assert_eq!(result.problems[0].path, "/credentials/FAKE_TOKEN");
+    let (_c2, with, _i2) = spawn_as("fake", "needs:FAKE_TOKEN", Some("s3cret"));
+    initialize(&with).await;
+    assert!(checked(with).await.handle.is_some());
+}

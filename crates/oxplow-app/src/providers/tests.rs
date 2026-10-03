@@ -119,6 +119,7 @@ fn configure(fx: &EffortFixture, enabled: bool, config: serde_json::Value) {
             enabled,
             config,
             sync_minutes: None,
+            provider: None,
         },
     );
 }
@@ -1097,6 +1098,10 @@ async fn a_provider_cannot_declare_another_core_event_type() {
 #[test]
 fn a_provider_event_names_only_its_own_refs() {
     use super::registry::check_subject;
+    // P9.B1: the id is the instance's — a second instance of `fake` may
+    // name its own items, not the first's.
+    assert!(check_subject("fake_second", "tracker", "work_item:fake_second:W-1").is_ok());
+    assert!(check_subject("fake_second", "tracker", "work_item:fake:W-1").is_err());
     assert!(check_subject("fake", "tracker", "work_item:fake:W-1").is_ok());
     assert!(check_subject("fake", "tracker", "plugin:tracker").is_ok());
     for bad in [
@@ -1985,4 +1990,222 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
         .map(|p| p["item"]["title"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(titles.last().map(String::as_str), Some("theirs!"));
+}
+
+/// Another instance of the tracker's `provider` (in memory, as a
+/// reconcile reads it).
+fn configure_named(
+    fx: &EffortFixture,
+    instance: &str,
+    provider: Option<&str>,
+    config: serde_json::Value,
+) {
+    fx.svc.config.write().unwrap().extension_instances.insert(
+        instance.into(),
+        oxplow_config::ExtensionInstanceConfig {
+            enabled: true,
+            config,
+            sync_minutes: Some(0),
+            provider: provider.map(str::to_string),
+        },
+    );
+}
+
+const SECOND: &str = "tracker/fake_second";
+
+/// P9.B1: two instances of one provider run side by side — one approved
+/// program, two processes — each under its own id: its refs' segment, its
+/// commands' namespace, its `v_capability_provider` row, its health.
+#[tokio::test]
+async fn two_instances_of_one_provider_run_side_by_side() {
+    let (fx, _ext) = approved("").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    configure_named(&fx, SECOND, Some("fake"), json!({ "team": "second" }));
+    fx.svc.providers.reconcile().await;
+    for name in [INSTANCE, SECOND] {
+        assert_eq!(
+            fx.svc.providers.health(name).map(|h| h.state),
+            Some(InstanceState::Ready),
+            "{name}"
+        );
+    }
+    assert_eq!(
+        fx.svc.commands.namespace_owner("fake_second").as_deref(),
+        Some("provider:tracker/fake_second")
+    );
+    assert!(fx.svc.commands.spec("fake.estimate").is_some());
+    assert!(fx.svc.commands.spec("fake_second.estimate").is_some());
+
+    let items = fx.svc.work_items_client();
+    let new = |provider: &str| crate::work_items::NewItem {
+        provider: Some(provider.into()),
+        title: "theirs".into(),
+        ..Default::default()
+    };
+    // Each instance numbers its own items: the instance is in the ref.
+    assert_eq!(
+        items
+            .create(&Actor::Human, new("fake_second"))
+            .await
+            .unwrap(),
+        "work_item:fake_second:W-1"
+    );
+    assert_eq!(
+        items.create(&Actor::Human, new("fake")).await.unwrap(),
+        "work_item:fake:W-1"
+    );
+    let listed = fx
+        .svc
+        .sql
+        .query_sql(
+            "SELECT provider FROM v_capability_provider WHERE extension = 'tracker' ORDER BY provider",
+            vec![],
+            None,
+        )
+        .await
+        .unwrap()
+        .rows;
+    assert_eq!(
+        serde_json::to_value(listed).unwrap(),
+        json!([["fake"], ["fake_second"]])
+    );
+    let views = fx.svc.providers.list().await;
+    let second = views.iter().find(|v| v.instance == SECOND).unwrap();
+    assert_eq!(
+        (second.provider.as_str(), second.instance_id.as_str()),
+        ("fake", "fake_second")
+    );
+    assert!(second.approved, "one approval: the program's");
+
+    // Stopping one leaves the other.
+    assert!(fx.svc.providers.stop(SECOND).await);
+    assert!(fx.svc.commands.spec("fake_second.estimate").is_none());
+    assert!(fx.svc.commands.spec("fake.estimate").is_some());
+    assert!(items.create(&Actor::Human, new("fake")).await.is_ok());
+}
+
+/// P9.B1: a credential is an instance's — set for one, another instance
+/// of the same provider runs without it.
+#[tokio::test]
+async fn an_instance_credential_is_its_own() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_extension(&project, "needs:FAKE_TOKEN");
+    let manifest = project
+        .join("oxplow/extensions")
+        .join(EXT)
+        .join("extension.yaml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+    let ext = extension(&project);
+    approve(&fx, &ext);
+    fx.svc
+        .providers
+        .set_credential(SECOND, "FAKE_TOKEN", Some("s3cret"))
+        .unwrap_err(); // not configured yet: nothing to set it on
+    configure(&fx, true, json!({ "team": "core" }));
+    configure_named(&fx, SECOND, Some("fake"), json!({ "team": "second" }));
+    fx.svc
+        .providers
+        .set_credential(SECOND, "FAKE_TOKEN", Some("s3cret"))
+        .unwrap();
+    let undeclared = fx
+        .svc
+        .providers
+        .set_credential(SECOND, "OTHER", Some("x"))
+        .unwrap_err();
+    assert!(
+        undeclared.to_string().contains("FAKE_TOKEN"),
+        "{undeclared}"
+    );
+    fx.svc.providers.reconcile().await;
+    assert_eq!(
+        fx.svc.providers.health(SECOND).map(|h| h.state),
+        Some(InstanceState::Ready)
+    );
+    match fx.svc.providers.health(INSTANCE).map(|h| h.state) {
+        Some(InstanceState::Unconfigured { problems }) => {
+            assert_eq!(problems[0].path, "/credentials/FAKE_TOKEN");
+        }
+        other => panic!("the default instance has no token: {other:?}"),
+    }
+    let views = fx.svc.providers.list().await;
+    let set = |instance: &str| {
+        views
+            .iter()
+            .find(|v| v.instance == instance)
+            .unwrap()
+            .credentials
+            .iter()
+            .map(|c| (c.name.clone(), c.set))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(set(SECOND), vec![("FAKE_TOKEN".to_string(), true)]);
+    assert_eq!(set(INSTANCE), vec![("FAKE_TOKEN".to_string(), false)]);
+}
+
+/// P9.B1: an instance whose id isn't a provider's says which provider it
+/// is; one that doesn't is listed missing, with the fix.
+#[tokio::test]
+async fn a_named_instance_says_which_provider_it_is() {
+    let (fx, _ext) = approved("").await;
+    configure_named(&fx, SECOND, None, json!({ "team": "second" }));
+    fx.svc.providers.reconcile().await;
+    match fx.svc.providers.health(SECOND).map(|h| h.state) {
+        Some(InstanceState::Missing { reason }) => {
+            assert!(
+                reason.contains("provider: fake") && reason.contains("fake_second"),
+                "{reason}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(fx.svc.commands.spec("fake_second.estimate").is_none());
+
+    // A person adds one by naming the provider; a provider the extension
+    // doesn't declare, or an id already taken, is refused.
+    let providers = &fx.svc.providers;
+    let refused = providers
+        .add_instance(&Actor::Human, "tracker/acme", "nope")
+        .await
+        .unwrap_err();
+    assert!(
+        refused.to_string().contains("fake"),
+        "names what it declares: {refused}"
+    );
+    let added = providers
+        .add_instance(&Actor::Human, "tracker/acme", "fake")
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            added.provider.as_str(),
+            added.instance_id.as_str(),
+            added.enabled
+        ),
+        ("fake", "acme", false)
+    );
+    let taken = providers
+        .add_instance(&Actor::Human, "tracker/acme", "fake")
+        .await
+        .unwrap_err();
+    assert!(taken.to_string().contains("already"), "{taken}");
+    // An agent can't: instances are a person's (`extensionInstances`).
+    let agent = Actor::Agent {
+        thread_id: Some(fx.thread),
+        stream_id: None,
+    };
+    assert!(providers
+        .add_instance(&agent, "tracker/other", "fake")
+        .await
+        .is_err());
+    providers
+        .remove_instance(&Actor::Human, "tracker/acme")
+        .await
+        .unwrap();
+    assert!(providers
+        .list()
+        .await
+        .iter()
+        .all(|v| v.instance != "tracker/acme"));
 }

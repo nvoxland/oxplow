@@ -55,8 +55,10 @@ pub const WORK_ITEMS_COMMANDS: &[&str] = &["create", "update", "transition"];
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProviderSpec {
-    /// The provider's name: its refs' segment (`work_item:<id>:…`) and its
-    /// commands' namespace (`<id>.create`).
+    /// The provider's id: its program's approval (`<extension>/<id>`) and
+    /// the id of its default instance — an instance's id is its refs'
+    /// segment (`work_item:<id>:…`) and its commands' namespace
+    /// (`<id>.estimate`).
     pub id: String,
     pub capability: String,
     /// The program, relative to the extension folder — or `adapter`.
@@ -104,8 +106,17 @@ pub struct McpServerSpec {
     pub url: Option<String>,
 }
 
+/// An instance's name: `<extension>/<instance id>` — its config key, its
+/// health's key, what Settings → Integrations lists.
+pub fn instance_name(extension: &str, id: &str) -> String {
+    format!("{extension}/{id}")
+}
+
 impl ProviderSpec {
-    /// Its approval key: `provider:<extension>/<id>`.
+    /// Its program's approval key: `provider:<extension>/<id>` — one
+    /// approval however many instances run it (consent is about the code;
+    /// instances differ in config and credential values, which it never
+    /// covered).
     pub fn approval_name(&self, extension: &str) -> String {
         format!("{extension}/{}", self.id)
     }

@@ -180,9 +180,9 @@ marks a deleted issue), not Linear.
 the project's copy of the example (consent hashes the folder, so the
 binary must live in it); enable the extension, approve its program on
 Settings → Data → Programs, then on Settings → Integrations set
-`LINEAR_API_KEY` and the team, Check and Enable. Two `providers:` entries
-with different ids give two instances (two teams); several instances of
-one provider are left for P9.
+`LINEAR_API_KEY` and the team, Check and Enable. A second team or
+workspace is another instance of the same provider (`tracker/linear_acme:
+{ provider: linear, … }`, "Instances" below), with its own key.
 
 ## The MCP adapter (`crates/oxplow-provider-mcp`)
 
@@ -337,8 +337,9 @@ working directory and `OXPLOW_EXTENSION_DIR` are the copy.
 
 **The spawn** (`host.rs`, `connect`) mirrors an `exec` source: a
 scrubbed environment (PATH, HOME, the declared `env` names, the
-credentials from the keychain account `source:<project>:<ext>:<name>`,
-`OXPLOW_EXTENSION_DIR`, `OXPLOW_PROVIDER_ID`), the egress proxy and
+credentials from the instance's keychain accounts
+(`instance:<project>:<ext>/<instance id>:<name>`),
+`OXPLOW_EXTENSION_DIR`, `OXPLOW_PROVIDER_ID` = the **instance id**), the egress proxy and
 `sandbox-exec` where the OS enforces `network`, stderr to the log, and
 `kill_on_drop`. Then **the handshake**: the live `initialize` must equal
 the approved declarations (`HostError::DeclarationsChanged` names the
@@ -346,13 +347,50 @@ first difference), and `check` of the instance's config must return a
 handle (`HostError::Unconfigured { problems }` otherwise). Requests from
 the provider are answered `MethodNotFound`.
 
-**Instances** (§10.3, minimal: project scope only). An instance is
-`<extension>/<provider id>`, configured in `.oxplow/project.yaml`:
+**Instances** (§10.3; project scope). An instance is
+`<extension>/<instance id>`, configured in `.oxplow/project.yaml`:
 
 ```yaml
 extensionInstances:
   tracker/linear: { enabled: true, config: { team: ENG } }
+  # A second workspace: its own id, saying which provider it is (P9.B1).
+  tracker/linear_acme: { enabled: true, provider: linear, config: { team: ACME } }
 ```
+
+**An instance id** is lowercase snake_case. A provider's **default
+instance** has the provider's own id; any other instance names its
+provider (`provider:`) — without it, an id that isn't a declared
+provider's is `Missing { reason }`, and the reason says what to add.
+One spelling everywhere, because the id is used as it stands:
+
+| Keyed on the **instance id** | Keyed on the **provider (program)** |
+|---|---|
+| the ref segment (`work_item:linear_acme:ENG-1`) and `check_subject` | the consent key `provider:<ext>/<provider id>` and its hash |
+| the bus namespace (`linear_acme.estimate`) | the approved copy (`copies/<ext>/<provider id>/<hash>`) |
+| the work-items registry id, `v_capability_provider.provider`, the `activeProviders` value | Data → Programs' row, `declaration_effects` |
+| `OXPLOW_PROVIDER_ID` (the provider is told which instance it is) | the kit's fixtures and transcripts (it tests the program, as its default instance) |
+| `plugin_health.contribution`, `provider_collector_state.instance` (the name) | |
+| the credential accounts (`instance:<project>:<ext>/<id>:<name>`) | |
+
+Consent stays per program: its hash covers the folder, the entry, args
+and the *names* of its grants; two instances differ only in config and
+credential *values*, which it never covered, so a second approval would
+review nothing. Approving a program restarts every running instance of
+it (`ProviderRegistry::approved`).
+
+`ProviderRegistry::resolve(instance)` is the one mapping from a name to
+`{ ext, spec, id }` (`enable` / `check` are the default instance's;
+`enable_instance` any). A person adds another with `add_instance`
+(refused when the extension doesn't declare the provider, the id is
+taken, or the id is another provider's own), removes one with
+`remove_instance` (it stops; its config entry and its credentials go),
+and sets a credential with `set_credential` (a declared name; the
+instance restarts on it) — RPCs `add_provider_instance`,
+`remove_provider_instance`, `set_instance_credential`, UI only. A
+provider's credential is its instance's: collectors keep the
+extension's `source:<project>:<ext>:<name>` accounts. An extension's
+`ui.commands` name the default instance's commands (`linear.estimate`);
+another instance's are on the bus under its own namespace.
 
 The key is human-only (`HUMAN_ONLY_KEYS`: enabling runs a program) and
 shared with the team; whether it *runs* is per machine (approval,

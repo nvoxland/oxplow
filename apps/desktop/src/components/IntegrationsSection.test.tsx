@@ -11,16 +11,18 @@ let active: unknown = null;
 let replacementsOff: string[] = [];
 /** `tracker`'s `ui.replacements`. */
 let replacements: unknown[] = [];
+const credentialSaves: Array<[string, string, string | null]> = [];
 const instance = {
   instance: "tracker/fake",
   extension: "tracker",
   provider: "fake",
+  instanceId: "fake",
   capability: "work_items",
   enabled: true,
   config: { team: "core" },
   configSchema: { type: "object", properties: { team: { type: "string" } } },
   approved: true,
-  credentials: [],
+  credentials: [{ name: "FAKE_TOKEN", set: false }],
   health: { state: { state: "ready" }, consecutiveFailures: 0, lastOkAt: null, meanInvokeMs: null, rateLimitedUntil: null, activity: null },
   collectors: [{ name: "work_items", entity: "work_item", status: "ok", error: null, lastReadAt: "2026-10-01T00:00:00Z", records: 3 }],
 };
@@ -38,6 +40,13 @@ mock.module("../api.js", () => ({
       ? []
       : [{ name: "tracker", enabled: true, ui: { slots: [], commands: [], decorators: [], replacements }, lenses: [] }],
   subscribeOxplowEvents: () => () => {},
+  setInstanceCredential: async (inst: string, name: string, value: string | null) => {
+    credentialSaves.push([inst, name, value]);
+    return [instance];
+  },
+  setCredential: async () => {
+    throw new Error("a provider's credential is its instance's, not the extension's");
+  },
   runCommand: async (name: string, input: unknown, confirmed = false) => {
     ran.push([name, input, confirmed]);
     return { result: null, audit_id: 1, event_id: null, inverse: null };
@@ -47,6 +56,7 @@ const { IntegrationsSection } = await import("./IntegrationsSection.js");
 
 afterEach(() => {
   ran.length = 0;
+  credentialSaves.length = 0;
   active = null;
   replacementsOff = [];
   replacements = [];
@@ -109,5 +119,16 @@ test("a replaced component can be turned back to oxplow's own", async () => {
   await waitFor(() => expect(box.checked).toBe(true));
   fireEvent.click(box);
   await waitFor(() => expect(ran[1]).toEqual(["config.unset", { key: "replacementsOff" }, true]));
+});
+
+// P9.B1: a provider's credential is an instance's own — saved under the
+// instance, never the extension.
+test("a credential is saved to its instance", async () => {
+  const view = render(<IntegrationsSection />);
+  const form = await waitFor(() => view.getByTestId("credential-tracker/fake-FAKE_TOKEN"));
+  const input = form.querySelector("input") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "s3cret" } });
+  fireEvent.submit(form);
+  await waitFor(() => expect(credentialSaves).toEqual([["tracker/fake", "FAKE_TOKEN", "s3cret"]]));
 });
 

@@ -143,6 +143,18 @@ pub fn project_key(project_dir: &Path) -> String {
 /// Keychain account for an extension's credential. Scoped by project and
 /// extension, so neither another repo nor another extension can read it by
 /// declaring the same name.
+/// The keychain account of a provider instance's credential `name`: an
+/// instance's own, so two instances of one provider (two workspaces) hold
+/// two keys.
+pub fn instance_credential_account(
+    project: &str,
+    extension: &str,
+    instance_id: &str,
+    name: &str,
+) -> String {
+    format!("instance:{project}:{extension}/{instance_id}:{name}")
+}
+
 pub fn credential_account(project: &str, extension: &str, name: &str) -> String {
     format!("source:{project}:{extension}:{name}")
 }

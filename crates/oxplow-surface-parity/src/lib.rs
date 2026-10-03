@@ -203,6 +203,10 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_provider_instances"),
     ui("check_provider_instance"),
     ui("set_provider_instance"),
+    // Instances and their credentials are a person's too (P9.B1).
+    ui("add_provider_instance"),
+    ui("remove_provider_instance"),
+    ui("set_instance_credential"),
     both("ensure_change"),
     both_named("ai.settings", "ai_settings", "list_ai_roles"),
     ui("save_ai_provider"),

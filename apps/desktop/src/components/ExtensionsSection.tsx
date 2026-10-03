@@ -183,9 +183,10 @@ export function ExtensionsSection() {
                 {extensionCredentials(collectors, m.name).map((c) => (
                   <CredentialRow
                     key={c.name}
-                    extension={m.name}
+                    owner={m.name}
                     name={c.name}
                     set={c.set}
+                    store={(v) => setCredential(m.name, c.name, v)}
                     onChanged={() => void refresh()}
                   />
                 ))}
@@ -334,28 +335,33 @@ export function ReviewPanel({
   );
 }
 
-/// One declared credential (a source's or a provider's — they share the
-/// extension's keychain accounts): set or replace its value (it goes to
-/// the OS keychain and never comes back), or clear it.
+/// One declared credential — an extension's (its collectors share them)
+/// or a provider instance's own: set or replace its value (it goes to the
+/// OS keychain and never comes back), or clear it. `owner` is whose it is
+/// (the extension, or `<extension>/<instance id>`) and `store` writes it
+/// there.
 export function CredentialRow({
-  extension,
+  owner,
   name,
   set,
+  store,
   onChanged,
 }: {
-  extension: string;
+  owner: string;
   name: string;
   set: boolean;
+  /** Save `value` (null: forget it) where this credential lives. */
+  store(value: string | null): Promise<unknown>;
   onChanged(): void;
 }) {
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
-  const id = `${extension}-${name}`;
+  const id = `${owner}-${name}`;
 
   async function save(v: string | null) {
     setSaving(true);
     try {
-      await setCredential(extension, name, v);
+      await store(v);
       setValue("");
       showToast({ message: v ? `Saved ${name} to your keychain.` : `Cleared ${name}.` });
       onChanged();

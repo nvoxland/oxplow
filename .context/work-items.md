@@ -185,7 +185,8 @@ which also drops a previous run's external rows); an external provider's
 row is written while its instance runs (`ProviderRegistry::publish`, a
 work-items provider's features as `ExternalWorkItems` reads them) and
 removed when it stops. **`active`** is the capability's active provider
-(P7.A2): the project's `activeProviders` (`{ work_items: <id> }`, a
+(P7.A2): the project's `activeProviders` (`{ work_items: <instance id>
+}` — a provider's default instance has the provider's id, P9.B1 —, a
 person-only config key — an agent's change is a proposal; Settings →
 Integrations offers it as "Active for work items", oxplow's own being the
 key unset), oxplow's own when it names none; a capability nobody can swap

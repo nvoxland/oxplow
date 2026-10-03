@@ -7,6 +7,7 @@ const view = (over: Partial<ProviderInstanceView>): ProviderInstanceView => ({
   instance: "tracker/linear",
   extension: "tracker",
   provider: "linear",
+  instanceId: "linear",
   capability: "work_items",
   enabled: false,
   config: {},
@@ -57,7 +58,7 @@ test("work-items choices list oxplow then each declared provider, and name a pro
   const { workItemsChoices, activeProviderProblem } = await import("./integrationsModel.js");
   const ready = view({ enabled: true, health: { ...view({}).health, state: { state: "ready" } } });
   const choices = workItemsChoices([ready, view({ instance: "other/linear" })]);
-  expect(choices.map((c) => [c.provider, c.running])).toEqual([
+  expect(choices.map((c) => [c.id, c.running])).toEqual([
     ["oxplow", true],
     ["linear", true],
   ]);
@@ -65,6 +66,34 @@ test("work-items choices list oxplow then each declared provider, and name a pro
   expect(activeProviderProblem(choices, "linear")).toBeNull();
   expect(activeProviderProblem(workItemsChoices([view({})]), "linear")).toContain("isn't running");
   expect(activeProviderProblem(choices, "jira")).toContain("No enabled extension declares `jira`");
+});
+
+// P9.B1: a choice is an instance — a second instance of one provider is
+// its own, under its own id (what `activeProviders` names).
+test("each instance of a provider is its own choice, by instance id", async () => {
+  const { workItemsChoices } = await import("./integrationsModel.js");
+  const ready = { ...view({}).health, state: { state: "ready" as const } };
+  const choices = workItemsChoices([
+    view({ enabled: true, health: ready }),
+    view({ instance: "tracker/linear_acme", instanceId: "linear_acme", enabled: true, health: ready }),
+  ]);
+  expect(choices.map((c) => [c.id, c.label])).toEqual([
+    ["oxplow", "oxplow's tasks"],
+    ["linear", "linear (tracker/linear)"],
+    ["linear_acme", "linear_acme (tracker/linear_acme)"],
+  ]);
+});
+
+test("a missing instance says why, and what to add", () => {
+  const missing = integrationRow(
+    view({
+      instance: "tracker/acme",
+      instanceId: "acme",
+      health: { ...view({}).health, state: { state: "missing", reason: "`tracker/acme`: add `provider: linear`" } },
+    }),
+  );
+  expect(missing.status).toBe("`tracker/acme`: add `provider: linear`");
+  expect(missing.problem).toBe(true);
 });
 
 // P7.A3: a collector's line says what its reads delivered and when, and

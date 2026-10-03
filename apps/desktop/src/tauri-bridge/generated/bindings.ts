@@ -290,6 +290,21 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	addProviderInstance: (instance: string, provider: string) => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("add_provider_instance", { instance, provider })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	removeProviderInstance: (instance: string) => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("remove_provider_instance", { instance })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	setInstanceCredential: (instance: string, name: string, value: string | null) => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("set_instance_credential", { instance, name, value })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	ensureChange: (target: ChangeTarget) => typedError<ChangeRow, IpcError>(__TAURI_INVOKE("ensure_change", { target })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2451,6 +2466,13 @@ export type ExtensionInstanceConfig = {
 	 *  `provider.sync`).
 	 */
 	syncMinutes?: number | null,
+	/**
+	 *  Which of the extension's providers this is an instance of, for an
+	 *  instance whose id isn't a provider's own (`tracker/linear_acme:
+	 *  { provider: linear }` — a second Linear workspace). Absent, the
+	 *  instance id is the provider id.
+	 */
+	provider?: string | null,
 };
 
 /**
@@ -2999,8 +3021,11 @@ export type InstanceHealth = {
 export type InstanceState = 
 // Not enabled in the project's config.
 { state: "off" } | 
-// Configured, but no enabled extension declares it.
-{ state: "missing" } | 
+/**
+ *  Configured, but it names no provider an enabled extension
+ *  declares; `reason` says what's wrong and how to fix it.
+ */
+{ state: "missing"; reason: string } | 
 // Enabled, but this machine hasn't approved this version of it.
 { state: "unapproved" } | 
 // Enabled, but its `check` found problems with its config.
@@ -4325,10 +4350,17 @@ export type ProviderEffect = {
 
 // An instance as Settings → Integrations shows it.
 export type ProviderInstanceView = {
-	// `<extension>/<provider id>`.
+	// `<extension>/<instance id>`.
 	instance: string,
 	extension: string,
+	// The provider (its program) this is an instance of.
 	provider: string,
+	/**
+	 *  Its id: its refs' segment, its commands' namespace, what
+	 *  `activeProviders` names. A provider's default instance has the
+	 *  provider's id.
+	 */
+	instanceId: string,
 	capability: string,
 	// The project's config enables it.
 	enabled: boolean,
@@ -4367,8 +4399,10 @@ export type ProviderRead = {
 // One declared provider.
 export type ProviderSpec = {
 	/**
-	 *  The provider's name: its refs' segment (`work_item:<id>:…`) and its
-	 *  commands' namespace (`<id>.create`).
+	 *  The provider's id: its program's approval (`<extension>/<id>`) and
+	 *  the id of its default instance — an instance's id is its refs'
+	 *  segment (`work_item:<id>:…`) and its commands' namespace
+	 *  (`<id>.estimate`).
 	 */
 	id: string,
 	capability: string,

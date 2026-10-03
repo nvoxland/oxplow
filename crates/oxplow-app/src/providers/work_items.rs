@@ -58,7 +58,7 @@ impl ExternalWorkItems {
             })
             .collect::<Result<_, _>>()?;
         Ok(WorkItemsProvider {
-            id: instance.spec.id.clone(),
+            id: instance.id.clone(),
             features,
             external: Some(Arc::new(ExternalWorkItems {
                 instance: instance.clone(),
@@ -76,7 +76,7 @@ impl ExternalVerbs for ExternalWorkItems {
         verb: &str,
         input: Value,
     ) -> Result<VerbOutcome, CommandError> {
-        let id = &self.instance.spec.id;
+        let id = &self.instance.id;
         let validator = self.inputs.get(verb).ok_or_else(|| CommandError::Invalid {
             field: None,
             message: format!("{id} work items don't support `{verb}`"),

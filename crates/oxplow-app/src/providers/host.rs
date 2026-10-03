@@ -80,8 +80,11 @@ pub type HostEnv = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 /// Everything a spawn needs.
 pub struct Launch {
-    /// `<extension>/<id>`.
+    /// `<extension>/<instance id>`.
     pub name: String,
+    /// The instance it runs as: what it's told its refs' segment is
+    /// (`OXPLOW_PROVIDER_ID`).
+    pub instance_id: String,
     pub ext_dir: PathBuf,
     pub spec: ProviderSpec,
     /// The declarations as approved.
@@ -167,7 +170,7 @@ pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .env("OXPLOW_EXTENSION_DIR", &launch.ext_dir)
-        .env("OXPLOW_PROVIDER_ID", &launch.spec.id);
+        .env("OXPLOW_PROVIDER_ID", &launch.instance_id);
     for name in ["PATH", "HOME"]
         .iter()
         .copied()

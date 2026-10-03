@@ -1756,8 +1756,11 @@ declare (`capability`, `provider` — the primary key — `extension`, NULL
 for core's, `features_json`, `active`). Restated from what runs: `reset`
 at boot with core's, `upsert` / `remove` as an external instance starts
 and stops; `set_active` restates which row is a capability's active
-provider (P7.A2). Published as `v_capability_provider`; see
-[work-items.md](./work-items.md).
+provider (P7.A2). An extension provider's `provider` is its **instance
+id** (P9.B1: a provider's default instance has the provider's id, a
+second instance its own — `linear_acme`), the same id its refs and
+`plugin_health.contribution` carry. Published as `v_capability_provider`;
+see [work-items.md](./work-items.md).
 
 ### `asset_state` — the asset runner (`crates/oxplow-app/src/assets.rs`)
 

@@ -3,7 +3,9 @@
 //! conformance kit are tested against, the way `oxplow-acp-fake` stands in
 //! for an agent.
 //!
-//! It keeps items in memory (`work_item:fake:W-<n>`), with native states
+//! It keeps items in memory (`work_item:<id>:W-<n>`, `<id>` being the
+//! instance the host says it is — `OXPLOW_PROVIDER_ID`, `fake` by
+//! default), with native states
 //! `Backlog` / `Doing` / `Stuck` / `Shipped` / `Dropped` for the canonical
 //! `todo` / `in_progress` / `blocked` / `done` / `canceled`. Its config
 //! needs a `team` (a string); a clean `check` returns the handle
@@ -70,6 +72,9 @@ pub struct Hooks {
     pub bad_record: bool,
     pub stale_read: bool,
     pub stuck_cursor: bool,
+    /// `needs:<NAME>`: `check` reports a problem unless the credential
+    /// `<NAME>` reached it (as an environment variable).
+    pub needs: Option<String>,
 }
 
 impl Hooks {
@@ -87,6 +92,7 @@ impl Hooks {
                 Some(("slow-check", ms)) => self.slow_check_ms = ms.parse().unwrap_or(0),
                 Some(("read-fail-after", n)) => self.read_fail_after = n.parse().ok(),
                 Some(("rate-limit", ms)) => self.rate_limit_ms = ms.parse().ok(),
+                Some(("needs", name)) => self.needs = Some(name.to_string()),
                 None if part == "fail-next" => self.fail_next = 1,
                 None if part == "crash" => self.crash = true,
                 None if part == "bad-declarations" => self.bad_declarations = true,
@@ -243,6 +249,8 @@ struct Item {
 
 #[derive(Default)]
 struct World {
+    /// The instance it is: its refs' provider segment.
+    id: String,
     hooks: Hooks,
     items: BTreeMap<u64, Item>,
     next: u64,
@@ -263,15 +271,16 @@ pub enum Served {
     Crashed,
 }
 
-/// Serve the protocol on `reader` / `writer` until the stream ends, a
-/// `shutdown`, or a `crash` hook.
-pub async fn serve<R, W>(reader: R, writer: W, hooks: &str) -> Served
+/// Serve the protocol on `reader` / `writer` as instance `id` until the
+/// stream ends, a `shutdown`, or a `crash` hook.
+pub async fn serve<R, W>(reader: R, writer: W, hooks: &str, id: &str) -> Served
 where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
     let (peer, mut incoming) = Peer::spawn(reader, writer);
     let world: Shared = Arc::new(Mutex::new(World {
+        id: id.to_string(),
         hooks: Hooks::parse(hooks),
         next: 1,
         ..World::default()
@@ -394,7 +403,21 @@ async fn handle(
             }
             let p: CheckParams = parse(params)?;
             let team = p.config.get("team").and_then(Value::as_str);
+            let missing = world
+                .lock()
+                .await
+                .hooks
+                .needs
+                .clone()
+                .filter(|name| std::env::var_os(name).is_none());
             let result = match team {
+                _ if missing.is_some() => CheckResult {
+                    problems: vec![Problem {
+                        path: format!("/credentials/{}", missing.unwrap_or_default()),
+                        message: "the credential isn't set".into(),
+                    }],
+                    handle: None,
+                },
                 Some(team) if !team.is_empty() => CheckResult {
                     problems: Vec::new(),
                     handle: Some(handle_of(team)),
@@ -516,13 +539,16 @@ async fn handle(
     }
 }
 
-fn number_of(item_ref: &str) -> Result<u64, ProtocolError> {
+/// The number of instance `id`'s item `item_ref`.
+fn number_of(id: &str, item_ref: &str) -> Result<u64, ProtocolError> {
     item_ref
-        .strip_prefix("work_item:fake:W-")
+        .strip_prefix(&format!("work_item:{id}:W-"))
         .and_then(|n| n.parse().ok())
         .ok_or_else(|| ProtocolError::InvalidInput {
             field: "/ref".into(),
-            message: format!("`{item_ref}` isn't a fake work item (work_item:fake:W-<n>)"),
+            message: format!(
+                "`{item_ref}` isn't one of `{id}`'s work items (work_item:{id}:W-<n>)"
+            ),
         })
 }
 
@@ -597,7 +623,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 .and_then(Value::as_str)
                 .map(str::to_string);
             if let Some(parent) = &parent_ref {
-                let n = number_of(parent)?;
+                let n = number_of(&w.id, parent)?;
                 if !w.items.get(&n).is_some_and(|i| !i.record.deleted) {
                     return Err(ProtocolError::InvalidInput {
                         field: "/parent_ref".into(),
@@ -613,7 +639,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 native["points"] = points.into();
             }
             let record = WorkItemRecord {
-                item_ref: format!("work_item:fake:W-{n}"),
+                item_ref: format!("work_item:{}:W-{n}", w.id),
                 title,
                 body: input
                     .get("body")
@@ -643,7 +669,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
         }
         "update" | "transition" | "link" | "comment" | "delete" | "estimate" => {
             let item_ref = str_field(&input, "ref")?;
-            let n = number_of(&item_ref)?;
+            let n = number_of(&w.id, &item_ref)?;
             w.rev += 1;
             let rev = w.rev;
             let item = w

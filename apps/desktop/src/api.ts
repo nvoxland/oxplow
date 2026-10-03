@@ -897,6 +897,28 @@ export async function setProviderInstance(
   return unwrap(await commands.setProviderInstance(instance, enabled, config));
 }
 
+/// A person adds another instance of an extension's provider
+/// (`<extension>/<instance id>`), off until configured and enabled.
+export async function addProviderInstance(instance: string, provider: string): Promise<ProviderInstanceView[]> {
+  return unwrap(await commands.addProviderInstance(instance, provider));
+}
+
+/// A person removes an instance: it stops; its config and its credentials
+/// on this machine go.
+export async function removeProviderInstance(instance: string): Promise<ProviderInstanceView[]> {
+  return unwrap(await commands.removeProviderInstance(instance));
+}
+
+/// Set (or, with null, forget) one of an instance's credentials in this
+/// machine's keychain; the instance restarts on it.
+export async function setInstanceCredential(
+  instance: string,
+  name: string,
+  value: string | null,
+): Promise<ProviderInstanceView[]> {
+  return unwrap(await commands.setInstanceCredential(instance, name, value));
+}
+
 /// The ACP agents this project can run (the new-thread picker).
 export async function listAcpAgents(): Promise<AcpAgentListing[]> {
   return unwrap(await commands.listAcpAgents());

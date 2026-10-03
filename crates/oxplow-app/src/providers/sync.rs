@@ -322,7 +322,7 @@ impl Instance {
                 decl.name
             )
         })?;
-        if provider_of(&item.item_ref).ok() != Some(self.spec.id.as_str()) {
+        if provider_of(&item.item_ref).ok() != Some(self.id.as_str()) {
             return Err(format!(
                 "collector `{}` streamed `{}`, which isn't one of its items",
                 decl.name, item.item_ref

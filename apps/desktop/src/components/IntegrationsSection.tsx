@@ -22,6 +22,7 @@ import {
   listExtensions,
   listProviderInstances,
   runCommand,
+  setInstanceCredential,
   setProviderInstance,
   subscribeOxplowEvents,
   type ProviderInstanceView,
@@ -117,13 +118,13 @@ function ActiveWorkItems({
     <fieldset data-testid="integrations-active-work-items" style={fieldsetStyle}>
       <legend style={mutedStyle}>Active for work items — new items are filed here</legend>
       {choices.map((c) => (
-        <label key={c.provider} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <label key={c.id} style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <input
             type="radio"
             name="active-work-items"
-            data-testid={`integrations-active-${c.provider}`}
-            checked={active === c.provider}
-            onChange={() => void choose(c.provider)}
+            data-testid={`integrations-active-${c.id}`}
+            checked={active === c.id}
+            onChange={() => void choose(c.id)}
           />
           {c.label}
           {c.running ? null : <span style={mutedStyle}>· not running</span>}
@@ -314,9 +315,10 @@ function IntegrationRow({
       {view.credentials.map((c) => (
         <CredentialRow
           key={c.name}
-          extension={view.extension}
+          owner={view.instance}
           name={c.name}
           set={c.set}
+          store={(v) => setInstanceCredential(view.instance, c.name, v)}
           onChanged={onCredentialChanged}
         />
       ))}

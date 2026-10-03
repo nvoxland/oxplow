@@ -42,6 +42,47 @@ pub async fn set_provider_instance(
     Ok(svc.providers.list().await)
 }
 
+/// A person adds another instance of an extension's `provider`
+/// (`instance` = `<extension>/<instance id>`): off until they configure
+/// and enable it.
+pub async fn add_provider_instance(
+    svc: &Services,
+    instance: String,
+    provider: String,
+) -> Result<Vec<ProviderInstanceView>, IpcError> {
+    svc.providers
+        .add_instance(&Actor::Human, &instance, &provider)
+        .await?;
+    Ok(svc.providers.list().await)
+}
+
+/// A person removes `instance`: it stops, and its config entry and its
+/// credentials on this machine go.
+pub async fn remove_provider_instance(
+    svc: &Services,
+    instance: String,
+) -> Result<Vec<ProviderInstanceView>, IpcError> {
+    svc.providers
+        .remove_instance(&Actor::Human, &instance)
+        .await?;
+    Ok(svc.providers.list().await)
+}
+
+/// Set (or, with no value, forget) one of `instance`'s credentials in
+/// this machine's keychain; the instance restarts on it. UI only: an
+/// agent never sets a credential.
+pub async fn set_instance_credential(
+    svc: &Services,
+    instance: String,
+    name: String,
+    value: Option<String>,
+) -> Result<Vec<ProviderInstanceView>, IpcError> {
+    svc.providers
+        .set_credential(&instance, &name, value.as_deref())?;
+    svc.providers.credential_changed(&instance).await;
+    Ok(svc.providers.list().await)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -63,6 +104,31 @@ mod tests {
         .unwrap_err();
         assert_eq!(refused.code, "INVALID", "{}", refused.message);
         assert!(refused.message.contains("tracker/fake"));
+        assert!(svc.config.read().unwrap().extension_instances.is_empty());
+        // P9.B1: another instance, its credential, its removal — each
+        // refused the same way while no extension declares the provider.
+        for (name, input) in [
+            (
+                "add_provider_instance",
+                json!({ "instance": "tracker/fake_two", "provider": "fake" }),
+            ),
+            (
+                "set_instance_credential",
+                json!({ "instance": "tracker/fake", "name": "TOKEN", "value": "x" }),
+            ),
+            (
+                "remove_provider_instance",
+                json!({ "instance": "tracker/fake" }),
+            ),
+        ] {
+            let refused = crate::dispatch(name, input, &svc).await.unwrap_err();
+            assert_eq!(refused.code, "INVALID", "{name}: {}", refused.message);
+            assert!(
+                refused.message.contains("tracker/fake"),
+                "{name}: {}",
+                refused.message
+            );
+        }
         assert!(svc.config.read().unwrap().extension_instances.is_empty());
     }
 }

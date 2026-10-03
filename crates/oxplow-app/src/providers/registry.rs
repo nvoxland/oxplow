@@ -95,8 +95,11 @@ pub struct ConfigProblem {
 pub enum InstanceState {
     /// Not enabled in the project's config.
     Off,
-    /// Configured, but no enabled extension declares it.
-    Missing,
+    /// Configured, but it names no provider an enabled extension
+    /// declares; `reason` says what's wrong and how to fix it.
+    Missing {
+        reason: String,
+    },
     /// Enabled, but this machine hasn't approved this version of it.
     Unapproved,
     /// Enabled, but its `check` found problems with its config.
@@ -153,10 +156,15 @@ impl InstanceHealth {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderInstanceView {
-    /// `<extension>/<provider id>`.
+    /// `<extension>/<instance id>`.
     pub instance: String,
     pub extension: String,
+    /// The provider (its program) this is an instance of.
     pub provider: String,
+    /// Its id: its refs' segment, its commands' namespace, what
+    /// `activeProviders` names. A provider's default instance has the
+    /// provider's id.
+    pub instance_id: String,
     pub capability: String,
     /// The project's config enables it.
     pub enabled: bool,
@@ -197,8 +205,12 @@ struct Live {
 
 /// One enabled instance.
 pub struct Instance {
-    /// `<extension>/<id>`.
+    /// `<extension>/<instance id>`.
     pub name: String,
+    /// The instance's id: its refs' segment (`work_item:<id>:…`), its
+    /// commands' namespace, its capability provider's id. A provider's
+    /// default instance has the provider's.
+    pub id: String,
     pub ext: Extension,
     pub spec: ProviderSpec,
     pub config: Value,
@@ -230,9 +242,10 @@ impl Instance {
         let (dir, declared) = (copy.ext_dir, copy.declared);
         let mut credentials = BTreeMap::new();
         for name in &self.spec.credentials {
-            let account = crate::collector_runner::credential_account(
+            let account = crate::collector_runner::instance_credential_account(
                 &self.deps.project,
                 &self.ext.name,
+                &self.id,
                 name,
             );
             match self.deps.secrets.get(&account) {
@@ -251,6 +264,7 @@ impl Instance {
         let names: Vec<String> = credentials.keys().cloned().collect();
         let conn = host::connect(&Launch {
             name: self.name.clone(),
+            instance_id: self.id.clone(),
             ext_dir: dir,
             spec: self.spec.clone(),
             declared,
@@ -451,7 +465,7 @@ impl Instance {
         match e {
             ProtocolError::InvalidInput { field, message } => CommandError::Invalid {
                 field: Some(field),
-                message: format!("{}: {message}", self.spec.id),
+                message: format!("{}: {message}", self.id),
             },
             other => CommandError::Failed {
                 message: format!("provider `{}`: {other}", self.name),
@@ -481,7 +495,7 @@ impl Instance {
         if draft.event_type == WorkItemRecorded::TYPE {
             let item = draft.payload["item"]["ref"].as_str().unwrap_or_default();
             let owner = oxplow_domain::work_items::provider_of(item).ok();
-            if owner != Some(self.spec.id.as_str()) {
+            if owner != Some(self.id.as_str()) {
                 return Err(failed(format!(
                     "provider `{}` recorded `{item}`, which isn't one of its items",
                     self.name
@@ -489,7 +503,7 @@ impl Instance {
             }
         }
         for subject in &draft.subject {
-            check_subject(&self.spec.id, &self.ext.name, subject).map_err(&failed)?;
+            check_subject(&self.id, &self.ext.name, subject).map_err(&failed)?;
         }
         Envelope::new(draft.event_type, draft.v, actor.source(), draft.payload)
             .map(|e| e.with_subject(draft.subject))
@@ -497,8 +511,8 @@ impl Instance {
     }
 }
 
-/// Whether a provider's event may name `subject`: only its own items
-/// (`work_item:<id>:…`) and its extension (`plugin:<ext>`).
+/// Whether an instance's event may name `subject`: only its own items
+/// (`work_item:<instance id>:…`) and its extension (`plugin:<ext>`).
 pub fn check_subject(provider: &str, extension: &str, subject: &str) -> Result<(), String> {
     let own_item = subject.starts_with("work_item:")
         && oxplow_domain::work_items::provider_of(subject).ok() == Some(provider);
@@ -528,13 +542,29 @@ pub struct ProviderRegistry {
     pub(super) plugins: crate::plugin_health::PluginHealth,
 }
 
-/// An instance's `plugin_health` key: `<extension>/<provider id>`.
+/// An instance's `plugin_health` key: `<extension>/<instance id>`.
 pub(super) fn plugin_key(instance: &str) -> PluginKey {
     let (plugin, contribution) = instance.split_once('/').unwrap_or((instance, ""));
     PluginKey {
         plugin: plugin.to_string(),
         contribution: contribution.to_string(),
         kind: "provider",
+    }
+}
+
+/// What an instance name resolves to.
+pub(crate) struct Resolved {
+    pub ext: Extension,
+    pub spec: ProviderSpec,
+    /// The instance's id.
+    pub id: String,
+}
+
+fn listed_or_none(ids: &[&str]) -> String {
+    if ids.is_empty() {
+        "it declares none".into()
+    } else {
+        format!("it declares {}", ids.join(", "))
     }
 }
 
@@ -576,17 +606,69 @@ impl ProviderRegistry {
         self.deps.catalog.get(&self.deps.project_dir)
     }
 
+    /// The enabled extension, provider and instance id behind `instance`
+    /// (`<extension>/<instance id>`): the provider its config entry names
+    /// (`provider:`), else the one whose id the instance has — a
+    /// provider's default instance. `Err` says what's missing and how to
+    /// fix it.
+    pub(crate) fn resolve(&self, instance: &str) -> Result<Resolved, String> {
+        let provider = self
+            .instances_config()
+            .get(instance)
+            .and_then(|c| c.provider.clone());
+        self.resolve_as(instance, provider.as_deref())
+    }
+
+    /// [`Self::resolve`] for an instance of `provider` (none: the one
+    /// whose id the instance has), whatever the config says.
+    fn resolve_as(&self, instance: &str, provider: Option<&str>) -> Result<Resolved, String> {
+        self.resolve_inner(instance, provider)
+            .map_err(|why| format!("`{instance}`: {why}"))
+    }
+
+    fn resolve_inner(&self, instance: &str, provider: Option<&str>) -> Result<Resolved, String> {
+        let (ext_name, id) = instance
+            .split_once('/')
+            .filter(|(e, i)| !e.is_empty() && !i.is_empty())
+            .ok_or_else(|| "an instance is `<extension>/<instance id>`".to_string())?;
+        let extensions = self.extensions();
+        let ext = extensions
+            .iter()
+            .find(|e| e.enabled && e.name == ext_name)
+            .ok_or_else(|| format!("no enabled extension `{ext_name}`"))?;
+        let wanted = provider.unwrap_or(id);
+        let declared: Vec<&str> = ext.providers.iter().map(|p| p.id.as_str()).collect();
+        let spec = ext
+            .providers
+            .iter()
+            .find(|p| p.id == wanted)
+            .ok_or_else(|| {
+                let which = match declared.as_slice() {
+                    [] => format!("`{ext_name}` declares no provider"),
+                    [one] => format!("add `provider: {one}`"),
+                    many => format!("add `provider: <one of {}>`", many.join(", ")),
+                };
+                match provider {
+                    Some(p) => format!(
+                        "`{ext_name}` declares no provider `{p}` ({})",
+                        listed_or_none(&declared)
+                    ),
+                    None => format!(
+                    "`{ext_name}` declares no provider `{id}`; an instance with its own id says \
+                     which provider it is — {which} to `extensionInstances.{instance}`"
+                ),
+                }
+            })?;
+        Ok(Resolved {
+            ext: ext.clone(),
+            spec: spec.clone(),
+            id: id.to_string(),
+        })
+    }
+
     /// The enabled extension and spec behind `instance`.
     pub(crate) fn find(&self, instance: &str) -> Option<(Extension, ProviderSpec)> {
-        self.extensions()
-            .iter()
-            .filter(|e| e.enabled)
-            .find_map(|e| {
-                e.providers
-                    .iter()
-                    .find(|s| s.approval_name(&e.name) == instance)
-                    .map(|s| (e.clone(), s.clone()))
-            })
+        self.resolve(instance).ok().map(|r| (r.ext, r.spec))
     }
 
     pub(super) fn instances_config(
@@ -604,7 +686,8 @@ impl ProviderRegistry {
         &self,
         instance: &str,
     ) -> Result<crate::extension_effects::ProviderEffect, DomainError> {
-        let (ext, spec) = self.find(instance).ok_or(DomainError::NotFound)?;
+        let Resolved { ext, spec, .. } =
+            self.resolve(instance).map_err(|_| DomainError::NotFound)?;
         let dir = host::ext_dir(&self.deps.project_dir, &ext);
         let read = |rel: &str| std::fs::read_to_string(dir.join(rel)).ok();
         spec::read_declarations(&spec, &read).map_err(DomainError::Invalid)?;
@@ -623,95 +706,123 @@ impl ProviderRegistry {
         .ok_or(DomainError::NotFound)
     }
 
-    /// Every declared provider and every configured instance, with health.
+    /// One instance's view, before its collectors' read states.
+    fn view_of(
+        &self,
+        ext: &Extension,
+        spec: &ProviderSpec,
+        id: &str,
+        cfg: Option<&oxplow_config::ExtensionInstanceConfig>,
+    ) -> ProviderInstanceView {
+        let instance = spec::instance_name(&ext.name, id);
+        let dir = host::ext_dir(&self.deps.project_dir, ext);
+        let declared =
+            spec::read_declarations(spec, &|rel| std::fs::read_to_string(dir.join(rel)).ok()).ok();
+        let config_schema = declared
+            .as_ref()
+            .map(|d| d.config_schema.clone())
+            .unwrap_or(Value::Null);
+        let collectors = declared
+            .map(|d| {
+                d.collectors
+                    .into_iter()
+                    .map(|c| CollectorView {
+                        name: c.name,
+                        entity: c.entity,
+                        status: "never".into(),
+                        error: None,
+                        last_read_at: None,
+                        records: 0,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        ProviderInstanceView {
+            extension: ext.name.clone(),
+            provider: spec.id.clone(),
+            instance_id: id.to_string(),
+            capability: spec.capability.clone(),
+            enabled: cfg.is_some_and(|c| c.enabled),
+            config: cfg.map(|c| c.config.clone()).unwrap_or_else(|| json!({})),
+            config_schema,
+            approved: crate::exec_consent::may_run_provider(
+                &self.deps.approvals,
+                &self.deps.project_dir,
+                ext,
+                spec,
+            ),
+            credentials: spec
+                .credentials
+                .iter()
+                .map(|name| crate::collector_runner::CredentialStatus {
+                    name: name.clone(),
+                    set: self
+                        .deps
+                        .secrets
+                        .get(&crate::collector_runner::instance_credential_account(
+                            &self.deps.project,
+                            &ext.name,
+                            id,
+                            name,
+                        ))
+                        .ok()
+                        .flatten()
+                        .is_some(),
+                })
+                .collect(),
+            health: self
+                .health(&instance)
+                .unwrap_or_else(|| InstanceHealth::new(InstanceState::Off)),
+            collectors,
+            instance,
+        }
+    }
+
+    /// Every declared provider's default instance and every configured
+    /// instance, with health.
     pub async fn list(&self) -> Vec<ProviderInstanceView> {
         let configured = self.instances_config();
         let mut out: BTreeMap<String, ProviderInstanceView> = BTreeMap::new();
         for ext in self.extensions().iter().filter(|e| e.enabled) {
             for spec in &ext.providers {
-                let instance = spec.approval_name(&ext.name);
-                let cfg = configured.get(&instance);
-                let dir = host::ext_dir(&self.deps.project_dir, ext);
-                let declared = spec::read_declarations(spec, &|rel| {
-                    std::fs::read_to_string(dir.join(rel)).ok()
-                })
-                .ok();
-                let config_schema = declared
-                    .as_ref()
-                    .map(|d| d.config_schema.clone())
-                    .unwrap_or(Value::Null);
-                let collectors = declared
-                    .map(|d| {
-                        d.collectors
-                            .into_iter()
-                            .map(|c| CollectorView {
-                                name: c.name,
-                                entity: c.entity,
-                                status: "never".into(),
-                                error: None,
-                                last_read_at: None,
-                                records: 0,
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                out.insert(
-                    instance.clone(),
-                    ProviderInstanceView {
-                        extension: ext.name.clone(),
-                        provider: spec.id.clone(),
-                        capability: spec.capability.clone(),
-                        enabled: cfg.is_some_and(|c| c.enabled),
-                        config: cfg.map(|c| c.config.clone()).unwrap_or_else(|| json!({})),
-                        config_schema,
-                        approved: crate::exec_consent::may_run_provider(
-                            &self.deps.approvals,
-                            &self.deps.project_dir,
-                            ext,
-                            spec,
-                        ),
-                        credentials: spec
-                            .credentials
-                            .iter()
-                            .map(|name| crate::collector_runner::CredentialStatus {
-                                name: name.clone(),
-                                set: self
-                                    .deps
-                                    .secrets
-                                    .get(&crate::collector_runner::credential_account(
-                                        &self.deps.project,
-                                        &ext.name,
-                                        name,
-                                    ))
-                                    .ok()
-                                    .flatten()
-                                    .is_some(),
-                            })
-                            .collect(),
-                        health: self
-                            .health(&instance)
-                            .unwrap_or_else(|| InstanceHealth::new(InstanceState::Off)),
-                        collectors,
-                        instance,
-                    },
-                );
+                let instance = spec::instance_name(&ext.name, &spec.id);
+                // A config entry under a provider's own id that names
+                // another provider is that other provider's instance.
+                if configured
+                    .get(&instance)
+                    .is_some_and(|c| c.provider.as_deref().is_some_and(|p| p != spec.id))
+                {
+                    continue;
+                }
+                let view = self.view_of(ext, spec, &spec.id, configured.get(&instance));
+                out.insert(instance, view);
             }
         }
-        for (instance, cfg) in configured {
-            out.entry(instance.clone())
-                .or_insert_with(|| ProviderInstanceView {
-                    extension: instance.split('/').next().unwrap_or_default().into(),
-                    provider: instance.split('/').nth(1).unwrap_or_default().into(),
-                    capability: String::new(),
-                    enabled: cfg.enabled,
-                    config: cfg.config.clone(),
-                    config_schema: Value::Null,
-                    approved: false,
-                    credentials: Vec::new(),
-                    health: InstanceHealth::new(InstanceState::Missing),
-                    collectors: Vec::new(),
-                    instance,
-                });
+        for (instance, cfg) in &configured {
+            if out.contains_key(instance) {
+                continue;
+            }
+            let view = match self.resolve(instance) {
+                Ok(r) => self.view_of(&r.ext, &r.spec, &r.id, Some(cfg)),
+                Err(reason) => {
+                    let (extension, id) = instance.split_once('/').unwrap_or((instance, ""));
+                    ProviderInstanceView {
+                        extension: extension.into(),
+                        provider: cfg.provider.clone().unwrap_or_else(|| id.into()),
+                        instance_id: id.into(),
+                        capability: String::new(),
+                        enabled: cfg.enabled,
+                        config: cfg.config.clone(),
+                        config_schema: Value::Null,
+                        approved: false,
+                        credentials: Vec::new(),
+                        health: InstanceHealth::new(InstanceState::Missing { reason }),
+                        collectors: Vec::new(),
+                        instance: instance.clone(),
+                    }
+                }
+            };
+            out.insert(instance.clone(), view);
         }
         let store = oxplow_db::SqliteProviderCollectorStore::new(self.deps.db.clone());
         for view in out.values_mut() {
@@ -739,10 +850,13 @@ impl ProviderRegistry {
             }
         }
         for (name, cfg) in configured {
-            let Some((ext, spec)) = self.find(&name) else {
-                self.stop(&name).await;
-                self.set_state(&name, InstanceState::Missing);
-                continue;
+            let Resolved { ext, spec, id } = match self.resolve(&name) {
+                Ok(resolved) => resolved,
+                Err(reason) => {
+                    self.stop(&name).await;
+                    self.set_state(&name, InstanceState::Missing { reason });
+                    continue;
+                }
             };
             if !cfg.enabled {
                 self.set_state(&name, InstanceState::Off);
@@ -776,7 +890,7 @@ impl ProviderRegistry {
                 }
                 self.stop(&name).await;
             }
-            let _ = self.enable(&ext, &spec, cfg.config).await;
+            let _ = self.enable_instance(&ext, &spec, &id, cfg.config).await;
         }
         // The config may name another active provider (P7.A2).
         let config = crate::config_service::read_config(&self.deps.config);
@@ -793,15 +907,27 @@ impl ProviderRegistry {
         self.plugins.disabled_reason(&plugin_key(instance)).await
     }
 
-    /// Check `ext`'s provider `spec` against `config` without enabling it:
-    /// consent, spawn, handshake, `check`, then stop.
+    /// Check `ext`'s provider `spec` against `config` without enabling it
+    /// — as its default instance: consent, spawn, handshake, `check`, then
+    /// stop.
     pub async fn check(
         &self,
         ext: &Extension,
         spec: &ProviderSpec,
         config: Value,
     ) -> Result<(), HostError> {
-        let instance = self.instance(ext, spec, config).await?;
+        self.check_as(ext, spec, &spec.id, config).await
+    }
+
+    /// [`Self::check`] as instance `id` (its own credentials).
+    async fn check_as(
+        &self,
+        ext: &Extension,
+        spec: &ProviderSpec,
+        id: &str,
+        config: Value,
+    ) -> Result<(), HostError> {
+        let instance = self.instance(ext, spec, id, config).await?;
         instance.start().await.map(|_| ())
     }
 
@@ -809,12 +935,14 @@ impl ProviderRegistry {
         &self,
         ext: &Extension,
         spec: &ProviderSpec,
+        id: &str,
         config: Value,
     ) -> Result<Arc<Instance>, HostError> {
-        let name = spec.approval_name(&ext.name);
+        let name = spec::instance_name(&ext.name, id);
         let declared = copy_approved(&self.deps, ext, spec).await?.declared;
         Ok(Arc::new(Instance {
             name,
+            id: id.to_string(),
             ext: ext.clone(),
             spec: spec.clone(),
             config,
@@ -828,17 +956,30 @@ impl ProviderRegistry {
         }))
     }
 
-    /// Start `ext`'s provider `spec` with `config` and register what it
-    /// declares. Consent, a matching handshake and a clean `check` come
-    /// first: refused, nothing is registered (a failed start counts as a
-    /// failure, [`crate::plugin_health`]).
+    /// Start `ext`'s provider `spec` with `config` — its default instance
+    /// — and register what it declares ([`Self::enable_instance`]).
     pub async fn enable(
         &self,
         ext: &Extension,
         spec: &ProviderSpec,
         config: Value,
     ) -> Result<(), HostError> {
-        let name = spec.approval_name(&ext.name);
+        self.enable_instance(ext, spec, &spec.id, config).await
+    }
+
+    /// Start instance `id` of `ext`'s provider `spec` with `config` and
+    /// register what it declares, under `id`: its commands' namespace and
+    /// its capability provider. Consent, a matching handshake and a clean
+    /// `check` come first: refused, nothing is registered (a failed start
+    /// counts as a failure, [`crate::plugin_health`]).
+    pub async fn enable_instance(
+        &self,
+        ext: &Extension,
+        spec: &ProviderSpec,
+        id: &str,
+        config: Value,
+    ) -> Result<(), HostError> {
+        let name = spec::instance_name(&ext.name, id);
         let refuse = |message: String| HostError::Failed {
             name: name.clone(),
             message,
@@ -851,16 +992,15 @@ impl ProviderRegistry {
             return Err(refuse(format!("`{name}` is already running")));
         }
         let epoch = self.disable_epoch(&name);
-        if let Some(owner) = bus.namespace_owner(&spec.id) {
+        if let Some(owner) = bus.namespace_owner(id) {
             return Err(refuse(format!(
-                "the command namespace `{}` is already {owner}'s",
-                spec.id
+                "the command namespace `{id}` is already {owner}'s"
             )));
         }
-        if self.work_items.get(&spec.id).is_ok() {
-            return Err(refuse(format!("`{}` is already a provider", spec.id)));
+        if self.work_items.get(id).is_ok() {
+            return Err(refuse(format!("`{id}` is already a provider")));
         }
-        let instance = match self.instance(ext, spec, config).await {
+        let instance = match self.instance(ext, spec, id, config).await {
             Ok(i) => i,
             Err(e) => {
                 self.start_failed(&name, e.clone()).await;
@@ -948,7 +1088,7 @@ impl ProviderRegistry {
     /// gates on), any other's as declared.
     async fn publish(&self, instance: &Instance) {
         let capability = &instance.spec.capability;
-        let features = match self.work_items.get(&instance.spec.id) {
+        let features = match self.work_items.get(&instance.id) {
             Ok(p) if capability == spec::WORK_ITEMS => {
                 serde_json::to_value(p.features).unwrap_or(Value::Null)
             }
@@ -963,10 +1103,10 @@ impl ProviderRegistry {
         let config = crate::config_service::read_config(&self.deps.config);
         let row = oxplow_db::CapabilityProvider {
             capability: capability.clone(),
-            provider: instance.spec.id.clone(),
+            provider: instance.id.clone(),
             extension: Some(instance.ext.name.clone()),
             features,
-            active: crate::capabilities::is_active(&config, capability, &instance.spec.id),
+            active: crate::capabilities::is_active(&config, capability, &instance.id),
         };
         if let Err(e) = oxplow_db::SqliteCapabilityStore::new(self.deps.db.clone())
             .upsert(row)
@@ -979,7 +1119,7 @@ impl ProviderRegistry {
     /// Put `instance`'s commands on the bus and its capability provider
     /// in its registry; all or nothing.
     fn register(&self, bus: &Arc<CommandBus>, instance: &Arc<Instance>) -> Result<(), String> {
-        let id = &instance.spec.id;
+        let id = &instance.id;
         bus.register_namespace(
             id,
             &format!("provider:{}", instance.name),
@@ -1011,11 +1151,11 @@ impl ProviderRegistry {
     /// Unregister a stopped instance and end its process.
     async fn tear_down(&self, running: Arc<Instance>) {
         if let Some(bus) = self.bus.upgrade() {
-            bus.unregister_namespace(&running.spec.id);
+            bus.unregister_namespace(&running.id);
         }
-        self.work_items.unregister(&running.spec.id);
+        self.work_items.unregister(&running.id);
         if let Err(e) = oxplow_db::SqliteCapabilityStore::new(self.deps.db.clone())
-            .remove(&running.spec.capability, &running.spec.id)
+            .remove(&running.spec.capability, &running.id)
             .await
         {
             tracing::warn!(instance = %running.name, error = %e, "withdrawing a provider's features failed");
@@ -1023,11 +1163,24 @@ impl ProviderRegistry {
         running.live.lock().await.take();
     }
 
-    /// A person approved `instance` as it is now: a running instance
-    /// restarts on what was approved (its declarations may have changed,
-    /// and a start checks them against what it was enabled with).
-    pub async fn approved(&self, instance: &str) {
-        if self.stop(instance).await {
+    /// A person approved program `<extension>/<provider id>` as it is
+    /// now: every running instance of it restarts on what was approved
+    /// (its declarations may have changed, and a start checks them against
+    /// what it was enabled with).
+    pub async fn approved(&self, program: &str) {
+        let of_it: Vec<String> = self
+            .running
+            .lock()
+            .await
+            .values()
+            .filter(|i| i.spec.approval_name(&i.ext.name) == program)
+            .map(|i| i.name.clone())
+            .collect();
+        let mut stopped = false;
+        for name in of_it {
+            stopped |= self.stop(&name).await;
+        }
+        if stopped {
             self.reconcile().await;
         }
     }
@@ -1044,12 +1197,14 @@ impl ProviderRegistry {
         enabled: bool,
         config: Value,
     ) -> Result<ProviderInstanceView, CommandError> {
-        let (ext, spec) = self.find(instance).ok_or_else(|| CommandError::Invalid {
-            field: Some("/instance".into()),
-            message: format!("no enabled extension declares provider `{instance}`"),
-        })?;
+        let Resolved { ext, spec, id } =
+            self.resolve(instance)
+                .map_err(|message| CommandError::Invalid {
+                    field: Some("/instance".into()),
+                    message,
+                })?;
         if enabled {
-            match self.check(&ext, &spec, config.clone()).await {
+            match self.check_as(&ext, &spec, &id, config.clone()).await {
                 Ok(()) => {}
                 Err(HostError::Unconfigured { problems, .. }) => {
                     let first = problems.first();
@@ -1090,12 +1245,14 @@ impl ProviderRegistry {
         }
         let mut all = self.instances_config();
         let sync_minutes = all.get(instance).and_then(|c| c.sync_minutes);
+        let provider = all.get(instance).and_then(|c| c.provider.clone());
         all.insert(
             instance.to_string(),
             oxplow_config::ExtensionInstanceConfig {
                 enabled,
                 config,
                 sync_minutes,
+                provider,
             },
         );
         bus.run(
@@ -1109,6 +1266,139 @@ impl ProviderRegistry {
         self.view(instance).await
     }
 
+    /// A person adds another instance of `provider`: `instance`
+    /// (`<extension>/<instance id>`), off and unconfigured until they set
+    /// it up. Written through `config.set` (`extensionInstances` is a
+    /// person's key, so an agent's is refused or proposed). Refused when
+    /// the extension doesn't declare `provider`, or the id is taken — by
+    /// another instance, or as another provider's own id.
+    pub async fn add_instance(
+        &self,
+        actor: &Actor,
+        instance: &str,
+        provider: &str,
+    ) -> Result<ProviderInstanceView, CommandError> {
+        let invalid = |message: String| CommandError::Invalid {
+            field: Some("/instance".into()),
+            message,
+        };
+        let Resolved { ext, id, .. } = self
+            .resolve_as(instance, Some(provider))
+            .map_err(&invalid)?;
+        let mut all = self.instances_config();
+        if all.contains_key(instance) {
+            return Err(invalid(format!("`{instance}` is already an instance")));
+        }
+        if id != provider && ext.providers.iter().any(|p| p.id == id) {
+            return Err(invalid(format!(
+                "`{id}` is already the id of one of `{}`'s providers (its default instance)",
+                ext.name
+            )));
+        }
+        all.insert(
+            instance.to_string(),
+            oxplow_config::ExtensionInstanceConfig {
+                enabled: false,
+                config: json!({}),
+                sync_minutes: None,
+                provider: (id != provider).then(|| provider.to_string()),
+            },
+        );
+        self.write_instances(actor, all).await?;
+        self.view(instance).await
+    }
+
+    /// A person removes `instance`: it stops, its config entry and its
+    /// credentials on this machine go.
+    pub async fn remove_instance(&self, actor: &Actor, instance: &str) -> Result<(), CommandError> {
+        let mut all = self.instances_config();
+        let resolved = self.resolve(instance).ok();
+        if all.remove(instance).is_none() {
+            return Err(CommandError::Invalid {
+                field: Some("/instance".into()),
+                message: format!("no provider instance `{instance}`"),
+            });
+        }
+        self.write_instances(actor, all).await?;
+        if let Some(Resolved { ext, spec, id }) = resolved {
+            for name in &spec.credentials {
+                let account = crate::collector_runner::instance_credential_account(
+                    &self.deps.project,
+                    &ext.name,
+                    &id,
+                    name,
+                );
+                if let Err(e) = self.deps.secrets.delete(&account) {
+                    tracing::warn!(%instance, credential = %name, error = %e, "removing an instance's credential failed");
+                }
+            }
+        }
+        self.health.lock().remove(instance);
+        Ok(())
+    }
+
+    /// Write `extensionInstances` as `actor` (a person: the key is
+    /// human-only) and reconcile.
+    async fn write_instances(
+        &self,
+        actor: &Actor,
+        all: BTreeMap<String, oxplow_config::ExtensionInstanceConfig>,
+    ) -> Result<(), CommandError> {
+        let bus = self.bus.upgrade().ok_or_else(|| CommandError::Failed {
+            message: "the command bus is gone".into(),
+        })?;
+        bus.run(
+            actor,
+            crate::commands::config_commands::SET,
+            json!({ "key": "extensionInstances", "value": all }),
+            matches!(actor, Actor::Human),
+        )
+        .await?;
+        self.reconcile().await;
+        Ok(())
+    }
+
+    /// Set (or, with `None`, forget) `instance`'s credential `name` in
+    /// this machine's keychain — a credential its provider declares. The
+    /// instance must exist: a credential is an instance's own.
+    pub fn set_credential(
+        &self,
+        instance: &str,
+        name: &str,
+        value: Option<&str>,
+    ) -> Result<(), DomainError> {
+        let Resolved { ext, spec, id } = self.resolve(instance).map_err(DomainError::Invalid)?;
+        if !spec.credentials.iter().any(|c| c == name) {
+            return Err(DomainError::Invalid(format!(
+                "provider `{}` declares no credential `{name}` (it declares: {})",
+                spec.approval_name(&ext.name),
+                if spec.credentials.is_empty() {
+                    "none".to_string()
+                } else {
+                    spec.credentials.join(", ")
+                }
+            )));
+        }
+        let account = crate::collector_runner::instance_credential_account(
+            &self.deps.project,
+            &ext.name,
+            &id,
+            name,
+        );
+        match value {
+            Some(v) => self.deps.secrets.set(&account, v),
+            None => self.deps.secrets.delete(&account),
+        }
+        .map_err(|e| DomainError::Storage(format!("credential `{name}`: {e}")))
+    }
+
+    /// `instance`'s credential changed: it restarts on the new value (a
+    /// running one), or starts if the credential was what it lacked.
+    pub async fn credential_changed(&self, instance: &str) {
+        self.stop(instance).await;
+        self.reconcile().await;
+    }
+
     /// Check `instance` with `config` for a person (Settings' Check): its
     /// view with the outcome as its state; nothing is enabled or written.
     pub async fn check_instance(
@@ -1116,12 +1406,14 @@ impl ProviderRegistry {
         instance: &str,
         config: Value,
     ) -> Result<ProviderInstanceView, CommandError> {
-        let (ext, spec) = self.find(instance).ok_or_else(|| CommandError::Invalid {
-            field: Some("/instance".into()),
-            message: format!("no enabled extension declares provider `{instance}`"),
-        })?;
+        let Resolved { ext, spec, id } =
+            self.resolve(instance)
+                .map_err(|message| CommandError::Invalid {
+                    field: Some("/instance".into()),
+                    message,
+                })?;
         let mut view = self.view(instance).await?;
-        view.health.state = match self.check(&ext, &spec, config).await {
+        view.health.state = match self.check_as(&ext, &spec, &id, config).await {
             Ok(()) => InstanceState::Ready,
             Err(HostError::Unapproved(_)) => InstanceState::Unapproved,
             Err(HostError::Unconfigured { problems, .. }) => InstanceState::Unconfigured {
@@ -1374,7 +1666,7 @@ fn now() -> String {
 /// capability's verbs, which run as `work_item.<verb>` (one write surface,
 /// dispatched by ref), never as `<id>.<verb>`.
 fn commands(instance: &Arc<Instance>) -> Result<Vec<Command>, String> {
-    let id = instance.spec.id.clone();
+    let id = instance.id.clone();
     let verbs: &[&str] = if instance.spec.capability == spec::WORK_ITEMS {
         &oxplow_domain::work_items::VERBS
     } else {

@@ -746,6 +746,8 @@ async fn test_provider(
     };
     let launch = Launch {
         name: spec.approval_name(&ext.name),
+        // The kit tests the program, as its default instance.
+        instance_id: spec.id.clone(),
         ext_dir: dir.clone(),
         spec: spec.clone(),
         declared: declared.clone(),
@@ -1171,7 +1173,9 @@ async fn suite(
         for (name, value) in env_credentials(spec) {
             svc.secrets
                 .set(
-                    &oxplow_app::collector_runner::credential_account(&project, &ext.name, &name),
+                    &oxplow_app::collector_runner::instance_credential_account(
+                        &project, &ext.name, &spec.id, &name,
+                    ),
                     &value,
                 )
                 .map_err(|e| e.to_string())?;
