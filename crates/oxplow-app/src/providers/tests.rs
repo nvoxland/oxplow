@@ -2422,10 +2422,89 @@ async fn a_project_entry_overrides_a_global_instance_whole() {
             there.enabled,
             there.health.state
         ),
-        (Scope::Global, true, false, InstanceState::Off)
+        (Scope::Project, true, false, InstanceState::Off)
     );
     assert_eq!(there.config, json!({}), "the entry replaces it whole");
     assert_eq!(state_of(&fx.svc, SHARED).await, Some(InstanceState::Ready));
+}
+
+/// tsk838: a project's entry is the project's own — its config and its
+/// credentials — whether or not the person has a global instance of the
+/// same name. One appearing (added in another project) or going doesn't
+/// move this project's instance onto the global credentials, nor take its
+/// own away.
+#[tokio::test]
+async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_extension(&project, "needs:FAKE_TOKEN");
+    let manifest = project
+        .join("oxplow/extensions")
+        .join(EXT)
+        .join("extension.yaml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+    let ext = extension(&project);
+    approve(&fx, &ext);
+    let providers = &fx.svc.providers;
+    providers
+        .add_instance(&Actor::Human, SHARED, "fake", Scope::Project)
+        .await
+        .unwrap();
+    providers
+        .set_credential(SHARED, "FAKE_TOKEN", Some("the project's"))
+        .unwrap();
+    providers
+        .set_instance(&Actor::Human, SHARED, true, json!({ "team": "core" }))
+        .await
+        .unwrap();
+    let account = crate::collector_runner::instance_credential_account(
+        &fx.svc.providers.deps.project,
+        EXT,
+        "fake_shared",
+        "FAKE_TOKEN",
+    );
+
+    // In another project the person adds a global one of the same name.
+    let global = fx.svc.layout.state_dir.join("global-config");
+    oxplow_config::GlobalInstances::update(&global, |all| {
+        all.insert(
+            SHARED.into(),
+            oxplow_config::ExtensionInstanceConfig {
+                enabled: true,
+                provider: Some("fake".into()),
+                ..Default::default()
+            },
+        );
+        Ok::<_, ()>(())
+    })
+    .unwrap()
+    .unwrap();
+    let here = |views: Vec<ProviderInstanceView>| {
+        views.into_iter().find(|v| v.instance == SHARED).unwrap()
+    };
+    let view = here(providers.list().await);
+    assert_eq!((view.scope, view.overridden), (Scope::Project, true));
+    // Started again, it is on its own token still.
+    providers
+        .set_instance(&Actor::Human, SHARED, true, json!({ "team": "core" }))
+        .await
+        .expect("its own credential is set");
+    assert_eq!(state_of(&fx.svc, SHARED).await, Some(InstanceState::Ready));
+
+    // The global one goes: nothing of this project's goes with it.
+    oxplow_config::GlobalInstances::update(&global, |all| {
+        all.remove(SHARED);
+        Ok::<_, ()>(())
+    })
+    .unwrap()
+    .unwrap();
+    let view = here(providers.list().await);
+    assert_eq!((view.scope, view.overridden), (Scope::Project, false));
+    assert_eq!(
+        fx.svc.secrets.get(&account).unwrap().as_deref(),
+        Some("the project's")
+    );
 }
 
 /// P9.B2: a global instance's credential is the person's, set once for

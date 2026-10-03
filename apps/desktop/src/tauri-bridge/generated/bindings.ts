@@ -4455,9 +4455,16 @@ export type ProviderEffect = {
 export type ProviderInstanceView = {
 	// `<extension>/<instance id>`.
 	instance: string,
-	// The project's, or the person's on this machine (every project).
+	/**
+	 *  The project's, or the person's on this machine (every project).
+	 *  A project's entry is the project's, config and credentials, even
+	 *  where it replaces a global one of the same name (tsk838).
+	 */
 	scope: Scope,
-	// A global instance this project's own entry replaces here.
+	/**
+	 *  This project's own entry replaces a global instance of the same
+	 *  name here.
+	 */
 	overridden: boolean,
 	extension: string,
 	// The provider (its program) this is an instance of.

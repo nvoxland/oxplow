@@ -210,8 +210,11 @@ pub struct ProviderInstanceView {
     /// `<extension>/<instance id>`.
     pub instance: String,
     /// The project's, or the person's on this machine (every project).
+    /// A project's entry is the project's, config and credentials, even
+    /// where it replaces a global one of the same name (tsk838).
     pub scope: Scope,
-    /// A global instance this project's own entry replaces here.
+    /// This project's own entry replaces a global instance of the same
+    /// name here.
     pub overridden: bool,
     pub extension: String,
     /// The provider (its program) this is an instance of.
@@ -990,13 +993,17 @@ impl ProviderRegistry {
     }
 
     /// Whose `instance` is, and whether a project entry replaces a global
-    /// one here. An instance configured nowhere is the project's.
+    /// one here. A project's entry is the project's — its config and its
+    /// credentials — whatever the person has globally, so a global one of
+    /// the same name appearing or going never moves it onto other
+    /// credentials (tsk838). An instance configured nowhere is the
+    /// project's too.
     fn scope_of(&self, instance: &str) -> (Scope, bool) {
-        if self.global_instances().contains_key(instance) {
-            (
-                Scope::Global,
-                self.project_instances().contains_key(instance),
-            )
+        let global = self.global_instances().contains_key(instance);
+        if self.project_instances().contains_key(instance) {
+            (Scope::Project, global)
+        } else if global {
+            (Scope::Global, false)
         } else {
             (Scope::Project, false)
         }
@@ -1154,7 +1161,7 @@ impl ProviderRegistry {
                     // have is the person's elsewhere: not this project's
                     // to list.
                     let (scope, overridden) = self.scope_of(instance);
-                    if scope == Scope::Global && !overridden {
+                    if scope == Scope::Global {
                         continue;
                     }
                     ProviderInstanceView {
@@ -1730,7 +1737,8 @@ impl ProviderRegistry {
 
     /// A person removes `instance`: it stops, its config entry and its
     /// credentials on this machine go. A project's replacement of a global
-    /// instance is what goes first — the global one then shows through.
+    /// instance is what goes first — with its own credentials; the global
+    /// one then shows through, on its own.
     pub async fn remove_instance(&self, actor: &Actor, instance: &str) -> Result<(), CommandError> {
         // A sign-in under way would store a token for what's gone — or,
         // for a project's replacement of a global one, under the removed
@@ -1758,9 +1766,8 @@ impl ProviderRegistry {
             (resolved, in_project && in_global)
         };
         self.reconcile().await;
-        if still_there {
-            return Ok(());
-        }
+        // Its credentials go with it — a project's replacement's are its
+        // own, never the global one's that now shows through (tsk838).
         if let Some(Resolved {
             ext,
             spec,
@@ -1780,7 +1787,10 @@ impl ProviderRegistry {
                 }
             }
         }
-        self.health.lock().remove(instance);
+        // The global one showing through keeps the health it now has.
+        if !still_there {
+            self.health.lock().remove(instance);
+        }
         Ok(())
     }
 

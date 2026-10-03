@@ -498,9 +498,17 @@ config, provider? } }`, the same entries and the same validation):
   extension enabled**; where the extension isn't, it isn't listed at all;
 - a project's entry of the same name **replaces it there, whole**
   (`instances_config()` is the one merge: global, then project) — to turn
-  it off or configure it differently in one project. Its scope stays
-  global (`ProviderInstanceView { scope, overridden }`), and so do its
-  credentials;
+  it off or configure it differently in one project. **A project's entry
+  is the project's, credentials included** (`scope_of`: `project`, with
+  `overridden` saying it replaces a global one; the row reads "this
+  project's, replacing yours"). The P9 plan had an override keep the
+  global scope and credentials; that broke a team's committed entry the
+  moment the person added a global instance of the same name in another
+  project — it moved onto the global credentials (unconfigured, or the
+  other project's token against this one's config), and back when the
+  global one went (tsk838). Now a global one appearing or going never
+  moves a project entry onto other credentials, and removing a project's
+  replacement removes its own credentials, never the global one's;
 - its credentials are the person's, set once:
   `instance:global:<ext>/<id>:<name>` (a project instance's are
   `instance:<project>:…`);

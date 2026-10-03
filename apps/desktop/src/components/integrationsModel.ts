@@ -63,7 +63,7 @@ export function integrationRow(v: ProviderInstanceView, now: Date = new Date()):
   return {
     key: v.instance,
     label: `${v.instance} · ${v.capability.replace(/_/g, " ")}${
-      v.scope !== "global" ? "" : v.overridden ? " · yours, replaced by this project's" : " · yours, in every project"
+      v.overridden ? " · this project's, replacing yours" : v.scope === "global" ? " · yours, in every project" : ""
     }`,
     status,
     enableLabel,

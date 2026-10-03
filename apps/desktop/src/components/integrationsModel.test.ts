@@ -93,8 +93,10 @@ test("a global instance's row says whose it is", () => {
   expect(integrationRow(view({ scope: "global", enabled: true, health: ready })).label).toBe(
     "tracker/linear · work items · yours, in every project",
   );
-  expect(integrationRow(view({ scope: "global", overridden: true })).label).toBe(
-    "tracker/linear · work items · yours, replaced by this project's",
+  // A project's own entry replacing a global one is the project's
+  // (its credentials too, tsk838).
+  expect(integrationRow(view({ scope: "project", overridden: true })).label).toBe(
+    "tracker/linear · work items · this project's, replacing yours",
   );
   const unapproved = integrationRow(
     view({ scope: "global", approved: false, enabled: true, health: { ...view({}).health, state: { state: "unapproved" } } }),
