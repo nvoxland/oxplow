@@ -41,6 +41,12 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 oxplow-app = { workspace = true }
+# The signed-in end-to-end test: the host's pieces it drives, and the
+# stand-in authorization server it signs in at.
+oxplow-ai = { workspace = true }
+oxplow-config = { workspace = true }
+oxplow-domain = { workspace = true }
+oxplow-oauth-sim = { workspace = true }
 oxplow-sdk = { workspace = true }
 tempfile = { workspace = true }
 url = { workspace = true }

@@ -704,7 +704,10 @@ form; sign-in is a provider's.
   redirect token requests and answer with another `token_type` or a
   string `expires_in` (tsk830). At `/mcp` it serves the notes MCP server
   behind exactly the access tokens it issued and still holds live, so a
-  signed-in bearer runs end to end; `POST /sim/expire` lapses every
+  signed-in bearer runs end to end (oxplow-provider-mcp's
+  `tests/signed_in.rs`: sign in, a by-url instance on the token, the
+  server expires it, the next create renews once and lands, still
+  Ready); `POST /sim/expire` lapses every
   access token and `POST /sim/revoke` revokes the grant (its access
   tokens stop working, its refresh is `invalid_grant`). Run it by hand
   with `cargo run -p oxplow-oauth-sim -- --http 127.0.0.1:8124` (it

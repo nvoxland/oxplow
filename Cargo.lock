@@ -4802,8 +4802,12 @@ version = "0.7.0"
 dependencies = [
  "axum",
  "futures",
+ "oxplow-ai",
  "oxplow-app",
  "oxplow-collect-plugin",
+ "oxplow-config",
+ "oxplow-domain",
+ "oxplow-oauth-sim",
  "oxplow-provider-protocol",
  "oxplow-sdk",
  "reqwest",
