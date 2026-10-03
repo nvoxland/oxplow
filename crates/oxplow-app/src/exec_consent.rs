@@ -250,6 +250,10 @@ pub struct ProjectProgram {
     /// The project-relative folder whose every file the approval covers
     /// (a provider's extension, declarations included).
     pub tree: Option<String>,
+    /// `program` is a url — a server run elsewhere (an MCP server by
+    /// `url`) — not a file: the approval covers the url itself, and what
+    /// the server is isn't in it.
+    pub remote: bool,
     /// This machine approved it as it is now.
     pub approved: bool,
     /// Its approval hash as it is now (`None` when it can't be read). The
@@ -312,8 +316,13 @@ impl ProjectProgram {
             // and lenses) — so its declarations file too.
             ProgramKind::Provider => {
                 h.update(self.program.as_bytes());
-                h.update([0u8]);
-                h.update(std::fs::read(&file)?);
+                if self.remote {
+                    // No file of its own: the url is what is covered.
+                    h.update([6u8]);
+                } else {
+                    h.update([0u8]);
+                    h.update(std::fs::read(&file)?);
+                }
                 let dir = project_dir.join(self.tree.as_deref().unwrap_or_default());
                 h.update([2u8]);
                 h.update(
@@ -441,6 +450,7 @@ pub fn program_hash(project_dir: &Path, program: &str, args: &[String]) -> std::
         credentials: Vec::new(),
         network: Vec::new(),
         tree: None,
+        remote: false,
         approved: false,
         version: None,
     }
@@ -466,6 +476,7 @@ pub fn may_run(
         credentials: Vec::new(),
         network: Vec::new(),
         tree: None,
+        remote: false,
         approved: false,
         version: None,
     };
@@ -495,6 +506,7 @@ pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
         credentials: Vec::new(),
         network: Vec::new(),
         tree: None,
+        remote: false,
         approved: false,
         version: None,
     }
@@ -532,6 +544,7 @@ pub fn advisory_program(ext: &crate::extensions::Extension) -> ProjectProgram {
         credentials: Vec::new(),
         network: Vec::new(),
         tree: None,
+        remote: false,
         approved: false,
         version: None,
     }
@@ -549,16 +562,32 @@ pub fn provider_program(
     // An adapter's mapping and pinned tools are files of the folder (the
     // tree hash covers them); naming them here also pins which they are.
     let args = match &spec.adapter {
-        Some(a) => [a.mapping.clone(), a.tools.clone()]
-            .into_iter()
-            .chain(args)
-            .collect(),
+        Some(a) => {
+            // A server by url: which credential is its bearer token.
+            let auth = match &a.mcp {
+                crate::providers::spec::McpServer::Url {
+                    auth: Some(name), ..
+                } => vec!["--auth-env".to_string(), name.clone()],
+                _ => Vec::new(),
+            };
+            [a.mapping.clone(), a.tools.clone()]
+                .into_iter()
+                .chain(args)
+                .chain(auth)
+                .collect()
+        }
         None => args,
     };
+    let remote = spec.is_remote();
     ProjectProgram {
         kind: ProgramKind::Provider,
         name: spec.approval_name(&ext.name),
-        program: format!("{dir}/{program}"),
+        program: if remote {
+            program
+        } else {
+            format!("{dir}/{program}")
+        },
+        remote,
         args,
         env: spec.env.clone(),
         credentials: spec.credential_grants(),
@@ -637,6 +666,7 @@ pub fn list(
             credentials: Vec::new(),
             network: Vec::new(),
             tree: None,
+            remote: false,
             approved: false,
             version: None,
         });

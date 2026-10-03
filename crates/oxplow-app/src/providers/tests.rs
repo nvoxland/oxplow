@@ -931,7 +931,12 @@ async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folde
         .adapter
         .as_ref()
         .expect("an adapter provider");
-    assert_eq!(adapter.mcp.command, ["bin/server", "--stdio"]);
+    assert_eq!(
+        adapter.mcp,
+        spec::McpServer::Command {
+            command: vec!["bin/server".into(), "--stdio".into()]
+        }
+    );
     for (from, to, says) in [
         ("    adapter:\n", "    entry: bin/server\n    adapter:\n", "either `entry` or `adapter`"),
         ("    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n", "", "either `entry` or `adapter`"),
@@ -940,7 +945,6 @@ async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folde
         ("tools: mcp/tools.json", "tools: mcp/missing.json", "mcp/missing.json"),
         ("command: [bin/server, --stdio]", "command: [/usr/local/bin/npx, server]", "/usr/local/bin/npx"),
         ("command: [bin/server, --stdio]", "command: [bin/server, ../../x.js]", "../../x.js"),
-        ("mcp: { command: [bin/server, --stdio] }", "mcp: { url: \"https://mcp.example.com\" }", "url"),
     ] {
         assert!(ADAPTER_MANIFEST.contains(from), "{from}");
         std::fs::write(dir.join("extension.yaml"), ADAPTER_MANIFEST.replace(from, to)).unwrap();
@@ -2935,4 +2939,155 @@ async fn a_newer_sign_in_replaces_the_one_under_way() {
         .await
         .unwrap();
     std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
+}
+
+/// The adapter manifest with its server reached by url, authenticated by
+/// the credential `NOTES_TOKEN`.
+fn url_manifest() -> String {
+    ADAPTER_MANIFEST.replace(
+        "      mcp: { command: [bin/server, --stdio] }\n",
+        "      mcp: { url: \"https://mcp.example.com/mcp\", auth: NOTES_TOKEN }\n",
+    ) + "    credentials: [NOTES_TOKEN]\n    network: [mcp.example.com]\n"
+}
+
+/// P9.B4: an adapter's MCP server may be one reached by `url` instead of
+/// a command — https (or loopback), a host its `network` lists, and its
+/// bearer a credential it declares.
+#[tokio::test]
+async fn an_adapter_server_by_url_is_declared_and_checked() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    let dir = write_adapter_extension(&project);
+    std::fs::remove_file(dir.join("bin/server")).unwrap();
+    let manifest = url_manifest();
+    std::fs::write(dir.join("extension.yaml"), &manifest).unwrap();
+    let ext = extension(&project);
+    assert_eq!(
+        ext.providers[0].adapter.as_ref().unwrap().mcp,
+        spec::McpServer::Url {
+            url: "https://mcp.example.com/mcp".into(),
+            auth: Some("NOTES_TOKEN".into()),
+        }
+    );
+    // What a person approves: the url, not a file of the folder.
+    let listed = program(&fx, &ext);
+    assert!(listed.remote);
+    assert_eq!(listed.program, "https://mcp.example.com/mcp");
+    assert_eq!(
+        listed.args,
+        ["mcp/x.star", "mcp/tools.json", "--auth-env", "NOTES_TOKEN"]
+    );
+    assert!(listed.version.is_some(), "no program file to read");
+
+    for (from, to, says) in [
+        (
+            "mcp: { url: \"https://mcp.example.com/mcp\", auth: NOTES_TOKEN }",
+            "mcp: { url: \"https://mcp.example.com/mcp\", command: [bin/server] }",
+            "names either `command`",
+        ),
+        (
+            "mcp: { url: \"https://mcp.example.com/mcp\", auth: NOTES_TOKEN }",
+            "mcp: {}",
+            "names either `command`",
+        ),
+        (
+            "mcp: { url: \"https://mcp.example.com/mcp\", auth: NOTES_TOKEN }",
+            "mcp: { command: [bin/server], auth: NOTES_TOKEN }",
+            "`auth` goes with a `url`",
+        ),
+        // The bearer never crosses the network in the clear.
+        (
+            "https://mcp.example.com/mcp",
+            "http://mcp.example.com/mcp",
+            "must be https",
+        ),
+        (
+            "https://mcp.example.com/mcp",
+            "ftp://mcp.example.com/mcp",
+            "must be https",
+        ),
+        (
+            "network: [mcp.example.com]",
+            "network: [other.example.com]",
+            "`network` must list `mcp.example.com`",
+        ),
+        (
+            "auth: NOTES_TOKEN }",
+            "auth: OTHER }",
+            "declares no credential `OTHER`",
+        ),
+        (
+            "    adapter:\n",
+            "    args: [--x]\n    adapter:\n",
+            "`args` go with an `entry`",
+        ),
+    ] {
+        assert!(manifest.contains(from), "{from}");
+        std::fs::write(dir.join("extension.yaml"), manifest.replace(from, to)).unwrap();
+        let loaded = crate::extensions::load_extensions(&project)
+            .into_iter()
+            .find(|e| e.name == EXT)
+            .unwrap();
+        assert!(loaded.providers.is_empty(), "{to}");
+        assert!(
+            loaded.errors.iter().any(|e| e.contains(says)),
+            "{to}: {:?}",
+            loaded.errors
+        );
+    }
+    // On loopback, plain http is what a local server speaks.
+    std::fs::write(
+        dir.join("extension.yaml"),
+        manifest
+            .replace("https://mcp.example.com/mcp", "http://127.0.0.1:8123/mcp")
+            .replace("network: [mcp.example.com]", "network: [127.0.0.1]"),
+    )
+    .unwrap();
+    extension(&project);
+}
+
+/// P9.B4: approving a server by url approves the url, its pins, its
+/// mapping and what it is authenticated with: changing any needs
+/// approving again.
+#[tokio::test]
+async fn a_url_servers_approval_covers_the_url_its_pins_mapping_and_credentials() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    let dir = write_adapter_extension(&project);
+    std::fs::remove_file(dir.join("bin/server")).unwrap();
+    let manifest = url_manifest();
+    let approved_now = |fx: &EffortFixture| {
+        std::fs::write(dir.join("extension.yaml"), &manifest).unwrap();
+        let ext = extension(&project);
+        approve(fx, &ext);
+        assert!(program(fx, &ext).approved);
+    };
+    for (from, to) in [
+        (
+            "https://mcp.example.com/mcp",
+            "https://mcp.example.com/other",
+        ),
+        ("auth: NOTES_TOKEN }", "}"),
+        (
+            "credentials: [NOTES_TOKEN]",
+            "credentials: [NOTES_TOKEN, MORE]",
+        ),
+    ] {
+        approved_now(&fx);
+        assert!(manifest.contains(from), "{from}");
+        std::fs::write(dir.join("extension.yaml"), manifest.replace(from, to)).unwrap();
+        assert!(!program(&fx, &extension(&project)).approved, "{to}");
+    }
+    for file in ["mcp/x.star", "mcp/tools.json"] {
+        approved_now(&fx);
+        let path = dir.join(file);
+        let text = std::fs::read_to_string(&path).unwrap();
+        let edited = match file {
+            "mcp/tools.json" => text.replace("List.", "List them all."),
+            _ => format!("{text}# changed\n"),
+        };
+        std::fs::write(&path, &edited).unwrap();
+        assert!(!program(&fx, &extension(&project)).approved, "{file}");
+        std::fs::write(&path, text).unwrap();
+    }
 }

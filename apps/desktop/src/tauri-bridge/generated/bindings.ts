@@ -1111,7 +1111,7 @@ export type AcpStatus = "starting" | "idle" | "running" | "awaiting_permission" 
  *  aren't `tools`.
  */
 export type AdapterSpec = {
-	mcp: McpServerSpec,
+	mcp: McpServer,
 	// The Starlark mapping (`transform(x)`), relative to the folder.
 	mapping: string,
 	// The pinned tools (`[{ name, description, inputSchema }]`, JSON).
@@ -3688,14 +3688,15 @@ export type MaterializePolicy =
 // Stored in its table and recomputed, whole, when an input changes.
 "on_change";
 
+// How the adapter reaches the MCP server: exactly one of the two.
+export type McpServer = 
+// A program in the folder, spoken to over its stdio.
+({ command: string[] }) & { auth?: never; url?: never } | 
 /**
- *  How the adapter reaches the MCP server: a command in the folder (a
- *  server by `url` isn't supported yet).
+ *  A server reached over streamable HTTP (P9.B4). `auth` names the
+ *  credential whose value is sent as its bearer token.
  */
-export type McpServerSpec = {
-	command?: string[],
-	url?: string | null,
-};
+({ url: string; auth: string | null }) & { command?: never };
 
 /**
  *  One entry in the top-level `measures:` block — the **measure catalog**
@@ -4357,6 +4358,12 @@ export type ProjectProgram = {
 	 *  (a provider's extension, declarations included).
 	 */
 	tree: string | null,
+	/**
+	 *  `program` is a url — a server run elsewhere (an MCP server by
+	 *  `url`) — not a file: the approval covers the url itself, and what
+	 *  the server is isn't in it.
+	 */
+	remote: boolean,
 	// This machine approved it as it is now.
 	approved: boolean,
 	/**

@@ -72,3 +72,48 @@ async fn the_notes_extension_passes_plugin_test_over_the_adapter() {
         );
     }
 }
+
+/// P9.B4: the same extension with its server reached by `url` — the notes
+/// served over streamable HTTP — passes `oxplow plugin test` too: the host
+/// starts the adapter with `--url`, through the egress proxy where the OS
+/// enforces `network`. The server outlives each start of the adapter (as a
+/// real one would), so its notes' ids aren't the golden transcript's: the
+/// run blesses its own, in the throwaway copy.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_notes_extension_passes_plugin_test_with_its_server_by_url() {
+    let dir = tempfile::tempdir().unwrap();
+    oxplow_app::vcs::GitProvider
+        .init_repository(dir.path())
+        .await
+        .unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/notes");
+    let ext = dir.path().join("oxplow/extensions/notes");
+    copy_dir(&fixture, &ext);
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let _ = oxplow_provider_mcp::notes::serve_http(listener, None).await;
+    });
+    let manifest = std::fs::read_to_string(ext.join("extension.yaml")).unwrap();
+    let by_command = "      mcp: { command: [bin/notes-server] }\n";
+    assert!(manifest.contains(by_command));
+    std::fs::write(
+        ext.join("extension.yaml"),
+        manifest.replace(by_command, &format!("      mcp: {{ url: \"{url}\" }}\n"))
+            + "    network: [127.0.0.1]\n",
+    )
+    .unwrap();
+
+    let report = test_extension(dir.path(), "notes", true).await.unwrap();
+    assert_eq!(report.errors, Vec::<String>::new());
+    for ran in ["work_items suite", "read items", "discover"] {
+        assert!(
+            report.ran.iter().any(|r| r == ran),
+            "{ran}: {:?}",
+            report.ran
+        );
+    }
+    server.abort();
+}

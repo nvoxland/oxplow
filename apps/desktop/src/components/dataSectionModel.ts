@@ -69,8 +69,10 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
   if (p.kind === "provider") {
     // Its grants are part of what's approved: env names, keychain
     // credentials, hosts, and every file of its extension.
+    // A server reached by url (`remote`) runs nothing of its own here:
+    // the url, then the adapter's mapping, pinned tools and bearer.
     const command = [
-      [p.program, ...p.args].join(" "),
+      ...(p.remote ? [`MCP server at ${p.program}`, `with: ${p.args.join(" ")}`] : [[p.program, ...p.args].join(" ")]),
       ...(p.env.length > 0 ? [`env: ${p.env.join(", ")}`] : []),
       ...(p.credentials.length > 0 ? [`credentials: ${p.credentials.join(", ")}`] : []),
       ...(p.network.length > 0 ? [`reaches: ${p.network.join(", ")}`] : []),
@@ -81,7 +83,9 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
       command,
       status: p.approved ? "Approved on this machine" : "Not approved: it won't run",
       approved: p.approved,
-      approveTitle: `Runs ${p.program} as a long-lived provider with these grants, approving every file in ${p.tree ?? "its extension"} (its declarations included). Approve only if you trust this extension; any change needs approval again.`,
+      approveTitle: p.remote
+        ? `Lets oxplow's MCP adapter talk to ${p.program} as a provider with these grants, approving that address and every file in ${p.tree ?? "its extension"} (its mapping, its pinned tools, its declarations). The server runs elsewhere: its code isn't part of this approval, and oxplow refuses it when its tools stop matching the pinned ones. Approve only if you trust this extension and that server; any change here needs approval again.`
+        : `Runs ${p.program} as a long-lived provider with these grants, approving every file in ${p.tree ?? "its extension"} (its declarations included). Approve only if you trust this extension; any change needs approval again.`,
     };
   }
   if (p.kind === "effect") {

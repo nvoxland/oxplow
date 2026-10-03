@@ -185,6 +185,7 @@ pub fn effect_program(ext: &Extension, decl: &EffectDecl) -> ProjectProgram {
         credentials: Vec::new(),
         network: Vec::new(),
         tree: Some(dir.to_string()),
+        remote: false,
         approved: false,
         version: None,
     }

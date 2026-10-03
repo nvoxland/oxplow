@@ -1264,7 +1264,13 @@ async fn collector_outputs(
 fn provider_grants(p: &ProviderSpec) -> Grants {
     let (entry, args) = p.program();
     Grants {
-        entry,
+        // A server by url isn't a program that runs here: what runs is
+        // oxplow's adapter, against it.
+        entry: if p.is_remote() {
+            format!("oxplow's MCP adapter against {entry}")
+        } else {
+            entry
+        },
         runtime: CollectorRuntime::Exec,
         args,
         hosts: p.network.clone(),
@@ -1834,6 +1840,41 @@ mod tests {
             declarations: Some(declared),
             tools: Vec::new(),
         }
+    }
+
+    /// P9.B4: a server reached by url isn't a program that runs here —
+    /// what runs is oxplow's adapter, against it — and moving it shows.
+    #[test]
+    fn a_url_servers_effects_say_what_runs_here() {
+        let by_url = |url: &str| {
+            let spec: ProviderSpec = serde_json::from_value(json!({
+                "id": "notes", "capability": "work_items", "declarations": "provider.json",
+                "adapter": { "mcp": { "url": url, "auth": "NOTES_TOKEN" },
+                             "mapping": "mcp/x.star", "tools": "mcp/tools.json" },
+                "credentials": ["NOTES_TOKEN"], "network": ["mcp.example.com"]
+            }))
+            .unwrap();
+            DeclaredProvider {
+                spec,
+                declarations: Some(oxplow_provider_fake::declarations()),
+                tools: Vec::new(),
+            }
+        };
+        let added = providers_diff(&[], &[by_url("https://mcp.example.com/mcp")]);
+        assert_eq!(
+            provider_phrases(&added[0])[0],
+            "added — runs oxplow's MCP adapter against https://mcp.example.com/mcp · reaches mcp.example.com · reads NOTES_TOKEN"
+        );
+        let moved = providers_diff(
+            &[by_url("https://mcp.example.com/mcp")],
+            &[by_url("https://mcp.example.com/v2")],
+        );
+        assert_eq!(
+            provider_phrases(&moved[0]),
+            vec![
+                "now runs oxplow's MCP adapter against https://mcp.example.com/v2 (was oxplow's MCP adapter against https://mcp.example.com/mcp)"
+            ]
+        );
     }
 
     /// P7.A6: an adapter provider's approval shows its server and each

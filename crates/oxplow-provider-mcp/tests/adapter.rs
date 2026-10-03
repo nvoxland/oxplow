@@ -478,3 +478,150 @@ async fn shutdown_with_a_call_in_flight_stops_the_server() {
     }
     panic!("the server {pid} is still running");
 }
+
+/// The notes server over HTTP on loopback (at `port`, or any), behind
+/// `bearer`: its url, and the task serving it.
+async fn http_notes(port: u16, bearer: Option<&str>) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+        .await
+        .unwrap();
+    let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+    let bearer = bearer.map(str::to_string);
+    let task = tokio::spawn(async move {
+        let _ = oxplow_provider_mcp::notes::serve_http(listener, bearer).await;
+    });
+    (url, task)
+}
+
+/// The adapter in front of the server at `url`, holding `token` (or
+/// nothing) as the credential `NOTES_TOKEN` its bearer is.
+fn spawn_by_url(dir: &Path, url: &str, token: Option<&str>) -> (Child, Peer) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_oxplow-provider-mcp"));
+    command
+        .args([
+            "--declarations",
+            "provider.json",
+            "--mapping",
+            "mcp/notes.star",
+            "--tools",
+            "mcp/tools.json",
+            "--url",
+            url,
+            "--auth-env",
+            "NOTES_TOKEN",
+        ])
+        .current_dir(dir)
+        .env("OXPLOW_PROVIDER_ID", "notes")
+        .env_remove("NOTES_TOKEN")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true);
+    if let Some(token) = token {
+        command.env("NOTES_TOKEN", token);
+    }
+    let mut child = command.spawn().unwrap();
+    let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
+    let (peer, _incoming) = Peer::spawn(stdout, stdin);
+    (child, peer)
+}
+
+async fn initialize(peer: &Peer) {
+    let _: InitializeResult = peer
+        .call(
+            method::INITIALIZE,
+            &InitializeParams {
+                protocol_version: PROTOCOL_VERSION.into(),
+                host: Party {
+                    name: "test".into(),
+                    version: "0".into(),
+                },
+            },
+        )
+        .await
+        .unwrap();
+}
+
+async fn try_check(peer: &Peer) -> Result<CheckResult, ProtocolError> {
+    initialize(peer).await;
+    peer.call(
+        method::CHECK,
+        &CheckParams {
+            config: json!({}),
+            credentials: vec!["NOTES_TOKEN".into()],
+        },
+    )
+    .await
+}
+
+/// P9.B4: an MCP server reached by url — over streamable HTTP, its bearer
+/// the credential the adapter is told the name of — is pinned and called
+/// like one it runs: the same check, the same mapping.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_by_url_is_pinned_and_called() {
+    let ext = extension();
+    let (url, server) = http_notes(0, Some("s3cret")).await;
+    let port: u16 = url::Url::parse(&url).unwrap().port().unwrap();
+
+    let (_child, peer) = spawn_by_url(ext.path(), &url, Some("s3cret"));
+    let ok = try_check(&peer).await.unwrap();
+    assert_eq!(ok.problems, vec![]);
+    let handle = ok.handle.unwrap();
+    let created = invoke(&peer, &handle, "create", json!({ "title": "First" }))
+        .await
+        .unwrap();
+    assert_eq!(created.result, json!({ "ref": "work_item:notes:N-1" }));
+    let moved = invoke(
+        &peer,
+        &handle,
+        "transition",
+        json!({ "ref": "work_item:notes:N-1", "to": "blocked" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(moved.events[0].payload["item"]["native_state"], "stuck");
+    let (streamed, result) = read(&peer, &handle, None).await;
+    assert_eq!(result["records"], 1);
+    assert_eq!(streamed[0].1["row"]["ref"], "work_item:notes:N-1");
+
+    // Its service stops taking the token mid-session (the server comes
+    // back wanting another): the call answers `Auth`, which is what has
+    // the host renew a signed-in credential and try again.
+    server.abort();
+    let _ = server.await;
+    let (_, server) = http_notes(port, Some("rotated")).await;
+    let refused = invoke(&peer, &handle, "create", json!({ "title": "Second" })).await;
+    assert!(
+        matches!(refused, Err(ProtocolError::Auth(_))),
+        "{refused:?}"
+    );
+
+    // A bearer the server refuses is `Auth` at check; none to send is the
+    // credential's problem.
+    let (_child, wrong) = spawn_by_url(ext.path(), &url, Some("s3cret"));
+    let refused = try_check(&wrong).await;
+    assert!(
+        matches!(refused, Err(ProtocolError::Auth(_))),
+        "{refused:?}"
+    );
+    let (_child, without) = spawn_by_url(ext.path(), &url, None);
+    let unset = try_check(&without).await.unwrap();
+    assert_eq!(unset.handle, None);
+    assert_eq!(unset.problems[0].path, "/credentials/NOTES_TOKEN");
+
+    // The pin holds over HTTP too: a server whose tools aren't the pinned
+    // ones is refused.
+    let tools = ext.path().join("mcp/tools.json");
+    let mut pins: Vec<Value> =
+        serde_json::from_str(&std::fs::read_to_string(&tools).unwrap()).unwrap();
+    pins[0]["description"] = json!("Not what the server says.");
+    std::fs::write(&tools, serde_json::to_string(&pins).unwrap()).unwrap();
+    let (_child, pinned) = spawn_by_url(ext.path(), &url, Some("rotated"));
+    let refused = try_check(&pinned).await.unwrap();
+    assert_eq!(refused.handle, None);
+    assert!(
+        refused.problems[0].message.contains("isn't the pinned one"),
+        "{:?}",
+        refused.problems
+    );
+    server.abort();
+}

@@ -4783,6 +4783,7 @@ dependencies = [
 name = "oxplow-provider-mcp"
 version = "0.7.0"
 dependencies = [
+ "axum",
  "oxplow-app",
  "oxplow-collect-plugin",
  "oxplow-provider-protocol",
@@ -4793,6 +4794,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "url",
 ]
 
 [[package]]
@@ -5922,6 +5924,7 @@ dependencies = [
  "pin-project-lite",
  "process-wrap",
  "rand 0.10.3",
+ "reqwest",
  "rmcp-macros",
  "schemars 1.2.2",
  "serde",

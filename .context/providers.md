@@ -215,13 +215,51 @@ the folder's file (never a name looked up on `PATH`), as an MCP client
 over the server's stdio; the server inherits the sandbox and the
 credentials. The loader refuses an adapter whose server, mapping or tools
 isn't inside the folder (a path check: a server that doesn't exist fails
-when the adapter spawns it, at `check`), an `args:` beside it, tools
-that aren't a JSON list of named tools, and a server by `url` (not yet,
-left for P9). **The approval covers it all**: the program hashed is the server's
+when the adapter spawns it, at `check`), an `args:` beside it, and tools
+that aren't a JSON list of named tools. **The approval covers it all**: the program hashed is the server's
 file, the mapping and tools are named in its args, and the tree hash
 covers the folder, so changing the mapping, a pin or the server needs
 approving again; the approval row lists the server and each pinned tool
 added, removed or changed (`ProviderEffect.tools`).
+
+**A server by `url`** (P9.B4): `mcp` names exactly one of `command` and
+`url` (`spec::McpServer`, an enum — the rule is the type):
+
+```yaml
+    adapter:
+      mcp: { url: https://mcp.example.com/mcp, auth: NOTES_TOKEN }
+      mapping: mcp/notes.star
+      tools: mcp/tools.json
+    credentials: [NOTES_TOKEN]       # or `{ name, oauth }`: signed in for
+    network: [mcp.example.com]
+```
+
+- The adapter is started with `--url <url> [--auth-env <NAME>]` instead of
+  `-- <command>` and speaks **streamable HTTP** to the server (rmcp's
+  reqwest client; no redirects followed), through the egress proxy where
+  the OS enforces `network`. `auth` names the credential whose value is
+  sent as the bearer token; a credential that didn't reach the adapter is
+  a `check` problem at `/credentials/<NAME>`.
+- The loader refuses a `url` that isn't https (plain http only on
+  loopback — the bearer never crosses the network in the clear), a host
+  the provider's `network` doesn't list, an `auth` that isn't one of its
+  `credentials`, and `auth` beside a `command`.
+- **A `401` is `Auth`** (at the server's initialize, `tools/list` or a
+  tool call), so a signed-in bearer is renewed and the call tried once
+  more ("Credentials and sign-in"); a pasted one is a failure that says
+  the bearer was refused.
+- **What the approval covers** is the url, the mapping, the pins, the
+  declarations and the grants — **not the server's code**, which runs
+  elsewhere (`ProjectProgram.remote`: the hash covers the url's bytes
+  where a local program's file would be; `args` carry the mapping, the
+  tools file and `--auth-env <NAME>`). What stands between a changed
+  server and the project is the pin: `check` refuses a server whose
+  tools aren't exactly `tools.json`. Data → Programs says so on its row
+  ("The server runs elsewhere: its code isn't part of this approval…"),
+  and the approval's diff words it as "runs oxplow's MCP adapter against
+  <url>".
+- Everything after the transport is the same: the pin, the mapping, the
+  checks on what the mapping returns.
 
 - **`initialize`** answers the checked-in declarations (the handshake
   checks them like any provider's).
@@ -260,9 +298,14 @@ added, removed or changed (`ProviderEffect.tools`).
 
 **Tests**: `tests/adapter.rs` drives the adapter over stdio in a copy of
 the fixture extension `tests/fixtures/notes/` in front of the test server
-`oxplow-provider-mcp-notes` (an rmcp stdio server: `list_items`,
+`oxplow-provider-mcp-notes` (`src/notes.rs`, an rmcp server: `list_items`,
 `create_item`, `update_item` over notes `open | doing | stuck | closed |
-dropped`) — the pin (an edited `tools.json` is refused), the mapping's
+dropped`; over stdio, or with `--http <addr>` over streamable HTTP at
+`/mcp`, behind the bearer in `$NOTES_BEARER` when set — the library's
+`notes::serve_http` is what the tests run in-process;
+`a_server_by_url_is_pinned_and_called` covers the pin, the calls, a
+bearer refused at check and mid-session, and a missing one, and
+`tests/kit.rs` runs `plugin test` on the fixture with its server by url) — the pin (an edited `tools.json` is refused), the mapping's
 calls and outcomes, the read and its cursor, an undeclared event and a
 foreign ref refused; `the_pinned_tools_are_the_servers` checks the pin
 (`OXPLOW_BLESS=1` re-pins). `tests/kit.rs` runs the fixture through

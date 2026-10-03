@@ -319,7 +319,11 @@ names the file and line and says what to change.
    the server, `check` refuses it unless its tools equal the pinned
    `tools.json`, and `transform(x)` in the mapping turns each verb into a
    tool call (`x.phase` `invoke`) and the tool's output into the answer
-   (`invoked`; `read` / `records` for a collector).
+   (`invoked`; `read` / `records` for a collector). A server that
+   already runs elsewhere is `mcp: { url: https://…, auth: NAME }`
+   instead of `command`: https only (http on loopback), its host in
+   `network`, and `auth` one of the provider's `credentials` (sent as the
+   bearer token).
 5. **`oxplow plugin test <name>`** runs every intent example on a
    throwaway oxplow (empty data, your extension's entities published
    empty and its models and commands loaded — never the project's

@@ -128,7 +128,8 @@ pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
         message,
     };
     let (own, _) = launch.spec.program();
-    if !launch.ext_dir.join(&own).is_file() {
+    // A server by url has no program of its own in the folder.
+    if !launch.spec.is_remote() && !launch.ext_dir.join(&own).is_file() {
         return Err(failed(format!(
             "`{own}` doesn't exist in the extension folder"
         )));

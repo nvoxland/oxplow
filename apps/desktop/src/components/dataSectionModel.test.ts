@@ -72,6 +72,7 @@ test("programRow shows a provider with the secrets and hosts it gets", () => {
     credentials: ["token"],
     network: ["api.linear.app"],
     tree: "oxplow/extensions/tracker",
+    remote: false,
     approved: false,
     version: "abc",
   });
@@ -132,3 +133,25 @@ test("a provider's declaration diff shows the server's lines", () => {
   ]);
 });
 
+// P9.B4: a provider whose MCP server is reached by url runs nothing of
+// its own here; the row says what the approval does and doesn't cover.
+test("programRow says a server by url isn't code this approval covers", () => {
+  const row = programRow({
+    kind: "provider",
+    name: "notes/notes",
+    program: "https://mcp.example.com/mcp",
+    args: ["mcp/notes.star", "mcp/tools.json", "--auth-env", "NOTES_TOKEN"],
+    env: [],
+    credentials: ["NOTES_TOKEN"],
+    network: ["mcp.example.com"],
+    tree: "oxplow/extensions/notes",
+    remote: true,
+    approved: false,
+    version: "abc",
+  });
+  expect(row.command).toBe(
+    "MCP server at https://mcp.example.com/mcp\nwith: mcp/notes.star mcp/tools.json --auth-env NOTES_TOKEN\ncredentials: NOTES_TOKEN\nreaches: mcp.example.com",
+  );
+  expect(row.approveTitle).toContain("The server runs elsewhere: its code isn't part of this approval");
+  expect(row.approveTitle).toContain("its tools stop matching the pinned ones");
+});

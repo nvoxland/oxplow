@@ -25,6 +25,10 @@
 //!       tools: mcp/tools.json
 //! ```
 //!
+//! The server may instead be one reached over HTTP (P9.B4): `mcp: { url:
+//! https://mcp.example.com/mcp, auth: TOKEN }`, `auth` naming the
+//! credential sent as its bearer token.
+//!
 //! The declarations file is what a person approves (with the program):
 //! the live `initialize` must equal it.
 
@@ -186,8 +190,6 @@ impl<'de> Deserialize<'de> for CredentialDecl {
 /// `client_secret` that doesn't name a static credential of its own.
 fn credentials_problem(spec: &ProviderSpec) -> Option<String> {
     let id = &spec.id;
-    let loopback =
-        |url: &url::Url| matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
     for (i, c) in spec.credentials.iter().enumerate() {
         if spec.credentials[..i].iter().any(|o| o.name == c.name) {
             return Some(format!(
@@ -200,9 +202,7 @@ fn credentials_problem(spec: &ProviderSpec) -> Option<String> {
             ("authorize_url", &oauth.authorize_url),
             ("token_url", &oauth.token_url),
         ] {
-            let ok = url::Url::parse(value)
-                .is_ok_and(|u| u.scheme() == "https" || (u.scheme() == "http" && loopback(&u)));
-            if !ok {
+            if secure_url(value).is_none() {
                 return Some(format!(
                     "provider `{id}`: credential `{}`'s `{key}` must be https (http only on \
                      loopback): `{value}`",
@@ -233,22 +233,57 @@ fn credentials_problem(spec: &ProviderSpec) -> Option<String> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AdapterSpec {
-    pub mcp: McpServerSpec,
+    pub mcp: McpServer,
     /// The Starlark mapping (`transform(x)`), relative to the folder.
     pub mapping: String,
     /// The pinned tools (`[{ name, description, inputSchema }]`, JSON).
     pub tools: String,
 }
 
-/// How the adapter reaches the MCP server: a command in the folder (a
-/// server by `url` isn't supported yet).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct McpServerSpec {
-    #[serde(default)]
-    pub command: Vec<String>,
-    #[serde(default)]
-    pub url: Option<String>,
+/// How the adapter reaches the MCP server: exactly one of the two.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+#[serde(untagged)]
+pub enum McpServer {
+    /// A program in the folder, spoken to over its stdio.
+    Command { command: Vec<String> },
+    /// A server reached over streamable HTTP (P9.B4). `auth` names the
+    /// credential whose value is sent as its bearer token.
+    Url { url: String, auth: Option<String> },
+}
+
+impl<'de> Deserialize<'de> for McpServer {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct File {
+            #[serde(default)]
+            command: Option<Vec<String>>,
+            #[serde(default)]
+            url: Option<String>,
+            #[serde(default)]
+            auth: Option<String>,
+        }
+        let file = File::deserialize(deserializer)?;
+        match (file.command, file.url, file.auth) {
+            (Some(command), None, None) => Ok(McpServer::Command { command }),
+            (Some(_), None, Some(_)) => Err(serde::de::Error::custom(
+                "`auth` goes with a `url`: the bearer token of a server reached over HTTP",
+            )),
+            (None, Some(url), auth) => Ok(McpServer::Url { url, auth }),
+            _ => Err(serde::de::Error::custom(
+                "`mcp` names either `command` (a program in the folder) or `url` (a server \
+                 reached over HTTP), not both or neither",
+            )),
+        }
+    }
+}
+
+/// `value` as a URL a secret may be sent to: https, or plain http on
+/// loopback (what a local service speaks).
+fn secure_url(value: &str) -> Option<url::Url> {
+    let url = url::Url::parse(value).ok()?;
+    let loopback = matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
+    (url.scheme() == "https" || (url.scheme() == "http" && loopback)).then_some(url)
 }
 
 /// An instance's name: `<extension>/<instance id>` — its config key, its
@@ -290,21 +325,31 @@ impl ProviderSpec {
     /// arguments: its `entry` and `args`, or its MCP server's command —
     /// what its approval names.
     pub fn program(&self) -> (String, Vec<String>) {
-        match &self.adapter {
-            Some(a) => {
-                let (server, args) = a.mcp.command.split_first().map_or_else(
-                    || (String::new(), Vec::new()),
-                    |(s, rest)| (s.clone(), rest.to_vec()),
-                );
-                (server, args)
-            }
+        match self.adapter.as_ref().map(|a| &a.mcp) {
+            Some(McpServer::Command { command }) => command.split_first().map_or_else(
+                || (String::new(), Vec::new()),
+                |(s, rest)| (s.clone(), rest.to_vec()),
+            ),
+            // Nothing of its own runs here: what it "runs" is the server
+            // at its url.
+            Some(McpServer::Url { url, .. }) => (url.clone(), Vec::new()),
             None => (self.entry.clone().unwrap_or_default(), self.args.clone()),
         }
     }
 
+    /// Whether what it runs is a server elsewhere (an MCP server by
+    /// `url`) rather than a program of its folder.
+    pub fn is_remote(&self) -> bool {
+        matches!(
+            self.adapter.as_ref().map(|a| &a.mcp),
+            Some(McpServer::Url { .. })
+        )
+    }
+
     /// What the host executes in the folder: its `entry` with `args`, or
     /// `adapter_bin` (oxplow's MCP adapter) with the adapter's files and
-    /// the server's command — every path relative to the folder.
+    /// the server's command (after `--`) or its `--url` and the name of
+    /// its bearer's credential — every path relative to the folder.
     pub fn launch(
         &self,
         adapter_bin: &std::path::Path,
@@ -318,12 +363,22 @@ impl ProviderSpec {
                     &a.mapping,
                     "--tools",
                     &a.tools,
-                    "--",
                 ]
                 .iter()
                 .map(|s| s.to_string())
                 .collect();
-                args.extend(a.mcp.command.iter().cloned());
+                match &a.mcp {
+                    McpServer::Command { command } => {
+                        args.push("--".into());
+                        args.extend(command.iter().cloned());
+                    }
+                    McpServer::Url { url, auth } => {
+                        args.extend(["--url".to_string(), url.clone()]);
+                        if let Some(name) = auth {
+                            args.extend(["--auth-env".to_string(), name.clone()]);
+                        }
+                    }
+                }
                 (Some(adapter_bin.to_path_buf()), args)
             }
             None => (None, self.args.clone()),
@@ -403,29 +458,50 @@ fn program_problem(spec: &ProviderSpec, read: &dyn Fn(&str) -> Option<String>) -
             }
         }
         (None, Some(adapter)) => {
-            if adapter.mcp.url.is_some() {
-                return Some(format!(
-                    "provider `{id}`: an MCP server by `url` isn't supported yet; run it with `command`"
-                ));
-            }
             if !spec.args.is_empty() {
                 return Some(format!(
                     "provider `{id}`: `args` go with an `entry`; an adapter's server takes them in `command`"
                 ));
             }
-            let Some((server, args)) = adapter.mcp.command.split_first() else {
-                return Some(format!("provider `{id}`: adapter `mcp.command` is empty"));
-            };
-            if !inside(server) {
-                return Some(format!(
-                    "provider `{id}`: the MCP server `{server}` must be a program inside the extension \
-                     folder (its approval covers what runs)"
-                ));
-            }
-            if let Some(bad) = args.iter().find(|a| !arg_inside(a)) {
-                return Some(format!(
-                    "provider `{id}`: server arg `{bad}` names a path outside the extension folder"
-                ));
+            match &adapter.mcp {
+                McpServer::Command { command } => {
+                    let Some((server, args)) = command.split_first() else {
+                        return Some(format!("provider `{id}`: adapter `mcp.command` is empty"));
+                    };
+                    if !inside(server) {
+                        return Some(format!(
+                            "provider `{id}`: the MCP server `{server}` must be a program inside the \
+                             extension folder (its approval covers what runs)"
+                        ));
+                    }
+                    if let Some(bad) = args.iter().find(|a| !arg_inside(a)) {
+                        return Some(format!(
+                            "provider `{id}`: server arg `{bad}` names a path outside the extension folder"
+                        ));
+                    }
+                }
+                McpServer::Url { url, auth } => {
+                    let Some(parsed) = secure_url(url) else {
+                        return Some(format!(
+                            "provider `{id}`: the MCP server's `url` must be https (http only on \
+                             loopback): `{url}`"
+                        ));
+                    };
+                    let host = parsed.host_str().unwrap_or_default();
+                    if !crate::net_sandbox::host_allowed(host, &spec.network) {
+                        return Some(format!(
+                            "provider `{id}`: `network` must list `{host}`, its MCP server's host"
+                        ));
+                    }
+                    if let Some(auth) = auth {
+                        if !spec.credentials.iter().any(|c| c.name == *auth) {
+                            return Some(format!(
+                                "provider `{id}` declares no credential `{auth}` (`mcp.auth` names \
+                                 the one sent as the server's bearer token)"
+                            ));
+                        }
+                    }
+                }
             }
             for (what, path) in [("mapping", &adapter.mapping), ("tools", &adapter.tools)] {
                 if !inside(path) {

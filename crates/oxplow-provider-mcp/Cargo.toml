@@ -19,7 +19,16 @@ path = "src/bin/notes.rs"
 [dependencies]
 oxplow-provider-protocol = { workspace = true }
 oxplow-collect-plugin = { workspace = true }
-rmcp = { workspace = true, features = ["client", "transport-child-process"] }
+# The streamable-HTTP client is the adapter's (a server by `url`); the
+# server side and axum are the notes test server's.
+rmcp = { workspace = true, features = [
+    "client",
+    "transport-child-process",
+    "transport-streamable-http-client-reqwest",
+    "reqwest",
+    "transport-streamable-http-server",
+] }
+axum = { version = "0.8" }
 schemars = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -29,6 +38,7 @@ serde_json = { workspace = true }
 oxplow-app = { workspace = true }
 oxplow-sdk = { workspace = true }
 tempfile = { workspace = true }
+url = { workspace = true }
 
 [lints]
 workspace = true

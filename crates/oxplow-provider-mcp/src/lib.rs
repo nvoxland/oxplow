@@ -6,10 +6,18 @@
 //! ```text
 //! oxplow-provider-mcp --declarations provider.json --mapping mcp/x.star \
 //!     --tools mcp/tools.json -- bin/server --stdio
+//! oxplow-provider-mcp --declarations provider.json --mapping mcp/x.star \
+//!     --tools mcp/tools.json --url https://mcp.example.com/mcp --auth-env TOKEN
 //! ```
 //!
+//! The server is a program in the folder, spoken to over its stdio, or
+//! (P9.B4) one reached over streamable HTTP at `--url`, its bearer token
+//! the value of the credential `--auth-env` names. A server that answers
+//! `401` is `Auth` — the host renews a signed-in credential and tries
+//! again.
+//!
 //! It answers `initialize` with the checked-in declarations, and starts
-//! the server (an MCP client over its stdio) at `check`, refusing it when
+//! the server (an MCP client) at `check`, refusing it when
 //! its tools — each one whole: name, description, schemas, annotations —
 //! aren't exactly the pinned `tools.json`. `invoke` and `read` run the mapping, a
 //! Starlark `transform(x)` under the sandbox (5 s), twice: once to turn
@@ -32,12 +40,17 @@ use oxplow_provider_protocol::model::*;
 use oxplow_provider_protocol::{Id, Incoming, Peer, ProtocolError};
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use rmcp::service::RunningService;
-use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
+use rmcp::transport::streamable_http_client::{
+    AuthRequiredError, StreamableHttpClientTransportConfig,
+};
+use rmcp::transport::{ConfigureCommandExt, StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::{RoleClient, ServiceExt};
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{oneshot, Mutex, OnceCell};
 use tokio::task::JoinSet;
+
+pub mod notes;
 
 /// How long one run of the mapping may take.
 pub const MAPPING_TIMEOUT: Duration = Duration::from_secs(5);
@@ -50,33 +63,61 @@ pub struct Adapter {
     pub mapping: String,
     /// The pinned tools (`tools.json`): each whole, as the server lists it.
     pub tools: Vec<Value>,
-    /// The MCP server's command, its program in the extension folder.
-    pub server: Vec<String>,
+    /// The MCP server: a program it runs, or one it reaches.
+    pub server: Server,
     /// Its provider id: its refs are `work_item:<id>:…`.
     pub provider_id: String,
 }
 
+/// The MCP server an adapter stands in front of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Server {
+    /// Its command: a program in the extension folder, over its stdio.
+    Command(Vec<String>),
+    /// One reached over streamable HTTP. `auth_env` names the environment
+    /// variable (a credential) whose value is its bearer token.
+    Url {
+        url: String,
+        auth_env: Option<String>,
+    },
+}
+
 impl Adapter {
-    /// From `--declarations <file> --mapping <file> --tools <file> --
-    /// <server command…>`, files relative to `dir`.
+    /// From `--declarations <file> --mapping <file> --tools <file>` and
+    /// then either `-- <server command…>` or `--url <url> [--auth-env
+    /// <NAME>]`; files relative to `dir`.
     pub fn from_args(dir: &Path, args: &[String], provider_id: &str) -> Result<Adapter, String> {
-        let split = args
-            .iter()
-            .position(|a| a == "--")
-            .ok_or("no `-- <server command>`")?;
-        let (flags, server) = (&args[..split], &args[split + 1..]);
-        if server.is_empty() {
-            return Err("no server command after `--`".into());
-        }
+        let split = args.iter().position(|a| a == "--");
+        let flags = &args[..split.unwrap_or(args.len())];
+        let value = |name: &str| -> Result<Option<&String>, String> {
+            match flags.iter().position(|f| f == name) {
+                None => Ok(None),
+                Some(at) => flags
+                    .get(at + 1)
+                    .map(Some)
+                    .ok_or_else(|| format!("{name} needs a value")),
+            }
+        };
         let flag = |name: &str| -> Result<String, String> {
-            let at = flags
-                .iter()
-                .position(|f| f == name)
-                .ok_or_else(|| format!("missing {name}"))?;
-            let path = flags
-                .get(at + 1)
-                .ok_or_else(|| format!("{name} needs a file"))?;
+            let path = value(name)?.ok_or_else(|| format!("missing {name}"))?;
             std::fs::read_to_string(dir.join(path)).map_err(|e| format!("{name} {path}: {e}"))
+        };
+        let server = match (split, value("--url")?) {
+            (Some(split), None) => {
+                let mut command = args[split + 1..].to_vec();
+                if command.is_empty() {
+                    return Err("no server command after `--`".into());
+                }
+                // The server is the folder's file its approval covers,
+                // never a name looked up on PATH.
+                command[0] = dir.join(&command[0]).to_string_lossy().into_owned();
+                Server::Command(command)
+            }
+            (None, Some(url)) => Server::Url {
+                url: url.clone(),
+                auth_env: value("--auth-env")?.cloned(),
+            },
+            _ => return Err("name the server: either `-- <command>` or `--url <url>`".into()),
         };
         let declarations = serde_json::from_str(&flag("--declarations")?)
             .map_err(|e| format!("--declarations: {e}"))?;
@@ -86,10 +127,6 @@ impl Adapter {
             .as_array()
             .cloned()
             .ok_or("--tools must be a JSON list of tools")?;
-        // The server is the folder's file its approval covers, never a
-        // name looked up on PATH.
-        let mut server = server.to_vec();
-        server[0] = dir.join(&server[0]).to_string_lossy().into_owned();
         Ok(Adapter {
             declarations,
             mapping: flag("--mapping")?,
@@ -252,10 +289,44 @@ fn internal(message: impl Into<String>) -> ProtocolError {
     ProtocolError::Internal(message.into())
 }
 
-/// Why the server didn't start: its tools aren't the pinned ones (a
-/// `check` problem), or it failed.
+/// Whether `error` is a server answering `401`: its bearer isn't one it
+/// takes.
+fn unauthorized(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut at = Some(error);
+    while let Some(current) = at {
+        if current.is::<AuthRequiredError>() {
+            return true;
+        }
+        // A transport's error is carried, not chained.
+        if let Some(carried) = current.downcast_ref::<rmcp::transport::DynamicTransportError>() {
+            return unauthorized(carried.error.as_ref());
+        }
+        if let Some(rmcp::ServiceError::TransportSend(carried)) = current.downcast_ref() {
+            return unauthorized(carried);
+        }
+        if let Some(rmcp::service::ClientInitializeError::TransportError { error, .. }) =
+            current.downcast_ref()
+        {
+            return unauthorized(error);
+        }
+        at = current.source();
+    }
+    false
+}
+
+/// A failure talking to the server: `Auth` when it refused the bearer.
+fn server_error(what: String, error: &(dyn std::error::Error + 'static)) -> ProtocolError {
+    if unauthorized(error) {
+        ProtocolError::Auth(format!("{what}: the MCP server refused its bearer token"))
+    } else {
+        internal(format!("{what}: {error}"))
+    }
+}
+
+/// Why the server didn't start: its tools aren't the pinned ones or its
+/// bearer isn't set (`check` problems), or it failed.
 enum Unstarted {
-    Pin(String),
+    Problem(Problem),
     Failed(ProtocolError),
 }
 
@@ -266,42 +337,67 @@ impl From<ProtocolError> for Unstarted {
 }
 
 /// The running server, started (and its tools checked against the pin)
-/// the first time; `Err` inside is the pin's difference.
-async fn client(world: &Shared) -> Result<Result<Arc<Client>, String>, ProtocolError> {
+/// the first time; `Err` inside is what `check` reports instead.
+async fn client(world: &Shared) -> Result<Result<Arc<Client>, Problem>, ProtocolError> {
     match world.client.get_or_try_init(|| start(&world.adapter)).await {
         Ok(c) => Ok(Ok(c.clone())),
-        Err(Unstarted::Pin(difference)) => Ok(Err(difference)),
+        Err(Unstarted::Problem(problem)) => Ok(Err(problem)),
         Err(Unstarted::Failed(e)) => Err(e),
+    }
+}
+
+/// Connect to the server: run its command, or reach its url.
+async fn connect(server: &Server) -> Result<Client, Unstarted> {
+    match server {
+        Server::Command(command) => {
+            let (program, args) = command.split_first().ok_or_else(|| internal("no server"))?;
+            let cmd = tokio::process::Command::new(program).configure(|c| {
+                c.args(args);
+            });
+            let transport = TokioChildProcess::new(cmd)
+                .map_err(|e| internal(format!("couldn't start the MCP server `{program}`: {e}")))?;
+            Ok(().serve(transport).await.map_err(|e| {
+                internal(format!("the MCP server `{program}` didn't initialize: {e}"))
+            })?)
+        }
+        Server::Url { url, auth_env } => {
+            let mut config = StreamableHttpClientTransportConfig::with_uri(url.clone());
+            if let Some(name) = auth_env {
+                // The credential didn't reach it: the instance's to fix.
+                let Some(token) = std::env::var(name).ok().filter(|t| !t.is_empty()) else {
+                    return Err(Unstarted::Problem(Problem {
+                        path: format!("/credentials/{name}"),
+                        message: "isn't set: it is the MCP server's bearer token".into(),
+                    }));
+                };
+                config = config.auth_header(token);
+            }
+            let transport = StreamableHttpClientTransport::from_config(config);
+            Ok(().serve(transport).await.map_err(|e| {
+                server_error(format!("the MCP server at `{url}` didn't initialize"), &e)
+            })?)
+        }
     }
 }
 
 /// Start the server and check its tools against the pin.
 async fn start(adapter: &Adapter) -> Result<Arc<Client>, Unstarted> {
-    let (program, args) = adapter
-        .server
-        .split_first()
-        .ok_or_else(|| internal("no server"))?;
-    let cmd = tokio::process::Command::new(program).configure(|c| {
-        c.args(args);
-    });
-    let transport = TokioChildProcess::new(cmd)
-        .map_err(|e| internal(format!("couldn't start the MCP server `{program}`: {e}")))?;
-    let client = ()
-        .serve(transport)
-        .await
-        .map_err(|e| internal(format!("the MCP server `{program}` didn't initialize: {e}")))?;
+    let client = connect(&adapter.server).await?;
     let live: Vec<Value> = client
         .list_all_tools()
         .await
-        .map_err(|e| internal(format!("tools/list failed: {e}")))?
+        .map_err(|e| server_error("tools/list failed".into(), &e))?
         .iter()
         .map(pinned)
         .collect();
     if let Some(difference) = pin_difference(&adapter.tools, &live) {
         let _ = client.cancel().await;
-        return Err(Unstarted::Pin(format!(
-            "{difference}: a changed server needs its tools.json updated, and a person's approval"
-        )));
+        return Err(Unstarted::Problem(Problem {
+            path: String::new(),
+            message: format!(
+                "{difference}: a changed server needs its tools.json updated, and a person's approval"
+            ),
+        }));
     }
     Ok(Arc::new(client))
 }
@@ -398,7 +494,7 @@ async fn call(client: &Client, call: &Value) -> Result<(String, Value, bool), Pr
     let result = client
         .call_tool(CallToolRequestParams::new(tool.clone()).with_arguments(arguments))
         .await
-        .map_err(|e| internal(format!("tool `{tool}`: {e}")))?;
+        .map_err(|e| server_error(format!("tool `{tool}`"), &e))?;
     let output = output_of(&result);
     Ok((tool, output, result.is_error == Some(true)))
 }
@@ -467,11 +563,8 @@ async fn handle(
         method::CHECK => {
             let p: CheckParams = parse(params)?;
             let result = match client(world).await? {
-                Err(pin) => CheckResult {
-                    problems: vec![Problem {
-                        path: String::new(),
-                        message: pin,
-                    }],
+                Err(problem) => CheckResult {
+                    problems: vec![problem],
                     handle: None,
                 },
                 Ok(_) => {
@@ -571,6 +664,6 @@ async fn config(world: &Shared, handle: &Handle) -> Result<Value, ProtocolError>
 async fn running(world: &Shared) -> Result<Arc<Client>, ProtocolError> {
     match client(world).await? {
         Ok(c) => Ok(c),
-        Err(pin) => Err(ProtocolError::NotConfigured(pin)),
+        Err(problem) => Err(ProtocolError::NotConfigured(problem.message)),
     }
 }
