@@ -1,4 +1,5 @@
 import { EmptyState } from "../components/Prompts/EmptyState.js";
+import { InlineConfirm } from "../components/InlineConfirm.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MergeReadiness, OpOutcome, RemoteBranchEntry, RevisionInfo, Stream, StatusCounts } from "../api.js";
 import {
@@ -319,17 +320,10 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     return out;
   }, [agentStatuses]);
 
+  // A push, merge or rebase asks on its own button (`InlineConfirm`): the
+  // person's second click is the confirmation the command runs with.
   const runOp = useCallback(
-    async (
-      label: string,
-      command: string,
-      action: () => Promise<import("../api.js").GitOpKickoff>,
-      opts?: { confirm?: boolean },
-    ) => {
-      if (opts?.confirm) {
-        const ok = window.confirm(`${label}\n\nWill run:\n  ${command}\n\nProceed?`);
-        if (!ok) return;
-      }
+    async (label: string, command: string, action: () => Promise<import("../api.js").GitOpKickoff>) => {
       addPending(label);
       let result: OpOutcome;
       try {
@@ -356,7 +350,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         removePending(label);
       }
       if (!result.success) {
-        window.alert(`${label} failed:\n${gitOpErrorMessage(result, "error")}`);
+        recordOpError({ label, message: gitOpErrorMessage(result, "error") });
       } else {
         void refresh();
       }
@@ -395,7 +389,6 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                   "Push",
                   "push",
                   () => vcsPush(streamId),
-                  { confirm: true },
                 )
               }
               onPullUpstream={() =>
@@ -432,7 +425,6 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                   `Merge ${branch} into current`,
                   `merge ${branch}`,
                   () => vcsMerge(streamId, branch, true),
-                  { confirm: true },
                 )
               }
               onRebase={(branch) =>
@@ -440,7 +432,6 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                   `Rebase current onto ${branch}`,
                   `rebase ${branch}`,
                   () => gitRebase(streamId, branch, true),
-                  { confirm: true },
                 )
               }
               isPending={isPending}
@@ -454,7 +445,6 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                   `Merge ${branch} into ${data.branchHeader.branch ?? "current"}`,
                   `merge ${branch}`,
                   () => vcsMerge(streamId, branch, true),
-                  { confirm: true },
                 )
               }
               isPending={isPending}
@@ -475,7 +465,6 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
                   `Push current → ${remote}/${branch}`,
                   `push ${remote} ${branch}`,
                   () => vcsPush(streamId, { remote, branch }),
-                  { confirm: true },
                 )
               }
               isPending={isPending}
@@ -524,15 +513,19 @@ function UpstreamCard({
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
           {hasUpstream ? (
             <>
-              <button
-                type="button"
-                data-testid="git-dashboard-push"
-                onClick={onPush}
-                disabled={pushing || nothingToPush}
-                style={primaryButton}
-              >
-                {pushing ? "Pushing…" : "Push"}
-              </button>
+              <InlineConfirm onConfirm={onPush} confirmLabel="Push" testIdPrefix="git-dashboard-push">
+                {(arm) => (
+                  <button
+                    type="button"
+                    data-testid="git-dashboard-push"
+                    onClick={arm}
+                    disabled={pushing || nothingToPush}
+                    style={primaryButton}
+                  >
+                    {pushing ? "Pushing…" : "Push"}
+                  </button>
+                )}
+              </InlineConfirm>
               <button
                 type="button"
                 data-testid="git-dashboard-pull"
@@ -913,15 +906,23 @@ function MergeReadinessCard({
                   <ReadinessBadge readiness={row.readiness} />
                   <span style={{ flex: 1 }} />
                   {canMerge ? (
-                    <button
-                      type="button"
-                      data-testid="git-dashboard-divergence-merge"
-                      onClick={() => onMerge(row.branch)}
-                      disabled={isPending(mergeLabel)}
-                      style={primaryButton}
+                    <InlineConfirm
+                      onConfirm={() => onMerge(row.branch)}
+                      confirmLabel="Merge"
+                      testIdPrefix="git-dashboard-divergence-merge"
                     >
-                      {isPending(mergeLabel) ? "Merging…" : `Merge into ${report.base}`}
-                    </button>
+                      {(arm) => (
+                        <button
+                          type="button"
+                          data-testid="git-dashboard-divergence-merge"
+                          onClick={arm}
+                          disabled={isPending(mergeLabel)}
+                          style={primaryButton}
+                        >
+                          {isPending(mergeLabel) ? "Merging…" : `Merge into ${report.base}`}
+                        </button>
+                      )}
+                    </InlineConfirm>
                   ) : null}
                 </div>
                 {row.readiness === "conflict" ? (
@@ -1028,17 +1029,25 @@ function MergeRebaseSplitButton({
 
   return (
     <div style={{ position: "relative", display: "inline-flex" }}>
-      <button
-        type="button"
-        data-testid="git-dashboard-stream-merge-rebase"
-        data-mode={mode}
-        onClick={onPrimary}
-        disabled={disabled}
-        title={primaryTitle}
-        style={{ ...smallButton, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: "none" }}
+      <InlineConfirm
+        onConfirm={onPrimary}
+        confirmLabel={mode === "merge" ? "Merge" : "Rebase"}
+        testIdPrefix="git-dashboard-stream-merge-rebase"
       >
-        {pending ? busyLabel : idleLabel}
-      </button>
+        {(arm) => (
+          <button
+            type="button"
+            data-testid="git-dashboard-stream-merge-rebase"
+            data-mode={mode}
+            onClick={arm}
+            disabled={disabled}
+            title={primaryTitle}
+            style={{ ...smallButton, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: "none" }}
+          >
+            {pending ? busyLabel : idleLabel}
+          </button>
+        )}
+      </InlineConfirm>
       <button
         type="button"
         aria-label="Choose merge or rebase"
@@ -1266,22 +1275,30 @@ function RemoteBranchesCard({
                 >
                   {isPending(pullLabel) ? "Pulling…" : "Pull into"}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
+                <InlineConfirm
+                  onConfirm={() => {
                     const [remote, ...rest] = row.short_name.split("/");
                     onPush(remote, rest.join("/"));
                   }}
-                  disabled={isPending(pushLabel) || (c?.ahead ?? 0) === 0}
-                  title={
-                    (c?.ahead ?? 0) === 0
-                      ? `Current has no commits not already in ${row.short_name} — nothing to push.`
-                      : undefined
-                  }
-                  style={smallButton}
+                  confirmLabel="Push"
+                  testIdPrefix={`git-dashboard-remote-push-${row.short_name}`}
                 >
-                  {isPending(pushLabel) ? "Pushing…" : "Push to"}
-                </button>
+                  {(arm) => (
+                    <button
+                      type="button"
+                      onClick={arm}
+                      disabled={isPending(pushLabel) || (c?.ahead ?? 0) === 0}
+                      title={
+                        (c?.ahead ?? 0) === 0
+                          ? `Current has no commits not already in ${row.short_name} — nothing to push.`
+                          : undefined
+                      }
+                      style={smallButton}
+                    >
+                      {isPending(pushLabel) ? "Pushing…" : "Push to"}
+                    </button>
+                  )}
+                </InlineConfirm>
               </div>
             );
           })}

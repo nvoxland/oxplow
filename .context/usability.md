@@ -54,7 +54,9 @@ Things I keep forgetting. Read this before adding any UI.
   silently no-ops. Use `InlineEdit` (for
   click-to-edit) or `InlinePromptStrip` (for new-X flows that need a
   target-path entry) instead. `window.confirm` / `window.alert` block
-  the renderer; prefer `InlineConfirm` for destructive actions on a
+  the renderer, and `no-blocking-dialogs.test.ts` fails on any call
+  (tsk630: the Git dashboard's push / merge / rebase now ask with
+  `InlineConfirm`); use `InlineConfirm` for destructive actions on a
   row/button and `showToast({ message, onUndo })` for fire-and-undo
   destructives that aren't tied to a specific row. A destructive command run
   from a menu (which closes, leaving nowhere to ask inline) goes through
@@ -71,7 +73,7 @@ Things I keep forgetting. Read this before adding any UI.
   click for the popover list). Clicking a row — or the toast's "View" —
   opens an `op-error` page tab with the full output. There is **no rail
   "Errors" section** any more. For ops that already have a page focus
-  when they fail (e.g. `runConfirmed` in GitDashboardPage), call
+  when they fail (e.g. `runOp` in GitDashboardPage), call
   `onOpenPage(opErrorRef(id))` after recording so the user lands on
   the detail view directly.
 - **Every `<button>` needs an explicit `type`.** HTML defaults
