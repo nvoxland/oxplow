@@ -58,9 +58,62 @@ pub fn claude_resume_state(home: &Path, cwd: &str, session_id: &str) -> ResumeSt
     }
 }
 
+/// Forget thread `thread`'s resume pointer when it is still `session` —
+/// the launch found that session's transcript gone. Only that column, and
+/// only if nothing replaced it meanwhile: agent-session state, written the
+/// way hook ingest writes it (off the bus, `ipc-and-stores.md`).
+pub async fn forget_missing(
+    db: &oxplow_db::Database,
+    thread: oxplow_domain::ThreadId,
+    session: &str,
+) -> Result<(), oxplow_domain::DomainError> {
+    let (session, now) = (
+        session.to_string(),
+        oxplow_domain::Timestamp::now().to_string(),
+    );
+    db.transaction(move |tx| {
+        tx.execute(
+            "UPDATE threads SET resume_session_id = '', updated_at = ?3
+              WHERE id = ?1 AND resume_session_id = ?2",
+            rusqlite::params![thread.value(), session, now],
+        )
+        .map(|_| ())
+        .map_err(oxplow_db::map_sql_err)
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// tsk785: the stale pointer is forgotten only while it is still the
+    /// one the launch found gone — a session that replaced it stays.
+    #[tokio::test]
+    async fn forgetting_a_missing_session_leaves_a_newer_one() {
+        use oxplow_domain::stores::ThreadStore as _;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let set = |session: &'static str| async move {
+            let mut t = svc.thread_store.get(&fx.thread).await.unwrap().unwrap();
+            t.resume_session_id = session.into();
+            svc.thread_store.upsert(&t).await.unwrap();
+        };
+        let now = || async {
+            svc.thread_store
+                .get(&fx.thread)
+                .await
+                .unwrap()
+                .unwrap()
+                .resume_session_id
+        };
+        set("newer").await;
+        forget_missing(&svc.db, fx.thread, "gone").await.unwrap();
+        assert_eq!(now().await, "newer");
+        set("gone").await;
+        forget_missing(&svc.db, fx.thread, "gone").await.unwrap();
+        assert_eq!(now().await, "");
+    }
     use std::fs;
 
     #[test]

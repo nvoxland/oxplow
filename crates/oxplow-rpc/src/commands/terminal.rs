@@ -536,9 +536,13 @@ pub async fn open_terminal_session(
                     );
                     if state == oxplow_app::resume_check::ResumeState::Missing {
                         if let Some(t) = thread.as_ref() {
-                            let mut updated = t.clone();
-                            updated.resume_session_id.clear();
-                            if let Err(err) = ctx.thread_store.upsert(&updated).await {
+                            if let Err(err) = oxplow_app::resume_check::forget_missing(
+                                &ctx.db,
+                                t.id,
+                                &resume_session_id,
+                            )
+                            .await
+                            {
                                 tracing::warn!(
                                     ?err,
                                     "resume-check: clearing stale resume pointer failed"

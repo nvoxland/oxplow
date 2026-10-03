@@ -30,6 +30,8 @@ command):
 | follow-ups, background-task progress | in memory and transient |
 | hook ingest, ACP prompt / cancel / permission answers, terminal input, `await_user` | agent-session activity, born as `agent.*` events (§5.1 of target-architecture.md); oxplow never synthesizes agent input |
 | terminal / ACP session open and close, LSP restart and requests | process control and protocol passthrough |
+| forgetting a stale Claude resume pointer at launch (`resume_check::forget_missing`) | agent-session state, like hook ingest's own writes of it; only that column, only while it's still the id found gone |
+| the left-nav panel layout (`set_panel_layout`) | a UI layout pointer, like the selection pointers |
 | workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |
 | a change's analysis (`ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized model — not an intent |
 | a model call's record (`ai_call`, `ai_result`) | the computation as it happened (`AiCompute`), like a test run's capture — the run that asked for it is what's audited |
@@ -38,13 +40,17 @@ command):
 **Guards** (`crates/oxplow-app/src/source_guards.rs`):
 `rpc_and_mcp_never_write_the_database_themselves` fails on a
 transaction, a rehearsal or a store's `_tx` core in oxplow-rpc or
-oxplow-mcp; `ui_events_have_their_pinned_sources` pins which file may
+oxplow-mcp; `rpc_and_mcp_store_writes_are_listed_off_the_bus` fails on a
+call to any store method that isn't a read (`get…`, `list…`, …) unless
+its `(file, call)` is in `OFF_BUS` with a reason this table gives — the
+stores keep their async write methods for the services and tests that
+own them, so the scan, not the compiler, holds the line (tsk785);
+`ui_events_have_their_pinned_sources` pins which file may
 push each UI event (its `EMITTERS` table). What's left there is a
 signal no model carries — the config swap, agent status, a stall alert,
 background tasks, the LSP server list, a snapshot take, VCS refs, the
 workspace; every other view re-reads a model on `ModelsChanged`
-(P8.A2–A10). As each domain moved, its store lost its write methods —
-the compiler holds the rest.
+(P8.A2–A10).
 
 **Then: is it a read of data a model can publish?** Reads are SQL
 (P4): a new read of project data is a **model** (a `models/<name>.sql`

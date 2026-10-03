@@ -156,6 +156,91 @@ fn rpc_and_mcp_never_write_the_database_themselves() {
     assert_eq!(offenders, Vec::<String>::new());
 }
 
+/// The writes oxplow-rpc and oxplow-mcp make through a store themselves,
+/// each with the off-bus reason the doc's table gives (`ipc-and-stores.md`
+/// "What stays off the bus") — the needle that table must contain.
+const OFF_BUS: &[(&str, &str, &str)] = &[
+    (
+        "crates/oxplow-rpc/src/commands/semantic.rs",
+        "panel_layout_store.set",
+        "left-nav panel layout",
+    ),
+    (
+        "crates/oxplow-rpc/src/commands/usage.rs",
+        "usage_store.record",
+        "usage recording",
+    ),
+];
+
+/// A store method that only reads, by its name.
+fn reads(method: &str) -> bool {
+    const READS: [&str; 10] = [
+        "get", "list", "read", "primary", "current", "selected", "stats", "find", "count", "search",
+    ];
+    READS
+        .iter()
+        .any(|r| method == *r || method.starts_with(&format!("{r}_")))
+}
+
+/// tsk785: a store call in oxplow-rpc / oxplow-mcp is a read, or a write
+/// listed in `OFF_BUS` with its reason — and the doc's off-bus table names
+/// each listed one. A write through a store's async method used to slip
+/// past the transaction scan above.
+#[test]
+fn rpc_and_mcp_store_writes_are_listed_off_the_bus() {
+    let mut found: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut offenders = Vec::new();
+    for (path, text) in production_sources() {
+        if !(path.starts_with("crates/oxplow-rpc/") || path.starts_with("crates/oxplow-mcp/")) {
+            continue;
+        }
+        for (n, line) in text.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or("");
+            for (i, _) in code.match_indices("_store.") {
+                let start = code[..i]
+                    .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .map_or(0, |p| p + 1);
+                let rest = &code[i + "_store.".len()..];
+                let method: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if !rest[method.len()..].starts_with('(') || reads(&method) {
+                    continue;
+                }
+                let call = format!("{}_store.{method}", &code[start..i]);
+                if OFF_BUS.iter().any(|(p, c, _)| *p == path && *c == call) {
+                    found.insert((path.clone(), call));
+                } else {
+                    offenders.push(format!("{path}:{}: {}", n + 1, line.trim()));
+                }
+            }
+        }
+    }
+    assert_eq!(
+        offenders,
+        Vec::<String>::new(),
+        "a write through a store from RPC/MCP: make it a command, or list it in OFF_BUS and the doc's table"
+    );
+    let stale: Vec<_> = OFF_BUS
+        .iter()
+        .filter(|(p, c, _)| !found.contains(&(p.to_string(), c.to_string())))
+        .collect();
+    assert!(stale.is_empty(), "OFF_BUS rows no longer called: {stale:?}");
+    let doc = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.context/ipc-and-stores.md"),
+    )
+    .unwrap();
+    let missing: Vec<_> = OFF_BUS
+        .iter()
+        .filter(|(_, _, needle)| !doc.contains(needle))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "OFF_BUS rows the doc's table doesn't give: {missing:?}"
+    );
+}
+
 /// The `OxplowEvent` variants, as the wire names them (`kind`, camelCase).
 fn event_kinds() -> Vec<String> {
     let src = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/events.rs"))
