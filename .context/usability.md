@@ -198,6 +198,42 @@ Things I keep forgetting. Read this before adding any UI.
   buffer and the unsaved draft). See `App.tsx` →
   `handleCloseOpenFile`.
 
+## Actions that reach outside oxplow
+
+Some actions do something oxplow can't take back or doesn't own: a
+provider's service is written to, a browser sign-in starts, an effect
+runs again. The rule is the destructive one's — the person's second
+click is the confirmation — plus saying what is about to happen.
+
+- **A retry says what it might repeat** (P9.D4). Settings → Data →
+  Delivery lists an effect's failed reactions with why they failed;
+  **Retry** is an `InlineConfirm` whose title says a step outside oxplow
+  may already have run and that retrying sends it again
+  (`reaction-retry-<effect>-<event>-trigger` / `-confirm`).
+- **A count a person should see comes before the confirming click**
+  (P9.D5). A command's confirmation shows its summary and input, not
+  something computed; so **Backfill…** on an approved effect's row first
+  reads the plan (`effect.backfill_plan`), says how many events the
+  effect never reacted to and that it may call outside oxplow for each,
+  and offers "Run on N events" beside Cancel. Escape cancels; nothing to
+  do says so, with Close (`effect-backfill-<key>`,
+  `effect-backfill-ask-<key>`, `effect-backfill-run-<key>`).
+- **Signing in happens in the person's own browser** (P9.B3). A
+  credential obtained by signing in has no value box: its row shows
+  where it stands ("Not signed in", "Signed in", "Signed in until …",
+  "Sign in again: …"), **Sign in** / **Sign in again**, and **Sign out**
+  (an `InlineConfirm`) when signed in. Sign in opens the service's page
+  in the system browser — never oxplow's in-app window — and the row
+  says "Finish signing in in your browser…" until oxplow hears how it
+  went; a failure is shown on the row (`sign-in-<instance>-<name>`,
+  `sign-in-button-…`, `sign-out-…`).
+- **Adding an instance is a small form under the list** (P9.B6): the
+  provider (a select only when there is more than one), a name, and
+  whose it is ("This project's" / "Mine, in every project"). Enter adds,
+  Escape clears, and what's wrong with the name is said before Add can
+  be pressed. **Remove** is an `InlineConfirm` on a named instance; a
+  provider's own instance is turned off, not removed.
+
 ## Links open where you ask them to
 
 Any link that resolves to a page — wiki, task, file, directory, commit —

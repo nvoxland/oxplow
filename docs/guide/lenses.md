@@ -354,6 +354,34 @@ returns only new and changed rows, plus the keys it removed:
 
 Anything the run doesn't mention stays as it was.
 
+### Saying that something happened
+
+Rows tell you what is true now. To record that something *happened* (a
+pull request merged), an extension declares an event type and its
+collector returns events of it:
+
+```yaml
+event_types:
+  types:
+    - type: my_gh.merged         # <extension name with _>.<name>
+      v: 1
+      schema: event_types/merged.v1.json   # the payload's JSON Schema
+      summary: A pull request merged.
+```
+
+```json
+{"entities": {"pr": [...]}, "events": [{"type": "my_gh.merged", "payload": {"number": 12}}]}
+```
+
+The events land in the event log with the run that produced them, and you
+can read them in `v_event`. Limits:
+
+- A collector can only emit types its own extension declares.
+- At most 100 events a run.
+- It can't emit a type it also runs on (`trigger: { on: [...] }`).
+- Once a `type` at a version has been recorded, its schema is fixed. A new
+  shape is a new `v` with an `upcast` script.
+
 A complete example, which pulls this repo's pull requests and a lens that
 matches them to tasks, is in
 [`examples/extensions/github`](https://github.com/nvoxland/oxplow/tree/main/examples/extensions/github).
