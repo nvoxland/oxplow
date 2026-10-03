@@ -535,6 +535,15 @@ fn program_problem(spec: &ProviderSpec, read: &dyn Fn(&str) -> Option<String>) -
                                  the one sent as the server's bearer token)"
                             ));
                         }
+                        // A client secret is the host's to send with token
+                        // requests and never reaches the process.
+                        if spec.is_client_secret(auth) {
+                            return Some(format!(
+                                "provider `{id}`: `mcp.auth` names `{auth}`, but `{auth}` is a \
+                                 client secret — the host's alone, never sent to the server; \
+                                 name the credential the server takes as its bearer token"
+                            ));
+                        }
                     }
                 }
             }

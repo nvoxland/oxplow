@@ -271,7 +271,9 @@ added, removed or changed (`ProviderEffect.tools`).
 - The loader refuses a `url` that isn't https (plain http only on
   loopback — the bearer never crosses the network in the clear), a host
   the provider's `network` doesn't list, an `auth` that isn't one of its
-  `credentials`, and `auth` beside a `command`.
+  `credentials` or is one of them named as a `client_secret` (the host's
+  alone, never in the process's environment, so it could never reach the
+  server — tsk835), and `auth` beside a `command`.
 - **A `401` is `Auth`** (at the server's initialize, `tools/list` or a
   tool call), so a signed-in bearer is renewed and the call tried once
   more ("Credentials and sign-in"); a pasted one is a failure that says

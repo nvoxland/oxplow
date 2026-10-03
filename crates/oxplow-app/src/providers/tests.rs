@@ -3054,6 +3054,15 @@ async fn an_adapter_server_by_url_is_declared_and_checked() {
             "auth: OTHER }",
             "declares no credential `OTHER`",
         ),
+        // tsk835: a client secret is the host's alone — never the
+        // process's, so never its bearer either.
+        (
+            "    credentials: [NOTES_TOKEN]\n",
+            "    credentials:\n      - NOTES_TOKEN\n      - name: SIGNED_IN\n        oauth: \
+             { authorize_url: \"https://mcp.example.com/authorize\", token_url: \
+             \"https://mcp.example.com/token\", client_id: oxplow, client_secret: NOTES_TOKEN }\n",
+            "`NOTES_TOKEN` is a client secret",
+        ),
         (
             "    adapter:\n",
             "    args: [--x]\n    adapter:\n",
