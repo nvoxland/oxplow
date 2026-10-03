@@ -680,6 +680,27 @@ mod tests {
     use super::*;
     use oxplow_db::EffortStore as _;
 
+    /// tsk468: the EFFORT REVIEW names an effort and its work item by the
+    /// canonical ids `effort.amend` and `work_item.*` take, so an agent
+    /// can paste them straight back.
+    #[test]
+    fn the_effort_review_prints_canonical_ids() {
+        let review = PendingEffortReview {
+            effort_id: oxplow_domain::EffortId::new(313).to_string(),
+            work_item: oxplow_domain::refs::build::work_item_ref(oxplow_domain::TaskId::new(42)),
+            task_title: "Fix the thing".into(),
+            claimed_but_not_changed: vec!["src/a.rs".into()],
+            changed_but_not_claimed: vec![],
+            unclaimed_overflow: None,
+            unattributed_runs: vec![],
+        };
+        let text = build_effort_file_review_reason(&[review]);
+        assert!(
+            text.contains("  • [tsk42] Fix the thing (effort eff313)\n"),
+            "{text}"
+        );
+    }
+
     /// P3.4 (tsk474): a turn's signals are the tool events anchored to that
     /// turn — a read-only turn, a writing turn and a Q&A turn each read
     /// alone, whatever ran in the turns around them.
