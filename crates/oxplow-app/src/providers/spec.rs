@@ -316,9 +316,26 @@ impl ProviderSpec {
         self.credentials.iter().map(|c| c.name.clone()).collect()
     }
 
-    /// Its credentials as an approval lists them ([`CredentialDecl::grant`]).
+    /// Its credentials as an approval lists them ([`CredentialDecl::grant`]),
+    /// the one a server by url gets as its bearer token marked so — which
+    /// secret leaves the machine for it is part of what is approved
+    /// (tsk834).
     pub fn credential_grants(&self) -> Vec<String> {
-        self.credentials.iter().map(CredentialDecl::grant).collect()
+        let bearer = match self.adapter.as_ref().map(|a| &a.mcp) {
+            Some(McpServer::Url { auth, .. }) => auth.as_deref(),
+            _ => None,
+        };
+        self.credentials
+            .iter()
+            .map(|c| {
+                let grant = c.grant();
+                if bearer == Some(c.name.as_str()) {
+                    format!("{grant} (sent to the server as its bearer token)")
+                } else {
+                    grant
+                }
+            })
+            .collect()
     }
 
     /// Whether `name` is a client secret: a credential a signed-in one's

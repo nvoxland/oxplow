@@ -1900,7 +1900,7 @@ mod tests {
         let added = providers_diff(&[], &[by_url("https://mcp.example.com/mcp")]);
         assert_eq!(
             provider_phrases(&added[0])[0],
-            "added — runs oxplow's MCP adapter against https://mcp.example.com/mcp · reaches mcp.example.com · reads NOTES_TOKEN"
+            "added — runs oxplow's MCP adapter against https://mcp.example.com/mcp · reaches mcp.example.com · reads NOTES_TOKEN (sent to the server as its bearer token)"
         );
         let moved = providers_diff(
             &[by_url("https://mcp.example.com/mcp")],
@@ -1911,6 +1911,35 @@ mod tests {
             vec![
                 "now runs oxplow's MCP adapter against https://mcp.example.com/v2 (was oxplow's MCP adapter against https://mcp.example.com/mcp)"
             ]
+        );
+    }
+
+    /// tsk834: which credential goes to a server by url as its bearer is
+    /// part of what a person approves, so moving `auth` to another
+    /// declared credential says so — beside any other change.
+    #[test]
+    fn moving_a_url_servers_bearer_shows() {
+        let with = |auth: &str| {
+            let spec: ProviderSpec = serde_json::from_value(json!({
+                "id": "notes", "capability": "work_items", "declarations": "provider.json",
+                "adapter": { "mcp": { "url": "https://mcp.example.com/mcp", "auth": auth },
+                             "mapping": "mcp/x.star", "tools": "mcp/tools.json" },
+                "credentials": ["NOTES_TOKEN", "GITHUB_TOKEN"], "network": ["mcp.example.com"]
+            }))
+            .unwrap();
+            DeclaredProvider {
+                spec,
+                declarations: Some(oxplow_provider_fake::declarations()),
+                tools: Vec::new(),
+            }
+        };
+        let moved = providers_diff(&[with("NOTES_TOKEN")], &[with("GITHUB_TOKEN")]);
+        let phrases = provider_phrases(&moved[0]);
+        assert!(
+            phrases.iter().any(|p| p
+                == "now reads NOTES_TOKEN, GITHUB_TOKEN (sent to the server as its bearer token) \
+                    (was NOTES_TOKEN (sent to the server as its bearer token), GITHUB_TOKEN)"),
+            "{phrases:?}"
         );
     }
 

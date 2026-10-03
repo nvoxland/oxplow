@@ -291,7 +291,11 @@ added, removed or changed (`ProviderEffect.tools`).
   declarations and the grants — **not the server's code**, which runs
   elsewhere (`ProjectProgram.remote`: the hash covers the url's bytes
   where a local program's file would be; `args` carry the mapping, the
-  tools file and `--auth-env <NAME>`). What stands between a changed
+  tools file and `--auth-env <NAME>`). The approval's credentials line
+  marks the one sent as the bearer (`NAME (sent to the server as its
+  bearer token)`, `ProviderSpec::credential_grants`), so moving `auth` to
+  another declared credential shows in the diff as its own `now reads …`
+  line beside any other change (tsk834). What stands between a changed
   server and the project is the pin: `check` refuses a server whose
   tools aren't exactly `tools.json`. Data → Programs says so on its row
   ("The server runs elsewhere: its code isn't part of this approval…"),
