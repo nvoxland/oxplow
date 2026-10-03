@@ -18,6 +18,7 @@ pub mod log;
 pub mod lsp;
 pub mod menu;
 pub mod metrics;
+pub mod oauth_redirect;
 pub mod page_refs;
 pub mod page_visit;
 pub mod search;

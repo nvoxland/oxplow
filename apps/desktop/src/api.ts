@@ -1,5 +1,5 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
-import type { ExtensionChange, OpOutcome, ProviderEffect, Reads, Scope, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
+import type { ExtensionChange, OpOutcome, ProviderEffect, Reads, Scope, SignInCompletion, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
 import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
 export { onRemoteReconnect, triggerRemoteResync };
@@ -932,13 +932,26 @@ export async function setInstanceCredential(
 }
 
 /// Start signing in for one of an instance's credentials (one its provider
-/// declares with `oauth:`): the page to open in the person's browser. The
-/// outcome arrives as the `credentialChanged` event.
-export async function beginOauthSignIn(instance: string, name: string): Promise<string> {
-  return unwrap(await commands.beginOauthSignIn(instance, name));
+/// declares with `oauth:`), its redirect coming back to `redirectPort`
+/// where the shell listens: the page to open in the person's browser.
+export async function beginOauthSignIn(instance: string, name: string, redirectPort: number): Promise<string> {
+  return unwrap(await commands.beginOauthSignIn(instance, name, redirectPort));
+}
+
+/// Hand the redirect the shell caught (its path and query) to the core:
+/// signed in, failed, or not this sign-in's (it waits on). The renderer
+/// also hears `credentialChanged` when it ends.
+export async function completeOauthSignIn(instance: string, name: string, redirect: string): Promise<SignInCompletion> {
+  return unwrap(await commands.completeOauthSignIn(instance, name, redirect));
 }
 
 export { openInSystemBrowser } from "./tauri-bridge/systemBrowser.js";
+export {
+  answerSignInRedirect,
+  awaitSignInRedirect,
+  canCatchSignInRedirect,
+  listenForSignInRedirect,
+} from "./tauri-bridge/oauthRedirect.js";
 
 /// The ACP agents this project can run (the new-thread picker).
 export async function listAcpAgents(): Promise<AcpAgentListing[]> {

@@ -7,9 +7,12 @@
 
 export const SHELL_COMMANDS = [
   "abort_setup",
+  "answer_oauth_redirect",
+  "await_oauth_redirect",
   "clipboard_read_text",
   "create_project",
   "list_recent_projects",
+  "listen_for_oauth_redirect",
   "open_external_url",
   "open_project",
   "remove_recent_project",

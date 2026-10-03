@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use oxplow_domain::{Actor, ThreadId};
+use oxplow_domain::{Actor, DomainError, ThreadId};
 use oxplow_oauth_sim::OAuthSim;
 use serde_json::json;
 
@@ -3104,19 +3104,48 @@ async fn signing_in(hooks: &str, more: &str) -> (EffortFixture, OAuthSim) {
     (fx, sim)
 }
 
-/// Start a sign-in and do what the person's browser does: open the page,
-/// follow it back to oxplow. What the renderer then hears.
+/// The port the shell catches a test sign-in's redirect on. Nothing
+/// listens: the redirect is read off the authorization server's answer
+/// and handed over as the shell would.
+const REDIRECT_PORT: u16 = 8124;
+
+/// What the person's browser does with a sign-in's page: the redirect it
+/// is sent back with, as the shell catches it (its path and query).
+async fn browse(page: &str) -> String {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let resp = client.get(page).send().await.unwrap();
+    let to = url::Url::parse(resp.headers()["location"].to_str().unwrap()).unwrap();
+    format!("{}?{}", to.path(), to.query().unwrap_or_default())
+}
+
+/// Hand `redirect` to the sign-in for `name`, as the shell does.
+async fn complete(
+    fx: &EffortFixture,
+    name: &str,
+    redirect: &str,
+) -> Result<SignInCompletion, DomainError> {
+    fx.svc
+        .providers
+        .complete_sign_in(INSTANCE, name, redirect)
+        .await
+}
+
+/// Start a sign-in, do what the person's browser does, and hand the
+/// redirect over as the shell does. What the renderer then hears.
 async fn sign_in(fx: &EffortFixture, name: &str) -> Option<String> {
     let mut ui = fx.svc.events.subscribe_ui();
-    let url = fx
+    let page = fx
         .svc
         .providers
-        .begin_sign_in(INSTANCE, name)
+        .begin_sign_in(INSTANCE, name, REDIRECT_PORT)
         .await
         .expect("the sign-in begins");
-    reqwest::get(&url)
+    let completion = complete(fx, name, &browse(&page).await)
         .await
-        .expect("the browser follows it back");
+        .expect("it is under way");
     let heard = async {
         loop {
             if let Ok(crate::events::OxplowEvent::CredentialChanged {
@@ -3130,9 +3159,19 @@ async fn sign_in(fx: &EffortFixture, name: &str) -> Option<String> {
             }
         }
     };
-    tokio::time::timeout(std::time::Duration::from_secs(20), heard)
+    let error = tokio::time::timeout(std::time::Duration::from_secs(20), heard)
         .await
-        .expect("the renderer hears the sign-in finished")
+        .expect("the renderer hears the sign-in finished");
+    assert_eq!(
+        completion,
+        match &error {
+            None => SignInCompletion::SignedIn,
+            Some(error) => SignInCompletion::Failed {
+                error: error.clone()
+            },
+        }
+    );
+    error
 }
 
 fn sign_in_state(views: &[ProviderInstanceView], name: &str) -> (bool, Option<oauth::SignInState>) {
@@ -3188,7 +3227,7 @@ async fn signing_in_starts_the_instance_on_the_access_token_alone() {
         .to_string();
     assert!(refused.contains("sign in"), "{refused}");
     let refused = providers
-        .begin_sign_in(INSTANCE, "PLAIN")
+        .begin_sign_in(INSTANCE, "PLAIN", REDIRECT_PORT)
         .await
         .unwrap_err()
         .to_string();
@@ -3443,7 +3482,7 @@ async fn a_client_secret_goes_to_the_token_endpoint_and_not_to_the_process() {
     let providers = &fx.svc.providers;
     configure(&fx, true, json!({ "team": "core" }));
     let refused = providers
-        .begin_sign_in(INSTANCE, "FAKE_TOKEN")
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
         .await
         .unwrap_err()
         .to_string();
@@ -3465,61 +3504,59 @@ async fn a_client_secret_goes_to_the_token_endpoint_and_not_to_the_process() {
 }
 
 /// P9.B3: starting a sign-in again abandons the one under way — its
-/// listener stops at once (a fixed `redirect_port` is free for the new
-/// one) and it stores nothing; removing the instance abandons it too.
+/// redirect is no longer the sign-in's, and it stores nothing; removing
+/// the instance abandons it too.
 #[tokio::test]
 async fn a_newer_sign_in_replaces_the_one_under_way() {
-    let port = {
-        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        l.local_addr().unwrap().port()
-    };
-    let (fx, sim) = signing_in("", &format!("          redirect_port: {port}\n")).await;
+    let (fx, sim) = signing_in("", "").await;
     let providers = &fx.svc.providers;
     configure(&fx, true, json!({ "team": "core" }));
     let first = providers
-        .begin_sign_in(INSTANCE, "FAKE_TOKEN")
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
         .await
         .unwrap();
-    assert!(first.contains(&format!("127.0.0.1%3A{port}")), "{first}");
-    // The second takes the same port: the first no longer listens.
     let second = providers
-        .begin_sign_in(INSTANCE, "FAKE_TOKEN")
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
         .await
         .unwrap();
-    // The first's page now comes back to the second's listener, which
-    // refuses it: its `state` isn't the one the second started with.
-    let stale = reqwest::get(&first).await.unwrap();
-    assert_eq!(stale.status().as_u16(), 400);
+    // The first's redirect comes back to the second, which refuses it:
+    // its `state` isn't the one the second started with.
+    let stale = complete(&fx, "FAKE_TOKEN", &browse(&first).await)
+        .await
+        .unwrap();
+    assert!(
+        matches!(stale, SignInCompletion::NotThisSignIn { .. }),
+        "{stale:?}"
+    );
     assert!(
         sim.grants().is_empty(),
         "no code of the first was exchanged"
     );
     // The second, still waiting, finishes.
-    let mut ui = fx.svc.events.subscribe_ui();
-    assert!(reqwest::get(&second).await.unwrap().status().is_success());
-    loop {
-        if let Ok(crate::events::OxplowEvent::CredentialChanged { error, .. }) = ui.recv().await {
-            assert_eq!(error, None);
-            break;
-        }
-    }
+    assert_eq!(
+        complete(&fx, "FAKE_TOKEN", &browse(&second).await)
+            .await
+            .unwrap(),
+        SignInCompletion::SignedIn
+    );
     assert_eq!(sim.grants(), vec!["authorization_code"]);
 
-    // Removing the instance abandons a sign-in under way: the port is
-    // free again, and nothing is kept for what's gone.
+    // Removing the instance abandons a sign-in under way: its redirect
+    // finds none, and nothing is kept for what's gone.
     let third = providers
-        .begin_sign_in(INSTANCE, "FAKE_TOKEN")
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
         .await
         .unwrap();
     providers
         .remove_instance(&Actor::Human, INSTANCE)
         .await
         .unwrap();
-    std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
-    assert!(
-        reqwest::get(&third).await.is_err(),
-        "nothing answers its page"
-    );
+    let refused = complete(&fx, "FAKE_TOKEN", &browse(&third).await)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("under way"), "{refused}");
+    assert_eq!(sim.grants(), vec!["authorization_code"]);
     let account = crate::collector_runner::instance_credential_account(
         &fx.svc.providers.deps.project,
         EXT,
@@ -3527,6 +3564,126 @@ async fn a_newer_sign_in_replaces_the_one_under_way() {
         "FAKE_TOKEN",
     );
     assert_eq!(fx.svc.secrets.get(&account).unwrap(), None, "no token kept");
+}
+
+/// P10: a redirect that isn't the sign-in's (another `state`: someone
+/// else's page sent the browser there) does nothing, and the sign-in
+/// waits on for the real one.
+#[tokio::test]
+async fn a_redirect_with_another_state_is_refused_and_the_wait_goes_on() {
+    let (fx, sim) = signing_in("", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    let page = fx
+        .svc
+        .providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    let forged = complete(&fx, "FAKE_TOKEN", "/callback?code=stolen&state=forged")
+        .await
+        .unwrap();
+    assert!(
+        matches!(&forged, SignInCompletion::NotThisSignIn { reason } if reason.contains("isn't the sign-in")),
+        "{forged:?}"
+    );
+    assert!(sim.grants().is_empty(), "nothing was exchanged");
+    assert_eq!(
+        complete(&fx, "FAKE_TOKEN", &browse(&page).await)
+            .await
+            .unwrap(),
+        SignInCompletion::SignedIn
+    );
+}
+
+/// P10: a sign-in ends when it is completed: the same redirect again
+/// finds none under way, and its code is exchanged once.
+#[tokio::test]
+async fn a_completed_sign_in_cannot_be_completed_again() {
+    let (fx, sim) = signing_in("", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    let page = fx
+        .svc
+        .providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    let redirect = browse(&page).await;
+    assert_eq!(
+        complete(&fx, "FAKE_TOKEN", &redirect).await.unwrap(),
+        SignInCompletion::SignedIn
+    );
+    let again = complete(&fx, "FAKE_TOKEN", &redirect)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(again.contains("under way"), "{again}");
+    assert_eq!(sim.grants(), vec!["authorization_code"]);
+}
+
+/// P10: finishing re-checks what was approved: a provider whose token
+/// endpoint changed since the sign-in began sends its code nowhere.
+#[tokio::test]
+async fn a_sign_in_whose_endpoints_changed_meanwhile_sends_nothing() {
+    let (fx, sim) = signing_in("", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    let page = fx
+        .svc
+        .providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    let redirect = browse(&page).await;
+    write_oauth_extension(
+        &fx.svc.layout.project_dir,
+        "",
+        &sim.authorize_url,
+        "https://elsewhere.example/token",
+        "",
+    );
+    let failed = complete(&fx, "FAKE_TOKEN", &redirect).await.unwrap();
+    assert!(
+        matches!(&failed, SignInCompletion::Failed { error } if error.contains("approv")),
+        "{failed:?}"
+    );
+    assert!(
+        sim.grants().is_empty(),
+        "nothing reached any token endpoint"
+    );
+}
+
+/// P10: a sign-in never finished ends after its wait: the renderer hears
+/// why, and its redirect, coming late, finds none under way.
+#[tokio::test]
+async fn an_unfinished_sign_in_ends_after_its_wait() {
+    let (fx, _sim) = signing_in("", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    let mut ui = fx.svc.events.subscribe_ui();
+    let page = fx
+        .svc
+        .providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
+    let redirect = browse(&page).await;
+    tokio::time::pause();
+    tokio::time::advance(oauth::SIGN_IN_WAIT + std::time::Duration::from_secs(1)).await;
+    let error = loop {
+        if let Ok(crate::events::OxplowEvent::CredentialChanged { error, .. }) = ui.recv().await {
+            break error;
+        }
+    };
+    assert!(
+        error
+            .as_deref()
+            .is_some_and(|e| e.contains("wasn't finished")),
+        "{error:?}"
+    );
+    tokio::time::resume();
+    let late = complete(&fx, "FAKE_TOKEN", &redirect)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(late.contains("under way"), "{late}");
 }
 
 /// The adapter manifest with its server reached by url, authenticated by
@@ -3710,7 +3867,7 @@ async fn sign_in_is_refused_until_the_endpoints_are_approved() {
     let refused = fx
         .svc
         .providers
-        .begin_sign_in(INSTANCE, "FAKE_TOKEN")
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
         .await
         .unwrap_err()
         .to_string();
@@ -3734,40 +3891,33 @@ async fn sign_in_is_refused_until_the_endpoints_are_approved() {
     assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
 }
 
-/// A port no one listens on now.
-fn free_port() -> u16 {
-    let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    l.local_addr().unwrap().port()
-}
-
 /// tsk826: two sign-ins for one credential started at once leave one
-/// listening — the later one — and the earlier one's page leads nowhere.
+/// under way — the later one — and the earlier one's redirect does
+/// nothing.
 #[tokio::test(flavor = "multi_thread")]
-async fn two_sign_ins_at_once_leave_one_listening() {
-    let port = free_port();
-    let (fx, sim) = signing_in("", &format!("          redirect_port: {port}\n")).await;
+async fn two_sign_ins_at_once_leave_one_under_way() {
+    let (fx, sim) = signing_in("", "").await;
     configure(&fx, true, json!({ "team": "core" }));
     let svc = fx.svc.clone();
-    let (a, b) = tokio::join!(
-        tokio::spawn({
-            let svc = svc.clone();
-            async move { svc.providers.begin_sign_in(INSTANCE, "FAKE_TOKEN").await }
-        }),
-        tokio::spawn({
-            let svc = svc.clone();
-            async move { svc.providers.begin_sign_in(INSTANCE, "FAKE_TOKEN").await }
-        }),
-    );
+    let begin = || {
+        let svc = svc.clone();
+        tokio::spawn(async move {
+            svc.providers
+                .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
+                .await
+        })
+    };
+    let (a, b) = tokio::join!(begin(), begin());
     let (a, b) = (a.unwrap().unwrap(), b.unwrap().unwrap());
-    let mut ok = 0;
-    for url in [&a, &b] {
-        if let Ok(resp) = reqwest::get(url.as_str()).await {
-            if resp.status().is_success() {
-                ok += 1;
-            }
+    let mut signed_in = 0;
+    for page in [&a, &b] {
+        if let Ok(SignInCompletion::SignedIn) =
+            complete(&fx, "FAKE_TOKEN", &browse(page).await).await
+        {
+            signed_in += 1;
         }
     }
-    assert_eq!(ok, 1, "exactly one sign-in is still listening");
+    assert_eq!(signed_in, 1, "exactly one sign-in was under way");
     assert_eq!(sim.grants(), vec!["authorization_code"]);
 }
 
@@ -3775,20 +3925,27 @@ async fn two_sign_ins_at_once_leave_one_listening() {
 /// sign-in under way for it too.
 #[tokio::test]
 async fn removing_a_project_replacement_ends_its_sign_in() {
-    let port = free_port();
-    let (fx, _sim) = signing_in("", &format!("          redirect_port: {port}\n")).await;
+    let (fx, _sim) = signing_in("", "").await;
     let providers = &fx.svc.providers;
     providers
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
         .await
         .unwrap();
     configure_named(&fx, SHARED, Some("fake"), json!({ "team": "mine" }));
-    providers.begin_sign_in(SHARED, "FAKE_TOKEN").await.unwrap();
+    let page = providers
+        .begin_sign_in(SHARED, "FAKE_TOKEN", REDIRECT_PORT)
+        .await
+        .unwrap();
     providers
         .remove_instance(&Actor::Human, SHARED)
         .await
         .unwrap();
-    std::net::TcpListener::bind(("127.0.0.1", port)).expect("its sign-in stopped listening");
+    let refused = providers
+        .complete_sign_in(SHARED, "FAKE_TOKEN", &browse(&page).await)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("under way"), "{refused}");
 }
 
 /// tsk828: several calls refused at once renew the sign-in once, and each

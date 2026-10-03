@@ -4959,6 +4959,7 @@ dependencies = [
  "oxplow-rpc",
  "oxplow-sdk",
  "oxplow-session",
+ "parking_lot",
  "serde",
  "serde_json",
  "similar",

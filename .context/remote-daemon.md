@@ -73,6 +73,15 @@ developer-facing mechanics.
   structured "unknown command" instead of the renderer throwing on a
   missing `__TAURI_INTERNALS__`.
 
+  **Signing in to a provider works the same with a remote daemon** (P10):
+  the service sends the browser back to a loopback port on the person's
+  machine, so the shell listens there (`listen_for_oauth_redirect`,
+  `await_oauth_redirect`, `answer_oauth_redirect` — shell commands) and
+  the renderer hands each redirect to the daemon
+  (`complete_oauth_sign_in`). The core never listens for one. A plain
+  browser on a daemon has no shell, so its Sign in is off with the
+  reason (`.context/providers.md` → "Credentials and sign-in").
+
   Every channel
   `listen()` accepts is declared in `channels.ts`'s `CHANNEL_ROUTING`
   registry with a routing class (`multiplexed` = daemon WS in remote /

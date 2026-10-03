@@ -96,16 +96,37 @@ pub async fn set_instance_credential(
 }
 
 /// Start signing in for one of `instance`'s credentials (one its
-/// provider declares with `oauth:`): the page the person signs in on, to
-/// open in their browser. When they have, the token is kept in this
-/// machine's keychain, the instance restarts on it, and the renderer
-/// hears `credentialChanged`. UI only: an agent never signs in.
+/// provider declares with `oauth:`), its redirect coming back to
+/// `redirect_port` on the person's machine, where the desktop shell
+/// listens: the page the person signs in on, to open in their browser.
+/// UI only: an agent never signs in.
 pub async fn begin_oauth_sign_in(
     svc: &Services,
     instance: String,
     name: String,
+    redirect_port: u16,
 ) -> Result<String, IpcError> {
-    Ok(svc.providers.begin_sign_in(&instance, &name).await?)
+    Ok(svc
+        .providers
+        .begin_sign_in(&instance, &name, redirect_port)
+        .await?)
+}
+
+/// The redirect the shell caught for that sign-in (`redirect`: the path
+/// and query the browser asked for). Not that sign-in's: refused, and it
+/// waits on. Its: the token is kept in this machine's keychain, the
+/// instance restarts on it, and the renderer hears `credentialChanged`.
+/// UI only: an agent never signs in.
+pub async fn complete_oauth_sign_in(
+    svc: &Services,
+    instance: String,
+    name: String,
+    redirect: String,
+) -> Result<oxplow_app::providers::SignInCompletion, IpcError> {
+    Ok(svc
+        .providers
+        .complete_sign_in(&instance, &name, &redirect)
+        .await?)
 }
 
 #[cfg(test)]
@@ -151,7 +172,11 @@ mod tests {
             ),
             (
                 "begin_oauth_sign_in",
-                json!({ "instance": "tracker/fake", "name": "TOKEN" }),
+                json!({ "instance": "tracker/fake", "name": "TOKEN", "redirectPort": 8124 }),
+            ),
+            (
+                "complete_oauth_sign_in",
+                json!({ "instance": "tracker/fake", "name": "TOKEN", "redirect": "/callback" }),
             ),
         ] {
             let refused = crate::dispatch(name, input, &svc).await.unwrap_err();

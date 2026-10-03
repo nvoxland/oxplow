@@ -1,5 +1,6 @@
 //! P10: a signed-in bearer, end to end — the person signs in at the
-//! stand-in authorization server (`oxplow-oauth-sim`), a by-url MCP
+//! stand-in authorization server (`oxplow-oauth-sim`), the redirect
+//! caught by the shell's listener and handed to the core, a by-url MCP
 //! instance runs on that token, the server stops taking it, and the next
 //! call renews once and lands.
 
@@ -10,6 +11,7 @@ use std::sync::Arc;
 
 use oxplow_app::events::OxplowEvent;
 use oxplow_app::providers::registry::InstanceState;
+use oxplow_app::providers::SignInCompletion;
 use oxplow_domain::Actor;
 use oxplow_oauth_sim::OAuthSim;
 use serde_json::json;
@@ -115,15 +117,28 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
         },
     );
 
-    // Sign in: what the person's browser does — open the page, follow it
-    // back to oxplow.
+    // Sign in as the desktop does: the shell listens for the redirect,
+    // the person's browser opens the page and comes back to it, and the
+    // shell hands the redirect to the core and answers the browser.
     let mut ui = svc.events.subscribe_ui();
-    let url = svc
-        .providers
-        .begin_sign_in(INSTANCE, "NOTES_TOKEN")
+    let mut listener = oxplow_app::oauth_redirect::RedirectListener::bind(0)
         .await
         .unwrap();
-    reqwest::get(&url).await.unwrap();
+    let page = svc
+        .providers
+        .begin_sign_in(INSTANCE, "NOTES_TOKEN", listener.port())
+        .await
+        .unwrap();
+    let browser = tokio::spawn(async move { reqwest::get(&page).await.unwrap().status() });
+    let redirect = listener.next().await.unwrap();
+    let completion = svc
+        .providers
+        .complete_sign_in(INSTANCE, "NOTES_TOKEN", &redirect.target)
+        .await
+        .unwrap();
+    assert_eq!(completion, SignInCompletion::SignedIn);
+    redirect.answer(true, "Signed in.").await;
+    assert!(browser.await.unwrap().is_success());
     let signed_in = async {
         loop {
             if let Ok(OxplowEvent::CredentialChanged { name, error, .. }) = ui.recv().await {

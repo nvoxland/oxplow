@@ -601,18 +601,25 @@ pasted credential of the same provider. Collectors keep the bare-name
 form; sign-in is a provider's.
 
 - **oxplow runs the flow, not the provider.** Authorization code with
-  PKCE (S256, always) and a loopback redirect (RFC 8252): `oauth::begin`
-  listens on `127.0.0.1` (an ephemeral port, or `redirect_port`), and
-  answers only `GET /callback` carrying this sign-in's `state` — anything
-  else is refused and the wait goes on — then exchanges the code with the
-  verifier only this process holds. It is hand-rolled (two form POSTs
-  over reqwest), one mechanism for every provider. The listener is its
-  own, not a daemon route: the daemon is per project and bearer-gated,
-  and a global instance's sign-in belongs to no project. It waits five
-  minutes; a sign-in nobody waits for any more stops listening. Each
-  connection is read on its own task with a deadline (10 s) and caps
-  (16 KiB head, 64 KiB body), so an idle or oversized connection gets a
-  `400` and never holds up the real redirect (tsk825).
+  PKCE (S256, always) and a loopback redirect (RFC 8252). The core
+  starts it and finishes it; **the desktop shell catches the redirect**
+  (P10), so it lands where the person's browser is whether the core runs
+  here or on a remote daemon, and the core never binds a socket for a
+  sign-in (guard `the_core_never_binds_a_socket_for_a_sign_in`).
+  `oauth::begin(decl, client_secret, redirect_port)` builds the page
+  (`redirect_uri` `http://127.0.0.1:<redirect_port>/callback`) and a
+  `PendingSignIn` holding the `state` and the PKCE verifier only the core
+  holds; a provider that declares `redirect_port` is signed in for on
+  that port only. `PendingSignIn::redirected` takes the path and query
+  the shell caught: only `/callback` with this sign-in's `state` is its —
+  anything else does nothing and the sign-in waits on — and
+  `PendingSignIn::exchange` trades the code. It is hand-rolled (two form
+  POSTs over reqwest), one mechanism for every provider. The listener
+  (`oauth_redirect::RedirectListener`, used only by the shell) answers
+  anything but `GET /callback` itself, reads each connection on its own
+  task with a deadline (10 s) and a 16 KiB head cap, and never reads a
+  body, so an idle or oversized connection never holds up the real
+  redirect (tsk825).
 - **Token requests** (`token_request`): the client secret goes in an
   HTTP Basic header (`client_secret_basic`, each half form-encoded — RFC
   6749 §2.3.1; the default every server must accept) or, with
@@ -664,38 +671,56 @@ form; sign-in is a provider's.
   can't be reached is an ordinary failed start (backoff), and a token
   that's still good is used as it is.
 - **Signing in** is a person's: IPC `begin_oauth_sign_in { instance,
-  name }` (`ProviderRegistry::begin_sign_in`, UI-only) returns the page
-  to open — **only for a provider approved as it is now** (tsk824): the
+  name, redirect_port }` (`ProviderRegistry::begin_sign_in`, UI-only)
+  returns the page to open — **only for a provider approved as it is now** (tsk824): the
   endpoints, client id and client-secret name are part of the approval,
   and a sign-in sends the code, the PKCE verifier and the client secret
   to them, so an edited endpoint is refused until a person approves it
   again (the row's Sign in is off meanwhile); the renderer opens it in **the person's own browser**
   (`tauri-bridge/systemBrowser.ts`, not the sandboxed external-URL
   window — their sessions live there and services refuse embedded
-  webviews). When the redirect lands the token is stored,
-  `credential_changed` restarts the instance on it, and the renderer
-  hears `CredentialChanged { instance, name, error }` — the keychain is
-  no model, so this is one of the bus's UI-only signals. A second
-  sign-in for the same credential abandons the first. Sign-ins are
-  tracked per instance and credential (`sign_ins`, each with a sequence
-  number): `begin_sign_in` holds `sign_in_gate` while it abandons the
-  old one, binds the listener and records the new one, so two clicks at
-  once leave one listening; a finished sign-in untracks itself only if
-  it is still the tracked one. Removing an instance — a project entry
-  that uncovers a global one too — abandons its sign-ins first, so
-  nothing is kept for what's gone (tsk826). The row's Sign in is off
-  while one starts.
+  webviews). The row runs it (`SignInRow`): the shell listens
+  (`listen_for_oauth_redirect { port? }`, shell-only — on the
+  credential's `redirectPort`, else any free port), the core begins on
+  that port, the browser opens the page, and each redirect the shell
+  catches (`await_oauth_redirect { port }`) goes to the core by IPC
+  `complete_oauth_sign_in { instance, name, redirect }` (UI-only), the
+  shell answering the browser with the core's verdict
+  (`answer_oauth_redirect { port, outcome }`). `SignInCompletion` is
+  `signed_in`, `failed { error }`, or `not_this_sign_in { reason }` —
+  refused, nothing done, the wait goes on. A match ends the sign-in: the
+  provider is re-checked as approved with the declaration it began with
+  (an endpoint edited meanwhile gets nothing), the code is exchanged, the
+  token stored, `credential_changed` restarts the instance on it, and
+  the renderer hears `CredentialChanged { instance, name, error }` — the
+  keychain is no model, so this is one of the bus's UI-only signals. A
+  completed sign-in can't be completed again. Sign-ins are tracked per
+  instance and credential (`sign_ins`, each with a sequence number and
+  an expiry timer): one not finished within five minutes
+  (`oauth::SIGN_IN_WAIT`) ends, and the renderer hears why; the shell's
+  listener stops by then too. A second sign-in for the same credential
+  abandons the first (its redirect is no longer the sign-in's; the row
+  stops its listener). `sign_in_gate` is held while one begins,
+  finishes — across the code exchange — expires or is abandoned, so two
+  clicks at once leave one under way, and removing an instance — a
+  project entry that uncovers a global one too — waits for a finish in
+  flight and abandons its sign-ins first, so nothing is kept for what's
+  gone (tsk826). The row's Sign in is off while one starts, and off
+  without the desktop app (a plain browser can't catch the redirect),
+  with the reason shown.
   `set_instance_credential` refuses a value for a signed-in credential;
   with no value it signs out.
 - **The view**: `ProviderInstanceView.credentials` is
-  `InstanceCredential { name, set, sign_in? }`, `sign_in` being
+  `InstanceCredential { name, set, sign_in?, redirect_port? }`
+  (`redirect_port`: the declared one, where the shell must listen), `sign_in` being
   `not_signed_in | signed_in { until? } | sign_in_again` (`until` only
   for a token that can't renew itself). The Integrations row shows a
   **Sign in** / **Sign in again** button and **Sign out** instead of a
   value box (`signInLine`).
-- **Limits.** With a remote daemon the redirect lands on the daemon's
-  machine, so sign-in works only where the browser and the core share a
-  host (a tunnel to `redirect_port` otherwise). No real OAuth service
+- **Limits.** Only the desktop app can sign in (a plain browser on a
+  daemon can't catch the redirect). A declared `redirect_port` already in
+  use on the person's machine fails the listen, with the reason on the
+  row. No real OAuth service
   has been exercised: the tests run against **`oxplow-oauth-sim`**
   (`crates/oxplow-oauth-sim`, axum), a stand-in authorization server
   that holds each code to the client, redirect and PKCE challenge it was

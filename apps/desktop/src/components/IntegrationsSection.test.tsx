@@ -22,6 +22,13 @@ const offHere: string[] = [];
 /** Further instances the listing returns after the provider's own. */
 let more: unknown[] = [];
 const browsed: string[] = [];
+/** The sign-in's steps, in order (P10: the shell listens, the core begins,
+ *  the browser opens, each redirect goes to the core, the browser hears). */
+const steps: string[] = [];
+/** Whether this window is the desktop app (only it can sign in). */
+let shellPresent = true;
+/** What each wait for a redirect returns, in turn (then none comes). */
+let redirects: string[] = [];
 const listeners = new Set<(event: Record<string, unknown>) => void>();
 const instance = {
   instance: "tracker/fake",
@@ -71,13 +78,34 @@ mock.module("../api.js", () => ({
     listeners.add(fn);
     return () => listeners.delete(fn);
   },
-  beginOauthSignIn: async (inst: string, name: string) => {
+  canCatchSignInRedirect: () => shellPresent,
+  listenForSignInRedirect: async (port: number | null) => {
+    steps.push(`listen ${port}`);
+    return 5555;
+  },
+  beginOauthSignIn: async (inst: string, name: string, port: number) => {
     signIns.push([inst, name]);
+    steps.push(`begin ${inst} ${name} ${port}`);
     await signInGate;
     return "https://auth.example.com/authorize?state=abc";
   },
   openInSystemBrowser: async (url: string) => {
     browsed.push(url);
+    steps.push(`open ${url}`);
+  },
+  awaitSignInRedirect: (port: number) => {
+    steps.push(`await ${port}`);
+    const next = redirects.shift();
+    return next === undefined ? new Promise<string>(() => {}) : Promise.resolve(next);
+  },
+  completeOauthSignIn: async (_inst: string, _name: string, redirect: string) => {
+    steps.push(`complete ${redirect}`);
+    return redirect.includes("forged")
+      ? { outcome: "not_this_sign_in", reason: "this isn't the sign-in oxplow started" }
+      : { outcome: "signed_in" };
+  },
+  answerSignInRedirect: async (port: number, outcome: { outcome: string }) => {
+    steps.push(`answer ${port} ${outcome.outcome}`);
   },
   setInstanceCredential: async (inst: string, name: string, value: string | null) => {
     credentialSaves.push([inst, name, value]);
@@ -102,6 +130,9 @@ afterEach(() => {
   offHere.length = 0;
   more = [];
   browsed.length = 0;
+  steps.length = 0;
+  redirects = [];
+  shellPresent = true;
   instance.credentials = STATIC_CREDENTIALS;
   active = null;
   replacementsOff = [];
@@ -182,15 +213,27 @@ test("a credential is saved to its instance", async () => {
 // has a Sign in button, which opens the provider's page in their browser,
 // and says how it went when oxplow hears.
 test("a signed-in credential has a Sign in button and no value box", async () => {
-  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" } }];
+  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" }, redirectPort: null }];
   const view = render(<IntegrationsSection />);
   const row = await waitFor(() => view.getByTestId("sign-in-tracker/fake-FAKE_TOKEN"));
   expect(row.querySelector("input")).toBeNull();
   expect(row.textContent).toContain("Not signed in");
   expect(view.queryByTestId("sign-out-tracker/fake-FAKE_TOKEN-trigger")).toBeNull();
+  // Someone else's redirect comes first: refused, and the wait goes on.
+  redirects = ["/callback?code=x&state=forged", "/callback?code=c&state=abc"];
   fireEvent.click(view.getByTestId("sign-in-button-tracker/fake-FAKE_TOKEN"));
-  await waitFor(() => expect(browsed).toEqual(["https://auth.example.com/authorize?state=abc"]));
-  expect(signIns).toEqual([["tracker/fake", "FAKE_TOKEN"]]);
+  await waitFor(() => expect(steps.at(-1)).toBe("answer 5555 signed_in"));
+  expect(steps).toEqual([
+    "listen null",
+    "begin tracker/fake FAKE_TOKEN 5555",
+    "open https://auth.example.com/authorize?state=abc",
+    "await 5555",
+    "complete /callback?code=x&state=forged",
+    "answer 5555 not_this_sign_in",
+    "await 5555",
+    "complete /callback?code=c&state=abc",
+    "answer 5555 signed_in",
+  ]);
   await waitFor(() => expect(row.textContent).toContain("Finish signing in in your browser"));
 
   // It came to nothing: why, on the row.
@@ -203,7 +246,7 @@ test("a signed-in credential has a Sign in button and no value box", async () =>
   expect(row.textContent).not.toContain("Finish signing in");
 
   // It worked: the instances are read again.
-  instance.credentials = [{ name: "FAKE_TOKEN", set: true, signIn: { state: "signed_in", until: null } }];
+  instance.credentials = [{ name: "FAKE_TOKEN", set: true, signIn: { state: "signed_in", until: null }, redirectPort: null }];
   hear(null);
   await waitFor(() => expect(view.getByTestId("sign-in-tracker/fake-FAKE_TOKEN").textContent).toContain("Signed in"));
   expect(view.getByTestId("sign-in-tracker/fake-FAKE_TOKEN").textContent).not.toContain("access_denied");
@@ -249,7 +292,7 @@ test("an instance is added by name and scope, and a named one removed", async ()
 // tsk824: where a credential signs in is part of what a person approves, so
 // an unapproved provider's Sign in is off (the core refuses it too).
 test("Sign in is off while the provider isn't approved", async () => {
-  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" } }];
+  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" }, redirectPort: null }];
   const approved = instance.approved;
   instance.approved = false;
   try {
@@ -264,9 +307,30 @@ test("Sign in is off while the provider isn't approved", async () => {
   }
 });
 
+// P10: the redirect comes back to the person's machine, where only the
+// desktop app can listen: a plain browser can't sign in, and says why.
+test("Sign in is off without the desktop app", async () => {
+  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" }, redirectPort: null }];
+  shellPresent = false;
+  const view = render(<IntegrationsSection />);
+  const button = (await waitFor(() => view.getByTestId("sign-in-button-tracker/fake-FAKE_TOKEN"))) as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  expect(button.title).toContain("desktop app");
+  fireEvent.click(button);
+  expect(steps).toEqual([]);
+});
+
+// A service with its redirect port registered is listened for there.
+test("a registered redirect port is the one the shell listens on", async () => {
+  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" }, redirectPort: 8765 }];
+  const view = render(<IntegrationsSection />);
+  fireEvent.click(await waitFor(() => view.getByTestId("sign-in-button-tracker/fake-FAKE_TOKEN")));
+  await waitFor(() => expect(steps[0]).toBe("listen 8765"));
+});
+
 // tsk826: a second click while a sign-in is starting doesn't start another.
 test("Sign in is off while a sign-in starts", async () => {
-  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" } }];
+  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" }, redirectPort: null }];
   let release = () => {};
   signInGate = new Promise((resolve) => {
     release = resolve;

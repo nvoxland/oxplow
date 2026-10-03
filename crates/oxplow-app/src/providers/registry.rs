@@ -205,13 +205,35 @@ pub struct InstanceCredential {
     /// For one the person signs in for, where that stands; none, its
     /// value is pasted.
     pub sign_in: Option<oauth::SignInState>,
+    /// For one signed in for at a service with its redirect port
+    /// registered (`redirect_port`): the loopback port the shell must
+    /// catch the redirect on. Any free port otherwise.
+    pub redirect_port: Option<u16>,
 }
 
 /// A sign-in waiting for its redirect.
 struct SignInUnderWay {
     /// Which start it was ([`ProviderRegistry`]'s `sign_in_seq`).
     seq: u64,
-    task: tokio::task::JoinHandle<()>,
+    /// The keychain account its token goes to.
+    account: String,
+    pending: oauth::PendingSignIn,
+    /// Ends it unfinished after [`oauth::SIGN_IN_WAIT`].
+    expiry: tokio::task::JoinHandle<()>,
+}
+
+/// How handing a redirect to a sign-in went (`complete_oauth_sign_in`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum SignInCompletion {
+    /// Signed in: the token is kept and the instance restarts on it.
+    SignedIn,
+    /// The sign-in ended without a token: why (what `CredentialChanged`
+    /// carries too).
+    Failed { error: String },
+    /// Not this sign-in's redirect (another `state`, another path):
+    /// nothing was done, and the sign-in still waits.
+    NotThisSignIn { reason: String },
 }
 
 /// An instance as Settings → Integrations shows it.
@@ -860,8 +882,10 @@ pub struct ProviderRegistry {
     /// Sign-ins under way, by `(instance, credential)`: a newer one for
     /// the same credential replaces the older.
     sign_ins: parking_lot::Mutex<BTreeMap<(String, String), SignInUnderWay>>,
-    /// Held while a sign-in is started or abandoned, so two at once for
-    /// one credential leave exactly one listening (tsk826).
+    /// Held while a sign-in is started, finished, expired or abandoned —
+    /// across a finish's code exchange, so an abandon (a removed
+    /// instance) waits for it and nothing is kept for what's gone
+    /// (tsk826).
     sign_in_gate: tokio::sync::Mutex<()>,
     /// One change to a person's instances at a time in this process: each
     /// reads them as they are and writes them back before another reads
@@ -1258,6 +1282,7 @@ impl ProviderRegistry {
                             None => secrets.get(&account).ok().flatten().is_some(),
                         },
                         sign_in,
+                        redirect_port: c.oauth.as_ref().and_then(|o| o.redirect_port),
                     }
                 })
                 .collect(),
@@ -2164,11 +2189,18 @@ impl ProviderRegistry {
     }
 
     /// Start signing in for `instance`'s credential `name` (one declared
-    /// with `oauth:`): where the person goes to do it. When they have, the
-    /// token is kept in the keychain, the instance restarts on it, and the
-    /// renderer hears `CredentialChanged` — with why, when it came to
-    /// nothing. A sign-in already under way for it is abandoned.
-    pub async fn begin_sign_in(&self, instance: &str, name: &str) -> Result<String, DomainError> {
+    /// with `oauth:`), its redirect coming back to `redirect_port` on the
+    /// person's machine, where the shell listens: where the person goes
+    /// to do it. The shell hands the redirect back by
+    /// [`Self::complete_sign_in`]. A sign-in already under way for it is
+    /// abandoned; one never finished ends after [`oauth::SIGN_IN_WAIT`],
+    /// and the renderer hears `CredentialChanged` saying so.
+    pub async fn begin_sign_in(
+        &self,
+        instance: &str,
+        name: &str,
+        redirect_port: u16,
+    ) -> Result<String, DomainError> {
         let (account, decl, resolved) = self.credential(instance, name)?;
         let Some(oauth_decl) = decl.oauth else {
             return Err(DomainError::Invalid(format!(
@@ -2177,20 +2209,9 @@ impl ProviderRegistry {
         };
         // Where it signs in, and where the code, the verifier and the
         // client secret go, are part of what a person approved: only as
-        // they were approved (tsk824). The declaration used below is the
-        // one this checks.
-        if !crate::exec_consent::may_run_provider(
-            &self.deps.approvals,
-            &self.deps.project_dir,
-            &resolved.ext,
-            &resolved.spec,
-        ) {
-            return Err(DomainError::Invalid(format!(
-                "provider `{}` isn't approved as it is now (where `{name}` signs in is part of \
-                 what you approve): approve it on Settings → Data → Programs first",
-                resolved.spec.approval_name(&resolved.ext.name)
-            )));
-        }
+        // they were approved (tsk824). The declaration kept below is the
+        // one this checks, and finishing checks it again.
+        self.approved_for_sign_in(&resolved, name)?;
         let client_secret = match &oauth_decl.client_secret {
             None => None,
             Some(secret) => {
@@ -2215,70 +2236,181 @@ impl ProviderRegistry {
                 }
             }
         };
+        let sign_in = oauth::begin(&oauth_decl, client_secret, redirect_port)
+            .map_err(|e| DomainError::Invalid(format!("signing in for `{name}`: {e}")))?;
         let key = (instance.to_string(), name.to_string());
-        // One start at a time: the old one stops listening before the new
-        // one binds (a fixed `redirect_port` is the old one's until then),
-        // and the new one is tracked before another can start.
+        // The old one is gone before the new one is tracked, and no finish
+        // is half done meanwhile.
         let _gate = self.sign_in_gate.lock().await;
-        self.abandon_sign_ins_locked(|k| *k == key).await;
-        let sign_in = oauth::begin(&oauth_decl, client_secret)
-            .await
-            .map_err(DomainError::Invalid)?;
-        let (me, deps) = (self.me.clone(), self.deps.clone());
-        let (instance, name) = key.clone();
+        self.abandon_sign_ins_locked(|k| *k == key);
         let seq = self
             .sign_in_seq
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let done = sign_in.done;
-        let waiting = tokio::spawn(async move {
-            let outcome = match done.await {
-                Ok(token) => oauth::store(deps.secrets.as_ref(), &account, &token),
-                Err(why) => Err(why),
-            };
-            if let Some(registry) = me.upgrade() {
-                {
-                    // Untrack itself only: a newer one may hold the key.
-                    let mut sign_ins = registry.sign_ins.lock();
-                    let key = (instance.clone(), name.clone());
-                    if sign_ins.get(&key).is_some_and(|s| s.seq == seq) {
-                        sign_ins.remove(&key);
-                    }
-                }
-                if outcome.is_ok() {
-                    registry.credential_changed(&instance).await;
+        let expiry = tokio::spawn({
+            let (me, key) = (self.me.clone(), key.clone());
+            async move {
+                tokio::time::sleep(oauth::SIGN_IN_WAIT).await;
+                if let Some(registry) = me.upgrade() {
+                    registry.expire_sign_in(key, seq).await;
                 }
             }
-            deps.events
-                .emit(crate::events::OxplowEvent::CredentialChanged {
-                    instance,
-                    name,
-                    error: outcome.err(),
-                });
         });
-        self.sign_ins
-            .lock()
-            .insert(key, SignInUnderWay { seq, task: waiting });
+        self.sign_ins.lock().insert(
+            key,
+            SignInUnderWay {
+                seq,
+                account,
+                pending: sign_in.pending,
+                expiry,
+            },
+        );
         Ok(sign_in.authorize_url)
     }
 
-    /// Stop waiting for the sign-ins `which` picks: each stops listening
-    /// before this returns (its port is free), and stores nothing.
+    /// Refused unless `resolved`'s provider is approved as it is now.
+    fn approved_for_sign_in(&self, resolved: &Resolved, name: &str) -> Result<(), DomainError> {
+        if crate::exec_consent::may_run_provider(
+            &self.deps.approvals,
+            &self.deps.project_dir,
+            &resolved.ext,
+            &resolved.spec,
+        ) {
+            return Ok(());
+        }
+        Err(DomainError::Invalid(format!(
+            "provider `{}` isn't approved as it is now (where `{name}` signs in is part of \
+             what you approve): approve it on Settings → Data → Programs first",
+            resolved.spec.approval_name(&resolved.ext.name)
+        )))
+    }
+
+    /// The redirect the shell caught for `instance`'s sign-in for `name`:
+    /// `redirect` is the path and query the browser asked for. One that
+    /// isn't that sign-in's is refused and the sign-in waits on; one that
+    /// is ends it — the code exchanged (the provider re-checked as
+    /// approved, with the declaration it began with) and the token kept,
+    /// the instance restarted on it, and the renderer told
+    /// (`CredentialChanged`). With no sign-in under way (never begun,
+    /// finished, expired, abandoned) it is an error.
+    pub async fn complete_sign_in(
+        &self,
+        instance: &str,
+        name: &str,
+        redirect: &str,
+    ) -> Result<SignInCompletion, DomainError> {
+        let key = (instance.to_string(), name.to_string());
+        let gate = self.sign_in_gate.lock().await;
+        let redirected = {
+            let sign_ins = self.sign_ins.lock();
+            let Some(under_way) = sign_ins.get(&key) else {
+                return Err(DomainError::Invalid(format!(
+                    "no sign-in for `{name}` of `{instance}` is under way"
+                )));
+            };
+            match under_way.pending.redirected(redirect) {
+                Ok(redirected) => redirected,
+                Err(reason) => return Ok(SignInCompletion::NotThisSignIn { reason }),
+            }
+        };
+        let Some(under_way) = self.sign_ins.lock().remove(&key) else {
+            return Err(DomainError::Invalid(format!(
+                "no sign-in for `{name}` of `{instance}` is under way"
+            )));
+        };
+        under_way.expiry.abort();
+        let outcome = match redirected {
+            oauth::Redirected::Refused(why) => Err(why),
+            oauth::Redirected::Code(code) => {
+                match self.still_approved(instance, name, &under_way) {
+                    Err(why) => Err(why),
+                    Ok(()) => match under_way.pending.exchange(&code).await {
+                        Ok(token) => {
+                            oauth::store(self.deps.secrets.as_ref(), &under_way.account, &token)
+                        }
+                        Err(why) => Err(why),
+                    },
+                }
+            }
+        };
+        drop(gate);
+        if outcome.is_ok() {
+            self.credential_changed(instance).await;
+        }
+        self.deps
+            .events
+            .emit(crate::events::OxplowEvent::CredentialChanged {
+                instance: instance.to_string(),
+                name: name.to_string(),
+                error: outcome.clone().err(),
+            });
+        Ok(match outcome {
+            Ok(()) => SignInCompletion::SignedIn,
+            Err(error) => SignInCompletion::Failed { error },
+        })
+    }
+
+    /// A sign-in being finished may send its code, verifier and client
+    /// secret only where it was approved to: its provider is approved as
+    /// it is now, and still declares the sign-in it began with.
+    fn still_approved(
+        &self,
+        instance: &str,
+        name: &str,
+        under_way: &SignInUnderWay,
+    ) -> Result<(), String> {
+        let (_, decl, resolved) = self.credential(instance, name).map_err(|e| e.to_string())?;
+        self.approved_for_sign_in(&resolved, name)
+            .map_err(|e| e.to_string())?;
+        if decl.oauth.as_ref() != Some(under_way.pending.decl()) {
+            return Err(format!(
+                "where `{name}` signs in changed since the sign-in began; sign in again"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Sign-in `seq` for `key` was never finished: end it, and tell the
+    /// renderer.
+    async fn expire_sign_in(&self, key: (String, String), seq: u64) {
+        let _gate = self.sign_in_gate.lock().await;
+        let expired = {
+            let mut sign_ins = self.sign_ins.lock();
+            if sign_ins.get(&key).is_some_and(|s| s.seq == seq) {
+                sign_ins.remove(&key)
+            } else {
+                None
+            }
+        };
+        if expired.is_some() {
+            let (instance, name) = key;
+            self.deps
+                .events
+                .emit(crate::events::OxplowEvent::CredentialChanged {
+                    instance,
+                    name,
+                    error: Some(format!(
+                        "the sign-in wasn't finished within {} minutes",
+                        oauth::SIGN_IN_WAIT.as_secs() / 60
+                    )),
+                });
+        }
+    }
+
+    /// End the sign-ins `which` picks, keeping nothing; one being finished
+    /// is waited for first.
     async fn abandon_sign_ins(&self, which: impl Fn(&(String, String)) -> bool) {
         let _gate = self.sign_in_gate.lock().await;
-        self.abandon_sign_ins_locked(which).await;
+        self.abandon_sign_ins_locked(which);
     }
 
     /// [`Self::abandon_sign_ins`], the gate already held.
-    async fn abandon_sign_ins_locked(&self, which: impl Fn(&(String, String)) -> bool) {
-        let abandoned: Vec<_> = {
-            let mut sign_ins = self.sign_ins.lock();
-            let keys: Vec<_> = sign_ins.keys().filter(|k| which(k)).cloned().collect();
-            keys.iter().filter_map(|k| sign_ins.remove(k)).collect()
-        };
-        for waiting in abandoned {
-            waiting.task.abort();
-            // Ended (or cancelled): its listener is dropped with it.
-            let _ = waiting.task.await;
+    fn abandon_sign_ins_locked(&self, which: impl Fn(&(String, String)) -> bool) {
+        let mut sign_ins = self.sign_ins.lock();
+        let keys: Vec<_> = sign_ins.keys().filter(|k| which(k)).cloned().collect();
+        for key in keys {
+            if let Some(abandoned) = sign_ins.remove(&key) {
+                abandoned.expiry.abort();
+            }
         }
     }
 

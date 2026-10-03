@@ -197,6 +197,7 @@ fn run_shell(ctx: tauri::Context) {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(specta.invoke_handler())
         .manage(windows::ShellWindows::default())
+        .manage(oxplow_tauri_ipc::commands::oauth_redirect::OAuthRedirects::default())
         .on_window_event(handle_window_event)
         .setup(move |app| {
             specta.mount_events(app);

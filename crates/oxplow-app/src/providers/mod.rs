@@ -24,6 +24,6 @@ mod tests;
 pub use host::HostError;
 pub use registry::{
     CollectorView, ConfigProblem, HostDeps, Instance, InstanceHealth, InstanceState,
-    ProviderInstanceView, ProviderRegistry, Scope,
+    ProviderInstanceView, ProviderRegistry, Scope, SignInCompletion,
 };
 pub use spec::{parse_providers, ProviderSpec};

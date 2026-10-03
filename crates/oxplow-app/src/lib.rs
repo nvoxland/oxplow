@@ -90,6 +90,7 @@ pub mod metric_visibility;
 pub mod metrics_service;
 pub mod models_changed;
 pub mod net_sandbox;
+pub mod oauth_redirect;
 pub mod otlp_ingest;
 pub mod otlp_tokens;
 pub mod output_activity;

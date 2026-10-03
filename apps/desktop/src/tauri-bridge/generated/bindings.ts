@@ -310,7 +310,33 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	beginOauthSignIn: (instance: string, name: string) => typedError<string, IpcError>(__TAURI_INVOKE("begin_oauth_sign_in", { instance, name })),
+	beginOauthSignIn: (instance: string, name: string, redirectPort: number) => typedError<string, IpcError>(__TAURI_INVOKE("begin_oauth_sign_in", { instance, name, redirectPort })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	completeOauthSignIn: (instance: string, name: string, redirect: string) => typedError<SignInCompletion, IpcError>(__TAURI_INVOKE("complete_oauth_sign_in", { instance, name, redirect })),
+	/**
+	 *  Listen on loopback for a sign-in's redirect — on `port` when the
+	 *  service has one registered, any free port otherwise: the port.
+	 */
+	listenForOauthRedirect: (port: number | null) => typedError<number, IpcError>(__TAURI_INVOKE("listen_for_oauth_redirect", { port })),
+	/**
+	 *  The next redirect to `port`: the path and query the browser asked
+	 *  for, to hand to the core. Its browser waits for
+	 *  [`answer_oauth_redirect`]. It stops listening when the sign-in is
+	 *  over (answered, or replaced) or not finished within
+	 *  [`SIGN_IN_WAIT`].
+	 */
+	awaitOauthRedirect: (port: number) => typedError<string, IpcError>(__TAURI_INVOKE("await_oauth_redirect", { port })),
+	/**
+	 *  Answer the browser waiting on `port` with how its redirect went (the
+	 *  core's answer): a redirect that wasn't the sign-in's is refused and
+	 *  the listener waits on; otherwise the sign-in is over and it stops
+	 *  listening — with no browser waiting (the renderer gave up), it just
+	 *  stops.
+	 */
+	answerOauthRedirect: (port: number, outcome: SignInCompletion) => typedError<null, IpcError>(__TAURI_INVOKE("answer_oauth_redirect", { port, outcome })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2990,6 +3016,12 @@ export type InstanceCredential = {
 	 *  value is pasted.
 	 */
 	signIn: SignInState | null,
+	/**
+	 *  For one signed in for at a service with its redirect port
+	 *  registered (`redirect_port`): the loopback port the shell must
+	 *  catch the redirect on. Any free port otherwise.
+	 */
+	redirectPort: number | null,
 };
 
 export type InstanceHealth = {
@@ -4678,6 +4710,21 @@ export type SelectThreadRequest = {
  *  kinds only and must name the engine it targets.
  */
 export type Sharing = "private" | "shared";
+
+// How handing a redirect to a sign-in went (`complete_oauth_sign_in`).
+export type SignInCompletion = 
+// Signed in: the token is kept and the instance restarts on it.
+{ outcome: "signed_in" } | 
+/**
+ *  The sign-in ended without a token: why (what `CredentialChanged`
+ *  carries too).
+ */
+{ outcome: "failed"; error: string } | 
+/**
+ *  Not this sign-in's redirect (another `state`, another path):
+ *  nothing was done, and the sign-in still waits.
+ */
+{ outcome: "not_this_sign_in"; reason: string };
 
 // Where a signed-in credential stands on this machine.
 export type SignInState = { state: "not_signed_in" } | 

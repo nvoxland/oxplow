@@ -2,7 +2,9 @@
 //! "Credentials and sign-in"): the authorization-code flow with PKCE
 //! (OAuth 2.1; RFC 6749 §4.1, RFC 7636) and a loopback redirect (RFC
 //! 8252 §7.3), run by oxplow for a credential a provider declares with
-//! `oauth:`. The token — access, refresh, expiry — is one keychain
+//! `oauth:`. The core starts a sign-in and finishes it; the redirect is
+//! caught by the desktop shell ([`crate::oauth_redirect`]) and handed over,
+//! so the core never listens. The token — access, refresh, expiry — is one keychain
 //! secret; the provider is handed the access token alone, by the
 //! credential's name.
 
@@ -11,8 +13,6 @@ use std::time::Duration;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, TcpStream};
 
 use oxplow_ai::secrets::SecretStore;
 
@@ -230,53 +230,6 @@ impl std::fmt::Display for OAuthError {
     }
 }
 
-/// An HTTP request as far as the loopback listener reads one: the
-/// redirect is a `GET`, so its line is all that matters.
-struct HttpRequest {
-    method: String,
-    /// The path and query.
-    target: String,
-}
-
-/// The most bytes of a request's line and headers read.
-const MAX_REQUEST_HEAD: usize = 16 * 1024;
-/// How long one connection may take to send its request.
-const REQUEST_READ_WAIT: Duration = Duration::from_secs(10);
-/// How many connections are read at once while waiting for the redirect.
-const MAX_READING: usize = 16;
-
-fn too_large(what: &str) -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        format!("the request's {what} is too large"),
-    )
-}
-
-/// Read one HTTP/1.1 request's line and headers, within
-/// [`MAX_REQUEST_HEAD`] — a line that never ends is an error, not a wait.
-/// A body is never read: the redirect has none.
-async fn read_request(conn: &mut TcpStream) -> std::io::Result<HttpRequest> {
-    let mut reader = BufReader::new(conn);
-    let mut head = (&mut reader).take(MAX_REQUEST_HEAD as u64);
-    let mut next_line = async || -> std::io::Result<String> {
-        let mut line = String::new();
-        let n = head.read_line(&mut line).await?;
-        // Cut short by the bound: no end of line within it.
-        if n > 0 && !line.ends_with('\n') {
-            return Err(too_large("head"));
-        }
-        Ok(line)
-    };
-    let line = next_line().await?;
-    let mut parts = line.split_whitespace();
-    let (method, target) = (
-        parts.next().unwrap_or_default().to_string(),
-        parts.next().unwrap_or_default().to_string(),
-    );
-    while !next_line().await?.trim().is_empty() {}
-    Ok(HttpRequest { method, target })
-}
-
 /// PKCE's S256 challenge for `verifier`.
 pub fn pkce_challenge(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
@@ -298,34 +251,56 @@ pub const SIGN_IN_WAIT: Duration = Duration::from_secs(300);
 /// How long a token request may take.
 const TOKEN_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// A sign-in under way: where the person goes, and what it comes to.
+/// A sign-in started: where the person signs in, and what finishing it
+/// needs.
 pub struct SignIn {
     pub authorize_url: String,
-    /// The token, once the redirect came back and its code was exchanged;
-    /// or why not (the person never finished, the service refused). It
-    /// owns the loopback listener: the redirect is answered only while
-    /// this is awaited, and dropping it stops listening at once.
-    pub done:
-        std::pin::Pin<Box<dyn std::future::Future<Output = Result<OAuthToken, String>> + Send>>,
+    pub pending: PendingSignIn,
 }
 
-/// Start a sign-in for `decl`: listen on loopback for the redirect and
-/// return where the person signs in. `client_secret` is the value of the
-/// credential `decl.client_secret` names, when it names one.
-///
-/// The listener answers only `GET /callback` carrying this sign-in's
-/// `state` — the redirect's authentication: another page sending the
-/// browser there is refused and the wait goes on — then exchanges the
-/// code (with the PKCE verifier only this process holds) and closes.
-pub async fn begin(decl: &OAuthDecl, client_secret: Option<String>) -> Result<SignIn, String> {
-    let listener = TcpListener::bind(("127.0.0.1", decl.redirect_port.unwrap_or(0)))
-        .await
-        .map_err(|e| format!("listening for the sign-in's redirect: {e}"))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| format!("listening for the sign-in's redirect: {e}"))?
-        .port();
-    let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+/// What finishing a sign-in needs, kept by the core until its redirect
+/// comes back: the `state` that authenticates the redirect and the PKCE
+/// verifier only this process holds.
+pub struct PendingSignIn {
+    decl: OAuthDecl,
+    client_secret: Option<String>,
+    state: String,
+    verifier: String,
+    redirect_uri: String,
+}
+
+/// What a redirect to a sign-in brought back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Redirected {
+    /// A code to exchange for the token.
+    Code(String),
+    /// Why the service, or the person, said no.
+    Refused(String),
+}
+
+/// Start a sign-in for `decl` whose redirect comes back to
+/// `127.0.0.1:<redirect_port>`, where the desktop shell listens
+/// ([`crate::oauth_redirect`]): where the person signs in, and what
+/// finishing it needs. `client_secret` is the value of the credential
+/// `decl.client_secret` names, when it names one. A provider that
+/// declares its `redirect_port` (a service with the port registered) is
+/// signed in for on that port only.
+pub fn begin(
+    decl: &OAuthDecl,
+    client_secret: Option<String>,
+    redirect_port: u16,
+) -> Result<SignIn, String> {
+    if redirect_port == 0 {
+        return Err("a sign-in needs the port its redirect comes back on".into());
+    }
+    if let Some(declared) = decl.redirect_port {
+        if declared != redirect_port {
+            return Err(format!(
+                "its service takes the redirect on port {declared} only, not {redirect_port}"
+            ));
+        }
+    }
+    let redirect_uri = format!("http://127.0.0.1:{redirect_port}/callback");
     let (verifier, state) = (unguessable(), unguessable());
     let mut url = url::Url::parse(&decl.authorize_url)
         .map_err(|e| format!("`authorize_url` isn't a URL: {e}"))?;
@@ -340,125 +315,63 @@ pub async fn begin(decl: &OAuthDecl, client_secret: Option<String>) -> Result<Si
         url.query_pairs_mut()
             .append_pair("scope", &decl.scopes.join(" "));
     }
-    let decl = decl.clone();
-    let done = async move {
-        tokio::time::timeout(
-            SIGN_IN_WAIT,
-            await_redirect(
-                listener,
-                &decl,
-                client_secret.as_deref(),
-                &state,
-                &verifier,
-                &redirect_uri,
-            ),
-        )
-        .await
-        .unwrap_or_else(|_| {
-            Err(format!(
-                "the sign-in wasn't finished within {} minutes",
-                SIGN_IN_WAIT.as_secs() / 60
-            ))
-        })
-    };
     Ok(SignIn {
         authorize_url: url.to_string(),
-        done: Box::pin(done),
+        pending: PendingSignIn {
+            decl: decl.clone(),
+            client_secret,
+            state,
+            verifier,
+            redirect_uri,
+        },
     })
 }
 
-/// Answer connections until the redirect with our `state` arrives; then
-/// exchange its code and tell the browser how it went.
-async fn await_redirect(
-    listener: TcpListener,
-    decl: &OAuthDecl,
-    client_secret: Option<&str>,
-    state: &str,
-    verifier: &str,
-    redirect_uri: &str,
-) -> Result<OAuthToken, String> {
-    // Each connection is read on its own, within a deadline: one that
-    // sends nothing (another process, a browser's idle socket) never holds
-    // up the real redirect.
-    let mut reading: tokio::task::JoinSet<(TcpStream, Option<HttpRequest>)> =
-        tokio::task::JoinSet::new();
-    loop {
-        let (mut conn, request) = tokio::select! {
-            accepted = listener.accept(), if reading.len() < MAX_READING => {
-                let (mut conn, _) =
-                    accepted.map_err(|e| format!("the sign-in's redirect: {e}"))?;
-                reading.spawn(async move {
-                    let request = tokio::time::timeout(REQUEST_READ_WAIT, read_request(&mut conn))
-                        .await
-                        .ok()
-                        .and_then(Result::ok);
-                    (conn, request)
-                });
-                continue;
-            }
-            Some(read) = reading.join_next() => match read {
-                Ok(read) => read,
-                Err(_) => continue,
-            },
-        };
-        let Some(request) = request else {
-            let _ = respond(
-                &mut conn,
-                "400 Bad Request",
-                "That isn't a request oxplow reads.",
-            )
-            .await;
-            continue;
-        };
-        let (path, query) = request
-            .target
-            .split_once('?')
-            .unwrap_or((&request.target, ""));
-        if request.method != "GET" || path != "/callback" {
-            let _ = respond(&mut conn, "404 Not Found", "Nothing here.").await;
-            continue;
+impl PendingSignIn {
+    /// The declaration it was started with (the one checked as approved).
+    pub fn decl(&self) -> &OAuthDecl {
+        &self.decl
+    }
+
+    /// What `redirect` — the path and query the browser was sent to, or
+    /// the whole URL — brought back to this sign-in. `Err(why)` when it
+    /// isn't this sign-in's (another `state` — the redirect's
+    /// authentication — or another path): nothing is done, and it still
+    /// waits.
+    pub fn redirected(&self, redirect: &str) -> Result<Redirected, String> {
+        let url = url::Url::parse("http://127.0.0.1/")
+            .and_then(|base| base.join(redirect))
+            .map_err(|e| format!("that isn't a redirect: {e}"))?;
+        if url.path() != "/callback" {
+            return Err("that isn't a sign-in's redirect".into());
         }
         let query: std::collections::HashMap<String, String> =
-            url::form_urlencoded::parse(query.as_bytes())
-                .into_owned()
-                .collect();
-        if query.get("state").map(String::as_str) != Some(state) {
-            let _ = respond(
-                &mut conn,
-                "400 Bad Request",
-                "This isn't the sign-in oxplow started. Nothing was done.",
-            )
-            .await;
-            continue;
+            url.query_pairs().into_owned().collect();
+        if query.get("state") != Some(&self.state) {
+            return Err("this isn't the sign-in oxplow started; nothing was done".into());
         }
-        let outcome = match (query.get("code"), query.get("error")) {
-            (Some(code), _) => exchange(decl, client_secret, code, verifier, redirect_uri)
-                .await
-                .map_err(|e| e.to_string()),
-            (None, Some(error)) => Err(format!(
+        Ok(match (query.get("code"), query.get("error")) {
+            (Some(code), _) => Redirected::Code(code.clone()),
+            (None, Some(error)) => Redirected::Refused(format!(
                 "the sign-in was refused: {}",
                 query.get("error_description").unwrap_or(error)
             )),
-            (None, None) => Err("the redirect carried no code".to_string()),
-        };
-        let page = match &outcome {
-            Ok(_) => "Signed in. You can close this tab and go back to oxplow.".to_string(),
-            Err(why) => format!("oxplow couldn't finish the sign-in: {why}"),
-        };
-        let _ = respond(&mut conn, "200 OK", &page).await;
-        return outcome;
+            (None, None) => Redirected::Refused("the redirect carried no code".into()),
+        })
     }
-}
 
-/// A plain-text page for the person's browser.
-async fn respond(conn: &mut TcpStream, status: &str, text: &str) -> std::io::Result<()> {
-    let head = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        text.len()
-    );
-    conn.write_all(head.as_bytes()).await?;
-    conn.write_all(text.as_bytes()).await?;
-    conn.shutdown().await
+    /// The token for this sign-in's `code`.
+    pub async fn exchange(&self, code: &str) -> Result<OAuthToken, String> {
+        exchange(
+            &self.decl,
+            self.client_secret.as_deref(),
+            code,
+            &self.verifier,
+            &self.redirect_uri,
+        )
+        .await
+        .map_err(|e| e.to_string())
+    }
 }
 
 /// The token for an authorization `code` (RFC 6749 §4.1.3, with PKCE's
@@ -659,25 +572,35 @@ mod tests {
         }
     }
 
-    /// A sign-in being waited for, as the registry waits for one.
-    struct Waited {
-        authorize_url: String,
-        done: tokio::task::JoinHandle<Result<OAuthToken, String>>,
+    /// The port the shell would catch the redirect on. Nothing listens:
+    /// the redirect is read off the authorization server's answer, as the
+    /// shell hands it over.
+    const PORT: u16 = 8124;
+
+    /// What the person's browser does: open the page; the redirect it is
+    /// sent back with, as the shell catches it.
+    async fn browse(url: &str) -> String {
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let resp = client.get(url).send().await.unwrap();
+        resp.headers()["location"].to_str().unwrap().to_string()
     }
 
-    async fn begin(decl: &OAuthDecl, client_secret: Option<String>) -> Result<Waited, String> {
-        let sign_in = super::begin(decl, client_secret).await?;
-        Ok(Waited {
-            authorize_url: sign_in.authorize_url,
-            done: tokio::spawn(sign_in.done),
-        })
-    }
-
-    /// What the person's browser does: open the page, follow the redirect
-    /// back to oxplow's loopback listener.
-    async fn browse(url: &str) -> (u16, String) {
-        let resp = reqwest::get(url).await.unwrap();
-        (resp.status().as_u16(), resp.text().await.unwrap())
+    /// A sign-in at `decl` finished as the person would: the page they
+    /// signed in on, and what it came to.
+    async fn sign_in(
+        decl: &OAuthDecl,
+        client_secret: Option<String>,
+    ) -> (String, Result<OAuthToken, String>) {
+        let started = begin(decl, client_secret, PORT).unwrap();
+        let redirect = browse(&started.authorize_url).await;
+        let token = match started.pending.redirected(&redirect).unwrap() {
+            Redirected::Code(code) => started.pending.exchange(&code).await,
+            Redirected::Refused(why) => Err(why),
+        };
+        (started.authorize_url, token)
     }
 
     /// RFC 7636 appendix B.
@@ -692,30 +615,20 @@ mod tests {
     #[tokio::test]
     async fn signing_in_exchanges_the_code_with_its_verifier() {
         let sim = OAuthSim::start().await;
-        let sign_in = begin(&decl(&sim), None).await.unwrap();
-        assert!(sign_in.authorize_url.starts_with(&sim.authorize_url));
+        let (page, token) = sign_in(&decl(&sim), None).await;
+        assert!(page.starts_with(&sim.authorize_url));
         for wanted in [
             "response_type=code",
             "client_id=oxplow-test",
             "code_challenge_method=S256",
             "scope=read+write",
-            "redirect_uri=http%3A%2F%2F127.0.0.1%3A",
+            "redirect_uri=http%3A%2F%2F127.0.0.1%3A8124%2Fcallback",
         ] {
-            assert!(
-                sign_in.authorize_url.contains(wanted),
-                "{wanted}: {}",
-                sign_in.authorize_url
-            );
+            assert!(page.contains(wanted), "{wanted}: {page}");
         }
-        let (status, page) = browse(&sign_in.authorize_url).await;
-        assert_eq!(status, 200);
-        assert!(
-            page.contains("oxplow"),
-            "the page says where to go back: {page}"
-        );
-        let token = sign_in.done.await.unwrap().unwrap();
         // The simulator only issues a token for the verifier matching the
         // challenge the authorize request carried.
+        let token = token.unwrap();
         assert!(token.access_token.starts_with("at-"));
         assert!(token
             .refresh_token
@@ -725,34 +638,54 @@ mod tests {
         assert_eq!(sim.grants(), vec!["authorization_code"]);
     }
 
+    /// A redirect is this sign-in's only with its `state` — the
+    /// redirect's authentication — at `/callback`: anything else does
+    /// nothing, and the real one still works.
     #[tokio::test]
-    async fn a_callback_with_the_wrong_state_is_refused() {
+    async fn a_redirect_with_another_state_isnt_this_sign_ins() {
         let sim = OAuthSim::start().await;
-        let sign_in = begin(&decl(&sim), None).await.unwrap();
-        let url = url::Url::parse(&sign_in.authorize_url).unwrap();
-        let redirect = url
+        let started = begin(&decl(&sim), None, PORT).unwrap();
+        let state = url::Url::parse(&started.authorize_url)
+            .unwrap()
             .query_pairs()
-            .find(|(k, _)| k == "redirect_uri")
+            .find(|(k, _)| k == "state")
             .unwrap()
             .1
             .into_owned();
         // Someone else's page sends the browser to the listener.
-        let (status, _) = browse(&format!("{redirect}?code=stolen&state=not-ours")).await;
-        assert_eq!(status, 400);
+        assert!(started
+            .pending
+            .redirected("/callback?code=stolen&state=not-ours")
+            .is_err());
+        assert!(started
+            .pending
+            .redirected(&format!("/elsewhere?code=c&state={state}"))
+            .is_err());
         assert_eq!(sim.grants(), Vec::<String>::new(), "no code was exchanged");
-        // The real redirect still works.
-        let (status, _) = browse(&sign_in.authorize_url).await;
-        assert_eq!(status, 200);
-        assert!(sign_in.done.await.unwrap().is_ok());
+        // The service saying no is this sign-in's answer.
+        assert_eq!(
+            started
+                .pending
+                .redirected(&format!("/callback?error=access_denied&state={state}")),
+            Ok(Redirected::Refused(
+                "the sign-in was refused: access_denied".into()
+            ))
+        );
+        // The real redirect still works, as a path or a whole URL.
+        let redirect = browse(&started.authorize_url).await;
+        assert!(redirect.starts_with("http://127.0.0.1:8124/callback?"));
+        let Ok(Redirected::Code(code)) = started.pending.redirected(&redirect) else {
+            panic!("{redirect}");
+        };
+        assert!(started.pending.exchange(&code).await.is_ok());
     }
 
     #[tokio::test]
     async fn a_refresh_keeps_or_rotates_the_refresh_token_and_a_revoked_one_says_so() {
         let sim = OAuthSim::start().await;
         let d = decl(&sim);
-        let sign_in = begin(&d, None).await.unwrap();
-        browse(&sign_in.authorize_url).await;
-        let first = sign_in.done.await.unwrap().unwrap();
+        let (_, first) = sign_in(&d, None).await;
+        let first = first.unwrap();
 
         // The service answers a refresh without a new refresh token: the
         // old one is kept.
@@ -788,9 +721,8 @@ mod tests {
     async fn a_client_secret_goes_with_each_token_request() {
         let sim = OAuthSim::start().await;
         let d = decl(&sim);
-        let sign_in = begin(&d, Some("s3cret".into())).await.unwrap();
-        browse(&sign_in.authorize_url).await;
-        let token = sign_in.done.await.unwrap().unwrap();
+        let (page, token) = sign_in(&d, Some("s3cret".into())).await;
+        let token = token.unwrap();
         refresh(&d, Some("s3cret"), &token).await.unwrap();
         assert_eq!(
             sim.secrets(),
@@ -800,7 +732,7 @@ mod tests {
         // what every service must take), unless the service says `post`.
         assert_eq!(sim.client_auths(), vec!["basic", "basic"]);
         // And never in the URL the browser opens.
-        assert!(!sign_in.authorize_url.contains("s3cret"));
+        assert!(!page.contains("s3cret"));
 
         let post = OAuthDecl {
             client_auth: ClientAuth::Post,
@@ -818,9 +750,8 @@ mod tests {
         let sim = OAuthSim::start().await;
         let elsewhere = OAuthSim::start().await;
         let d = decl(&sim);
-        let sign_in = begin(&d, None).await.unwrap();
-        browse(&sign_in.authorize_url).await;
-        let token = sign_in.done.await.unwrap().unwrap();
+        let (_, token) = sign_in(&d, None).await;
+        let token = token.unwrap();
         sim.redirect_token_requests(&elsewhere.token_url);
         assert!(matches!(
             refresh(&d, None, &token).await,
@@ -835,9 +766,8 @@ mod tests {
     async fn a_token_answer_is_read_as_services_write_it() {
         let sim = OAuthSim::start().await;
         let d = decl(&sim);
-        let sign_in = begin(&d, None).await.unwrap();
-        browse(&sign_in.authorize_url).await;
-        let token = sign_in.done.await.unwrap().unwrap();
+        let (_, token) = sign_in(&d, None).await;
+        let token = token.unwrap();
         sim.expires_in_as_string();
         let renewed = refresh(&d, None, &token).await.unwrap();
         assert!(renewed.expires_at.is_some(), "{renewed:?}");
@@ -851,9 +781,8 @@ mod tests {
 
     /// Sign in against `sim` and keep the token under `account`.
     async fn signed_in(sim: &OAuthSim, secrets: &dyn SecretStore, account: &str) -> OAuthToken {
-        let sign_in = begin(&decl(sim), None).await.unwrap();
-        browse(&sign_in.authorize_url).await;
-        let token = sign_in.done.await.unwrap().unwrap();
+        let (_, token) = sign_in(&decl(sim), None).await;
+        let token = token.unwrap();
         store(secrets, account, &token).unwrap();
         token
     }
@@ -954,94 +883,23 @@ mod tests {
         assert_eq!(sim.grants(), vec!["authorization_code"]);
     }
 
-    /// A sign-in nobody waits for stops listening: the next one (with a
-    /// fixed `redirect_port`) gets the port.
+    /// A sign-in comes back where the shell listens; a service with its
+    /// port registered (`redirect_port`) is signed in for on that port
+    /// only.
     #[tokio::test]
-    async fn an_abandoned_sign_in_frees_its_port() {
+    async fn a_declared_redirect_port_is_the_only_one() {
         let sim = OAuthSim::start().await;
-        let port = {
-            let l = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
-            l.local_addr().unwrap().port()
-        };
+        assert!(begin(&decl(&sim), None, 0).is_err(), "a port is needed");
         let d = OAuthDecl {
-            redirect_port: Some(port),
+            redirect_port: Some(PORT),
             ..decl(&sim)
         };
-        let first = super::begin(&d, None).await.unwrap();
-        assert!(super::begin(&d, None).await.is_err(), "the port is taken");
-        drop(first);
-        let again = begin(&d, None).await.unwrap();
-        browse(&again.authorize_url).await;
-        assert!(again.done.await.unwrap().is_ok());
+        let refused = begin(&d, None, PORT + 1).err().unwrap();
+        assert!(refused.contains(&format!("port {PORT} only")), "{refused}");
+        let (_, token) = sign_in(&d, None).await;
+        assert!(token.is_ok());
     }
 
-    /// The loopback port a sign-in's redirect comes back on.
-    fn redirect_port(authorize_url: &str) -> u16 {
-        let url = url::Url::parse(authorize_url).unwrap();
-        let redirect = url
-            .query_pairs()
-            .find(|(k, _)| k == "redirect_uri")
-            .unwrap()
-            .1
-            .into_owned();
-        url::Url::parse(&redirect).unwrap().port().unwrap()
-    }
-
-    /// tsk825: a connection that sends nothing (another process, a
-    /// browser's idle socket) doesn't hold up the real redirect.
-    #[tokio::test]
-    async fn an_idle_connection_doesnt_hold_up_the_redirect() {
-        let sim = OAuthSim::start().await;
-        let sign_in = begin(&decl(&sim), None).await.unwrap();
-        let port = redirect_port(&sign_in.authorize_url);
-        let _idle = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-        let mut half = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-        // A head that promises a body it never sends.
-        half.write_all(b"POST /callback HTTP/1.1\r\nContent-Length: 10\r\n\r\n")
-            .await
-            .unwrap();
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        let (status, _) =
-            tokio::time::timeout(Duration::from_secs(10), browse(&sign_in.authorize_url))
-                .await
-                .expect("the redirect is answered");
-        assert_eq!(status, 200);
-        assert!(sign_in.done.await.unwrap().is_ok());
-    }
-
-    /// tsk825: a request's head is bounded: a line with no end is refused
-    /// rather than read.
-    #[tokio::test]
-    async fn a_request_is_read_within_its_bounds() {
-        async fn read_after(bytes: Vec<u8>) -> std::io::Result<HttpRequest> {
-            let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
-            let port = listener.local_addr().unwrap().port();
-            let writer = tokio::spawn(async move {
-                let mut c = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-                let _ = c.write_all(&bytes).await;
-                // Keep the connection open while the reader decides.
-                tokio::time::sleep(Duration::from_secs(2)).await;
-            });
-            let (mut conn, _) = listener.accept().await.unwrap();
-            let out = read_request(&mut conn).await;
-            writer.abort();
-            out
-        }
-        let endless = vec![b'a'; MAX_REQUEST_HEAD + 10];
-        assert!(read_after(endless).await.is_err());
-        let fine = read_after(b"GET /callback?x=1 HTTP/1.1\r\nHost: a\r\n\r\n".to_vec())
-            .await
-            .unwrap();
-        assert_eq!(
-            (fine.method.as_str(), fine.target.as_str()),
-            ("GET", "/callback?x=1")
-        );
-    }
-
-    /// tsk827: two renewals of one account at once — two starts of an
-    /// instance, a Settings Check — don't both spend the refresh token.
-    /// With rotation the second would be refused and mark the account
-    /// lapsed; serialized, the second finds the fresh token.
     #[tokio::test(flavor = "multi_thread")]
     async fn concurrent_renewals_of_one_account_renew_once() {
         let sim = OAuthSim::start().await;

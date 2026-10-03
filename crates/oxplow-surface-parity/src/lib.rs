@@ -208,8 +208,13 @@ pub const MANIFEST: &[Capability] = &[
     ui("remove_provider_instance"),
     ui("turn_off_provider_instance_here"),
     ui("set_instance_credential"),
-    // Signing in is a person's, in their browser (P9.B3).
+    // Signing in is a person's, in their browser (P9.B3); the shell hands
+    // the redirect it caught to the core (P10).
     ui("begin_oauth_sign_in"),
+    ui("complete_oauth_sign_in"),
+    ui("listen_for_oauth_redirect"),
+    ui("await_oauth_redirect"),
+    ui("answer_oauth_redirect"),
     both("ensure_change"),
     both_named("ai.settings", "ai_settings", "list_ai_roles"),
     ui("save_ai_provider"),

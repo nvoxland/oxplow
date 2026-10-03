@@ -14,15 +14,20 @@
 /// failures in opErrorsStore.
 
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   addProviderInstance,
+  answerSignInRedirect,
+  awaitSignInRedirect,
   beginOauthSignIn,
+  canCatchSignInRedirect,
   checkProviderInstance,
+  completeOauthSignIn,
   effectiveConfig,
   listExtensions,
   listProviderInstances,
+  listenForSignInRedirect,
   openInSystemBrowser,
   removeProviderInstance,
   turnOffProviderInstanceHere,
@@ -33,7 +38,7 @@ import {
   type ProviderInstanceView,
 } from "../api.js";
 import { REPLACEABLE_LABELS } from "../lens/useReplacement.js";
-import type { SignInState, UiReplacement } from "../tauri-bridge/generated/bindings.js";
+import type { SignInCompletion, SignInState, UiReplacement } from "../tauri-bridge/generated/bindings.js";
 import { CredentialRow } from "./ExtensionsSection.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import {
@@ -296,18 +301,25 @@ function AddInstance({ views, onChanged }: { views: ProviderInstanceView[]; onCh
 }
 
 /** A credential the person signs in for (P9.B3): never typed. Sign in
- *  opens the service's page in their own browser; oxplow hears when it is
- *  done (`credentialChanged`) and the section reads the instances again. */
+ *  has the shell listen for the redirect (P10), opens the service's page in
+ *  the person's own browser, and hands each redirect the shell catches to
+ *  the core, answering the browser with its verdict; oxplow hears when it
+ *  is done (`credentialChanged`) and the section reads the instances
+ *  again. Only the desktop app can sign in: the redirect comes back to
+ *  this machine. */
 function SignInRow({
   instance,
   name,
   state,
+  redirectPort,
   approved,
   onChanged,
 }: {
   instance: string;
   name: string;
   state: SignInState;
+  /** The port its service has registered for the redirect, if any. */
+  redirectPort: number | null;
   /** Its program is approved as it is: where it signs in is part of that. */
   approved: boolean;
   onChanged(): void;
@@ -316,8 +328,20 @@ function SignInRow({
   // A sign-in is being started: a second click would start another.
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The port the shell listens on for this row's sign-in under way. */
+  const listening = useRef<number | null>(null);
+  const shell = canCatchSignInRedirect();
   const id = `${instance}-${name}`;
   const line = signInLine(state);
+
+  /** The sign-in under way is over (`why`): the shell stops listening. */
+  function stopListening(why: string) {
+    const port = listening.current;
+    listening.current = null;
+    if (port !== null) void answerSignInRedirect(port, { outcome: "failed", error: why }).catch(() => {});
+  }
+  // Leaving the page ends it.
+  useEffect(() => () => stopListening("the sign-in was left"), []);
 
   useEffect(
     () =>
@@ -330,15 +354,45 @@ function SignInRow({
   );
 
   async function signIn() {
+    const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
     setError(null);
     setStarting(true);
+    // A newer sign-in replaces the one under way (the core abandons it too).
+    stopListening("a newer sign-in replaced it");
+    let port: number | null = null;
     try {
-      await openInSystemBrowser(await beginOauthSignIn(instance, name));
+      port = await listenForSignInRedirect(redirectPort);
+      listening.current = port;
+      await openInSystemBrowser(await beginOauthSignIn(instance, name, port));
       setWaiting(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      stopListening(message(e));
+      setError(message(e));
+      return;
     } finally {
       setStarting(false);
+    }
+    // Each redirect the shell catches goes to the core, and the browser
+    // hears its verdict; one that isn't this sign-in's is refused and the
+    // wait goes on. How it ended arrives as `credentialChanged`.
+    try {
+      for (;;) {
+        const redirect = await awaitSignInRedirect(port);
+        const outcome: SignInCompletion = await completeOauthSignIn(instance, name, redirect).catch(
+          (e: unknown) => ({ outcome: "failed", error: message(e) }),
+        );
+        await answerSignInRedirect(port, outcome);
+        if (outcome.outcome === "not_this_sign_in") continue;
+        if (listening.current === port) listening.current = null;
+        return;
+      }
+    } catch (e) {
+      // Stopped by a newer sign-in or by leaving (no longer this row's
+      // concern), or never finished.
+      if (listening.current !== port) return;
+      listening.current = null;
+      setWaiting(false);
+      setError(message(e));
     }
   }
 
@@ -362,11 +416,13 @@ function SignInRow({
       <button
         type="button"
         data-testid={`sign-in-button-${id}`}
-        disabled={!approved || starting}
+        disabled={!approved || starting || !shell}
         title={
-          approved
-            ? "Open the service's sign-in page in your browser; the token it gives is kept in this machine's keychain"
-            : "Approve its program on Settings → Data → Programs first: where it signs in is part of what you approve"
+          !shell
+            ? "Signing in needs the oxplow desktop app: the service sends your browser back to this machine, where only the app can listen"
+            : approved
+              ? "Open the service's sign-in page in your browser; the token it gives is kept in this machine's keychain"
+              : "Approve its program on Settings → Data → Programs first: where it signs in is part of what you approve"
         }
         onClick={() => void signIn()}
       >
@@ -551,6 +607,7 @@ function IntegrationRow({
             instance={view.instance}
             name={c.name}
             state={c.signIn}
+            redirectPort={c.redirectPort}
             approved={view.approved}
             onChanged={onCredentialChanged}
           />
