@@ -19,6 +19,15 @@ link, comment, delete — goes to Linear.
    Check, then Enable. Issues arrive with the first sync; "Active for work
    items" makes new items Linear issues.
 
+## Its own Board
+
+While Linear is the active provider, the Board page shows this
+extension's `lenses/board.yaml` in place of oxplow's columns
+(`ui.replacements`, experimental): the team's issues under Linear's own
+workflow states, which oxplow's Board folds into "to do". Right-click a
+row to Start it or mark it Done. Settings → Integrations has "Always use
+oxplow's own board" to switch back.
+
 ## Config
 
 | key | |

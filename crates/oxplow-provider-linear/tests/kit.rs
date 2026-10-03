@@ -75,6 +75,24 @@ async fn the_example_extension_passes_plugin_test() {
         )
         .unwrap();
     }
+    // P9.A1: the example replaces the Board with its own lens, checked
+    // above with the rest of the extension.
+    let loaded = oxplow_app::extensions::load_extensions(dir.path())
+        .into_iter()
+        .find(|e| e.name == "linear")
+        .unwrap();
+    let replaced: Vec<(&str, &str)> = loaded
+        .ui
+        .replacements
+        .iter()
+        .map(|r| (r.target.as_str(), r.lens_id.as_str()))
+        .collect();
+    assert_eq!(
+        replaced,
+        vec![("work_item.board", "linear/board")],
+        "{:?}",
+        loaded.errors
+    );
     for ran in ["work_items suite", "read issues", "discover"] {
         assert!(
             report.ran.iter().any(|r| r == ran),

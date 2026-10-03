@@ -27,3 +27,9 @@ providers:
     credentials: [LINEAR_API_KEY]
     network: [api.linear.app]
     declarations: provider.json
+ui:
+  # While Linear is "Active for work items", the Board's cards are this
+  # lens instead of oxplow's columns (experimental; Settings → Integrations
+  # switches back to oxplow's own).
+  replacements:
+    - { target: work_item.board, lens: board }

@@ -3,7 +3,9 @@
 /// written with `config.set` as the person), then each extension
 /// provider's instance on this machine — its state, its config (a form
 /// from the provider's `config_schema`, P6.B2), Check, and Enable /
-/// Disable. Enabling checks first;
+/// Disable. Between the two, the core components an extension replaces
+/// (P9.A1), each with a switch back to oxplow's own (`replacementsOff`).
+/// Enabling checks first;
 /// an unapproved provider is approved under Data → Programs. See
 /// `.context/providers.md`.
 ///
@@ -17,12 +19,15 @@ import { useCallback, useEffect, useState } from "react";
 import {
   checkProviderInstance,
   effectiveConfig,
+  listExtensions,
   listProviderInstances,
   runCommand,
   setProviderInstance,
   subscribeOxplowEvents,
   type ProviderInstanceView,
 } from "../api.js";
+import { REPLACEABLE_LABELS } from "../lens/useReplacement.js";
+import type { UiReplacement } from "../tauri-bridge/generated/bindings.js";
 import { CredentialRow } from "./ExtensionsSection.js";
 import { activeProviderProblem, collectorLine, integrationRow, workItemsChoices } from "./integrationsModel.js";
 import { SchemaForm } from "./SchemaForm/SchemaForm.js";
@@ -32,11 +37,20 @@ import { showToast } from "./toastStore.js";
 export function IntegrationsSection() {
   const [views, setViews] = useState<ProviderInstanceView[] | null>(null);
   const [active, setActive] = useState<string>("oxplow");
+  const [replaced, setReplaced] = useState<UiReplacement[]>([]);
+  const [off, setOff] = useState<string[]>([]);
 
   const refresh = useCallback(async () => {
     try {
-      const [listed, settings] = await Promise.all([listProviderInstances(), effectiveConfig()]);
+      const [listed, settings, extensions] = await Promise.all([
+        listProviderInstances(),
+        effectiveConfig(),
+        listExtensions(null),
+      ]);
       setViews(listed);
+      setReplaced(extensions.filter((e) => e.enabled).flatMap((e) => e.ui.replacements));
+      const turnedOff = settings.find((s) => s.key === "replacementsOff")?.value;
+      setOff(Array.isArray(turnedOff) ? turnedOff.map(String) : []);
       const chosen = settings.find((s) => s.key === "activeProviders")?.value as Record<string, unknown> | null;
       setActive(typeof chosen?.work_items === "string" ? chosen.work_items : "oxplow");
     } catch (e) {
@@ -63,6 +77,7 @@ export function IntegrationsSection() {
   return (
     <div data-testid="integrations-section">
       <ActiveWorkItems views={views} active={active} onChosen={setActive} />
+      <Replacements replaced={replaced} off={off} onChanged={setOff} />
       {views.map((v) => (
         <IntegrationRow key={v.instance} view={v} onChanged={setViews} onCredentialChanged={() => void refresh()} />
       ))}
@@ -119,6 +134,62 @@ function ActiveWorkItems({
           {problem}
         </div>
       ) : null}
+    </fieldset>
+  );
+}
+
+/** The core components an extension replaces, each with a switch back to
+ *  oxplow's own: `replacementsOff`, a person-only key like
+ *  `activeProviders`, so the click is the confirmation `config.set` asks
+ *  for. A replacement shows only while its extension's provider is the
+ *  active one. */
+function Replacements({
+  replaced,
+  off,
+  onChanged,
+}: {
+  replaced: UiReplacement[];
+  off: string[];
+  onChanged(off: string[]): void;
+}) {
+  const targets = [...new Set(replaced.map((r) => r.target))].sort();
+  if (targets.length === 0) return null;
+  async function set(target: string, keepOxplows: boolean) {
+    const next = keepOxplows ? [...new Set([...off, target])].sort() : off.filter((t) => t !== target);
+    try {
+      if (next.length === 0) {
+        await runCommand("config.unset", { key: "replacementsOff" }, true);
+      } else {
+        await runCommand("config.set", { key: "replacementsOff", value: next }, true);
+      }
+      onChanged(next);
+    } catch (e) {
+      recordOpError({ label: "Choose whose component shows", message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return (
+    <fieldset data-testid="integrations-replacements" style={fieldsetStyle}>
+      <legend style={mutedStyle}>Replaced components — an extension's own, while its provider is the active one</legend>
+      {targets.map((target) => {
+        const label = REPLACEABLE_LABELS[target] ?? target;
+        const by = replaced.filter((r) => r.target === target).map((r) => r.extension);
+        return (
+          <label
+            key={target}
+            data-testid={`integrations-replacement-${target}`}
+            style={{ display: "flex", gap: 6, alignItems: "center" }}
+          >
+            <input
+              type="checkbox"
+              data-testid={`integrations-replacement-off-${target}`}
+              checked={off.includes(target)}
+              onChange={(e) => void set(target, e.target.checked)}
+            />
+            {`Always use oxplow's own ${label}`}
+            <span style={mutedStyle}>· replaced by {by.join(", ")}</span>
+          </label>
+        );
+      })}
     </fieldset>
   );
 }

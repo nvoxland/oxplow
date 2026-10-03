@@ -104,6 +104,8 @@ async function expectPlain(view: ReturnType<typeof render>) {
   await act(async () => {});
   // Any slot mount, whatever its slot (`LensSlots` marks each one).
   expect(view.container.querySelector("[data-slot]")).toBeNull();
+  // No core component replaced (`Replaceable` marks one that is).
+  expect(view.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
   expect(view.queryByTestId("page-nav-commands")).toBeNull();
   expect(view.container.querySelector('[title^="from "]')).toBeNull();
 }
@@ -120,7 +122,7 @@ test("another provider's item, with every flag off, is its core content and no m
 });
 
 test("the Board, the commit page, uncommitted changes and history render plain", async () => {
-  const board = mount("page:board", <BoardPage threadId={null} onOpenPage={() => {}} />);
+  const board = mount("page:board", <BoardPage threadId={null} streamId="str1" onOpenPage={() => {}} />);
   await waitFor(() => expect(board.getByTestId("work-board").textContent).toContain("Their bug"));
   await expectPlain(board);
   cleanup();
@@ -191,3 +193,55 @@ test("the file diff's header strip is plain, and a mount gets the file and its r
   );
   await waitFor(() => expect(view.container.innerHTML).toContain('data-testid="diff.file.header-x/co"'));
 });
+
+// P9.A1: the Board is replaceable — by the active work-items provider's
+// extension only, given the Board's props and nothing else.
+test("the active provider's extension replaces the Board; another's doesn't", async () => {
+  const replacing = (name: string) => ({
+    name,
+    enabled: true,
+    ui: {
+      slots: [],
+      commands: [],
+      decorators: [],
+      replacements: [{ id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", lensId: `${name}/board` }],
+    },
+    lenses: [{ id: `${name}/board`, params: ["scope", "thread_id"].map((p) => ({ name: p, label: null, default: null })) }],
+  });
+  extensions = [replacing("x"), replacing("y")];
+  const realQuery = answers.querySql!;
+  let active = "oxplow";
+  answers.querySql = async (...args) => {
+    if (!String(args[0]).includes("v_capability_provider")) return realQuery(...args);
+    return ok({
+      columns: ["capability", "provider", "extension", "features", "active"],
+      rows: [
+        ["work_items", "oxplow", null, "{}", active === "oxplow" ? 1 : 0],
+        ["work_items", "fake", "x", "{}", active === "fake" ? 1 : 0],
+        ["work_items", "other", "y", "{}", 0],
+      ],
+      truncated: false,
+      reads: { models: ["v_capability_provider"], tables: [], measures: [] },
+      freshness: [],
+    });
+  };
+  try {
+    // Installed but not active: oxplow's own Board, and no replacement lens runs.
+    const own = mount("page:board", <BoardPage threadId={null} streamId="str1" onOpenPage={() => {}} />);
+    await waitFor(() => expect(own.getByTestId("work-board").textContent).toContain("Their bug"));
+    expect(own.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
+    expect(lensRuns).toEqual([]);
+    cleanup();
+
+    active = "fake";
+    const replaced = mount("page:board", <BoardPage threadId={null} streamId="str1" onOpenPage={() => {}} />);
+    await waitFor(() => expect(replaced.getByTestId("replacement-work_item.board").textContent).toContain("replaced by x"));
+    expect(replaced.queryByTestId("work-board")).toBeNull();
+    expect(lensRuns).toEqual([["x/board", { scope: "all", thread_id: null }]]);
+    // The page's own chrome — its scope picker — is still oxplow's.
+    expect(replaced.getByTestId("board-scope")).toBeTruthy();
+  } finally {
+    answers.querySql = realQuery;
+  }
+});
+

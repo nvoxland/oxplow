@@ -142,7 +142,7 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    const BOARD: &str = "title: Board\nparams: [{ name: scope }, { name: thread_id }, { name: stream_id }]\nquery: SELECT ref, title, state FROM v_work_item\n";
+    const BOARD: &str = "title: Board\nparams: [{ name: scope }, { name: thread_id }]\nquery: SELECT ref, title, state FROM v_work_item\n";
 
     /// Extension `tracker` (`sharing`), with `providers` (YAML, or none),
     /// a `board` lens taking the Board's whole contract, a `partial` one
@@ -225,7 +225,7 @@ mod tests {
             ),
             (
                 "{ target: work_item.board, lens: partial }",
-                "must declare `thread_id`, `stream_id`",
+                "must declare `thread_id`",
             ),
             (
                 "{ target: work_item.board, lens: board, order: 1 }",

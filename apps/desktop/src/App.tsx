@@ -2830,7 +2830,9 @@ export function App() {
         id: ref.id,
         label: "Board",
         closable: true,
-        render: () => <BoardPage threadId={selectedThreadId ?? null} onOpenPage={nav.navOpen} />,
+        render: () => (
+          <BoardPage threadId={selectedThreadId ?? null} streamId={stream?.id ?? null} onOpenPage={nav.navOpen} />
+        ),
       }),
       catalog: (ref, nav) => ({
         id: ref.id,

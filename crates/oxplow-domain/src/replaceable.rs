@@ -2,6 +2,8 @@
 //! experimental; `.context/target-architecture.md` §11.2): each a named
 //! target of one capability with a **props contract** — the params its
 //! replacement lens gets, and must declare, instead of any host state.
+//! (The viewer's stream isn't a prop: any lens declaring `stream_id` gets
+//! it, as everywhere.)
 //! Whole pages are never replaceable.
 //!
 //! One table for the extension loader (which checks a declaration against
@@ -22,11 +24,11 @@ pub struct Replaceable {
 pub const REPLACEABLE: &[Replaceable] = &[
     // The Board's columns of cards (`WorkBoard`): `scope` is `thread`,
     // `backlog` or `all`; `thread_id` the thread when `scope` is `thread`,
-    // else null; `stream_id` the viewer's stream.
+    // else null.
     Replaceable {
         target: "work_item.board",
         capability: "work_items",
-        props: &["scope", "thread_id", "stream_id"],
+        props: &["scope", "thread_id"],
     },
 ];
 

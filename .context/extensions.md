@@ -931,7 +931,7 @@ host state.
 
 | Target | Core component | Capability | Props |
 |---|---|---|---|
-| `work_item.board` | the Board's columns of cards (`WorkBoard`) | `work_items` | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null), `stream_id` |
+| `work_item.board` | the Board's columns of cards (`WorkBoard`) | `work_items` | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) |
 
 The first target is the only one; the history graph and the conflict
 resolver §11.2 names wait for a provider that needs them.
@@ -941,7 +941,8 @@ target is in the table; the lens is one of the extension's and declares
 **every** prop (a slot's lens declares at least one; a replacement takes
 the whole contract — a Board that ignores `scope` isn't the Board); the
 extension brings a provider of the target's capability (`providers:`);
-a target is replaced once per extension. Valid ones are
+a target is replaced once per extension. The viewer's stream isn't a
+prop: a lens that declares `stream_id` gets it, as everywhere. Valid ones are
 `Extension.ui.replacements` (`UiReplacement { id: <ext>/<target>,
 extension, target, capability, lensId }`).
 
@@ -949,7 +950,46 @@ extension, target, capability, lensId }`).
 [work_item.board]` (person-only, like `activeProviders` — it decides
 what renders a core region; validated against the table, an unknown
 target is an error listing the real ones). Listed, oxplow's own
-component shows.
+component shows. Settings → Integrations lists the replaced components
+under the active-provider chooser, each with "Always use oxplow's own
+<component>" (`config.set` / `config.unset` as the person).
+
+**At render** (`lens/useReplacement.ts`, `components/Replaceable.tsx`).
+A core page wraps the component: `<Replaceable target props streamId
+fallback={<WorkBoard …/>}>` (`BoardPage`). `useReplacement` reads the
+enabled extensions' replacements of the target and, only when one
+exists, the capability's providers (`v_capability_provider`, re-read
+when it changes) and `replacementsOff` (re-read on `configChanged`):
+- **only the active provider's extension replaces** — the candidate
+  whose `extension` is the active row's. That is decided here, not at
+  load: the active provider changes with `activeProviders` and no
+  reload. One provider is active, so there is never a second candidate;
+- no candidate, oxplow's own provider active, or the target turned off →
+  `fallback`, untouched;
+- chosen → its lens runs with the props it declares (`childParams`) and
+  renders through `LensResultView` (the one render path: kit, or `viz:
+  custom` with its sandbox and "custom" badge) under a **"replaced by
+  <extension>"** badge (`replacement-<target>`, `replacement-badge`),
+  re-running like any lens. The page's own chrome (the Board's scope
+  picker) stays oxplow's;
+- it can't load — the lens run fails, or its custom component doesn't
+  start (`LensResultView.customFailure` → `CustomComponentViz.failure`)
+  → **the core component**, under a line saying whose it was and why
+  ("linear's board couldn't load: …. Showing oxplow's.",
+  `replacement-fallback`) — never the lens's table;
+- while any of that isn't known yet, nothing renders, so the wrong
+  component never flashes.
+Showing one records `usage { kind: "replacement", key: <ext>/<target> }`
+(the evidence a kind needs to be promoted). A replacement is a lens, so
+its text rendering is the lens's; agents read work items from
+`v_work_item` either way. The capability smoke test renders the Board
+with every enhancement off (no `replacement-*`), and with two extensions
+replacing it shows that only the active provider's does.
+
+The first real one is the Linear example
+(`examples/extensions/linear`): `lenses/board.yaml` lists the team's
+issues under Linear's own workflow states, which oxplow's Board folds
+into "to do"; its kit test loads it with the replacement.
 
 ## Reviewing by effect
 

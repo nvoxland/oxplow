@@ -53,6 +53,25 @@ test("a frame that never says ready, or navigates away, falls back to the table"
   await waitFor(() => expect(away.getByTestId("custom-component-fallback").textContent).toContain("navigated away"));
 });
 
+// P9.A1: a replacement's lens says what stands in for a component that
+// can't be shown — the core component, not this lens's table.
+test("with `failure`, a component that can't be shown gives way to what it says, not the table", async () => {
+  const failure = (reason: string) => <div data-testid="core">core, because: {reason}</div>;
+  const slow = render(
+    <CustomComponentViz run={run({ component: "burndown", props: null })} streamId={null} fallback={fallback} failure={failure} base="http://127.0.0.1:9" readyTimeoutMs={10} />,
+  );
+  fireEvent.load(slow.getByTestId("custom-component-frame"));
+  await waitFor(() => expect(slow.getByTestId("core").textContent).toContain("didn't start"));
+  expect(slow.queryByTestId("the-table")).toBeNull();
+  expect(slow.queryByTestId("custom-component-fallback")).toBeNull();
+  cleanup();
+  const hostless = render(
+    <CustomComponentViz run={run({ component: "burndown", props: null })} streamId={null} fallback={fallback} failure={failure} base={null} />,
+  );
+  expect(hostless.getByTestId("core")).toBeTruthy();
+  expect(hostless.queryByTestId("the-table")).toBeNull();
+});
+
 // A stream switch changes the bundle's URL: a new frame loads, which is
 // not the old one navigating away.
 test("a new bundle URL is a new frame, not a navigation", async () => {

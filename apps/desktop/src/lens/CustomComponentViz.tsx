@@ -28,6 +28,7 @@ export function CustomComponentViz({
   streamId,
   onOpenPage,
   fallback,
+  failure,
   base = remoteBaseUrl(),
   readyTimeoutMs = 3000,
 }: {
@@ -36,6 +37,9 @@ export function CustomComponentViz({
   onOpenPage?(ref: TabRef): void;
   /** The lens's table: shown when the component can't be. */
   fallback: ReactNode;
+  /** What to show instead when the component can't be — in place of the
+   *  note and `fallback` (a replacement shows the core component). */
+  failure?(reason: string): ReactNode;
   /** The daemon that serves bundles; none means no component. */
   base?: string | null;
   readyTimeoutMs?: number;
@@ -43,9 +47,10 @@ export function CustomComponentViz({
   const component = run.lens.custom?.component ?? null;
   // Why the frame at `src` was given up on; a new `src` starts afresh.
   const [failed, setFailed] = useState<{ src: string; reason: string } | null>(null);
-  if (!base || !component) return <>{fallback}</>;
+  if (!base || !component) return <>{failure ? failure("Its component can't be shown here.") : fallback}</>;
   const src = componentBundleUrl(base, run.lens.extension, component, streamId);
   if (failed?.src === src) {
+    if (failure) return <>{failure(failed.reason)}</>;
     return (
       <div>
         <div data-testid="custom-component-fallback" style={noteStyle}>

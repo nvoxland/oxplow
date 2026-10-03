@@ -8,6 +8,9 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 const realApi = await import("../api.js");
 const ran: Array<[string, unknown, boolean]> = [];
 let active: unknown = null;
+let replacementsOff: string[] = [];
+/** `tracker`'s `ui.replacements`. */
+let replacements: unknown[] = [];
 const instance = {
   instance: "tracker/fake",
   extension: "tracker",
@@ -24,7 +27,16 @@ const instance = {
 mock.module("../api.js", () => ({
   ...realApi,
   listProviderInstances: async () => [instance],
-  effectiveConfig: async () => [{ key: "activeProviders", doc: "", value: active, origin: "default", extension: null, humanOnly: true, schema: {} }],
+  effectiveConfig: async () => [
+    { key: "activeProviders", doc: "", value: active, origin: "default", extension: null, humanOnly: true, schema: {} },
+    { key: "replacementsOff", doc: "", value: replacementsOff, origin: "default", extension: null, humanOnly: true, schema: {} },
+  ],
+  // Nothing unless a test declares a replacement: this fake outlives the
+  // file (a module mock is process-wide).
+  listExtensions: async () =>
+    replacements.length === 0
+      ? []
+      : [{ name: "tracker", enabled: true, ui: { slots: [], commands: [], decorators: [], replacements }, lenses: [] }],
   subscribeOxplowEvents: () => () => {},
   runCommand: async (name: string, input: unknown, confirmed = false) => {
     ran.push([name, input, confirmed]);
@@ -36,6 +48,8 @@ const { IntegrationsSection } = await import("./IntegrationsSection.js");
 afterEach(() => {
   ran.length = 0;
   active = null;
+  replacementsOff = [];
+  replacements = [];
   cleanup();
 });
 
@@ -70,3 +84,30 @@ test("Sync Now runs provider.sync for that collector", async () => {
     expect(ran).toEqual([["provider.sync", { instance: "tracker/fake", collector: "work_items" }, false]]),
   );
 });
+
+// P9.A1: a person can keep oxplow's own component where an extension
+// replaces it — `replacementsOff`, a person's `config.set` like the active
+// provider.
+test("a replaced component can be turned back to oxplow's own", async () => {
+  const none = render(<IntegrationsSection />);
+  await waitFor(() => none.getByTestId("integrations-section"));
+  expect(none.queryByTestId("integrations-replacements")).toBeNull();
+  cleanup();
+
+  replacements = [
+    { id: "tracker/work_item.board", extension: "tracker", target: "work_item.board", capability: "work_items", lensId: "tracker/board" },
+  ];
+  const view = render(<IntegrationsSection />);
+  const row = await waitFor(() => view.getByTestId("integrations-replacement-work_item.board"));
+  expect(row.textContent).toContain("tracker");
+  const box = view.getByTestId("integrations-replacement-off-work_item.board") as HTMLInputElement;
+  expect(box.checked).toBe(false);
+  fireEvent.click(box);
+  await waitFor(() =>
+    expect(ran).toEqual([["config.set", { key: "replacementsOff", value: ["work_item.board"] }, true]]),
+  );
+  await waitFor(() => expect(box.checked).toBe(true));
+  fireEvent.click(box);
+  await waitFor(() => expect(ran[1]).toEqual(["config.unset", { key: "replacementsOff" }, true]));
+});
+

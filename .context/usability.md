@@ -154,6 +154,19 @@ Things I keep forgetting. Read this before adding any UI.
   below the frame), never inside the frame. When it can't start, a muted
   line says so and the lens's table shows.
 
+## A replaced component is marked, and falls back to oxplow's
+
+- Where an extension's lens stands in for a core component (the Board's
+  cards — `Replaceable`, P9.A1), a small **replaced by <extension>**
+  badge says whose it is; the page's own chrome stays oxplow's. When the
+  replacement can't load, oxplow's own component shows, under a muted
+  line saying whose couldn't load and why — never an error instead of
+  the page, and never the lens's table. A person switches back for good
+  with "Always use oxplow's own <component>" on Settings → Integrations.
+  Testids: `replacement-<target>`, `replacement-badge`,
+  `replacement-fallback`, `integrations-replacement-<target>`,
+  `integrations-replacement-off-<target>`.
+
 ## Decorations are additive
 
 - An extension's decorator adds a chip to a page's header (after the

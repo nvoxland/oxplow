@@ -220,6 +220,9 @@ export interface CapabilityProvider {
   /** The extension it comes from; null for oxplow's own. */
   extension: string | null;
   features: Record<string, unknown>;
+  /** The capability's active provider (`activeProviders`; oxplow's own
+   *  when none is chosen). */
+  active: boolean;
 }
 
 export function capabilityProvidersFromResult(result: SqlQueryResult): CapabilityProvider[] {
@@ -237,6 +240,7 @@ export function capabilityProvidersFromResult(result: SqlQueryResult): Capabilit
       provider: String(at(row, "provider")),
       extension: at(row, "extension") == null ? null : String(at(row, "extension")),
       features,
+      active: Number(at(row, "active") ?? 0) === 1,
     };
   });
 }

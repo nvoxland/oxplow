@@ -1,0 +1,29 @@
+title: Linear Board
+description: The team's issues under Linear's own workflow states. Oxplow's Board folds triage, backlog and unstarted into one "to do" column; this keeps them apart.
+# The Board's props (oxplow's `work_item.board` contract): what the page's
+# "Show" picker chose, and the thread when it chose this thread.
+params: [{ name: scope }, { name: thread_id }]
+query: |
+  SELECT w.ref, w.title, w.native_state, w.state
+  FROM v_work_item w
+  WHERE w.provider = 'linear'
+    AND CASE :scope
+          -- This thread: the issues its efforts worked on.
+          WHEN 'thread' THEN w.ref IN (SELECT e.work_item FROM v_effort e WHERE e.thread_id = :thread_id)
+          -- Backlog: not started, and no effort yet.
+          WHEN 'backlog' THEN w.state = 'todo'
+            AND w.ref NOT IN (SELECT e.work_item FROM v_effort e WHERE e.work_item IS NOT NULL)
+          ELSE 1
+        END
+  ORDER BY CASE w.state WHEN 'in_progress' THEN 0 WHEN 'blocked' THEN 1 WHEN 'todo' THEN 2 WHEN 'done' THEN 3 ELSE 4 END,
+           w.native_state, w.updated_at DESC
+viz: table
+columns:
+  - { key: native_state, label: Linear State }
+  - { key: title, label: Issue, link: { kind: page, from: ref } }
+actions:
+  # In each row's right-click menu, run as the person; the write goes to Linear.
+  - { id: start, label: Start, command: work_item.transition, input: { ref: "{{row.ref}}", to: in_progress }, row: true }
+  - { id: done, label: Done, command: work_item.transition, input: { ref: "{{row.ref}}", to: done }, row: true }
+empty: No Linear issues here.
+hidden: true

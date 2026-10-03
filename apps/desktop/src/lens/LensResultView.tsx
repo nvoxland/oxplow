@@ -98,6 +98,9 @@ interface LensResultViewProps {
   /** Show the toolbar (Copy, Add to Agent Context, actions); a grid's
    *  children leave it to the grid. Default true. */
   toolbar?: boolean;
+  /** For a `viz: custom` lens: what to show when its component can't be,
+   *  instead of the lens's table (a replacement shows the core component). */
+  customFailure?(reason: string): ReactNode;
 }
 
 /** Pressing a lens's actions, with the confirmation a command may ask
@@ -197,6 +200,7 @@ function RowsBody({
   streamId = null,
   compact = false,
   runRowAction,
+  customFailure,
 }: LensResultViewProps & { runRowAction?: RowActionRunner }) {
   const lens = run.lens;
   const result = limitRows(run.result, maxRows);
@@ -272,7 +276,7 @@ function RowsBody({
   });
   return (
     <>
-      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu }} />
+      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, customFailure }} />
       {ctxMenu.menu}
     </>
   );
@@ -295,6 +299,7 @@ function LensViz({
   streamId,
   onOpenPage,
   rowMenu,
+  customFailure,
 }: {
   run: LensRun;
   result: LensRun["result"];
@@ -306,6 +311,7 @@ function LensViz({
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
   rowMenu: RowMenu;
+  customFailure?(reason: string): ReactNode;
 }) {
   switch (lens.viz) {
     case "bar":
@@ -341,6 +347,7 @@ function LensViz({
           streamId={streamId}
           onOpenPage={onOpenPage}
           fallback={<TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} />}
+          failure={customFailure}
         />
       );
     case "table":
