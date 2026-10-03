@@ -788,7 +788,18 @@ launcher commands are checked), then — only if `check` is clean — each
   (providers.md "The conformance kit");
 - no fixture is a warning; an `input` naming none of these is an error.
 
-Then `questions.yaml` and each provider's conformance kit.
+Then `questions.yaml`, each provider's conformance kit, and (P8.B5) each
+`materialize: { incremental: <column> }` model on its fixture
+`fixtures/model-<name>.yaml` — `before:` and `after:`, each `{ <table>:
+[{ column: value }] }`: in a rehearsal (rolled back), `before` is written
+and the model built whole into a temp table keyed like its `m_<view>`,
+`after` is written, the rows past its watermark are appended, and what
+it holds is compared with its SELECT's rows now
+(`models::incremental_matches_full`). A difference is an error at the
+model's line in `extension.yaml` ("misses n row(s) a full refill holds"
+— a watermark that doesn't grow as rows arrive drops a row below it
+unseen, which nothing at run time can tell); an append that hits the key
+passes (the runtime refills then); no fixture is a warning.
 
 ## Lenses
 

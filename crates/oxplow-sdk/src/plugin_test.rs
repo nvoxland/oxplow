@@ -86,6 +86,7 @@ pub async fn test_extension(root: &Path, name: &str, bless: bool) -> Result<Test
             test_provider(root, &ext, spec, bless, &mut report).await;
         }
         questions(&host, &ext, &mut report).await;
+        incremental_models(&host, &ext, &mut report).await;
     }
     report.ok = report.errors.is_empty();
     Ok(report)
@@ -330,6 +331,103 @@ async fn collector_example(
             "{shown}:1: collector `{id}` returned {got} at `{path}`, the example expects {want} — \
              fix: the script, or the example's `expect` (`{{ entities: {{ <name>: n | $any }} }}`)"
         ));
+    }
+}
+
+/// Each incremental model (P8.B5), on its fixture `fixtures/model-<name>.yaml`
+/// (`before:` and `after:`, each `{ <table>: [rows] }`): built whole on
+/// `before`, appended to past its watermark after `after` is written, and
+/// compared with a full refill — in a rehearsal, so nothing stays. A
+/// watermark that doesn't grow as rows arrive drops a row below it
+/// unseen; nothing at run time can tell, so this is where it shows.
+async fn incremental_models(host: &Host, ext: &Extension, report: &mut TestReport) {
+    let rel = ext.path.trim_end_matches('/').to_string();
+    let dir = host.root.join(&rel);
+    let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap_or_default();
+    for model in &ext.models {
+        let decl = &model.decl;
+        if decl
+            .materialize
+            .as_ref()
+            .and_then(oxplow_db::models::Materialize::incremental)
+            .is_none()
+        {
+            continue;
+        }
+        let line = oxplow_app::extensions::manifest_v2::entry_line(
+            &manifest, "models", "name", &decl.name,
+        )
+        .unwrap_or(1);
+        let at = format!("{rel}/extension.yaml:{line}");
+        let fixture = format!("fixtures/model-{}.yaml", decl.name);
+        let Ok(text) = std::fs::read_to_string(dir.join(&fixture)) else {
+            report.warnings.push(format!(
+                "{at}: incremental model `{}` has no {rel}/{fixture}, so appending isn't checked \
+                 against a full refill — fix: write its `before:` and `after:` rows \
+                 (`{{ <table>: [{{ column: value }}] }}`)",
+                decl.name
+            ));
+            continue;
+        };
+        let rows = |doc: &Value, part: &str| -> Result<oxplow_db::models::FixtureRows, String> {
+            let Some(tables) = doc.get(part) else {
+                return Ok(Vec::new());
+            };
+            let tables = tables
+                .as_object()
+                .ok_or_else(|| format!("`{part}` isn't a map of table → rows"))?;
+            tables
+                .iter()
+                .map(|(table, rows)| {
+                    let rows = rows
+                        .as_array()
+                        .ok_or_else(|| format!("`{part}.{table}` isn't a list of rows"))?
+                        .iter()
+                        .map(|r| {
+                            r.as_object()
+                                .cloned()
+                                .ok_or_else(|| format!("a row of `{part}.{table}` isn't a map"))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok((table.clone(), rows))
+                })
+                .collect()
+        };
+        let parsed = serde_yaml::from_str::<Value>(&text)
+            .map_err(|e| e.to_string())
+            .and_then(|doc| Ok((rows(&doc, "before")?, rows(&doc, "after")?)));
+        let (before, after) = match parsed {
+            Ok(p) => p,
+            Err(e) => {
+                report
+                    .errors
+                    .push(format!("{rel}/{fixture}:1: {e} — fix: correct the fixture"));
+                continue;
+            }
+        };
+        report.ran.push(format!("incremental {}", decl.name));
+        let view = oxplow_db::models::extension_view(&ext.name, &decl.name);
+        let decl_c = decl.clone();
+        let checked = host
+            .svc
+            .db
+            .rehearse(move |tx| {
+                oxplow_db::models::incremental_matches_full(tx, &view, &decl_c, &before, &after)
+            })
+            .await;
+        match checked {
+            Ok(None) => {}
+            Ok(Some(problem)) => report.errors.push(format!(
+                "{at}: incremental model `{}` {problem} — fix: `materialize: on_change`, or a \
+                 watermark that only grows as rows arrive",
+                decl.name
+            )),
+            Err(e) => report.errors.push(format!(
+                "{rel}/{fixture}:1: incremental model `{}` couldn't run on the fixture: {e} — \
+                 fix: the fixture's rows",
+                decl.name
+            )),
+        }
     }
 }
 
@@ -1108,6 +1206,77 @@ commands:
         let errors = report.errors.join("\n");
         assert!(
             errors.contains("example `happy`: composed [work_item.comment] but `expect_commands` is [work_item.transition]"),
+            "{errors}"
+        );
+    }
+
+    /// An extension with one incremental model over page visits, watermarked
+    /// on `watermark`, and its `before` / `after` fixture.
+    fn visits(root: &Path, watermark: &str) {
+        write(
+            root,
+            "oxplow/extensions/visits/extension.yaml",
+            &format!(
+                "manifest: 2
+name: visits
+intent:
+  purpose: Long visits.
+  origin: thread:thr1
+  examples: []
+models:
+  - name: long_visits
+    version: 1
+    description: Visits and how long they lasted.
+    key: [id]
+    materialize: {{ incremental: {watermark} }}
+    columns:
+      - {{ name: id, type: INTEGER, doc: The visit. }}
+      - {{ name: duration_ms, type: INTEGER, doc: How long it lasted. }}
+"
+            ),
+        );
+        write(
+            root,
+            "oxplow/extensions/visits/models/long_visits.sql",
+            "SELECT id, duration_ms FROM ref('page_visit') WHERE duration_ms IS NOT NULL\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/visits/fixtures/model-long_visits.yaml",
+            "before:
+  page_visit:
+    - { id: 1, page_kind: task, page_id: \"task:1\", visited_at: \"2026-01-01T00:00:00.000000Z\", duration_ms: 50 }
+after:
+  page_visit:
+    - { id: 2, page_kind: task, page_id: \"task:2\", visited_at: \"2026-01-01T00:00:01.000000Z\", duration_ms: 10 }
+",
+        );
+    }
+
+    /// P8.B5: each incremental model is appended to on its fixture's
+    /// `after` rows and checked against a full refill — a watermark that
+    /// doesn't grow with arrivals (a row lands below it, unseen) fails at
+    /// the model's line; one that does passes.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn plugin_test_checks_incremental_models_against_a_full_refill() {
+        let dir = tempfile::tempdir().unwrap();
+        visits(dir.path(), "id");
+        let report = test_extension(dir.path(), "visits", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+        assert!(
+            report.ran.iter().any(|r| r == "incremental long_visits"),
+            "{:?}",
+            report.ran
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        visits(dir.path(), "duration_ms");
+        let report = test_extension(dir.path(), "visits", false).await.unwrap();
+        let errors = report.errors.join("\n");
+        assert!(
+            errors.contains(
+                "oxplow/extensions/visits/extension.yaml:8: incremental model `long_visits`"
+            ) && errors.contains("1 row(s) a full refill holds"),
             "{errors}"
         );
     }

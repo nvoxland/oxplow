@@ -1207,6 +1207,133 @@ pub fn contract_change(before: &[ColumnDecl], after: &[ColumnDecl]) -> String {
     }
 }
 
+/// Rows to write into tables, in order: `(table, [row])`, each row a JSON
+/// object of column → value.
+pub type FixtureRows = Vec<(String, Vec<serde_json::Map<String, serde_json::Value>>)>;
+
+/// Whether an incremental model kept by appending holds what a full refill
+/// would (P8.B5): `before` written, the model built whole, `after` written,
+/// the rows past its watermark appended — then compared with the SELECT's
+/// rows now. `None` when they match (an append that hits the key counts:
+/// the runtime refills then); else what differs. Run it in a rehearsal:
+/// it writes the rows and a temp table.
+pub fn incremental_matches_full(
+    tx: &Connection,
+    view: &str,
+    decl: &ModelDecl,
+    before: &FixtureRows,
+    after: &FixtureRows,
+) -> Result<Option<String>, DomainError> {
+    let Some(watermark) = decl.materialize.as_ref().and_then(Materialize::incremental) else {
+        return Ok(None);
+    };
+    // As compiled; a model that didn't compile has no row (and `check`
+    // reported why).
+    let sql: Option<String> = tx
+        .query_row("SELECT sql FROM model WHERE view = ?1", [view], |r| {
+            r.get(0)
+        })
+        .optional()
+        .map_err(map_sql_err)?;
+    let Some(sql) = sql else {
+        return Ok(None);
+    };
+    let sql = sql.as_str();
+    write_fixture_rows(tx, before)?;
+    let mut defs: Vec<String> = decl
+        .columns
+        .iter()
+        .map(|c| {
+            format!("{} {}", quote(&c.name), c.sql_type)
+                .trim()
+                .to_string()
+        })
+        .collect();
+    let key: Vec<String> = decl.key.iter().map(|k| quote(k)).collect();
+    defs.push(format!("PRIMARY KEY ({})", key.join(", ")));
+    tx.execute_batch(&format!(
+        "DROP TABLE IF EXISTS temp.incremental_held;
+         CREATE TEMP TABLE incremental_held ({});
+         INSERT INTO temp.incremental_held SELECT * FROM ({sql});",
+        defs.join(", ")
+    ))
+    .map_err(map_sql_err)?;
+    write_fixture_rows(tx, after)?;
+    let mark: Option<i64> = tx
+        .query_row(
+            &format!(
+                "SELECT max({}) FROM temp.incremental_held",
+                quote(watermark)
+            ),
+            [],
+            |r| r.get(0),
+        )
+        .map_err(map_sql_err)?;
+    let appended = tx.execute(
+        &format!(
+            "INSERT INTO temp.incremental_held SELECT * FROM ({sql})
+             WHERE ?1 IS NULL OR {} > ?1",
+            quote(watermark)
+        ),
+        [mark],
+    );
+    if appended.is_err() {
+        // The append repeats a key it holds: the runtime refills whole.
+        return Ok(None);
+    }
+    let count = |q: String| -> Result<i64, DomainError> {
+        tx.query_row(&format!("SELECT count(*) FROM ({q})"), [], |r| r.get(0))
+            .map_err(map_sql_err)
+    };
+    let missed = count(format!(
+        "SELECT * FROM ({sql}) EXCEPT SELECT * FROM temp.incremental_held"
+    ))?;
+    let extra = count(format!(
+        "SELECT * FROM temp.incremental_held EXCEPT SELECT * FROM ({sql})"
+    ))?;
+    Ok((missed > 0 || extra > 0).then(|| {
+        format!(
+            "after appending the rows past `{watermark}` it misses {missed} row(s) a full refill holds and keeps {extra} it doesn't"
+        )
+    }))
+}
+
+/// Write `rows` into their tables.
+fn write_fixture_rows(tx: &Connection, rows: &FixtureRows) -> Result<(), DomainError> {
+    for (table, rows) in rows {
+        for row in rows {
+            let cols: Vec<String> = row.keys().map(|k| quote(k)).collect();
+            let marks: Vec<String> = (1..=row.len()).map(|i| format!("?{i}")).collect();
+            let values: Vec<rusqlite::types::Value> = row.values().map(sql_value).collect();
+            tx.execute(
+                &format!(
+                    "INSERT INTO {} ({}) VALUES ({})",
+                    quote(table),
+                    cols.join(", "),
+                    marks.join(", ")
+                ),
+                rusqlite::params_from_iter(values),
+            )
+            .map_err(|e| invalid(format!("a fixture row for `{table}`: {e}")))?;
+        }
+    }
+    Ok(())
+}
+
+fn sql_value(v: &serde_json::Value) -> rusqlite::types::Value {
+    use rusqlite::types::Value as V;
+    match v {
+        serde_json::Value::Null => V::Null,
+        serde_json::Value::Bool(b) => V::Integer(i64::from(*b)),
+        serde_json::Value::Number(n) => match n.as_i64() {
+            Some(i) => V::Integer(i),
+            None => V::Real(n.as_f64().unwrap_or_default()),
+        },
+        serde_json::Value::String(s) => V::Text(s.clone()),
+        other => V::Text(other.to_string()),
+    }
+}
+
 /// One declared test's result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestResult {
