@@ -70,6 +70,7 @@ pub mod followup;
 pub mod hook_ingest;
 pub mod indexer;
 pub mod inferred_decisions;
+pub mod kind_search;
 pub mod knowledge;
 pub mod knowledge_conformance;
 pub mod lens_actions;

@@ -20,6 +20,9 @@ pub struct RefKindRow {
     pub resolve: Option<String>,
     pub page: Option<String>,
     pub icon: Option<String>,
+    /// The view search indexes under the kind; `None` for a core kind
+    /// (core indexes its own) and a plugin kind that isn't searchable.
+    pub searchable: Option<String>,
 }
 
 /// Replace the table with `rows`.
@@ -29,8 +32,9 @@ pub fn restate_tx(conn: &Connection, rows: &[RefKindRow]) -> Result<(), DomainEr
     let mut st = conn
         .prepare(
             "INSERT INTO ref_kind
-                 (kind, extension, label, id_pattern, revisioned, wikilinks, resolve, page, icon)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 (kind, extension, label, id_pattern, revisioned, wikilinks, resolve, page, icon,
+                  searchable)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )
         .map_err(map_sql_err)?;
     for r in rows {
@@ -44,6 +48,7 @@ pub fn restate_tx(conn: &Connection, rows: &[RefKindRow]) -> Result<(), DomainEr
             r.resolve,
             r.page,
             r.icon,
+            r.searchable,
         ])
         .map_err(map_sql_err)?;
     }

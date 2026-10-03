@@ -582,7 +582,7 @@
   tests:
     - { not_null: event_type }
 - name: ref_kind
-  version: 1
+  version: 2
   key: [kind]
   description: "Every kind of ref the running vocabulary knows (P8.D6): core's, and those extensions declare (`ref_kinds:`, with how to show one). A removed extension's kinds leave with it."
   columns:
@@ -595,6 +595,7 @@
     - { name: "resolve", type: "TEXT", doc: "The view whose `title` names one, by its `ref` column; NULL for a core kind." }
     - { name: "page", type: "TEXT", doc: "The page that opens one (`page:ext.<extension>.<page>`, given `?ref=`); NULL for a core kind." }
     - { name: "icon", type: "TEXT", doc: "Its icon's name (one of `REF_KIND_ICONS`); NULL for a core kind." }
+    - { name: "searchable", type: "TEXT", doc: "The view whose rows (`ref`, `title`, `body`) the site-wide search indexes under the kind; NULL for a core kind (core indexes its own) and for a plugin kind that isn't searchable." }
   tests:
     - { not_null: kind }
 - name: plugin_health

@@ -317,3 +317,29 @@ test("a work item ref opens for every provider", () => {
   expect(refFromTabId("work_item:fake:W-1")).toEqual(theirs);
   expect(refFromTabId("work_item:oxplow:tsk3")).toEqual(taskRef("tsk3"));
 });
+
+// P9.D3: where a unified-search hit opens. A hit of an extension's ref
+// kind (a searchable kind) opens that kind's page with `?ref=`, as a
+// `[[pr:12]]` does; core kinds keep their pages; a note has none.
+test("searchHitTarget routes core kinds and an extension's kind", async () => {
+  const { searchHitTarget, taskRef, wikiPageRef, commentsRef, extPageRef } = await import("./pageRefs.js");
+  const { setRefKinds } = await import("../refKinds.js");
+  setRefKinds([
+    { kind: "acme_pr", extension: "acme", label: "Pull request", idPattern: "^\\d+$", wikilinks: ["pr"], resolve: "v_acme_prs", page: "page:ext.acme.pr", icon: "git-pull-request" },
+  ]);
+  try {
+    expect(searchHitTarget({ kind: "task", ref_id: "tsk1" })).toEqual({ page: taskRef("tsk1") });
+    expect(searchHitTarget({ kind: "wiki", ref_id: "home" })).toEqual({ page: wikiPageRef("home") });
+    expect(searchHitTarget({ kind: "comment", ref_id: "7" })).toEqual({ page: commentsRef() });
+    expect(searchHitTarget({ kind: "file", ref_id: "src/a.ts" })).toEqual({ file: "src/a.ts" });
+    expect(searchHitTarget({ kind: "note", ref_id: "3" })).toBeNull();
+    expect(searchHitTarget({ kind: "acme_pr", ref_id: "12" })).toEqual({
+      page: extPageRef("acme", "pr", { ref: "acme_pr:12" }),
+    });
+    // A kind nobody declares (its extension is gone) opens nothing.
+    expect(searchHitTarget({ kind: "gone_kind", ref_id: "1" })).toBeNull();
+  } finally {
+    setRefKinds([]);
+  }
+});
+

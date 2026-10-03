@@ -1995,8 +1995,12 @@ FTS5 virtual table (`tokenize = 'porter unicode61'`, `prefix = '2 3'`) storing
 or removed in place (a `UNIQUE` index over `(kind, ref_id, COALESCE(stream_id,''))`
 enforces identity, treating global rows' `NULL` stream as `''`).
 
-- `kind` ∈ `task | comment | note | wiki | file`; `ref_id` is the task id,
-  comment id, note id, wiki slug, or repo-relative path.
+- `kind` ∈ `task | comment | note | wiki | file`, or a **searchable
+  plugin ref kind** (`acme_pr`, P9.D3); `ref_id` is the task id, comment
+  id, note id, wiki slug, repo-relative path, or the plugin ref's id. A
+  plugin kind's entries are derived from its `searchable` model by an
+  asset per kind (`kind_search.rs`, `restate_kind_tx`: the kind's entries
+  replaced whole), not by the `Indexer`.
 - `stream_id` is `NULL` for project-global rows (wiki) and the owning stream
   otherwise. Search filters `stream_id = ?  OR stream_id IS NULL`; BM25 weights
   title above body (`bm25(search_fts, 5.0, 1.0)`).

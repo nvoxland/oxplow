@@ -4595,6 +4595,11 @@ export type RefKindDecl = {
 	 */
 	page: string,
 	wikilink: string | null,
+	/**
+	 *  The view whose rows (`ref`, `title`, `body`) search indexes under
+	 *  the kind (`kind_search`); none, its refs aren't found by search.
+	 */
+	searchable: string | null,
 	icon: string,
 	// `file:line` of the declaration.
 	declaredAt: string,

@@ -12,6 +12,7 @@
 //!     resolve: prs              # one of its models, with `ref` and `title` columns
 //!     page: pr                  # one of its pages, opened with `?ref=<ref>`
 //!     wikilink: pr              # optional `[[pr:12]]` sugar
+//!     searchable: found         # optional: one of its models, with `ref`, `title` and `body` (P9.D3)
 //!     icon: git-pull-request    # one of REF_KIND_ICONS
 //! ```
 
@@ -66,6 +67,9 @@ pub struct RefKindDecl {
     /// `?ref=<ref>`.
     pub page: String,
     pub wikilink: Option<String>,
+    /// The view whose rows (`ref`, `title`, `body`) search indexes under
+    /// the kind (`kind_search`); none, its refs aren't found by search.
+    pub searchable: Option<String>,
     pub icon: String,
     /// `file:line` of the declaration.
     pub declared_at: String,
@@ -81,6 +85,8 @@ struct RefKindFile {
     page: String,
     #[serde(default)]
     wikilink: Option<String>,
+    #[serde(default)]
+    searchable: Option<String>,
     icon: String,
 }
 
@@ -202,22 +208,36 @@ fn decl_of(
     }
     portable_id_pattern(&f.id).map_err(|why| named(format!("`id: {}`: {why}", f.id)))?;
     oxplow_domain::refs::kind::KindSpec::new(&f.kind, &f.id).map_err(|e| named(e.to_string()))?;
-    let model = models
-        .iter()
-        .find(|m| m.decl.name == f.resolve)
-        .ok_or_else(|| {
+    // A model of the extension's own with these columns, for `key:`.
+    let model_with = |key: &str, name: &str, columns: &[&str], why: &str| {
+        let model = models.iter().find(|m| m.decl.name == name).ok_or_else(|| {
             named(format!(
-                "`resolve: {}` isn't one of this extension's models (`models:`)",
-                f.resolve
+                "`{key}: {name}` isn't one of this extension's models (`models:`)"
             ))
         })?;
-    for col in ["ref", "title"] {
-        if !model.decl.columns.iter().any(|c| c.name == col) {
-            return Err(named(format!(
-                "model `{}` has no `{col}` column (a ref kind's model gives each ref's title)",
-                f.resolve
-            )));
+        match columns
+            .iter()
+            .find(|col| !model.decl.columns.iter().any(|c| c.name == **col))
+        {
+            Some(col) => Err(named(format!(
+                "model `{name}` has no `{col}` column ({why})"
+            ))),
+            None => Ok(()),
         }
+    };
+    model_with(
+        "resolve",
+        &f.resolve,
+        &["ref", "title"],
+        "a ref kind's model gives each ref's title",
+    )?;
+    if let Some(searchable) = &f.searchable {
+        model_with(
+            "searchable",
+            searchable,
+            &["ref", "title", "body"],
+            "what search indexes for each ref",
+        )?;
     }
     let page = pages.iter().find(|p| p.id == f.page).ok_or_else(|| {
         named(format!(
@@ -253,6 +273,10 @@ fn decl_of(
         resolve: oxplow_db::models::extension_view(extension, &f.resolve),
         page: page.page_ref.clone(),
         wikilink: f.wikilink,
+        searchable: f
+            .searchable
+            .as_deref()
+            .map(|m| oxplow_db::models::extension_view(extension, m)),
         icon: f.icon,
         declared_at,
         kind: f.kind,
@@ -381,6 +405,55 @@ ref_kinds:
                 errors.contains("extension.yaml:15:") && errors.contains(says),
                 "{to}: {errors}"
             );
+        }
+    }
+
+    /// P9.D3: `searchable:` names one of the extension's models with
+    /// `ref`, `title` and `body` — what search indexes under the kind.
+    #[test]
+    fn a_searchable_kind_names_a_model_with_ref_title_and_body() {
+        let found = "  - name: found
+    version: 1
+    description: Pull requests, as search finds them.
+    columns:
+      - { name: ref, type: TEXT, doc: The ref. }
+      - { name: title, type: TEXT, doc: Its title. }
+      - { name: body, type: TEXT, doc: Its description. }
+pages:";
+        let manifest = MANIFEST.replace("pages:", found).replace(
+            "    wikilink: pr\n",
+            "    wikilink: pr\n    searchable: found\n",
+        );
+        let load = |manifest: &str| {
+            let dir = tempfile::tempdir().unwrap();
+            write_acme(dir.path(), manifest);
+            std::fs::write(
+                dir.path().join("oxplow/extensions/acme/models/found.sql"),
+                "SELECT 'acme_pr:1' AS ref, 'One' AS title, 'The first.' AS body",
+            )
+            .unwrap();
+            load_extensions(dir.path())
+                .into_iter()
+                .find(|e| e.name == "acme")
+                .unwrap()
+        };
+        let ext = load(&manifest);
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(ext.ref_kinds[0].searchable.as_deref(), Some("v_acme_found"));
+        // Without it, a kind resolves and opens but isn't searched.
+        assert_eq!(acme(MANIFEST).ref_kinds[0].searchable, None);
+        for (to, says) in [
+            (
+                "searchable: nope",
+                "`searchable: nope` isn't one of this extension's models",
+            ),
+            // `prs` has `ref` and `title`, no `body`.
+            ("searchable: prs", "model `prs` has no `body` column"),
+        ] {
+            let ext = load(&manifest.replace("searchable: found", to));
+            assert!(ext.ref_kinds.is_empty(), "{to}");
+            let errors = ext.errors.join("\n");
+            assert!(errors.contains(says), "{to}: {errors}");
         }
     }
 }

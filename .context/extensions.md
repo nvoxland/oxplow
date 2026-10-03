@@ -1493,6 +1493,7 @@ ref_kinds:
     resolve: prs              # one of its models, with `ref` and `title` columns
     page: pr                  # one of its pages, opened with `?ref=<ref>`
     wikilink: pr              # optional `[[pr:12]]` sugar
+    searchable: found         # optional: one of its models, with `ref`, `title` and `body`
     icon: git-pull-request    # one of REF_KIND_ICONS
 ```
 
@@ -1533,6 +1534,40 @@ helpers consult and `useRefKinds` subscribes to:
   backend's `canonical_wikilink` does), `urlTransform` lets the kind's
   scheme through, and the link's text becomes its title from the
   `resolve` model (`usePluginRefTitle`) unless the author labelled it.
+
+**Searchable kinds** (P9.D3, `kind_search.rs`). `searchable: <model>`
+names one of the extension's models with `ref`, `title` and `body`
+(checked at load, like `resolve`); `v_ref_kind.searchable` is its view
+(V155). Its rows are in the site-wide search index (`search_fts`) under
+the kind, so the launcher finds a pull request by its title or text and
+the hit opens the kind's page (`searchHitTarget`, the one place a hit is
+routed; the row shows the kind's icon and label).
+
+- It is **index-time ingestion, as an asset** — not a query-time UNION:
+  `search_fts` owns the text it ranks (BM25 and `snippet()` need it in
+  the index), and a UNION would run every extension's SQL per keystroke,
+  unranked. One `Materializer` per searchable kind (`search:<kind>`), its
+  inputs the tables behind the model's view (the registry's lineage; a
+  materialized model's own table): a commit touching one re-reads the
+  view after the assets' quiet window and restates the kind's entries in
+  its own transaction — never the writer's.
+- `Assets::sync_search_kinds` keeps them in step with `ref_kind` and the
+  model registry (the change loop runs it at start and when `ref_kind`,
+  `model` or `model_input` change). A kind that stops being searchable —
+  its extension removed, the key dropped — leaves the index with its
+  entries; so does one that went while oxplow wasn't running (an
+  `asset_state` row `search:<kind>` with no kind behind it).
+- Bounded: 20,000 rows a kind, 16 KiB of body a row. A row whose `ref`
+  isn't `<kind>:<id>` with an id matching the kind's pattern is skipped
+  (a hit must be something that opens), with a warning in the log.
+- Entries are project-global (`stream_id` NULL): a model is.
+
+**`revisioned` isn't built for plugin kinds.** A revision is read by its
+reader (`git:`, `snap:` — the VCS and snapshot stores), and no plugin
+kind has one: there is nothing `acme_pr:12@…` could be read from. When a
+provider can read a revision of its own things, `resolve` gains a `rev`
+parameter and `KindSpec::revisioned` follows; until then a plugin kind's
+ref takes no `@rev`.
 
 ## Effects (experimental)
 

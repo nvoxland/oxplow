@@ -225,6 +225,9 @@ pub fn spawn(
         if let Err(error) = assets.sync_models().await {
             tracing::warn!(%error, "the materialized models didn't register");
         }
+        if let Err(error) = assets.sync_search_kinds().await {
+            tracing::warn!(%error, "the searchable ref kinds' indexes didn't register");
+        }
         let mut captures = CaptureListener::at_end(&db).await.unwrap_or_else(|error| {
             tracing::warn!(%error, "the capture listener starts from the beginning");
             CaptureListener::default()
@@ -241,6 +244,16 @@ pub fn spawn(
                         }
                         if let Err(error) = assets.sync_models().await {
                             tracing::warn!(%error, "the materialized models didn't resync");
+                        }
+                    }
+                    // A searchable kind's index follows the kinds declared
+                    // (`ref_kind`) and the tables behind each one's view.
+                    if ["ref_kind", "model_input", "model"]
+                        .iter()
+                        .any(|t| tables.contains(t))
+                    {
+                        if let Err(error) = assets.sync_search_kinds().await {
+                            tracing::warn!(%error, "the searchable ref kinds' indexes didn't resync");
                         }
                     }
                     assets.changed(&tables);

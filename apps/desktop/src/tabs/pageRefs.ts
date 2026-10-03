@@ -293,6 +293,30 @@ function pluginRefPage(ref: string, kind: string): TabRef | null {
   return ext ? extPageRef(ext.extension, ext.page, { ref }) : null;
 }
 
+/** Where a unified-search hit opens: a page, a file (in the editor), or
+ *  nowhere — a note has no page of its own, and a kind no installed
+ *  extension declares opens nothing. A hit of an extension's ref kind (a
+ *  `searchable:` kind, P9.D3) opens that kind's page with `?ref=`, as a
+ *  `[[…]]` of it does. */
+export function searchHitTarget(hit: { kind: string; ref_id: string }): { page: TabRef } | { file: string } | null {
+  switch (hit.kind) {
+    case "task":
+      return { page: taskRef(hit.ref_id) };
+    case "wiki":
+      return { page: wikiPageRef(hit.ref_id) };
+    case "comment":
+      return { page: commentsRef() };
+    case "file":
+      return { file: hit.ref_id };
+    case "note":
+      return null;
+    default: {
+      const page = pluginRefPage(`${hit.kind}:${hit.ref_id}`, hit.kind);
+      return page ? { page } : null;
+    }
+  }
+}
+
 /** The extension and page of a `page:ext.<extension>.<page>` id (the page
  *  id has no `.`, so it's what follows the last one), or null. */
 function extPageOf(head: string): { extension: string; page: string } | null {

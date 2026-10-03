@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { refKindInfo, useRefKinds } from "../refKinds.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useExtensions } from "../extensionsStore.js";
 import {
@@ -120,6 +121,9 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [siteHits, setSiteHits] = useState<SearchHit[]>([]);
+  // A hit of an extension's ref kind is drawn with that kind's icon and
+  // label: redraw when the kinds change.
+  useRefKinds();
   const [recentEntries, setRecentEntries] = useState<LauncherPageEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -548,7 +552,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 11 }}>
                       {result.hit.snippet}
                     </span>
-                    <span style={{ color: "var(--muted)", fontSize: 11 }}>{result.hit.kind}</span>
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>{refKindInfo(result.hit.kind)?.label ?? result.hit.kind}</span>
                   </button>
                 );
               }

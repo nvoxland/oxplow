@@ -58,6 +58,37 @@ pub fn sanitize_query(raw: &str) -> String {
         .join(" ")
 }
 
+/// Replace every project-global entry of `kind` with `entries` (`ref_id`
+/// → `(title, body)`), in the caller's transaction: what a kind whose
+/// whole index is derived from a model does on each recompute, and — with
+/// none — how a kind leaves the index.
+pub fn restate_kind_tx(
+    conn: &rusqlite::Connection,
+    kind: &str,
+    entries: &std::collections::BTreeMap<String, (String, String)>,
+) -> Result<(), DomainError> {
+    let sql = crate::database::map_sql_err;
+    conn.execute(
+        "DELETE FROM search_fts WHERE rowid IN (SELECT rowid FROM search_entry WHERE kind = ?1)",
+        params![kind],
+    )
+    .map_err(sql)?;
+    conn.execute("DELETE FROM search_entry WHERE kind = ?1", params![kind])
+        .map_err(sql)?;
+    let mut entry = conn
+        .prepare("INSERT INTO search_entry (kind, ref_id, stream_id) VALUES (?1, ?2, NULL)")
+        .map_err(sql)?;
+    let mut text = conn
+        .prepare("INSERT INTO search_fts (rowid, title, body) VALUES (?1, ?2, ?3)")
+        .map_err(sql)?;
+    for (ref_id, (title, body)) in entries {
+        entry.execute(params![kind, ref_id]).map_err(sql)?;
+        text.execute(params![conn.last_insert_rowid(), title, body])
+            .map_err(sql)?;
+    }
+    Ok(())
+}
+
 impl SqliteSearchStore {
     pub fn new(db: Database) -> Self {
         Self { db }

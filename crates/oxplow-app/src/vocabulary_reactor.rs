@@ -358,6 +358,7 @@ fn kind_rows(kinds: &KindRegistry, declared: &Declared) -> Vec<RefKindRow> {
                 kind: k.kind.clone(),
                 extension: decl.map(|d| d.extension.clone()),
                 label: decl.map(|d| d.label.clone()),
+                searchable: decl.and_then(|d| d.searchable.clone()),
                 id_pattern: k.id_regex.to_string(),
                 revisioned: k.revisioned,
                 wikilinks: k.wikilink_prefixes.clone(),

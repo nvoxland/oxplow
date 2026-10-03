@@ -3505,6 +3505,63 @@
       "key": [
         "kind"
       ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "The kind (`work_item`, `acme_pr`)."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it; NULL for a core kind."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What one is called (`Pull request`); NULL for a core kind."
+        },
+        {
+          "name": "id_pattern",
+          "type": "TEXT",
+          "doc": "The regex its ids match."
+        },
+        {
+          "name": "revisioned",
+          "type": "INTEGER",
+          "doc": "1 when a ref to one may carry `@rev`."
+        },
+        {
+          "name": "wikilinks",
+          "type": "TEXT",
+          "doc": "JSON array of its `[[prefix:…]]` sugar (`git` for `commit`)."
+        },
+        {
+          "name": "resolve",
+          "type": "TEXT",
+          "doc": "The view whose `title` names one, by its `ref` column; NULL for a core kind."
+        },
+        {
+          "name": "page",
+          "type": "TEXT",
+          "doc": "The page that opens one (`page:ext.<extension>.<page>`, given `?ref=`); NULL for a core kind."
+        },
+        {
+          "name": "icon",
+          "type": "TEXT",
+          "doc": "Its icon's name (one of `REF_KIND_ICONS`); NULL for a core kind."
+        },
+        {
+          "name": "searchable",
+          "type": "TEXT",
+          "doc": "The view whose rows (`ref`, `title`, `body`) the site-wide search indexes under the kind; NULL for a core kind (core indexes its own) and for a plugin kind that isn't searchable."
+        }
+      ],
+      "key": [
+        "kind"
+      ]
     }
   },
   "snapshot": {

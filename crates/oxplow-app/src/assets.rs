@@ -111,6 +111,10 @@ pub struct Assets {
     /// The materialized models registered from the model registry
     /// ([`Assets::sync_models`]), by view.
     models: Arc<tokio::sync::Mutex<BTreeMap<String, ModelAsset>>>,
+    /// The searchable plugin ref kinds whose index is registered
+    /// ([`Assets::sync_search_kinds`], `kind_search`), by kind.
+    pub(crate) search_kinds:
+        Arc<tokio::sync::Mutex<BTreeMap<String, crate::kind_search::SearchableKind>>>,
 }
 
 impl Assets {
@@ -121,7 +125,13 @@ impl Assets {
             now: Arc::new(Timestamp::now),
             entries: Arc::default(),
             models: Arc::default(),
+            search_kinds: Arc::default(),
         }
+    }
+
+    /// The database its assets are computed in.
+    pub(crate) fn db(&self) -> &Database {
+        &self.db
     }
 
     /// These assets on clock `now` (tests: one that follows tokio's
@@ -261,18 +271,24 @@ impl Assets {
     }
 }
 
-/// The registry's materialized models, with the tables each reads: its
-/// inputs followed through live models to tables — and to a materialized
-/// model's own table, which is where that one's changes come from.
-async fn materialized_models(db: &Database) -> Result<BTreeMap<String, ModelAsset>, DomainError> {
-    db.read(|tx| {
+/// The model registry as an asset reads it: each model's compiled SELECT,
+/// its policy when materialized, its contract, and what each reads.
+struct Registry {
+    /// view → (sql, materialize, contract columns).
+    models: BTreeMap<String, (String, Option<String>, Option<String>)>,
+    /// view → the views and tables it reads.
+    inputs: BTreeMap<String, Vec<String>>,
+}
+
+impl Registry {
+    fn load(tx: &rusqlite::Connection) -> Result<Registry, DomainError> {
         let mut st = tx
             .prepare(
                 "SELECT m.view, m.sql, m.materialize, c.columns_json FROM model m
                  LEFT JOIN model_contract c ON c.view = m.view AND c.version = m.version",
             )
             .map_err(oxplow_db::map_sql_err)?;
-        let models: BTreeMap<String, (String, Option<String>, Option<String>)> = st
+        let models = st
             .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?))))
             .map_err(oxplow_db::map_sql_err)?
             .collect::<rusqlite::Result<_>>()
@@ -288,39 +304,77 @@ async fn materialized_models(db: &Database) -> Result<BTreeMap<String, ModelAsse
             let (view, input) = row.map_err(oxplow_db::map_sql_err)?;
             inputs.entry(view).or_default().push(input);
         }
-        let mut out = BTreeMap::new();
-        for (view, (sql, materialize, contract)) in &models {
-            if materialize.is_none() {
+        Ok(Registry { models, inputs })
+    }
+
+    /// The tables `view`'s SELECT reads: its inputs followed through live
+    /// models to tables — and to a materialized model's own table, which
+    /// is where that one's changes come from.
+    fn input_tables(&self, view: &str) -> Vec<String> {
+        let mut tables = BTreeSet::new();
+        let mut seen = BTreeSet::new();
+        let mut todo: Vec<&String> = self.inputs.get(view).into_iter().flatten().collect();
+        while let Some(input) = todo.pop() {
+            if !seen.insert(input.clone()) {
                 continue;
             }
-            let mut tables = BTreeSet::new();
-            let mut seen = BTreeSet::new();
-            let mut todo: Vec<&String> = inputs.get(view).into_iter().flatten().collect();
-            while let Some(input) = todo.pop() {
-                if !seen.insert(input.clone()) {
-                    continue;
+            match self.models.get(input) {
+                Some((_, Some(_), _)) => {
+                    tables.insert(oxplow_db::models::materialized_table(input));
                 }
-                match models.get(input) {
-                    Some((_, Some(_), _)) => {
-                        tables.insert(oxplow_db::models::materialized_table(input));
-                    }
-                    Some((_, None, _)) => todo.extend(inputs.get(input).into_iter().flatten()),
-                    None => {
-                        tables.insert(input.clone());
-                    }
+                Some((_, None, _)) => todo.extend(self.inputs.get(input).into_iter().flatten()),
+                None => {
+                    tables.insert(input.clone());
                 }
             }
-            out.insert(
-                view.clone(),
-                ModelAsset {
-                    sql: sql.clone(),
-                    contract: contract.clone(),
-                    tables: tables.into_iter().collect(),
-                    materialize: materialize.clone().unwrap_or_default(),
-                },
-            );
         }
-        Ok(out)
+        tables.into_iter().collect()
+    }
+}
+
+/// The registry's materialized models, with the tables each reads.
+async fn materialized_models(db: &Database) -> Result<BTreeMap<String, ModelAsset>, DomainError> {
+    db.read(|tx| {
+        let registry = Registry::load(tx)?;
+        Ok(registry
+            .models
+            .iter()
+            .filter_map(|(view, (sql, materialize, contract))| {
+                Some((
+                    view.clone(),
+                    ModelAsset {
+                        sql: sql.clone(),
+                        contract: contract.clone(),
+                        tables: registry.input_tables(view),
+                        materialize: materialize.clone()?,
+                    },
+                ))
+            })
+            .collect())
+    })
+    .await
+}
+
+/// The tables whose commits change what each of `views` returns — a
+/// materialized one's own table, a live one's inputs — for those the
+/// registry lists (an unpublished view has no entry).
+pub(crate) async fn tables_behind(
+    db: &Database,
+    views: &[String],
+) -> Result<BTreeMap<String, Vec<String>>, DomainError> {
+    let views = views.to_vec();
+    db.read(move |tx| {
+        let registry = Registry::load(tx)?;
+        Ok(views
+            .into_iter()
+            .filter_map(|view| {
+                let tables = match registry.models.get(&view)? {
+                    (_, Some(_), _) => vec![oxplow_db::models::materialized_table(&view)],
+                    (_, None, _) => registry.input_tables(&view),
+                };
+                Some((view, tables))
+            })
+            .collect())
     })
     .await
 }

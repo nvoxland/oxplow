@@ -152,7 +152,7 @@ import { NewTaskPage } from "./pages/NewTaskPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { AGENT_TAB_ID, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, customDashboardRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, opErrorRef, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { AGENT_TAB_ID, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, customDashboardRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, opErrorRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -1874,21 +1874,10 @@ export function App() {
   /** Navigate to a unified-search hit. Shared by the search palette and
    *  the quick-open overlay's body-hit rows. */
   const openSearchHit = useCallback((hit: import("./api.js").SearchHit) => {
-    switch (hit.kind) {
-      case "task":
-        handleOpenPage(taskRef(hit.ref_id));
-        break;
-      case "wiki":
-        handleOpenPage(wikiPageRef(hit.ref_id));
-        break;
-      case "file":
-        void handleOpenFile(hit.ref_id);
-        break;
-      case "comment":
-        handleOpenPage(commentsRef());
-        break;
-      // notes have no standalone page — surfaced in results only.
-    }
+    const target = searchHitTarget(hit);
+    if (!target) return;
+    if ("file" in target) void handleOpenFile(target.file);
+    else handleOpenPage(target.page);
   }, [handleOpenPage, handleOpenFile]);
 
   /**

@@ -114,6 +114,14 @@ own handle; two handles in one process never share a kind. An extension's
 `ref_kinds:` (P8.D6, extensions.md "Ref kinds") join the running kinds
 through the vocabulary reactor, and `v_ref_kind` lists them all.
 
+**Searchable kinds** (P9.D3). A plugin kind declared `searchable:
+<model>` has that model's rows (`ref`, `title`, `body`) in the site-wide
+index under its kind — an asset per kind (`kind_search.rs`), so search
+hits carry `{ kind, ref_id }` for plugin kinds as for core ones and the
+desktop routes them through `searchHitTarget`. Core kinds are indexed by
+core (`search.index`). A plugin kind is never `revisioned`: no plugin
+kind has a reader for a revision (extensions.md "Ref kinds").
+
 `refs::validate_ref` parses a ref and checks it against the kind
 registry. The event log's `append_tx` runs it on every `subject`
 entry, so an event naming `zones`, `config:`, `nope:thing`,
