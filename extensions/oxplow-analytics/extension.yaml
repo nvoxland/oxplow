@@ -26,6 +26,7 @@ ui:
     - { slot: effort.review.details, lens: effort-nudges }
     - { slot: work_item.detail.body, lens: task-tokens }
     - { slot: thread.plan.header, lens: thread-tokens }
+    - { slot: diff.file.header, lens: file-co-change }
 advisories:
   # Steer the agent to add tests when this effort's changed lines are poorly
   # covered. Reads the stored observation, so it fires on the tool call after

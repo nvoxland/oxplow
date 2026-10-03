@@ -81,6 +81,7 @@ const { BoardPage } = await import("./BoardPage.js");
 const { GitCommitPage } = await import("./GitCommitPage.js");
 const { UncommittedChangesPage } = await import("./UncommittedChangesPage.js");
 const { GitHistoryPage } = await import("./GitHistoryPage.js");
+const { DiffFileHeaderSlot } = await import("../components/Diff/DiffFileHeaderSlot.js");
 
 afterEach(() => {
   extensions = [];
@@ -161,4 +162,32 @@ test("an extension's mounts reach the uncommitted strip and the history side col
   const history = mount("page:git-history", <GitHistoryPage stream={STREAM} onOpenPage={() => {}} />);
   await waitFor(() => expect(lensRuns).toContainEqual(["x/history", { stream_id: 1 }]));
   await waitFor(() => expect(history.container.innerHTML).toContain('data-testid="vcs.history.sidebar-x/history"'));
+});
+
+
+// P9.A2: a file diff's header strip — plain with nothing mounted; a
+// mounted lens gets the path and the two revisions it declares.
+test("the file diff's header strip is plain, and a mount gets the file and its revisions", async () => {
+  const spec = { path: "a.ts", leftVersion: "git:abc", rightVersion: "working", baseLabel: "HEAD" } as never;
+  const plain = mount("page:diff", <DiffFileHeaderSlot streamId="str1" spec={spec} />);
+  await expectPlain(plain);
+  cleanup();
+
+  answers.runLens = async (...args) => {
+    lensRuns.push([String(args[0]), args[1]]);
+    return ok({ lens: { id: args[0], title: "Usually Changes With", columns: [], viz: "table", actions: [] }, params: args[1], result: { columns: ["path"], rows: [["b.ts"]], truncated: false, reads }, alert: null });
+  };
+  extensions = [
+    {
+      name: "x",
+      enabled: true,
+      ui: { slots: [{ slot: "diff.file.header", lensId: "x/co" }], commands: [], decorators: [] },
+      lenses: [{ id: "x/co", params: ["path", "left_revision", "right_revision"].map((name) => ({ name, label: null, default: null })) }],
+    },
+  ];
+  const view = mount("page:diff", <DiffFileHeaderSlot streamId="str1" spec={spec} />);
+  await waitFor(() =>
+    expect(lensRuns).toContainEqual(["x/co", { path: "a.ts", left_revision: "git:abc", right_revision: "working" }]),
+  );
+  await waitFor(() => expect(view.container.innerHTML).toContain('data-testid="diff.file.header-x/co"'));
 });

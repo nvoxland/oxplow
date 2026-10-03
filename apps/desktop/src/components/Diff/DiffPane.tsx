@@ -5,6 +5,7 @@ import type { Revision } from "../../revision.js";
 import { askAboutSelection } from "../../agent-context-ref.js";
 import { diffAskTarget } from "./diffAsk.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
+import { DiffFileHeaderSlot } from "./DiffFileHeaderSlot.js";
 
 export interface DiffSpec {
   path: string;
@@ -262,6 +263,7 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
           Open file
         </button>
       </div>
+      <DiffFileHeaderSlot streamId={streamId} spec={spec} />
       <div
         ref={hostRef}
         style={{

@@ -907,7 +907,7 @@ manifest still using top-level `slot_mounts:` / `decorators:` /
 | `vcs.status.header` | UncommittedChangesPage, a strip above everything | `stream_id` |
 | `vcs.status.details` | UncommittedChangesPage | `change_id` |
 | `vcs.history.sidebar` | GitHistoryPage, a side column shown only when something mounts there (`useSlotMounted`) | `stream_id` |
-| (`diff.file.header`, a file diff's header strip, isn't a slot yet — left for P9: the file diff has a header strip above Monaco (the path, the base, Prev / Next, Open File) a lens could mount in; it waits for a lens that needs it) | | |
+| `diff.file.header` | a file diff (`DiffPane`), a strip under its header (P9.A2; `DiffFileHeaderSlot`) | `path`, `left_revision`, `right_revision` (each a revision in its wire form: `working`, `snap:<id>`, `git:<sha>`), `stream_id` |
 | `settings.section` | Settings: a section per mounting extension, titled with its name, before AI (tsk330; `SettingsSlotSections`, `slotRuns(…, extension)`) | none |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
@@ -1864,7 +1864,10 @@ its model `change_interest` (`v_oxplow_analytics_change_interest`, over
 `change-look-here` lens reads; co-change surprises are its models
 `co_change_pair` (`materialize: { every: 1h }` over the commit index —
 "the last 180 days" moves with the clock) and
-`change_co_change`, which the `change-co-change` lens reads; an
+`change_co_change`, which the `change-co-change` lens reads — and the
+`file-co-change` lens ("Usually Changes With", mounted at
+`diff.file.header`, P9.A2) reads `co_change_pair` for the file a diff
+shows; an
 effort's churn is its fact collector `oxplow_analytics.effort_churn`
 (`on: [effort.finished]`, `after: [change.analyze]`, reading the
 effort's change files) recording `oxplow_analytics.effort_churn_lines`.

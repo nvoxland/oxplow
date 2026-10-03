@@ -752,6 +752,12 @@ pub const SLOTS: &[(&str, &[&str])] = &[
     ("vcs.status.details", &["change_id"]),
     // Git history's side column.
     ("vcs.history.sidebar", &["stream_id"]),
+    // A file diff's header strip, above the editor: the file and the two
+    // revisions the diff reads (`working`, `snap:<id>`, `git:<sha>`).
+    (
+        "diff.file.header",
+        &["path", "left_revision", "right_revision", "stream_id"],
+    ),
     // Settings: a section per extension with the lenses it mounts (its
     // own status or configuration views). No params.
     ("settings.section", &[]),
@@ -5045,6 +5051,11 @@ commands:
             .iter()
             .any(|s| s.slot == "effort.review.details"
                 && s.lens_id == "oxplow-review/inferred-decisions"));
+        // P9.A2: the file diff's header strip has its first user.
+        let analytics = exts.iter().find(|e| e.name == "oxplow-analytics").unwrap();
+        assert!(analytics.ui.slots.iter().any(
+            |s| s.slot == "diff.file.header" && s.lens_id == "oxplow-analytics/file-co-change"
+        ));
         // The analytics extension's advisory and lens SQL runs too.
         let a = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-analytics", None)
             .await
@@ -5408,6 +5419,43 @@ commands:
         );
         let errs = ext.errors.join("\n");
         assert!(errs.contains("task_id") && errs.contains("plain"), "{errs}");
+    }
+
+    /// P9.A2: a file diff's header strip takes lenses about the file — its
+    /// path and the two revisions the diff reads.
+    #[test]
+    fn the_diff_file_header_slot_passes_the_path_and_both_revisions() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = format!(
+            "{EXT_V2}ui:\n  slots:\n    - {{ slot: diff.file.header, lens: partners }}\n    - {{ slot: diff.file.header, lens: plain }}\n"
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/review/extension.yaml",
+            &manifest,
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/review/lenses/partners.yaml",
+            "title: Partners\nparams: [{ name: path }]\nquery: SELECT :path AS path\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/review/lenses/plain.yaml",
+            "title: Plain\nquery: SELECT 1 AS n\n",
+        );
+        let e = only(dir.path(), "review");
+        let mounted: Vec<(&str, &str)> =
+            e.ui.slots
+                .iter()
+                .map(|s| (s.slot.as_str(), s.lens_id.as_str()))
+                .collect();
+        assert_eq!(mounted, vec![("diff.file.header", "review/partners")]);
+        let errs = e.errors.join("\n");
+        for param in ["path", "left_revision", "right_revision", "stream_id"] {
+            assert!(errs.contains(param), "{param}: {errs}");
+        }
+        assert!(errs.contains("plain"), "{errs}");
     }
 
     #[test]

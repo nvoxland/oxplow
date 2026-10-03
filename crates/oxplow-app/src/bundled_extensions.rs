@@ -44,6 +44,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-analytics", "lenses/effort-test-runs.yaml"),
             ext_file!("oxplow-analytics", "lenses/effort-tests.yaml"),
             ext_file!("oxplow-analytics", "lenses/effort-untested-files.yaml"),
+            ext_file!("oxplow-analytics", "lenses/file-co-change.yaml"),
             ext_file!("oxplow-analytics", "lenses/findings.yaml"),
             ext_file!("oxplow-analytics", "lenses/page-visits-by-day.yaml"),
             ext_file!("oxplow-analytics", "lenses/planning.yaml"),
