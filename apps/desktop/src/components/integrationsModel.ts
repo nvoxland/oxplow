@@ -113,6 +113,12 @@ export function newInstanceProblem(views: ProviderInstanceView[], id: string): s
  *  of the person's own (removing it lets theirs show through), or one
  *  whose provider is gone. A provider's own instance is turned off, not
  *  removed. */
+/** A person's global instance not already replaced here can be turned off
+ *  in this project alone (tsk843). */
+export function canTurnOffHere(v: ProviderInstanceView): boolean {
+  return v.scope === "global" && !v.overridden;
+}
+
 export function canRemoveInstance(v: ProviderInstanceView): boolean {
   return v.health.state.state === "missing" || v.instanceId !== v.provider || v.overridden;
 }

@@ -18,6 +18,7 @@ const signIns: Array<[string, string]> = [];
 let signInGate: Promise<void> = Promise.resolve();
 const added: Array<[string, string, string]> = [];
 const removed: string[] = [];
+const offHere: string[] = [];
 /** Further instances the listing returns after the provider's own. */
 let more: unknown[] = [];
 const browsed: string[] = [];
@@ -44,6 +45,11 @@ mock.module("../api.js", () => ({
   addProviderInstance: async (inst: string, provider: string, scope: string) => {
     added.push([inst, provider, scope]);
     more = [{ ...instance, instance: inst, instanceId: inst.split("/")[1], scope, enabled: false }];
+    return [instance, ...more];
+  },
+  turnOffProviderInstanceHere: async (inst: string) => {
+    offHere.push(inst);
+    more = [{ ...instance, instance: inst, instanceId: inst.split("/")[1], scope: "project", overridden: true, enabled: false }];
     return [instance, ...more];
   },
   removeProviderInstance: async (inst: string) => {
@@ -93,6 +99,7 @@ afterEach(() => {
   signIns.length = 0;
   added.length = 0;
   removed.length = 0;
+  offHere.length = 0;
   more = [];
   browsed.length = 0;
   instance.credentials = STATIC_CREDENTIALS;
@@ -276,5 +283,18 @@ test("Sign in is off while a sign-in starts", async () => {
   } finally {
     signInGate = Promise.resolve();
   }
+});
+
+// tsk843: a global instance is turned off in one project from its row —
+// the project gets its own entry, off — and Remove on that brings it back.
+test("a global instance has Off in this project", async () => {
+  more = [{ ...instance, instance: "tracker/fake_shared", instanceId: "fake_shared", scope: "global" }];
+  const view = render(<IntegrationsSection />);
+  await waitFor(() => view.getByTestId("integration-row-tracker/fake_shared"));
+  expect(view.queryByTestId("integration-off-here-tracker/fake")).toBeNull();
+  fireEvent.click(view.getByTestId("integration-off-here-tracker/fake_shared"));
+  await waitFor(() => expect(offHere).toEqual(["tracker/fake_shared"]));
+  await waitFor(() => view.getByTestId("integration-remove-tracker/fake_shared-trigger"));
+  expect(view.queryByTestId("integration-off-here-tracker/fake_shared")).toBeNull();
 });
 

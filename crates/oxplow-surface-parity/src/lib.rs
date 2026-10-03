@@ -206,6 +206,7 @@ pub const MANIFEST: &[Capability] = &[
     // Instances and their credentials are a person's too (P9.B1).
     ui("add_provider_instance"),
     ui("remove_provider_instance"),
+    ui("turn_off_provider_instance_here"),
     ui("set_instance_credential"),
     // Signing in is a person's, in their browser (P9.B3).
     ui("begin_oauth_sign_in"),

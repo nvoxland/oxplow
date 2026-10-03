@@ -147,6 +147,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::set_provider_instance,
             commands::generated::add_provider_instance,
             commands::generated::remove_provider_instance,
+            commands::generated::turn_off_provider_instance_here,
             commands::generated::set_instance_credential,
             commands::generated::begin_oauth_sign_in,
             commands::generated::ensure_change,

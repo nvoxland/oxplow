@@ -1835,6 +1835,50 @@ impl ProviderRegistry {
         self.view(instance).await
     }
 
+    /// A person turns the global instance `instance` off in this project
+    /// only (tsk843): the project gets its own entry of the same name —
+    /// off, with the global one's config and provider — which replaces it
+    /// here (and is the project's, credentials included, tsk838); every
+    /// other project keeps running it, and removing the entry brings it
+    /// back here. Written through `config.set`, so an agent's is refused
+    /// or proposed.
+    pub async fn off_here(
+        &self,
+        actor: &Actor,
+        instance: &str,
+    ) -> Result<ProviderInstanceView, CommandError> {
+        let invalid = |message: String| CommandError::Invalid {
+            field: Some("/instance".into()),
+            message,
+        };
+        {
+            let gate = self.instances_gate.lock().await;
+            if self.project_instances().contains_key(instance) {
+                return Err(invalid(format!(
+                    "`{instance}` already has this project's own entry"
+                )));
+            }
+            let Some(global) = self.global_instances().get(instance).cloned() else {
+                return Err(invalid(format!(
+                    "`{instance}` isn't one of your global instances"
+                )));
+            };
+            self.write_instances(&gate, actor, Scope::Project, |all| {
+                all.insert(
+                    instance.to_string(),
+                    oxplow_config::ExtensionInstanceConfig {
+                        enabled: false,
+                        ..global
+                    },
+                );
+                Ok(())
+            })
+            .await?;
+        }
+        self.reconcile().await;
+        self.view(instance).await
+    }
+
     /// A person removes `instance`: it stops, its config entry and its
     /// credentials on this machine go. A project's replacement of a global
     /// instance is what goes first — with its own credentials; the global

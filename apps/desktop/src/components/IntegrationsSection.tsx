@@ -25,6 +25,7 @@ import {
   listProviderInstances,
   openInSystemBrowser,
   removeProviderInstance,
+  turnOffProviderInstanceHere,
   runCommand,
   setInstanceCredential,
   setProviderInstance,
@@ -38,6 +39,7 @@ import { InlineConfirm } from "./InlineConfirm.js";
 import {
   activeProviderProblem,
   canRemoveInstance,
+  canTurnOffHere,
   collectorLine,
   integrationRow,
   newInstanceProblem,
@@ -389,7 +391,7 @@ function IntegrationRow({
   const saved = view.config as Record<string, unknown>;
   const [config, setConfig] = useState<Record<string, unknown> | null>(saved);
   const [checked, setChecked] = useState<ProviderInstanceView | null>(null);
-  const [busy, setBusy] = useState<"check" | "toggle" | "sync" | "remove" | null>(null);
+  const [busy, setBusy] = useState<"check" | "toggle" | "sync" | "remove" | "off-here" | null>(null);
   useEffect(() => setConfig(saved), [saved]);
 
   const shown = checked ?? view;
@@ -433,6 +435,20 @@ function IntegrationRow({
       showToast({ message: `Removed ${view.instance}.` });
     } catch (e) {
       recordOpError({ label: `Remove ${view.instance}`, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Turn the person's global instance off in this project alone: the
+  // project gets its own entry, off; Remove on it brings theirs back.
+  async function offHere() {
+    setBusy("off-here");
+    try {
+      onChanged(await turnOffProviderInstanceHere(view.instance));
+      showToast({ message: `Turned ${view.instance} off in this project.` });
+    } catch (e) {
+      recordOpError({ label: `Turn off ${view.instance} here`, message: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(null);
     }
@@ -485,6 +501,17 @@ function IntegrationRow({
         >
           {busy === "toggle" ? "Saving…" : m.enableLabel}
         </button>
+        {canTurnOffHere(view) ? (
+          <button
+            type="button"
+            data-testid={`integration-off-here-${m.key}`}
+            disabled={busy !== null}
+            title="Turn it off in this project only: this project gets its own entry, off, and every other project keeps running yours. Remove that entry to bring yours back here."
+            onClick={() => void offHere()}
+          >
+            {busy === "off-here" ? "Saving…" : "Off in this project"}
+          </button>
+        ) : null}
         {canRemoveInstance(view) ? (
           <InlineConfirm
             triggerLabel="Remove"

@@ -300,6 +300,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	turnOffProviderInstanceHere: (instance: string) => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("turn_off_provider_instance_here", { instance })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setInstanceCredential: (instance: string, name: string, value: string | null) => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("set_instance_credential", { instance, name, value })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

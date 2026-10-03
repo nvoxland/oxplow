@@ -909,6 +909,12 @@ export async function addProviderInstance(
   return unwrap(await commands.addProviderInstance(instance, provider, scope));
 }
 
+/// A person turns their global instance off in this project only: the
+/// project gets its own entry, off, replacing it here.
+export async function turnOffProviderInstanceHere(instance: string): Promise<ProviderInstanceView[]> {
+  return unwrap(await commands.turnOffProviderInstanceHere(instance));
+}
+
 /// A person removes an instance: it stops; its config and its credentials
 /// on this machine go.
 export async function removeProviderInstance(instance: string): Promise<ProviderInstanceView[]> {

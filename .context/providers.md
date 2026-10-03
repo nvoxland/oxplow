@@ -519,7 +519,12 @@ config, provider? } }`, the same entries and the same validation):
   extension enabled**; where the extension isn't, it isn't listed at all;
 - a project's entry of the same name **replaces it there, whole**
   (`instances_config()` is the one merge: global, then project) — to turn
-  it off or configure it differently in one project. **A project's entry
+  it off or configure it differently in one project. A person makes one
+  from the global row's **Off in this project** (`off_here`, RPC
+  `turn_off_provider_instance_here`, tsk843): the project's own entry,
+  off, with the global one's config and provider; Disable or a config
+  edit on a global row with no project entry changes it everywhere, and
+  Remove on the project's entry brings the global one back here. **A project's entry
   is the project's, credentials included** (`scope_of`: `project`, with
   `overridden` saying it replaces a global one; the row reads "this
   project's, replacing yours"). The P9 plan had an override keep the

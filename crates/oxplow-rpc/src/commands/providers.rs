@@ -58,6 +58,16 @@ pub async fn add_provider_instance(
     Ok(svc.providers.list().await)
 }
 
+/// A person turns their global instance `instance` off in this project
+/// only: the project gets its own entry, off, replacing it here.
+pub async fn turn_off_provider_instance_here(
+    svc: &Services,
+    instance: String,
+) -> Result<Vec<ProviderInstanceView>, IpcError> {
+    svc.providers.off_here(&Actor::Human, &instance).await?;
+    Ok(svc.providers.list().await)
+}
+
 /// A person removes `instance`: it stops, and its config entry and its
 /// credentials on this machine go.
 pub async fn remove_provider_instance(
@@ -133,6 +143,10 @@ mod tests {
             ),
             (
                 "remove_provider_instance",
+                json!({ "instance": "tracker/fake" }),
+            ),
+            (
+                "turn_off_provider_instance_here",
                 json!({ "instance": "tracker/fake" }),
             ),
             (

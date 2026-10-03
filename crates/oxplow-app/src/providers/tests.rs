@@ -2638,6 +2638,58 @@ async fn a_global_instance_runs_in_every_project_with_the_extension() {
     assert!(other.commands.spec("fake_shared.estimate").is_none());
 }
 
+/// tsk843: a person turns a global instance off in one project from its
+/// row: the project gets its own entry, off, with the global one's config
+/// — every other project keeps running it, and removing the entry brings
+/// the global one back here.
+#[tokio::test]
+async fn a_global_instance_is_turned_off_in_one_project() {
+    let (fx, _ext) = approved("").await;
+    let providers = &fx.svc.providers;
+    providers
+        .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
+        .await
+        .unwrap();
+    providers
+        .set_instance(&Actor::Human, SHARED, true, json!({ "team": "shared" }))
+        .await
+        .unwrap();
+    let (other, _other_dir) = sibling_project(&fx, "", true).await;
+    other.providers.reconcile().await;
+    assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Ready));
+
+    let agent = Actor::Agent {
+        thread_id: Some(fx.thread),
+        stream_id: None,
+    };
+    assert!(other.providers.off_here(&agent, SHARED).await.is_err());
+    let view = other
+        .providers
+        .off_here(&Actor::Human, SHARED)
+        .await
+        .unwrap();
+    assert_eq!(
+        (view.scope, view.overridden, view.enabled),
+        (Scope::Project, true, false)
+    );
+    assert_eq!(view.config, json!({ "team": "shared" }));
+    assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Off));
+    assert_eq!(state_of(&fx.svc, SHARED).await, Some(InstanceState::Ready));
+    // Only a global instance not already replaced here.
+    assert!(other
+        .providers
+        .off_here(&Actor::Human, SHARED)
+        .await
+        .is_err());
+
+    other
+        .providers
+        .remove_instance(&Actor::Human, SHARED)
+        .await
+        .unwrap();
+    assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Ready));
+}
+
 /// P9.B2: a project's entry of the same name replaces the global one
 /// there, whole — and only there.
 #[tokio::test]
