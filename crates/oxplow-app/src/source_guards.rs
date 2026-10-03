@@ -96,6 +96,7 @@ const EMITTERS: &[(&str, &str)] = &[
     ("AgentStatusChanged", "crates/oxplow-app/src/agent_stall_watch.rs"),
     ("AgentStatusChanged", "crates/oxplow-app/src/hook_ingest.rs"),
     ("BackgroundTasksChanged", "crates/oxplow-app/src/lib.rs"),
+    ("FollowupsChanged", "crates/oxplow-app/src/lib.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/commands/config_commands.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/lib.rs"),
     ("ConfigChanged", "crates/oxplow-rpc/src/commands/ai.rs"),
@@ -286,6 +287,25 @@ fn every_ui_event_has_a_listener() {
         .filter(|k| !text.contains(&format!("\"{k}\"")))
         .collect();
     assert_eq!(unheard, Vec::<String>::new());
+}
+
+/// tsk789: every UI event has a pinned emitter — a variant the renderer
+/// listens for that nothing sends leaves its view stale.
+#[test]
+fn every_ui_event_has_an_emitter() {
+    let emitted: BTreeSet<String> = EMITTERS
+        .iter()
+        .map(|(variant, _)| {
+            let mut kind = variant[..1].to_lowercase();
+            kind.push_str(&variant[1..]);
+            kind
+        })
+        .collect();
+    let silent: Vec<String> = event_kinds()
+        .into_iter()
+        .filter(|k| !emitted.contains(k))
+        .collect();
+    assert_eq!(silent, Vec::<String>::new());
 }
 
 /// P7.B6's guard: nothing listens to the in-memory bus but the `/events`
