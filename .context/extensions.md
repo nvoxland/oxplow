@@ -1392,12 +1392,18 @@ a person approves it again. Approving (the RPC, a person's only) also
 sets `effect_state.start_after_seq` (V148) to the log's head
 (`effects::approved`): an effect never reacts to an event logged before
 its latest approval — not the backlog, not what happened while it waited
-to be re-approved. `effects::gate(...)` is the one check: `Unapproved`,
-`BeforeApproval` or `Runs`.
+to be re-approved. `effects::gate(approved, start_after, seq)` is the one
+check: `Unapproved`, `BeforeApproval` or `Runs`. The consumer hashes an
+extension's folder once per catalog load (`FolderHashes`, keyed by the
+catalog's `Arc`), not per event: an edit reloads the catalog, so it's
+hashed again and stops the effect (tsk798). The approvals file is read
+on each check, so revoking one takes effect at once.
 
 **Running** (P8.D10, `effect_triggers.rs`): one async pump consumer,
 `effect.triggers` (registered at boot beside `collector.triggers`, with
-the same `after`/`after_for` handling of each effect's `after:`). Per
+the same `after`/`after_for` handling of each effect's `after:` — one
+naming no consumer is warned about once per effect and name, not on each
+ordering question the pump asks). Per
 event, each enabled effect whose `on`/`where` match **reacts at most
 once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
 1. a row exists — a redelivery: nothing. A `started` row is a run that
@@ -1412,8 +1418,9 @@ once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
    subject, payload }, rows }` (`input` with the payload's fields bound):
    `{ skip: "why" }` is `skipped`; `{ commands, events? }` runs.
 
-A run is `command.sequence`'s spec over what the script composed (calls,
-and its own events through `own_events`), run by
+A run is the registered `command.sequence` — its spec and compiled input
+schema, shared (`Command::with_handler`) — over what the script composed
+(calls, and its own events through `own_events`), run by
 `CommandBus::run_effect` as `Actor::Effect` with
 `RunOrigin::Effect(key)`: its `command.executed@2` is caused by the
 triggering event, and the reaction's `effect_run` row and

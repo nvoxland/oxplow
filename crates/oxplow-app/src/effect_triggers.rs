@@ -46,11 +46,64 @@ pub const MAX_CHAIN: usize = 4;
 
 pub struct EffectTriggers {
     services: Weak<Services>,
+    hashes: std::sync::Mutex<FolderHashes>,
+    /// The `(effect, consumer)` pairs whose unknown `after` was warned about.
+    warned: std::sync::Mutex<std::collections::BTreeSet<(String, String)>>,
+    /// How many such warnings it gave (tests).
+    warnings: std::sync::atomic::AtomicUsize,
+}
+
+/// The effects' approval hashes for one catalog load: each extension's
+/// folder hashed the first time one of its effects is gated, again only
+/// when the catalog reloads (a file under it changed).
+#[derive(Default)]
+struct FolderHashes {
+    load: Option<Arc<Vec<Extension>>>,
+    /// By program key; `None` when its folder couldn't be read.
+    by_program: std::collections::BTreeMap<String, Option<String>>,
+    /// How many it has computed (tests).
+    computed: usize,
 }
 
 impl EffectTriggers {
     pub fn new(services: Weak<Services>) -> Self {
-        Self { services }
+        Self {
+            services,
+            hashes: std::sync::Mutex::default(),
+            warned: std::sync::Mutex::default(),
+            warnings: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    /// `program`'s approval hash as of catalog load `load`.
+    fn folder_hash(
+        &self,
+        load: &Arc<Vec<Extension>>,
+        project_dir: &std::path::Path,
+        program: &crate::exec_consent::ProjectProgram,
+    ) -> Option<String> {
+        let mut hashes = self.hashes.lock().unwrap_or_else(|e| e.into_inner());
+        if !hashes.load.as_ref().is_some_and(|l| Arc::ptr_eq(l, load)) {
+            hashes.load = Some(load.clone());
+            hashes.by_program.clear();
+        }
+        if let Some(hash) = hashes.by_program.get(&program.key()) {
+            return hash.clone();
+        }
+        let hash = program.hash(project_dir).ok();
+        hashes.computed += 1;
+        hashes.by_program.insert(program.key(), hash.clone());
+        hash
+    }
+
+    #[cfg(test)]
+    fn folder_hashes(&self) -> usize {
+        self.hashes.lock().unwrap().computed
+    }
+
+    #[cfg(test)]
+    fn unknown_after_warnings(&self) -> usize {
+        self.warnings.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -63,9 +116,11 @@ pub fn register(svc: &Arc<Services>) {
 /// The enabled extensions' effects, in the primary worktree (where, like
 /// providers and commands, they run from).
 fn effects(svc: &Services) -> Vec<(Extension, EffectDecl)> {
-    svc.extension_catalog
-        .get(&svc.layout.project_dir)
-        .iter()
+    effects_of(&svc.extension_catalog.get(&svc.layout.project_dir))
+}
+
+fn effects_of(load: &[Extension]) -> Vec<(Extension, EffectDecl)> {
+    load.iter()
         .filter(|e| e.enabled)
         .flat_map(|e| e.effects.iter().map(move |d| (e.clone(), d.clone())))
         .collect()
@@ -90,7 +145,17 @@ impl EffectTriggers {
             }
             for name in &decl.after {
                 if !known.contains(&name.as_str()) {
-                    tracing::warn!(effect = %decl.name(), consumer = %name, "`after` names no consumer; ignored");
+                    let pair = (decl.name(), name.clone());
+                    let first = self
+                        .warned
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(pair.clone());
+                    if first {
+                        self.warnings
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        tracing::warn!(effect = %pair.0, consumer = %name, "`after` names no consumer; ignored");
+                    }
                 } else if !after.contains(name) {
                     after.push(name.clone());
                 }
@@ -130,7 +195,8 @@ impl AsyncEventConsumer for EffectTriggers {
         };
         let health =
             crate::plugin_health::PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
-        for (ext, decl) in effects(&svc) {
+        let load = svc.extension_catalog.get(&svc.layout.project_dir);
+        for (ext, decl) in effects_of(&load) {
             if !reacts_to(&decl, event) {
                 continue;
             }
@@ -140,7 +206,10 @@ impl AsyncEventConsumer for EffectTriggers {
                 continue;
             }
             let started = std::time::Instant::now();
-            let counted = match react(&svc, &ext, &decl, event).await {
+            let program = effects::effect_program(&ext, &decl);
+            let hash = self.folder_hash(&load, &svc.layout.project_dir, &program);
+            let approved = effects::is_approved(&svc.approvals, &program, hash.as_deref());
+            let counted = match react(&svc, &ext, &decl, approved, event).await {
                 Ok(Reacted::Ran) => health.succeeded(&key, Some(started.elapsed())).await,
                 Ok(Reacted::Failed(reason)) => health.failed(&key, &reason).await.map(|_| ()),
                 // Skipped, proposed or nothing to do: neither counts.
@@ -210,6 +279,7 @@ async fn react(
     svc: &Arc<Services>,
     ext: &Extension,
     decl: &EffectDecl,
+    approved: bool,
     event: &StoredEvent,
 ) -> Result<Reacted, DomainError> {
     let key = EffectRunKey {
@@ -238,8 +308,7 @@ async fn react(
         Some(_) => return Ok(Reacted::Other),
     }
     let start = effects::start_after(&svc.db, &key.effect).await?;
-    let project_dir = &svc.layout.project_dir;
-    if effects::gate(&svc.approvals, project_dir, ext, decl, start, event.seq) != Gate::Runs {
+    if effects::gate(approved, start, event.seq) != Gate::Runs {
         return Ok(Reacted::Other);
     }
     let (own, depth) = lineage(svc, event, &format!("effect:{}", key.effect)).await?;
@@ -306,15 +375,18 @@ async fn react(
     }
 }
 
-/// The run of an effect's reaction: `command.sequence`'s spec over what
-/// its script composed — `calls`, and its own `events` beside them.
+/// The run of an effect's reaction: the registered `command.sequence` —
+/// its spec and compiled schema — over what its script composed: `calls`,
+/// and its own `events` beside them.
 fn effect_command(
     bus: &Arc<crate::commands::CommandBus>,
     calls: Vec<CommandCall>,
     events: Vec<oxplow_domain::Envelope>,
 ) -> Result<crate::commands::Command, CommandError> {
-    use crate::commands::compose::{sequence_spec, Compose, Composer, Composition};
-    let spec = sequence_spec();
+    use crate::commands::compose::{Compose, Composer, Composition, SEQUENCE};
+    let sequence = bus.command(SEQUENCE).ok_or_else(|| CommandError::Failed {
+        message: format!("`{SEQUENCE}` isn't registered"),
+    })?;
     let composer: Arc<Composer> = Arc::new(move |_conn, _input| {
         Ok(Composition {
             calls: calls.clone(),
@@ -329,7 +401,7 @@ fn effect_command(
                 .collect(),
         })
     });
-    crate::commands::Command::new(spec.clone(), Compose::handler(bus, spec, composer))
+    sequence.with_handler(Compose::handler(bus, sequence.spec.clone(), composer))
 }
 
 /// Read the effect's `input` rows (the event's payload fields bound) and
@@ -504,6 +576,70 @@ mod tests {
             .await,
             json!([["ok", format!("event:{}", ev.envelope.id), executed[0][0]]])
         );
+    }
+
+    /// tsk798: the extension's folder is hashed once per catalog load, not
+    /// per event — and an edit (a new load) is hashed again, so the edited
+    /// effect stops until a person approves it again.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_folder_is_hashed_once_per_catalog_load() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        approve(svc).await;
+        let consumer = EffectTriggers::new(Arc::downgrade(svc));
+        for _ in 0..2 {
+            let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+            consumer.handle(&ev).await.unwrap();
+        }
+        assert_eq!(consumer.folder_hashes(), 1);
+        std::fs::write(
+            svc.layout
+                .project_dir
+                .join("oxplow/extensions/acme/mark.star"),
+            format!("{MARK}# edited\n"),
+        )
+        .unwrap();
+        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        consumer.handle(&ev).await.unwrap();
+        assert_eq!(consumer.folder_hashes(), 2);
+        assert_eq!(
+            rows(svc, "SELECT count(*) FROM v_effect_run").await,
+            json!([[2]]),
+            "the edited effect didn't run"
+        );
+    }
+
+    /// tsk798: an `after` naming no consumer is warned about once, not on
+    /// every ordering question the pump asks.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_unknown_after_is_warned_about_once() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        extension(
+            &svc.layout.project_dir,
+            &format!("{MARK_DONE}    after: [no.such.consumer]\n"),
+            &[("mark.star", MARK)],
+        );
+        let consumer = EffectTriggers::new(Arc::downgrade(svc));
+        for _ in 0..3 {
+            assert!(consumer.after().is_empty());
+            assert!(consumer.after_for("work_item.transitioned").is_empty());
+        }
+        assert_eq!(consumer.unknown_after_warnings(), 1);
+    }
+
+    /// tsk798: a reaction's command shares `command.sequence`'s compiled
+    /// input schema rather than compiling its own.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_reactions_command_shares_the_sequences_validator() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let bus = &fx.svc.commands;
+        let (a, b) = (
+            effect_command(bus, Vec::new(), Vec::new()).unwrap(),
+            effect_command(bus, Vec::new(), Vec::new()).unwrap(),
+        );
+        assert!(a.shares_validator(&b));
     }
 
     /// Nothing before approval, and a `where` that doesn't match skips.

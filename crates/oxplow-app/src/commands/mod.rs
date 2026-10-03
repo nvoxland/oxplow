@@ -228,39 +228,66 @@ type ConfirmFor = dyn Fn(&Value) -> oxplow_domain::Confirm + Send + Sync;
 pub struct Command {
     pub spec: CommandSpec,
     pub handler: Handler,
-    validator: InputValidator,
+    /// Compiled once, shared by [`Command::with_handler`]'s copies.
+    validator: Arc<InputValidator>,
     /// Per-input confirmation, when the spec's `confirm` depends on the
     /// input (`config.set` on a human-only key). Overrides `spec.confirm`.
     confirm_for: Option<Arc<ConfirmFor>>,
 }
 
 impl Command {
+    /// This command run by `handler` instead — its spec and compiled
+    /// schema shared (an effect's reaction: `command.sequence` over what
+    /// its script composed). The handler must be of the same atomicity.
+    pub fn with_handler(&self, handler: Handler) -> Result<Self, CommandError> {
+        let copy = Self {
+            spec: self.spec.clone(),
+            handler,
+            validator: self.validator.clone(),
+            confirm_for: self.confirm_for.clone(),
+        };
+        copy.check_atomicity()?;
+        Ok(copy)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shares_validator(&self, other: &Command) -> bool {
+        Arc::ptr_eq(&self.validator, &other.validator)
+    }
+
     pub fn new(spec: CommandSpec, handler: Handler) -> Result<Self, CommandError> {
         CommandSpec::validate_name(&spec.name)?;
-        let declared = match handler {
-            Handler::Tx(_) => Atomicity::Tx,
-            Handler::External(_) => Atomicity::External,
-            Handler::Dispatch(_) | Handler::Compose(_) => Atomicity::Dispatch,
-        };
-        if declared != spec.atomicity {
-            return Err(CommandError::Invalid {
-                field: Some("/atomicity".into()),
-                message: format!(
-                    "`{}` declares {:?} but its handler is {:?}",
-                    spec.name, spec.atomicity, declared
-                ),
-            });
-        }
         if spec.confirm.required() {
             Self::may_ask(&spec)?;
         }
-        let validator = InputValidator::compile(&spec.input_schema)?;
-        Ok(Self {
+        let validator = Arc::new(InputValidator::compile(&spec.input_schema)?);
+        let command = Self {
             spec,
             handler,
             validator,
             confirm_for: None,
-        })
+        };
+        command.check_atomicity()?;
+        Ok(command)
+    }
+
+    /// Its handler is of the atomicity its spec declares.
+    fn check_atomicity(&self) -> Result<(), CommandError> {
+        let declared = match self.handler {
+            Handler::Tx(_) => Atomicity::Tx,
+            Handler::External(_) => Atomicity::External,
+            Handler::Dispatch(_) | Handler::Compose(_) => Atomicity::Dispatch,
+        };
+        if declared != self.spec.atomicity {
+            return Err(CommandError::Invalid {
+                field: Some("/atomicity".into()),
+                message: format!(
+                    "`{}` declares {:?} but its handler is {:?}",
+                    self.spec.name, self.spec.atomicity, declared
+                ),
+            });
+        }
+        Ok(())
     }
 
     /// Its confirmation decided per input. A `Read` command may not have
@@ -529,6 +556,11 @@ impl CommandBus {
 
     pub fn spec(&self, name: &str) -> Option<CommandSpec> {
         self.commands.read().get(name).map(|c| c.spec.clone())
+    }
+
+    /// A registered command, by name.
+    pub(crate) fn command(&self, name: &str) -> Option<Arc<Command>> {
+        self.commands.read().get(name).cloned()
     }
 
     /// A registered command's input schema: what an extension's launcher

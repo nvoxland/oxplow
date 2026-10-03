@@ -21,7 +21,6 @@
 //! happened before its approval.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -201,20 +200,16 @@ pub enum Gate {
     Runs,
 }
 
-/// Decide [`Gate`] for `decl` at event `seq`, given where it starts
-/// (`effect_state`).
-pub fn gate(
-    store: &ApprovalStore,
-    project_dir: &Path,
-    ext: &Extension,
-    decl: &EffectDecl,
-    start_after: Option<i64>,
-    seq: i64,
-) -> Gate {
-    let program = effect_program(ext, decl);
-    let approved = program
-        .hash(project_dir)
-        .is_ok_and(|h| store.is_approved(&program.key(), &h));
+/// Whether a person approved `program` at `hash` (its folder now; `None`
+/// when that couldn't be read, which nothing approves).
+pub fn is_approved(store: &ApprovalStore, program: &ProjectProgram, hash: Option<&str>) -> bool {
+    hash.is_some_and(|h| store.is_approved(&program.key(), h))
+}
+
+/// Decide [`Gate`] at event `seq` for an effect `approved` as it is now
+/// (its program's key at its folder's current hash), given where it
+/// starts (`effect_state`).
+pub fn gate(approved: bool, start_after: Option<i64>, seq: i64) -> Gate {
     match start_after {
         _ if !approved => Gate::Unapproved,
         None => Gate::Unapproved,
@@ -453,6 +448,7 @@ pub fn finished_tx(
 pub(crate) mod tests {
     use super::*;
     use crate::extensions::load_extensions;
+    use std::path::Path;
 
     pub(crate) const MANIFEST: &str = "manifest: 2
 name: acme
@@ -526,7 +522,13 @@ effects:
         let ext = acme(root);
         let decl = &ext.effects[0];
         let start = start_after(&svc.db, &decl.name()).await.unwrap();
-        gate(&svc.approvals, root, &ext, decl, start, seq)
+        let program = effect_program(&ext, decl);
+        let hash = program.hash(root).ok();
+        gate(
+            is_approved(&svc.approvals, &program, hash.as_deref()),
+            start,
+            seq,
+        )
     }
 
     /// P8.D9: an unapproved effect never runs; a person's approval starts
