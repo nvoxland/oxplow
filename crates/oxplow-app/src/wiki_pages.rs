@@ -402,31 +402,6 @@ pub fn wiki_pages_dir(project_dir: &Path) -> PathBuf {
     project_dir.join(".oxplow").join("wiki")
 }
 
-/// One-time on-disk rename. Earlier versions of oxplow stored wiki
-/// pages at `<project>/.oxplow/notes/<slug>.md`; the rename to
-/// `wiki` (matching the schema + UI nomenclature) requires moving
-/// the directory if it exists. Idempotent and safe — if either the
-/// new dir already exists or the old one doesn't, it's a no-op.
-/// Called once at boot before any wiki-page reads/writes.
-pub fn migrate_legacy_notes_dir(project_dir: &Path) {
-    let new_dir = wiki_pages_dir(project_dir);
-    let legacy_dir = project_dir.join(".oxplow").join("notes");
-    if new_dir.exists() {
-        return;
-    }
-    if !legacy_dir.exists() {
-        return;
-    }
-    if let Err(err) = std::fs::rename(&legacy_dir, &new_dir) {
-        tracing::warn!(
-            error = %err,
-            from = %legacy_dir.display(),
-            to = %new_dir.display(),
-            "failed to migrate legacy .oxplow/notes -> .oxplow/wiki",
-        );
-    }
-}
-
 pub fn extract_title(body: &str, fallback: &str) -> String {
     for line in body.lines() {
         if let Some(rest) = line.trim_start().strip_prefix("# ") {

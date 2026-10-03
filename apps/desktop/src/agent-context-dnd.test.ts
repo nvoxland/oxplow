@@ -27,14 +27,9 @@ describe("decodeTaskDragPayload", () => {
     expect(decodeTaskDragPayload(raw)).toEqual(["tsk101", "tsk102", "tsk9301"]);
   });
 
-  test("falls back to single itemId when itemIds is absent", () => {
+  test("a payload without itemIds carries no tasks", () => {
     const raw = JSON.stringify({ itemId: "tsk101", fromThreadId: "t-1" });
-    expect(decodeTaskDragPayload(raw)).toEqual(["tsk101"]);
-  });
-
-  test("prefers itemIds when both are present", () => {
-    const raw = JSON.stringify({ itemId: "tsk101", itemIds: ["tsk102", "tsk9301"] });
-    expect(decodeTaskDragPayload(raw)).toEqual(["tsk102", "tsk9301"]);
+    expect(decodeTaskDragPayload(raw)).toEqual([]);
   });
 
   test("skips non-string entries in itemIds", () => {

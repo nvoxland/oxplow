@@ -129,9 +129,7 @@ enabled, and your `.oxplow/project.yaml` can still turn one off or change
 its target. An extension's metric collectors run Starlark or jq only,
 never an external program.
 
-Older configs used a `gauges` block. oxplow now refuses to load it and
-says so; `oxplow plugin migrate --project` (or `oxplow plugin migrate
-<name>` for an extension) rewrites it as `collectors`.
+A file with a `gauges` block doesn't load: write `collectors` instead.
 
 ## Collection
 

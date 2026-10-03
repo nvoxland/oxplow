@@ -342,7 +342,7 @@ mod tests {
         write(
             root,
             "oxplow/extensions/demo/extension.yaml",
-            "name: demo\ndescription: Demo\n",
+            "manifest: 2\nname: demo\nintent:\n  purpose: test\ndescription: Demo\n",
         );
         write(
             root,
@@ -418,7 +418,11 @@ mod tests {
     async fn installs_and_updates_from_git() {
         let (svc, _dir) = crate::test_support::services();
         let repo = tempfile::tempdir().unwrap();
-        write(repo.path(), "extension.yaml", "name: shared\n");
+        write(
+            repo.path(),
+            "extension.yaml",
+            "manifest: 2\nname: shared\nintent:\n  purpose: test\n",
+        );
         write(
             repo.path(),
             "lenses/one.yaml",

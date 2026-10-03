@@ -389,13 +389,6 @@ pub struct MeasureEntry {
     /// emits per-file facts on (tsk41).
     #[serde(rename = "captureScope", default)]
     pub capture_scope: Option<String>,
-    /// `none` | `numerator` | `denominator` — ratio-base role (default `none`).
-    /// **Reserved / currently inert** (tsk15): still parsed + validated for
-    /// back-compat (`deny_unknown_fields`), but no longer persisted — the
-    /// `measure.component_role` column is dead (ratio components ride per-fact
-    /// num/den). Kept as an authoring surface for a future component-role join.
-    #[serde(rename = "componentRole", default)]
-    pub component_role: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
 }
@@ -412,7 +405,6 @@ pub struct ResolvedMeasure {
     pub temporal_semantics: String,
     /// `complete` | `per-path` — see [`MeasureEntry::capture_scope`].
     pub capture_scope: String,
-    pub component_role: String,
     /// `global` | `project` (built-ins are the migration seed, not config).
     pub scope: String,
     pub description: Option<String>,
@@ -990,9 +982,6 @@ pub fn parse_project_config(
     doc: serde_yaml::Value,
     fallback_name: &str,
 ) -> Result<OxplowConfig, ConfigError> {
-    if doc.get("gauges").is_some() {
-        return Err(ConfigError::Invalid(GAUGES_RETIRED.into()));
-    }
     let parsed: RawConfig = serde_yaml::from_value(doc)?;
     validate(parsed, fallback_name)
 }
@@ -2117,7 +2106,6 @@ const MEASURE_TEMPORAL_SEMANTICS: &[&str] = &["additive", "semi-additive", "non-
 /// `capture_scope` is validated here and in `CaptureScope::parse` instead.
 const MEASURE_CAPTURE_SCOPES: &[&str] = &["complete", "per-path", "per-subject"];
 /// Ratio-base role a `measures:` entry may declare.
-const MEASURE_COMPONENT_ROLES: &[&str] = &["none", "numerator", "denominator"];
 /// Value types a `dimensions:` entry may declare (mirrors the `dimension`
 /// table's CHECK).
 const DIMENSION_VALUE_TYPES: &[&str] = &["categorical", "numeric", "temporal", "entity-ref"];
@@ -2360,11 +2348,6 @@ fn validate_formula(i: usize, f: FormulaConfig) -> Result<FormulaConfig, ConfigE
     }
     Ok(FormulaConfig { op, left, right })
 }
-
-/// Gauges were folded into collectors (P7.B3): what loading a `gauges:`
-/// block says.
-pub const GAUGES_RETIRED: &str = "`gauges:` is now `collectors:` (each gauge is a collector that \
-     records facts). Run `oxplow plugin migrate --project` to rewrite the block in place.";
 
 /// The project's `collectors:` block, parsed with owner
 /// [`collectors::PROJECT`]: every error at once, naming each collector.
@@ -2641,7 +2624,7 @@ fn validate_catalog_key(
 
 /// Validate the top-level `measures:` block. Mirrors [`validate_metrics`]:
 /// namespaced keys, `oxplow.*` reserved, per-key uniqueness, known
-/// temporalSemantics/componentRole enums. Definition-only (no `use:` form).
+/// temporalSemantics/captureScope enums. Definition-only (no `use:` form).
 pub fn validate_measures(raw: Option<Vec<MeasureEntry>>) -> Result<Vec<MeasureEntry>, ConfigError> {
     let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let mut out = Vec::new();
@@ -2672,18 +2655,6 @@ pub fn validate_measures(raw: Option<Vec<MeasureEntry>>) -> Result<Vec<MeasureEn
             }
             None => None,
         };
-        let component_role = match opt(e.component_role) {
-            Some(s) => {
-                if !MEASURE_COMPONENT_ROLES.contains(&s.as_str()) {
-                    return Err(ConfigError::Invalid(format!(
-                        "measures[{i}] componentRole must be one of \
-                         {MEASURE_COMPONENT_ROLES:?} (got \"{s}\")"
-                    )));
-                }
-                Some(s)
-            }
-            None => None,
-        };
         out.push(MeasureEntry {
             key: Some(key),
             title: opt(e.title),
@@ -2691,7 +2662,6 @@ pub fn validate_measures(raw: Option<Vec<MeasureEntry>>) -> Result<Vec<MeasureEn
             subject_kind: opt(e.subject_kind),
             temporal_semantics,
             capture_scope,
-            component_role,
             description: opt(e.description),
         });
     }
@@ -2797,7 +2767,6 @@ pub fn resolve_measures(
                     .clone()
                     .unwrap_or_else(|| "semi-additive".into()),
                 capture_scope: e.capture_scope.clone().unwrap_or_else(|| "complete".into()),
-                component_role: e.component_role.clone().unwrap_or_else(|| "none".into()),
                 scope: scope.clone(),
                 description: e.description.clone(),
             };
@@ -4428,8 +4397,8 @@ metrics:
         assert!(err.to_string().contains("acme.scan"), "{err}");
     }
 
-    /// This repo's own `.oxplow/project.yaml` loads — its collectors
-    /// included (migrated from `gauges:` in P7.B3).
+    /// This repo's own `.oxplow/project.yaml` loads, its collectors
+    /// included.
     #[test]
     fn this_repos_project_config_loads() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -4443,18 +4412,12 @@ metrics:
         );
     }
 
-    /// `gauges:` is retired: loading one says how to migrate it.
+    /// tsk865: `gauges:` is a key the file doesn't have (they're
+    /// `collectors:`); nothing special-cases it.
     #[test]
-    fn a_gauges_block_is_an_error_naming_the_migration() {
-        let err = load_from_yaml(
-            "gauges:\n  - key: acme.foo\n    emits: [acme.m]\n    compute: { runtime: starlark, entryFile: g.star }\n",
-        )
-        .unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("collectors:") && msg.contains("oxplow plugin migrate --project"),
-            "{msg}"
-        );
+    fn a_gauges_block_is_an_unknown_key() {
+        let err = load_from_yaml("gauges:\n  - key: acme.foo\n").unwrap_err();
+        assert!(matches!(err, ConfigError::Parse(_)), "{err:?}");
     }
 
     // --- measures + dimensions (workstream E) ------------------------------
@@ -4469,7 +4432,6 @@ measures:
     unit: ms
     subjectKind: endpoint
     temporalSemantics: non-additive
-    componentRole: numerator
     description: "p95 request latency"
 dimensions:
   - key: acme.license
@@ -4489,7 +4451,6 @@ dimensions:
         assert_eq!(m.unit.as_deref(), Some("ms"));
         assert_eq!(m.subject_kind.as_deref(), Some("endpoint"));
         assert_eq!(m.temporal_semantics.as_deref(), Some("non-additive"));
-        assert_eq!(m.component_role.as_deref(), Some("numerator"));
 
         assert_eq!(cfg.dimensions.len(), 2);
         assert_eq!(cfg.dimensions[0].key.as_deref(), Some("acme.license"));
@@ -4515,8 +4476,8 @@ dimensions:
             load_from_yaml("measures:\n  - key: acme.x\n    temporalSemantics: sideways\n")
                 .is_err()
         );
-        // Bad componentRole.
-        assert!(load_from_yaml("measures:\n  - key: acme.x\n    componentRole: pivot\n").is_err());
+        // componentRole is gone (tsk865): ratio components ride each fact.
+        assert!(load_from_yaml("measures:\n  - key: acme.x\n    componentRole: none\n").is_err());
         // Bad captureScope (tsk41).
         assert!(
             load_from_yaml("measures:\n  - key: acme.x\n    captureScope: sometimes\n").is_err()
@@ -4583,7 +4544,6 @@ dimensions:
         // Defaults applied.
         assert_eq!(churn.title, "acme.churn");
         assert_eq!(churn.temporal_semantics, "semi-additive");
-        assert_eq!(churn.component_role, "none");
     }
 
     #[test]

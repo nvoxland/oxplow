@@ -503,15 +503,14 @@ pub struct Services {
     pub usage_store: Arc<SqliteUsageStore>,
     pub code_quality_store: Arc<SqliteCodeQualityStore>,
     pub snapshot_store: Arc<SqliteSnapshotStore>,
-    /// Unified site-wide search index (FTS5/BM25). Written by the
-    /// `Indexer` (`indexer.rs`); read by the `search` IPC/MCP surface.
+    /// Unified site-wide search index (FTS5/BM25). Written by the search
+    /// kinds' assets (`kind_search.rs`) and, for files, the `search.index`
+    /// consumer (`indexer.rs`); read by the `search` IPC/MCP surface.
     pub search_store: Arc<SqliteSearchStore>,
     /// Per-stream snapshot capture registry. Holds one service per
-    /// active stream (each watching its own worktree) and is the
-    /// stream-aware replacement for the singleton above. Callers that
-    /// know which stream they're acting on should `get(&stream_id)`
-    /// here; legacy callers that need "the primary" use
-    /// `snapshot_captures.primary()` (or the `snapshot_capture` alias).
+    /// active stream (each watching its own worktree). Callers that know which stream they're acting on `get(&stream_id)`
+    /// here; those about the primary stream's worktree (the wiki watcher)
+    /// use `snapshot_captures.primary()`.
     pub snapshot_captures: snapshot_capture_registry::SnapshotCaptureRegistry,
     pub agent_status_store: Arc<dyn AgentStatusStore>,
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,

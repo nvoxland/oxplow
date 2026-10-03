@@ -37,8 +37,9 @@ the bundled `oxplow-analytics` example extension.
 >   (tsk330).
 > - **Current (P1, 2026-09-28/29):** manifest v2 with `intent`,
 >   `sharing` and the stable/experimental split (tsk413), the textual
->   v1→v2 migrator (tsk414), the per-root catalog cache (tsk415, tsk390) and
->   the SDK: `oxplow plugin new|check|migrate` (tsk416; "The SDK").
+>   v1→v2 migrator (tsk414, removed with the v1 reader in tsk865), the
+>   per-root catalog cache (tsk415, tsk390) and the SDK: `oxplow plugin
+>   new|check|test` (tsk416; "The SDK").
 >
 > When a piece ships, move it from "target" to "current" here, in the
 > same commit.
@@ -566,11 +567,11 @@ intent:                  # required
 measures:    [...]   # same schema as .oxplow/project.yaml
 metrics:     [...]   # `key:` definitions; sourceMeasure must be declared here or oxplow.*
 dimensions:  [...]
-collectors:  [...]   # v1 `sources`: entity collectors (exec / starlark / jaq / read → entities) and
+collectors:  [...]   # entity collectors (exec / starlark / jaq / read → entities) and
                      # fact collectors (`facts:`; starlark / jaq only; facts must be declared here or oxplow.*)
-                     # see semantic-layer.md "Collectors"; a `gauges:` key is an error → `oxplow plugin migrate <name>`
+                     # see semantic-layer.md "Collectors"
 ui:                  # what it adds to the core UI
-  slots:             # lenses mounted into core pages (v1 `slots`); see "Slots"
+  slots:             # lenses mounted into core pages; see "Slots"
     - { slot: effort.review.details, lens: change-review }
   commands: …        # its commands in core menus (stable; P6b)
   decorators: …      # experimental: a private extension only
@@ -623,32 +624,17 @@ had it experimental, but the bundled `oxplow-analytics` — shared by
 definition — ships on it, and a first-party extension depending on a
 kind is exactly the evidence promotion requires (target §10.1, §12).
 
-**v1 still loads, through the migrator.** A manifest with no `manifest:`
-key is v1 (`sources`, `slots`, no intent). The loader runs
-`extensions::migrate_v1::migrate_v1_to_v2` on its text in memory, reads
-the result as v2, and carries a warning to run `oxplow plugin migrate`
-(which writes the same text to the file; see "The SDK"). The migration is **textual**
-so a person's consent survives it: it prepends `manifest: 2`, inserts
-`sharing: private` and an `intent` skeleton (`purpose` from
-`description`, `origin: null`, `examples: []` — the agent fills those
-in) after the header, and renames the top-level `sources:` →
-`collectors:` and moves `slots:` under `ui:` (its block indented two
-spaces, and each `slot: <v1 name>` in it renamed through `RENAMED_SLOTS`
-— `task-detail` → `work_item.detail.body` and so on — so a real v1
-manifest loads; a name that isn't a v1 name is left for the loader to
-report); every other byte,
-comments included, is unchanged, and it is idempotent.
-`Extension.manifest_version` says which path a loaded extension took.
-
-**Consent is unaffected by the migration.** `approval_hash` never
-included `extension.yaml`, and the advisory program hash is over the
-advisories' content, so rewriting a manifest from v1 to v2 asks for no
-re-approval (tested).
+**Only v2 loads (tsk865).** A manifest without `manifest: 2` is a load
+error (`extension.yaml:1`); so is any key v2 doesn't have (`sources:`, a
+top-level `slots:`, `gauges:` — `deny_unknown_fields`). There is no
+reader or migrator for v1. An old slot name under `ui.slots` is an error
+naming its new one (`RENAMED_SLOTS`). `Extension.manifest_version` is the
+version the file declares.
 
 ## The SDK
 
 `crates/oxplow-sdk` (P1.14, tsk416; target §10.5) is the one
-implementation behind three doors: the `oxplow plugin new|check|migrate|test`
+implementation behind three doors: the `oxplow plugin new|check|test`
 CLI, the RPC/MCP `validate_extension`, and `save_lens`'s manifest. Every
 door gives an author the same report, so an agent editing from a terminal
 and one calling MCP read identical `file:line: what — fix` lines.
@@ -711,8 +697,6 @@ and one calling MCP read identical `file:line: what — fix` lines.
   its own unpublished model. It returns a `CheckReport { ok, errors,
   warnings, dry_run, extension }`; `render_findings` prints it as text
   (`error: <file:line …>` lines then a one-line summary) or JSON.
-- **`migrate(root, name)`** writes `migrate_v1::migrate_v1_to_v2` to the
-  file; `changed: false` when it was already v2.
 - **`scaffold(…, Kind::Provider, …)`** (`plugin new provider <name>`,
   P5.D5) adds a `providers:` entry (id = the name with `_` for `-`,
   capability `work_items`), `provider.json` (create / update /

@@ -316,9 +316,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
 
     // Wiki notes watcher: keeps `wiki_page` rows in sync with
     // `.oxplow/wiki/<slug>.md` on disk (initial scan + debounced
-    // re-syncs on change). One-shot legacy migration runs
-    // synchronously before the watcher spawns.
-    crate::wiki_pages::migrate_legacy_notes_dir(&state.layout.project_dir);
+    // re-syncs on change).
     {
         let wiki_store = state.wiki_page_store.clone();
         let wiki_db = state.db.clone();

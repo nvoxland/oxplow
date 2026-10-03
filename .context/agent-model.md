@@ -1538,7 +1538,7 @@ cache_creation_input_tokens, cache_read_input_tokens}` and
 **Flow (the `token_usage.turns` pump reactor, P3.7).** Nothing is parsed in
 the Stop hook. The ingest logs `agent.turn.ended@2` with Claude's
 `transcript_path`; `TurnTokensConsumer` (`crates/oxplow-app/src/token_usage.rs`)
-reacts to it with `TokenUsageService::on_stop_for`, carrying a `TurnRecord`
+reacts to it with `TokenUsageService::on_stop`, carrying a `TurnRecord`
 (the turn, the effort it ran in, the event id). An ACP agent reports its
 counts with the turn instead: the host puts them on the Stop body
 (`TURN_USAGE_KEY`), they ride the event's `usage`, and the reactor records

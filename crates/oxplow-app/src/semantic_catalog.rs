@@ -106,7 +106,7 @@ mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "name: my-gh\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, doc: A pull request., key: number, columns: { number: int } }\n",
+            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, doc: A pull request., key: number, columns: { number: int } }\n",
         )
         .unwrap();
         std::fs::write(ext.join("sync.sh"), "#!/bin/sh\n").unwrap();

@@ -249,7 +249,6 @@ export function Page({ title, kind, chips: ownChips, actions, children, backlink
           onForward={effectiveNavBar.onForward}
           siblings={effectiveNavBar.siblings}
           title={titleInBody ? undefined : effectiveTitle}
-          kind={kind}
           bookmark={effectiveNavBar.bookmark}
           backlinks={effectiveNavBar.backlinks}
           outbound={effectiveNavBar.outbound}

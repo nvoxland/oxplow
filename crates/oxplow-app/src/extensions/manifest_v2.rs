@@ -5,9 +5,8 @@
 //! plugin's **intent**, says whether it is **private** or **shared**, and
 //! names the kinds it uses; unknown keys are errors. Kinds have a
 //! lifecycle: the stable ones are permanent API, the experimental ones
-//! may appear only in a private extension. A v1 manifest (no `manifest:`
-//! key) is still read — converted in memory with a warning — so nothing
-//! breaks while `oxplow plugin migrate` rewrites the file.
+//! may appear only in a private extension. A manifest without
+//! `manifest: 2` doesn't load.
 //!
 //! This module parses and checks the manifest's own shape and
 //! lifecycle; the loader (`extensions.rs`) resolves cross-references
@@ -98,14 +97,6 @@ pub struct UiBlock {
     #[serde(default)]
     pub replacements: Option<Value>,
 }
-
-/// Top-level keys that moved under `ui:` — a manifest still using one is
-/// an error naming where it went.
-pub const MOVED_KEYS: &[(&str, &str)] = &[
-    ("slot_mounts", "ui.slots"),
-    ("decorators", "ui.decorators"),
-    ("replacements", "ui.replacements"),
-];
 
 /// A launcher entry as the manifest holds it; [`launcher_entries`]
 /// checks its target and types it.
@@ -291,13 +282,9 @@ pub struct ManifestV2 {
     pub measures: Option<Value>,
     #[serde(default)]
     pub metrics: Option<Value>,
-    /// Retired (P7.B3): each gauge is a collector that records facts. Read
-    /// only to refuse it, naming `oxplow plugin migrate`.
-    #[serde(default)]
-    pub gauges: Option<Value>,
     #[serde(default)]
     pub dimensions: Option<Value>,
-    /// Collectors (v1 `sources`; P7.B3 also gauges): exec / starlark /
+    /// Collectors (P7.B3): exec / starlark /
     /// jaq / read, writing entities or recording facts. Parsed by
     /// `oxplow_config::collectors`.
     #[serde(default)]
@@ -457,14 +444,6 @@ pub fn kind_line(text: &str, kind: &str) -> Option<usize> {
         Some(sub) => line_under(text, "ui", &format!("{sub}:")).or(key_line(text, "ui")),
         None => key_line(text, kind),
     }
-}
-
-/// The first top-level key that moved under `ui:`, with its line and
-/// where it went.
-pub fn moved_key(text: &str) -> Option<(usize, &'static str, &'static str)> {
-    MOVED_KEYS
-        .iter()
-        .find_map(|(old, new)| key_line(text, old).map(|line| (line, *old, *new)))
 }
 
 /// `file:line: message`, or `file: message` when no line is known.

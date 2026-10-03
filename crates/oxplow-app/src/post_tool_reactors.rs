@@ -9,7 +9,7 @@
 //! its hook's window goes out on the next one instead of being lost.
 //!
 //! - `collection` — a Bash command's test / analysis / coverage runs
-//!   (`CollectionService::on_post_tool_use_caused`), reading the command
+//!   (`CollectionService::on_post_tool_use`), reading the command
 //!   and its output back from `event_content`.
 //! - `advisories.post_tool` — the enabled extensions' post-tool-use
 //!   advisories for the effort the tool ran in.
@@ -80,7 +80,7 @@ impl AsyncEventConsumer for CollectionConsumer {
             "tool_response": content(&self.db, event, "output").await?,
         });
         self.collection
-            .on_post_tool_use_caused(&thread, &payload.to_string(), Some(&cause_of(event)))
+            .on_post_tool_use(&thread, &payload.to_string(), Some(&cause_of(event)))
             .await
             .map(|_| ())
     }

@@ -465,3 +465,73 @@ fn a_test_only_module_is_not_production() {
     assert!(!has("crates/oxplow-app/src/providers/oauth_sim.rs"));
     assert!(!has("crates/oxplow-app/src/test_fixtures.rs"));
 }
+
+/// What only a shim, alias or migrator for an old shape says (tsk865: no
+/// legacy code, no migration code). The SQL schema migrations aren't
+/// sources here — they upgrade the one database — and the two readers of
+/// rows already in it (`SnapshotTrigger::Legacy`, the comment selectors'
+/// position objects) don't say any of these.
+const LEGACY_SHIMS: &[&str] = &[
+    "migrate_v1",
+    "migrate_gauges",
+    "gauges_to_collectors",
+    "GAUGES_RETIRED",
+    "plugin migrate",
+    "migrate_legacy",
+    "hook_bridge.py",
+    "\"legacy:",
+    "#[deprecated",
+    "@deprecated",
+    "Legacy alias",
+    "API compatibility",
+    "for back-compat",
+];
+
+/// The desktop's own TypeScript, tests and generated bindings aside.
+fn desktop_sources() -> Vec<(String, String)> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut out = Vec::new();
+    let mut stack = vec![root.join("apps/desktop/src")];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if path.is_dir() {
+                if name != "generated" {
+                    stack.push(path);
+                }
+            } else if (name.ends_with(".ts") || name.ends_with(".tsx")) && !name.contains(".test.")
+            {
+                let rel = path
+                    .strip_prefix(&root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                out.push((rel, std::fs::read_to_string(&path).unwrap_or_default()));
+            }
+        }
+    }
+    out
+}
+
+/// tsk865: no production source keeps a shim, alias or migrator for an
+/// old shape — a manifest without `manifest: 2`, a `gauges:` block, a
+/// `collection:` block, an old key are errors, not conversions.
+#[test]
+fn no_legacy_shims() {
+    let found: Vec<String> = production_sources()
+        .into_iter()
+        .chain(desktop_sources())
+        .flat_map(|(path, text)| {
+            LEGACY_SHIMS
+                .iter()
+                .filter(|needle| text.contains(*needle))
+                .map(|needle| format!("{path}: {needle}"))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert_eq!(found, Vec::<String>::new());
+}

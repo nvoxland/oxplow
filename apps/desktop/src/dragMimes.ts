@@ -20,8 +20,8 @@
  */
 
 /** Task rows: reorder, restatus, and multi-select moves. Payload carries
- *  `itemIds` (plus a legacy single `itemId`) and an optional resolved
- *  `items` slice — see `agent-context-dnd.ts`. */
+ *  `itemIds` and an optional resolved `items` slice — see
+ *  `agent-context-dnd.ts`. */
 export const TASK_DRAG_MIME = "application/x-oxplow-task";
 
 /** "Add to agent context" — a single typed reference (file, note, task)

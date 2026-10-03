@@ -19,7 +19,6 @@ use serde::{Deserialize, Serialize};
 pub mod custom_components;
 pub mod decorators;
 pub mod manifest_v2;
-pub mod migrate_v1;
 pub mod replacements;
 pub mod ui_commands;
 use manifest_v2::{at, entry_line, key_line, line_under, ManifestV2};
@@ -906,14 +905,13 @@ pub struct Extension {
     /// Problems found while loading; empty when healthy. A lens that
     /// failed to load is listed here and missing from `lenses`.
     pub errors: Vec<String>,
-    /// Things worth fixing that don't stop it loading: a v1 manifest, an
-    /// intent with no examples.
+    /// Things worth fixing that don't stop it loading: an intent with no
+    /// examples.
     pub warnings: Vec<String>,
-    /// `2` for a current manifest; `1` for one read through the v1
-    /// compatibility path (see `warnings`).
+    /// The manifest version it was read as (`manifest:`).
     pub manifest_version: u32,
     pub sharing: Sharing,
-    /// Why it exists (required at v2; `None` for a v1 manifest).
+    /// Why it exists (required; `None` only when the manifest didn't load).
     pub intent: Option<Intent>,
     pub lenses: Vec<Lens>,
     /// Where it was installed from, for extensions added with
@@ -1497,20 +1495,15 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         return ext;
     };
     let file = format!("{rel}/extension.yaml");
-    // `manifest: 2` says which shape to read; a file without it is v1 and
-    // is read through the same textual migration `oxplow plugin migrate`
-    // writes, so the two can't disagree.
-    let is_v2 = key_line(&manifest, "manifest").is_some();
-    let manifest = if is_v2 {
-        manifest
-    } else {
-        migrate_v1::migrate_v1_to_v2(&manifest)
-    };
-    if let Some((line, old, new)) = manifest_v2::moved_key(&manifest) {
+    // `manifest:` says which shape to read; this oxplow reads one.
+    if key_line(&manifest, "manifest").is_none() {
         ext.errors.push(at(
             &file,
-            Some(line),
-            format!("`{old}` moved to `{new}`: write it under `ui:`"),
+            Some(1),
+            format!(
+                "`manifest: {}` is required: it says which shape the file is in",
+                manifest_v2::CURRENT
+            ),
         ));
         return ext;
     }
@@ -1530,24 +1523,16 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             return ext;
         }
     };
-    ext.manifest_version = if is_v2 { manifest_v2::CURRENT } else { 1 };
+    ext.manifest_version = m.manifest;
     ext.sharing = m.sharing;
     ext.intent = m.intent.clone();
     ext.description = m.description.clone();
-    if is_v2 {
-        let (errors, warnings) = manifest_v2::check(&m, &file, &manifest, origin == "bundled");
-        ext.errors.extend(errors);
-        ext.warnings.extend(warnings);
-        let (launcher, errors) = manifest_v2::launcher_entries(&m, &file, &manifest);
-        ext.launcher = launcher;
-        ext.errors.extend(errors);
-    } else {
-        ext.warnings.push(at(
-            &file,
-            Some(1),
-            "manifest v1 (no `manifest:` key); run `oxplow plugin migrate` to rewrite it as v2 with an `intent`",
-        ));
-    }
+    let (errors, warnings) = manifest_v2::check(&m, &file, &manifest, origin == "bundled");
+    ext.errors.extend(errors);
+    ext.warnings.extend(warnings);
+    let (launcher, errors) = manifest_v2::launcher_entries(&m, &file, &manifest);
+    ext.launcher = launcher;
+    ext.errors.extend(errors);
     let panel_files = m.panels.clone();
     let ui_command_files = m.ui.commands.clone();
     // An experimental kind: a shared manifest's is refused by `check`.
@@ -1567,16 +1552,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         .clone()
         .filter(|_| m.sharing == Sharing::Private);
     let slot_files = {
-        if m.gauges.is_some() {
-            ext.errors.push(at(
-                &file,
-                key_line(&manifest, "gauges"),
-                format!(
-                    "`gauges:` is now `collectors:` (each gauge is a collector that records \
-                     facts); run `oxplow plugin migrate {name}` to rewrite it in place"
-                ),
-            ));
-        }
         // A stable kind (P9.D6): a shared extension's load too.
         if let Some(v) = m.event_types.as_ref() {
             let (declared, errors) = crate::extension_event_types::parse_event_types(
@@ -3764,7 +3739,8 @@ mod tests {
         fs::write(p, body).unwrap();
     }
 
-    const EXT: &str = "name: review\ndescription: Review helpers\n";
+    const EXT: &str =
+        "manifest: 2\nname: review\nintent:\n  purpose: test\ndescription: Review helpers\n";
     const LENS: &str = r#"
 title: Tasks by status
 description: Every task with a given status.
@@ -3858,7 +3834,7 @@ empty: No tasks.
         write(
             dir.path(),
             "oxplow/extensions/misnamed/extension.yaml",
-            "name: other\n",
+            "manifest: 2\nname: other\nintent:\n  purpose: test\n",
         );
 
         let exts = project_extensions(dir.path());
@@ -4147,7 +4123,7 @@ empty: No tasks.
         write(
             repo.path(),
             "extension.yaml",
-            "name: shared\ndescription: Shared lenses\n",
+            "manifest: 2\nname: shared\nintent:\n  purpose: test\ndescription: Shared lenses\n",
         );
         write(
             repo.path(),
@@ -4174,7 +4150,7 @@ empty: No tasks.
         write(
             repo.path(),
             "extension.yaml",
-            "name: shared\ndescription: Shared lenses\nmodels:\n  - name: x\n    version: 1\n    description: X.\n    columns:\n      - { name: n, type: \"\", doc: N. }\n",
+            "manifest: 2\nname: shared\nintent:\n  purpose: test\ndescription: Shared lenses\nmodels:\n  - name: x\n    version: 1\n    description: X.\n    columns:\n      - { name: n, type: \"\", doc: N. }\n",
         );
         write(repo.path(), "models/x.sql", "SELECT 1 AS n\n");
         write(
@@ -4309,7 +4285,7 @@ empty: No tasks.
         write(
             repo.path(),
             "extension.yaml",
-            "name: shared\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    network: [api.github.com]\n    credentials: [TOKEN]\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+            "manifest: 2\nname: shared\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    network: [api.github.com]\n    credentials: [TOKEN]\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
         );
         write(repo.path(), "sync.sh", "echo '{}'\n");
         write(
@@ -4373,7 +4349,11 @@ empty: No tasks.
     fn install_refuses_an_extension_with_load_errors() {
         let project = tempfile::tempdir().unwrap();
         let repo = published_repo("Count");
-        write(repo.path(), "extension.yaml", "name: shared\nbogus: 1\n");
+        write(
+            repo.path(),
+            "extension.yaml",
+            "manifest: 2\nname: shared\nintent:\n  purpose: test\nbogus: 1\n",
+        );
         git(repo.path(), &["commit", "-q", "-am", "bad"]);
         let url = repo.path().to_string_lossy().to_string();
         let err = install_extension(project.path(), &url, None, &head(repo.path())).unwrap_err();
@@ -4442,7 +4422,7 @@ empty: No tasks.
         write(
             project.path(),
             "oxplow/extensions/local/extension.yaml",
-            "name: local\n",
+            "manifest: 2\nname: local\nintent:\n  purpose: test\n",
         );
         let err = update_extension(project.path(), "local", "x").unwrap_err();
         assert!(
@@ -4618,7 +4598,7 @@ empty: No tasks.
         write(
             project.path(),
             "oxplow/extensions/shared/extension.yaml",
-            "name: shared\n",
+            "manifest: 2\nname: shared\nintent:\n  purpose: test\n",
         );
         write(
             project.path(),
@@ -4650,7 +4630,7 @@ empty: No tasks.
         write(
             dir.path(),
             "oxplow/extensions/review/extension.yaml",
-            "name: review\nsources:\n  - id: gh\n    runtime: exec\n    entry: bin/sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n  - id: bad\n    runtime: python\n    entry: x\n    entities: []\n",
+            "manifest: 2\nname: review\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: bin/sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n  - id: bad\n    runtime: python\n    entry: x\n    entities: []\n",
         );
         write(
             dir.path(),
@@ -4680,7 +4660,7 @@ empty: No tasks.
         write(
             dir.path(),
             "oxplow/extensions/gh/extension.yaml",
-            "name: gh\nsources:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+            "manifest: 2\nname: gh\nintent:\n  purpose: test\ncollectors:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
         );
         write(dir.path(), "oxplow/extensions/gh/sync.sh", "#!/bin/sh\n");
         write(
@@ -4720,7 +4700,7 @@ empty: No tasks.
         write(
             dir.path(),
             "oxplow/extensions/gh/extension.yaml",
-            "name: gh\nsources:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+            "manifest: 2\nname: gh\nintent:\n  purpose: test\ncollectors:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
         );
         write(dir.path(), "oxplow/extensions/gh/sync.sh", "#!/bin/sh\n");
         write(
@@ -4897,90 +4877,25 @@ empty: No tasks.
         assert_eq!(e.metrics.len(), 2, "both specs still load");
     }
 
+    /// tsk865: a manifest says its version, or it doesn't load — there is
+    /// no v1 reader any more.
     #[test]
-    fn a_v1_manifest_still_loads_with_a_migration_warning() {
+    fn a_manifest_without_a_version_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             "oxplow/extensions/review/extension.yaml",
-            "name: review\ndescription: Review helpers\nslots:\n  - { slot: task-detail, lens: tasks }\n",
-        );
-        write(
-            dir.path(),
-            "oxplow/extensions/review/lenses/tasks.yaml",
-            "title: Task\nquery: SELECT id FROM v_task WHERE id = :task_id\nparams: [{ name: task_id }]\n",
+            "name: review\ndescription: Review helpers\n",
         );
         let e = only(dir.path(), "review");
-        assert!(e.errors.is_empty(), "{:?}", e.errors);
-        assert_eq!(e.manifest_version, 1);
-        // The migrator's skeleton intent: purpose from the description,
-        // examples left for the agent to fill in.
-        let intent = e.intent.as_ref().expect("skeleton intent");
-        assert_eq!(intent.purpose, "Review helpers");
-        assert!(intent.examples.is_empty());
         assert!(
-            e.warnings
+            e.errors
                 .iter()
-                .any(|w| w.contains("manifest v1") && w.contains("plugin migrate")),
+                .any(|m| m.contains("extension.yaml:1") && m.contains("`manifest: 2` is required")),
             "{:?}",
-            e.warnings
+            e.errors
         );
-        assert_eq!(e.ui.slots.len(), 1, "v1 `slots` become slot mounts");
-    }
-
-    /// Rewriting a manifest from v1 to v2 must not ask the person to
-    /// approve the extension's programs again: neither hash reads the
-    /// manifest's shape.
-    #[test]
-    fn migrating_a_manifest_to_v2_keeps_the_consent_hashes() {
-        let dir = tempfile::tempdir().unwrap();
-        let ext_rel = "oxplow/extensions/review";
-        let source = "  - id: github\n    runtime: exec\n    entry: bin/sync.sh\n    env: [GITHUB_TOKEN]\n    network: [api.github.com]\n    entities:\n      - name: pr\n        key: number\n        columns:\n          number: int\n";
-        let advisory =
-            "  - id: coverage-target\n    on: post-tool-use\n    query: SELECT 'x' AS message\n";
-        write(
-            dir.path(),
-            &format!("{ext_rel}/bin/sync.sh"),
-            "#!/bin/sh\necho '{}'\n",
-        );
-        write(
-            dir.path(),
-            &format!("{ext_rel}/extension.yaml"),
-            &format!("name: review\ndescription: d\nsources:\n{source}advisories:\n{advisory}"),
-        );
-        let v1 = only(dir.path(), "review");
-        assert!(v1.errors.is_empty(), "{:?}", v1.errors);
-        assert_eq!(v1.manifest_version, 1);
-        let ext_dir = dir.path().join(ext_rel);
-        let source_hash_v1 =
-            crate::collector_runner::approval_hash(&ext_dir, &v1.collectors[0]).unwrap();
-        let advisory_hash_v1 = crate::exec_consent::advisory_program(&v1)
-            .hash(Path::new(""))
-            .unwrap();
-
-        write(
-            dir.path(),
-            &format!("{ext_rel}/extension.yaml"),
-            &format!(
-                "manifest: 2\nname: review\ndescription: d\nintent:\n  purpose: Pull requests and coverage nudges\n  examples: [{{ name: a }}]\ncollectors:\n{source}advisories:\n{advisory}"
-            ),
-        );
-        let v2 = only(dir.path(), "review");
-        assert!(v2.errors.is_empty(), "{:?}", v2.errors);
-        assert!(v2.warnings.is_empty(), "{:?}", v2.warnings);
-        assert_eq!(v2.manifest_version, 2);
-        assert_eq!(v2.collectors, v1.collectors);
-        assert_eq!(v2.advisories, v1.advisories);
-        assert_eq!(
-            crate::collector_runner::approval_hash(&ext_dir, &v2.collectors[0]).unwrap(),
-            source_hash_v1
-        );
-        assert_eq!(
-            crate::exec_consent::advisory_program(&v2)
-                .hash(Path::new(""))
-                .unwrap(),
-            advisory_hash_v1
-        );
+        assert!(e.intent.is_none());
     }
 
     #[test]
@@ -5199,7 +5114,7 @@ commands:
         write(
             dir.path(),
             "oxplow/extensions/oxplow-review/extension.yaml",
-            "name: oxplow-review\n",
+            "manifest: 2\nname: oxplow-review\nintent:\n  purpose: test\n",
         );
         let exts = load_extensions(dir.path());
         let named: Vec<&Extension> = exts.iter().filter(|e| e.name == "oxplow-review").collect();
@@ -5242,7 +5157,7 @@ commands:
         write(
             dir.path(),
             "oxplow/extensions/mine/extension.yaml",
-            "name: mine\nslots:\n  - { slot: effort-review, lens: nope }\n  - { slot: sidebar, lens: a }\n  - { slot: effort-review, lens: a }\n",
+            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: effort.review.details, lens: nope }\n    - { slot: sidebar, lens: a }\n    - { slot: effort.review.details, lens: a }\n",
         );
         write(
             dir.path(),
@@ -5266,7 +5181,7 @@ commands:
         write(
             dir.path(),
             "oxplow/extensions/mine/extension.yaml",
-            "name: mine\nslots:\n  - { slot: settings, lens: status }\n",
+            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: settings.section, lens: status }\n",
         );
         write(
             dir.path(),
@@ -5308,7 +5223,11 @@ commands:
         write(
             dir.path(),
             "oxplow/extensions/x/extension.yaml",
-            &format!("name: x\n{manifest_tail}"),
+            &if manifest_tail.starts_with("manifest:") {
+                format!("name: x\n{manifest_tail}")
+            } else {
+                format!("manifest: 2\nname: x\nintent:\n  purpose: test\n{manifest_tail}")
+            },
         );
         for (slug, body) in files {
             write(
@@ -5508,7 +5427,7 @@ commands:
         let thread_lens = "title: Th\nparams: [{ name: thread_id }]\nquery: SELECT :thread_id\n";
         let (_d, ext) = load_x(
             &[("t", task_lens), ("th", thread_lens), ("plain", "title: P\nquery: SELECT 1\n")],
-            "slots:\n  - { slot: task-detail, lens: t }\n  - { slot: thread, lens: th }\n  - { slot: task-detail, lens: plain }\n",
+            "ui:\n  slots:\n    - { slot: work_item.detail.body, lens: t }\n    - { slot: thread.plan.header, lens: th }\n    - { slot: work_item.detail.body, lens: plain }\n",
         );
         let mounted: Vec<(&str, &str)> = ext
             .ui
@@ -5583,7 +5502,7 @@ commands:
         write(
             dir.path(),
             "oxplow/extensions/x/extension.yaml",
-            &format!("name: x\n{manifest}"),
+            &format!("manifest: 2\nname: x\nintent:\n  purpose: test\n{manifest}"),
         );
         write(
             dir.path(),
@@ -5615,12 +5534,12 @@ commands:
             "{:?}",
             ext.warnings
         );
-        // `gauges:` is retired, naming the migration.
+        // `gauges:` is a key the manifest doesn't have.
         let (_d, ext) = load_x(&[], "gauges:\n  - { key: acme.x }\n");
         assert!(
             ext.errors
                 .iter()
-                .any(|e| e.contains("gauges:") && e.contains("oxplow plugin migrate x")),
+                .any(|e| e.contains("unknown field `gauges`")),
             "{:?}",
             ext.errors
         );
@@ -5633,7 +5552,10 @@ commands:
     fn extensions_declare_models_with_their_sql() {
         let dir = tempfile::tempdir().unwrap();
         let manifest = [
+            "manifest: 2",
             "name: x",
+            "intent:",
+            "  purpose: test",
             "models:",
             "  - name: late",
             "    version: 1",
@@ -5739,7 +5661,7 @@ commands:
         write(
             dir.path(),
             "oxplow/extensions/x/extension.yaml",
-            "name: x\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, trigger: { on: [snapshot.taken] }, facts: [acme.todo] }\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: test\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, trigger: { on: [snapshot.taken] }, facts: [acme.todo] }\n",
         );
         write(
             dir.path(),
@@ -5844,7 +5766,7 @@ commands:
     /// P6b.C1: slot names are one dotted namespace; an old name says its
     /// new one, and the top-level keys that moved under `ui:` say where.
     #[test]
-    fn old_slot_names_and_moved_keys_say_where_they_went() {
+    fn old_slot_names_say_where_they_went_and_ui_keys_stay_under_ui() {
         let (_d, ext) = load_x(
             &[(
                 "c",
@@ -5859,19 +5781,15 @@ commands:
                 && errs.contains("extension.yaml:"),
             "{errs}"
         );
-        for (key, to) in [
-            ("slot_mounts", "ui.slots"),
-            ("decorators", "ui.decorators"),
-            ("replacements", "ui.replacements"),
-        ] {
+        // Keys that live under `ui:` are unknown at the top.
+        for key in ["slot_mounts", "decorators", "replacements"] {
             let (_d, ext) = load_x(
                 &[],
                 &format!("manifest: 2\nintent:\n  purpose: p\n{key}: []\n"),
             );
             let errs = ext.errors.join("\n");
             assert!(
-                errs.contains(&format!("`{key}` moved to `{to}`"))
-                    && errs.contains("extension.yaml:5"),
+                errs.contains(&format!("unknown field `{key}`")),
                 "{key}: {errs}"
             );
         }
@@ -5893,7 +5811,7 @@ commands:
     fn a_rail_mount_is_an_error_naming_panels() {
         let (_d, ext) = load_x(
             &[("ok", "title: A\nquery: SELECT 1\nalert: { min_rows: 1 }\n")],
-            "slots:\n  - { slot: rail, lens: ok }\n",
+            "ui:\n  slots:\n    - { slot: rail, lens: ok }\n",
         );
         assert!(ext.ui.slots.is_empty());
         let errs = ext.errors.join("\n");
@@ -6143,7 +6061,7 @@ commands:
                 ("both", "title: B\nparams: [{ name: effort_id }]\nquery: SELECT 1\n"),
                 ("none", "title: N\nparams: [{ name: other }]\nquery: SELECT 1\n"),
             ],
-            "slots:\n  - { slot: commit, lens: files }\n  - { slot: uncommitted, lens: files }\n  - { slot: effort-review, lens: files }\n  - { slot: effort-review, lens: both }\n  - { slot: commit, lens: none }\n",
+            "ui:\n  slots:\n    - { slot: vcs.commit.details, lens: files }\n    - { slot: vcs.status.details, lens: files }\n    - { slot: effort.review.details, lens: files }\n    - { slot: effort.review.details, lens: both }\n    - { slot: vcs.commit.details, lens: none }\n",
         );
         let link = ext
             .lenses

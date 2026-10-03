@@ -49,8 +49,8 @@ export function resolveQuoteOffset(
 // ---------------------------------------------------------------------
 // Robust anchoring (W3C/Hypothesis-style): a quote selector enriched
 // with surrounding context + a position hint, resolved in tiers with a
-// bounded fuzzy fallback. `resolveQuoteOffset` above stays exact-only
-// for back-compat; surfaces use `resolveAnchor` below.
+// bounded fuzzy fallback. `resolveQuoteOffset` above is the exact-only
+// lookup (DOM annotations use it); the editors use `resolveAnchor` below.
 // ---------------------------------------------------------------------
 
 /// Chars of surrounding text captured/searched on each side of a quote.

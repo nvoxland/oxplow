@@ -722,18 +722,9 @@ only when `metrics: - use: oxplow.<x>` enables them). `project` and
 - **A fact collector gets no `env` / `credentials` / `network`**, and
   `report` is for fact collectors only.
 
-**Migrating `gauges:`.** A `gauges:` block in either file is a load
-error naming the fix: `oxplow plugin migrate --project` (project.yaml) or
-`oxplow plugin migrate <name>` (an extension; it also does the v1→v2
-manifest migration). Both rewrite the block in place, textually and
-idempotently: `key`→`id`, `title`→`doc`, `compute.runtime`→`runtime`,
-`compute.entryFile`→`entry`, `emits`→`facts`, `compute.report` +
-`compute.input` → `report: { path, format }`, trigger `on-snapshot` (the
-default) → `{ on: [snapshot.taken] }`, `on-effort-complete` → `{ on:
-[effort.finished] }`, `manual` → `manual`. `on-report` / `continuous` and
-`compute.args` have no equivalent — the migration refuses, naming the
-gauge. Fingerprints are preserved, so a migrated gauge keeps its
-baseline.
+**No `gauges:`.** The retired producer block is a key neither file has
+(tsk865): `.oxplow/project.yaml` and `extension.yaml` reject it like any
+unknown key. There is no migrator.
 
 **Running.** `on:` collectors, entity and fact alike, run from the
 `collector.triggers` consumer (below). For a fact collector:
@@ -856,10 +847,8 @@ entities from data already in the semantic layer:
 | Piece | Where |
 |---|---|
 | Parse/validate declarations (`CollectorSpec`, `Trigger`) | `crates/oxplow-config/src/collectors.rs` |
-| `gauges:` → `collectors:` (`migrate_gauges_text`, behind `oxplow plugin migrate --project` / `<name>`) | `crates/oxplow-config/src/collectors.rs`, `apps/desktop/src-tauri/src/plugin_cli.rs` |
 | Fact collectors: `FactCollector`, `fact_collectors()`, `run_collector_by_key`, `run_snapshot_collectors` / `run_effort_collectors` / `run_event_collectors` | `crates/oxplow-app/src/metrics_service.rs` |
 | Fact-collector script host (`TreeHost`, `run_fact_starlark`, `facts_of`, `parse_report`) | `crates/oxplow-collect-plugin/src/lib.rs`, `runtime.rs` |
-| v1 `sources:` / `schedule:` → `collectors:` / `trigger:` | `crates/oxplow-app/src/extensions/migrate_v1.rs` |
 | Consent (`approve_reviewed`), exec, coercion, `run_collector` / `run_for_event`, `CollectorRunner` + the `collector.sync` command, scheduler | `crates/oxplow-app/src/collector_runner.rs` |
 | The `collector.triggers` consumer (`on:` / `where` / `after`) | `crates/oxplow-app/src/collector_triggers.rs` |
 | Entity tables + views, run state (V133 `collector_run`) | `crates/oxplow-db/src/collector_store.rs` |

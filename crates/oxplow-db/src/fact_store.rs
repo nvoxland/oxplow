@@ -95,9 +95,6 @@ impl NewMeasure {
     }
 }
 
-// `measure.component_role` (a dead V43 column, tsk15) is intentionally omitted
-// from the read cols + upsert: it's never read, can't be safely `DROP COLUMN`d
-// (a CHECK + the fact→measure CASCADE), and defaults to 'none' on insert.
 const MEASURE_COLS: &str = "id, key, title, unit, subject_kind, temporal_semantics, \
      capture_scope, scope, description, created_at, updated_at, extension";
 
@@ -1107,8 +1104,6 @@ impl SqliteFactStore {
                     .optional()
                     .map_err(map_sql_err)?;
                 let now = ts_to_string(Timestamp::now());
-                // `component_role` is omitted — it defaults to 'none' and is
-                // never read (dead V43 column, tsk15).
                 let (scope, extension) = stored_scope(&m.scope);
                 tx.execute(
                     "INSERT INTO measure

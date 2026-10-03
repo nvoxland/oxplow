@@ -3597,7 +3597,7 @@ mod tests {
         std::fs::create_dir_all(&p).unwrap();
         std::fs::write(
             proj.path().join("oxplow/extensions/demo/extension.yaml"),
-            "name: demo\n",
+            "manifest: 2\nname: demo\nintent:\n  purpose: test\n",
         )
         .unwrap();
         std::fs::write(
@@ -3646,7 +3646,7 @@ mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "name: my-gh\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
         )
         .unwrap();
         let script = ext.join("sync.sh");
@@ -3684,7 +3684,10 @@ mod tests {
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(p, body).unwrap();
         };
-        w("oxplow/extensions/demo/extension.yaml", "name: demo\n");
+        w(
+            "oxplow/extensions/demo/extension.yaml",
+            "manifest: 2\nname: demo\nintent:\n  purpose: test\n",
+        );
         w(
             "oxplow/extensions/demo/lenses/streams.yaml",
             "title: Streams\nparams:\n  - { name: kind, default: primary }\nquery: SELECT kind FROM v_stream WHERE kind = :kind\n",
@@ -4008,7 +4011,7 @@ mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "name: work\nsources:\n  - id: one\n    runtime: jaq\n    entry: one.jq\n    input: \"SELECT 1 AS n\"\n    entities:\n      - { name: nums, key: n, columns: { n: int } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: one\n    runtime: jaq\n    entry: one.jq\n    input: \"SELECT 1 AS n\"\n    entities:\n      - { name: nums, key: n, columns: { n: int } }\n",
         )
         .unwrap();
         std::fs::write(ext.join("one.jq"), "{entities: {nums: .rows}}").unwrap();
@@ -4482,7 +4485,11 @@ mod tests {
         let elsewhere = tempfile::tempdir().unwrap();
         let ext = elsewhere.path().join("oxplow/extensions/mine");
         std::fs::create_dir_all(&ext).unwrap();
-        std::fs::write(ext.join("extension.yaml"), "name: mine\n").unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: mine\nintent:\n  purpose: test\n",
+        )
+        .unwrap();
         let mut other = primary.clone();
         other.id = oxplow_domain::StreamId::placeholder();
         other.title = "other".into();

@@ -47,9 +47,9 @@ export type ParsedLink =
       path: string;
       line?: number;
       /** Tree version the wikilink pinned. `null` means the wikilink
-       *  was bare (`[[path]]`) — host falls back to `WORKING` (working
-       *  tree) for back-compat. Non-null carries the author's intent
-       *  exactly. */
+       *  was bare (`[[path]]`): it names the file as it is now, so the
+       *  host opens `WORKING` (the working tree). Non-null carries the
+       *  author's intent exactly. */
       version: import("../../revision.js").Revision | null;
     }
   | { kind: "directory"; path: string }

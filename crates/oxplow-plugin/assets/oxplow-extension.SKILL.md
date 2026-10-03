@@ -94,9 +94,7 @@ panels:                 # optional: a left-nav panel (body lens compact, badge =
   - { id: waiting, title: Waiting on Me, icon: bell, scope: stream, body: waiting-on-me, badge: waiting-on-me }
 ```
 
-A manifest without `manifest: 2` is read as the old v1 shape with a
-warning; write v2 (`oxplow plugin migrate <name>` rewrites a v1 file in
-place). Unknown keys are errors, and `check` reports every problem as
+A manifest without `manifest: 2` doesn't load. Unknown keys are errors, and `check` reports every problem as
 `file:line: what — fix`.
 
 `lenses/<slug>.yaml`:
@@ -446,8 +444,7 @@ collectors:
   no `env`, `credentials` or `network`. Its script reads the snapshot
   with `files()` / `ast_query()` and returns `{"facts": [...]}`.
 - A collector has `entities:` or `facts:`, never both.
-- A `gauges:` block is a load error; `oxplow plugin migrate <name>`
-  rewrites it as `collectors:`.
+- A `gauges:` block is an unknown key; write `collectors:`.
 - Metrics are `key:` definitions and are on while the extension is
   enabled. A project can still turn one off or change its target with a
   `use:` entry in `.oxplow/project.yaml`. `use:` isn't allowed in an

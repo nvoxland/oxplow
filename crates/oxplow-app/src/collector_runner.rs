@@ -2193,7 +2193,7 @@ pub(crate) mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "name: my-gh\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
+            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
         )
         .unwrap();
         script(
@@ -2359,7 +2359,7 @@ pub(crate) mod tests {
             std::fs::create_dir_all(&ext).unwrap();
             std::fs::write(
                 ext.join("extension.yaml"),
-                format!("name: {name}\nsources:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - {{ name: row, key: id, columns: {{ id: int, token: text }} }}\n"),
+                format!("manifest: 2\nname: {name}\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - {{ name: row, key: id, columns: {{ id: int, token: text }} }}\n"),
             )
             .unwrap();
             script(
@@ -2495,7 +2495,7 @@ pub(crate) mod tests {
         extension(
             &root,
             "work",
-            "name: work\nsources:\n  - id: bad\n    runtime: starlark\n    entry: bad.star\n    entities:\n      - { name: hot, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: bad\n    runtime: starlark\n    entry: bad.star\n    entities:\n      - { name: hot, key: id, columns: { id: int } }\n",
             &[("bad.star", "def transform(input):\n    return 1 // 0\n")],
         );
         let sync = || {
@@ -2563,7 +2563,7 @@ pub(crate) mod tests {
         extension(
             &root,
             "work",
-            "name: work\nsources:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    schedule: every 10m\n    input: \"SELECT id, title FROM v_task\"\n    entities:\n      - { name: hot, key: id, columns: { id: int, title: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    trigger: { every: 10m }\n    input: \"SELECT id, title FROM v_task\"\n    entities:\n      - { name: hot, key: id, columns: { id: int, title: text } }\n",
             &[(
                 "hot.star",
                 "def transform(input):\n    return {\"entities\": {\"hot\": [{\"id\": r[\"id\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
@@ -2650,7 +2650,7 @@ pub(crate) mod tests {
             root.path(),
             "work",
             &format!(
-                "name: work\nsources:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT id, title, priority FROM v_task WHERE status = 'ready'\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT id, title FROM v_task\"\n    entities:\n      - {{ name: upper, key: id, columns: {{ id: int, title: text }} }}\n"
+                "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT id, title, priority FROM v_task WHERE status = 'ready'\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT id, title FROM v_task\"\n    entities:\n      - {{ name: upper, key: id, columns: {{ id: int, title: text }} }}\n"
             ),
             &[
                 (
@@ -2713,7 +2713,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "name: work\nsources:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT id, title FROM v_task\"\n    entities:\n      - { name: kind, key: id, columns: { id: int, kind: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT id, title FROM v_task\"\n    entities:\n      - { name: kind, key: id, columns: { id: int, kind: text } }\n",
             &[(
                 "kind.star",
                 "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        rows.append({\"id\": r[\"id\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
@@ -2798,7 +2798,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "name: work\nsources:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT id, title, priority FROM v_task WHERE status = 'ready'\"\n    entities:\n      - { name: hot, key: id, columns: { id: int, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT id, title, priority FROM v_task WHERE status = 'ready'\"\n    entities:\n      - { name: hot, key: id, columns: { id: int, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
             &[(
                 "hot.star",
                 "def transform(input):\n    return {\"entities\": {\"hot\": [{\"id\": r[\"id\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
@@ -2865,7 +2865,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "inc",
-            "name: inc\nsources:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    sync: upsert\n    entities:\n      - { name: item, key: id, columns: { id: int, title: text } }\n      - { name: other, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: inc\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    sync: upsert\n    entities:\n      - { name: item, key: id, columns: { id: int, title: text } }\n      - { name: other, key: id, columns: { id: int } }\n",
             &[],
         );
         let ext = root.path().join("oxplow/extensions/inc");
@@ -2996,7 +2996,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "net",
-            "name: net\nsources:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    network: [localhost]\n    entities:\n      - { name: r, key: id, columns: { id: int, declared: text, undeclared: text, direct: text } }\n",
+            "manifest: 2\nname: net\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    network: [localhost]\n    entities:\n      - { name: r, key: id, columns: { id: int, declared: text, undeclared: text, direct: text } }\n",
             &[],
         );
         let ext = root.path().join("oxplow/extensions/net");
@@ -3072,7 +3072,11 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
     fn env_and_credentials_are_approved_but_lens_edits_are_not_code() {
         let ext = tempfile::tempdir().unwrap();
         script(ext.path(), "s.sh", "echo x");
-        std::fs::write(ext.path().join("extension.yaml"), "name: x\n").unwrap();
+        std::fs::write(
+            ext.path().join("extension.yaml"),
+            "manifest: 2\nname: x\nintent:\n  purpose: test\n",
+        )
+        .unwrap();
         let mut s = spec("s.sh", &[]);
         let base = approval_hash(ext.path(), &s).unwrap();
         s.env = vec!["AWS_SECRET_ACCESS_KEY".into()];
@@ -3086,7 +3090,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
         std::fs::write(ext.path().join("lenses/a.yaml"), "title: A").unwrap();
         std::fs::write(
             ext.path().join("extension.yaml"),
-            "name: x\ndescription: y\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: test\ndescription: y\n",
         )
         .unwrap();
         assert_eq!(base, approval_hash(ext.path(), &s).unwrap());
@@ -3100,7 +3104,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "name: my-gh\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
         )
         .unwrap();
         script(

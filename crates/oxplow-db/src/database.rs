@@ -1435,6 +1435,44 @@ mod tests {
             .is_err());
     }
 
+    /// V159 (tsk865) drops the dead `measure.component_role` in place:
+    /// no table rebuild, so the measure's facts — a CASCADE child — stay.
+    #[test]
+    fn v159_drops_component_role_and_keeps_every_fact() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(158))
+            .run(&mut conn)
+            .unwrap();
+        let now = "2026-10-03T00:00:00Z";
+        conn.execute_batch(&format!(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', '{now}', '{now}');
+             INSERT INTO metric_capture (id, stream_id, producer, provenance, source, captured_at)
+               VALUES (1, 1, 'p', 'observed', 's', '{now}');
+             INSERT INTO fact (capture_id, measure_id, value)
+               SELECT 1, id, 1.0 FROM measure;"
+        ))
+        .unwrap();
+        let facts = |conn: &rusqlite::Connection| -> i64 {
+            conn.query_row("SELECT count(*) FROM fact", [], |r| r.get(0))
+                .unwrap()
+        };
+        let before = facts(&conn);
+        assert!(before > 0);
+        migrate_and_compile(&mut conn).unwrap();
+        assert_eq!(facts(&conn), before, "every fact survived the drop");
+        let has_column: bool = conn
+            .query_row(
+                "SELECT count(*) > 0 FROM pragma_table_info('measure') WHERE name = 'component_role'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!has_column);
+    }
+
     /// V100 (tsk427) turns `task_effort` into `effort` in place. Every
     /// child of an effort — CASCADE and SET NULL alike — must survive
     /// (a DROP TABLE on a `foreign_keys=ON` connection would have wiped

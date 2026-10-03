@@ -598,10 +598,6 @@ pub fn write_codex_runtime(
         }),
     )?;
 
-    let legacy_hook_bridge = runtime_dir.join("scripts/hook_bridge.py");
-    if legacy_hook_bridge.exists() {
-        fs::remove_file(legacy_hook_bridge)?;
-    }
     let oxplow_executable = std::env::current_exe()?;
 
     let hooks = hooks_dir.join("hooks.json");

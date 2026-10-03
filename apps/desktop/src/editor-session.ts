@@ -18,9 +18,6 @@ export interface FileSessionState {
   files: Record<string, OpenFileState>;
 }
 
-/** Legacy alias — kept because some call sites import it. */
-export type FileSession = FileSessionState;
-
 export interface TerminalEvent {
   sessionId: string;
   message: string;

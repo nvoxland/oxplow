@@ -10,7 +10,7 @@
 //! JSONL line and [`parse_claude_usage`] summed every line (the dedupe-by
 //! `message.id` fix here removed that).
 //!
-//! The **transcript path** ([`TokenUsageService::on_stop_for`], run by the
+//! The **transcript path** ([`TokenUsageService::on_stop`], run by the
 //! `token_usage.turns` reactor on `agent.turn.ended`) survives for what OTEL
 //! lacks: the per-turn `agent_token_usage` rows (with the human prompt text)
 //! and the `oxplow.turn` facts. The event carries the Stop's
@@ -20,7 +20,7 @@
 //! persisted per-session cursor that commits with the rows, so we never re-sum
 //! the whole file or double-count across restarts or redeliveries) and persist
 //! one row per turn attributed to the effort the turn ran in. An ACP turn's
-//! counts ride the event instead ([`TokenUsageService::record_turn_for`]).
+//! counts ride the event instead ([`TokenUsageService::record_turn`]).
 //! Provenance is `observed`.
 //!
 //! Pluggable per agent kind: Claude is implemented; Codex/Opencode return
@@ -382,19 +382,9 @@ impl TokenUsageService {
     /// nothing to record (no transcript_path, no thread, no new usage, or a
     /// non-Claude agent). Best-effort — the caller treats errors as
     /// non-fatal so a parse hiccup never blocks the hook.
+    /// The rows carry the turn (`rec`) the `token_usage.turns` reactor saw
+    /// and the effort it ran in.
     pub async fn on_stop(
-        &self,
-        thread: &ThreadId,
-        session_id: Option<&str>,
-        payload_json: &str,
-    ) -> Result<Option<i64>, DomainError> {
-        self.on_stop_for(thread, session_id, payload_json, &TurnRecord::default())
-            .await
-    }
-
-    /// [`Self::on_stop`] for a turn the `token_usage.turns` reactor saw
-    /// (`rec`): the rows carry its turn and the effort it ran in.
-    pub async fn on_stop_for(
         &self,
         thread: &ThreadId,
         session_id: Option<&str>,
@@ -464,19 +454,9 @@ impl TokenUsageService {
     /// Record one ACP turn's token counts (from the prompt response), the
     /// counterpart of [`Self::on_stop`]'s transcript parse. `Ok(None)` when
     /// the thread is gone or the counts are empty.
+    /// Keyed by its `agent.turn.ended` (`rec.cause`), so a redelivery
+    /// counts it once.
     pub async fn record_turn(
-        &self,
-        thread: &ThreadId,
-        session_id: &str,
-        turn: Turn,
-    ) -> Result<Option<i64>, DomainError> {
-        self.record_turn_for(thread, session_id, turn, &TurnRecord::default())
-            .await
-    }
-
-    /// [`Self::record_turn`] for a turn the reactor saw: keyed by its
-    /// `agent.turn.ended` (`rec.cause`), so a redelivery counts it once.
-    pub async fn record_turn_for(
         &self,
         thread: &ThreadId,
         session_id: &str,
@@ -883,12 +863,12 @@ impl crate::event_pump::AsyncEventConsumer for TurnTokensConsumer {
                 },
             };
             self.tokens
-                .record_turn_for(&thread, session, reported, &rec)
+                .record_turn(&thread, session, reported, &rec)
                 .await?;
         } else if let Some(path) = payload.transcript_path {
             let body = serde_json::json!({ "transcript_path": path }).to_string();
             self.tokens
-                .on_stop_for(&thread, session.as_deref(), &body, &rec)
+                .on_stop(&thread, session.as_deref(), &body, &rec)
                 .await?;
         }
         Ok(())
@@ -1224,7 +1204,7 @@ mod tests {
         std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
         let id0 = svc
             .token_usage
-            .on_stop(&thread, Some("sess-1"), &payload)
+            .on_stop(&thread, Some("sess-1"), &payload, &TurnRecord::default())
             .await
             .unwrap();
         assert!(id0.is_none(), "bootstrap Stop seeds, records nothing");
@@ -1249,7 +1229,7 @@ mod tests {
         }
         let id1 = svc
             .token_usage
-            .on_stop(&thread, Some("sess-1"), &payload)
+            .on_stop(&thread, Some("sess-1"), &payload, &TurnRecord::default())
             .await
             .unwrap();
         assert!(id1.is_some());
@@ -1274,7 +1254,7 @@ mod tests {
         }
         let id2 = svc
             .token_usage
-            .on_stop(&thread, Some("sess-1"), &payload)
+            .on_stop(&thread, Some("sess-1"), &payload, &TurnRecord::default())
             .await
             .unwrap();
         assert!(id2.is_some());
@@ -1290,7 +1270,7 @@ mod tests {
         // Stop with no new bytes → nothing recorded.
         let id3 = svc
             .token_usage
-            .on_stop(&thread, Some("sess-1"), &payload)
+            .on_stop(&thread, Some("sess-1"), &payload, &TurnRecord::default())
             .await
             .unwrap();
         assert!(id3.is_none());
@@ -1331,7 +1311,7 @@ mod tests {
         // First Stop (no stored cursor): records nothing, just seeds.
         let id = svc
             .token_usage
-            .on_stop(&thread, Some("sess-boot"), &payload)
+            .on_stop(&thread, Some("sess-boot"), &payload, &TurnRecord::default())
             .await
             .unwrap();
         assert!(id.is_none(), "first capture must seed, not ingest history");
@@ -1356,7 +1336,7 @@ mod tests {
         }
         let id2 = svc
             .token_usage
-            .on_stop(&thread, Some("sess-boot"), &payload)
+            .on_stop(&thread, Some("sess-boot"), &payload, &TurnRecord::default())
             .await
             .unwrap();
         assert!(id2.is_some());
@@ -1390,7 +1370,7 @@ mod tests {
         std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
         assert!(svc
             .token_usage
-            .on_stop(&thread, Some("sess-2p"), &payload)
+            .on_stop(&thread, Some("sess-2p"), &payload, &TurnRecord::default())
             .await
             .unwrap()
             .is_none());
@@ -1415,7 +1395,7 @@ mod tests {
         };
         assert!(svc
             .token_usage
-            .on_stop_for(&thread, Some("sess-2p"), &payload, &rec)
+            .on_stop(&thread, Some("sess-2p"), &payload, &rec)
             .await
             .unwrap()
             .is_some());
@@ -1434,7 +1414,7 @@ mod tests {
         let (svc, _dir, thread) = service_fixture().await;
         let id = svc
             .token_usage
-            .on_stop(&thread, Some("sess-1"), "{}")
+            .on_stop(&thread, Some("sess-1"), "{}", &TurnRecord::default())
             .await
             .unwrap();
         assert!(id.is_none());
@@ -1604,7 +1584,7 @@ mod tests {
         // Bootstrap (seed cursor, record nothing).
         std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
         svc.token_usage
-            .on_stop(&thread, Some("sess-m"), &payload)
+            .on_stop(&thread, Some("sess-m"), &payload, &TurnRecord::default())
             .await
             .unwrap();
         // Append one watched turn.
@@ -1617,7 +1597,7 @@ mod tests {
                 .unwrap();
         }
         svc.token_usage
-            .on_stop(&thread, Some("sess-m"), &payload)
+            .on_stop(&thread, Some("sess-m"), &payload, &TurnRecord::default())
             .await
             .unwrap();
 
@@ -1721,7 +1701,7 @@ mod tests {
         );
         std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
         svc.token_usage
-            .on_stop(&thread, Some("sess-e"), &payload)
+            .on_stop(&thread, Some("sess-e"), &payload, &TurnRecord::default())
             .await
             .unwrap();
         {
@@ -1733,7 +1713,7 @@ mod tests {
                 .unwrap();
         }
         svc.token_usage
-            .on_stop(&thread, Some("sess-e"), &payload)
+            .on_stop(&thread, Some("sess-e"), &payload, &TurnRecord::default())
             .await
             .unwrap();
 

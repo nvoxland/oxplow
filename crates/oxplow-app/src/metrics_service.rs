@@ -606,8 +606,6 @@ impl MetricsService {
         let layer = crate::sql_gateway::SqlGateway::new(facts.database());
         let mut m = 0;
         for rm in resolve_measures(&global_measures, &ext.measures, &project_measures) {
-            // `rm.component_role` is intentionally not forwarded — the measure
-            // row's `component_role` is a dead column (tsk15).
             let nm = NewMeasure {
                 key: rm.key.clone(),
                 title: rm.title,
@@ -1134,7 +1132,6 @@ impl MetricsService {
             subject_kind: Some("file".to_string()),
             temporal_semantics: Some("semi-additive".to_string()),
             capture_scope: Some("per-path".to_string()),
-            component_role: None,
             description: None,
         };
         // The collector (producer) — records `<key>.count` facts on every
@@ -5227,7 +5224,7 @@ def transform(input):
         std::fs::create_dir_all(ext.join("collectors")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "name: acme\n\
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n\
              measures:\n  - { key: acme.todo, title: TODOs }\n\
              metrics:\n  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum }\n\
              collectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n",
@@ -5307,7 +5304,7 @@ def transform(input):
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "name: acme\n\
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n\
              dimensions:\n  - { key: acme.status, label: Status, entity: v_task, expr: e.status }\n\
              metrics:\n  - { key: acme.tasks, title: Tasks, entity: v_task }\n",
         )

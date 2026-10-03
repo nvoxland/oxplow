@@ -402,7 +402,6 @@ export function TaskGroupList({
         event.dataTransfer.setData(
           TASK_DRAG_MIME,
           JSON.stringify({
-            itemId: row.item.id,
             itemIds: ids,
             items,
             fromThreadId: scopeThreadId,
@@ -424,9 +423,9 @@ export function TaskGroupList({
         const raw = event.dataTransfer.getData(TASK_DRAG_MIME);
         if (!raw) return;
         try {
-          const payload = JSON.parse(raw) as { itemId?: string; itemIds?: string[]; parentEpicId?: string };
+          const payload = JSON.parse(raw) as { itemIds?: string[]; parentEpicId?: string };
           if (payload.parentEpicId) {
-            const ids = payload.itemIds?.length ? payload.itemIds : payload.itemId ? [payload.itemId] : [];
+            const ids = payload.itemIds ?? [];
             for (const id of ids) void onReparentTask(id, null);
           }
         } catch { /* ignore */ }
@@ -954,8 +953,8 @@ function EpicChildrenPane({
     const raw = event.dataTransfer.getData(TASK_DRAG_MIME);
     if (!raw) return;
     try {
-      const payload = JSON.parse(raw) as { itemId?: string; itemIds?: string[]; fromThreadId?: string | null };
-      const ids = payload.itemIds && payload.itemIds.length > 0 ? payload.itemIds : payload.itemId !== undefined ? [payload.itemId] : [];
+      const payload = JSON.parse(raw) as { itemIds?: string[]; fromThreadId?: string | null };
+      const ids = payload.itemIds ?? [];
       for (const id of ids) {
         if (!children.some((c) => c.id === id)) {
           void onReparentTask(id, epicId);
@@ -1003,7 +1002,7 @@ function EpicChildrenPane({
                 .map((item) => ({ id: item.id, title: item.title, status: item.status }));
               event.dataTransfer.setData(
                 TASK_DRAG_MIME,
-                JSON.stringify({ itemId: child.id, itemIds: ids, items, fromThreadId: scopeThreadId, parentEpicId: epicId }),
+                JSON.stringify({ itemIds: ids, items, fromThreadId: scopeThreadId, parentEpicId: epicId }),
               );
               queueMicrotask(() => setDraggingKey(key));
             }}

@@ -453,15 +453,12 @@ export function PlanPane({
     event.preventDefault();
     try {
       const payload = JSON.parse(raw) as {
-        itemId?: string;
         itemIds?: string[];
         fromThreadId?: string | null;
       };
       const fromThreadId = payload.fromThreadId;
       if (!fromThreadId) return;
-      const ids = payload.itemIds && payload.itemIds.length > 0
-        ? payload.itemIds
-        : payload.itemId ? [payload.itemId] : [];
+      const ids = payload.itemIds ?? [];
       // Move each marked item in sequence — the store already serialises the
       // thread mutations, and doing them one at a time keeps the failure mode
       // simple (a bad id throws, the rest keep going isn't worth the risk of

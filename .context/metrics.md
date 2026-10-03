@@ -324,11 +324,10 @@ welded to collection.
   `non-additive`); only the **accumulating** mean-across-closes ratios
   (cycle_time, effort — one observation per close, Σ over all captures =
   the mean) are `non-additive`),
-  `scope`, `description`. (`component_role` is a **dead** V43 column, tsk15 —
-  never read; ratio components ride per-fact num/den. Its Rust plumbing + config
-  wiring are removed; the column itself stays inert (`DEFAULT 'none'`) because a
-  `DROP COLUMN` isn't safe — a CHECK constraint plus the `fact→measure` CASCADE
-  under `foreign_keys = ON` would wipe the facts on a table rebuild.)
+  `scope`, `description`. (Ratio components ride each fact's num/den; the
+  dead V43 `component_role` column is dropped in place by V159, tsk865 —
+  `ALTER TABLE … DROP COLUMN` rewrites the table without a rebuild, so the
+  `fact→measure` CASCADE never fires.)
   Seeded built-ins: `oxplow.complexity`, `oxplow.fn_length`,
   `oxplow.parameter_count`, `oxplow.todo`, `oxplow.coverage`, `oxplow.test_case`,
   `oxplow.lint_hit`, `oxplow.duplicate_lines`, `oxplow.tokens`,
@@ -1200,7 +1199,6 @@ measures:                          # custom fact TYPES a collector may emit
     unit: ms
     subjectKind: endpoint
     temporalSemantics: non-additive   # additive | semi-additive | non-additive
-    componentRole: numerator          # none | numerator | denominator
 dimensions:                        # custom conformed slice axes
   - key: acme.license
     valueType: categorical            # categorical | numeric | temporal | entity-ref
@@ -1426,7 +1424,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 | producer | where | emits |
 |---|---|---|
 | coverage / tests / analysis | `crates/oxplow-app/src/collection.rs` (`mirror_coverage_metric` / `mirror_test_metrics` / `mirror_analysis_metrics`, called from `observe_coverage`/`record_test_run`/`record_static_analysis`) | `oxplow.coverage.abs_pct` (absolute; diff derived at read); `oxplow.tests.{passed,failed,total}`; `oxplow.analysis.{errors,warnings}` + a finding per lint hit + a `*-detail` finding carrying the verbatim payload |
-| otel-tokens | `crates/oxplow-app/src/token_usage.rs` (`ingest_otlp_tokens`, fed by the control-plane OTLP receiver — tsk22) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
+| otel-tokens | `crates/oxplow-app/src/token_usage.rs` (the `token_usage.otlp` consumer of `agent.tokens.reported`, which the control-plane OTLP receiver logs through `otlp_ingest` — tsk22, tsk860) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
 | effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
 | fact collectors | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the fact engine. Seeds a `metric_spec` per resolved `metrics:` entry; runs each **fact collector** (`fact_collectors()` = the project's `collectors:` with `facts:` ∪ enabled extensions' ∪ `use:`-enabled built-ins; an id two owners declare runs once, project > extension > built-in) on its trigger: `on:` from the `collector.triggers` pump consumer (`run_snapshot_collectors` for `snapshot.taken` that recorded files, `run_effort_collectors` over the effort's end snapshot for `effort.finished`, `run_event_collectors` over the stream's latest snapshot otherwise), `every:` from the scheduler, `manual` and any explicit run through `collector.sync` → `run_collector_by_key(owner, id, stream, source)` | one `fact` per `CollectedFact` the script returns (bound to a defined measure in the collector's `facts`), version/branch/snapshot-stamped, under one `metric_capture` (a failed capture on error), plus a `collector_run` row and a `collector.synced@1` event carrying the `facts` count. `facts_of` refuses any output but `{"facts": [...]}` |
@@ -1749,8 +1747,7 @@ resolved in `crates/oxplow-config/src/lib.rs` (`MetricEntry`→`ResolvedSpec` +
 [semantic-layer.md](./semantic-layer.md) "Collectors"). The fact engine
 (`MetricsService`) seeds a `metric_spec` per resolved metric and runs each
 **fact collector** on its `trigger`. (Until P7.B3 the producer block was
-`gauges:`; loading one is now an error naming `oxplow plugin migrate --project`,
-which rewrites it in place.)
+`gauges:`; it is now an unknown key, tsk865.)
 
 ```yaml
 measures:                             # the fact TYPE the collector records

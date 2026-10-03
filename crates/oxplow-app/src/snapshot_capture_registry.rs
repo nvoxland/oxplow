@@ -43,10 +43,9 @@ pub struct SnapshotCaptureRegistryConfig {
 #[derive(Clone)]
 pub struct SnapshotCaptureRegistry {
     services: Arc<RwLock<HashMap<StreamId, Arc<SnapshotCaptureService>>>>,
-    /// `primary_id` lets legacy single-stream callers fetch the
-    /// primary service without already knowing its id — the wiki
-    /// watcher, MCP file-ref-version resolver, and bootloader logs
-    /// all need it. Set once at boot.
+    /// `primary_id` lets a caller about the primary stream fetch its
+    /// service without already knowing its id — the wiki watcher, MCP
+    /// file-ref-version resolver, and bootloader logs. Set once at boot.
     primary_id: Arc<RwLock<Option<StreamId>>>,
     /// Live workspace filter, seeded from `config.workspace_filter`.
     /// Kept separate (and behind a lock) so [`Self::set_workspace_filter`]
@@ -172,10 +171,9 @@ impl SnapshotCaptureRegistry {
             .collect()
     }
 
-    /// Mark `id` as the primary stream — used by legacy callers that
-    /// haven't migrated to a stream-aware lookup yet (wiki watcher,
-    /// MCP file-ref-version resolver). Must be called after the
-    /// corresponding `register` so the lookup actually resolves.
+    /// Mark `id` as the primary stream, for callers about it (the wiki
+    /// watcher, the MCP file-ref-version resolver). Must be called after
+    /// the corresponding `register` so the lookup actually resolves.
     pub fn set_primary(&self, id: StreamId) {
         *self.primary_id.write().unwrap_or_else(|e| e.into_inner()) = Some(id);
     }

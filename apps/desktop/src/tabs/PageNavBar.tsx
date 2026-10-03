@@ -35,9 +35,6 @@ export interface PageNavBarProps {
   };
   /** Page title rendered to the right of the back/forward arrows. */
   title?: ReactNode;
-  /** Accepted for API compatibility; the page-kind chip is no longer
-   *  rendered in the nav bar. */
-  kind?: string;
   /** Optional bookmark affordance — when omitted, no star renders.
    *  The button always opens a popover that lets the user toggle this
    *  page's bookmark in each scope (thread / stream / global). */

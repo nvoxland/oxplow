@@ -204,7 +204,7 @@ hook + MCP wiring):
   The ingest logs `agent.tool.finished` (the command and its output in
   `event_content`); the `collection` async consumer
   (`crates/oxplow-app/src/post_tool_reactors.rs`) rebuilds the Bash payload
-  from it and runs `CollectionService::on_post_tool_use_caused`. A run's
+  from it and runs `CollectionService::on_post_tool_use`. A run's
   recording can outlive the hook's 5 s budget (a debug-build junit ingest +
   a multi-MB lcov parse) and always completes; a crash re-delivers the
   event. **Redelivery records nothing twice:** the test-run capture's

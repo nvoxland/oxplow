@@ -1,4 +1,4 @@
-//! `oxplow plugin new|check|migrate|test` (`.context/extensions.md` "The
+//! `oxplow plugin new|check|test` (`.context/extensions.md` "The
 //! SDK"). A thin argv shell over `oxplow_sdk`: the same `check` the
 //! RPC/MCP `validate_extension` runs, printed as `file:line: what — fix`
 //! lines so an agent editing an extension from a terminal gets the same
@@ -32,11 +32,6 @@ usage:
       git HEAD (or --against <rev>, which implies --effects): lenses' text,
       models and their rows, collectors' outputs, providers' grants —
       writing nothing
-  oxplow plugin migrate <name|path> [--root <dir>]
-      rewrite a v1 extension.yaml as v2, and its `gauges:` as `collectors:`,
-      in place (idempotent)
-  oxplow plugin migrate --project [--root <dir>]
-      rewrite .oxplow/project.yaml's `gauges:` as `collectors:` in place
   oxplow plugin test <name|path> [--bless] [--json] [--root <dir>]
       on a throwaway oxplow over a copy of the project's extensions: check,
       then each intent example's fixture (a lens's rows, a collector's
@@ -90,7 +85,6 @@ struct Parsed {
     root: Option<PathBuf>,
     json: bool,
     bless: bool,
-    project: bool,
     /// `check --effects`: compare the working tree with `against`.
     effects: bool,
     against: Option<String>,
@@ -103,7 +97,6 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
         root: None,
         json: false,
         bless: false,
-        project: false,
         effects: false,
         against: None,
     };
@@ -133,7 +126,6 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
                 )
             }
             "--bless" => p.bless = true,
-            "--project" => p.project = true,
             "-h" | "--help" | "help" => return Err(Failure::Usage("help".into())),
             flag if flag.starts_with('-') => {
                 return Err(Failure::Usage(format!("unknown flag `{flag}`")))
@@ -229,39 +221,6 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                 let _ = writeln!(out);
             }
             Ok(if report.ok { 0 } else { 1 })
-        }
-        "migrate" if p.project => {
-            let root = p.root.clone().unwrap_or_else(cwd);
-            let done = oxplow_sdk::migrate_project(&root)?;
-            let _ = writeln!(
-                out,
-                "{}: {}",
-                done.path,
-                if done.changed {
-                    "`gauges:` rewritten as `collectors:`"
-                } else {
-                    "no `gauges:`, nothing to do"
-                }
-            );
-            Ok(0)
-        }
-        "migrate" => {
-            let target = pos
-                .next()
-                .ok_or_else(|| Failure::Usage("migrate needs an extension name or path".into()))?;
-            let (root, name) = locate(p.root.as_deref(), target);
-            let done = oxplow_sdk::migrate(&root, &name)?;
-            let _ = writeln!(
-                out,
-                "{}: {}",
-                done.path,
-                if done.changed {
-                    "migrated to manifest v2; fill in intent.origin and intent.examples"
-                } else {
-                    "already v2, nothing to do"
-                }
-            );
-            Ok(0)
         }
         other => Err(Failure::Usage(format!("unknown subcommand `{other}`"))),
     }
@@ -374,28 +333,14 @@ mod tests {
         assert!(out.contains("team: 1 error, 0 warnings"), "{out}");
     }
 
+    /// tsk865: there is no `migrate`: a manifest is v2 or doesn't load.
     #[test]
-    fn migrate_rewrites_once_and_usage_errors_exit_two() {
+    fn usage_errors_exit_two() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_str().unwrap();
-        let folder = dir.path().join("oxplow/extensions/old");
-        std::fs::create_dir_all(&folder).unwrap();
-        std::fs::write(
-            folder.join("extension.yaml"),
-            "name: old\ndescription: Old\n",
-        )
-        .unwrap();
-        let (code, out, _) = cli(&["migrate", "old", "--root", root]);
-        assert_eq!(code, 0);
-        assert!(out.contains("migrated to manifest v2"), "{out}");
-        let (code, out, _) = cli(&["migrate", folder.to_str().unwrap()]);
-        assert_eq!(code, 0);
-        assert!(out.contains("already v2"), "{out}");
-        let (code, _, err) = cli(&["check", "old", "--root", root]);
-        assert_eq!(code, 0, "{err}");
-
         assert_eq!(cli(&[]).0, 2);
         assert_eq!(cli(&["frobnicate"]).0, 2);
+        assert_eq!(cli(&["migrate", "old", "--root", root]).0, 2);
         let (code, _, err) = cli(&["new", "widget", "x", "--root", root]);
         assert_eq!(code, 2);
         assert!(err.contains("`effect` or `component`"), "{err}");

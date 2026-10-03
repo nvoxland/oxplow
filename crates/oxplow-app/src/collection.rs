@@ -2048,23 +2048,13 @@ impl CollectionService {
     }
 
     /// PostToolUse entry point: detect a test and/or static-analysis run,
-    /// record it, and ride along to coverage / findings. Best-effort — never
-    /// fails the hook.
-    pub async fn on_post_tool_use(
-        &self,
-        thread: &ThreadId,
-        payload_json: &str,
-    ) -> Result<Option<String>, DomainError> {
-        self.on_post_tool_use_caused(thread, payload_json, None)
-            .await
-    }
-
-    /// [`Self::on_post_tool_use`] as the collection reactor runs it (P3.6):
-    /// `cause` is the `agent.tool.finished` event — every capture and nudge
+    /// record it, and ride along to coverage / findings. The collection
+    /// reactor runs it (P3.6) with `cause`, the `agent.tool.finished`
+    /// event — every capture and nudge
     /// is keyed by it and anchored to its turn, and the effort the command
     /// ran in owns what it records. The nudge is persisted (the hook
     /// response picks it up); the returned text is for callers that want it.
-    pub async fn on_post_tool_use_caused(
+    pub async fn on_post_tool_use(
         &self,
         thread: &ThreadId,
         payload_json: &str,
@@ -4699,6 +4689,7 @@ mod tests {
                 .on_post_tool_use(
                     &h.thread,
                     &bash_payload(&format!("git revert {bad_sha}"), 0),
+                    None,
                 )
                 .await
                 .unwrap();
@@ -4723,6 +4714,7 @@ mod tests {
                 .on_post_tool_use(
                     &h.thread,
                     &bash_payload(&format!("git revert {bad_sha}"), 0),
+                    None,
                 )
                 .await
                 .unwrap();
@@ -4739,7 +4731,7 @@ mod tests {
             let h = build(Some("<coverage this is not xml")).await;
             let out = h
                 .service
-                .on_post_tool_use(&h.thread, &bash_payload("bun test --watch false", 0))
+                .on_post_tool_use(&h.thread, &bash_payload("bun test --watch false", 0), None)
                 .await
                 .unwrap();
             // The failure is recorded, not returned — the hook never fails.
@@ -6086,7 +6078,7 @@ mod tests {
             // Names no crate and no path, so target overlap can't resolve it.
             let msg = h
                 .service
-                .on_post_tool_use(&h.thread, &bash_payload("cargo test --workspace", 0))
+                .on_post_tool_use(&h.thread, &bash_payload("cargo test --workspace", 0), None)
                 .await
                 .unwrap()
                 .expect("an unattributable run must nudge");
@@ -6153,7 +6145,11 @@ mod tests {
 
             let msg = h
                 .service
-                .on_post_tool_use(&h.thread, &bash_payload("cargo test -p oxplow-git", 0))
+                .on_post_tool_use(
+                    &h.thread,
+                    &bash_payload("cargo test -p oxplow-git", 0),
+                    None,
+                )
                 .await
                 .unwrap();
             assert!(
@@ -7123,7 +7119,7 @@ mod tests {
             }
             let result = h
                 .service
-                .on_post_tool_use(&h.thread, &bash_payload("bun test --watch false", 0))
+                .on_post_tool_use(&h.thread, &bash_payload("bun test --watch false", 0), None)
                 .await
                 .unwrap();
             let nudge = result.expect("nudge returned for report-less run");
@@ -7246,7 +7242,7 @@ mod tests {
             };
             let result = h
                 .service
-                .on_post_tool_use_caused(
+                .on_post_tool_use(
                     &h.thread,
                     &bash_payload("bun test --watch false", 0),
                     Some(&cause),
@@ -7274,13 +7270,13 @@ mod tests {
             let payload = bash_payload("bun test", 0);
             let first = h
                 .service
-                .on_post_tool_use(&h.thread, &payload)
+                .on_post_tool_use(&h.thread, &payload, None)
                 .await
                 .unwrap();
             assert!(first.is_some(), "first report-less run should nudge");
             let second = h
                 .service
-                .on_post_tool_use(&h.thread, &payload)
+                .on_post_tool_use(&h.thread, &payload, None)
                 .await
                 .unwrap();
             assert!(
@@ -7301,7 +7297,7 @@ mod tests {
             }
             let payload = bash_payload("bun test --watch false", 0);
             h.service
-                .on_post_tool_use(&h.thread, &payload)
+                .on_post_tool_use(&h.thread, &payload, None)
                 .await
                 .unwrap()
                 .expect("first run nudges");
@@ -7332,7 +7328,7 @@ mod tests {
             // Second run is deduped (returns None) and stores nothing more.
             let second = h
                 .service
-                .on_post_tool_use(&h.thread, &payload)
+                .on_post_tool_use(&h.thread, &payload, None)
                 .await
                 .unwrap();
             assert!(second.is_none(), "second run deduped");
@@ -7346,7 +7342,7 @@ mod tests {
             let h = build(None).await;
             let result = h
                 .service
-                .on_post_tool_use(&h.thread, &bash_payload("cargo build", 0))
+                .on_post_tool_use(&h.thread, &bash_payload("cargo build", 0), None)
                 .await
                 .unwrap();
             assert!(result.is_none());
@@ -7364,7 +7360,7 @@ mod tests {
             // No test command and no report collectors by default.
             let result = h
                 .service
-                .on_post_tool_use(&h.thread, &bash_payload("bun test", 0))
+                .on_post_tool_use(&h.thread, &bash_payload("bun test", 0), None)
                 .await
                 .unwrap();
             let nudge = result.expect("nudge returned even without report collectors");
@@ -7754,6 +7750,7 @@ mod tests {
                 .on_post_tool_use(
                     &h.thread,
                     &bash_payload("cargo clippy --workspace --all-targets", 0),
+                    None,
                 )
                 .await
                 .unwrap();

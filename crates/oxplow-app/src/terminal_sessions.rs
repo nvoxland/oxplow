@@ -248,55 +248,6 @@ impl TerminalSessionRegistry {
         }
     }
 
-    /// Open a new session. Spawns `tmux attach-session -t <pane_target>`
-    /// via the PtyManager and starts forwarding bytes back as `data`
-    /// messages. Returns the new session_id.
-    ///
-    /// Used directly only by tests / older callers; production paths
-    /// should go through `attach_or_create`.
-    pub async fn open(
-        &self,
-        pane_target: String,
-        cols: u16,
-        rows: u16,
-    ) -> Result<String, TerminalSessionError> {
-        let req = SpawnRequest {
-            command: "tmux".into(),
-            args: vec!["attach-session".into(), "-t".into(), pane_target.clone()],
-            cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            env: crate::agent_path::base_pty_env(),
-            cols,
-            rows,
-        };
-        let key = format!("legacy:{}", uuid::Uuid::new_v4().simple());
-        self.spawn_with(pane_target, req, key, None).await
-    }
-
-    /// Direct-mode open: spawn a shell command in a fresh PTY (no
-    /// tmux). Mirrors the main-branch `AgentPty` path — useful when
-    /// the renderer is wired directly to the agent CLI without going
-    /// through tmux. `pane_target` is stored as a label only; the
-    /// underlying PTY is the spawned `sh -lc <command>`.
-    pub async fn open_command(
-        &self,
-        pane_target: String,
-        command: String,
-        cwd: std::path::PathBuf,
-        cols: u16,
-        rows: u16,
-    ) -> Result<String, TerminalSessionError> {
-        let req = SpawnRequest {
-            command: "sh".into(),
-            args: vec!["-lc".into(), command],
-            cwd,
-            env: crate::agent_path::base_pty_env(),
-            cols,
-            rows,
-        };
-        let key = format!("legacy:{}", uuid::Uuid::new_v4().simple());
-        self.spawn_with(pane_target, req, key, None).await
-    }
-
     async fn spawn_with(
         &self,
         pane_target: String,
@@ -674,8 +625,17 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&path);
         let command = format!("cat > '{}'", path.display());
+        let req = SpawnRequest {
+            command: "sh".into(),
+            args: vec!["-lc".into(), command],
+            cwd: dir.clone(),
+            env: crate::agent_path::base_pty_env(),
+            cols: 80,
+            rows: 24,
+        };
+        let key = format!("shell:{}", uuid::Uuid::new_v4().simple());
         let session_id = reg
-            .open_command(format!("test-{label}"), command, dir, 80, 24)
+            .spawn_with(format!("test-{label}"), req, key, None)
             .await
             .expect("spawn capture shell");
         (reg, session_id, path)

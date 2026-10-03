@@ -385,10 +385,6 @@ export function hookEventsRef(): TabRef {
 export function tasksRef(): TabRef {
   return indexRef("tasks");
 }
-/** @deprecated Use `tasksRef()` instead. */
-export function planWorkRef(): TabRef {
-  return tasksRef();
-}
 export function doneWorkRef(): TabRef {
   return indexRef("done-work");
 }

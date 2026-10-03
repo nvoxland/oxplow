@@ -310,8 +310,7 @@ dimensions:
 - **`oxplow.*` is reserved** — define new measures/collectors/metrics under a
   project/vendor namespace.
 - **`entry` is project-relative**, no leading `/`, no `..`.
-- **No `gauges:` block.** It's a load error now; `oxplow plugin migrate
-  --project` rewrites it in place as `collectors:`.
+- **No `gauges:` block.** It's an unknown key; write `collectors:`.
 - **Scripts do no I/O** (jaq/starlark) — that's what keeps facts `observed`. Reach
   for `exec` only when you truly must shell out.
 - A `use:` entry may only re-target thresholds; the measure/aggregation/filter are

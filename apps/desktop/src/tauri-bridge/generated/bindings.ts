@@ -2574,17 +2574,14 @@ export type Extension_Deserialize = {
 	 */
 	errors: string[],
 	/**
-	 *  Things worth fixing that don't stop it loading: a v1 manifest, an
-	 *  intent with no examples.
+	 *  Things worth fixing that don't stop it loading: an intent with no
+	 *  examples.
 	 */
 	warnings: string[],
-	/**
-	 *  `2` for a current manifest; `1` for one read through the v1
-	 *  compatibility path (see `warnings`).
-	 */
+	// The manifest version it was read as (`manifest:`).
 	manifestVersion: number,
 	sharing: Sharing,
-	// Why it exists (required at v2; `None` for a v1 manifest).
+	// Why it exists (required; `None` only when the manifest didn't load).
 	intent: Intent | null,
 	lenses: Lens_Deserialize[],
 	/**
@@ -2689,17 +2686,14 @@ export type Extension_Serialize = {
 	 */
 	errors: string[],
 	/**
-	 *  Things worth fixing that don't stop it loading: a v1 manifest, an
-	 *  intent with no examples.
+	 *  Things worth fixing that don't stop it loading: an intent with no
+	 *  examples.
 	 */
 	warnings: string[],
-	/**
-	 *  `2` for a current manifest; `1` for one read through the v1
-	 *  compatibility path (see `warnings`).
-	 */
+	// The manifest version it was read as (`manifest:`).
 	manifestVersion: number,
 	sharing: Sharing,
-	// Why it exists (required at v2; `None` for a v1 manifest).
+	// Why it exists (required; `None` only when the manifest didn't load).
 	intent: Intent | null,
 	lenses: Lens_Serialize[],
 	/**
@@ -3713,14 +3707,6 @@ export type MeasureEntry = {
 	 *  emits per-file facts on (tsk41).
 	 */
 	captureScope?: string | null,
-	/**
-	 *  `none` | `numerator` | `denominator` — ratio-base role (default `none`).
-	 *  **Reserved / currently inert** (tsk15): still parsed + validated for
-	 *  back-compat (`deny_unknown_fields`), but no longer persisted — the
-	 *  `measure.component_role` column is dead (ratio components ride per-fact
-	 *  num/den). Kept as an authoring surface for a future component-role join.
-	 */
-	componentRole?: string | null,
 	description?: string | null,
 };
 

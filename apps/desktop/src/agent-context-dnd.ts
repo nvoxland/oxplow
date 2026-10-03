@@ -83,15 +83,14 @@ export function dragHasTaskRefs(e: AnyDragEvent): boolean {
 
 /**
  * Decode a `TASK_DRAG_MIME` payload into the list of tasks ids
- * it carries. Accepts both the multi-id `itemIds` form and the single
- * `itemId` legacy form. Returns `[]` for any malformed payload so
+ * it carries (`itemIds`). Returns `[]` for any malformed payload so
  * callers can `return` cleanly without nested try/catch.
  *
  * Pure — exported for tests.
  */
 export function decodeTaskDragPayload(raw: string | null | undefined): string[] {
   if (!raw) return [];
-  let parsed: { itemId?: unknown; itemIds?: unknown };
+  let parsed: { itemIds?: unknown };
   try {
     parsed = JSON.parse(raw);
   } catch {
@@ -103,9 +102,6 @@ export function decodeTaskDragPayload(raw: string | null | undefined): string[] 
     for (const id of parsed.itemIds) {
       if (typeof id === "string" && id) ids.push(id);
     }
-  }
-  if (ids.length === 0 && typeof parsed.itemId === "string" && parsed.itemId) {
-    ids.push(parsed.itemId);
   }
   return ids;
 }
