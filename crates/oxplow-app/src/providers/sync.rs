@@ -335,7 +335,12 @@ impl Instance {
         )
     }
 
-    /// Append `batch` and the checkpoint covering it, in one transaction.
+    /// Append `batch` and the checkpoint covering it, in one transaction —
+    /// each record only when it changes its item: one equal to the item's
+    /// last `work_item.recorded` (a write's, or an earlier read's) restates
+    /// nothing, and logging it would echo a write back to whatever reacted
+    /// to it (an effect writing the item, tsk799). The checkpoint counts
+    /// what was read.
     async fn commit(
         &self,
         collector: &str,
@@ -349,6 +354,9 @@ impl Instance {
             .db
             .transaction(move |tx| {
                 for envelope in &batch {
+                    if restates(tx, envelope)? {
+                        continue;
+                    }
                     oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), envelope)?;
                 }
                 oxplow_db::provider_collector_store::checkpoint_tx(
@@ -362,6 +370,32 @@ impl Instance {
             })
             .await
     }
+}
+
+/// Whether `record` (a `work_item.recorded`) says what its item's last
+/// record already said.
+fn restates(
+    tx: &rusqlite::Connection,
+    record: &Envelope,
+) -> Result<bool, oxplow_domain::DomainError> {
+    use rusqlite::OptionalExtension;
+    let Some(item) = record.payload["item"]["ref"].as_str() else {
+        return Ok(false);
+    };
+    let last: Option<String> = tx
+        .query_row(
+            "SELECT payload FROM event_log
+              WHERE type = 'work_item.recorded'
+                AND json_extract(payload, '$.item.ref') = ?1
+              ORDER BY seq DESC LIMIT 1",
+            [item],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(oxplow_db::map_sql_err)?;
+    Ok(last
+        .and_then(|p| serde_json::from_str::<Value>(&p).ok())
+        .is_some_and(|p| p == record.payload))
 }
 
 /// A `$/progress` as a line on the instance: `issues: page 2 (40%)`.

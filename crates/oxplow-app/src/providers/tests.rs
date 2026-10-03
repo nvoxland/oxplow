@@ -1439,8 +1439,8 @@ async fn a_read_streams_records_into_work_item_and_keeps_its_cursor() {
     for r in &refs {
         assert_eq!(
             recorded_for(&fx, r).await,
-            2,
-            "its create's, then the read's"
+            1,
+            "its create's; the read restated it, so recorded nothing new (tsk799)"
         );
     }
     // The next read resumes after the cursor: nothing new.
@@ -1544,8 +1544,8 @@ async fn concurrent_syncs_of_one_collector_record_each_item_once() {
     for r in &refs {
         assert_eq!(
             recorded_for(&fx, r).await,
-            2,
-            "its create's, then one read's"
+            1,
+            "its create's; the read restated it (tsk799)"
         );
     }
     assert_eq!(
@@ -1864,4 +1864,125 @@ async fn three_failures_disable_it_with_rate_limits_interleaved() {
         fx.svc.providers.health(INSTANCE).unwrap().state,
         InstanceState::Disabled { .. }
     ));
+}
+
+/// tsk799: an effect that writes another provider's item doesn't hear its
+/// own write again when the next read restates it. The write's
+/// `work_item.recorded` is caused by the effect's run (the loop guard
+/// sees it); a read that brings back the same item records nothing new,
+/// so nothing echoes — sync after sync.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_extension(&project, "");
+    let dir = project.join("oxplow/extensions").join(EXT);
+    let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
+    std::fs::write(
+        dir.join("extension.yaml"),
+        format!("{manifest}effects:\n  - id: shout\n    summary: Shout a recorded item's title.\n    on: [work_item.recorded]\n    entry: shout.star\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("shout.star"),
+        "def transform(x):\n    item = x[\"event\"][\"payload\"][\"item\"]\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": item[\"ref\"], \"title\": item[\"title\"] + \"!\"}}]}\n",
+    )
+    .unwrap();
+    let ext = extension(&project);
+    approve(&fx, &ext);
+    let config = fx.svc.config.read().unwrap().clone();
+    let decl = &ext.effects[0];
+    let effect = crate::effects::effect_program(&ext, decl);
+    exec_consent::approve_program(
+        &fx.svc.approvals,
+        &project,
+        &config,
+        std::slice::from_ref(&ext),
+        ProgramKind::Effect,
+        &effect.name,
+        &effect.hash(&project).unwrap(),
+    )
+    .unwrap();
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    first_read(&fx).await;
+    crate::effects::approved(&fx.svc.db, &decl.name())
+        .await
+        .unwrap();
+
+    let consumer = crate::effect_triggers::EffectTriggers::new(std::sync::Arc::downgrade(&fx.svc));
+    let mut seen = fx
+        .svc
+        .event_log_store
+        .read_after(0, 10_000)
+        .await
+        .unwrap()
+        .len() as i64;
+    // Hand the consumer what was logged since last time, as the pump would.
+    let deliver = |seen: i64| {
+        let (svc, consumer) = (&fx.svc, &consumer);
+        async move {
+            let mut at = seen;
+            loop {
+                let events = svc.event_log_store.read_after(at, 100).await.unwrap();
+                if events.is_empty() {
+                    return at;
+                }
+                for e in &events {
+                    use crate::event_pump::AsyncEventConsumer as _;
+                    consumer.handle(e).await.unwrap();
+                    at = e.seq;
+                }
+            }
+        }
+    };
+    let item = fx
+        .svc
+        .work_items_client()
+        .create(
+            &Actor::Human,
+            crate::work_items::NewItem {
+                provider: Some("fake".into()),
+                title: "theirs".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    seen = deliver(seen).await;
+    for _ in 0..3 {
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                sync::SYNC,
+                json!({ "instance": INSTANCE }),
+                false,
+            )
+            .await
+            .unwrap();
+        seen = deliver(seen).await;
+    }
+    let runs = fx
+        .svc
+        .sql
+        .query_sql("SELECT count(*) FROM v_effect_run", vec![], None)
+        .await
+        .unwrap()
+        .rows;
+    assert_eq!(
+        serde_json::to_value(runs).unwrap(),
+        json!([[1]]),
+        "one reaction, to the person's create"
+    );
+    let titles: Vec<String> = logged(&fx, "work_item.recorded")
+        .await
+        .iter()
+        .filter(|p| p["item"]["ref"] == item.as_str())
+        .map(|p| p["item"]["title"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(titles.last().map(String::as_str), Some("theirs!"));
 }

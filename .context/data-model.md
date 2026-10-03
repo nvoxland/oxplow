@@ -1123,7 +1123,9 @@ time), `type` (`namespace.name`, snake_case, validated on append), `v`
 `system:task_service`, `system:hook_ingest`, `system:snapshot_capture`),
 `anchors` (nullable stream / thread / effort / turn / snapshot columns,
 so per-anchor timelines are indexed range scans; an event that names a
-thread also carries its stream), `subject` (JSON array of canonical
+thread also carries its stream; V153 adds a partial index on a
+`work_item.recorded`'s item ref, for a provider read's "did this
+change?" lookup — providers.md), `subject` (JSON array of canonical
 refs built with `oxplow_domain::refs::build` and validated against the
 kind registry on append, see [refs.md](./refs.md)), `payload` (JSON;
 validated against `type@v`'s schema on append), `payload_hash` (reserved for

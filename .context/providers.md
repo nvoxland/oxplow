@@ -456,7 +456,15 @@ for a work-items provider — a `WorkItemRecord` of its own item; it is
 kept as a `work_item.recorded@1` envelope (the actor's source) until the
 next `$/state`, which commits the batch **and** the checkpoint in one
 transaction, so a read that fails midway keeps exactly what its last
-checkpoint covered and the next read resumes there. The result's
+checkpoint covered and the next read resumes there. A record equal to its
+item's last `work_item.recorded` (a write's or an earlier read's —
+looked up by `json_extract(payload, '$.item.ref')`, index V153) is
+**not logged**: it restates nothing, and logging it would echo a write
+back to whatever reacted to it — an effect that writes another
+provider's item would hear its own write again on every sync (tsk799).
+The checkpoint's `records` still counts what was read. This leans on a
+read restating a write exactly, which the work-items conformance suite
+checks. The result's
 `records` must equal what was streamed; records after the last
 checkpoint of a read that succeeded land too. A record that breaks a
 rule, a count that doesn't match, or a read that sends nothing for
