@@ -303,7 +303,30 @@ rebuild a fresh one; a contract change recreates the table and drops its
 wider CHECK); `v_model` is v4. oxplow-analytics' `co_change_pair` is
 `every: 1h`.
 
-**Not yet:** incremental recompute.
+**Incremental** (P8.B4). `materialize: { incremental: <column> }` keeps
+a model by appending the rows past its watermark — the highest value of
+`<column>` its table holds — instead of refilling it:
+`INSERT INTO m_<view> SELECT * FROM (<sql>) WHERE <column> > :watermark`.
+It's for append-only inputs, and the compiler holds it to that, each
+refusal at `file:line` and pointing at `on_change`: it needs a `key`
+(its table's primary key) and an INTEGER `<column>` it declares, and its
+SQL may not group, de-duplicate, window, cap or combine sets (`GROUP BY`,
+`DISTINCT`, `OVER`, `LIMIT`, `UNION` / `INTERSECT` / `EXCEPT`, an
+aggregate call) or read the clock (a date function, `CURRENT_*`,
+`'now'`). At run time it refills whole instead when it must:
+- an input was **rewritten** — an UPDATE or DELETE, not only inserts
+  (`Changed.rewrote`, P8.B3; an event payload expiring is an UPDATE);
+- it's the **first build** since it registered (an open, a changed
+  SELECT or contract — which also recreates the table);
+- the append **hits the primary key** — a row past the watermark whose
+  key it already holds (output that replaces rows, like "the latest per
+  key") — logged, then refilled.
+The flag is sticky until a recompute succeeds. A row that appears
+*below* the watermark is the case nothing at run time can see; `plugin
+test` checks each incremental model against a full refill (P8.B5).
+`asset_state` (V143) records each recompute's `mode` (`full` /
+`incremental`), the `watermark` it reached and the `row_count`;
+`v_asset` (v2) and `v_model` (v5, `mode`) show them.
 
 ## Metrics in SQL (P4.5)
 

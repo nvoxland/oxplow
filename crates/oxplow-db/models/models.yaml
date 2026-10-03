@@ -757,14 +757,17 @@
     - { not_null: id }
     - { unique: id }
 - name: asset
-  version: 1
-  description: "Each asset's last recompute (P7.B1): derived data computed from tables — the metric cube, a model materialized on change — recomputed when a commit touches one of its inputs."
+  version: 2
+  description: "Each asset's last recompute (P7.B1): derived data computed from tables — the metric cube, a materialized model — recomputed when a commit touches one of its inputs, or on its clock."
   columns:
     - { name: "asset", type: "TEXT", doc: "The asset: `metric_cube`, or a materialized model's view (`v_<name>`)." }
     - { name: "computed_at", type: "TEXT", doc: "When it was last recomputed (RFC 3339)." }
     - { name: "events_to", type: "INTEGER", doc: "The event log's highest seq when that recompute began: what its inputs had seen." }
     - { name: "snapshot_id", type: "INTEGER", doc: "The snapshot it was computed against, when it has one." }
     - { name: "elapsed_ms", type: "INTEGER", doc: "How long the recompute took." }
+    - { name: "mode", type: "TEXT", doc: "For a materialized model: `full` (refilled whole) or `incremental` (rows past its watermark appended); NULL otherwise." }
+    - { name: "watermark", type: "INTEGER", doc: "For an incremental model: the highest watermark value it holds." }
+    - { name: "row_count", type: "INTEGER", doc: "For a materialized model: how many rows it holds." }
   tests:
     - { not_null: asset }
     - { unique: asset }
@@ -981,7 +984,7 @@
     - { not_null: page }
     - { relationships: { column: page, to: knowledge_page, field: ref } }
 - name: model
-  version: 4
+  version: 5
   description: "Models: every published view, as compiled at this open — core ones and each extension's. Read a model's columns in `v_model_column`, what it reads in `v_model_lineage` and its declared tests' results in `v_model_test`."
   columns:
     - { name: view, type: TEXT, doc: "The view to query (`v_task`)." }
@@ -992,9 +995,10 @@
     - { name: description, type: TEXT, doc: "What the view holds." }
     - { name: sql, type: TEXT, doc: "The SELECT the view was compiled from, references resolved." }
     - { name: compiled_at, type: TEXT, doc: "RFC 3339 time of the open that compiled it." }
-    - { name: materialize, type: TEXT, doc: "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes; `every <d>` (`every 1h`) when it's stored and recomputed on that clock." }
+    - { name: materialize, type: TEXT, doc: "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes; `every <d>` (`every 1h`) when it's stored and recomputed on that clock; `incremental <column>` when it's stored and kept by appending rows past that watermark." }
     - { name: computed_at, type: TEXT, doc: "For a materialized model: when it was last recomputed (RFC 3339); NULL otherwise." }
     - { name: events_to, type: INTEGER, doc: "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen." }
+    - { name: mode, type: TEXT, doc: "For a materialized model: how its last recompute ran — `full` or `incremental`." }
   tests:
     - { not_null: view }
     - { unique: view }

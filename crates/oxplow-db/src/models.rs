@@ -84,6 +84,10 @@ pub enum Materialize {
     /// inputs do: for SQL that reads the time (`'now'`), whose answer
     /// moves without a write.
     Every { every: String },
+    /// Stored, and kept by appending the rows past its watermark —
+    /// `{ incremental: <column> }`, a declared INTEGER that only grows —
+    /// refilled whole when an input saw a rewrite (P8.B4).
+    Incremental { incremental: String },
 }
 
 /// The named materialization policies.
@@ -103,14 +107,25 @@ impl Materialize {
         match self {
             Materialize::Named(MaterializePolicy::OnChange) => "on_change".into(),
             Materialize::Every { every } => format!("every {}", every.trim()),
+            Materialize::Incremental { incremental } => {
+                format!("incremental {}", incremental.trim())
+            }
+        }
+    }
+
+    /// The watermark column of an incremental model.
+    pub fn incremental(&self) -> Option<&str> {
+        match self {
+            Materialize::Incremental { incremental } => Some(incremental.trim()),
+            _ => None,
         }
     }
 
     /// The clock of an `every:` policy: `15m`, `2h`.
     pub fn every(&self) -> Option<std::time::Duration> {
         match self {
-            Materialize::Named(_) => None,
             Materialize::Every { every } => every_duration(every),
+            _ => None,
         }
     }
 }
@@ -128,12 +143,17 @@ pub fn every_duration(text: &str) -> Option<std::time::Duration> {
 
 /// The policy `model.materialize` recorded (`on_change`, `every 1h`).
 pub fn recorded_materialize(text: &str) -> Option<Materialize> {
-    match text.strip_prefix("every ") {
-        Some(every) => Some(Materialize::Every {
+    if let Some(every) = text.strip_prefix("every ") {
+        return Some(Materialize::Every {
             every: every.to_string(),
-        }),
-        None => (text == "on_change").then_some(Materialize::ON_CHANGE),
+        });
     }
+    if let Some(column) = text.strip_prefix("incremental ") {
+        return Some(Materialize::Incremental {
+            incremental: column.to_string(),
+        });
+    }
+    (text == "on_change").then_some(Materialize::ON_CHANGE)
 }
 
 /// The table a materialized model's view reads: `m_<view>`.
@@ -335,15 +355,101 @@ fn decl_line(text: &str, model: &str) -> Option<usize> {
     })
 }
 
-/// An `every:` clock is one the grammar reads.
+/// An `every:` clock is one the grammar reads; an incremental model has a
+/// key (what keeps an appended row from repeating) and an INTEGER
+/// watermark column.
 fn check_materialize(decl: &ModelDecl, at: &str) -> Result<(), DomainError> {
     match &decl.materialize {
         Some(m @ Materialize::Every { every }) if m.every().is_none() => Err(invalid(format!(
             "{at}: `{}` materializes `every: {every}`, which isn't a duration; use minutes (`15m`) or hours (`2h`)",
             decl.name
         ))),
+        Some(Materialize::Incremental { incremental }) => {
+            if decl.key.is_empty() {
+                return Err(invalid(format!(
+                    "{at}: `{}` is incremental but declares no key — the key is what keeps an appended row from repeating; declare `key:`",
+                    decl.name
+                )));
+            }
+            let integer = decl.columns.iter().any(|c| {
+                c.name == incremental.trim() && c.sql_type.eq_ignore_ascii_case("INTEGER")
+            });
+            if !integer {
+                return Err(invalid(format!(
+                    "{at}: `{}`'s watermark `{}` must be an INTEGER column it declares",
+                    decl.name,
+                    incremental.trim()
+                )));
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
+}
+
+/// An incremental model's SQL keeps a row once it has appeared and never
+/// rewrites one: no grouping, de-duplication, window, cap, set operation
+/// or reading of the clock (`file:line` of the first, pointing at
+/// `on_change`).
+fn check_incremental_sql(decl: &ModelDecl, sql: &str, file: &str) -> Result<(), DomainError> {
+    if decl
+        .materialize
+        .as_ref()
+        .and_then(Materialize::incremental)
+        .is_none()
+    {
+        return Ok(());
+    }
+    const AGGREGATES: [&str; 8] = [
+        "count",
+        "sum",
+        "avg",
+        "total",
+        "min",
+        "max",
+        "group_concat",
+        "string_agg",
+    ];
+    const CLOCK: [&str; 6] = [
+        "date",
+        "time",
+        "datetime",
+        "julianday",
+        "strftime",
+        "unixepoch",
+    ];
+    let tokens = crate::sql_tokens::tokenize(sql)?;
+    let sig: Vec<_> = crate::sql_tokens::significant(&tokens).collect();
+    for (i, t) in sig.iter().enumerate() {
+        let next = sig.get(i + 1);
+        let called = next.is_some_and(|n| n.is_punct('('));
+        let what = if t.is_word("group") && next.is_some_and(|n| n.is_word("by")) {
+            Some("GROUP BY".to_string())
+        } else if ["distinct", "over", "limit", "union", "intersect", "except"]
+            .iter()
+            .any(|w| t.is_word(w))
+        {
+            Some(t.text.to_ascii_uppercase())
+        } else if called && AGGREGATES.iter().chain(CLOCK.iter()).any(|w| t.is_word(w)) {
+            Some(format!("{}(", t.text.to_ascii_lowercase()))
+        } else if ["current_date", "current_time", "current_timestamp"]
+            .iter()
+            .any(|w| t.is_word(w))
+            || (t.kind == crate::sql_tokens::TokenKind::Str && t.text.eq_ignore_ascii_case("'now'"))
+        {
+            Some(format!("the clock (`{}`)", t.text))
+        } else {
+            None
+        };
+        if let Some(what) = what {
+            let (line, _) = line_col(sql, t.start);
+            return Err(invalid(format!(
+                "{file}:{line}: `{}` is incremental, but its SQL uses {what} — appending rows past a watermark can't keep that right; use `materialize: on_change`",
+                decl.name
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// A key names declared columns, each once.
@@ -455,6 +561,7 @@ pub fn join_sources(
                 }),
             });
         }
+        check_incremental_sql(&decl, &sql, &format!("{dir}/{path}"))?;
         out.push(ModelSource {
             decl,
             file: format!("{dir}/{path}"),
@@ -1945,6 +2052,68 @@ mod tests {
                 .contains("models/models.yaml:1: `a` materializes `every: soon`"),
             "{err}"
         );
+    }
+
+    /// P8.B4: an incremental model needs a key and an INTEGER watermark
+    /// column, and SQL that appending past the watermark keeps right — each
+    /// refusal at its line, pointing at `on_change`.
+    #[test]
+    fn an_incremental_model_is_refused_what_appending_cant_keep_right() {
+        let decl = |extra: &str| {
+            format!(
+                "- name: a\n  version: 1\n  description: d\n  materialize: {{ incremental: id }}\n{extra}  columns:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n    - {{ name: v, type: TEXT, doc: \"A value.\" }}\n"
+            )
+        };
+        let load = |yaml: String, sql: &str| {
+            let sql = sql.to_string();
+            sources_from(
+                &yaml,
+                "models",
+                move |_| Some(sql.clone()),
+                || vec!["a".into()],
+            )
+        };
+        let err = |yaml: String, sql: &str| load(yaml, sql).unwrap_err().to_string();
+        let plain = "SELECT id, v FROM source('streams')";
+        assert!(load(decl("  key: [id]\n"), plain).is_ok());
+        assert!(
+            err(decl(""), plain)
+                .contains("models/models.yaml:1: `a` is incremental but declares no key"),
+            "{}",
+            err(decl(""), plain)
+        );
+        let on_v = decl("  key: [id]\n").replace("incremental: id", "incremental: v");
+        assert!(
+            err(on_v, plain).contains("`a`'s watermark `v` must be an INTEGER column"),
+            "watermark type"
+        );
+        for (sql, what) in [
+            (
+                "SELECT id, v FROM source('streams') GROUP BY id",
+                "GROUP BY",
+            ),
+            ("SELECT DISTINCT id, v FROM source('streams')", "DISTINCT"),
+            (
+                "SELECT id, row_number() OVER (ORDER BY id) AS v FROM source('streams')",
+                "OVER",
+            ),
+            ("SELECT id, v FROM source('streams') LIMIT 5", "LIMIT"),
+            (
+                "SELECT id, v FROM source('streams') UNION SELECT id, v FROM source('threads')",
+                "UNION",
+            ),
+            ("SELECT id, max(v) AS v FROM source('streams')", "max("),
+            (
+                "SELECT id, v FROM source('streams') WHERE v > datetime('now', '-1 day')",
+                "datetime(",
+            ),
+        ] {
+            let e = err(decl("  key: [id]\n"), sql);
+            assert!(
+                e.contains("models/a.sql:1:") && e.contains(what) && e.contains("on_change"),
+                "{sql}: {e}"
+            );
+        }
     }
 
     /// A key names declared columns; another is an error at its line.

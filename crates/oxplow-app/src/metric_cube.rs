@@ -561,7 +561,7 @@ impl crate::assets::Materializer for MetricCubeBuilder {
         vec!["metric_capture".into(), "fact".into()]
     }
 
-    async fn recompute(&self) -> Result<crate::assets::Recomputed, DomainError> {
+    async fn recompute(&self, _full: bool) -> Result<crate::assets::Recomputed, DomainError> {
         let folded = self.build_all().await;
         tracing::debug!(folded, "metric cube folded");
         Ok(crate::assets::Recomputed::default())

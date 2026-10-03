@@ -342,6 +342,51 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "doc": "The asset: `metric_cube`, or a materialized model's view (`v_<name>`).",
+          "name": "asset",
+          "type": "TEXT"
+        },
+        {
+          "doc": "When it was last recomputed (RFC 3339).",
+          "name": "computed_at",
+          "type": "TEXT"
+        },
+        {
+          "doc": "The event log's highest seq when that recompute began: what its inputs had seen.",
+          "name": "events_to",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "The snapshot it was computed against, when it has one.",
+          "name": "snapshot_id",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "How long the recompute took.",
+          "name": "elapsed_ms",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "For a materialized model: `full` (refilled whole) or `incremental` (rows past its watermark appended); NULL otherwise.",
+          "name": "mode",
+          "type": "TEXT"
+        },
+        {
+          "doc": "For an incremental model: the highest watermark value it holds.",
+          "name": "watermark",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "For a materialized model: how many rows it holds.",
+          "name": "row_count",
+          "type": "INTEGER"
+        }
+      ],
+      "key": []
     }
   },
   "branch": {
@@ -2835,6 +2880,71 @@
           "doc": "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen.",
           "name": "events_to",
           "type": "INTEGER"
+        }
+      ],
+      "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "doc": "The view to query (`v_task`).",
+          "name": "view",
+          "type": "TEXT"
+        },
+        {
+          "doc": "The model's name within its owner (`task`).",
+          "name": "name",
+          "type": "TEXT"
+        },
+        {
+          "doc": "`core`, or the extension that declares it.",
+          "name": "owner",
+          "type": "TEXT"
+        },
+        {
+          "doc": "`sql` (compiled from a model file) or `entity` (an extension's synced entity).",
+          "name": "kind",
+          "type": "TEXT"
+        },
+        {
+          "doc": "Contract version: a change to the columns bumps it.",
+          "name": "version",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "What the view holds.",
+          "name": "description",
+          "type": "TEXT"
+        },
+        {
+          "doc": "The SELECT the view was compiled from, references resolved.",
+          "name": "sql",
+          "type": "TEXT"
+        },
+        {
+          "doc": "RFC 3339 time of the open that compiled it.",
+          "name": "compiled_at",
+          "type": "TEXT"
+        },
+        {
+          "doc": "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes; `every <d>` (`every 1h`) when it's stored and recomputed on that clock; `incremental <column>` when it's stored and kept by appending rows past that watermark.",
+          "name": "materialize",
+          "type": "TEXT"
+        },
+        {
+          "doc": "For a materialized model: when it was last recomputed (RFC 3339); NULL otherwise.",
+          "name": "computed_at",
+          "type": "TEXT"
+        },
+        {
+          "doc": "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen.",
+          "name": "events_to",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "For a materialized model: how its last recompute ran — `full` or `incremental`.",
+          "name": "mode",
+          "type": "TEXT"
         }
       ],
       "key": []

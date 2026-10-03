@@ -3399,7 +3399,13 @@ MaterializePolicy |
  *  inputs do: for SQL that reads the time (`'now'`), whose answer
  *  moves without a write.
  */
-{ every: string };
+({ every: string }) & { incremental?: never } | 
+/**
+ *  Stored, and kept by appending the rows past its watermark —
+ *  `{ incremental: <column> }`, a declared INTEGER that only grows —
+ *  refilled whole when an input saw a rewrite (P8.B4).
+ */
+({ incremental: string }) & { every?: never };
 
 // The named materialization policies.
 export type MaterializePolicy = 

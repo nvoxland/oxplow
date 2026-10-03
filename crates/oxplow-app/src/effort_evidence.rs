@@ -51,7 +51,7 @@ impl Materializer for OpenEffortEvidence {
         INPUTS.iter().map(|t| t.to_string()).collect()
     }
 
-    async fn recompute(&self) -> Result<Recomputed, oxplow_domain::DomainError> {
+    async fn recompute(&self, _full: bool) -> Result<Recomputed, oxplow_domain::DomainError> {
         let Some(svc) = self.svc.upgrade() else {
             return Ok(Recomputed::default());
         };
