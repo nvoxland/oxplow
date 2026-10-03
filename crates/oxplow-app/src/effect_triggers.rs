@@ -1412,6 +1412,48 @@ mod tests {
         );
     }
 
+    /// tsk848: a backfill's plan applies `where` to every candidate in its
+    /// range, reading them a page at a time: events its `where` excludes
+    /// filling the first pages never hide the matches after them.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_backfill_plan_reads_past_what_where_excludes() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        for _ in 0..5 {
+            log(svc, transitioned(fx.task, TaskStatus::Blocked)).await;
+        }
+        let first = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let last = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        approve(svc).await;
+        let (_, decl) = find_effect(svc, "acme/mark-done").unwrap();
+        let vocabulary = svc.vocabulary.current();
+        let planned = svc
+            .db
+            .read(move |tx| {
+                crate::commands::effect::unreacted_tx(
+                    tx,
+                    &vocabulary,
+                    &decl,
+                    &crate::commands::effect::Range::default(),
+                    1,
+                    2,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(planned.count, 2);
+        assert_eq!(
+            (planned.from_seq, planned.to_seq),
+            (Some(first.seq), Some(last.seq))
+        );
+        assert_eq!(
+            planned.first.iter().map(|e| e.seq).collect::<Vec<_>>(),
+            vec![first.seq],
+            "only as many as asked for"
+        );
+    }
+
     /// tsk846: an event the effect's own run led to is never its trigger
     /// (the loop guard), so a backfill never plans it either: otherwise
     /// an effect that edits what it reacts to would find its own edits

@@ -1729,7 +1729,11 @@ proposed, failed, remaining, stopped? }` says what is left for another
 run. The effect must be enabled and approved as it is now.
 
 `effect.backfill_plan` (a read, anyone's) answers `{ planned, from_seq,
-to_seq }` for the same input: what a backfill would react to. The bus's
+to_seq }` for the same input: what a backfill would react to. Both read
+the candidates by log position a page at a time (`SCAN_PAGE`) to the end
+of the range, applying `where` to every one — never to a first window of
+them, which a selective `where` over a busy type would leave empty for
+good (tsk848) — counting all and keeping the batch's first. The bus's
 confirmation shows a command's summary and input, not a count, so the
 count is the plan's: an approved effect's row in Settings → Data →
 Programs has **Backfill…**, which reads the plan, says how many events

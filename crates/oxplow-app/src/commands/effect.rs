@@ -55,8 +55,8 @@ pub const BACKFILL_PLAN: &str = "effect.backfill_plan";
 /// The most reactions one `effect.backfill` run makes; the rest are
 /// `remaining`, for another run.
 pub const BACKFILL_BATCH: usize = 200;
-/// The most candidate events a backfill looks through.
-const SCAN_LIMIT: usize = 50_000;
+/// How many candidate events a backfill's plan reads at a time.
+const SCAN_PAGE: usize = 1_000;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -179,68 +179,105 @@ async fn ready(
     Ok((ext, decl, health))
 }
 
+/// What a backfill would react to in a range.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Unreacted {
+    /// How many there are.
+    pub count: usize,
+    /// The first few, oldest first: as many as were asked for.
+    pub first: Vec<StoredEvent>,
+    /// The log positions of the first and the last.
+    pub from_seq: Option<i64>,
+    pub to_seq: Option<i64>,
+}
+
 /// The events in `range` that `decl` reacts to (`on`, `where`, each read
 /// at its type's newest version, as the pump delivers it) and has never
-/// reacted to — oldest first. One its own run led to is never its trigger
-/// (the loop guard), so it is never planned either (tsk846): an effect
-/// that changes what it reacts to would otherwise meet its own changes on
-/// every backfill.
-fn unreacted_tx(
+/// reacted to — counted, with the first `keep` of them, oldest first. One
+/// its own run led to is never its trigger (the loop guard), so it is
+/// never planned either (tsk846): an effect that changes what it reacts
+/// to would otherwise meet its own changes on every backfill. The
+/// candidates are read `page` at a time by log position, so `where` is
+/// applied to every one in the range, not to a first window of them
+/// (tsk848).
+pub(crate) fn unreacted_tx(
     tx: &rusqlite::Connection,
     vocabulary: &oxplow_domain::vocabulary::Vocabulary,
     decl: &EffectDecl,
     range: &Range,
-) -> Result<Vec<StoredEvent>, DomainError> {
+    keep: usize,
+    page: usize,
+) -> Result<Unreacted, DomainError> {
     let types = vec!["?"; decl.on.len()].join(", ");
     let sql = format!(
-        "SELECT e.id FROM event_log e
+        "SELECT e.id, e.seq FROM event_log e
           WHERE e.type IN ({types})
             AND e.seq >= ?{n1} AND e.seq <= ?{n2} AND e.at >= ?{n3}
             AND NOT EXISTS (SELECT 1 FROM effect_run r
                              WHERE r.effect = ?{n4} AND r.event_id = e.id)
-          ORDER BY e.seq LIMIT {SCAN_LIMIT}",
+          ORDER BY e.seq LIMIT {page}",
         n1 = decl.on.len() + 1,
         n2 = decl.on.len() + 2,
         n3 = decl.on.len() + 3,
         n4 = decl.on.len() + 4,
     );
-    let mut params: Vec<rusqlite::types::Value> = decl
-        .on
-        .iter()
-        .map(|t| rusqlite::types::Value::Text(t.clone()))
-        .collect();
     // What was logged after its approval is the live consumer's: a
     // backfill stops there, so the two never attempt one event at once
     // (tsk847). Never approved, it has nothing to backfill.
     let live_from = oxplow_db::effect_state_store::start_after_tx(tx, &decl.name())?.unwrap_or(-1);
-    params.push(range.from_seq.unwrap_or(0).into());
-    params.push(range.to_seq.unwrap_or(i64::MAX).min(live_from).into());
-    params.push(range.since.clone().unwrap_or_default().into());
-    params.push(decl.name().into());
+    let to = range.to_seq.unwrap_or(i64::MAX).min(live_from);
+    let own = format!("effect:{}", decl.name());
     let mut st = tx.prepare(&sql).map_err(oxplow_db::map_sql_err)?;
-    let ids: Vec<String> = st
-        .query_map(rusqlite::params_from_iter(params), |r| r.get(0))
-        .map_err(oxplow_db::map_sql_err)?
-        .collect::<rusqlite::Result<_>>()
-        .map_err(oxplow_db::map_sql_err)?;
-    let mut out = Vec::new();
-    for id in ids {
-        let Some(stored) = oxplow_db::event_log_store::get_tx(tx, &oxplow_domain::EventId(id))?
-        else {
-            continue;
+    let mut out = Unreacted::default();
+    let mut from = range.from_seq.unwrap_or(0);
+    loop {
+        let mut params: Vec<rusqlite::types::Value> = decl
+            .on
+            .iter()
+            .map(|t| rusqlite::types::Value::Text(t.clone()))
+            .collect();
+        params.push(from.into());
+        params.push(to.into());
+        params.push(range.since.clone().unwrap_or_default().into());
+        params.push(decl.name().into());
+        let candidates: Vec<(String, i64)> = st
+            .query_map(rusqlite::params_from_iter(params), |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .map_err(oxplow_db::map_sql_err)?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(oxplow_db::map_sql_err)?;
+        let Some(&(_, last)) = candidates.last() else {
+            break;
         };
-        // One that can't be carried to today's shape isn't reacted to.
-        let Ok(event) = crate::event_pump::at_latest(vocabulary, &stored) else {
-            continue;
-        };
-        if !crate::effects::reacts_to(decl, &event.envelope.event_type, &event.envelope.payload) {
-            continue;
+        for (id, seq) in &candidates {
+            let Some(stored) =
+                oxplow_db::event_log_store::get_tx(tx, &oxplow_domain::EventId(id.clone()))?
+            else {
+                continue;
+            };
+            // One that can't be carried to today's shape isn't reacted to.
+            let Ok(event) = crate::event_pump::at_latest(vocabulary, &stored) else {
+                continue;
+            };
+            if !crate::effects::reacts_to(decl, &event.envelope.event_type, &event.envelope.payload)
+            {
+                continue;
+            }
+            if crate::event_lineage::lineage_tx(tx, stored, &own)?.own {
+                continue;
+            }
+            out.count += 1;
+            out.from_seq.get_or_insert(*seq);
+            out.to_seq = Some(*seq);
+            if out.first.len() < keep {
+                out.first.push(event);
+            }
         }
-        let own =
-            crate::event_lineage::lineage_tx(tx, stored, &format!("effect:{}", decl.name()))?.own;
-        if !own {
-            out.push(event);
+        if candidates.len() < page {
+            break;
         }
+        from = last + 1;
     }
     Ok(out)
 }
@@ -274,18 +311,18 @@ pub async fn backfill(
 ) -> Result<Backfilled, CommandError> {
     let health = PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
     let key = effect_triggers::plugin_key(decl);
-    let events = {
+    let planned = {
         let (vocabulary, decl, range) = (svc.vocabulary.current(), decl.clone(), range.clone());
         svc.db
-            .read(move |tx| unreacted_tx(tx, &vocabulary, &decl, &range))
+            .read(move |tx| unreacted_tx(tx, &vocabulary, &decl, &range, batch, SCAN_PAGE))
             .await?
     };
     let mut out = Backfilled {
-        planned: events.len(),
+        planned: planned.count,
         ..Backfilled::default()
     };
     let mut attempted = 0;
-    for event in events.iter().take(batch) {
+    for event in &planned.first {
         if let Some(why) = health.disabled_reason(&key).await? {
             out.stopped = Some(format!("the effect was disabled: {why}"));
             break;
@@ -396,13 +433,14 @@ pub fn backfill_plan_command(services: Weak<Services>) -> Command {
                     format!("no enabled extension declares an effect `{}`", input.effect),
                 )
             })?;
-            let events = unreacted_tx(ctx.conn, ctx.events.vocabulary, &decl, &range)?;
+            let planned =
+                unreacted_tx(ctx.conn, ctx.events.vocabulary, &decl, &range, 0, SCAN_PAGE)?;
             Ok(HandlerOutput {
                 result: json!({
                     "effect": input.effect,
-                    "planned": events.len(),
-                    "from_seq": events.first().map(|e| e.seq),
-                    "to_seq": events.last().map(|e| e.seq),
+                    "planned": planned.count,
+                    "from_seq": planned.from_seq,
+                    "to_seq": planned.to_seq,
                 }),
                 ..HandlerOutput::default()
             })
