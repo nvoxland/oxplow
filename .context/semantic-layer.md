@@ -290,7 +290,20 @@ takes the key as its `PRIMARY KEY` (a changed key recreates the table
 for the next recompute). `v_model_column` (v2) shows each column's
 `key_part` (its 1-based place in the key).
 
-**Not yet:** `every:` freshness and incremental recompute.
+**On a clock** (P8.B2). `materialize: { every: 1h }` (the collectors'
+duration grammar: minutes `15m` or hours `2h`; anything else is an error
+at the declaration's `file:line`) stores the model like `on_change` but
+recomputes it on that clock, ignoring its inputs' changes — for SQL whose
+answer moves with time (`'now'`, "the last 180 days") rather than with a
+write. The runner wakes at the persisted `asset_state.computed_at +
+every` (at once when it never ran or is overdue), so a restart doesn't
+rebuild a fresh one; a contract change recreates the table and drops its
+`asset_state` row, so the next recompute is its first build.
+`model.materialize` records `every 1h` (V142 rebuilt `model` for the
+wider CHECK); `v_model` is v4. oxplow-analytics' `co_change_pair` is
+`every: 1h`.
+
+**Not yet:** incremental recompute.
 
 ## Metrics in SQL (P4.5)
 

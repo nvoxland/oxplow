@@ -3386,8 +3386,23 @@ export type LspServerListing = {
 // Where a server config came from, for the settings UI.
 export type LspServerSource = "yaml" | "installed";
 
-// A model's freshness policy beyond the default (computed on read).
+/**
+ *  A model's freshness policy beyond the default (computed on read):
+ *  `on_change`, or `{ every: 1h }`.
+ */
 export type Materialize = 
+// A named policy: `on_change`.
+MaterializePolicy | 
+/**
+ *  Stored and recomputed, whole, on a clock — `{ every: 1h }` (the
+ *  collectors' grammar: minutes `15m` or hours `2h`) — whatever its
+ *  inputs do: for SQL that reads the time (`'now'`), whose answer
+ *  moves without a write.
+ */
+{ every: string };
+
+// The named materialization policies.
+export type MaterializePolicy = 
 // Stored in its table and recomputed, whole, when an input changes.
 "on_change";
 
@@ -3580,7 +3595,8 @@ export type ModelDecl = {
 	deprecated?: Deprecated[],
 	/**
 	 *  How it is computed: absent, on read (a view); `on_change`, stored
-	 *  and recomputed when one of its inputs changes.
+	 *  and recomputed when one of its inputs changes; `{ every: 1h }`,
+	 *  stored and recomputed on that clock.
 	 */
 	materialize?: Materialize | null,
 };

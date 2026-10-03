@@ -66,24 +66,73 @@ pub struct ModelDecl {
     #[serde(default)]
     pub deprecated: Vec<Deprecated>,
     /// How it is computed: absent, on read (a view); `on_change`, stored
-    /// and recomputed when one of its inputs changes.
+    /// and recomputed when one of its inputs changes; `{ every: 1h }`,
+    /// stored and recomputed on that clock.
     #[serde(default)]
     pub materialize: Option<Materialize>,
 }
 
-/// A model's freshness policy beyond the default (computed on read).
+/// A model's freshness policy beyond the default (computed on read):
+/// `on_change`, or `{ every: 1h }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(untagged)]
+pub enum Materialize {
+    /// A named policy: `on_change`.
+    Named(MaterializePolicy),
+    /// Stored and recomputed, whole, on a clock — `{ every: 1h }` (the
+    /// collectors' grammar: minutes `15m` or hours `2h`) — whatever its
+    /// inputs do: for SQL that reads the time (`'now'`), whose answer
+    /// moves without a write.
+    Every { every: String },
+}
+
+/// The named materialization policies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
-pub enum Materialize {
+pub enum MaterializePolicy {
     /// Stored in its table and recomputed, whole, when an input changes.
     OnChange,
 }
 
 impl Materialize {
-    pub fn as_str(self) -> &'static str {
+    /// `materialize: on_change`.
+    pub const ON_CHANGE: Materialize = Materialize::Named(MaterializePolicy::OnChange);
+
+    /// What `model.materialize` records: `on_change`, or `every 1h`.
+    pub fn recorded(&self) -> String {
         match self {
-            Materialize::OnChange => "on_change",
+            Materialize::Named(MaterializePolicy::OnChange) => "on_change".into(),
+            Materialize::Every { every } => format!("every {}", every.trim()),
         }
+    }
+
+    /// The clock of an `every:` policy: `15m`, `2h`.
+    pub fn every(&self) -> Option<std::time::Duration> {
+        match self {
+            Materialize::Named(_) => None,
+            Materialize::Every { every } => every_duration(every),
+        }
+    }
+}
+
+/// `15m`, `2h` → the duration; anything else (zero included) is `None`.
+pub fn every_duration(text: &str) -> Option<std::time::Duration> {
+    let t = text.trim();
+    let (n, unit) = match t.strip_suffix('m') {
+        Some(n) => (n, 60),
+        None => (t.strip_suffix('h')?, 3600),
+    };
+    let n: u64 = n.trim().parse().ok().filter(|n| *n > 0)?;
+    Some(std::time::Duration::from_secs(n * unit))
+}
+
+/// The policy `model.materialize` recorded (`on_change`, `every 1h`).
+pub fn recorded_materialize(text: &str) -> Option<Materialize> {
+    match text.strip_prefix("every ") {
+        Some(every) => Some(Materialize::Every {
+            every: every.to_string(),
+        }),
+        None => (text == "on_change").then_some(Materialize::ON_CHANGE),
     }
 }
 
@@ -286,6 +335,17 @@ fn decl_line(text: &str, model: &str) -> Option<usize> {
     })
 }
 
+/// An `every:` clock is one the grammar reads.
+fn check_materialize(decl: &ModelDecl, at: &str) -> Result<(), DomainError> {
+    match &decl.materialize {
+        Some(m @ Materialize::Every { every }) if m.every().is_none() => Err(invalid(format!(
+            "{at}: `{}` materializes `every: {every}`, which isn't a duration; use minutes (`15m`) or hours (`2h`)",
+            decl.name
+        ))),
+        _ => Ok(()),
+    }
+}
+
 /// A key names declared columns, each once.
 fn check_key(decl: &ModelDecl, at: &str) -> Result<(), DomainError> {
     let mut seen = BTreeSet::new();
@@ -323,6 +383,7 @@ pub fn sources_from(
             None => declared_in.clone(),
         };
         check_key(d, &at)?;
+        check_materialize(d, &at)?;
     }
     join_sources(decls, dir, &declared_in, file, sql_files)
 }
@@ -341,6 +402,7 @@ pub fn join_sources(
     let mut out = Vec::with_capacity(decls.len());
     for decl in decls {
         check_key(&decl, declared_in)?;
+        check_materialize(&decl, declared_in)?;
         if !seen.insert(decl.name.clone()) {
             return Err(invalid(format!(
                 "{declared_in}: model `{}` is declared twice",
@@ -795,7 +857,7 @@ fn publish(
             decl.description,
             m.sql,
             now,
-            decl.materialize.map(Materialize::as_str)
+            decl.materialize.as_ref().map(Materialize::recorded)
         ],
     )
     .map_err(map_sql_err)?;
@@ -864,7 +926,12 @@ fn materialize_table(
         defs.join(", "),
         t = quote(&table)
     ))
-    .map_err(map_sql_err)
+    .map_err(map_sql_err)?;
+    // Its last recompute is gone with its rows: the next is its first
+    // build, whatever its clock says.
+    conn.execute("DELETE FROM asset_state WHERE asset = ?1", [view])
+        .map_err(map_sql_err)?;
+    Ok(())
 }
 
 /// Drop the tables of materialized models that are no longer published
@@ -1837,6 +1904,49 @@ mod tests {
         );
     }
 
+    /// P8.B2: `materialize: { every: 2h }` is recorded as its clock; a
+    /// clock the grammar can't read is an error at its line.
+    #[test]
+    fn an_every_clock_is_checked_and_recorded() {
+        let yaml = |every: &str| {
+            format!("- name: a\n  version: 1\n  description: d\n  materialize: {{ every: {every} }}\n  columns:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n")
+        };
+        let ok = sources_from(
+            &yaml("2h"),
+            "models",
+            |_| Some("SELECT id FROM source('streams')".into()),
+            || vec!["a".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            ok[0].decl.materialize.as_ref().and_then(Materialize::every),
+            Some(std::time::Duration::from_secs(7200))
+        );
+        let mut conn = fresh();
+        compile(&mut conn, "t", &ok, &view).unwrap();
+        let recorded: String = conn
+            .query_row(
+                "SELECT materialize FROM model WHERE view = 'v_t_a'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(recorded, "every 2h");
+
+        let err = sources_from(
+            &yaml("soon"),
+            "models",
+            |_| Some("SELECT 1 AS id".into()),
+            || vec!["a".into()],
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("models/models.yaml:1: `a` materializes `every: soon`"),
+            "{err}"
+        );
+    }
+
     /// A key names declared columns; another is an error at its line.
     #[test]
     fn a_key_on_an_undeclared_column_is_an_error_at_its_line() {
@@ -1904,7 +2014,7 @@ mod tests {
             &["id INTEGER", "title TEXT"],
         );
         m.decl.key = vec!["id".into()];
-        m.decl.materialize = Some(Materialize::OnChange);
+        m.decl.materialize = Some(Materialize::ON_CHANGE);
         compile(&mut conn, "t", std::slice::from_ref(&m), &view).unwrap();
         let pk: Vec<(String, i64)> = conn
             .prepare("SELECT name, pk FROM pragma_table_info('m_v_t_mk') ORDER BY cid")
@@ -2023,7 +2133,7 @@ mod tests {
     }
 
     fn on_change(mut m: ModelSource) -> ModelSource {
-        m.decl.materialize = Some(Materialize::OnChange);
+        m.decl.materialize = Some(Materialize::ON_CHANGE);
         m
     }
 

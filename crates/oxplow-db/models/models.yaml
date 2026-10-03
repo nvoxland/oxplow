@@ -981,7 +981,7 @@
     - { not_null: page }
     - { relationships: { column: page, to: knowledge_page, field: ref } }
 - name: model
-  version: 3
+  version: 4
   description: "Models: every published view, as compiled at this open — core ones and each extension's. Read a model's columns in `v_model_column`, what it reads in `v_model_lineage` and its declared tests' results in `v_model_test`."
   columns:
     - { name: view, type: TEXT, doc: "The view to query (`v_task`)." }
@@ -992,7 +992,7 @@
     - { name: description, type: TEXT, doc: "What the view holds." }
     - { name: sql, type: TEXT, doc: "The SELECT the view was compiled from, references resolved." }
     - { name: compiled_at, type: TEXT, doc: "RFC 3339 time of the open that compiled it." }
-    - { name: materialize, type: TEXT, doc: "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes." }
+    - { name: materialize, type: TEXT, doc: "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes; `every <d>` (`every 1h`) when it's stored and recomputed on that clock." }
     - { name: computed_at, type: TEXT, doc: "For a materialized model: when it was last recomputed (RFC 3339); NULL otherwise." }
     - { name: events_to, type: INTEGER, doc: "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen." }
   tests:

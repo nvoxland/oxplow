@@ -17,6 +17,12 @@
 //! not one per commit) — then records `asset_state { computed_at,
 //! events_to, snapshot_id, elapsed_ms }`. A recompute that fails is
 //! logged; the next change tries again.
+//!
+//! An asset on a **clock** (`every()`, a model's `materialize: { every: 1h }`,
+//! P8.B2) ignores its inputs' changes: it recomputes when its last
+//! recompute (`asset_state.computed_at`, persisted) is `every` old — at
+//! once when it never ran or is overdue, so a restart doesn't rebuild a
+//! fresh one — and every `every` after.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -44,6 +50,10 @@ pub trait Materializer: Send + Sync {
     fn asset(&self) -> &str;
     /// The tables whose commits make it stale.
     fn inputs(&self) -> Vec<String>;
+    /// Recomputed on this clock instead of on its inputs' changes.
+    fn every(&self) -> Option<Duration> {
+        None
+    }
     async fn recompute(&self) -> Result<Recomputed, DomainError>;
 }
 
@@ -65,6 +75,8 @@ struct ModelAsset {
     sql: String,
     contract: Option<String>,
     tables: Vec<String>,
+    /// Its policy as recorded (`on_change`, `every 1h`).
+    materialize: String,
 }
 
 /// The registered assets. Cloning shares them.
@@ -104,6 +116,14 @@ impl Assets {
         let (db, coalesce, looping) = (self.db.clone(), self.coalesce, entry.clone());
         let task = tokio::spawn(async move {
             let entry = looping;
+            if let Some(every) = entry.materializer.every() {
+                let mut wait = until_due(&db, entry.materializer.asset(), every).await;
+                loop {
+                    tokio::time::sleep(wait).await;
+                    recompute(&db, entry.materializer.as_ref()).await;
+                    wait = every;
+                }
+            }
             recompute(&db, entry.materializer.as_ref()).await;
             loop {
                 entry.dirty.notified().await;
@@ -154,6 +174,8 @@ impl Assets {
                 view: view.clone(),
                 sql: model.sql.clone(),
                 tables: model.tables.clone(),
+                every: oxplow_db::models::recorded_materialize(&model.materialize)
+                    .and_then(|m| m.every()),
             }));
             have.insert(view, model);
         }
@@ -242,6 +264,7 @@ async fn materialized_models(db: &Database) -> Result<BTreeMap<String, ModelAsse
                     sql: sql.clone(),
                     contract: contract.clone(),
                     tables: tables.into_iter().collect(),
+                    materialize: materialize.clone().unwrap_or_default(),
                 },
             );
         }
@@ -250,13 +273,15 @@ async fn materialized_models(db: &Database) -> Result<BTreeMap<String, ModelAsse
     .await
 }
 
-/// A `materialize: on_change` model (P7.B2): its table refilled, whole,
-/// from its SELECT in one transaction.
+/// A materialized model (P7.B2): its table refilled, whole, from its
+/// SELECT in one transaction — when an input changes, or on its `every:`
+/// clock (P8.B2).
 pub struct SqlModelMaterializer {
     db: Database,
     view: String,
     sql: String,
     tables: Vec<String>,
+    every: Option<Duration>,
 }
 
 #[async_trait]
@@ -267,6 +292,10 @@ impl Materializer for SqlModelMaterializer {
 
     fn inputs(&self) -> Vec<String> {
         self.tables.clone()
+    }
+
+    fn every(&self) -> Option<Duration> {
+        self.every
     }
 
     async fn recompute(&self) -> Result<Recomputed, DomainError> {
@@ -280,6 +309,33 @@ impl Materializer for SqlModelMaterializer {
             .await?;
         Ok(Recomputed::default())
     }
+}
+
+/// How long until a clocked asset is due: `every` after its last recorded
+/// recompute, nothing when it never ran (or the record is unreadable) or
+/// is overdue.
+async fn until_due(db: &Database, asset: &str, every: Duration) -> Duration {
+    let asset = asset.to_string();
+    let last = db
+        .read(move |tx| {
+            use rusqlite::OptionalExtension;
+            tx.query_row(
+                "SELECT computed_at FROM asset_state WHERE asset = ?1",
+                [&asset],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .ok()
+        .flatten()
+        .and_then(|at| Timestamp::parse(&at).ok());
+    let Some(last) = last else {
+        return Duration::ZERO;
+    };
+    let age_ms = (Timestamp::now().unix_ms() - last.unix_ms()).max(0) as u64;
+    every.saturating_sub(Duration::from_millis(age_ms))
 }
 
 /// Recompute one asset and record it in `asset_state`.
@@ -398,5 +454,80 @@ mod tests {
         assets.changed(&["thread".to_string()].into());
         settle().await;
         assert_eq!(runs.load(Ordering::SeqCst), 2, "not one of its inputs");
+    }
+
+    struct Clocked {
+        runs: Arc<AtomicUsize>,
+        every: Duration,
+    }
+
+    #[async_trait]
+    impl Materializer for Clocked {
+        fn asset(&self) -> &str {
+            "counting"
+        }
+        fn inputs(&self) -> Vec<String> {
+            vec!["task".into()]
+        }
+        fn every(&self) -> Option<Duration> {
+            Some(self.every)
+        }
+        async fn recompute(&self) -> Result<Recomputed, DomainError> {
+            self.runs.fetch_add(1, Ordering::SeqCst);
+            Ok(Recomputed::default())
+        }
+    }
+
+    /// P8.B2: a clocked asset builds when it never ran, then on its clock —
+    /// its inputs' changes don't recompute it.
+    #[tokio::test]
+    async fn a_clocked_asset_recomputes_on_its_clock_not_on_changes() {
+        let db = Database::in_memory();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let assets = Assets::new(db.clone(), Duration::from_millis(10));
+        assets.register(Arc::new(Clocked {
+            runs: runs.clone(),
+            every: Duration::from_millis(400),
+        }));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "the first build");
+        assets.changed(&["task".to_string()].into());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            runs.load(Ordering::SeqCst),
+            1,
+            "a change doesn't recompute it"
+        );
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 2, "the clock does");
+    }
+
+    /// A restart with a fresh `computed_at` waits out the rest of the
+    /// clock instead of rebuilding.
+    #[tokio::test]
+    async fn a_fresh_clocked_asset_waits_after_a_restart() {
+        let db = Database::in_memory();
+        let at = Timestamp::now().to_string();
+        db.transaction(move |tx| {
+            tx.execute(
+                "INSERT INTO asset_state (asset, computed_at, events_to, elapsed_ms)
+                 VALUES ('counting', ?1, 0, 1)",
+                [&at],
+            )
+            .map(|_| ())
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let assets = Assets::new(db.clone(), Duration::from_millis(10));
+        assets.register(Arc::new(Clocked {
+            runs: runs.clone(),
+            every: Duration::from_millis(500),
+        }));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 0, "still fresh");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "due, so recomputed");
     }
 }
