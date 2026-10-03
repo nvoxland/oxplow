@@ -1637,7 +1637,13 @@ event, each enabled effect whose `on`/`where` match **reacts at most
 once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
 1. a row exists — a redelivery: nothing. A `started` row is a run that
    claimed a step outside oxplow and was interrupted: recorded `failed`
-   ("interrupted") and **never sent again**;
+   ("interrupted") and **never sent again**. A person's retry or
+   backfill is no pump delivery, so nothing redelivers one cut off
+   between its claim and its record: at start (`boot.rs`,
+   `effect_triggers::recover_interrupted`) every attempt still `started`
+   whose origin is `retry` or `backfill` is recorded the same way, with
+   its `effect.result` saying what started it — Delivery lists it, and a
+   person may retry it (tsk845);
 2. `effects::gate` isn't `Runs`: nothing;
 3. the loop guard (`lineage`, walking the event's `cause` chain): an
    event its own run caused (source `effect:<extension>/<id>`) never

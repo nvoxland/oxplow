@@ -313,6 +313,30 @@ fn ended(state: RunState, reason: impl Into<String>) -> Finished {
     }
 }
 
+/// Why an attempt claimed `started` and never finished is failed.
+pub(crate) const INTERRUPTED: &str =
+    "interrupted: a step outside oxplow may have run, so it isn't sent again";
+
+/// At start: every attempt a person started (a retry, a backfill) that is
+/// still `started` was cut off — the app stopped between its claim and
+/// its record — and no pump delivery will find it, so record each failed,
+/// interrupted, with what started it (tsk845): Delivery lists it, and a
+/// person may retry it. A live one is the pump's: its redelivery finds
+/// it. How many were recovered.
+pub(crate) async fn recover_interrupted(svc: &Arc<Services>) -> Result<usize, DomainError> {
+    let cut_off = svc
+        .db
+        .read(|tx| oxplow_db::effect_run_store::person_started_tx(tx))
+        .await?;
+    let mut recovered = 0;
+    for key in cut_off {
+        if finish(svc, &key, ended(RunState::Failed, INTERRUPTED)).await? {
+            recovered += 1;
+        }
+    }
+    Ok(recovered)
+}
+
 /// Why [`run_reaction`] made no attempt for a person's `origin` (a
 /// retry, a backfill): what they asked for isn't there to do.
 pub(crate) const NOT_FAILED: &str = "didn't fail";
@@ -357,10 +381,9 @@ pub(crate) async fn run_reaction(
                 attempt,
                 origin,
             };
-            let reason = "interrupted: a step outside oxplow may have run, so it isn't sent again";
             return Ok(
-                if finish(svc, &key, ended(RunState::Failed, reason)).await? {
-                    Reacted::Failed(reason.into())
+                if finish(svc, &key, ended(RunState::Failed, INTERRUPTED)).await? {
+                    Reacted::Failed(INTERRUPTED.into())
                 } else {
                     Reacted::Nothing
                 },
@@ -743,6 +766,56 @@ mod tests {
         let run = rows(svc, "SELECT state, reason FROM v_effect_run").await;
         assert_eq!(run[0][0], json!("failed"));
         assert!(run[0][1].as_str().unwrap().contains("interrupted"), "{run}");
+    }
+
+    /// tsk845: a person's retry or backfill claimed `started` and then cut
+    /// off (the app quit mid-step) is no pump delivery, so no redelivery
+    /// ever finds it. Starting up does: each such attempt is recorded
+    /// failed — interrupted — with what started it, so Delivery lists it
+    /// and a person may retry it. A live one is the pump's to find.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_cut_off_backfill_attempt_is_recovered_at_start() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        approve(svc).await;
+        register(svc);
+        let claim = |ev: &StoredEvent, origin| {
+            let key =
+                EffectRunKey::first("acme/mark-done", ev.envelope.id.to_string(), ev.seq, origin);
+            async move {
+                svc.db
+                    .transaction(move |tx| oxplow_db::effect_run_store::claim_tx(tx, &key, "t"))
+                    .await
+                    .unwrap()
+            }
+        };
+        let cut_off = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        claim(&cut_off, ReactionOrigin::Backfill).await;
+        let live = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        claim(&live, ReactionOrigin::Live).await;
+
+        assert_eq!(recover_interrupted(svc).await.unwrap(), 1);
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT origin, state, reason LIKE 'interrupted%' FROM v_effect_run ORDER BY event_seq"
+            )
+            .await,
+            json!([["backfill", "failed", 1], ["live", "started", null]])
+        );
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT json_extract(payload, '$.origin'), json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result'"
+            )
+            .await,
+            json!([["backfill", "failed"]])
+        );
+        let human = oxplow_domain::Actor::Human;
+        let retried = retry(svc, &human, &cut_off, true).await.unwrap();
+        assert_eq!(retried.result["attempt"], json!(2));
+        assert_eq!(retried.result["outcome"], json!("ok"));
     }
 
     /// `acme/mark-done`'s reaction to `ev`, claimed `started` (a step

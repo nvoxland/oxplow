@@ -30,6 +30,17 @@ impl ReactionOrigin {
             ReactionOrigin::Backfill => "backfill",
         }
     }
+
+    pub fn parse(s: &str) -> Result<Self, DomainError> {
+        match s {
+            "live" => Ok(ReactionOrigin::Live),
+            "retry" => Ok(ReactionOrigin::Retry),
+            "backfill" => Ok(ReactionOrigin::Backfill),
+            other => Err(DomainError::Invariant(format!(
+                "an effect_run origin `{other}` isn't one oxplow writes"
+            ))),
+        }
+    }
 }
 
 /// Which attempt: effect `<extension>/<id>`'s `attempt`-th at reacting
@@ -123,6 +134,35 @@ pub fn latest_tx(
     latest
         .map(|(attempt, state)| Ok((attempt, RunState::parse(&state)?)))
         .transpose()
+}
+
+/// The attempts a person started — a retry, a backfill — that are still
+/// `started`. No pump delivery makes them, so none redelivers them: at
+/// start, each was cut off (tsk845).
+pub fn person_started_tx(conn: &Connection) -> Result<Vec<EffectRunKey>, DomainError> {
+    let mut st = conn
+        .prepare(
+            "SELECT effect, event_id, event_seq, attempt, origin FROM effect_run
+              WHERE state = 'started' AND origin <> 'live' ORDER BY id",
+        )
+        .map_err(map_sql_err)?;
+    let rows: Vec<(String, String, i64, u32, String)> = st
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })
+        .and_then(|rows| rows.collect::<rusqlite::Result<_>>())
+        .map_err(map_sql_err)?;
+    rows.into_iter()
+        .map(|(effect, event_id, event_seq, attempt, origin)| {
+            Ok(EffectRunKey {
+                effect,
+                event_id,
+                event_seq,
+                attempt,
+                origin: ReactionOrigin::parse(&origin)?,
+            })
+        })
+        .collect()
 }
 
 /// The state of `key`'s attempt, if it was made.

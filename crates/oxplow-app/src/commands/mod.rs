@@ -1632,7 +1632,10 @@ impl CommandBus {
     async fn release(&self, origin: &RunOrigin) {
         let released = match *origin {
             // A claimed reaction stays `started`: the effect's runner
-            // records it failed (`effect_triggers`), never runs it again.
+            // records it failed (`effect_triggers::run_reaction`), never
+            // runs it again — and one cut off before that is recorded at
+            // the next start (a person's retry or backfill) or by the
+            // pump's redelivery (a live one).
             RunOrigin::Call | RunOrigin::Effect(_) => return,
             RunOrigin::Undo(audit_id) => {
                 self.db

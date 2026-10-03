@@ -153,8 +153,14 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     crate::plugin_repair::register(state);
     // `on:` collectors (P7.B3), after the consumers they may name.
     crate::collector_triggers::register(state);
-    // Extensions' effects (P8.D10), approved ones only.
+    // Extensions' effects (P8.D10), approved ones only — and a person's
+    // retry or backfill the last run left half-done, recorded (tsk845).
     crate::effect_triggers::register(state);
+    match crate::effect_triggers::recover_interrupted(state).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(n, "recorded effect attempts cut off by the last stop"),
+        Err(e) => tracing::warn!(error = %e, "recovering cut-off effect attempts failed"),
+    }
     // Config changes reach the extension catalog, the provider registry and
     // the metric catalog (P7.B6).
     crate::config_reactors::register(state);
