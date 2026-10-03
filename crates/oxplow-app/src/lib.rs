@@ -90,6 +90,7 @@ pub mod metric_visibility;
 pub mod metrics_service;
 pub mod models_changed;
 pub mod net_sandbox;
+pub mod otlp_ingest;
 pub mod otlp_tokens;
 pub mod output_activity;
 pub mod page_ref_backfill;
@@ -578,6 +579,8 @@ pub struct Services {
     pub token_usage_store: Arc<SqliteTokenUsageStore>,
     /// Captures token usage on Stop from the agent transcript.
     pub token_usage: token_usage::TokenUsageService,
+    /// Logs an agent's OTLP token exports as `agent.tokens.reported`.
+    pub otlp_ingest: otlp_ingest::OtlpIngestService,
     pub wiki_page_thread_updates: Arc<SqliteWikiPageThreadUpdateStore>,
     /// Unified cross-page reference graph. Every writer that owns a
     /// `source_kind` slice mirrors its outbound refs into this store
@@ -1285,6 +1288,8 @@ impl Services {
             thread_store.clone(),
             fact_store.clone(),
         );
+        let otlp_ingest =
+            otlp_ingest::OtlpIngestService::new(db.clone(), vocabulary.clone(), event_pump.clone());
 
         let advisories = Arc::new(advisories::AdvisoryRunner::new((*nudge_store).clone()));
         // State entity metrics re-capture as their rows move (P7.B6).
@@ -1295,6 +1300,10 @@ impl Services {
         event_pump.register_async(Arc::new(config_reactors::WorkspaceFilterConsumer {
             captures: snapshot_captures.clone(),
             project_dir: layout.project_dir.clone(),
+        }));
+        // An agent's telemetry export is counted once it is logged (P10.M2).
+        event_pump.register_async(Arc::new(token_usage::OtlpTokensConsumer {
+            tokens: token_usage.clone(),
         }));
         // A turn's tokens are counted when it ends (P3.7).
         event_pump.register_async(Arc::new(token_usage::TurnTokensConsumer {
@@ -1384,6 +1393,7 @@ impl Services {
             collection,
             token_usage_store,
             token_usage,
+            otlp_ingest,
             wiki_page_thread_updates,
             page_ref_store,
             comment_store,

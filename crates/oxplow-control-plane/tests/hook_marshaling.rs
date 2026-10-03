@@ -723,10 +723,12 @@ fn otlp_codex_logs_body(
     .encode_to_vec()
 }
 
+/// Post an export as the agent of `thread`, then let the pump count it
+/// (the receiver logs `agent.tokens.reported`; a consumer writes facts).
 async fn post_otlp(
     cp: &ControlPlane,
+    svc: &oxplow_app::Services,
     thread: Option<ThreadId>,
-    stream: Option<StreamId>,
     body: Vec<u8>,
 ) -> reqwest::Response {
     let mut req = reqwest::Client::new()
@@ -737,10 +739,9 @@ async fn post_otlp(
     if let Some(t) = thread {
         req = req.header("x-oxplow-thread", t.to_string());
     }
-    if let Some(s) = stream {
-        req = req.header("x-oxplow-stream", s.to_string());
-    }
-    req.send().await.unwrap()
+    let resp = req.send().await.unwrap();
+    svc.event_pump.run_once().await.unwrap();
+    resp
 }
 
 #[tokio::test]
@@ -761,8 +762,8 @@ async fn otlp_metrics_ingests_token_facts_attributed_by_headers() {
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
     let resp = post_otlp(
         &cp,
+        &svc,
         Some(tid),
-        Some(StreamId::new(1)),
         otlp_claude_body("claude-opus-4-8", 100, 20),
     )
     .await;
@@ -788,8 +789,8 @@ async fn otlp_metrics_ingests_codex_histogram_facts() {
     // input=100, output=20, reasoning_output=30 → output folds to 50, total 150.
     let resp = post_otlp(
         &cp,
+        &svc,
         Some(tid),
-        Some(StreamId::new(1)),
         otlp_codex_body("gpt-5-codex", 100.0, 20.0, 30.0),
     )
     .await;
@@ -817,8 +818,8 @@ async fn otlp_logs_body_at_metrics_endpoint_ingests_codex_token_facts() {
     // input 5000 − cached 1000 = 4000 new input; output 200 + reasoning 50 = 250.
     let resp = post_otlp(
         &cp,
+        &svc,
         Some(tid),
-        Some(StreamId::new(1)),
         otlp_codex_logs_body("gpt-5.5", 5000, 1000, 200, 50),
     )
     .await;
@@ -841,7 +842,7 @@ async fn otlp_logs_body_at_metrics_endpoint_ingests_codex_token_facts() {
 async fn otlp_metrics_without_attribution_headers_is_dropped_but_acked() {
     let (cp, svc, _root, _dir) = boot().await;
     // No X-Oxplow-Thread/Stream → nothing to attribute to; accept + drop.
-    let resp = post_otlp(&cp, None, None, otlp_claude_body("m", 100, 20)).await;
+    let resp = post_otlp(&cp, &svc, None, otlp_claude_body("m", 100, 20)).await;
     assert_eq!(resp.status(), 200);
     let measure = svc
         .fact_store

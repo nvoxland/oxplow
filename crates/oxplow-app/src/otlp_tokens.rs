@@ -41,41 +41,17 @@ const CODEX_TOKEN_METRIC: &str = "codex.turn.token_usage";
 /// `event.kind` attribute is `response.completed` (tsk27).
 const CODEX_TOKEN_EVENT_KIND: &str = "response.completed";
 
-/// The token kinds oxplow tracks. Cache tokens (Claude `cacheRead`/
-/// `cacheCreation`, Codex `cached_input` → CacheRead) are tracked since tsk73;
-/// the Codex `total` rollup stays dropped (it would double-count) and Codex
-/// `reasoning_output` folds into `output` (matching Claude, whose `output`
-/// already includes thinking).
+/// The token kinds oxplow tracks — the event vocabulary's. Cache tokens
+/// (Claude `cacheRead`/`cacheCreation`, Codex `cached_input` → CacheRead)
+/// are tracked since tsk73; the Codex `total` rollup stays dropped (it would
+/// double-count) and Codex `reasoning_output` folds into `output` (matching
+/// Claude, whose `output` already includes thinking).
 ///
-/// ⚠️ Ingest routes kinds to DIFFERENT measures: Input/Output →
-/// `oxplow.tokens`, cache kinds → `oxplow.cache_tokens`. They must never share
-/// a measure — `agent.tokens.total` is an UNFILTERED sum over `oxplow.tokens`,
-/// so cache facts there would silently change its meaning.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TokenKind {
-    Input,
-    Output,
-    CacheRead,
-    CacheCreation,
-}
-
-impl TokenKind {
-    /// The conformed `oxplow.token_kind` dimension value.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            TokenKind::Input => "input",
-            TokenKind::Output => "output",
-            TokenKind::CacheRead => "cache_read",
-            TokenKind::CacheCreation => "cache_creation",
-        }
-    }
-
-    /// Whether this kind rides `oxplow.cache_tokens` rather than
-    /// `oxplow.tokens` (see the enum docs for why they're separate).
-    pub fn is_cache(self) -> bool {
-        matches!(self, TokenKind::CacheRead | TokenKind::CacheCreation)
-    }
-}
+/// ⚠️ Facts route kinds to DIFFERENT measures: Input/Output →
+/// `oxplow.tokens`, cache kinds → `oxplow.cache_tokens`. They must never
+/// share a measure — `agent.tokens.total` is an UNFILTERED sum over
+/// `oxplow.tokens`, so cache facts there would silently change its meaning.
+pub use oxplow_domain::events::schema::TokenKind;
 
 /// One token measurement projected out of an OTLP export: a `value`-token count
 /// for a `(model, kind)` pair, ready to become a `NewFact` on `oxplow.tokens`.
@@ -84,6 +60,41 @@ pub struct TokenFact {
     pub model: String,
     pub kind: TokenKind,
     pub value: i64,
+    /// When the data point or log record was measured (0: it didn't say).
+    pub at_unix_nano: u64,
+}
+
+/// What one OTLP export reported: its token counts, and the end of the
+/// time window they cover — what places them in a turn, since an export
+/// arrives after the turn it measured.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TokenExport {
+    pub counts: Vec<TokenFact>,
+    pub window_end: Option<oxplow_domain::Timestamp>,
+}
+
+/// Decode an export body: as metrics (Claude), else as logs (Codex points
+/// its one endpoint here, and its token counts ride log events). `None`
+/// when it carries no token counts — most Codex log events don't.
+pub fn decode_token_export(body: &[u8]) -> Option<TokenExport> {
+    let mut counts = decode_metrics_request(body)
+        .map(|req| otlp_metrics_to_token_facts(&req))
+        .unwrap_or_default();
+    if counts.is_empty() {
+        counts = decode_logs_request(body)
+            .map(|req| otlp_logs_to_token_facts(&req))
+            .unwrap_or_default();
+    }
+    if counts.is_empty() {
+        return None;
+    }
+    let window_end = counts
+        .iter()
+        .map(|c| c.at_unix_nano)
+        .max()
+        .filter(|n| *n > 0)
+        .map(|n| oxplow_domain::Timestamp::from_unix_ms((n / 1_000_000) as i64));
+    Some(TokenExport { counts, window_end })
 }
 
 /// Decode an OTLP/HTTP protobuf metrics export body.
@@ -145,6 +156,7 @@ fn collect_claude(m: &Metric, resource_attrs: &[KeyValue], out: &mut Vec<TokenFa
             model: model_attr(&dp.attributes, resource_attrs),
             kind,
             value,
+            at_unix_nano: dp.time_unix_nano,
         });
     }
 }
@@ -167,6 +179,7 @@ fn collect_codex(m: &Metric, resource_attrs: &[KeyValue], out: &mut Vec<TokenFac
             model: model_attr(&dp.attributes, resource_attrs),
             kind,
             value,
+            at_unix_nano: dp.time_unix_nano,
         });
     }
 }
@@ -197,6 +210,11 @@ pub fn otlp_logs_to_token_facts(req: &ExportLogsServiceRequest) -> Vec<TokenFact
                 let output = int_attr(a, "output_token_count").unwrap_or(0);
                 let reasoning = int_attr(a, "reasoning_token_count").unwrap_or(0);
                 let model = model_attr(a, resource_attrs);
+                let at_unix_nano = if lr.time_unix_nano > 0 {
+                    lr.time_unix_nano
+                } else {
+                    lr.observed_time_unix_nano
+                };
                 // new (uncached) input this request; reasoning folded into
                 // output; the cached prefix is its own CacheRead fact (tsk73).
                 let new_input = (input - cached).max(0);
@@ -206,6 +224,7 @@ pub fn otlp_logs_to_token_facts(req: &ExportLogsServiceRequest) -> Vec<TokenFact
                         model: model.clone(),
                         kind: TokenKind::Input,
                         value: new_input,
+                        at_unix_nano,
                     });
                 }
                 if cached > 0 {
@@ -213,6 +232,7 @@ pub fn otlp_logs_to_token_facts(req: &ExportLogsServiceRequest) -> Vec<TokenFact
                         model: model.clone(),
                         kind: TokenKind::CacheRead,
                         value: cached,
+                        at_unix_nano,
                     });
                 }
                 if out_total > 0 {
@@ -220,6 +240,7 @@ pub fn otlp_logs_to_token_facts(req: &ExportLogsServiceRequest) -> Vec<TokenFact
                         model,
                         kind: TokenKind::Output,
                         value: out_total,
+                        at_unix_nano,
                     });
                 }
             }
@@ -446,6 +467,17 @@ fn fmt_attr_value(v: &any_value::Value) -> String {
 /// for `model`. Shared with the ingest-service tests in `token_usage.rs`.
 #[cfg(test)]
 pub(crate) fn encoded_claude_export(model: &str, input: i64, output: i64) -> Vec<u8> {
+    encoded_claude_export_at(model, input, output, None)
+}
+
+/// [`encoded_claude_export`] whose points say they were measured `at`.
+#[cfg(test)]
+pub(crate) fn encoded_claude_export_at(
+    model: &str,
+    input: i64,
+    output: i64,
+    at: Option<oxplow_domain::Timestamp>,
+) -> Vec<u8> {
     use opentelemetry_proto::tonic::common::v1::AnyValue;
     use opentelemetry_proto::tonic::metrics::v1::{
         Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
@@ -457,9 +489,11 @@ pub(crate) fn encoded_claude_export(model: &str, input: i64, output: i64) -> Vec
         }),
         ..Default::default()
     };
+    let time_unix_nano = at.map_or(0, |t| t.unix_ms() as u64 * 1_000_000);
     let point = |ty: &str, val: i64| NumberDataPoint {
         attributes: vec![kv("type", ty), kv("model", model)],
         value: Some(number_data_point::Value::AsInt(val)),
+        time_unix_nano,
         ..Default::default()
     };
     ExportMetricsServiceRequest {
@@ -583,6 +617,21 @@ mod tests {
         }
     }
 
+    /// tsk860: an export says when it was measured — the latest of its
+    /// points' times — which is what places it in a turn; one that doesn't
+    /// say has no window end, and a body with no token counts is none.
+    #[test]
+    fn an_export_reports_its_window_end() {
+        let at = oxplow_domain::Timestamp::from_unix_ms(1_790_000_000_000);
+        let export = decode_token_export(&encoded_claude_export_at("m", 100, 20, Some(at)))
+            .expect("token counts");
+        assert_eq!(export.window_end, Some(at));
+        assert_eq!(export.counts.len(), 2);
+        let undated = decode_token_export(&encoded_claude_export("m", 100, 20)).unwrap();
+        assert_eq!(undated.window_end, None);
+        assert_eq!(decode_token_export(b"not otlp"), None);
+    }
+
     #[test]
     fn claude_counter_maps_all_four_token_kinds() {
         let facts = otlp_metrics_to_token_facts(&claude_request());
@@ -591,21 +640,25 @@ mod tests {
             model: "claude-opus-4-8".into(),
             kind: TokenKind::Input,
             value: 100,
+            at_unix_nano: 0,
         }));
         assert!(facts.contains(&TokenFact {
             model: "claude-opus-4-8".into(),
             kind: TokenKind::Output,
             value: 20,
+            at_unix_nano: 0,
         }));
         assert!(facts.contains(&TokenFact {
             model: "claude-opus-4-8".into(),
             kind: TokenKind::CacheRead,
             value: 5000,
+            at_unix_nano: 0,
         }));
         assert!(facts.contains(&TokenFact {
             model: "claude-opus-4-8".into(),
             kind: TokenKind::CacheCreation,
             value: 700,
+            at_unix_nano: 0,
         }));
     }
 

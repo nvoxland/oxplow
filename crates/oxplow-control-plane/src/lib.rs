@@ -203,11 +203,11 @@ async fn handle_dev_ping() -> Response {
 }
 
 /// OTLP/HTTP metrics receiver (epic tsk22). Agent CLIs (Claude Code, Codex)
-/// export token-usage metrics here. Attribution reuses the hook spine: the
-/// owning thread/stream ride the `X-Oxplow-Thread`/`X-Oxplow-Stream` headers the
-/// spawn path injects into the exporter (one agent process per thread, so the
-/// headers are constant for its lifetime). The protobuf body is decoded +
-/// projected onto `oxplow.tokens` facts by the token-usage service.
+/// export token usage here. Attribution reuses the hook spine: the owning
+/// thread rides the `X-Oxplow-Thread` header the spawn path injects into the
+/// exporter (one agent process per thread, so it is constant for its
+/// lifetime). The body is logged as one `agent.tokens.reported` event
+/// (`oxplow_app::otlp_ingest`); the `token_usage.otlp` consumer counts it.
 ///
 /// Always answers 200 (an empty OTLP success ack): token capture is a
 /// best-effort side-band, and a non-2xx would make the exporter retry-storm a
@@ -225,28 +225,20 @@ async fn handle_otlp_metrics(
     // to discover an agent's real OTEL shape (e.g. Codex) from a live run.
     // Off by default, zero cost when unset.
     otlp_debug_dump(&headers, &body);
-    let stream_id = headers
-        .get("x-oxplow-stream")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .and_then(StreamId::try_from_str);
     let thread_id = headers
         .get("x-oxplow-thread")
         .and_then(|v| v.to_str().ok())
         .filter(|s| !s.is_empty())
         .and_then(ThreadId::try_from_str);
-    let (Some(stream_id), Some(thread_id)) = (stream_id, thread_id) else {
-        warn!("OTLP metrics export missing X-Oxplow-Thread/Stream headers; dropping");
+    let Some(thread_id) = thread_id else {
+        warn!("OTLP export missing the X-Oxplow-Thread header; dropping");
         return otlp_ok();
     };
-    match ctx
-        .services
-        .token_usage
-        .ingest_otlp_tokens(&thread_id, &stream_id, &body)
-        .await
-    {
-        Ok(n) => tracing::debug!(facts = n, "ingested OTLP token export"),
-        Err(err) => warn!(?err, "failed to ingest OTLP token export"),
+    // Logged as `agent.tokens.reported`; the `token_usage.otlp` consumer
+    // counts it.
+    match ctx.services.otlp_ingest.ingest(thread_id, &body).await {
+        Ok(logged) => tracing::debug!(logged, "OTLP token export"),
+        Err(err) => warn!(?err, "failed to log OTLP token export"),
     }
     otlp_ok()
 }
@@ -268,10 +260,9 @@ fn otlp_debug_dump(headers: &HeaderMap, body: &[u8]) {
             .unwrap_or("<none>")
     };
     let entry = format!(
-        "=== OTLP export ({} bytes) thread={} stream={} ===\n{}\n\n",
+        "=== OTLP export ({} bytes) thread={} ===\n{}\n\n",
         body.len(),
         hdr("x-oxplow-thread"),
-        hdr("x-oxplow-stream"),
         oxplow_app::otlp_tokens::summarize_metrics_request(body),
     );
     use std::io::Write;

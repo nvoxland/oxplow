@@ -153,6 +153,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<AgentStatusChanged>()
             .expect("core type registers");
+        r.register::<AgentTokensReported>()
+            .expect("core type registers");
         r.register::<TestRunRecorded>()
             .expect("core type registers");
         r.register::<TestCoverageRecorded>()
@@ -1077,6 +1079,64 @@ impl EventType for AgentSessionEnded {
     type Payload = AgentSessionEndedV1;
 }
 
+/// A kind of token an agent's telemetry counts. Cache kinds are their
+/// own: a sum over input and output must never include them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenKind {
+    Input,
+    Output,
+    CacheRead,
+    CacheCreation,
+}
+
+impl TokenKind {
+    /// The conformed `oxplow.token_kind` dimension value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TokenKind::Input => "input",
+            TokenKind::Output => "output",
+            TokenKind::CacheRead => "cache_read",
+            TokenKind::CacheCreation => "cache_creation",
+        }
+    }
+
+    /// Whether it is a cache kind (counted on its own measure).
+    pub fn is_cache(self) -> bool {
+        matches!(self, TokenKind::CacheRead | TokenKind::CacheCreation)
+    }
+}
+
+/// One count an agent's telemetry reported: `value` tokens of `kind` for
+/// `model`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TokenCount {
+    pub model: String,
+    pub kind: TokenKind,
+    pub value: u64,
+}
+
+/// `agent.tokens.reported@1`: an agent's own telemetry (an OTLP export)
+/// reported token counts. Anchored to the turn the export's time window
+/// fell in — exports lag the turn — and the thread's single open effort.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentTokensReportedV1 {
+    pub thread: String,
+    pub counts: Vec<TokenCount>,
+    /// The end of the export's time window (RFC 3339), when it said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_end: Option<String>,
+}
+
+pub struct AgentTokensReported;
+impl EventType for AgentTokensReported {
+    const TYPE: &'static str = "agent.tokens.reported";
+    const V: u32 = 1;
+    type Payload = AgentTokensReportedV1;
+}
+
 /// `agent.prompt.submitted@1`: a person sent the agent a prompt. Every
 /// prompt logs one; only a prompt with no turn open also opens a turn
 /// (`reprompt` says it landed inside an open one).
@@ -1747,6 +1807,7 @@ mod tests {
                 ("agent.session.ended", 1),
                 ("agent.session.started", 1),
                 ("agent.status.changed", 1),
+                ("agent.tokens.reported", 1),
                 ("agent.tool.finished", 1),
                 ("agent.tool.requested", 1),
                 ("agent.turn.ended", 1),

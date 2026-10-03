@@ -1,0 +1,64 @@
+{
+  "$defs": {
+    "TokenCount": {
+      "additionalProperties": false,
+      "description": "One count an agent's telemetry reported: `value` tokens of `kind` for\n`model`.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/TokenKind"
+        },
+        "model": {
+          "type": "string"
+        },
+        "value": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "model",
+        "kind",
+        "value"
+      ],
+      "type": "object"
+    },
+    "TokenKind": {
+      "description": "A kind of token an agent's telemetry counts. Cache kinds are their\nown: a sum over input and output must never include them.",
+      "enum": [
+        "input",
+        "output",
+        "cache_read",
+        "cache_creation"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.tokens.reported@1`: an agent's own telemetry (an OTLP export)\nreported token counts. Anchored to the turn the export's time window\nfell in — exports lag the turn — and the thread's single open effort.",
+  "properties": {
+    "counts": {
+      "items": {
+        "$ref": "#/$defs/TokenCount"
+      },
+      "type": "array"
+    },
+    "thread": {
+      "type": "string"
+    },
+    "window_end": {
+      "description": "The end of the export's time window (RFC 3339), when it said.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "thread",
+    "counts"
+  ],
+  "title": "AgentTokensReportedV1",
+  "type": "object"
+}

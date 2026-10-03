@@ -53,8 +53,8 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
     const BRANCH_DIMS: &[&str] = &["branch"];
     const TREE_DIMS: &[&str] = &["branch", "vcs_rev"];
     &[
-        // otel-tokens (token_usage.rs::ingest_otlp_tokens, via the OTLP
-        // receiver — tsk22). The `producer` field is descriptor metadata; the
+        // otel-tokens (token_usage.rs::record_reported, counting the OTLP
+        // receiver's `agent.tokens.reported` — tsk22, P10.M2). The `producer` field is descriptor metadata; the
         // token facts arrive under the `otel-tokens` capture producer.
         ProducerMetric {
             key: "agent.tokens.input",

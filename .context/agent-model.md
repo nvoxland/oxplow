@@ -287,9 +287,12 @@ streamId-derivation in other MCP tools).
 sibling `POST /v1/metrics` OTLP receiver beside `/hook` and `/mcp`
 (`handle_otlp_metrics`, same bearer auth). Claude Code's launch env
 (`terminal.rs::claude_otel_env`) points its OTEL metrics exporter at it and
-attaches `X-Oxplow-Thread`/`X-Oxplow-Stream` as OTLP headers (one process per
-thread → constant), so the receiver attributes the `claude_code.token.usage`
-counter onto `oxplow.tokens` facts without a session→thread lookup. Cache
+attaches `X-Oxplow-Thread` as an OTLP header (one process per thread →
+constant), so the receiver attributes the `claude_code.token.usage` counter
+without a session→thread lookup. Each export is logged as one
+`agent.tokens.reported` event anchored to the turn it measured (P10.M2,
+`otlp_ingest.rs`); the `token_usage.otlp` consumer turns it into
+`oxplow.tokens` facts. Cache
 kinds (`cacheRead`/`cacheCreation`) are tracked too (tsk73) — on the separate
 `oxplow.cache_tokens`/`oxplow.cache_usage` measures, feeding
 `agent.tokens.cache_read`/`cache_creation`/`cache_hit_pct` and the per-close

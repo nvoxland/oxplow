@@ -1,9 +1,10 @@
 //! Agent token-usage capture (tsk104).
 //!
 //! **Two sources, split by tsk22.** The durable `oxplow.tokens` **facts** now
-//! come from **OpenTelemetry** — [`TokenUsageService::ingest_otlp_tokens`],
-//! fed by the control-plane `POST /v1/metrics` receiver (decode + map in
-//! [`crate::otlp_tokens`]). OTEL is accurate (the agent's own billed counts),
+//! come from **OpenTelemetry**: the control-plane `POST /v1/metrics` receiver
+//! logs each export as `agent.tokens.reported` ([`crate::otlp_ingest`], decode
+//! in [`crate::otlp_tokens`]) and the `token_usage.otlp` consumer counts it
+//! ([`TokenUsageService::record_reported`]). OTEL is accurate (the agent's own billed counts),
 //! multi-agent, and format-stable; the old transcript parse overcounted ~2–3×
 //! because Claude repeats a message's cumulative `usage` on every content-block
 //! JSONL line and [`parse_claude_usage`] summed every line (the dedupe-by
@@ -635,7 +636,7 @@ impl TokenUsageService {
         rec: &TurnRecord,
     ) -> Result<(), DomainError> {
         // Turn facts only (epic tsk22): the `oxplow.tokens` facts now come from
-        // the OTEL producer (`ingest_otlp_tokens`) — accurate + multi-agent —
+        // the OTEL producer (`record_reported`) — accurate + multi-agent —
         // so the transcript path projects just the `oxplow.turn` count (one
         // fact per model; additive event measure, model a conformed dimension).
         // The per-turn `agent_token_usage` rows (with prompt text) are recorded
@@ -679,90 +680,39 @@ impl TokenUsageService {
         Ok(())
     }
 
-    /// Ingest an OTLP metrics export (epic tsk22) — the OpenTelemetry successor
-    /// to the transcript-parse token facts. Decode the protobuf `body` as OTLP
-    /// **metrics** (Claude's `claude_code.token.usage` counter) or, failing that,
-    /// as OTLP **logs** (Codex's `response.completed` event — its real token
-    /// source; Codex points its single OTLP endpoint here), project the token
-    /// counts onto the token measures (per-model, sliced by
-    /// `oxplow.token_kind`): input/output → `oxplow.tokens`, cache kinds →
-    /// `oxplow.cache_tokens`, plus one per-model `oxplow.cache_usage` hit-ratio
-    /// fact (tsk73) — all under one capture attributed to `thread`/`stream`
-    /// plus the thread's single open effort when unambiguous (same resolution
-    /// as [`Self::on_stop`]). The capture carries an idempotency
-    /// key over the raw body, so a retransmit of the same export is a no-op.
-    /// Returns the number of token facts the export mapped to. A body that is
-    /// neither metrics nor logs (most Codex log events aren't token events) is a
-    /// quiet `Ok(0)`, not an error — so the receiver never warn-spams.
-    pub async fn ingest_otlp_tokens(
+    /// Count an agent's reported tokens (`agent.tokens.reported`, logged
+    /// by [`crate::otlp_ingest`] from an OTLP export — the OpenTelemetry
+    /// successor to the transcript-parse token facts, epic tsk22): per
+    /// model and kind, input/output on `oxplow.tokens`, cache kinds on
+    /// `oxplow.cache_tokens`, plus one per-model `oxplow.cache_usage`
+    /// hit-ratio fact (tsk73) — all under one capture carrying the event's
+    /// thread, stream, effort and turn, keyed by the event so a redelivery
+    /// counts nothing twice. How many facts it wrote.
+    pub async fn record_reported(
         &self,
-        thread: &ThreadId,
-        stream: &StreamId,
-        body: &[u8],
+        event: &oxplow_domain::StoredEvent,
     ) -> Result<usize, DomainError> {
-        // Claude sends metrics; Codex sends its token counts as logs (to the
-        // same endpoint). Try metrics; if that yields no token facts (decode
-        // failed, OR a non-token metrics body, OR a logs body that happened to
-        // decode as empty metrics), try logs. A body that is neither is a quiet
-        // no-op — so the receiver never warn-spams on Codex's non-token logs.
-        let mut token_facts = crate::otlp_tokens::decode_metrics_request(body)
-            .map(|req| crate::otlp_tokens::otlp_metrics_to_token_facts(&req))
-            .unwrap_or_default();
-        if token_facts.is_empty() {
-            token_facts = crate::otlp_tokens::decode_logs_request(body)
-                .map(|req| crate::otlp_tokens::otlp_logs_to_token_facts(&req))
-                .unwrap_or_default();
-        }
-        if token_facts.is_empty() {
+        use oxplow_domain::events::schema::{AgentTokensReportedV1, TokenKind};
+        let env = &event.envelope;
+        let (Some(thread), Some(stream)) = (env.anchors.thread_id, env.anchors.stream_id) else {
             return Ok(0);
-        }
+        };
+        let reported: AgentTokensReportedV1 = serde_json::from_value(env.payload.clone())
+            .map_err(|e| DomainError::Invalid(format!("agent.tokens.reported: {e}")))?;
         // Stop-collecting gates (tsk31), one per measure this export can feed:
         // input/output → `oxplow.tokens` (the agent.tokens.* specs), cache
         // kinds → `oxplow.cache_tokens`, and the per-model hit-ratio fact →
         // `oxplow.cache_usage` (tsk73). Cache rides SEPARATE measures because
         // `agent.tokens.total` is an unfiltered sum over `oxplow.tokens` —
-        // cache facts there would silently change its meaning. Still a 200 ack
-        // to the exporter either way (the caller answers).
-        let tokens_measure = if self
-            .facts
-            .measure_has_active_spec("oxplow.tokens")
-            .await
-            .unwrap_or(true)
-        {
-            self.facts.get_measure("oxplow.tokens").await?
-        } else {
-            None
-        };
-        let cache_measure = if self
-            .facts
-            .measure_has_active_spec("oxplow.cache_tokens")
-            .await
-            .unwrap_or(true)
-        {
-            self.facts.get_measure("oxplow.cache_tokens").await?
-        } else {
-            None
-        };
-        let usage_measure = if self
-            .facts
-            .measure_has_active_spec("oxplow.cache_usage")
-            .await
-            .unwrap_or(true)
-        {
-            self.facts.get_measure("oxplow.cache_usage").await?
-        } else {
-            None
-        };
+        // cache facts there would silently change its meaning.
+        let tokens_measure = self.active_measure("oxplow.tokens").await?;
+        let cache_measure = self.active_measure("oxplow.cache_tokens").await?;
+        let usage_measure = self.active_measure("oxplow.cache_usage").await?;
         if tokens_measure.is_none() && cache_measure.is_none() && usage_measure.is_none() {
             return Ok(0);
         }
-        let effort_val = self
-            .efforts
-            .find_single_open_for_thread(thread)
-            .await?
-            .map(|e| e.id.value());
-        // json! (not format!) — the model id is verbatim from the OTLP export;
-        // a quote/backslash must not poison the dims JSON.
+        // json! (not format!) — the model id is verbatim from the export; a
+        // quote/backslash must not poison the dims JSON.
         let kind_dims = |model: &str, kind: &str| {
             serde_json::json!({
                 "oxplow.model": model,
@@ -771,8 +721,8 @@ impl TokenUsageService {
             .to_string()
         };
         let mut facts: Vec<NewFact> = Vec::new();
-        for tf in &token_facts {
-            let measure = if tf.kind.is_cache() {
+        for c in &reported.counts {
+            let measure = if c.kind.is_cache() {
                 &cache_measure
             } else {
                 &tokens_measure
@@ -780,9 +730,9 @@ impl TokenUsageService {
             let Some(m) = measure else { continue };
             facts.push(NewFact {
                 subject_kind: Some("model".into()),
-                subject_ref: Some(format!("model:{}", tf.model)),
-                dims_json: Some(kind_dims(&tf.model, tf.kind.as_str())),
-                ..NewFact::new(m.id, tf.value as f64)
+                subject_ref: Some(format!("model:{}", c.model)),
+                dims_json: Some(kind_dims(&c.model, c.kind.as_str())),
+                ..NewFact::new(m.id, c.value as f64)
             });
         }
         // Per-model prompt-cache hit ratio (tsk73): num = cache_read, den =
@@ -791,15 +741,14 @@ impl TokenUsageService {
         // all — an agent that doesn't report cache kinds must read as "no
         // data", not a string of 0% points dragging the cumulative Σn/Σd.
         if let Some(um) = &usage_measure {
-            use crate::otlp_tokens::TokenKind;
             let mut by_model: std::collections::BTreeMap<&str, (f64, f64, f64)> =
                 std::collections::BTreeMap::new();
-            for tf in &token_facts {
-                let e = by_model.entry(tf.model.as_str()).or_default();
-                match tf.kind {
-                    TokenKind::Input => e.0 += tf.value as f64,
-                    TokenKind::CacheRead => e.1 += tf.value as f64,
-                    TokenKind::CacheCreation => e.2 += tf.value as f64,
+            for c in &reported.counts {
+                let e = by_model.entry(c.model.as_str()).or_default();
+                match c.kind {
+                    TokenKind::Input => e.0 += c.value as f64,
+                    TokenKind::CacheRead => e.1 += c.value as f64,
+                    TokenKind::CacheCreation => e.2 += c.value as f64,
                     TokenKind::Output => {}
                 }
             }
@@ -825,27 +774,49 @@ impl TokenUsageService {
         let mut capture = NewMetricCapture::done(stream.value(), "otel-tokens", "otel");
         capture.thread_id = Some(thread.value());
         capture.trigger = Some("continuous".into());
-        capture.effort_id = effort_val;
-        capture.idempotency_key = Some(otlp_idempotency_key(thread, body));
+        capture.effort_id = env.anchors.effort_id.map(|e| e.value());
+        capture.turn_id = env.anchors.turn_id;
+        capture.idempotency_key = Some(format!("otel-tokens:{}", env.id.as_str()));
         self.facts.record_facts(capture, facts).await?;
         Ok(count)
     }
+
+    /// `key`'s measure, when a spec still consumes it (tsk31).
+    async fn active_measure(&self, key: &str) -> Result<Option<oxplow_db::Measure>, DomainError> {
+        if !self
+            .facts
+            .measure_has_active_spec(key)
+            .await
+            .unwrap_or(true)
+        {
+            return Ok(None);
+        }
+        self.facts.get_measure(key).await
+    }
 }
 
-/// Idempotency key for an OTLP token-export capture. The raw request body
-/// carries each delta data point's window timestamps, so two distinct export
-/// intervals hash differently while an SDK retransmit of the same export hashes
-/// identically — `record_facts` no-ops the repeat via the `metric_capture`
-/// partial-unique index (V51).
-fn otlp_idempotency_key(thread: &ThreadId, body: &[u8]) -> String {
-    let mut buf = Vec::with_capacity(8 + body.len());
-    buf.extend_from_slice(&thread.value().to_le_bytes());
-    buf.extend_from_slice(body);
-    format!(
-        "otel-tokens:{}:{:032x}",
-        thread.value(),
-        xxhash_rust::xxh3::xxh3_128(&buf)
-    )
+/// The OTLP consumer's name (its checkpoint key).
+pub const OTLP_TOKENS: &str = "token_usage.otlp";
+
+/// Counts an agent's reported tokens (`agent.tokens.reported`) into facts
+/// (P10.M2): the only writer of the OTLP token facts.
+pub struct OtlpTokensConsumer {
+    pub tokens: TokenUsageService,
+}
+
+#[async_trait::async_trait]
+impl crate::event_pump::AsyncEventConsumer for OtlpTokensConsumer {
+    fn name(&self) -> &'static str {
+        OTLP_TOKENS
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        event_type == "agent.tokens.reported"
+    }
+
+    async fn handle(&self, event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
+        self.tokens.record_reported(event).await.map(|_| ())
+    }
 }
 
 /// The reactor's consumer name (its checkpoint key).
@@ -1469,20 +1440,21 @@ mod tests {
         assert!(id.is_none());
     }
 
+    /// An agent's export, logged and counted (P10.M2).
+    async fn report(svc: &crate::Services, thread: ThreadId, body: &[u8]) -> bool {
+        let logged = svc.otlp_ingest.ingest(thread, body).await.unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        logged
+    }
+
     #[tokio::test]
-    async fn ingest_otlp_tokens_records_facts_and_is_idempotent() {
+    async fn a_reported_export_records_facts_once() {
         // tsk22: an OTLP metrics export lands per-kind token facts on
         // `oxplow.tokens`, and a retransmit of the identical export is a no-op.
         let (svc, _dir, thread) = service_fixture().await;
-        let stream = svc.streams.ensure_primary().await.unwrap().id;
         let body = crate::otlp_tokens::encoded_claude_export("claude-opus-4-8", 100, 20);
 
-        let n = svc
-            .token_usage
-            .ingest_otlp_tokens(&thread, &stream, &body)
-            .await
-            .unwrap();
-        assert_eq!(n, 2, "one input + one output fact");
+        assert!(report(&svc, thread, &body).await);
 
         let measure = svc
             .fact_store
@@ -1506,10 +1478,7 @@ mod tests {
         assert_eq!(input.subject_ref.as_deref(), Some("model:claude-opus-4-8"));
 
         // Re-ingesting the identical export must not double-count (idempotency).
-        svc.token_usage
-            .ingest_otlp_tokens(&thread, &stream, &body)
-            .await
-            .unwrap();
+        assert!(!report(&svc, thread, &body).await);
         let facts_after = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
         assert_eq!(facts_after.len(), 2, "retransmit is a no-op");
 
@@ -1531,13 +1500,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ingest_otlp_tokens_records_cache_facts_and_hit_ratio() {
+    async fn a_reported_export_records_cache_facts_and_hit_ratio() {
         // tsk73: cache kinds land on `oxplow.cache_tokens` (NOT `oxplow.tokens`
         // — `agent.tokens.total` must keep meaning input+output), plus one
         // per-model `oxplow.cache_usage` ratio fact: num = cache_read, den =
         // prompt-side total (input + cache_read + cache_creation).
         let (svc, _dir, thread) = service_fixture().await;
-        let stream = svc.streams.ensure_primary().await.unwrap().id;
         let body = crate::otlp_tokens::encoded_claude_export_with_cache(
             "claude-fable-5",
             100, // input
@@ -1546,12 +1514,7 @@ mod tests {
             200, // cacheCreation
         );
 
-        let n = svc
-            .token_usage
-            .ingest_otlp_tokens(&thread, &stream, &body)
-            .await
-            .unwrap();
-        assert_eq!(n, 5, "input + output + 2 cache facts + 1 ratio fact");
+        assert!(report(&svc, thread, &body).await);
 
         // input/output stay on oxplow.tokens — total is NOT cache-polluted.
         let tokens = svc
@@ -1610,12 +1573,8 @@ mod tests {
         // An agent that reports no cache telemetry must read as "no data",
         // not a 0% point dragging the cumulative hit ratio down.
         let (svc, _dir, thread) = service_fixture().await;
-        let stream = svc.streams.ensure_primary().await.unwrap().id;
         let body = crate::otlp_tokens::encoded_claude_export("claude-fable-5", 100, 20);
-        svc.token_usage
-            .ingest_otlp_tokens(&thread, &stream, &body)
-            .await
-            .unwrap();
+        report(&svc, thread, &body).await;
         let usage = svc
             .fact_store
             .get_measure("oxplow.cache_usage")
@@ -1634,7 +1593,7 @@ mod tests {
     async fn on_stop_projects_turn_facts_not_token_facts() {
         // tsk22 (transcript split): the Stop-hook transcript path now projects
         // only `oxplow.turn` facts — the `oxplow.tokens` facts come from the
-        // OTEL producer (see `ingest_otlp_tokens_records_facts_and_is_idempotent`).
+        // OTEL producer (see `a_reported_export_records_facts_once`).
         let (svc, _dir, thread) = service_fixture().await;
         let tdir = tempfile::tempdir().unwrap();
         let path = tdir.path().join("session.jsonl");

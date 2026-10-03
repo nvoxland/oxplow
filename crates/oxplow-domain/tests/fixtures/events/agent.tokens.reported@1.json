@@ -1,0 +1,9 @@
+{
+  "thread": "thread:thr3",
+  "counts": [
+    { "model": "claude-opus-4-8", "kind": "input", "value": 100 },
+    { "model": "claude-opus-4-8", "kind": "output", "value": 20 },
+    { "model": "claude-opus-4-8", "kind": "cache_read", "value": 700 }
+  ],
+  "window_end": "2026-10-03T19:00:00.000Z"
+}

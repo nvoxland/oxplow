@@ -86,7 +86,6 @@ fn codex_config_overrides(
 /// which maps straight onto the additive `oxplow.tokens` facts.
 fn claude_otel_env(
     plugin_runtime: &crate::PluginRuntime,
-    stream_id: &str,
     thread_id: &str,
 ) -> Vec<(String, String)> {
     vec![
@@ -104,8 +103,8 @@ fn claude_otel_env(
         (
             "OTEL_EXPORTER_OTLP_HEADERS".to_string(),
             format!(
-                "Authorization=Bearer {},X-Oxplow-Thread={},X-Oxplow-Stream={}",
-                plugin_runtime.hook_token, thread_id, stream_id
+                "Authorization=Bearer {},X-Oxplow-Thread={}",
+                plugin_runtime.hook_token, thread_id
             ),
         ),
         // 10s (default is 60s) — snappier token updates in the UI.
@@ -120,15 +119,10 @@ fn claude_otel_env(
 /// oxplow's receiver (tsk24). Codex has NO OTEL env vars — config only. The
 /// http exporter is protobuf ("binary"); the endpoint is the FULL signal URL
 /// (`<base>/v1/metrics` — Codex uses it as-is, unlike Claude which appends the
-/// signal path). Attribution + auth ride the same `X-Oxplow-*` + bearer headers
-/// the receiver reads. The tagged-union `otel.exporter.otlp-http.*` keys select
+/// signal path). Attribution + auth ride the `X-Oxplow-Thread` + bearer headers
+/// the receiver reads (the thread names its stream). The tagged-union `otel.exporter.otlp-http.*` keys select
 /// the http exporter (default is `none`).
-fn codex_otel_overrides(
-    otlp_base_url: &str,
-    hook_token: &str,
-    thread_id: &str,
-    stream_id: &str,
-) -> Vec<String> {
+fn codex_otel_overrides(otlp_base_url: &str, hook_token: &str, thread_id: &str) -> Vec<String> {
     let endpoint = format!("{otlp_base_url}/v1/metrics");
     vec![
         format!(
@@ -143,10 +137,6 @@ fn codex_otel_overrides(
         format!(
             "otel.exporter.otlp-http.headers.x-oxplow-thread={}",
             toml_cli_string(thread_id)
-        ),
-        format!(
-            "otel.exporter.otlp-http.headers.x-oxplow-stream={}",
-            toml_cli_string(stream_id)
         ),
     ]
 }
@@ -393,7 +383,6 @@ pub async fn open_terminal_session(
     if agent == AgentKind::Claude {
         plugin_env.extend(claude_otel_env(
             plugin_runtime,
-            &stream.id.to_string(),
             thread_id_str.as_deref().unwrap_or_default(),
         ));
     }
@@ -446,7 +435,6 @@ pub async fn open_terminal_session(
                 &plugin_runtime.otlp_base_url,
                 &plugin_runtime.hook_token,
                 thread_id_str.as_deref().unwrap_or_default(),
-                &stream.id.to_string(),
             ));
         }
         oxplow_plugin::AgentRuntimePaths::Opencode(paths) => {
@@ -700,14 +688,14 @@ mod tests {
             hook_token: "tok123".into(),
         };
         let env: std::collections::HashMap<String, String> =
-            claude_otel_env(&pr, "str1", "thr1").into_iter().collect();
+            claude_otel_env(&pr, "thr1").into_iter().collect();
         assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
         assert_eq!(env["OTEL_METRICS_EXPORTER"], "otlp");
         assert_eq!(env["OTEL_EXPORTER_OTLP_PROTOCOL"], "http/protobuf");
         assert_eq!(env["OTEL_EXPORTER_OTLP_ENDPOINT"], "http://127.0.0.1:9");
         assert_eq!(
             env["OTEL_EXPORTER_OTLP_HEADERS"],
-            "Authorization=Bearer tok123,X-Oxplow-Thread=thr1,X-Oxplow-Stream=str1"
+            "Authorization=Bearer tok123,X-Oxplow-Thread=thr1"
         );
         assert_eq!(env["OTEL_METRIC_EXPORT_INTERVAL"], "10000");
     }
@@ -717,7 +705,7 @@ mod tests {
         // tsk24: Codex OTEL is config-only (`--config`). Pin the keys — the
         // endpoint is the full /v1/metrics signal URL, protobuf ("binary"),
         // and the bearer + attribution headers ride the exporter's headers map.
-        let ov = codex_otel_overrides("http://127.0.0.1:9", "tok123", "thr1", "str1");
+        let ov = codex_otel_overrides("http://127.0.0.1:9", "tok123", "thr1");
         assert!(ov.contains(
             &"otel.exporter.otlp-http.endpoint=\"http://127.0.0.1:9/v1/metrics\"".to_string()
         ));
@@ -728,9 +716,7 @@ mod tests {
         assert!(
             ov.contains(&"otel.exporter.otlp-http.headers.x-oxplow-thread=\"thr1\"".to_string())
         );
-        assert!(
-            ov.contains(&"otel.exporter.otlp-http.headers.x-oxplow-stream=\"str1\"".to_string())
-        );
+        assert!(!ov.iter().any(|o| o.contains("x-oxplow-stream")));
     }
 
     #[test]

@@ -64,6 +64,27 @@ pub fn activity_anchors_tx(conn: &Connection, thread: ThreadId) -> Result<Anchor
     Ok(anchors)
 }
 
+/// The turn on `thread` that something measured at `at` happened in: the
+/// newest one started at or before `at` — the one whose span holds it, or
+/// the last before it when it fell between turns. `None` before the
+/// thread's first turn. What places a report that arrives after its turn
+/// ended (an agent's telemetry export).
+pub fn turn_at_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    at: Timestamp,
+) -> Result<Option<AgentTurnId>, DomainError> {
+    conn.query_row(
+        "SELECT id FROM agent_turn WHERE thread_id = ?1 AND started_at <= ?2
+          ORDER BY started_at DESC, id DESC LIMIT 1",
+        params![thread.value(), ts_to_string(at)],
+        |r| r.get::<_, i64>(0),
+    )
+    .optional()
+    .map(|id| id.map(AgentTurnId::new))
+    .map_err(map_sql_err)
+}
+
 /// The thread's open turns, newest first.
 pub fn open_turn_ids_tx(
     conn: &Connection,
