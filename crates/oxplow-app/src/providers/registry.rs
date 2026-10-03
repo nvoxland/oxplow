@@ -828,6 +828,44 @@ pub(super) fn plugin_key(instance: &str) -> PluginKey {
     }
 }
 
+/// What a removed instance was: enough to find what it left behind.
+struct Gone {
+    ext: String,
+    id: String,
+    /// The provider it was an instance of.
+    provider: String,
+    /// Its credentials' names, when its extension still declares it.
+    credentials: Option<Vec<String>>,
+}
+
+impl Gone {
+    fn of(
+        instance: &str,
+        resolved: Option<Resolved>,
+        configured: Option<&oxplow_config::ExtensionInstanceConfig>,
+    ) -> Gone {
+        match resolved {
+            Some(r) => Gone {
+                ext: r.ext.name.clone(),
+                id: r.id.clone(),
+                provider: r.spec.id.clone(),
+                credentials: Some(r.spec.credential_names()),
+            },
+            None => {
+                let (ext, id) = instance.split_once('/').unwrap_or((instance, ""));
+                Gone {
+                    ext: ext.to_string(),
+                    id: id.to_string(),
+                    provider: configured
+                        .and_then(|c| c.provider.clone())
+                        .unwrap_or_else(|| id.to_string()),
+                    credentials: None,
+                }
+            }
+        }
+    }
+}
+
 /// What an instance name resolves to.
 pub(crate) struct Resolved {
     pub ext: Extension,
@@ -1164,11 +1202,17 @@ impl ProviderRegistry {
                 Ok(r) => self.view_of(&r.ext, &r.spec, &r.id, Some(cfg)),
                 Err(reason) => {
                     let (extension, id) = instance.split_once('/').unwrap_or((instance, ""));
-                    // An instance of an extension this project doesn't
-                    // have is the person's elsewhere: not this project's
-                    // to list.
+                    // A global instance of an extension this project
+                    // doesn't have is the person's elsewhere: not this
+                    // project's to list. One of an extension it has that
+                    // doesn't resolve is listed, so it can be seen and
+                    // removed (tsk841).
                     let (scope, overridden) = self.scope_of(instance);
-                    if scope == Scope::Global {
+                    let here = self
+                        .extensions()
+                        .iter()
+                        .any(|e| e.enabled && e.name == extension);
+                    if scope == Scope::Global && !here {
                         continue;
                     }
                     ProviderInstanceView {
@@ -1767,9 +1811,10 @@ impl ProviderRegistry {
             field: Some("/instance".into()),
             message: format!("no provider instance `{instance}`"),
         };
-        let (resolved, still_there) = {
+        let (gone, home, still_there) = {
             let gate = self.instances_gate.lock().await;
             let resolved = self.resolve(instance).ok();
+            let configured = self.instances_config().get(instance).cloned();
             let in_project = self.project_instances().contains_key(instance);
             let in_global = self.global_instances().contains_key(instance);
             // A project's replacement of a global one: the global one stays.
@@ -1782,33 +1827,62 @@ impl ProviderRegistry {
                 all.remove(instance).map(|_| ()).ok_or_else(missing)
             })
             .await?;
-            (resolved, in_project && in_global)
+            (
+                Gone::of(instance, resolved, configured.as_ref()),
+                home,
+                in_project && in_global,
+            )
         };
         self.reconcile().await;
         // Its credentials go with it — a project's replacement's are its
-        // own, never the global one's that now shows through (tsk838).
-        if let Some(Resolved {
-            ext,
-            spec,
-            id,
-            scope,
-        }) = resolved
-        {
-            for name in &spec.credential_names() {
-                let account = crate::collector_runner::instance_credential_account(
-                    credential_scope(&self.deps, scope),
-                    &ext.name,
-                    &id,
-                    name,
-                );
-                if let Err(e) = self.deps.secrets.delete(&account) {
-                    tracing::warn!(%instance, credential = %name, error = %e, "removing an instance's credential failed");
-                }
+        // own, never the global one's that now shows through (tsk838) —
+        // named by the extension, or, when it no longer declares the
+        // provider (when Remove is offered), by the copy it last ran
+        // (tsk841).
+        let names = match &gone.credentials {
+            Some(names) => names.clone(),
+            None => host::last_ran_credentials(&self.deps.copies, &gone.ext, &gone.provider),
+        };
+        for name in &names {
+            let account = crate::collector_runner::instance_credential_account(
+                credential_scope(&self.deps, home),
+                &gone.ext,
+                &gone.id,
+                name,
+            );
+            if let Err(e) = self.deps.secrets.delete(&account) {
+                tracing::warn!(%instance, credential = %name, error = %e, "removing an instance's credential failed");
             }
         }
-        // The global one showing through keeps the health it now has.
-        if !still_there {
-            self.health.lock().remove(instance);
+        // The global one showing through keeps what it has.
+        if still_there {
+            return Ok(());
+        }
+        self.health.lock().remove(instance);
+        if let Err(e) = self.plugins.forget(&plugin_key(instance)).await {
+            tracing::warn!(%instance, error = %e, "forgetting an instance's health failed");
+        }
+        if let Err(e) = oxplow_db::SqliteProviderCollectorStore::new(self.deps.db.clone())
+            .remove_instance(instance)
+            .await
+        {
+            tracing::warn!(%instance, error = %e, "forgetting an instance's reads failed");
+        }
+        // No capability's active provider is one that's gone.
+        let config = crate::config_service::read_config(&self.deps.config);
+        let mut active = config.active_providers.clone();
+        active.retain(|_, id| *id != gone.id);
+        if active != config.active_providers {
+            let bus = self.bus.upgrade().ok_or_else(|| CommandError::Failed {
+                message: "the command bus is gone".into(),
+            })?;
+            bus.run(
+                actor,
+                crate::commands::config_commands::SET,
+                json!({ "key": "activeProviders", "value": active }),
+                matches!(actor, Actor::Human),
+            )
+            .await?;
         }
         Ok(())
     }

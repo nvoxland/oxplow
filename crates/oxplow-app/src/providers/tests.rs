@@ -2019,6 +2019,130 @@ fn configure_named(
 
 const SECOND: &str = "tracker/fake_second";
 
+/// tsk841: removing an instance — here one whose provider is gone, which
+/// is when the row offers Remove — takes everything of it: its config,
+/// the active-provider choice naming it, its read checkpoints (an
+/// instance added again under the id starts fresh), its health row and
+/// its credentials, read from the copy it last ran when the extension no
+/// longer declares it.
+#[tokio::test]
+async fn removing_an_instance_leaves_nothing_behind() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_extension(&project, "needs:FAKE_TOKEN");
+    let manifest = project
+        .join("oxplow/extensions")
+        .join(EXT)
+        .join("extension.yaml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+    approve(&fx, &extension(&project));
+    let providers = &fx.svc.providers;
+    providers
+        .add_instance(&Actor::Human, SECOND, "fake", Scope::Project)
+        .await
+        .unwrap();
+    providers
+        .set_credential(SECOND, "FAKE_TOKEN", Some("t0ken"))
+        .unwrap();
+    providers
+        .set_instance(&Actor::Human, SECOND, true, json!({ "team": "second" }))
+        .await
+        .unwrap();
+    let states = oxplow_db::SqliteProviderCollectorStore::new(fx.svc.db.clone());
+    for _ in 0..200 {
+        if states
+            .get(SECOND, "work_items")
+            .await
+            .unwrap()
+            .is_some_and(|s| s.status != "reading")
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    fx.svc
+        .commands
+        .run(
+            &Actor::Human,
+            crate::commands::config_commands::SET,
+            json!({ "key": "activeProviders", "value": { "work_items": "fake_second" } }),
+            true,
+        )
+        .await
+        .unwrap();
+    let account = crate::collector_runner::instance_credential_account(
+        &fx.svc.providers.deps.project,
+        EXT,
+        "fake_second",
+        "FAKE_TOKEN",
+    );
+    assert!(fx.svc.secrets.get(&account).unwrap().is_some());
+
+    // Its provider goes from the extension.
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(&manifest, text.replace("- id: fake", "- id: fake_renamed")).unwrap();
+    providers.reconcile().await;
+    providers
+        .remove_instance(&Actor::Human, SECOND)
+        .await
+        .unwrap();
+
+    let config = fx.svc.config.read().unwrap().clone();
+    assert!(!config.extension_instances.contains_key(SECOND));
+    assert_eq!(config.active_providers.get("work_items"), None);
+    assert_eq!(states.for_instance(SECOND).await.unwrap(), vec![]);
+    assert_eq!(
+        oxplow_db::plugin_health_store::SqlitePluginHealthStore::new(fx.svc.db.clone())
+            .get(&registry::plugin_key(SECOND))
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        fx.svc.secrets.get(&account).unwrap(),
+        None,
+        "its credential went"
+    );
+
+    // A global instance of an extension this project has, that doesn't
+    // resolve, is listed — so it can be removed here.
+    let global = fx.svc.layout.state_dir.join("global-config");
+    oxplow_config::GlobalInstances::update(&global, |all| {
+        all.insert(
+            "tracker/fake_lost".into(),
+            oxplow_config::ExtensionInstanceConfig {
+                enabled: true,
+                provider: Some("fake".into()),
+                ..Default::default()
+            },
+        );
+        Ok::<_, ()>(())
+    })
+    .unwrap()
+    .unwrap();
+    providers.reconcile().await;
+    let lost = providers
+        .list()
+        .await
+        .into_iter()
+        .find(|v| v.instance == "tracker/fake_lost")
+        .expect("listed");
+    assert!(
+        matches!(lost.health.state, InstanceState::Missing { .. }),
+        "{:?}",
+        lost.health.state
+    );
+    providers
+        .remove_instance(&Actor::Human, "tracker/fake_lost")
+        .await
+        .unwrap();
+    assert!(oxplow_config::GlobalInstances::load(&global)
+        .unwrap()
+        .instances
+        .is_empty());
+}
+
 /// tsk840: an instance oxplow can't run as configured — its id is a
 /// command namespace something else already owns — says so on its row,
 /// rather than showing enabled and "Off" with no reason.

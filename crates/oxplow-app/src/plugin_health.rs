@@ -142,6 +142,13 @@ impl PluginHealth {
     /// Disable it now, for `reason` — something other than a count of
     /// failures (a provider that no longer answers with its approved
     /// declarations). Logged once: already disabled, nothing changes.
+    /// Forget `key`: its contribution is gone (a removed provider instance).
+    pub async fn forget(&self, key: &PluginKey) -> Result<(), DomainError> {
+        store::SqlitePluginHealthStore::new(self.db.clone())
+            .remove(key)
+            .await
+    }
+
     pub async fn disable(&self, key: &PluginKey, reason: &str) -> Result<(), DomainError> {
         let (key, reason, vocabulary) = (key.clone(), reason.to_string(), self.vocabulary.clone());
         self.db

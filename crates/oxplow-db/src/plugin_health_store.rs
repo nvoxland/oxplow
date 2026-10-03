@@ -250,6 +250,21 @@ impl SqlitePluginHealthStore {
         self.db.read(move |c| get_tx(c, &key)).await
     }
 
+    /// Forget `key`'s row: its contribution is gone.
+    pub async fn remove(&self, key: &PluginKey) -> Result<(), DomainError> {
+        let key = key.clone();
+        self.db
+            .transaction(move |c| {
+                c.execute(
+                    &format!("DELETE FROM plugin_health WHERE {KEY}"),
+                    named_params! { ":plugin": key.plugin, ":kind": key.kind, ":contribution": key.contribution },
+                )
+                .map_err(map_sql_err)?;
+                Ok(())
+            })
+            .await
+    }
+
     pub async fn list(&self) -> Result<Vec<PluginHealthRow>, DomainError> {
         self.db
             .read(|c| {

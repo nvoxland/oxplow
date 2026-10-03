@@ -153,6 +153,22 @@ impl SqliteProviderCollectorStore {
             .await
     }
 
+    /// Forget every collector of `instance`: it was removed, and one added
+    /// again under its name reads from the start.
+    pub async fn remove_instance(&self, instance: &str) -> Result<(), DomainError> {
+        let i = instance.to_string();
+        self.db
+            .transaction(move |tx| {
+                tx.execute(
+                    "DELETE FROM provider_collector_state WHERE instance = ?1",
+                    [&i],
+                )
+                .map_err(map_sql_err)?;
+                Ok(())
+            })
+            .await
+    }
+
     pub async fn finish(
         &self,
         instance: &str,

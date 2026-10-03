@@ -418,6 +418,27 @@ pub fn last_approved(
     })
 }
 
+/// The credentials provider `provider` of extension `ext` declared in the
+/// copy a start of it last ran: what a removed instance's are when the
+/// extension no longer declares the provider (tsk841). None when it never
+/// ran.
+pub fn last_ran_credentials(copies: &Path, ext: &str, provider: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(copies.join(ext).join(provider)) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+        .find_map(|e| {
+            crate::extensions::load_project_extension(&e.path(), ext)
+                .providers
+                .into_iter()
+                .find(|p| p.id == provider)
+                .map(|p| p.credential_names())
+        })
+        .unwrap_or_default()
+}
+
 /// Copy the regular files and directories under `from` to `to`
 /// (permissions kept); a symlink is refused, as the approval refuses it.
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
