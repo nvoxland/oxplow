@@ -302,6 +302,10 @@ names the file and line and says what to change.
    match the protocol, the session must match the golden
    `fixtures/transcripts/<id>.jsonl` (`--bless` writes it when a change is
    intended — commit it), and the work-items conformance suite must pass.
+   An effect's `on:` (and a collector's `trigger: { on: [...] }`) may
+   name another extension's event type (`acme_pr.merged`): `check` warns,
+   and the extension shows an error while no enabled extension registers
+   that type. The payload you get is at the owner's newest version.
    A provider's `credentials:` entry is a name (the person pastes its
    value) or `{ name, oauth: { authorize_url, token_url, client_id,
    scopes } }` (the person signs in on Settings → Integrations; oxplow

@@ -2672,6 +2672,12 @@ export type Extension_Deserialize = {
 	 */
 	effects: EffectDecl[],
 	/**
+	 *  Another extension's event types its effects and collectors react
+	 *  to (P9.D1): each resolves when an enabled extension registers the
+	 *  type (`vocabulary_reactor`).
+	 */
+	subscriptions: ForeignSubscription[],
+	/**
 	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).
 	 */
@@ -2780,6 +2786,12 @@ export type Extension_Serialize = {
 	 *  valid ones — each runs only once a person approves it, `effects`).
 	 */
 	effects: EffectDecl[],
+	/**
+	 *  Another extension's event types its effects and collectors react
+	 *  to (P9.D1): each resolves when an enabled extension registers the
+	 *  type (`vocabulary_reactor`).
+	 */
+	subscriptions: ForeignSubscription[],
 	/**
 	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).
@@ -2898,6 +2910,20 @@ export type Followup = {
 	thread_id: ThreadId,
 	body: string,
 	created_at: number,
+};
+
+/**
+ *  An effect's or collector's `on:` naming an event type of another
+ *  extension's namespace (P9.D1). The type's name is the dependency —
+ *  there is no `depends:` key, as a model's `ref('<ext>/<name>')` has
+ *  none: it resolves when an enabled extension registers the type.
+ */
+export type ForeignSubscription = {
+	// What reacts: "effect `note`", "collector `pull`".
+	by: string,
+	eventType: string,
+	// `file:line` of the declaration.
+	declaredAt: string,
 };
 
 /**

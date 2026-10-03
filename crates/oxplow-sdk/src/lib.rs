@@ -931,6 +931,51 @@ mod tests {
         ));
     }
 
+    /// P9.D1: an effect reacting to another extension's event type checks
+    /// clean with a warning — a check sees one extension, and the type's
+    /// owner may simply not be in this repo.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_reaction_to_another_extensions_type_is_a_warning_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/beta/extension.yaml",
+            "manifest: 2\nname: beta\nsharing: private\nengine: \">=0.1\"\nintent:\n  purpose: Follows merges.\n  examples: [{ name: a }]\neffects:\n  - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/beta/note.star",
+            "def transform(x):\n    return {\"skip\": \"nothing to do\"}\n",
+        );
+        let report = check(
+            dir.path(),
+            "beta",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let reaction = |lines: &[String]| {
+            lines
+                .iter()
+                .filter(|l| l.contains("`acme_pr.merged`"))
+                .count()
+        };
+        assert_eq!(reaction(&report.errors), 0, "{:?}", report.errors);
+        assert_eq!(reaction(&report.warnings), 1, "{:?}", report.warnings);
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("extension.yaml:9")
+                    && w.contains("another extension's event type")),
+            "{:?}",
+            report.warnings
+        );
+    }
+
     /// Launcher command entries are always checked: against the registry
     /// when one is given, else a throwaway oxplow's (P7.C6).
     #[tokio::test(flavor = "multi_thread")]

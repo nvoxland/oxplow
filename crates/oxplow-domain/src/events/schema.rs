@@ -395,6 +395,15 @@ impl EventSchemaRegistry {
     }
 }
 
+/// The namespace of `event_type` when it could be an extension's: a
+/// well-formed type name outside core's namespaces. An extension that
+/// reacts to such a type, not its own, names its owner by it.
+pub fn plugin_type_namespace(event_type: &str) -> Option<&str> {
+    validate_type_name(event_type).ok()?;
+    let ns = namespace_of(event_type);
+    (!CORE_NAMESPACES.contains(&ns)).then_some(ns)
+}
+
 fn namespace_of(event_type: &str) -> &str {
     event_type.split('.').next().unwrap_or("")
 }

@@ -936,6 +936,10 @@ pub struct Extension {
     /// Effects it declares (experimental: a private extension's only;
     /// valid ones — each runs only once a person approves it, `effects`).
     pub effects: Vec<crate::effects::EffectDecl>,
+    /// Another extension's event types its effects and collectors react
+    /// to (P9.D1): each resolves when an enabled extension registers the
+    /// type (`vocabulary_reactor`).
+    pub subscriptions: Vec<ForeignSubscription>,
     /// `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
     /// read-only).
     pub origin: String,
@@ -1389,6 +1393,58 @@ impl ExtensionFiles for Embedded {
     }
 }
 
+/// An effect's or collector's `on:` naming an event type of another
+/// extension's namespace (P9.D1). The type's name is the dependency —
+/// there is no `depends:` key, as a model's `ref('<ext>/<name>')` has
+/// none: it resolves when an enabled extension registers the type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ForeignSubscription {
+    /// What reacts: "effect `note`", "collector `pull`".
+    pub by: String,
+    pub event_type: String,
+    /// `file:line` of the declaration.
+    pub declared_at: String,
+}
+
+impl ForeignSubscription {
+    /// What loading says: not an error — the owner may not be here yet.
+    fn warning(&self) -> String {
+        format!(
+            "{}: {} reacts to `{}`, another extension's event type; it runs once an enabled \
+             extension registers that type (`v_event_type`)",
+            self.declared_at, self.by, self.event_type
+        )
+    }
+}
+
+/// How an `on:` type stands for the extension declaring the reaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Subscribes {
+    /// A core type, or one it declares.
+    Known,
+    /// One in another extension's namespace: known when that one is here.
+    Foreign,
+    /// No type at all: a core namespace's that doesn't exist, its own
+    /// that it doesn't declare, a name that isn't a type's.
+    Unknown,
+}
+
+fn subscribes(
+    extension: &str,
+    declared: &[crate::extension_event_types::EventTypeDecl],
+    event_type: &str,
+) -> Subscribes {
+    use oxplow_domain::events::schema::{is_core_type, plugin_namespace, plugin_type_namespace};
+    if is_core_type(event_type) || declared.iter().any(|d| d.event_type == event_type) {
+        return Subscribes::Known;
+    }
+    match plugin_type_namespace(event_type) {
+        Some(ns) if ns != plugin_namespace(extension) => Subscribes::Foreign,
+        _ => Subscribes::Unknown,
+    }
+}
+
 pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
     Extension {
         name: name.to_string(),
@@ -1407,6 +1463,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         event_types: Default::default(),
         ref_kinds: Vec::new(),
         effects: Vec::new(),
+        subscriptions: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
         enabled: true,
@@ -1537,31 +1594,39 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.errors.extend(errors);
         }
         // An experimental kind: a shared manifest's is refused by `check`.
-        // After `event_types`: an effect may react to its own types.
+        // After `event_types`: an effect may react to its own types — and
+        // to another extension's (P9.D1), which resolves when that one is
+        // here (`subscriptions`).
+        let declared = ext.event_types.types.clone();
+        let subscribable = |t: &str| subscribes(name, &declared, t) != Subscribes::Unknown;
         if let Some(v) = m.effects.as_ref().filter(|_| m.sharing == Sharing::Private) {
-            let declared = ext.event_types.types.clone();
             let (effects, errors) = crate::effects::parse_effects(
                 name,
                 v,
                 &file,
                 &manifest,
                 &|rel| files.read(rel),
-                &|t: &str| {
-                    oxplow_domain::events::schema::is_core_type(t)
-                        || declared.iter().any(|d| d.event_type == t)
-                },
+                &subscribable,
             );
+            for e in &effects {
+                for t in &e.on {
+                    if subscribes(name, &declared, t) == Subscribes::Foreign {
+                        ext.subscriptions.push(ForeignSubscription {
+                            by: format!("effect `{}`", e.id),
+                            event_type: t.clone(),
+                            declared_at: e.declared_at.clone(),
+                        });
+                    }
+                }
+            }
             ext.effects = effects;
             ext.errors.extend(errors);
         }
         if let Some(v) = &m.collectors {
-            // A collector may follow core types and its own extension's.
-            let declared = ext.event_types.types.clone();
+            // A collector may follow core types, its own extension's, and
+            // another's.
             let (collectors, errors) =
-                oxplow_config::collectors::parse_collectors(name, v, &|t: &str| {
-                    oxplow_domain::events::schema::is_core_type(t)
-                        || declared.iter().any(|d| d.event_type == t)
-                });
+                oxplow_config::collectors::parse_collectors(name, v, &subscribable);
             let line = key_line(&manifest, "collectors");
             ext.errors
                 .extend(errors.into_iter().map(|e| at(&file, line, e)));
@@ -1593,7 +1658,28 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     _ => ext.collectors.push(c),
                 }
             }
+            for c in &ext.collectors {
+                let oxplow_config::collectors::Trigger::On { events, .. } = &c.trigger else {
+                    continue;
+                };
+                for t in events {
+                    if subscribes(name, &declared, t) == Subscribes::Foreign {
+                        let c_line = entry_line(&manifest, "collectors", "id", &c.id).or(line);
+                        ext.subscriptions.push(ForeignSubscription {
+                            by: format!("collector `{}`", c.id),
+                            event_type: t.clone(),
+                            declared_at: at(&file, c_line, "").trim_end_matches(": ").to_string(),
+                        });
+                    }
+                }
+            }
         }
+        let foreign: Vec<String> = ext
+            .subscriptions
+            .iter()
+            .map(ForeignSubscription::warning)
+            .collect();
+        ext.warnings.extend(foreign);
         // An experimental kind: a shared manifest's is refused by `check`.
         if let Some(v) = m
             .providers

@@ -497,7 +497,9 @@ effects:
         for (from, to, says) in [
             (
                 "on: [work_item.transitioned]",
-                "on: [nope.never]",
+                // A core namespace's type that doesn't exist (another
+                // extension's would be a subscription: P9.D1).
+                "on: [work_item.never]",
                 "isn't a registered event type",
             ),
             (

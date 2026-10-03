@@ -13,7 +13,11 @@
 //! - a schema that differs from the one recorded at that `type@v`
 //!   (`event_type_contract`): a new shape is a new version;
 //! - two extensions whose names make one namespace (`acme-pr`,
-//!   `acme_pr`): neither registers.
+//!   `acme_pr`): neither registers;
+//! - a reaction (an effect's or collector's `on:`) to another extension's
+//!   type that no enabled extension registers (P9.D1) — the subscriber's
+//!   error, gone once the type's owner is installed and its declaration
+//!   accepted.
 //!
 //! The pass restates `event_type_contract` (read as `v_event_type`) in
 //! the same transaction that checks it.
@@ -57,8 +61,19 @@ pub struct VocabularyService {
     state: Mutex<State>,
 }
 
-/// Each enabled extension's `event_types:` and `ref_kinds:`, by name.
-type Declared = Vec<(String, EventTypes, Vec<RefKindDecl>)>;
+/// What one enabled extension brings to the vocabulary.
+#[derive(serde::Serialize)]
+struct Declares {
+    extension: String,
+    /// Its `event_types:`.
+    types: EventTypes,
+    /// Its `ref_kinds:`.
+    kinds: Vec<RefKindDecl>,
+    /// Its reactions to other extensions' types.
+    subscriptions: Vec<crate::extensions::ForeignSubscription>,
+}
+
+type Declared = Vec<Declares>;
 
 impl VocabularyService {
     pub fn new(
@@ -87,7 +102,12 @@ impl VocabularyService {
             .get(&self.root)
             .iter()
             .filter(|e| e.enabled)
-            .map(|e| (e.name.clone(), e.event_types.clone(), e.ref_kinds.clone()))
+            .map(|e| Declares {
+                extension: e.name.clone(),
+                types: e.event_types.clone(),
+                kinds: e.ref_kinds.clone(),
+                subscriptions: e.subscriptions.clone(),
+            })
             .collect();
         let fingerprint = {
             let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -163,14 +183,17 @@ fn build_tx(
     let mut errors: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let declares = |t: &EventTypes| !t.types.is_empty() || t.retention.is_some();
     let mut by_namespace: HashMap<String, Vec<&str>> = HashMap::new();
-    for (extension, _, _) in declared.iter().filter(|(_, t, _)| declares(t)) {
+    for d in declared.iter().filter(|d| declares(&d.types)) {
         by_namespace
-            .entry(plugin_namespace(extension))
+            .entry(plugin_namespace(&d.extension))
             .or_default()
-            .push(extension);
+            .push(&d.extension);
     }
     let mut retention = Vec::new();
-    for (extension, types, _) in declared {
+    for Declares {
+        extension, types, ..
+    } in declared
+    {
         let namespace = plugin_namespace(extension);
         let others: Vec<&str> = by_namespace
             .get(&namespace)
@@ -222,6 +245,25 @@ fn build_tx(
             }
         }
     }
+    // A reaction to another extension's type holds only while someone
+    // registers it: the name is the dependency.
+    for Declares {
+        extension,
+        subscriptions,
+        ..
+    } in declared
+    {
+        for s in subscriptions {
+            if events.latest(&s.event_type).is_none() {
+                errors.entry(extension.clone()).or_default().push(format!(
+                    "{}: {} reacts to `{}`, which no enabled extension registers: install or \
+                     enable the extension that declares it (or see that one's errors, if its \
+                     declaration was refused)",
+                    s.declared_at, s.by, s.event_type
+                ));
+            }
+        }
+    }
     restate_declared_tx(tx, &retention, now)?;
     let rows: Vec<EventTypeRow> = events
         .versions()
@@ -247,14 +289,24 @@ fn build_tx(
 fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>>) -> KindRegistry {
     let mut kinds = core_kinds();
     let mut users: HashMap<&str, BTreeSet<&str>> = HashMap::new();
-    for (extension, _, decls) in declared {
+    for Declares {
+        extension,
+        kinds: decls,
+        ..
+    } in declared
+    {
         for d in decls {
             for name in std::iter::once(d.kind.as_str()).chain(d.wikilink.as_deref()) {
                 users.entry(name).or_default().insert(extension);
             }
         }
     }
-    for (extension, _, decls) in declared {
+    for Declares {
+        extension,
+        kinds: decls,
+        ..
+    } in declared
+    {
         for d in decls {
             let shared: BTreeSet<&str> = std::iter::once(d.kind.as_str())
                 .chain(d.wikilink.as_deref())
@@ -300,7 +352,7 @@ fn kind_rows(kinds: &KindRegistry, declared: &Declared) -> Vec<RefKindRow> {
         .map(|k| {
             let decl = declared
                 .iter()
-                .flat_map(|(_, _, d)| d)
+                .flat_map(|d| &d.kinds)
                 .find(|d| d.kind == k.kind);
             RefKindRow {
                 kind: k.kind.clone(),
@@ -615,6 +667,22 @@ mod tests {
         let ext = loaded.iter().find(|e| e.name == "acme-pr").unwrap();
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.collectors.len(), 1);
+        // One in its own namespace that it doesn't declare is no type.
+        write(
+            dir.path(),
+            "oxplow/extensions/acme-pr/extension.yaml",
+            &collector("acme_pr.closed"),
+        );
+        let loaded = crate::extensions::load_extensions(dir.path());
+        let ext = loaded.iter().find(|e| e.name == "acme-pr").unwrap();
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("`acme_pr.closed` isn't a registered event type")),
+            "{:?}",
+            ext.errors
+        );
+        // Another extension's is a subscription (P9.D1): a warning here.
         write(
             dir.path(),
             "oxplow/extensions/acme-pr/extension.yaml",
@@ -622,12 +690,14 @@ mod tests {
         );
         let loaded = crate::extensions::load_extensions(dir.path());
         let ext = loaded.iter().find(|e| e.name == "acme-pr").unwrap();
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(ext.subscriptions.len(), 1);
         assert!(
-            ext.errors
+            ext.warnings
                 .iter()
-                .any(|e| e.contains("isn't a registered event type")),
+                .any(|w| w.contains("collector `tally` reacts to `other_ext.thing`")),
             "{:?}",
-            ext.errors
+            ext.warnings
         );
     }
 
@@ -664,5 +734,134 @@ mod tests {
             );
         }
         assert!(!svc.vocabulary.current().is_registered("acme_pr.merged", 1));
+    }
+
+    /// `beta`: an effect and a collector that react to `acme_pr.merged`,
+    /// a type of another extension's.
+    const SUBSCRIBER: &str = "manifest: 2\nname: beta\nsharing: private\nintent: { purpose: Follows merges., origin: null, examples: [] }\neffects:\n  - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\ncollectors:\n  - id: pull\n    runtime: exec\n    entry: pull.sh\n    trigger: { on: [acme_pr.merged] }\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n";
+
+    async fn listed(svc: &crate::Services, name: &str) -> Extension {
+        svc.listed_extensions(&svc.layout.project_dir)
+            .await
+            .into_iter()
+            .find(|e| e.name == name)
+            .unwrap()
+    }
+
+    /// P9.D1: an effect and a collector may react to another extension's
+    /// event type. The type's name is the dependency: at load it is a
+    /// warning (the owner may not be here yet); while no enabled extension
+    /// registers it, it is the subscriber's error — gone once the owner is
+    /// installed, back if the owner's declaration is refused.
+    #[tokio::test]
+    async fn a_subscription_to_another_extensions_type_resolves_when_its_owner_registers_it() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        write(&root, "oxplow/extensions/beta/extension.yaml", SUBSCRIBER);
+        write(
+            &root,
+            "oxplow/extensions/beta/note.star",
+            "def transform(x):\n    return {\"skip\": \"nothing to do\"}\n",
+        );
+        write(&root, "oxplow/extensions/beta/pull.sh", "#!/bin/sh\n");
+
+        // Loading alone (what `oxplow plugin check` sees): no error, and a
+        // warning for each subscription.
+        let loaded = crate::extensions::load_extensions(&root)
+            .into_iter()
+            .find(|e| e.name == "beta")
+            .unwrap();
+        assert_eq!(loaded.errors, Vec::<String>::new());
+        assert_eq!((loaded.effects.len(), loaded.collectors.len()), (1, 1));
+        let foreign: Vec<&String> = loaded
+            .warnings
+            .iter()
+            .filter(|w| w.contains("`acme_pr.merged`") && w.contains("another extension's"))
+            .collect();
+        assert_eq!(foreign.len(), 2, "{:?}", loaded.warnings);
+        assert!(
+            foreign.iter().any(|w| w.contains("effect `note`"))
+                && foreign.iter().any(|w| w.contains("collector `pull`")),
+            "{foreign:?}"
+        );
+
+        // Nobody registers it: the subscriber's error, for each.
+        svc.vocabulary_service.sync().await.unwrap();
+        let unresolved = |errors: &[String]| {
+            errors
+                .iter()
+                .filter(|e| {
+                    e.contains("`acme_pr.merged`") && e.contains("no enabled extension registers")
+                })
+                .count()
+        };
+        let errors = listed(svc, "beta").await.errors;
+        assert_eq!(unresolved(&errors), 2, "{errors:?}");
+        assert!(
+            errors.iter().all(|e| e.contains("extension.yaml:")),
+            "{errors:?}"
+        );
+
+        // Its owner arrives: resolved.
+        write(&root, "oxplow/extensions/acme-pr/extension.yaml", MANIFEST);
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/merged.json",
+            &schema("number"),
+        );
+        svc.vocabulary_service.sync().await.unwrap();
+        assert_eq!(listed(svc, "beta").await.errors, Vec::<String>::new());
+
+        // The owner's declaration is refused (a new shape at a recorded
+        // version): the type isn't registered, and the subscriber says so.
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/merged.json",
+            &schema("pr"),
+        );
+        svc.vocabulary_service.sync().await.unwrap();
+        assert_eq!(unresolved(&listed(svc, "beta").await.errors), 2);
+
+        // The owner goes: unresolved again.
+        std::fs::remove_dir_all(root.join("oxplow/extensions/acme-pr")).unwrap();
+        svc.vocabulary_service.sync().await.unwrap();
+        assert_eq!(unresolved(&listed(svc, "beta").await.errors), 2);
+    }
+
+    /// P9.D1: what isn't another extension's type is still refused at
+    /// load — a core namespace's type that doesn't exist, one in the
+    /// extension's own namespace it doesn't declare, a name that isn't a
+    /// type's.
+    #[tokio::test]
+    async fn a_subscription_to_no_type_at_all_is_refused_at_load() {
+        let d = tempfile::tempdir().unwrap();
+        for bad in ["work_item.nope", "beta.nope", "nope"] {
+            write(
+                d.path(),
+                "oxplow/extensions/beta/extension.yaml",
+                &SUBSCRIBER.replace("acme_pr.merged", bad),
+            );
+            write(
+                d.path(),
+                "oxplow/extensions/beta/note.star",
+                "def transform(x):\n    return {\"skip\": \"no\"}\n",
+            );
+            write(d.path(), "oxplow/extensions/beta/pull.sh", "#!/bin/sh\n");
+            let loaded = crate::extensions::load_extensions(d.path())
+                .into_iter()
+                .find(|e| e.name == "beta")
+                .unwrap();
+            let refused = loaded
+                .errors
+                .iter()
+                .filter(|e| e.contains(&format!("`{bad}` isn't a registered event type")))
+                .count();
+            assert_eq!(refused, 2, "{bad}: {:?}", loaded.errors);
+            assert!(
+                loaded.effects.is_empty() && loaded.collectors.is_empty(),
+                "{bad}"
+            );
+        }
     }
 }

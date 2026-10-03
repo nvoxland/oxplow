@@ -894,4 +894,143 @@ mod tests {
             json!([[0]])
         );
     }
+
+    fn write(root: &Path, rel: &str, body: &str) {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    }
+
+    /// P9.D1: an effect of one extension reacts to another's event type,
+    /// seeing it at the owner's newest version — a row logged at v1
+    /// reaches it as v2 through the owner's upcast — and the loop guard
+    /// counts the other extension's runs.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_effect_reacts_to_another_extensions_type_at_its_latest_version() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        let owner = |types: &str| {
+            format!("manifest: 2\nname: acme-pr\nsharing: private\nintent: {{ purpose: PRs., origin: null, examples: [] }}\nevent_types:\n  types:\n{types}")
+        };
+        let v1 = "    - { type: acme_pr.merged, v: 1, schema: merged.v1.json, summary: A pull request merged. }\n";
+        let v2 = "    - { type: acme_pr.merged, v: 2, schema: merged.v2.json, summary: A pull request merged by someone., upcast: merged.star }\n";
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/extension.yaml",
+            &owner(v1),
+        );
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/merged.v1.json",
+            r#"{"type": "object", "required": ["number"], "properties": {"number": {"type": "integer"}}}"#,
+        );
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/merged.v2.json",
+            r#"{"type": "object", "required": ["number", "by"], "properties": {"number": {"type": "integer"}, "by": {"type": "string"}}}"#,
+        );
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/merged.star",
+            "def transform(x):\n    p = dict(x[\"payload\"])\n    p[\"by\"] = \"unknown\"\n    return p\n",
+        );
+        // The subscriber: retitles the fixture's task with what it saw.
+        let task = oxplow_domain::refs::build::work_item_ref(fx.task);
+        write(
+            &root,
+            "oxplow/extensions/acme/extension.yaml",
+            &format!("{HEAD}  - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\n"),
+        );
+        write(
+            &root,
+            "oxplow/extensions/acme/note.star",
+            &format!(
+                "def transform(x):\n    e = x[\"event\"]\n    return {{\"commands\": [{{\"name\": \"work_item.update\", \"input\": {{\"ref\": \"{task}\", \"title\": \"#%d v%d by %s\" % (e[\"payload\"][\"number\"], e[\"v\"], e[\"payload\"][\"by\"])}}}}]}}\n"
+            ),
+        );
+        svc.vocabulary_service.sync().await.unwrap();
+        // The subscriber is `acme`; `effects()` lists the owner first.
+        let config = svc.config.read().unwrap().clone();
+        let (ext, decl) = effects(svc)
+            .into_iter()
+            .find(|(e, _)| e.name == "acme")
+            .unwrap();
+        let program = effects::effect_program(&ext, &decl);
+        crate::exec_consent::approve_program(
+            &svc.approvals,
+            &root,
+            &config,
+            std::slice::from_ref(&ext),
+            ProgramKind::Effect,
+            &program.name,
+            &program.hash(&root).unwrap(),
+        )
+        .unwrap();
+        effects::approved(&svc.db, &decl.name()).await.unwrap();
+
+        // Logged at v1, while v1 was the newest.
+        let ev = log(
+            svc,
+            Envelope::new("acme_pr.merged", 1, "test", json!({ "number": 12 })).unwrap(),
+        )
+        .await;
+        // The owner publishes v2; the pump delivers the old row at it.
+        write(
+            &root,
+            "oxplow/extensions/acme-pr/extension.yaml",
+            &owner(&format!("{v1}{v2}")),
+        );
+        svc.vocabulary_service.sync().await.unwrap();
+        let consumer = Arc::new(EffectTriggers::new(Arc::downgrade(svc)));
+        assert!(consumer.handles("acme_pr.merged"));
+        crate::event_pump::run_async_handler(
+            svc.vocabulary.clone(),
+            consumer.clone(),
+            Arc::new(ev),
+        )
+        .await
+        .unwrap();
+        assert_eq!(title(&fx).await, "#12 v2 by unknown");
+
+        // The loop guard spans extensions: an event four effect runs of
+        // other extensions led to isn't reacted to.
+        let mut cause: Option<oxplow_domain::EventId> = None;
+        for i in 0..MAX_CHAIN {
+            let mut executed = Envelope::typed::<CommandExecuted>(
+                format!("effect:acme-pr/e{i}"),
+                &CommandExecutedV2 {
+                    command: "command.sequence".into(),
+                    actor_kind: ActorKind::Effect,
+                    actor_id: Some(format!("acme-pr/e{i}")),
+                    outcome: CommandOutcome::Ok,
+                    audit_id: 1,
+                    undoable: false,
+                },
+            );
+            executed.cause = cause.clone();
+            cause = Some(executed.id.clone());
+            log(svc, executed).await;
+        }
+        let mut chained = Envelope::new(
+            "acme_pr.merged",
+            2,
+            "effect:acme-pr/e3",
+            json!({ "number": 13, "by": "ann" }),
+        )
+        .unwrap();
+        chained.cause = cause;
+        let chained = log(svc, chained).await;
+        consumer.handle(&chained).await.unwrap();
+        assert_eq!(title(&fx).await, "#12 v2 by unknown");
+        let guarded = rows(
+            svc,
+            &format!(
+                "SELECT state FROM v_effect_run WHERE event_id = '{}'",
+                chained.envelope.id
+            ),
+        )
+        .await;
+        assert_eq!(guarded, json!([["skipped"]]));
+    }
 }

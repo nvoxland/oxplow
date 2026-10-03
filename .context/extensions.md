@@ -1408,8 +1408,37 @@ and are appended after the children's events, caused by the run's
 outside the transaction) they're recorded with the run only when every
 step landed.
 
-A collector's `trigger: { on: [...] }` may name its own extension's
-declared types as well as core ones; another extension's are refused.
+**Reacting to another extension's types (P9.D1).** A collector's
+`trigger: { on: [...] }` and an effect's `on:` may name core types, the
+extension's own declared ones, and **another extension's**
+(`acme_pr.merged` from an extension that isn't `acme-pr`). There is no
+`depends:` key: the qualified type name is the dependency, as a model's
+`ref('<ext>/<name>')` is. `extensions::subscribes` sorts each name:
+- **known** — a core type or one the extension declares;
+- **foreign** — a well-formed name in a namespace that is neither core's
+  nor its own: accepted, kept on `Extension.subscriptions`
+  (`ForeignSubscription { by, event_type, declared_at }`), and a
+  **warning** at load ("…another extension's event type; it runs once an
+  enabled extension registers that type") — which is all `oxplow plugin
+  check` says, since a check sees one extension;
+- **unknown** — a core namespace's type that doesn't exist, its own
+  namespace's that it doesn't declare, a name that isn't a type's: an
+  error, as before.
+
+The vocabulary pass then holds each foreign subscription against the
+vocabulary it just built: one **no enabled extension registers** is an
+error on the *subscriber* (`extension.yaml:<line>: effect \`note\` reacts
+to …`), in the same list a refused declaration shows in. It clears when
+the owner is installed and enabled, and comes back if the owner goes or
+its declaration is refused. Until then the reaction simply never fires:
+nothing can append a type that isn't registered. There is no `type@v` in
+`on:` — the pump hands every consumer an event at its type's newest
+registered version (`at_latest`, the owner's upcasts), so a subscriber is
+written against the owner's latest shape and a breaking change is the
+owner's new version plus upcast. A subscriber still **appends** only its
+own types (`own_events` is unchanged), and the effects' loop guard
+already counts every extension's runs.
+
 **Health is the extension's errors, not `plugin_health`** — a refused
 declaration is a load problem, like a model's contract drift, not a
 failing run that counts toward a disable.
@@ -1480,7 +1509,7 @@ confirms"):
 effects:
   - id: announce-done          # [a-z0-9-]+, unique in the extension
     summary: Note a finished item on its thread.
-    on: [work_item.transitioned]   # core types and its own declared ones
+    on: [work_item.transitioned]   # core types, its own, or another extension's ("Event types")
     where: { to: done }            # optional: payload fields equal to these
     input: "SELECT title FROM v_work_item WHERE ref = :work_item"   # optional; payload fields bound
     entry: effects/announce.star   # transform({event, rows}) → {commands, events?} | {skip}

@@ -637,7 +637,7 @@ fn at_latest(vocabulary: &Vocabulary, event: &StoredEvent) -> Result<StoredEvent
     Ok(out)
 }
 
-async fn run_async_handler(
+pub(crate) async fn run_async_handler(
     vocabulary: VocabularyHandle,
     consumer: Arc<dyn AsyncEventConsumer>,
     event: Arc<StoredEvent>,
