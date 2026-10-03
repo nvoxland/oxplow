@@ -1071,7 +1071,8 @@ them with `effects_between` — an `ExtensionChange { name, change,
 effects?, errors }` each (a removed one has no report). The section
 renders each with `EffectReportView` (the server's lines, then each
 changed lens before and after), the component the install review uses
-too.
+too. While the RPC runs it says "Reviewing acme…"; when it fails, "Could
+not review acme: <why>" (tsk793) — never a spinner that doesn't end.
 
 ## Commands in core menus (`ui.commands`)
 

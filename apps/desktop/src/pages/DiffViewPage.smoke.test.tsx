@@ -22,6 +22,7 @@ let diffFiles: { path: string; status: string; additions: number; deletions: num
   { path: "a.ts", status: "modified", additions: 2, deletions: 1 },
 ];
 const extensionCalls: unknown[][] = [];
+let extensionFailure: string | null = null;
 
 const neutral: Record<string, (...args: unknown[]) => Promise<unknown>> = {
   diff: async (...args) => {
@@ -30,6 +31,7 @@ const neutral: Record<string, (...args: unknown[]) => Promise<unknown>> = {
   },
   extensionEffectsBetween: async (...args) => {
     extensionCalls.push(args);
+    if (extensionFailure) throw new Error(extensionFailure);
     return ok([
       {
         name: "acme",
@@ -178,4 +180,22 @@ test("extension changes show only when an extension's files changed", async () =
   expect(second.getByTestId("effect-lens-acme/count")).toBeTruthy();
   expect(extensionCalls[0]).toEqual(["str1", "snap:1", "snap:2"]);
   diffFiles = [{ path: "a.ts", status: "modified", additions: 2, deletions: 1 }];
+});
+
+// tsk793: a review that fails says so, instead of "Reviewing…" forever.
+test("a failed extension review shows its error", async () => {
+  diffFiles = [{ path: "oxplow/extensions/acme/lenses/count.yaml", status: "modified", additions: 1, deletions: 1 }];
+  extensionFailure = "no such revision";
+  try {
+    const page = render(
+      <DiffViewPage stream={STREAM} spec={{ mode: "endpoints", start: "snap:1", end: "snap:2" }} onOpenPage={() => {}} onOpenFile={() => {}} />,
+    );
+    const error = await page.findByTestId("diff-view-extension-changes-error");
+    expect(error.textContent).toContain("Could not review acme");
+    expect(error.textContent).toContain("no such revision");
+    expect(page.queryByText(/Reviewing/)).toBeNull();
+  } finally {
+    extensionFailure = null;
+    diffFiles = [{ path: "a.ts", status: "modified", additions: 2, deletions: 1 }];
+  }
 });

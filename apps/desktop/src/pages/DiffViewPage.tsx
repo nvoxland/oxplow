@@ -327,16 +327,23 @@ function ResolvedEndpointDiff({
   // version reviewed as its revision holds it.
   const extensionNames = changedExtensions(changed.files.map((f) => f.path));
   const extensionKey = extensionNames.join(",");
-  const [extensionChanges, setExtensionChanges] = useState<ExtensionChange[] | null>(null);
+  const [extensionReview, setExtensionReview] = useState<
+    { state: "reviewing" } | { state: "reviewed"; changes: ExtensionChange[] } | { state: "failed"; message: string }
+  >({ state: "reviewing" });
   useEffect(() => {
-    setExtensionChanges(null);
+    setExtensionReview({ state: "reviewing" });
     if (!stream || extensionKey === "") return;
     let cancelled = false;
     void extensionEffectsBetween(stream.id, start, end)
-      .then((rows) => {
-        if (!cancelled) setExtensionChanges(rows);
+      .then((changes) => {
+        if (!cancelled) setExtensionReview({ state: "reviewed", changes });
       })
-      .catch((err) => logUi("warn", "extension effects failed", { error: String(err) }));
+      .catch((err: unknown) => {
+        logUi("warn", "extension effects failed", { error: String(err) });
+        if (!cancelled) {
+          setExtensionReview({ state: "failed", message: err instanceof Error ? err.message : String(err) });
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -740,10 +747,17 @@ function ResolvedEndpointDiff({
       {extensionNames.length > 0 ? (
         <section data-testid="diff-view-extension-changes">
           <h2 style={h2Style}>Extension Changes</h2>
-          {extensionChanges === null ? (
+          {extensionReview.state === "reviewing" ? (
             <div style={muted}>Reviewing {extensionNames.join(", ")}…</div>
+          ) : extensionReview.state === "failed" ? (
+            <div
+              data-testid="diff-view-extension-changes-error"
+              style={{ color: "var(--severity-critical)", fontSize: "var(--text-xs)" }}
+            >
+              Could not review {extensionNames.join(", ")}: {extensionReview.message}
+            </div>
           ) : (
-            extensionChanges.map((c) => (
+            extensionReview.changes.map((c) => (
               <div key={c.name} data-testid={`extension-change-${c.name}`} style={{ marginBottom: 10 }}>
                 <div style={{ fontWeight: 600 }}>
                   {c.name} <span style={muted}>{c.change}</span>
