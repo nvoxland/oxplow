@@ -235,6 +235,9 @@ impl AsyncEventConsumer for CollectorTriggers {
                 EventRun::Ran(Err(error)) => {
                     tracing::warn!(collector = %format!("{owner}/{}", spec.id), %error, "collector failed");
                 }
+                EventRun::Guarded => {
+                    tracing::warn!(collector = %format!("{owner}/{}", spec.id), "collector skipped by the loop guard");
+                }
                 EventRun::Ran(Ok(_)) | EventRun::Skipped | EventRun::NeedsApproval => {}
             }
         }
@@ -475,5 +478,308 @@ mod tests {
         assert!(consumer.handles("effort.claim_verified"));
         assert!(!consumer.handles("snapshot.taken"));
         assert!(!consumer.handles("collector.synced"));
+    }
+
+    /// `acme-pr`: it declares `acme_pr.merged`, `.ping` and `.pong`
+    /// (payload `{ number }`), and the given collectors.
+    fn emitter(root: &std::path::Path, collectors: &str, files: &[(&str, &str)]) {
+        let dir = root.join("oxplow/extensions/acme-pr");
+        std::fs::create_dir_all(&dir).unwrap();
+        let types: String = ["merged", "ping", "pong"]
+            .iter()
+            .map(|t| {
+                format!(
+                    "    - {{ type: acme_pr.{t}, v: 1, schema: number.json, summary: A {t}. }}\n"
+                )
+            })
+            .collect();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            format!("manifest: 2\nname: acme-pr\nsharing: private\nintent: {{ purpose: t, origin: null, examples: [] }}\nevent_types:\n  types:\n{types}collectors:\n{collectors}"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("number.json"),
+            r#"{"type": "object", "required": ["number"], "properties": {"number": {"type": "integer"}}}"#,
+        )
+        .unwrap();
+        for (name, body) in files {
+            std::fs::write(dir.join(name), body).unwrap();
+        }
+    }
+
+    /// A manual collector `prs` storing one `pr` row and returning `events`.
+    fn prs(trigger: &str) -> String {
+        format!("  - id: prs\n    runtime: starlark\n    entry: prs.star\n{trigger}    entities:\n      - {{ name: pr, key: n, columns: {{ n: int }} }}\n")
+    }
+
+    fn prs_script(events: &str) -> String {
+        format!("def transform(input):\n    return {{\"entities\": {{\"pr\": [{{\"n\": 12}}]}}, \"events\": {events}}}\n")
+    }
+
+    async fn sync(
+        svc: &Services,
+        id: &str,
+    ) -> Result<collector_runner::CollectorRunReport, String> {
+        let root = svc.layout.project_dir.clone();
+        collector_runner::run_collector(
+            &Collectors::of(svc, &root),
+            "acme-pr",
+            id,
+            collector_runner::RunTrigger::Manual,
+            "human",
+        )
+        .await
+        .map_err(|e| match e {
+            collector_runner::RunCollectorError::Failed(m) => m,
+            other => format!("{other:?}"),
+        })
+    }
+
+    /// P9.D2: a collector's script may return `events` of its extension's
+    /// own declared types. They land with the run — its rows, its
+    /// `collector_run`, its `collector.synced` — in one transaction, from
+    /// `collector:<owner>/<id>`, caused by that `collector.synced`.
+    #[tokio::test]
+    async fn a_collector_emits_its_extensions_events_with_its_run() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        emitter(
+            &svc.layout.project_dir,
+            &prs(""),
+            &[(
+                "prs.star",
+                &prs_script("[{\"type\": \"acme_pr.merged\", \"payload\": {\"number\": 12}, \"subject\": [\"collector:acme-pr/prs\"]}]"),
+            )],
+        );
+        svc.vocabulary_service.sync().await.unwrap();
+        sync(svc, "prs").await.unwrap();
+        assert_eq!(rows(svc, "SELECT n FROM v_acme_pr_pr").await, json!([[12]]));
+        let synced = rows(
+            svc,
+            "SELECT id FROM v_event WHERE type = 'collector.synced' AND json_extract(payload, '$.status') = 'ok'",
+        )
+        .await;
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT source, cause, json_extract(payload, '$.number'), v FROM v_event WHERE type = 'acme_pr.merged'"
+            )
+            .await,
+            json!([["collector:acme-pr/prs", synced[0][0], 12, 1]])
+        );
+        // What a preview (and `oxplow plugin test`) shows: the events it
+        // would emit, stored nowhere.
+        let root = svc.layout.project_dir.clone();
+        let preview = collector_runner::preview_collector(
+            &Collectors::of(svc, &root),
+            "acme-pr",
+            "prs",
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&preview.events).unwrap(),
+            json!([{ "type": "acme_pr.merged", "v": 1, "payload": { "number": 12 }, "subject": ["collector:acme-pr/prs"] }])
+        );
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT count(*) FROM v_event WHERE type = 'acme_pr.merged'"
+            )
+            .await,
+            json!([[1]])
+        );
+    }
+
+    /// P9.D2: what a collector may not emit fails the whole run — nothing
+    /// is stored, no event is logged, and the run is recorded as an error:
+    /// another namespace's type, a type that doesn't validate, a type it
+    /// runs on (it would trigger itself), or more than the cap.
+    #[tokio::test]
+    async fn a_collector_may_not_emit_what_isnt_its_own_or_what_it_runs_on() {
+        let many = format!(
+            "[{{\"type\": \"acme_pr.merged\", \"payload\": {{\"number\": i}}}} for i in range({})]",
+            collector_runner::MAX_RUN_EVENTS + 1
+        );
+        for (trigger, events, says) in [
+            (
+                "",
+                "[{\"type\": \"work_item.created\", \"payload\": {}}]".to_string(),
+                "may emit only the event types `acme-pr` declares",
+            ),
+            (
+                "",
+                "[{\"type\": \"other_ext.thing\", \"payload\": {}}]".to_string(),
+                "may emit only the event types `acme-pr` declares",
+            ),
+            (
+                "",
+                "[{\"type\": \"acme_pr.merged\", \"payload\": {\"number\": \"twelve\"}}]"
+                    .to_string(),
+                "number",
+            ),
+            (
+                "    trigger: { on: [acme_pr.merged] }\n",
+                "[{\"type\": \"acme_pr.merged\", \"payload\": {\"number\": 1}}]".to_string(),
+                "a type it runs on",
+            ),
+            ("", many, "at most"),
+        ] {
+            // Each on its own project: three failures in a row would
+            // disable the collector, which is another rule's business.
+            let fx = crate::test_fixtures::services_with_effort().await;
+            let svc = &fx.svc;
+            emitter(
+                &svc.layout.project_dir,
+                &prs(trigger),
+                &[("prs.star", &prs_script(&events))],
+            );
+            svc.vocabulary_service.sync().await.unwrap();
+            let refused = sync(svc, "prs").await.unwrap_err();
+            assert!(refused.contains(says), "{says}: {refused}");
+            assert_eq!(
+                rows(
+                    svc,
+                    "SELECT count(*) FROM v_event WHERE type LIKE 'acme_pr.%'"
+                )
+                .await,
+                json!([[0]]),
+                "{says}"
+            );
+            assert_eq!(
+                rows(svc, "SELECT status FROM v_collector_run WHERE id = 'prs'").await,
+                json!([["error"]]),
+                "{says}"
+            );
+            // Nothing was stored.
+            assert!(
+                svc.sql
+                    .query_sql("SELECT n FROM v_acme_pr_pr", vec![], None)
+                    .await
+                    .map(|r| r.rows.is_empty())
+                    .unwrap_or(true),
+                "{says}"
+            );
+        }
+    }
+
+    /// P9.D2: two collectors that run on each other's events stop: an
+    /// event a collector's own run led to never triggers it again, and a
+    /// chain of `MAX_CHAIN` reactions isn't extended. A guarded run is
+    /// recorded as skipped, not as a failure.
+    #[tokio::test]
+    async fn collectors_on_each_others_events_stop_at_the_guard() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let echo = |id: &str, on: &str| {
+            format!("  - id: {id}\n    runtime: starlark\n    entry: {id}.star\n    trigger: {{ on: [acme_pr.{on}] }}\n    sync: upsert\n    entities:\n      - {{ name: {id}, key: n, columns: {{ n: int }} }}\n")
+        };
+        let script = |id: &str| {
+            format!("def transform(input):\n    n = input[\"event\"][\"payload\"][\"number\"] + 1\n    return {{\"entities\": {{\"{id}\": [{{\"n\": n}}]}}, \"events\": [{{\"type\": \"acme_pr.{id}\", \"payload\": {{\"number\": n}}}}]}}\n")
+        };
+        emitter(
+            &svc.layout.project_dir,
+            &format!("{}{}", echo("ping", "pong"), echo("pong", "ping")),
+            &[
+                ("ping.star", &script("ping")),
+                ("pong.star", &script("pong")),
+            ],
+        );
+        svc.vocabulary_service.sync().await.unwrap();
+        let consumer = CollectorTriggers::new(Arc::downgrade(svc));
+        svc.event_log_store
+            .append(Envelope::new("acme_pr.ping", 1, "test", json!({ "number": 0 })).unwrap())
+            .await
+            .unwrap();
+        // Deliver every ping and pong, the collectors' own included, until
+        // a round logs nothing new.
+        let mut delivered = 0;
+        for _ in 0..10 {
+            let events = svc.event_log_store.read_after(0, 10_000).await.unwrap();
+            let fresh: Vec<_> = events
+                .iter()
+                .filter(|e| e.envelope.event_type.starts_with("acme_pr."))
+                .skip(delivered)
+                .cloned()
+                .collect();
+            if fresh.is_empty() {
+                break;
+            }
+            delivered += fresh.len();
+            for e in &fresh {
+                assert!(consumer.handles(&e.envelope.event_type));
+                consumer.handle(e).await.unwrap();
+            }
+        }
+        // ping 0 → pong → ping → (pong: its own run led to this) stop.
+        assert_eq!(
+            rows(svc, "SELECT type, json_extract(payload, '$.number') FROM v_event WHERE type LIKE 'acme_pr.%' ORDER BY seq").await,
+            json!([["acme_pr.ping", 0], ["acme_pr.pong", 1], ["acme_pr.ping", 2]])
+        );
+        let guarded = rows(
+            svc,
+            "SELECT status, error FROM v_collector_run WHERE id = 'pong'",
+        )
+        .await;
+        assert_eq!(guarded[0][0], json!("skipped"), "{guarded}");
+        assert!(
+            guarded[0][1].as_str().unwrap().contains("loop guard"),
+            "{guarded}"
+        );
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT count(*) FROM v_plugin_health WHERE consecutive_failures > 0"
+            )
+            .await,
+            json!([[0]])
+        );
+
+        // A chain of `MAX_CHAIN` event-triggered runs of other collectors:
+        // the next isn't run.
+        let mut cause: Option<oxplow_domain::EventId> = None;
+        for i in 0..crate::event_lineage::MAX_CHAIN {
+            let mut synced = Envelope::typed::<oxplow_domain::events::schema::CollectorSynced>(
+                "system",
+                &oxplow_domain::events::schema::CollectorSyncedV1 {
+                    collector: format!("collector:other/c{i}"),
+                    trigger: "on".into(),
+                    status: "ok".into(),
+                    entities: Default::default(),
+                    facts: 0,
+                    elapsed_ms: 1,
+                    error: None,
+                },
+            );
+            synced.cause = cause.clone();
+            cause = Some(synced.id.clone());
+            svc.event_log_store.append(synced).await.unwrap();
+        }
+        let mut chained = Envelope::new(
+            "acme_pr.pong",
+            1,
+            "collector:other/c3",
+            json!({ "number": 40 }),
+        )
+        .unwrap();
+        chained.cause = cause;
+        let id = chained.id.clone();
+        svc.event_log_store.append(chained).await.unwrap();
+        let chained = svc.event_log_store.get(id).await.unwrap().unwrap();
+        consumer.handle(&chained).await.unwrap();
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT status, last_event_id FROM v_collector_run WHERE id = 'ping'"
+            )
+            .await,
+            json!([["skipped", chained.seq]])
+        );
+        assert_eq!(
+            rows(svc, "SELECT count(*) FROM v_event WHERE type = 'acme_pr.ping' AND json_extract(payload, '$.number') = 41").await,
+            json!([[0]])
+        );
     }
 }

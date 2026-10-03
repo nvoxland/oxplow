@@ -6,7 +6,7 @@
 //! examples dry-run), then each intent example whose fixture names a lens
 //! (`input: { lens, params? }`, `expect: { columns?, rows }`), a derived
 //! collector (`input: { collector, rows? }`, `expect: { entities: { <name>:
-//! n } }`; an exec collector's isn't run — it needs a person's approval),
+//! n }, events?: [{ type, payload? }] }`; an exec collector's isn't run — it needs a person's approval),
 //! or one of its own commands (`input: { command, input, rows? }`,
 //! `expect: { commands: [names] }` or `{ refuses }`, dry-run),
 //! the extension's `questions.yaml`, and for each declared provider —
@@ -526,11 +526,24 @@ async fn collector_example(
         .iter()
         .map(|e| (e.entity.clone(), json!(e.total)))
         .collect();
-    let got = json!({ "entities": entities });
+    // The events it would log (its extension's own types, checked as a
+    // run's are): `expect: { events: [{ type, payload? }] }`.
+    let events: Vec<Value> = preview
+        .events
+        .iter()
+        .map(|e| json!({ "type": e.event_type, "v": e.v, "payload": e.payload, "subject": e.subject }))
+        .collect();
+    // Said only when there is something to say (or the example asks):
+    // an example of a collector that emits must say what it expects.
+    let mut got = json!({ "entities": entities });
+    if !events.is_empty() || expect.get("events").is_some() {
+        got["events"] = Value::Array(events);
+    }
     if let Some((path, want, got)) = first_mismatch(expect, &got) {
         report.errors.push(format!(
             "{shown}:1: collector `{id}` returned {got} at `{path}`, the example expects {want} — \
-             fix: the script, or the example's `expect` (`{{ entities: {{ <name>: n | $any }} }}`)"
+             fix: the script, or the example's `expect` (`{{ entities: {{ <name>: n | $any }}, \
+             events?: [{{ type, payload? }}] }}`)"
         ));
     }
 }

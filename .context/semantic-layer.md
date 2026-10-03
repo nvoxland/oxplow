@@ -659,7 +659,10 @@ collectors:
           - { to: v_task, on: "v_github_pr.title LIKE '%tsk' || v_task.id || '%'" }
 ```
 
-The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`.
+The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`,
+and may add `"events": [{ "type", "payload", "subject"? }]` — its
+extension's own declared event types, logged with the run (P9.D2;
+[extensions.md](./extensions.md) "Event types").
 
 **Entity vs fact collectors.**
 

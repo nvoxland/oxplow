@@ -3,49 +3,49 @@
     "1": {
       "columns": [
         {
-          "doc": "Row id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Row id."
         },
         {
-          "doc": "Thread.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread."
         },
         {
-          "doc": "Effort it was about, if any.",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Effort it was about, if any."
         },
         {
-          "doc": "Turn it happened in (v_agent_turn.id), when known.",
           "name": "turn_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
         },
         {
-          "doc": "What kind of nudge, e.g. `coverage-target`, `report-less-run`.",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What kind of nudge, e.g. `coverage-target`, `report-less-run`."
         },
         {
-          "doc": "The text the agent was given.",
           "name": "message",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The text the agent was given."
         },
         {
-          "doc": "What prompted it, if recorded.",
           "name": "trigger",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What prompted it, if recorded."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "When a hook response carried it to the agent; NULL while it waits for the thread's next hook.",
           "name": "delivered_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When a hook response carried it to the agent; NULL while it waits for the thread's next hook."
         }
       ],
       "key": []
@@ -55,49 +55,49 @@
     "1": {
       "columns": [
         {
-          "doc": "Turn id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Turn id."
         },
         {
-          "doc": "Thread the turn ran in.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread the turn ran in."
         },
         {
-          "doc": "What the human typed.",
           "name": "prompt",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What the human typed."
         },
         {
-          "doc": "The agent's final answer, once the turn ended.",
           "name": "answer",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The agent's final answer, once the turn ended."
         },
         {
-          "doc": "The harness session id, when it reported one.",
           "name": "session_id",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The harness session id, when it reported one."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "started_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "RFC 3339 timestamp; NULL while running.",
           "name": "ended_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while running."
         },
         {
-          "doc": "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet.",
           "name": "start_snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet."
         },
         {
-          "doc": "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running.",
           "name": "snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running."
         }
       ],
       "key": []
@@ -107,64 +107,64 @@
     "2": {
       "columns": [
         {
-          "doc": "Row id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Row id."
         },
         {
-          "doc": "Role used (`main`, `fast`, `summarize`, `embed`, `decide`, `review`).",
           "name": "role",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Role used (`main`, `fast`, `summarize`, `embed`, `decide`, `review`)."
         },
         {
-          "doc": "Provider id from ai.yaml.",
           "name": "provider",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Provider id from ai.yaml."
         },
         {
-          "doc": "Model id.",
           "name": "model",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Model id."
         },
         {
-          "doc": "What asked, e.g. `mcp:ai_decide`, `inferred-decisions`.",
           "name": "caller",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What asked, e.g. `mcp:ai_decide`, `inferred-decisions`."
         },
         {
-          "doc": "Input tokens.",
           "name": "input_tokens",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Input tokens."
         },
         {
-          "doc": "Output tokens.",
           "name": "output_tokens",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Output tokens."
         },
         {
-          "doc": "Round-trip time.",
           "name": "latency_ms",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Round-trip time."
         },
         {
-          "doc": "1 succeeded, 0 failed.",
           "name": "ok",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 succeeded, 0 failed."
         },
         {
-          "doc": "Error message when it failed.",
           "name": "error",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Error message when it failed."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "For a recorded computation (`v_ai_result`), the hash of its input; NULL for other calls.",
           "name": "input_hash",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "For a recorded computation (`v_ai_result`), the hash of its input; NULL for other calls."
         }
       ],
       "key": []
@@ -244,69 +244,69 @@
     "3": {
       "columns": [
         {
-          "doc": "Row id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Row id."
         },
         {
-          "doc": "sha256 of the canonical `{ op, args }`.",
           "name": "input_hash",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "sha256 of the canonical `{ op, args }`."
         },
         {
-          "doc": "The provider that served the model (`ai_*` settings id); another provider of the same model name is another result.",
           "name": "provider",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The provider that served the model (`ai_*` settings id); another provider of the same model name is another result."
         },
         {
-          "doc": "The model that computed it.",
           "name": "model",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The model that computed it."
         },
         {
-          "doc": "The op's prompt version (`classify@1`); a new prompt is a new result.",
           "name": "prompt_version",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The op's prompt version (`classify@1`); a new prompt is a new result."
         },
         {
-          "doc": "`classify`, `score`, `summarize` or `extract`.",
           "name": "op",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`classify`, `score`, `summarize` or `extract`."
         },
         {
-          "doc": "The role it ran on (`decide`, `summarize`, `main`).",
           "name": "role",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The role it ran on (`decide`, `summarize`, `main`)."
         },
         {
-          "doc": "What first asked, e.g. `inferred-decisions`, `collector:<owner>/<id>`.",
           "name": "caller",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What first asked, e.g. `inferred-decisions`, `collector:<owner>/<id>`."
         },
         {
-          "doc": "The result as JSON.",
           "name": "output_json",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The result as JSON."
         },
         {
-          "doc": "Input tokens of the call that computed it.",
           "name": "input_tokens",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Input tokens of the call that computed it."
         },
         {
-          "doc": "Output tokens of that call.",
           "name": "output_tokens",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Output tokens of that call."
         },
         {
-          "doc": "When it was computed (RFC 3339).",
           "name": "at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When it was computed (RFC 3339)."
         },
         {
-          "doc": "The call that computed it (v_ai_call.id).",
           "name": "ai_call_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The call that computed it (v_ai_call.id)."
         }
       ],
       "key": []
@@ -391,54 +391,54 @@
     "3": {
       "columns": [
         {
-          "doc": "The asset: `metric_cube`, or a materialized model's view (`v_<name>`).",
           "name": "asset",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The asset: `metric_cube`, or a materialized model's view (`v_<name>`)."
         },
         {
-          "doc": "When it was last recomputed (RFC 3339).",
           "name": "computed_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When it was last recomputed (RFC 3339)."
         },
         {
-          "doc": "The event log's highest seq when that recompute began: what its inputs had seen.",
           "name": "events_to",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The event log's highest seq when that recompute began: what its inputs had seen."
         },
         {
-          "doc": "The snapshot it was computed against, when it has one.",
           "name": "snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The snapshot it was computed against, when it has one."
         },
         {
-          "doc": "How long the recompute took.",
           "name": "elapsed_ms",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "How long the recompute took."
         },
         {
-          "doc": "For a materialized model: `full` (refilled whole) or `incremental` (rows past its watermark appended); NULL otherwise.",
           "name": "mode",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "For a materialized model: `full` (refilled whole) or `incremental` (rows past its watermark appended); NULL otherwise."
         },
         {
-          "doc": "For an incremental model: the highest watermark value it holds.",
           "name": "watermark",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "For an incremental model: the highest watermark value it holds."
         },
         {
-          "doc": "For a materialized model: how many rows it holds.",
           "name": "row_count",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "For a materialized model: how many rows it holds."
         },
         {
-          "doc": "When its last recompute failed, while no later one has succeeded (RFC 3339); NULL otherwise. Its rows are the last good ones.",
           "name": "failed_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When its last recompute failed, while no later one has succeeded (RFC 3339); NULL otherwise. Its rows are the last good ones."
         },
         {
-          "doc": "Why that recompute failed (a materialized model's SELECT emitting one key twice, a query error).",
           "name": "error",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Why that recompute failed (a materialized model's SELECT emitting one key twice, a query error)."
         }
       ],
       "key": []
@@ -448,39 +448,39 @@
     "2": {
       "columns": [
         {
-          "doc": "Branch name (without the remote).",
           "name": "name",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Branch name (without the remote)."
         },
         {
-          "doc": "`local` or `remote`.",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`local` or `remote`."
         },
         {
-          "doc": "Remote name for a remote-tracking branch.",
           "name": "remote",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Remote name for a remote-tracking branch."
         },
         {
-          "doc": "The commit it points at.",
           "name": "head_sha",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The commit it points at."
         },
         {
-          "doc": "The stream whose worktree has it checked out (v_stream.id), if any.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The stream whose worktree has it checked out (v_stream.id), if any."
         },
         {
-          "doc": "When oxplow last read it (RFC 3339).",
           "name": "updated_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When oxplow last read it (RFC 3339)."
         },
         {
-          "doc": "1 for the repository's default branch (`main`), else 0.",
           "name": "is_default",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 for the repository's default branch (`main`), else 0."
         }
       ],
       "key": []
@@ -490,29 +490,29 @@
     "1": {
       "columns": [
         {
-          "doc": "`work_items`, `vcs`, `knowledge`.",
           "name": "capability",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`work_items`, `vcs`, `knowledge`."
         },
         {
-          "doc": "The provider's name: a work item ref's segment (`work_item:<provider>:…`), `git`.",
           "name": "provider",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The provider's name: a work item ref's segment (`work_item:<provider>:…`), `git`."
         },
         {
-          "doc": "The extension it comes from; NULL for oxplow's own.",
           "name": "extension",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The extension it comes from; NULL for oxplow's own."
         },
         {
-          "doc": "The capability's feature flags as JSON (`work_items`: `hierarchy`, `comments`, `links`, `delete`, `in_progress_opens_effort`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`).",
           "name": "features",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The capability's feature flags as JSON (`work_items`: `hierarchy`, `comments`, `links`, `delete`, `in_progress_opens_effort`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`)."
         },
         {
-          "doc": "1 when it's the capability's active provider: the project's `activeProviders` names it (oxplow's own when it names none); a capability no project swaps has its one provider active.",
           "name": "active",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 when it's the capability's active provider: the project's `activeProviders` names it (oxplow's own when it names none); a capability no project swaps has its one provider active."
         }
       ],
       "key": []
@@ -522,79 +522,79 @@
     "2": {
       "columns": [
         {
-          "doc": "Capture id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Capture id."
         },
         {
-          "doc": "Stream captured in.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Stream captured in."
         },
         {
-          "doc": "Thread, if known.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread, if known."
         },
         {
-          "doc": "Producing effort, when unambiguous.",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Producing effort, when unambiguous."
         },
         {
-          "doc": "What produced it (collector, gauge, hook…).",
           "name": "producer",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What produced it (collector, gauge, hook…)."
         },
         {
-          "doc": "`running`, `done` or `failed`.",
           "name": "status",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`running`, `done` or `failed`."
         },
         {
-          "doc": "What started it.",
           "name": "trigger",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What started it."
         },
         {
-          "doc": "`observed` (measured) or `asserted` (an agent claimed it).",
           "name": "provenance",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`observed` (measured) or `asserted` (an agent claimed it)."
         },
         {
-          "doc": "Source identifier.",
           "name": "source",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Source identifier."
         },
         {
-          "doc": "Snapshot it was taken against, if any.",
           "name": "snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Snapshot it was taken against, if any."
         },
         {
-          "doc": "Git branch at capture.",
           "name": "branch",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Git branch at capture."
         },
         {
-          "doc": "The VCS revision (a git sha) the capture's tree was at or nearest to.",
           "name": "closest_vcs_rev",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The VCS revision (a git sha) the capture's tree was at or nearest to."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "captured_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "When the capture finished.",
           "name": "ended_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When the capture finished."
         },
         {
-          "doc": "`delta` or `full`.",
           "name": "scan_kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`delta` or `full`."
         }
       ],
       "key": []
@@ -604,59 +604,59 @@
     "3": {
       "columns": [
         {
-          "doc": "Change id (the change_id in v_change_*).",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Change id (the change_id in v_change_*)."
         },
         {
-          "doc": "Stream whose repo it's in.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Stream whose repo it's in."
         },
         {
-          "doc": "`commit`, `effort`, `turn` or `working`.",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`commit`, `effort`, `turn` or `working`."
         },
         {
-          "doc": "The commit sha, the effort row id, the turn row id, or '' for the working tree.",
           "name": "target",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The commit sha, the effort row id, the turn row id, or '' for the working tree."
         },
         {
-          "doc": "What it's compared against, as a revision: `git:<sha>`, `git:HEAD`, `snap:<id>`; NULL for a root commit.",
           "name": "base_revision",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What it's compared against, as a revision: `git:<sha>`, `git:HEAD`, `snap:<id>`; NULL for a root commit."
         },
         {
-          "doc": "The newer side, as a revision: `git:<sha>`, `snap:<id>` or `working`.",
           "name": "head_revision",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The newer side, as a revision: `git:<sha>`, `snap:<id>` or `working`."
         },
         {
-          "doc": "`pending`, `running`, `done` or `failed`.",
           "name": "status",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`pending`, `running`, `done` or `failed`."
         },
         {
-          "doc": "Why it failed, if it did.",
           "name": "error",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Why it failed, if it did."
         },
         {
-          "doc": "When the analysis last finished (RFC 3339).",
           "name": "computed_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When the analysis last finished (RFC 3339)."
         },
         {
-          "doc": "The stream's snapshot it was computed against (the head's for a turn or a closed effort); NULL for a commit.",
           "name": "snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The stream's snapshot it was computed against (the head's for a turn or a closed effort); NULL for a commit."
         },
         {
-          "doc": "The event log's highest seq when the last analysis began: what its inputs had seen.",
           "name": "events_to",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The event log's highest seq when the last analysis began: what its inputs had seen."
         }
       ],
       "key": []
@@ -666,44 +666,44 @@
     "1": {
       "columns": [
         {
-          "doc": "The change (v_change.id).",
           "name": "change_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The change (v_change.id)."
         },
         {
-          "doc": "The changed file.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The changed file."
         },
         {
-          "doc": "First line of the block.",
           "name": "start_line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "First line of the block."
         },
         {
-          "doc": "Last line of the block.",
           "name": "end_line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Last line of the block."
         },
         {
-          "doc": "Block size in lines.",
           "name": "lines",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Block size in lines."
         },
         {
-          "doc": "Where the copy is.",
           "name": "peer_path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Where the copy is."
         },
         {
-          "doc": "First line of the copy.",
           "name": "peer_start_line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "First line of the copy."
         },
         {
-          "doc": "Last line of the copy.",
           "name": "peer_end_line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Last line of the copy."
         }
       ],
       "key": []
@@ -713,39 +713,39 @@
     "2": {
       "columns": [
         {
-          "doc": "The change (v_change.id).",
           "name": "change_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The change (v_change.id)."
         },
         {
-          "doc": "Repo-relative path.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Repo-relative path."
         },
         {
-          "doc": "`added`, `modified` or `deleted`.",
           "name": "status",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`added`, `modified` or `deleted`."
         },
         {
-          "doc": "Lines added.",
           "name": "additions",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Lines added."
         },
         {
-          "doc": "Lines deleted.",
           "name": "deletions",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Lines deleted."
         },
         {
-          "doc": "Architectural zone from the project's zone rules (`other` when none match).",
           "name": "zone",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Architectural zone from the project's zone rules (`other` when none match)."
         },
         {
-          "doc": "1 if the path looks like a test file.",
           "name": "is_test",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 if the path looks like a test file."
         }
       ],
       "key": []
@@ -755,104 +755,104 @@
     "1": {
       "columns": [
         {
-          "doc": "The change (v_change.id).",
           "name": "change_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The change (v_change.id)."
         },
         {
-          "doc": "File.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "File."
         },
         {
-          "doc": "Enclosing class/impl/module path, `::`-joined; '' at top level.",
           "name": "container",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Enclosing class/impl/module path, `::`-joined; '' at top level."
         },
         {
-          "doc": "Function name.",
           "name": "name",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Function name."
         },
         {
-          "doc": "`added`, `deleted` or `modified`.",
           "name": "status",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`added`, `deleted` or `modified`."
         },
         {
-          "doc": "1 if its parameter count changed.",
           "name": "signature_changed",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 if its parameter count changed."
         },
         {
-          "doc": "1 if its complexity or length changed.",
           "name": "body_changed",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 if its complexity or length changed."
         },
         {
-          "doc": "First line (head side, or base side if deleted).",
           "name": "start_line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "First line (head side, or base side if deleted)."
         },
         {
-          "doc": "`public`, `private` or `unknown`.",
           "name": "visibility",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`public`, `private` or `unknown`."
         },
         {
-          "doc": "1 if it's a test (test file, test name or test container).",
           "name": "is_test",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 if it's a test (test file, test name or test container)."
         },
         {
-          "doc": "Cyclomatic complexity (head side, or base if deleted).",
           "name": "complexity",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Cyclomatic complexity (head side, or base if deleted)."
         },
         {
-          "doc": "Length in lines.",
           "name": "length",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Length in lines."
         },
         {
-          "doc": "Parameter count before; NULL if added.",
           "name": "params_before",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Parameter count before; NULL if added."
         },
         {
-          "doc": "Parameter count after; NULL if deleted.",
           "name": "params_after",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Parameter count after; NULL if deleted."
         },
         {
-          "doc": "Complexity change, for modified functions.",
           "name": "complexity_delta",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Complexity change, for modified functions."
         },
         {
-          "doc": "Length change, for modified functions.",
           "name": "length_delta",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Length change, for modified functions."
         },
         {
-          "doc": "Lines added inside it.",
           "name": "added_lines",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Lines added inside it."
         },
         {
-          "doc": "Lines deleted inside it.",
           "name": "deleted_lines",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Lines deleted inside it."
         },
         {
-          "doc": "min(added, deleted): edited both ways.",
           "name": "modified_lines",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "min(added, deleted): edited both ways."
         },
         {
-          "doc": "Its share of the change's function churn (0–1).",
           "name": "churn_share",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Its share of the change's function churn (0–1)."
         }
       ],
       "key": []
@@ -862,44 +862,44 @@
     "1": {
       "columns": [
         {
-          "doc": "The change (v_change.id).",
           "name": "change_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The change (v_change.id)."
         },
         {
-          "doc": "Importing file.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Importing file."
         },
         {
-          "doc": "What's imported, as written.",
           "name": "module",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What's imported, as written."
         },
         {
-          "doc": "`added` or `removed`.",
           "name": "direction",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`added` or `removed`."
         },
         {
-          "doc": "Line of the import.",
           "name": "start_line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Line of the import."
         },
         {
-          "doc": "The importing file's zone.",
           "name": "from_zone",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The importing file's zone."
         },
         {
-          "doc": "The target's zone, if known (`external` for packages).",
           "name": "to_zone",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The target's zone, if known (`external` for packages)."
         },
         {
-          "doc": "1 for an added import into a different known zone.",
           "name": "cross_zone",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 for an added import into a different known zone."
         }
       ],
       "key": []
@@ -909,44 +909,44 @@
     "1": {
       "columns": [
         {
-          "doc": "The change (v_change.id).",
           "name": "change_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The change (v_change.id)."
         },
         {
-          "doc": "The file.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The file."
         },
         {
-          "doc": "Test functions on the base side.",
           "name": "tests_before",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Test functions on the base side."
         },
         {
-          "doc": "Test functions on the head side.",
           "name": "tests_after",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Test functions on the head side."
         },
         {
-          "doc": "Assertion calls on the base side.",
           "name": "assertions_before",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Assertion calls on the base side."
         },
         {
-          "doc": "Assertion calls on the head side.",
           "name": "assertions_after",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Assertion calls on the head side."
         },
         {
-          "doc": "Skip markers on the base side.",
           "name": "skips_before",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Skip markers on the base side."
         },
         {
-          "doc": "Skip markers on the head side.",
           "name": "skips_after",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Skip markers on the head side."
         }
       ],
       "key": []
@@ -1011,54 +1011,54 @@
     "2": {
       "columns": [
         {
-          "doc": "Claim id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Claim id."
         },
         {
-          "doc": "Thread it was made in.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread it was made in."
         },
         {
-          "doc": "Task, if known.",
           "name": "task_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Task, if known."
         },
         {
-          "doc": "Effort, if one was open.",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Effort, if one was open."
         },
         {
-          "doc": "Turn it happened in (v_agent_turn.id), when known.",
           "name": "turn_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
         },
         {
-          "doc": "The claim in words.",
           "name": "statement",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The claim in words."
         },
         {
-          "doc": "`tests_pass`, `no_behavior_change`, `handles_case` or `other`.",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`tests_pass`, `no_behavior_change`, `handles_case` or `other`."
         },
         {
-          "doc": "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `effort.verify_claim`); NULL if nothing was cited.",
           "name": "evidence_ref",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `effort.verify_claim`); NULL if nothing was cited."
         },
         {
-          "doc": "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0.",
           "name": "verified",
-          "type": ""
+          "type": "",
+          "doc": "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -1068,54 +1068,54 @@
     "1": {
       "columns": [
         {
-          "doc": "Finding id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Finding id."
         },
         {
-          "doc": "The scan (v_code_quality_scan.id).",
           "name": "scan_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The scan (v_code_quality_scan.id)."
         },
         {
-          "doc": "Scanner that found it.",
           "name": "tool",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Scanner that found it."
         },
         {
-          "doc": "Repo-relative file.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Repo-relative file."
         },
         {
-          "doc": "First line.",
           "name": "start_line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "First line."
         },
         {
-          "doc": "Last line.",
           "name": "end_line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Last line."
         },
         {
-          "doc": "Finding kind, e.g. `duplicate-block`.",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Finding kind, e.g. `duplicate-block`."
         },
         {
-          "doc": "Size or score (lines, for a duplicate).",
           "name": "metric_value",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Size or score (lines, for a duplicate)."
         },
         {
-          "doc": "Kind-specific JSON, e.g. the duplicate's peer path and lines.",
           "name": "extra_json",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Kind-specific JSON, e.g. the duplicate's peer path and lines."
         },
         {
-          "doc": "When its scan started (RFC 3339).",
           "name": "scanned_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When its scan started (RFC 3339)."
         }
       ],
       "key": []
@@ -1125,49 +1125,49 @@
     "2": {
       "columns": [
         {
-          "doc": "Scan id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Scan id."
         },
         {
-          "doc": "Scanner, e.g. `duplication`.",
           "name": "tool",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Scanner, e.g. `duplication`."
         },
         {
-          "doc": "What was scanned.",
           "name": "scope",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What was scanned."
         },
         {
-          "doc": "`pending`, `running`, `done` or `failed`.",
           "name": "status",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`pending`, `running`, `done` or `failed`."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "started_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "RFC 3339 timestamp; NULL while running.",
           "name": "ended_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while running."
         },
         {
-          "doc": "Failure message, if it failed.",
           "name": "error",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Failure message, if it failed."
         },
         {
-          "doc": "The revision it read: `working`, `snap:<id>` or `git:<rev>`.",
           "name": "revision",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The revision it read: `working`, `snap:<id>` or `git:<rev>`."
         },
         {
-          "doc": "Fingerprint of the file filter it ran with, if any.",
           "name": "file_filter",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Fingerprint of the file filter it ran with, if any."
         }
       ],
       "key": []
@@ -1218,90 +1218,135 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The collector's id within its owner (may be dotted: `repo.scan_clone`)."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`ok`, `error`, `needs_approval` (an exec collector a person hasn't approved), or `skipped` (the loop guard refused its run for an event; `error` says why)."
+        },
+        {
+          "name": "last_run_at",
+          "type": "TEXT",
+          "doc": "When it last ran (RFC 3339)."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "The last run's error, when it failed."
+        },
+        {
+          "name": "row_counts_json",
+          "type": "TEXT",
+          "doc": "Rows per entity after the last successful run, as JSON."
+        },
+        {
+          "name": "cursor_json",
+          "type": "TEXT",
+          "doc": "Its checkpoint: the opaque state its script or provider read returned last."
+        },
+        {
+          "name": "last_event_id",
+          "type": "INTEGER",
+          "doc": "The seq of the last trigger event it ran for."
+        }
+      ],
+      "key": []
     }
   },
   "command_proposal": {
     "1": {
       "columns": [
         {
-          "doc": "Proposal id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Proposal id."
         },
         {
-          "doc": "`proposal:<id>`.",
           "name": "ref",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`proposal:<id>`."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "The command (`config.set`, `work_item.delete`).",
           "name": "command",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The command (`config.set`, `work_item.delete`)."
         },
         {
-          "doc": "Its input (JSON).",
           "name": "input",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Its input (JSON)."
         },
         {
-          "doc": "Who proposed it: `agent` or `lens`.",
           "name": "actor_kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Who proposed it: `agent` or `lens`."
         },
         {
-          "doc": "The proposing thread (`thr3`) or lens, when known.",
           "name": "actor_id",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The proposing thread (`thr3`) or lens, when known."
         },
         {
-          "doc": "The thread it was proposed in (v_thread.id), if any.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The thread it was proposed in (v_thread.id), if any."
         },
         {
-          "doc": "The stream it was proposed in, if any.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The stream it was proposed in, if any."
         },
         {
-          "doc": "What it supersedes on: `config:<key>` for a config change, else the command and its input.",
           "name": "key",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What it supersedes on: `config:<key>` for a config change, else the command and its input."
         },
         {
-          "doc": "The confirmation preview (JSON: command, summary, input, destructive).",
           "name": "preview",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The confirmation preview (JSON: command, summary, input, destructive)."
         },
         {
-          "doc": "What it would have done when proposed (JSON: a config key's before/after, a composite's children); NULL when it can't be dry-run.",
           "name": "dry_run",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What it would have done when proposed (JSON: a config key's before/after, a composite's children); NULL when it can't be dry-run."
         },
         {
-          "doc": "`pending`, `approved`, `declined` or `superseded`.",
           "name": "decision",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`pending`, `approved`, `declined` or `superseded`."
         },
         {
-          "doc": "When it was decided or superseded.",
           "name": "decided_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When it was decided or superseded."
         },
         {
-          "doc": "The approving run's command audit row.",
           "name": "audit_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The approving run's command audit row."
         },
         {
-          "doc": "The proposal that replaced it.",
           "name": "superseded_by",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The proposal that replaced it."
         }
       ],
       "key": []
@@ -1311,84 +1356,84 @@
     "1": {
       "columns": [
         {
-          "doc": "Comment id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Comment id."
         },
         {
-          "doc": "Stream the comment was made in.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Stream the comment was made in."
         },
         {
-          "doc": "Thread it was made in, if any.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread it was made in, if any."
         },
         {
-          "doc": "Kind of page it is anchored to: `file`, `wiki`, `task`, …",
           "name": "target_kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Kind of page it is anchored to: `file`, `wiki`, `task`, …"
         },
         {
-          "doc": "Id of that page (path, slug, task id…).",
           "name": "target_id",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Id of that page (path, slug, task id…)."
         },
         {
-          "doc": "The selected text the comment is anchored to.",
           "name": "quote",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The selected text the comment is anchored to."
         },
         {
-          "doc": "`note` (for me) or `followup` (for the agent to act on).",
           "name": "intent",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`note` (for me) or `followup` (for the agent to act on)."
         },
         {
-          "doc": "`open` or `resolved`.",
           "name": "status",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`open` or `resolved`."
         },
         {
-          "doc": "1 when the quote can no longer be found in the page.",
           "name": "orphaned",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 when the quote can no longer be found in the page."
         },
         {
-          "doc": "Who started it.",
           "name": "author",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Who started it."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "updated_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "Time of the newest message.",
           "name": "last_activity_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Time of the newest message."
         },
         {
-          "doc": "Set when resolved.",
           "name": "resolved_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Set when resolved."
         },
         {
-          "doc": "Text of the first message.",
           "name": "body",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Text of the first message."
         },
         {
-          "doc": "Number of messages in the thread.",
           "name": "message_count",
-          "type": ""
+          "type": "",
+          "doc": "Number of messages in the thread."
         }
       ],
       "key": []
@@ -1398,49 +1443,49 @@
     "2": {
       "columns": [
         {
-          "doc": "Full commit sha.",
           "name": "sha",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Full commit sha."
         },
         {
-          "doc": "Author name.",
           "name": "author",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Author name."
         },
         {
-          "doc": "Author email.",
           "name": "email",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Author email."
         },
         {
-          "doc": "Commit time (RFC 3339).",
           "name": "committed_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Commit time (RFC 3339)."
         },
         {
-          "doc": "First line of the message.",
           "name": "subject",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "First line of the message."
         },
         {
-          "doc": "The rest of the message.",
           "name": "body",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The rest of the message."
         },
         {
-          "doc": "First parent's sha; NULL for a root commit.",
           "name": "first_parent",
-          "type": ""
+          "type": "",
+          "doc": "First parent's sha; NULL for a root commit."
         },
         {
-          "doc": "Number of parents (2+ for a merge).",
           "name": "parent_count",
-          "type": ""
+          "type": "",
+          "doc": "Number of parents (2+ for a merge)."
         },
         {
-          "doc": "Every parent's sha, as a JSON array (first parent first).",
           "name": "parents",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Every parent's sha, as a JSON array (first parent first)."
         }
       ],
       "key": []
@@ -1450,29 +1495,29 @@
     "1": {
       "columns": [
         {
-          "doc": "The commit (v_commit.sha).",
           "name": "sha",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The commit (v_commit.sha)."
         },
         {
-          "doc": "Repo-relative path.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Repo-relative path."
         },
         {
-          "doc": "`added`, `modified`, `deleted` or `renamed`.",
           "name": "status",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`added`, `modified`, `deleted` or `renamed`."
         },
         {
-          "doc": "Lines added.",
           "name": "additions",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Lines added."
         },
         {
-          "doc": "Lines deleted.",
           "name": "deletions",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Lines deleted."
         }
       ],
       "key": []
@@ -1482,14 +1527,14 @@
     "1": {
       "columns": [
         {
-          "doc": "The commit (v_commit.sha).",
           "name": "sha",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The commit (v_commit.sha)."
         },
         {
-          "doc": "The task (v_task.id).",
           "name": "task_id",
-          "type": "INT"
+          "type": "INT",
+          "doc": "The task (v_task.id)."
         }
       ],
       "key": []
@@ -1499,29 +1544,29 @@
     "1": {
       "columns": [
         {
-          "doc": "Row id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Row id."
         },
         {
-          "doc": "Thread.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread."
         },
         {
-          "doc": "Effort, if one was open.",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Effort, if one was open."
         },
         {
-          "doc": "Doc path, e.g. `.context/usability.md`.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Doc path, e.g. `.context/usability.md`."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -1531,29 +1576,29 @@
     "1": {
       "columns": [
         {
-          "doc": "Dashboard id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Dashboard id."
         },
         {
-          "doc": "Title.",
           "name": "title",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Title."
         },
         {
-          "doc": "Order in the dashboards list.",
           "name": "sort_index",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Order in the dashboards list."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "updated_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -1563,29 +1608,29 @@
     "2": {
       "columns": [
         {
-          "doc": "Tile id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Tile id."
         },
         {
-          "doc": "Its dashboard (v_dashboard.id).",
           "name": "dashboard_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Its dashboard (v_dashboard.id)."
         },
         {
-          "doc": "Position on the dashboard.",
           "name": "sort_index",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Position on the dashboard."
         },
         {
-          "doc": "`query`, `lens` or `text`.",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`query`, `lens` or `text`."
         },
         {
-          "doc": "Tile options, JSON: a query tile's `sql` and `display` (a lens viz, or `metric` with its `metric` key), a lens tile's `lensId`, a text tile's `text`, and every tile's size and filter overrides.",
           "name": "options_json",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Tile options, JSON: a query tile's `sql` and `display` (a lens viz, or `metric` with its `metric` key), a lens tile's `lensId`, a text tile's `text`, and every tile's size and filter overrides."
         }
       ],
       "key": []
@@ -1660,64 +1705,64 @@
     "2": {
       "columns": [
         {
-          "doc": "Decision id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Decision id."
         },
         {
-          "doc": "Thread it was made in.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread it was made in."
         },
         {
-          "doc": "Task being worked on, if known.",
           "name": "task_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Task being worked on, if known."
         },
         {
-          "doc": "Effort it was made during, if one was open.",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Effort it was made during, if one was open."
         },
         {
-          "doc": "Turn it happened in (v_agent_turn.id), when known.",
           "name": "turn_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
         },
         {
-          "doc": "What had to be decided.",
           "name": "question",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What had to be decided."
         },
         {
-          "doc": "What was chosen.",
           "name": "choice",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What was chosen."
         },
         {
-          "doc": "Options not taken, as a JSON array of strings.",
           "name": "alternatives",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Options not taken, as a JSON array of strings."
         },
         {
-          "doc": "`low`, `medium` or `high`.",
           "name": "confidence",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`low`, `medium` or `high`."
         },
         {
-          "doc": "The reasoning.",
           "name": "why",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The reasoning."
         },
         {
-          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`).",
           "name": "provenance",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`)."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -1727,64 +1772,64 @@
     "1": {
       "columns": [
         {
-          "doc": "Stream whose worktree it's in (v_stream.id).",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Stream whose worktree it's in (v_stream.id)."
         },
         {
-          "doc": "The language server that reported it.",
           "name": "language",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The language server that reported it."
         },
         {
-          "doc": "Repo-relative file.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Repo-relative file."
         },
         {
-          "doc": "`error`, `warning`, `information` or `hint`.",
           "name": "severity",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`error`, `warning`, `information` or `hint`."
         },
         {
-          "doc": "The diagnostic text.",
           "name": "message",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The diagnostic text."
         },
         {
-          "doc": "The tool behind it (`rustc`, `ts`, `eslint`, …), if given.",
           "name": "source",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The tool behind it (`rustc`, `ts`, `eslint`, …), if given."
         },
         {
-          "doc": "Its code (`E0308`, `2304`, …), if given.",
           "name": "code",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Its code (`E0308`, `2304`, …), if given."
         },
         {
-          "doc": "Start line (1-based).",
           "name": "line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Start line (1-based)."
         },
         {
-          "doc": "Start column (1-based).",
           "name": "col",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Start column (1-based)."
         },
         {
-          "doc": "End line (1-based).",
           "name": "end_line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "End line (1-based)."
         },
         {
-          "doc": "End column (1-based).",
           "name": "end_col",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "End column (1-based)."
         },
         {
-          "doc": "When the server last published this file (RFC 3339).",
           "name": "updated_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When the server last published this file (RFC 3339)."
         }
       ],
       "key": []
@@ -1794,49 +1839,49 @@
     "1": {
       "columns": [
         {
-          "doc": "The dimension key, e.g. `zone`; `oxplow.*` keys are built in.",
           "name": "key",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The dimension key, e.g. `zone`; `oxplow.*` keys are built in."
         },
         {
-          "doc": "Display name.",
           "name": "label",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Display name."
         },
         {
-          "doc": "`categorical`, `numeric`, `temporal` or `entity-ref`.",
           "name": "value_type",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`categorical`, `numeric`, `temporal` or `entity-ref`."
         },
         {
-          "doc": "For an `entity-ref` dimension, the kind of thing it refers to.",
           "name": "subject_kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "For an `entity-ref` dimension, the kind of thing it refers to."
         },
         {
-          "doc": "The controlled set of values, as a JSON array; NULL when open.",
           "name": "vocabulary_json",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The controlled set of values, as a JSON array; NULL when open."
         },
         {
-          "doc": "`built-in`, `global` or `project`.",
           "name": "scope",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`built-in`, `global` or `project`."
         },
         {
-          "doc": "1 when facts carry it as a column (fast to group by), else 0.",
           "name": "promoted",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 when facts carry it as a column (fast to group by), else 0."
         },
         {
-          "doc": "For an entity dimension, the view and expression it slices (`{\"view\", \"expr\"}`).",
           "name": "entity_json",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "For an entity dimension, the view and expression it slices (`{\"view\", \"expr\"}`)."
         },
         {
-          "doc": "The extension that declared it; NULL for core.",
           "name": "extension",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The extension that declared it; NULL for core."
         }
       ],
       "key": []
@@ -1846,59 +1891,59 @@
     "1": {
       "columns": [
         {
-          "doc": "Reaction id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Reaction id."
         },
         {
-          "doc": "The effect: `<extension>/<id>`.",
           "name": "effect",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The effect: `<extension>/<id>`."
         },
         {
-          "doc": "The extension that declares it.",
           "name": "extension",
-          "type": ""
+          "type": "",
+          "doc": "The extension that declares it."
         },
         {
-          "doc": "The event it reacted to (`v_event.id`).",
           "name": "event_id",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The event it reacted to (`v_event.id`)."
         },
         {
-          "doc": "That event's log position.",
           "name": "event_seq",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "That event's log position."
         },
         {
-          "doc": "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`.",
           "name": "state",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`started` (a step outside oxplow is running), `ok`, `skipped`, `proposed` or `failed`."
         },
         {
-          "doc": "Why it skipped or failed.",
           "name": "reason",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Why it skipped or failed."
         },
         {
-          "doc": "Its run's `command_audit` row, when its commands ran.",
           "name": "audit_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Its run's `command_audit` row, when its commands ran."
         },
         {
-          "doc": "The proposal it left, when a command asked a person.",
           "name": "proposal_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The proposal it left, when a command asked a person."
         },
         {
-          "doc": "When it started (RFC 3339).",
           "name": "started_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When it started (RFC 3339)."
         },
         {
-          "doc": "When it ended; NULL while `started`.",
           "name": "finished_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When it ended; NULL while `started`."
         }
       ],
       "key": [
@@ -1911,54 +1956,54 @@
     "1": {
       "columns": [
         {
-          "doc": "Effort id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Effort id."
         },
         {
-          "doc": "The work item worked on, as a canonical ref: `work_item:oxplow:tsk42`, `work_item:linear:ENG-12`.",
           "name": "work_item",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The work item worked on, as a canonical ref: `work_item:oxplow:tsk42`, `work_item:linear:ENG-12`."
         },
         {
-          "doc": "The oxplow task worked on (v_task.id); NULL for another provider's work item.",
           "name": "task_id",
-          "type": ""
+          "type": "",
+          "doc": "The oxplow task worked on (v_task.id); NULL for another provider's work item."
         },
         {
-          "doc": "Thread that did the work.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread that did the work."
         },
         {
-          "doc": "That thread's stream.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "That thread's stream."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "started_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "RFC 3339 timestamp; NULL while the effort is open.",
           "name": "ended_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while the effort is open."
         },
         {
-          "doc": "Snapshot at the start (v_snapshot.id).",
           "name": "start_snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Snapshot at the start (v_snapshot.id)."
         },
         {
-          "doc": "Snapshot at the end; NULL while open.",
           "name": "end_snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Snapshot at the end; NULL while open."
         },
         {
-          "doc": "Closing summary written when the effort closed.",
           "name": "summary",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Closing summary written when the effort closed."
         }
       ],
       "key": []
@@ -1968,34 +2013,34 @@
     "2": {
       "columns": [
         {
-          "doc": "The effort (v_effort.id).",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The effort (v_effort.id)."
         },
         {
-          "doc": "That effort's work item ref.",
           "name": "work_item",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "That effort's work item ref."
         },
         {
-          "doc": "That effort's oxplow task (v_task.id); NULL for another provider's work item.",
           "name": "task_id",
-          "type": ""
+          "type": "",
+          "doc": "That effort's oxplow task (v_task.id); NULL for another provider's work item."
         },
         {
-          "doc": "Repo-relative file path.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Repo-relative file path."
         },
         {
-          "doc": "`created`, `updated` or `deleted`.",
           "name": "change_kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`created`, `updated` or `deleted`."
         },
         {
-          "doc": "The VCS revision (a git sha) nearest the file when recorded.",
           "name": "closest_vcs_rev",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The VCS revision (a git sha) nearest the file when recorded."
         }
       ],
       "key": []
@@ -2005,109 +2050,109 @@
     "1": {
       "columns": [
         {
-          "doc": "Effort (v_effort.id).",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Effort (v_effort.id)."
         },
         {
-          "doc": "Metric key (v_metric_spec.key).",
           "name": "key",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Metric key (v_metric_spec.key)."
         },
         {
-          "doc": "Metric name.",
           "name": "title",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Metric name."
         },
         {
-          "doc": "Unit, if any.",
           "name": "unit",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Unit, if any."
         },
         {
-          "doc": "`higher-better`, `lower-better` or `neutral`.",
           "name": "direction",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`higher-better`, `lower-better` or `neutral`."
         },
         {
-          "doc": "`gauge`, `coverage`, `test`, `event`, …",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`gauge`, `coverage`, `test`, `event`, …"
         },
         {
-          "doc": "Metric category.",
           "name": "category",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Metric category."
         },
         {
-          "doc": "Language, if language-specific.",
           "name": "language",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Language, if language-specific."
         },
         {
-          "doc": "How the delta was computed: `files` (over the effort's claimed files), `sum` (in-window total) or `level` (before→after).",
           "name": "agg",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "How the delta was computed: `files` (over the effort's claimed files), `sum` (in-window total) or `level` (before→after)."
         },
         {
-          "doc": "Value as the effort began; NULL for `sum`.",
           "name": "baseline",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Value as the effort began; NULL for `sum`."
         },
         {
-          "doc": "Value at the effort's end (or now, if open).",
           "name": "current",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Value at the effort's end (or now, if open)."
         },
         {
-          "doc": "current − baseline, or the total for `sum`.",
           "name": "delta",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "current − baseline, or the total for `sum`."
         },
         {
-          "doc": "1 if the value moved during the effort.",
           "name": "changed",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 if the value moved during the effort."
         },
         {
-          "doc": "For `files`: how many claimed files carry the metric.",
           "name": "attributed_files",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "For `files`: how many claimed files carry the metric."
         },
         {
-          "doc": "Samples considered.",
           "name": "sample_count",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Samples considered."
         },
         {
-          "doc": "Metric target.",
           "name": "target",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Metric target."
         },
         {
-          "doc": "Warning threshold.",
           "name": "warn_at",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Warning threshold."
         },
         {
-          "doc": "Failure threshold.",
           "name": "fail_at",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Failure threshold."
         },
         {
-          "doc": "`warn` or `fail` when the current value sits past that threshold; else NULL.",
           "name": "crossing",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`warn` or `fail` when the current value sits past that threshold; else NULL."
         },
         {
-          "doc": "The latest contributing capture (v_capture.id), for drill-in.",
           "name": "latest_capture_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The latest contributing capture (v_capture.id), for drill-in."
         },
         {
-          "doc": "When oxplow last recomputed it (RFC 3339).",
           "name": "refreshed_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When oxplow last recomputed it (RFC 3339)."
         }
       ],
       "key": []
@@ -2117,49 +2162,49 @@
     "1": {
       "columns": [
         {
-          "doc": "Effort (v_effort.id).",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Effort (v_effort.id)."
         },
         {
-          "doc": "Order within the effort.",
           "name": "seq",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Order within the effort."
         },
         {
-          "doc": "`test-run`, `diff-coverage`, `static-analysis`, …",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`test-run`, `diff-coverage`, `static-analysis`, …"
         },
         {
-          "doc": "`observed` (oxplow saw it) or `asserted` (the agent reported it).",
           "name": "provenance",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`observed` (oxplow saw it) or `asserted` (the agent reported it)."
         },
         {
-          "doc": "Where it came from, e.g. `post-tool-bash`.",
           "name": "source",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Where it came from, e.g. `post-tool-bash`."
         },
         {
-          "doc": "Headline number, e.g. coverage %.",
           "name": "metric_value",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Headline number, e.g. coverage %."
         },
         {
-          "doc": "Kind-specific detail, JSON (e.g. test cases, covered/uncovered lines).",
           "name": "payload_json",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Kind-specific detail, JSON (e.g. test cases, covered/uncovered lines)."
         },
         {
-          "doc": "Snapshot it was captured against.",
           "name": "local_snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Snapshot it was captured against."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -2169,89 +2214,89 @@
     "1": {
       "columns": [
         {
-          "doc": "Insert order — the delivery order consumers checkpoint on.",
           "name": "seq",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Insert order — the delivery order consumers checkpoint on."
         },
         {
-          "doc": "Public identity (UUIDv7; sorts by time).",
           "name": "id",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Public identity (UUIDv7; sorts by time)."
         },
         {
-          "doc": "`namespace.name`, e.g. `work_item.transitioned`.",
           "name": "type",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`namespace.name`, e.g. `work_item.transitioned`."
         },
         {
-          "doc": "Schema version of `type`.",
           "name": "v",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Schema version of `type`."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, …",
           "name": "source",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, …"
         },
         {
-          "doc": "Anchor, when known.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
         },
         {
-          "doc": "Anchor, when known.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
         },
         {
-          "doc": "Anchor, when known.",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
         },
         {
-          "doc": "Anchor (agent_turn), when known.",
           "name": "turn_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Anchor (agent_turn), when known."
         },
         {
-          "doc": "Anchor, when known.",
           "name": "snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
         },
         {
-          "doc": "JSON array of the canonical refs the event is about.",
           "name": "subject",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "JSON array of the canonical refs the event is about."
         },
         {
-          "doc": "JSON, validated against `type@v`'s schema.",
           "name": "payload",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "JSON, validated against `type@v`'s schema."
         },
         {
-          "doc": "Content hash when the body lives in the content store.",
           "name": "payload_hash",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Content hash when the body lives in the content store."
         },
         {
-          "doc": "When retention replaced the payload with `{}` (the envelope stays); NULL while it's kept.",
           "name": "payload_expired_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When retention replaced the payload with `{}` (the envelope stays); NULL while it's kept."
         },
         {
-          "doc": "The event id that caused this one.",
           "name": "cause",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The event id that caused this one."
         },
         {
-          "doc": "Emitter-derived key; unique.",
           "name": "dedupe_key",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Emitter-derived key; unique."
         }
       ],
       "key": []
@@ -2261,19 +2306,19 @@
     "1": {
       "columns": [
         {
-          "doc": "Consumer name.",
           "name": "consumer",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Consumer name."
         },
         {
-          "doc": "Last `v_event.seq` it handled or skipped.",
           "name": "last_seq",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Last `v_event.seq` it handled or skipped."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "updated_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -2283,24 +2328,24 @@
     "1": {
       "columns": [
         {
-          "doc": "xxh3-128 hex of the bytes.",
           "name": "hash",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "xxh3-128 hex of the bytes."
         },
         {
-          "doc": "The event namespace it belongs to (`agent`, `test`, …); sets its retention.",
           "name": "namespace",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The event namespace it belongs to (`agent`, `test`, …); sets its retention."
         },
         {
-          "doc": "Length in bytes.",
           "name": "size",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Length in bytes."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -2310,54 +2355,54 @@
     "1": {
       "columns": [
         {
-          "doc": "Letter id (for `retry_dead_letter` / `discard_dead_letter`).",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Letter id (for `retry_dead_letter` / `discard_dead_letter`)."
         },
         {
-          "doc": "The consumer that failed.",
           "name": "consumer",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The consumer that failed."
         },
         {
-          "doc": "`v_event.seq`.",
           "name": "event_seq",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "`v_event.seq`."
         },
         {
-          "doc": "`v_event.id`.",
           "name": "event_id",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`v_event.id`."
         },
         {
-          "doc": "`v_event.type`.",
           "name": "event_type",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`v_event.type`."
         },
         {
-          "doc": "The last failure.",
           "name": "error",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The last failure."
         },
         {
-          "doc": "How many times it has failed.",
           "name": "attempts",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "How many times it has failed."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "first_failed_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "last_failed_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "`pending`, `retried` or `discarded`.",
           "name": "state",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`pending`, `retried` or `discarded`."
         }
       ],
       "key": []
@@ -2415,44 +2460,44 @@
     "2": {
       "columns": [
         {
-          "doc": "`namespace.name`; an extension's namespace is its name with `-` read as `_`.",
           "name": "event_type",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`namespace.name`; an extension's namespace is its name with `-` read as `_`."
         },
         {
-          "doc": "The schema version.",
           "name": "v",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The schema version."
         },
         {
-          "doc": "The extension that declares it; NULL for a core type.",
           "name": "extension",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The extension that declares it; NULL for a core type."
         },
         {
-          "doc": "What it records, as its extension declares; NULL for a core type.",
           "name": "summary",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What it records, as its extension declares; NULL for a core type."
         },
         {
-          "doc": "1 while the running vocabulary has it (it can be appended); 0 once its extension is gone, or while its extension's declaration of it is refused (a schema changed at a recorded version, a namespace collision).",
           "name": "registered",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 while the running vocabulary has it (it can be appended); 0 once its extension is gone, or while its extension's declaration of it is refused (a schema changed at a recorded version, a namespace collision)."
         },
         {
-          "doc": "1 for the newest registered version of its type: what consumers read rows at.",
           "name": "latest",
-          "type": ""
+          "type": "",
+          "doc": "1 for the newest registered version of its type: what consumers read rows at."
         },
         {
-          "doc": "The payload's JSON Schema, as first registered: a declared type's schema at a recorded version never changes.",
           "name": "schema_json",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The payload's JSON Schema, as first registered: a declared type's schema at a recorded version never changes."
         },
         {
-          "doc": "When it was first registered (RFC 3339).",
           "name": "recorded_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When it was first registered (RFC 3339)."
         }
       ],
       "key": [
@@ -2465,99 +2510,99 @@
     "1": {
       "columns": [
         {
-          "doc": "Fact id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Fact id."
         },
         {
-          "doc": "Producing capture (v_capture.id).",
           "name": "capture_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Producing capture (v_capture.id)."
         },
         {
-          "doc": "Measure this is a value of (v_measure.key).",
           "name": "measure_key",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Measure this is a value of (v_measure.key)."
         },
         {
-          "doc": "The measured value.",
           "name": "value",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "The measured value."
         },
         {
-          "doc": "Ratio numerator, for ratio measures.",
           "name": "numerator",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Ratio numerator, for ratio measures."
         },
         {
-          "doc": "Ratio denominator, for ratio measures.",
           "name": "denominator",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Ratio denominator, for ratio measures."
         },
         {
-          "doc": "What the fact is about.",
           "name": "subject_kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What the fact is about."
         },
         {
-          "doc": "Logical id of the subject.",
           "name": "subject_ref",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Logical id of the subject."
         },
         {
-          "doc": "File path, when the subject has one.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "File path, when the subject has one."
         },
         {
-          "doc": "Line number, when it has one.",
           "name": "line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Line number, when it has one."
         },
         {
-          "doc": "Finding severity, for lint-like facts.",
           "name": "severity",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Finding severity, for lint-like facts."
         },
         {
-          "doc": "Rule id, for lint-like facts.",
           "name": "rule",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Rule id, for lint-like facts."
         },
         {
-          "doc": "Free-text detail.",
           "name": "detail",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Free-text detail."
         },
         {
-          "doc": "Extra dimensions as a JSON object.",
           "name": "dims_json",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Extra dimensions as a JSON object."
         },
         {
-          "doc": "From the capture.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "From the capture."
         },
         {
-          "doc": "From the capture.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "From the capture."
         },
         {
-          "doc": "From the capture.",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "From the capture."
         },
         {
-          "doc": "From the capture.",
           "name": "captured_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "From the capture."
         },
         {
-          "doc": "From the capture.",
           "name": "branch",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "From the capture."
         }
       ],
       "key": []
@@ -2567,39 +2612,39 @@
     "1": {
       "columns": [
         {
-          "doc": "The stream (worktree) whose tree it's in.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The stream (worktree) whose tree it's in."
         },
         {
-          "doc": "The file.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The file."
         },
         {
-          "doc": "The measure (v_measure.key).",
           "name": "measure_key",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The measure (v_measure.key)."
         },
         {
-          "doc": "Its value for the file.",
           "name": "value",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Its value for the file."
         },
         {
-          "doc": "Ratio numerator, for ratio measures.",
           "name": "numerator",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Ratio numerator, for ratio measures."
         },
         {
-          "doc": "Ratio denominator, for ratio measures.",
           "name": "denominator",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Ratio denominator, for ratio measures."
         },
         {
-          "doc": "When its latest capture ran.",
           "name": "captured_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When its latest capture ran."
         }
       ],
       "key": []
@@ -2609,54 +2654,54 @@
     "1": {
       "columns": [
         {
-          "doc": "The stream (worktree) whose tree it's in.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The stream (worktree) whose tree it's in."
         },
         {
-          "doc": "`symbol:<path>::<name>`.",
           "name": "symbol",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`symbol:<path>::<name>`."
         },
         {
-          "doc": "The file it's in.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The file it's in."
         },
         {
-          "doc": "The function's name.",
           "name": "name",
-          "type": ""
+          "type": "",
+          "doc": "The function's name."
         },
         {
-          "doc": "Its first line.",
           "name": "line",
-          "type": ""
+          "type": "",
+          "doc": "Its first line."
         },
         {
-          "doc": "Its language (`rust`, `typescript`, …).",
           "name": "language",
-          "type": ""
+          "type": "",
+          "doc": "Its language (`rust`, `typescript`, …)."
         },
         {
-          "doc": "Cyclomatic complexity; NULL when not measured.",
           "name": "complexity",
-          "type": ""
+          "type": "",
+          "doc": "Cyclomatic complexity; NULL when not measured."
         },
         {
-          "doc": "Length in lines; NULL when not measured.",
           "name": "length",
-          "type": ""
+          "type": "",
+          "doc": "Length in lines; NULL when not measured."
         },
         {
-          "doc": "Parameter count; NULL when not measured.",
           "name": "parameters",
-          "type": ""
+          "type": "",
+          "doc": "Parameter count; NULL when not measured."
         },
         {
-          "doc": "When its latest capture ran.",
           "name": "captured_at",
-          "type": ""
+          "type": "",
+          "doc": "When its latest capture ran."
         }
       ],
       "key": []
@@ -2666,14 +2711,14 @@
     "1": {
       "columns": [
         {
-          "doc": "`wiki:<slug>` (v_knowledge_page.ref).",
           "name": "ref",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`wiki:<slug>` (v_knowledge_page.ref)."
         },
         {
-          "doc": "The page's markdown, as its file holds it.",
           "name": "body",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The page's markdown, as its file holds it."
         }
       ],
       "key": []
@@ -2683,49 +2728,49 @@
     "1": {
       "columns": [
         {
-          "doc": "`wiki:<slug>`.",
           "name": "ref",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`wiki:<slug>`."
         },
         {
-          "doc": "The knowledge provider (`oxplow`).",
           "name": "provider",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The knowledge provider (`oxplow`)."
         },
         {
-          "doc": "Page slug (link with [[slug]]).",
           "name": "slug",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Page slug (link with [[slug]])."
         },
         {
-          "doc": "The page's first `# ` heading, else its slug.",
           "name": "title",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The page's first `# ` heading, else its slug."
         },
         {
-          "doc": "Start of the body.",
           "name": "excerpt",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Start of the body."
         },
         {
-          "doc": "Size of the full body, bytes.",
           "name": "body_size",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Size of the full body, bytes."
         },
         {
-          "doc": "JSON array of every ref the page links to (`file:src/lib.rs`, `wiki:other`, `work_item:oxplow:tsk42`).",
           "name": "outbound_refs",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "JSON array of every ref the page links to (`file:src/lib.rs`, `wiki:other`, `work_item:oxplow:tsk42`)."
         },
         {
-          "doc": "Its `stale` rows in v_knowledge_ref: file refs whose file has a newer primary-stream snapshot than the one the ref was pinned to (or that were never pinned but have been snapshotted): what may no longer hold.",
           "name": "stale_ref_count",
-          "type": "INT"
+          "type": "INT",
+          "doc": "Its `stale` rows in v_knowledge_ref: file refs whose file has a newer primary-stream snapshot than the one the ref was pinned to (or that were never pinned but have been snapshotted): what may no longer hold."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "updated_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -2735,39 +2780,39 @@
     "2": {
       "columns": [
         {
-          "doc": "The page (`wiki:<slug>`, v_knowledge_page.ref).",
           "name": "page",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The page (`wiki:<slug>`, v_knowledge_page.ref)."
         },
         {
-          "doc": "The file it relies on (workspace-relative).",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The file it relies on (workspace-relative)."
         },
         {
-          "doc": "The snapshot the ref was pinned to (written or verified against); NULL if never pinned.",
           "name": "pinned_snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The snapshot the ref was pinned to (written or verified against); NULL if never pinned."
         },
         {
-          "doc": "The VCS revision nearest the pin (v_commit.sha for git); NULL without one.",
           "name": "pinned_vcs_rev",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The VCS revision nearest the pin (v_commit.sha for git); NULL without one."
         },
         {
-          "doc": "1 when the pinned snapshot is exactly `pinned_vcs_rev` (a clean worktree), else 0.",
           "name": "pinned_vcs_rev_exact",
-          "type": "INT"
+          "type": "INT",
+          "doc": "1 when the pinned snapshot is exactly `pinned_vcs_rev` (a clean worktree), else 0."
         },
         {
-          "doc": "The file's latest primary-stream snapshot (the stream a pin comes from); NULL if it was never captured there.",
           "name": "latest_snapshot_id",
-          "type": "INT"
+          "type": "INT",
+          "doc": "The file's latest primary-stream snapshot (the stream a pin comes from); NULL if it was never captured there."
         },
         {
-          "doc": "1 when the file changed after the pin (or was captured but never pinned).",
           "name": "stale",
-          "type": "INT"
+          "type": "INT",
+          "doc": "1 when the file changed after the pin (or was captured but never pinned)."
         }
       ],
       "key": []
@@ -2777,19 +2822,19 @@
     "1": {
       "columns": [
         {
-          "doc": "The page (`wiki:<slug>`, v_knowledge_page.ref).",
           "name": "page",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The page (`wiki:<slug>`, v_knowledge_page.ref)."
         },
         {
-          "doc": "The thread (v_thread.id).",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The thread (v_thread.id)."
         },
         {
-          "doc": "RFC 3339 timestamp of that thread's latest write to it.",
           "name": "last_seen_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp of that thread's latest write to it."
         }
       ],
       "key": []
@@ -2799,39 +2844,39 @@
     "1": {
       "columns": [
         {
-          "doc": "Namespaced key, e.g. `oxplow.coverage`.",
           "name": "key",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Namespaced key, e.g. `oxplow.coverage`."
         },
         {
-          "doc": "Display name.",
           "name": "title",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Display name."
         },
         {
-          "doc": "Unit of value, if any.",
           "name": "unit",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Unit of value, if any."
         },
         {
-          "doc": "What a fact is about: `symbol`, `file`, `test`, `model`, …",
           "name": "subject_kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What a fact is about: `symbol`, `file`, `test`, `model`, …"
         },
         {
-          "doc": "How values combine over time: `additive`, `semi-additive` or `non-additive`.",
           "name": "temporal_semantics",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "How values combine over time: `additive`, `semi-additive` or `non-additive`."
         },
         {
-          "doc": "`built-in`, `global` or `project`.",
           "name": "scope",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`built-in`, `global` or `project`."
         },
         {
-          "doc": "What the measure means.",
           "name": "description",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What the measure means."
         }
       ],
       "key": []
@@ -2841,54 +2886,54 @@
     "1": {
       "columns": [
         {
-          "doc": "The metric key.",
           "name": "key",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The metric key."
         },
         {
-          "doc": "Display name.",
           "name": "title",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Display name."
         },
         {
-          "doc": "How it displays (`gauge`, …).",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "How it displays (`gauge`, …)."
         },
         {
-          "doc": "The language a code gauge reads; NULL for the rest.",
           "name": "language",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The language a code gauge reads; NULL for the rest."
         },
         {
-          "doc": "`built-in`, `global` or `project`.",
           "name": "scope",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`built-in`, `global` or `project`."
         },
         {
-          "doc": "1 when it's on in this project.",
           "name": "enabled",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 when it's on in this project."
         },
         {
-          "doc": "The target value, when set.",
           "name": "target",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "The target value, when set."
         },
         {
-          "doc": "When a gauge runs (`on-snapshot`, …); `auto` for a metric fed by its producer.",
           "name": "trigger",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When a gauge runs (`on-snapshot`, …); `auto` for a metric fed by its producer."
         },
         {
-          "doc": "1 when `metric.enable` can switch it.",
           "name": "toggleable",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 when `metric.enable` can switch it."
         },
         {
-          "doc": "`operational`, `testing`, `static-quality` or `custom` — how the catalog groups it.",
           "name": "category",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`operational`, `testing`, `static-quality` or `custom` — how the catalog groups it."
         }
       ],
       "key": []
@@ -2898,84 +2943,84 @@
     "2": {
       "columns": [
         {
-          "doc": "Metric key, e.g. `oxplow.coverage.abs_pct`.",
           "name": "key",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Metric key, e.g. `oxplow.coverage.abs_pct`."
         },
         {
-          "doc": "Display name.",
           "name": "title",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Display name."
         },
         {
-          "doc": "Unit, e.g. `%`, `ms`; NULL for counts.",
           "name": "unit",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Unit, e.g. `%`, `ms`; NULL for counts."
         },
         {
-          "doc": "Measure whose facts it aggregates; NULL for a formula metric.",
           "name": "source_measure",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Measure whose facts it aggregates; NULL for a formula metric."
         },
         {
-          "doc": "How facts combine within a capture: count, sum, avg, min, max, last, p95, ratio, …",
           "name": "aggregation",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "How facts combine within a capture: count, sum, avg, min, max, last, p95, ratio, …"
         },
         {
-          "doc": "`higher-better`, `lower-better` or `neutral`.",
           "name": "direction",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`higher-better`, `lower-better` or `neutral`."
         },
         {
-          "doc": "Goal value, if any.",
           "name": "target",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Goal value, if any."
         },
         {
-          "doc": "Warning threshold, if any (read with `direction`).",
           "name": "warn_at",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Warning threshold, if any (read with `direction`)."
         },
         {
-          "doc": "Failure threshold, if any (read with `direction`).",
           "name": "fail_at",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Failure threshold, if any (read with `direction`)."
         },
         {
-          "doc": "What it measures.",
           "name": "description",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What it measures."
         },
         {
-          "doc": "Grouping on the Metrics page.",
           "name": "category",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Grouping on the Metrics page."
         },
         {
-          "doc": "Language it applies to, if language-specific.",
           "name": "language",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Language it applies to, if language-specific."
         },
         {
-          "doc": "`built-in`, `global`, `project` or `extension`.",
           "name": "scope",
-          "type": ""
+          "type": "",
+          "doc": "`built-in`, `global`, `project` or `extension`."
         },
         {
-          "doc": "`gauge`, `findings`, `test`, `coverage` or `event`.",
           "name": "display_kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`gauge`, `findings`, `test`, `coverage` or `event`."
         },
         {
-          "doc": "The extension that declares it, when `scope` is `extension`.",
           "name": "extension",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The extension that declares it, when `scope` is `extension`."
         },
         {
-          "doc": "For an entity metric, what it reads: `{\"view\", \"where\", \"time\", \"value\", \"aggregation\"}`; NULL for a fact metric. (v2)",
           "name": "entity_json",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "For an entity metric, what it reads: `{\"view\", \"where\", \"time\", \"value\", \"aggregation\"}`; NULL for a fact metric. (v2)"
         }
       ],
       "key": []
@@ -3105,64 +3150,64 @@
     "5": {
       "columns": [
         {
-          "doc": "The view to query (`v_task`).",
           "name": "view",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The view to query (`v_task`)."
         },
         {
-          "doc": "The model's name within its owner (`task`).",
           "name": "name",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The model's name within its owner (`task`)."
         },
         {
-          "doc": "`core`, or the extension that declares it.",
           "name": "owner",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`core`, or the extension that declares it."
         },
         {
-          "doc": "`sql` (compiled from a model file) or `entity` (an extension's synced entity).",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`sql` (compiled from a model file) or `entity` (an extension's synced entity)."
         },
         {
-          "doc": "Contract version: a change to the columns bumps it.",
           "name": "version",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Contract version: a change to the columns bumps it."
         },
         {
-          "doc": "What the view holds.",
           "name": "description",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What the view holds."
         },
         {
-          "doc": "The SELECT the view was compiled from, references resolved.",
           "name": "sql",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The SELECT the view was compiled from, references resolved."
         },
         {
-          "doc": "RFC 3339 time of the open that compiled it.",
           "name": "compiled_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 time of the open that compiled it."
         },
         {
-          "doc": "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes; `every <d>` (`every 1h`) when it's stored and recomputed on that clock; `incremental <column>` when it's stored and kept by appending rows past that watermark.",
           "name": "materialize",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes; `every <d>` (`every 1h`) when it's stored and recomputed on that clock; `incremental <column>` when it's stored and kept by appending rows past that watermark."
         },
         {
-          "doc": "For a materialized model: when it was last recomputed (RFC 3339); NULL otherwise.",
           "name": "computed_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "For a materialized model: when it was last recomputed (RFC 3339); NULL otherwise."
         },
         {
-          "doc": "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen.",
           "name": "events_to",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen."
         },
         {
-          "doc": "For a materialized model: how its last recompute ran — `full` or `incremental`.",
           "name": "mode",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "For a materialized model: how its last recompute ran — `full` or `incremental`."
         }
       ],
       "key": []
@@ -3202,34 +3247,34 @@
     "2": {
       "columns": [
         {
-          "doc": "The model's view (`v_model.view`).",
           "name": "view",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The model's view (`v_model.view`)."
         },
         {
-          "doc": "0-based column position.",
           "name": "position",
-          "type": "INT"
+          "type": "INT",
+          "doc": "0-based column position."
         },
         {
-          "doc": "Column name.",
           "name": "name",
-          "type": ""
+          "type": "",
+          "doc": "Column name."
         },
         {
-          "doc": "The column's SQLite declared type; empty for a computed column.",
           "name": "sql_type",
-          "type": ""
+          "type": "",
+          "doc": "The column's SQLite declared type; empty for a computed column."
         },
         {
-          "doc": "What the column holds.",
           "name": "doc",
-          "type": ""
+          "type": "",
+          "doc": "What the column holds."
         },
         {
-          "doc": "Its 1-based place in the model's key; null when it isn't part of the key.",
           "name": "key_part",
-          "type": ""
+          "type": "",
+          "doc": "Its 1-based place in the model's key; null when it isn't part of the key."
         }
       ],
       "key": []
@@ -3239,19 +3284,19 @@
     "1": {
       "columns": [
         {
-          "doc": "The reading model's view.",
           "name": "view",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The reading model's view."
         },
         {
-          "doc": "The view (`ref`) or table (`source`) it reads.",
           "name": "input",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The view (`ref`) or table (`source`) it reads."
         },
         {
-          "doc": "`ref` or `source`.",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`ref` or `source`."
         }
       ],
       "key": []
@@ -3261,29 +3306,29 @@
     "1": {
       "columns": [
         {
-          "doc": "The tested model's view.",
           "name": "view",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The tested model's view."
         },
         {
-          "doc": "The test, e.g. `unique(id)`.",
           "name": "test",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The test, e.g. `unique(id)`."
         },
         {
-          "doc": "`passed`, `failed` (rows break it) or `error` (it didn't run).",
           "name": "state",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`passed`, `failed` (rows break it) or `error` (it didn't run)."
         },
         {
-          "doc": "How many rows broke it, or the error; NULL when passed.",
           "name": "detail",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "How many rows broke it, or the error; NULL when passed."
         },
         {
-          "doc": "RFC 3339 time it ran.",
           "name": "ran_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 time it ran."
         }
       ],
       "key": []
@@ -3293,39 +3338,39 @@
     "1": {
       "columns": [
         {
-          "doc": "Visit id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Visit id."
         },
         {
-          "doc": "Thread the page was opened in.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread the page was opened in."
         },
         {
-          "doc": "Page kind (`task`, `file`, `lens`, …).",
           "name": "page_kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Page kind (`task`, `file`, `lens`, …)."
         },
         {
-          "doc": "Page id (`task:42`, `file:src/a.rs`, …).",
           "name": "page_id",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Page id (`task:42`, `file:src/a.rs`, …)."
         },
         {
-          "doc": "Title shown at the time.",
           "name": "label",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Title shown at the time."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "visited_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "Time on the page, when known.",
           "name": "duration_ms",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Time on the page, when known."
         }
       ],
       "key": []
@@ -3335,74 +3380,74 @@
     "2": {
       "columns": [
         {
-          "doc": "The extension it belongs to.",
           "name": "plugin",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The extension it belongs to."
         },
         {
-          "doc": "The provider's or collector's id within it.",
           "name": "contribution",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The provider's or collector's id within it."
         },
         {
-          "doc": "`provider` or `collector`.",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`provider` or `collector`."
         },
         {
-          "doc": "`ok`, `failing` or `disabled`.",
           "name": "state",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`ok`, `failing` or `disabled`."
         },
         {
-          "doc": "Why it's disabled.",
           "name": "reason",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Why it's disabled."
         },
         {
-          "doc": "Failures since its last success.",
           "name": "consecutive_failures",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Failures since its last success."
         },
         {
-          "doc": "When it last succeeded (RFC 3339).",
           "name": "last_ok_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When it last succeeded (RFC 3339)."
         },
         {
-          "doc": "Its last failure.",
           "name": "last_error",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Its last failure."
         },
         {
-          "doc": "A moving average of its successful runs or calls, in milliseconds.",
           "name": "mean_ms",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "A moving average of its successful runs or calls, in milliseconds."
         },
         {
-          "doc": "When it should next run (a schedule's next slot), if it runs on one.",
           "name": "next_due_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When it should next run (a schedule's next slot), if it runs on one."
         },
         {
-          "doc": "When this row last changed.",
           "name": "updated_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When this row last changed."
         },
         {
-          "doc": "Events it couldn't handle and that wait for a person: dead letters of its consumer (`extension:<plugin>/<contribution>`) or of events about the plugin.",
           "name": "dead_letters",
-          "type": ""
+          "type": "",
+          "doc": "Events it couldn't handle and that wait for a person: dead letters of its consumer (`extension:<plugin>/<contribution>`) or of events about the plugin."
         },
         {
-          "doc": "1 unless a scheduled run is overdue (`next_due_at` has passed).",
           "name": "fresh",
-          "type": ""
+          "type": "",
+          "doc": "1 unless a scheduled run is overdue (`next_due_at` has passed)."
         },
         {
-          "doc": "The open repair work item filed when it was disabled (P7.C2); NULL once that item is done or canceled.",
           "name": "repair_item",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The open repair work item filed when it was disabled (P7.C2); NULL once that item is done or canceled."
         }
       ],
       "key": []
@@ -3412,49 +3457,49 @@
     "1": {
       "columns": [
         {
-          "doc": "The kind (`work_item`, `acme_pr`).",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The kind (`work_item`, `acme_pr`)."
         },
         {
-          "doc": "The extension that declares it; NULL for a core kind.",
           "name": "extension",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The extension that declares it; NULL for a core kind."
         },
         {
-          "doc": "What one is called (`Pull request`); NULL for a core kind.",
           "name": "label",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What one is called (`Pull request`); NULL for a core kind."
         },
         {
-          "doc": "The regex its ids match.",
           "name": "id_pattern",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The regex its ids match."
         },
         {
-          "doc": "1 when a ref to one may carry `@rev`.",
           "name": "revisioned",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 when a ref to one may carry `@rev`."
         },
         {
-          "doc": "JSON array of its `[[prefix:…]]` sugar (`git` for `commit`).",
           "name": "wikilinks",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "JSON array of its `[[prefix:…]]` sugar (`git` for `commit`)."
         },
         {
-          "doc": "The view whose `title` names one, by its `ref` column; NULL for a core kind.",
           "name": "resolve",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The view whose `title` names one, by its `ref` column; NULL for a core kind."
         },
         {
-          "doc": "The page that opens one (`page:ext.<extension>.<page>`, given `?ref=`); NULL for a core kind.",
           "name": "page",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The page that opens one (`page:ext.<extension>.<page>`, given `?ref=`); NULL for a core kind."
         },
         {
-          "doc": "Its icon's name (one of `REF_KIND_ICONS`); NULL for a core kind.",
           "name": "icon",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Its icon's name (one of `REF_KIND_ICONS`); NULL for a core kind."
         }
       ],
       "key": [
@@ -3466,34 +3511,34 @@
     "2": {
       "columns": [
         {
-          "doc": "Snapshot id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Snapshot id."
         },
         {
-          "doc": "Stream captured.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Stream captured."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "The VCS revision the captured tree equals (`git:<sha>`): set when the workspace was clean at the head; NULL otherwise.",
           "name": "revision",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The VCS revision the captured tree equals (`git:<sha>`): set when the workspace was clean at the head; NULL otherwise."
         },
         {
-          "doc": "Branch when captured, if known.",
           "name": "branch",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Branch when captured, if known."
         },
         {
-          "doc": "Whole-tree identity: two snapshots with the same tree_hash hold the same files. NULL before V96.",
           "name": "tree_hash",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Whole-tree identity: two snapshots with the same tree_hash hold the same files. NULL before V96."
         }
       ],
       "key": []
@@ -3503,69 +3548,69 @@
     "1": {
       "columns": [
         {
-          "doc": "Operation order within the project.",
           "name": "seq",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Operation order within the project."
         },
         {
-          "doc": "Stream (worktree) the take ran on.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Stream (worktree) the take ran on."
         },
         {
-          "doc": "Snapshot the worktree is at after the take (v_snapshot.id).",
           "name": "snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree is at after the take (v_snapshot.id)."
         },
         {
-          "doc": "Snapshot the worktree was at just before this take; parent → snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id → snapshot_id).",
           "name": "parent_snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at just before this take; parent → snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id → snapshot_id)."
         },
         {
-          "doc": "Why: turn_end, quiet, effort_start, effort_end, startup, manual, git_refs, head_moved, legacy.",
           "name": "trigger",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Why: turn_end, quiet, effort_start, effort_end, startup, manual, git_refs, head_moved, legacy."
         },
         {
-          "doc": "Thread the take belongs to, if any.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread the take belongs to, if any."
         },
         {
-          "doc": "Agent turn the take belongs to, if any (v_agent_turn.id).",
           "name": "turn_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Agent turn the take belongs to, if any (v_agent_turn.id)."
         },
         {
-          "doc": "Effort the take belongs to, if any (v_effort.id).",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Effort the take belongs to, if any (v_effort.id)."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "How long the take took.",
           "name": "elapsed_ms",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "How long the take took."
         },
         {
-          "doc": "The caller's time budget, if it had one.",
           "name": "budget_ms",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The caller's time budget, if it had one."
         },
         {
-          "doc": "1 when elapsed_ms exceeded budget_ms.",
           "name": "over_budget",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 when elapsed_ms exceeded budget_ms."
         },
         {
-          "doc": "File rows recorded (0 when nothing changed).",
           "name": "file_count",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "File rows recorded (0 when nothing changed)."
         }
       ],
       "key": []
@@ -3575,44 +3620,44 @@
     "1": {
       "columns": [
         {
-          "doc": "Stream id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Stream id."
         },
         {
-          "doc": "`primary` (the repo) or `worktree`.",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`primary` (the repo) or `worktree`."
         },
         {
-          "doc": "Display name.",
           "name": "title",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Display name."
         },
         {
-          "doc": "Git branch currently checked out in the worktree.",
           "name": "branch",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Git branch currently checked out in the worktree."
         },
         {
-          "doc": "Absolute path of the stream's worktree.",
           "name": "worktree_path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Absolute path of the stream's worktree."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "updated_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "Set when the stream was archived; NULL while live.",
           "name": "archived_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Set when the stream was archived; NULL while live."
         }
       ],
       "key": []
@@ -3622,29 +3667,29 @@
     "1": {
       "columns": [
         {
-          "doc": "Effort.",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Effort."
         },
         {
-          "doc": "Thread.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread."
         },
         {
-          "doc": "`repeated_edits` or `failed_commands`.",
           "name": "kind",
-          "type": ""
+          "type": "",
+          "doc": "`repeated_edits` or `failed_commands`."
         },
         {
-          "doc": "The file path, or `Bash`.",
           "name": "subject",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The file path, or `Bash`."
         },
         {
-          "doc": "How many edits / failures.",
           "name": "count",
-          "type": ""
+          "type": "",
+          "doc": "How many edits / failures."
         }
       ],
       "key": []
@@ -3654,74 +3699,74 @@
     "2": {
       "columns": [
         {
-          "doc": "`symbol:<path>/<name>@snap:<id>`; a nested symbol's name is its container path (`Widget::spin`), and a name path's later symbols in a file (an overload, a setter after its getter) are numbered in position order (`Widget::value~2`). Unique.",
           "name": "ref",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`symbol:<path>/<name>@snap:<id>`; a nested symbol's name is its container path (`Widget::spin`), and a name path's later symbols in a file (an overload, a setter after its getter) are numbered in position order (`Widget::value~2`). Unique."
         },
         {
-          "doc": "The snapshot the file's symbols were read at.",
           "name": "snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The snapshot the file's symbols were read at."
         },
         {
-          "doc": "The stream (v_stream.id).",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The stream (v_stream.id)."
         },
         {
-          "doc": "Workspace-relative file.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Workspace-relative file."
         },
         {
-          "doc": "The symbol's own name.",
           "name": "name",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The symbol's own name."
         },
         {
-          "doc": "`function`, `class`, `method`, `module`, … (the LSP symbol kinds).",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`function`, `class`, `method`, `module`, … (the LSP symbol kinds)."
         },
         {
-          "doc": "The enclosing symbol path (`Widget`); NULL at top level.",
           "name": "container",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The enclosing symbol path (`Widget`); NULL at top level."
         },
         {
-          "doc": "The language server that reported it (`rust`, `python`, …).",
           "name": "language",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The language server that reported it (`rust`, `python`, …)."
         },
         {
-          "doc": "Where its name is (what to jump to), 1-based.",
           "name": "line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Where its name is (what to jump to), 1-based."
         },
         {
-          "doc": "1-based.",
           "name": "col",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1-based."
         },
         {
-          "doc": "Where the whole symbol starts (a decorator or doc comment included, as the server reports it), 1-based.",
           "name": "start_line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Where the whole symbol starts (a decorator or doc comment included, as the server reports it), 1-based."
         },
         {
-          "doc": "1-based.",
           "name": "start_col",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1-based."
         },
         {
-          "doc": "Where the whole symbol ends (its body included), 1-based: the lines `start_line`..`end_line` are the symbol.",
           "name": "end_line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Where the whole symbol ends (its body included), 1-based: the lines `start_line`..`end_line` are the symbol."
         },
         {
-          "doc": "1-based.",
           "name": "end_col",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1-based."
         }
       ],
       "key": []
@@ -3731,39 +3776,39 @@
     "2": {
       "columns": [
         {
-          "doc": "The snapshot (v_snapshot.id).",
           "name": "snapshot_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The snapshot (v_snapshot.id)."
         },
         {
-          "doc": "The stream (v_stream.id).",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The stream (v_stream.id)."
         },
         {
-          "doc": "Changed files whose symbols were read.",
           "name": "files_collected",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Changed files whose symbols were read."
         },
         {
-          "doc": "Changed files skipped for the bound.",
           "name": "files_over_budget",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Changed files skipped for the bound."
         },
         {
-          "doc": "Changed files whose language had no running server (the collector never starts one).",
           "name": "files_without_server",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Changed files whose language had no running server (the collector never starts one)."
         },
         {
-          "doc": "Changed files the server was asked about but failed on (an error, or no answer in time); they count against the bound.",
           "name": "files_failed",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Changed files the server was asked about but failed on (an error, or no answer in time); they count against the bound."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "captured_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -3773,19 +3818,19 @@
     "1": {
       "columns": [
         {
-          "doc": "Tag name.",
           "name": "name",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Tag name."
         },
         {
-          "doc": "The commit it points at (v_commit.sha); annotated tags peeled.",
           "name": "sha",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The commit it points at (v_commit.sha); annotated tags peeled."
         },
         {
-          "doc": "When oxplow last read it (RFC 3339).",
           "name": "updated_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When oxplow last read it (RFC 3339)."
         }
       ],
       "key": []
@@ -3795,69 +3840,69 @@
     "1": {
       "columns": [
         {
-          "doc": "Task id (shown as tsk<id>).",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Task id (shown as tsk<id>)."
         },
         {
-          "doc": "Owning thread (v_thread.id); NULL = backlog.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Owning thread (v_thread.id); NULL = backlog."
         },
         {
-          "doc": "The thread's stream; NULL for backlog tasks.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The thread's stream; NULL for backlog tasks."
         },
         {
-          "doc": "Parent task (an epic); NULL at top level.",
           "name": "parent_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Parent task (an epic); NULL at top level."
         },
         {
-          "doc": "Task title.",
           "name": "title",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Task title."
         },
         {
-          "doc": "Markdown body.",
           "name": "description",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Markdown body."
         },
         {
-          "doc": "`ready`, `in_progress`, `blocked`, `done`, `canceled` or `archived`.",
           "name": "status",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`ready`, `in_progress`, `blocked`, `done`, `canceled` or `archived`."
         },
         {
-          "doc": "`low`, `medium`, `high` or `urgent`.",
           "name": "priority",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`low`, `medium`, `high` or `urgent`."
         },
         {
-          "doc": "Who the task came from: `user` or `agent`.",
           "name": "author",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Who the task came from: `user` or `agent`."
         },
         {
-          "doc": "Order within its list.",
           "name": "sort_index",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Order within its list."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "updated_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "When the task reached `done`; kept if it is then archived, cleared if reopened.",
           "name": "completed_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When the task reached `done`; kept if it is then archived, cleared if reopened."
         }
       ],
       "key": []
@@ -3867,34 +3912,34 @@
     "1": {
       "columns": [
         {
-          "doc": "Link id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Link id."
         },
         {
-          "doc": "Thread the link was made in.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread the link was made in."
         },
         {
-          "doc": "Source task (v_task.id).",
           "name": "from_task_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Source task (v_task.id)."
         },
         {
-          "doc": "Target task (v_task.id).",
           "name": "to_task_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Target task (v_task.id)."
         },
         {
-          "doc": "`blocks`, `relates_to`, `discovered_from`, `duplicates`, `supersedes` or `replies_to`.",
           "name": "link_type",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`blocks`, `relates_to`, `discovered_from`, `duplicates`, `supersedes` or `replies_to`."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -3904,34 +3949,34 @@
     "1": {
       "columns": [
         {
-          "doc": "Note id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Note id."
         },
         {
-          "doc": "Task it's attached to, if a task note.",
           "name": "task_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Task it's attached to, if a task note."
         },
         {
-          "doc": "Thread it's attached to, if a thread note.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread it's attached to, if a thread note."
         },
         {
-          "doc": "Markdown body.",
           "name": "body",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Markdown body."
         },
         {
-          "doc": "Who wrote it (`agent`, `user`, …).",
           "name": "author",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Who wrote it (`agent`, `user`, …)."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -3941,34 +3986,34 @@
     "1": {
       "columns": [
         {
-          "doc": "The run (v_test_run.id).",
           "name": "run_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The run (v_test_run.id)."
         },
         {
-          "doc": "Report suite name.",
           "name": "suite",
-          "type": ""
+          "type": "",
+          "doc": "Report suite name."
         },
         {
-          "doc": "Grouping path (module path, file·class, describe path).",
           "name": "classname",
-          "type": ""
+          "type": "",
+          "doc": "Grouping path (module path, file·class, describe path)."
         },
         {
-          "doc": "Test name.",
           "name": "name",
-          "type": ""
+          "type": "",
+          "doc": "Test name."
         },
         {
-          "doc": "`passed`, `failed` or `skipped`.",
           "name": "status",
-          "type": ""
+          "type": "",
+          "doc": "`passed`, `failed` or `skipped`."
         },
         {
-          "doc": "Its duration, when the report gave one.",
           "name": "time_ms",
-          "type": ""
+          "type": "",
+          "doc": "Its duration, when the report gave one."
         }
       ],
       "key": []
@@ -3978,84 +4023,84 @@
     "1": {
       "columns": [
         {
-          "doc": "Stream it ran in (v_stream.id).",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Stream it ran in (v_stream.id)."
         },
         {
-          "doc": "Branch checked out when it ran; empty when unknown.",
           "name": "branch",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Branch checked out when it ran; empty when unknown."
         },
         {
-          "doc": "What recorded the runs (`tests`).",
           "name": "producer",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What recorded the runs (`tests`)."
         },
         {
-          "doc": "The test: `test:<classname>::<name>`.",
           "name": "subject",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The test: `test:<classname>::<name>`."
         },
         {
-          "doc": "`passed`, `failed` or `skipped` in its latest run.",
           "name": "last_status",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`passed`, `failed` or `skipped` in its latest run."
         },
         {
-          "doc": "Its duration in its latest timed run, in milliseconds.",
           "name": "last_ms",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Its duration in its latest timed run, in milliseconds."
         },
         {
-          "doc": "Its longest duration in any run.",
           "name": "max_ms",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Its longest duration in any run."
         },
         {
-          "doc": "Its mean duration across its timed runs.",
           "name": "mean_ms",
-          "type": ""
+          "type": "",
+          "doc": "Its mean duration across its timed runs."
         },
         {
-          "doc": "Runs it was part of.",
           "name": "runs",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Runs it was part of."
         },
         {
-          "doc": "Runs it failed in.",
           "name": "failures",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Runs it failed in."
         },
         {
-          "doc": "Times its status changed from one run to the next: how flaky it is.",
           "name": "flips",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Times its status changed from one run to the next: how flaky it is."
         },
         {
-          "doc": "Its first run here (RFC 3339).",
           "name": "first_seen_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Its first run here (RFC 3339)."
         },
         {
-          "doc": "Its latest run here (RFC 3339).",
           "name": "last_seen_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Its latest run here (RFC 3339)."
         },
         {
-          "doc": "When it last failed; NULL if never.",
           "name": "last_failed_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When it last failed; NULL if never."
         },
         {
-          "doc": "When it last passed; NULL if never.",
           "name": "last_passed_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When it last passed; NULL if never."
         },
         {
-          "doc": "Its latest run (v_test_run.id).",
           "name": "last_run_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Its latest run (v_test_run.id)."
         }
       ],
       "key": []
@@ -4065,84 +4110,84 @@
     "2": {
       "columns": [
         {
-          "doc": "Run id; `run:<id>` is how claims and decisions cite it.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Run id; `run:<id>` is how claims and decisions cite it."
         },
         {
-          "doc": "Stream it ran in (v_stream.id).",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Stream it ran in (v_stream.id)."
         },
         {
-          "doc": "Thread whose agent ran it, if known.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread whose agent ran it, if known."
         },
         {
-          "doc": "Effort it belongs to: the one that claimed it, else the one open when it ran.",
           "name": "effort_id",
-          "type": ""
+          "type": "",
+          "doc": "Effort it belongs to: the one that claimed it, else the one open when it ran."
         },
         {
-          "doc": "The command that was run.",
           "name": "command",
-          "type": ""
+          "type": "",
+          "doc": "The command that was run."
         },
         {
-          "doc": "Its exit code, if known.",
           "name": "exit_code",
-          "type": ""
+          "type": "",
+          "doc": "Its exit code, if known."
         },
         {
-          "doc": "Tests passed (NULL when not reported).",
           "name": "passed",
-          "type": ""
+          "type": "",
+          "doc": "Tests passed (NULL when not reported)."
         },
         {
-          "doc": "Tests failed (NULL when not reported).",
           "name": "failed",
-          "type": ""
+          "type": "",
+          "doc": "Tests failed (NULL when not reported)."
         },
         {
-          "doc": "Tests skipped (NULL when not reported).",
           "name": "skipped",
-          "type": ""
+          "type": "",
+          "doc": "Tests skipped (NULL when not reported)."
         },
         {
-          "doc": "Tests run in total (NULL when not reported).",
           "name": "total",
-          "type": ""
+          "type": "",
+          "doc": "Tests run in total (NULL when not reported)."
         },
         {
-          "doc": "Wall-clock duration, if known.",
           "name": "duration_ms",
-          "type": ""
+          "type": "",
+          "doc": "Wall-clock duration, if known."
         },
         {
-          "doc": "`observed` (oxplow parsed a report) or `asserted` (an agent reported counts).",
           "name": "provenance",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`observed` (oxplow parsed a report) or `asserted` (an agent reported counts)."
         },
         {
-          "doc": "What recorded it (`hook`, `mcp`, …).",
           "name": "source",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What recorded it (`hook`, `mcp`, …)."
         },
         {
-          "doc": "Branch checked out when it ran.",
           "name": "branch",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Branch checked out when it ran."
         },
         {
-          "doc": "The VCS revision (a git sha) the tested tree was at or nearest to.",
           "name": "closest_vcs_rev",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The VCS revision (a git sha) the tested tree was at or nearest to."
         },
         {
-          "doc": "When it was recorded (RFC 3339).",
           "name": "captured_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When it was recorded (RFC 3339)."
         }
       ],
       "key": []
@@ -4152,59 +4197,59 @@
     "1": {
       "columns": [
         {
-          "doc": "Thread id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread id."
         },
         {
-          "doc": "Owning stream (v_stream.id).",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Owning stream (v_stream.id)."
         },
         {
-          "doc": "Display name.",
           "name": "title",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Display name."
         },
         {
-          "doc": "`active` (the stream's writer), `queued` (read-only) or `closed`.",
           "name": "status",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`active` (the stream's writer), `queued` (read-only) or `closed`."
         },
         {
-          "doc": "Agent harness: `claude`, `codex`, `opencode`, or `acp` (an Agent Client Protocol agent).",
           "name": "agent",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Agent harness: `claude`, `codex`, `opencode`, or `acp` (an Agent Client Protocol agent)."
         },
         {
-          "doc": "Order within the stream.",
           "name": "sort_index",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Order within the stream."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "updated_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "Set when the thread was closed.",
           "name": "closed_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Set when the thread was closed."
         },
         {
-          "doc": "Set when the thread was archived.",
           "name": "archived_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Set when the thread was archived."
         },
         {
-          "doc": "For an `acp` thread, which ACP agent it runs (`claude`, `gemini`, a project `acpAgents` name); NULL otherwise.",
           "name": "acp_agent",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "For an `acp` thread, which ACP agent it runs (`claude`, `gemini`, a project `acpAgents` name); NULL otherwise."
         }
       ],
       "key": []
@@ -4214,59 +4259,59 @@
     "1": {
       "columns": [
         {
-          "doc": "Answer id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Answer id."
         },
         {
-          "doc": "`answer:<id>`.",
           "name": "ref",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`answer:<id>`."
         },
         {
-          "doc": "The thread it was shown in (v_thread.id).",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The thread it was shown in (v_thread.id)."
         },
         {
-          "doc": "The turn it was shown in (v_agent_turn.id), when one was open.",
           "name": "turn_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The turn it was shown in (v_agent_turn.id), when one was open."
         },
         {
-          "doc": "The effort open in the thread at the time, if any.",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The effort open in the thread at the time, if any."
         },
         {
-          "doc": "What it's called.",
           "name": "title",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What it's called."
         },
         {
-          "doc": "An existing lens shown (`<extension>/<slug>`); NULL when the answer has its own spec.",
           "name": "lens",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "An existing lens shown (`<extension>/<slug>`); NULL when the answer has its own spec."
         },
         {
-          "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, …); NULL for an existing lens.",
           "name": "spec",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, …); NULL for an existing lens."
         },
         {
-          "doc": "The params it ran with (JSON object).",
           "name": "params",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The params it ran with (JSON object)."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "The lens it was kept as (`lens.keep`), if it was.",
           "name": "kept_lens",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The lens it was kept as (`lens.keep`), if it was."
         }
       ],
       "key": []
@@ -4276,74 +4321,74 @@
     "1": {
       "columns": [
         {
-          "doc": "Row id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Row id."
         },
         {
-          "doc": "Stream.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Stream."
         },
         {
-          "doc": "Thread.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread."
         },
         {
-          "doc": "Effort open at the time, if any.",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Effort open at the time, if any."
         },
         {
-          "doc": "Turn it happened in (v_agent_turn.id), when known.",
           "name": "turn_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
         },
         {
-          "doc": "Harness (`claude`, `codex`, …).",
           "name": "agent_kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Harness (`claude`, `codex`, …)."
         },
         {
-          "doc": "Model id, if reported.",
           "name": "model",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Model id, if reported."
         },
         {
-          "doc": "The human prompt that opened this turn, if the transcript had one.",
           "name": "prompt",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The human prompt that opened this turn, if the transcript had one."
         },
         {
-          "doc": "Input tokens.",
           "name": "input_tokens",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Input tokens."
         },
         {
-          "doc": "Output tokens.",
           "name": "output_tokens",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Output tokens."
         },
         {
-          "doc": "Tokens written to the prompt cache.",
           "name": "cache_creation_input_tokens",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Tokens written to the prompt cache."
         },
         {
-          "doc": "Tokens read from the prompt cache.",
           "name": "cache_read_input_tokens",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Tokens read from the prompt cache."
         },
         {
-          "doc": "Messages in this record.",
           "name": "message_count",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Messages in this record."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "recorded_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -4353,54 +4398,54 @@
     "1": {
       "columns": [
         {
-          "doc": "Row id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Row id."
         },
         {
-          "doc": "Thread.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Thread."
         },
         {
-          "doc": "Effort open at the time, if any.",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Effort open at the time, if any."
         },
         {
-          "doc": "Turn it happened in (v_agent_turn.id), when known.",
           "name": "turn_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
         },
         {
-          "doc": "Tool name (`Read`, `Edit`, `Bash`, `Grep`, …).",
           "name": "tool",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Tool name (`Read`, `Edit`, `Bash`, `Grep`, …)."
         },
         {
-          "doc": "File it touched, repo-relative when inside the project.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "File it touched, repo-relative when inside the project."
         },
         {
-          "doc": "Short context: the Bash command (truncated), a search pattern, the question an `await_user` call asked, …",
           "name": "detail",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Short context: the Bash command (truncated), a search pattern, the question an `await_user` call asked, …"
         },
         {
-          "doc": "1 succeeded, 0 failed, NULL unknown (Bash often reports no exit code).",
           "name": "ok",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "1 succeeded, 0 failed, NULL unknown (Bash often reports no exit code)."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "The `agent.tool.finished` event (v_event.id) this row records; NULL for rows written before the event log carried tool calls.",
           "name": "event_id",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The `agent.tool.finished` event (v_event.id) this row records; NULL for rows written before the event log carried tool calls."
         }
       ],
       "key": []
@@ -4410,99 +4455,99 @@
     "1": {
       "columns": [
         {
-          "doc": "Fact id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Fact id."
         },
         {
-          "doc": "Producing capture (v_capture.id).",
           "name": "capture_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Producing capture (v_capture.id)."
         },
         {
-          "doc": "Measure this is a value of (v_measure.key).",
           "name": "measure_key",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Measure this is a value of (v_measure.key)."
         },
         {
-          "doc": "The measured value.",
           "name": "value",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "The measured value."
         },
         {
-          "doc": "Ratio numerator, for ratio measures.",
           "name": "numerator",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Ratio numerator, for ratio measures."
         },
         {
-          "doc": "Ratio denominator, for ratio measures.",
           "name": "denominator",
-          "type": "REAL"
+          "type": "REAL",
+          "doc": "Ratio denominator, for ratio measures."
         },
         {
-          "doc": "What the fact is about: `file` or `symbol`.",
           "name": "subject_kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What the fact is about: `file` or `symbol`."
         },
         {
-          "doc": "Logical id of the subject (`symbol:<path>::<name>`, `file:<path>`).",
           "name": "subject_ref",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Logical id of the subject (`symbol:<path>::<name>`, `file:<path>`)."
         },
         {
-          "doc": "File path.",
           "name": "path",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "File path."
         },
         {
-          "doc": "Line number, when it has one.",
           "name": "line",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Line number, when it has one."
         },
         {
-          "doc": "Finding severity, for lint-like facts.",
           "name": "severity",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Finding severity, for lint-like facts."
         },
         {
-          "doc": "Rule id, for lint-like facts.",
           "name": "rule",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Rule id, for lint-like facts."
         },
         {
-          "doc": "Free-text detail.",
           "name": "detail",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Free-text detail."
         },
         {
-          "doc": "Extra dimensions as a JSON object.",
           "name": "dims_json",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Extra dimensions as a JSON object."
         },
         {
-          "doc": "The stream (worktree) whose tree it describes.",
           "name": "stream_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "The stream (worktree) whose tree it describes."
         },
         {
-          "doc": "From the capture.",
           "name": "thread_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "From the capture."
         },
         {
-          "doc": "From the capture.",
           "name": "effort_id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "From the capture."
         },
         {
-          "doc": "When the capture that holds it ran.",
           "name": "captured_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "When the capture that holds it ran."
         },
         {
-          "doc": "From the capture.",
           "name": "branch",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "From the capture."
         }
       ],
       "key": []
@@ -4512,24 +4557,24 @@
     "1": {
       "columns": [
         {
-          "doc": "Use id.",
           "name": "id",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Use id."
         },
         {
-          "doc": "What was used (`wiki`, …).",
           "name": "kind",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What was used (`wiki`, …)."
         },
         {
-          "doc": "What the renderer recorded about it (JSON; a `key` / `slug` / `path` / `id` names the thing).",
           "name": "payload_json",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "What the renderer recorded about it (JSON; a `key` / `slug` / `path` / `id` names the thing)."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "occurred_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -4539,34 +4584,34 @@
     "1": {
       "columns": [
         {
-          "doc": "Page slug (link with [[slug]]).",
           "name": "slug",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Page slug (link with [[slug]])."
         },
         {
-          "doc": "Page title.",
           "name": "title",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Page title."
         },
         {
-          "doc": "Start of the body.",
           "name": "body_excerpt",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Start of the body."
         },
         {
-          "doc": "Size of the full body.",
           "name": "body_size_bytes",
-          "type": "INTEGER"
+          "type": "INTEGER",
+          "doc": "Size of the full body."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "updated_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []
@@ -4576,54 +4621,54 @@
     "1": {
       "columns": [
         {
-          "doc": "`work_item:<provider>:<id>` (`work_item:oxplow:tsk42`).",
           "name": "ref",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "`work_item:<provider>:<id>` (`work_item:oxplow:tsk42`)."
         },
         {
-          "doc": "The provider it comes from (`oxplow`).",
           "name": "provider",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The provider it comes from (`oxplow`)."
         },
         {
-          "doc": "Title.",
           "name": "title",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Title."
         },
         {
-          "doc": "Markdown body.",
           "name": "body",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Markdown body."
         },
         {
-          "doc": "Canonical state: `todo`, `in_progress`, `blocked`, `done` or `canceled`. oxplow: `ready` is `todo`; `archived` is `done` when it was completed, else `canceled`.",
           "name": "state",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Canonical state: `todo`, `in_progress`, `blocked`, `done` or `canceled`. oxplow: `ready` is `todo`; `archived` is `done` when it was completed, else `canceled`."
         },
         {
-          "doc": "The provider's own state (oxplow: the task status, `archived` included).",
           "name": "native_state",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The provider's own state (oxplow: the task status, `archived` included)."
         },
         {
-          "doc": "Provider-specific fields as JSON (oxplow: priority, thread_id, sort_index, author, completed_at).",
           "name": "native",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "Provider-specific fields as JSON (oxplow: priority, thread_id, sort_index, author, completed_at)."
         },
         {
-          "doc": "The parent work item's ref (an epic); NULL at top level or when the parent is deleted.",
           "name": "parent_ref",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "The parent work item's ref (an epic); NULL at top level or when the parent is deleted."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "created_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         },
         {
-          "doc": "RFC 3339 timestamp.",
           "name": "updated_at",
-          "type": "TEXT"
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
         }
       ],
       "key": []

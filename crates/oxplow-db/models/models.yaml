@@ -846,12 +846,12 @@
     - { not_null: subject }
     - { relationships: { column: stream_id, to: stream, field: id } }
 - name: collector_run
-  version: 1
+  version: 2
   description: "Each collector's last run (P7.B3): its outcome, the row counts it wrote and its checkpoint. A collector is owned by an extension, the project (`project`) or oxplow (`built-in`)."
   columns:
     - { name: "owner", type: "TEXT", doc: "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`." }
     - { name: "id", type: "TEXT", doc: "The collector's id within its owner (may be dotted: `repo.scan_clone`)." }
-    - { name: "status", type: "TEXT", doc: "`ok`, `error`, or `needs_approval` (an exec collector a person hasn't approved)." }
+    - { name: "status", type: "TEXT", doc: "`ok`, `error`, `needs_approval` (an exec collector a person hasn't approved), or `skipped` (the loop guard refused its run for an event; `error` says why)." }
     - { name: "last_run_at", type: "TEXT", doc: "When it last ran (RFC 3339)." }
     - { name: "error", type: "TEXT", doc: "The last run's error, when it failed." }
     - { name: "row_counts_json", type: "TEXT", doc: "Rows per entity after the last successful run, as JSON." }

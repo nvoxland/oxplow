@@ -40,9 +40,7 @@ use crate::Services;
 /// The consumer's name: its checkpoint and dead letters.
 pub const NAME: &str = "effect.triggers";
 
-/// The most effect runs a chain of events may pass through before an
-/// effect stops reacting to it.
-pub const MAX_CHAIN: usize = 4;
+pub use crate::event_lineage::MAX_CHAIN;
 
 pub struct EffectTriggers {
     services: Weak<Services>,
@@ -311,12 +309,13 @@ async fn react(
     if effects::gate(approved, start, event.seq) != Gate::Runs {
         return Ok(Reacted::Other);
     }
-    let (own, depth) = lineage(svc, event, &format!("effect:{}", key.effect)).await?;
-    if own {
+    let lineage =
+        crate::event_lineage::lineage(&svc.db, event, &format!("effect:{}", key.effect)).await?;
+    // Its own run's events never trigger it, and aren't worth a record.
+    if lineage.own {
         return Ok(Reacted::Other);
     }
-    if depth >= MAX_CHAIN {
-        let why = format!("loop guard: {depth} effect runs already led to this event");
+    if let Some(why) = lineage.refusal() {
         finish(svc, &key, ended(RunState::Skipped, why)).await?;
         return Ok(Reacted::Other);
     }
@@ -428,41 +427,6 @@ async fn run_script(
     tokio::task::spawn_blocking(move || effects::run_script(&script, event, rows))
         .await
         .map_err(|e| format!("the script panicked: {e}"))?
-}
-
-/// Walk `event`'s causes: whether `source` (an effect's) caused it — its
-/// own run's events, which never trigger it — and how many effect runs
-/// (`command.executed` from an effect) led to it. Bounded: a chain longer
-/// than the guard needs isn't followed.
-async fn lineage(
-    svc: &Services,
-    event: &StoredEvent,
-    source: &str,
-) -> Result<(bool, usize), DomainError> {
-    const MAX_WALK: usize = 64;
-    let (first, source) = (event.clone(), source.to_string());
-    svc.db
-        .read(move |tx| {
-            let (mut own, mut depth) = (false, 0usize);
-            let mut current = Some(first);
-            for _ in 0..MAX_WALK {
-                let Some(e) = current.take() else { break };
-                let env = &e.envelope;
-                if env.source == source {
-                    own = true;
-                    break;
-                }
-                if env.event_type == "command.executed" && env.source.starts_with("effect:") {
-                    depth += 1;
-                }
-                current = match &env.cause {
-                    Some(cause) => oxplow_db::event_log_store::get_tx(tx, cause)?,
-                    None => None,
-                };
-            }
-            Ok((own, depth))
-        })
-        .await
 }
 
 #[cfg(test)]

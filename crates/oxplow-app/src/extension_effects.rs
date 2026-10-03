@@ -586,6 +586,9 @@ pub struct Ran {
     /// The rows per entity (the first 20).
     #[specta(type = oxplow_domain::Json)]
     pub rows: Value,
+    /// The events it would log, counted per type (P9.D2) — as the script
+    /// returned them: whether it may emit them is checked when it runs.
+    pub events: BTreeMap<String, i64>,
     /// Why it failed (a model call it tried was refused, say).
     pub error: Option<String>,
 }
@@ -594,6 +597,10 @@ fn ran(run: crate::collector_runner::DryRun) -> Result<Ran, String> {
     use crate::collector_runner::DryRun;
     match run {
         DryRun::Output(out) => Ok(Ran {
+            events: out.events.iter().fold(BTreeMap::new(), |mut by_type, e| {
+                *by_type.entry(e.event_type.clone()).or_insert(0) += 1;
+                by_type
+            }),
             counts: out
                 .entities
                 .iter()
@@ -614,6 +621,7 @@ fn ran(run: crate::collector_runner::DryRun) -> Result<Ran, String> {
         }),
         DryRun::Failed(e) => Ok(Ran {
             counts: BTreeMap::new(),
+            events: BTreeMap::new(),
             rows: Value::Null,
             error: Some(e),
         }),
@@ -869,7 +877,8 @@ fn ran_text(r: Option<&Ran>) -> String {
     match r {
         None => "—".into(),
         Some(Ran { error: Some(e), .. }) => format!("fails ({e})"),
-        Some(r) => counts(&r.counts),
+        Some(r) if r.events.is_empty() => counts(&r.counts),
+        Some(r) => format!("{}; emits {}", counts(&r.counts), counts(&r.events)),
     }
 }
 
@@ -1840,6 +1849,34 @@ mod tests {
             declarations: Some(declared),
             tools: Vec::new(),
         }
+    }
+
+    /// P9.D2: what a collector's dry run would log shows beside what it
+    /// would store.
+    #[test]
+    fn a_dry_runs_events_show_in_the_review() {
+        let out: crate::collector_runner::ScriptOutput = serde_json::from_value(json!({
+            "entities": { "pr": [{ "n": 1 }, { "n": 2 }] },
+            "events": [
+                { "type": "acme_pr.merged", "payload": { "number": 1 } },
+                { "type": "acme_pr.merged", "payload": { "number": 2 } },
+                { "type": "acme_pr.opened", "payload": { "number": 3 } },
+            ],
+        }))
+        .unwrap();
+        let ran = ran(crate::collector_runner::DryRun::Output(out)).unwrap();
+        assert_eq!(
+            ran.events,
+            [
+                ("acme_pr.merged".to_string(), 2),
+                ("acme_pr.opened".to_string(), 1)
+            ]
+            .into()
+        );
+        assert_eq!(
+            ran_text(Some(&ran)),
+            "2 pr; emits 2 acme_pr.merged, 1 acme_pr.opened"
+        );
     }
 
     /// P9.B4: a server reached by url isn't a program that runs here —
@@ -3004,11 +3041,13 @@ mod tests {
                     before: Some(Ran {
                         counts: [("thing".to_string(), 2)].into(),
                         rows: Value::Null,
+                        events: BTreeMap::new(),
                         error: None,
                     }),
                     after: Some(Ran {
                         counts: BTreeMap::new(),
                         rows: Value::Null,
+                        events: BTreeMap::new(),
                         error: Some("boom".into()),
                     }),
                 }],

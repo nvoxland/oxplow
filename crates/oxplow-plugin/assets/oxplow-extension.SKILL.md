@@ -462,7 +462,11 @@ When the user wants data oxplow doesn't have (GitHub PRs, Linear issues,
 CI runs), add a **collector** to the extension:
 
 - Write a script that prints
-  `{"entities": {"<name>": [ {col: value, …} ]}}`.
+  `{"entities": {"<name>": [ {col: value, …} ]}}`. It may add
+  `"events": [{"type": "<your_ns>.<name>", "payload": {…}}]` — only event
+  types your extension declares (`event_types:`), at most 100 a run, and
+  never a type the collector itself runs on. Use it to say what the
+  collector saw; put what should *happen* in an effect that reacts to it.
 - Declare it under `collectors:` in `extension.yaml`, with its entities'
   typed columns and key, and when it runs: `trigger: { every: 15m }` or
   `trigger: manual` (the default).

@@ -1590,7 +1590,7 @@ export type CollectorRun = {
 	// The declaring extension, `project` or `built-in`.
 	owner: string,
 	id: string,
-	// `ok`, `error` or `needs_approval`.
+	// `ok`, `error`, `needs_approval` or `skipped` (the loop guard).
 	status: string,
 	lastRunAt: string,
 	error: string | null,
@@ -4536,6 +4536,11 @@ export type Ran = {
 	counts: { [key in string]: number },
 	// The rows per entity (the first 20).
 	rows: unknown,
+	/**
+	 *  The events it would log, counted per type (P9.D2) — as the script
+	 *  returned them: whether it may emit them is checked when it runs.
+	 */
+	events: { [key in string]: number },
 	// Why it failed (a model call it tried was refused, say).
 	error: string | null,
 };

@@ -1408,6 +1408,43 @@ and are appended after the children's events, caused by the run's
 outside the transaction) they're recorded with the run only when every
 step landed.
 
+**A collector may emit them too (P9.D2).** An entity collector's output
+— a derived script's result, an exec collector's stdout, parsed alike —
+may carry `events: [{ type, payload, subject? }]` beside `entities`.
+`collector_runner::plan_events` holds them to the same rule
+(`own_events`: the extension's own declared types, at their newest
+version), from `collector:<owner>/<id>`, and the payload is validated
+before anything is written. They are appended **in the run's
+transaction**, after its rows, its `collector_run` and its
+`collector.synced`, each **caused by that `collector.synced`** — with
+the run or not at all. A run whose events aren't allowed fails whole
+(nothing stored, the run recorded `error`). Refused besides: a
+`project` or `built-in` collector's (no extension, no namespace), a type
+the collector's own `trigger.on` names (its run would trigger itself),
+and more than `MAX_RUN_EVENTS` (100) a run. A fact collector doesn't
+emit. A preview (`CollectorPreview.events`) and a `plugin test` example
+(`expect: { events: [{ type, payload? }] }`) show what would be logged;
+a review's dry run counts them per type ("2 pr; emits 2 acme_pr.merged").
+
+**The boundary.** A collector **ingests**: it turns the outside (or
+existing state) into rows, and its events say *what it saw* — "a pull
+request merged". It has no rights to act, needs no approval beyond its
+program's, and may run again and again over the same input. An effect
+**reacts**: it composes commands with an agent's rights, is approved by a
+person, and runs at most once per event. So "when a PR merges, close its
+work item" is a collector that emits `acme_pr.merged` and an effect that
+reacts to it — never an effect with no commands whose only job is to emit
+from data, and never a collector that acts.
+
+**The loop guard** (`event_lineage.rs`) is one for both kinds of
+event-triggered code. Walking an event's causes, a *hop* is an effect's
+run (`command.executed` from `effect:…`) or a collector's run for an
+event (`collector.synced` with `trigger: on`). Nothing reacts to an event
+its **own** run led to, or to one `MAX_CHAIN` (4) hops already led to. A
+guarded effect reaction is `skipped` in `effect_run`; a guarded collector
+run is `collector_run.status = skipped` with the reason in `error` (V154;
+its last good counts stay, and it isn't a failure toward a disable).
+
 **Reacting to another extension's types (P9.D1).** A collector's
 `trigger: { on: [...] }` and an effect's `on:` may name core types, the
 extension's own declared ones, and **another extension's**

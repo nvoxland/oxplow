@@ -75,7 +75,7 @@ pub struct CollectorRun {
     /// The declaring extension, `project` or `built-in`.
     pub owner: String,
     pub id: String,
-    /// `ok`, `error` or `needs_approval`.
+    /// `ok`, `error`, `needs_approval` or `skipped` (the loop guard).
     pub status: String,
     pub last_run_at: String,
     pub error: Option<String>,

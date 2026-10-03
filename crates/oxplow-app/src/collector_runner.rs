@@ -413,6 +413,11 @@ pub struct ScriptOutput {
     pub entities: BTreeMap<String, Vec<serde_json::Value>>,
     #[serde(default)]
     pub deleted: BTreeMap<String, Vec<serde_json::Value>>,
+    /// Events of its extension's own declared types to log with the run
+    /// (P9.D2): an observation worth reacting to ("a pull request
+    /// merged"), not a way to act — see [`plan_events`].
+    #[serde(default)]
+    pub events: Vec<crate::extension_commands::ComposedEvent>,
 }
 
 impl ScriptOutput {
@@ -950,7 +955,16 @@ async fn run_collector_once(
 ) -> Result<CollectorRunReport, RunCollectorError> {
     let started = std::time::Instant::now();
     let (spec, output) = produce(ctx, owner, id, trigger.event(), None).await?;
-    let writes = output.and_then(|o| plan_writes(owner, &spec, o));
+    // What it may not emit fails the run whole: nothing is stored.
+    let writes = output.and_then(|mut o| {
+        let events = plan_events(
+            &ctx.vocabulary.current(),
+            owner,
+            &spec,
+            std::mem::take(&mut o.events),
+        )?;
+        Ok((plan_writes(owner, &spec, o)?, events))
+    });
     let last_event_id = trigger.event().map(|e| e.seq);
     let run = |status: &str, error: Option<String>| CollectorRun {
         owner: owner.to_string(),
@@ -970,7 +984,7 @@ async fn run_collector_once(
         trigger: trigger.name(),
     };
     let error = match writes {
-        Ok(writes) => {
+        Ok((writes, events)) => {
             let names: Vec<String> = writes.iter().map(|(t, _)| t.entity.clone()).collect();
             let ok_run = run("ok", None);
             let vocabulary = ctx.vocabulary.clone();
@@ -990,11 +1004,18 @@ async fn run_collector_once(
                     };
                     oxplow_db::collector_store::record_run_in(tx, &run)
                         .map_err(oxplow_db::map_sql_err)?;
-                    oxplow_db::event_log_store::append_tx(
-                        tx,
-                        &vocabulary.current(),
-                        &event.envelope("ok", counts.clone(), 0, elapsed, None),
-                    )?;
+                    let vocabulary = vocabulary.current();
+                    let synced = event.envelope("ok", counts.clone(), 0, elapsed, None);
+                    oxplow_db::event_log_store::append_tx(tx, &vocabulary, &synced)?;
+                    // What it observed, caused by this run: with its rows
+                    // or not at all.
+                    for emitted in &events {
+                        oxplow_db::event_log_store::append_tx(
+                            tx,
+                            &vocabulary,
+                            &emitted.clone().with_cause(synced.id.clone()),
+                        )?;
+                    }
                     Ok(counts)
                 })
                 .await;
@@ -1030,6 +1051,66 @@ async fn run_collector_once(
         .await
         .map_err(RunCollectorError::Storage)?;
     Err(RunCollectorError::Failed(error))
+}
+
+/// The most events one run may emit: a collector reports what happened,
+/// it doesn't replay a history into the log.
+pub const MAX_RUN_EVENTS: usize = 100;
+
+/// The events a collector's script returned as it may log them (P9.D2):
+/// each one of its **extension's own declared types**, at that type's
+/// newest version, from `collector:<owner>/<id>` — the rule a command's
+/// or an effect's script is held to ([`own_events`]). Refused: a project
+/// or built-in collector's (it has no namespace to declare types in), a
+/// type the collector itself runs on (its run would trigger itself), and
+/// more than [`MAX_RUN_EVENTS`].
+///
+/// A collector **ingests**: its events say what it saw. Acting on what
+/// was seen — composing commands, with rights and a person's approval —
+/// is an effect's, which may react to these.
+fn plan_events(
+    vocabulary: &oxplow_domain::vocabulary::Vocabulary,
+    owner: &str,
+    spec: &CollectorSpec,
+    events: Vec<crate::extension_commands::ComposedEvent>,
+) -> Result<Vec<Envelope>, String> {
+    use oxplow_config::collectors::{Trigger, BUILT_IN, PROJECT};
+    if events.is_empty() {
+        return Ok(Vec::new());
+    }
+    let id = &spec.id;
+    if [PROJECT, BUILT_IN].contains(&owner) {
+        return Err(format!(
+            "collector `{owner}/{id}` returned `events`, which only an extension's collector \
+             may: event types are declared by an extension (`event_types:`)"
+        ));
+    }
+    if events.len() > MAX_RUN_EVENTS {
+        return Err(format!(
+            "collector `{owner}/{id}` returned {} events; a run may emit at most {MAX_RUN_EVENTS}",
+            events.len()
+        ));
+    }
+    if let Trigger::On { events: on, .. } = &spec.trigger {
+        if let Some(own) = events.iter().find(|e| on.contains(&e.event_type)) {
+            return Err(format!(
+                "collector `{owner}/{id}` may not emit `{}`, a type it runs on: its run would \
+                 trigger itself",
+                own.event_type
+            ));
+        }
+    }
+    let source = oxplow_domain::refs::build::collector_ref(owner, id);
+    let envelopes = crate::extension_commands::own_events(vocabulary, owner, &source, events)
+        .map_err(|e| format!("collector `{owner}/{id}`: {e}"))?;
+    // What the append would refuse (a payload its schema doesn't take) is
+    // this run's error, before anything is written.
+    for e in &envelopes {
+        vocabulary
+            .validate(&e.event_type, e.v, &e.payload)
+            .map_err(|err| format!("collector `{owner}/{id}`: {err}"))?;
+    }
+    Ok(envelopes)
 }
 
 /// What a run's `collector.synced@1` says about who ran which collector.
@@ -1204,6 +1285,8 @@ pub enum EventRun {
     Skipped,
     /// An exec collector nobody approved: recorded, nothing ran.
     NeedsApproval,
+    /// The loop guard refused it: recorded as skipped, nothing ran.
+    Guarded,
     /// It ran: its report, or what failed (recorded and announced).
     Ran(Result<CollectorRunReport, String>),
 }
@@ -1226,6 +1309,29 @@ pub async fn run_for_event(
         .is_some_and(|last| last >= seq)
     {
         return Ok(EventRun::Skipped);
+    }
+    // The loop guard (P9.D2): an event this collector's own run led to,
+    // or one a chain of reactions already at the limit led to, runs
+    // nothing — recorded as skipped (the last good counts stay), never as
+    // a failure.
+    let own = oxplow_domain::refs::build::collector_ref(owner, id);
+    if let Some(why) = crate::event_lineage::lineage(&ctx.db, &event, &own)
+        .await?
+        .refusal()
+    {
+        ctx.store
+            .record_run(CollectorRun {
+                owner: owner.to_string(),
+                id: id.to_string(),
+                status: "skipped".into(),
+                last_run_at: now_rfc3339(),
+                error: Some(why),
+                row_counts: BTreeMap::new(),
+                cursor: None,
+                last_event_id: Some(seq),
+            })
+            .await?;
+        return Ok(EventRun::Guarded);
     }
     let source = oxplow_domain::Actor::System.source();
     match run_collector(ctx, owner, id, RunTrigger::On(event), &source).await {
@@ -1273,6 +1379,18 @@ pub struct CollectorPreview {
     pub owner: String,
     pub id: String,
     pub entities: Vec<EntityPreview>,
+    /// The events it would log (P9.D2), checked as a run's are.
+    pub events: Vec<EventPreview>,
+}
+
+/// An event a collector's run would log.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EventPreview {
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub v: u32,
+    pub payload: serde_json::Value,
+    pub subject: Vec<String>,
 }
 
 /// One entity of a [`CollectorPreview`]: its first rows, coerced to the
@@ -1301,8 +1419,23 @@ pub async fn preview_collector(
     rows: Option<Vec<serde_json::Value>>,
 ) -> Result<CollectorPreview, RunCollectorError> {
     let (spec, output) = produce(ctx, owner, id, None, rows).await?;
-    let writes = plan_writes(owner, &spec, output.map_err(RunCollectorError::Failed)?)
-        .map_err(RunCollectorError::Failed)?;
+    let mut output = output.map_err(RunCollectorError::Failed)?;
+    let events = plan_events(
+        &ctx.vocabulary.current(),
+        owner,
+        &spec,
+        std::mem::take(&mut output.events),
+    )
+    .map_err(RunCollectorError::Failed)?
+    .into_iter()
+    .map(|e| EventPreview {
+        event_type: e.event_type,
+        v: e.v,
+        payload: e.payload,
+        subject: e.subject,
+    })
+    .collect();
+    let writes = plan_writes(owner, &spec, output).map_err(RunCollectorError::Failed)?;
     let entities = writes
         .into_iter()
         .map(|(table, write)| {
@@ -1324,6 +1457,7 @@ pub async fn preview_collector(
         owner: owner.to_string(),
         id: id.to_string(),
         entities,
+        events,
     })
 }
 
@@ -1678,6 +1812,7 @@ pub async fn publish_declared_empty(
                     .map(|e| (e.name.clone(), Vec::new()))
                     .collect(),
                 deleted: BTreeMap::new(),
+                events: Vec::new(),
             };
             writes.extend(plan_writes(&ext.name, spec, empty).map_err(DomainError::Invalid)?);
         }
@@ -2710,6 +2845,48 @@ pub(crate) mod tests {
             serde_json::to_value(&out.rows).unwrap(),
             json!([["2B,3c", 1]]),
             "an entity the run didn't mention is left alone"
+        );
+    }
+
+    /// P9.D2: an exec collector's stdout is parsed like a script's
+    /// result, so its `events` meet the same check — and a collector with
+    /// no extension to declare types in can't emit any.
+    #[test]
+    fn printed_events_are_parsed_and_only_an_extensions_collector_may_emit() {
+        let s = spec("x.sh", &[]);
+        let out = ScriptOutput::parse(
+            &s,
+            json!({"entities": {}, "events": [{"type": "my_gh.merged", "payload": {"n": 1}}]}),
+        )
+        .unwrap();
+        assert_eq!(out.events.len(), 1);
+        let unknown = ScriptOutput::parse(
+            &s,
+            json!({"entities": {}, "events": [{"type": "my_gh.merged", "payload": {}, "extra": 1}]}),
+        )
+        .unwrap_err();
+        assert!(unknown.contains("unknown field"), "{unknown}");
+
+        let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
+        assert_eq!(
+            plan_events(&vocabulary, "my-gh", &s, Vec::new()).unwrap(),
+            Vec::new()
+        );
+        for owner in [
+            oxplow_config::collectors::PROJECT,
+            oxplow_config::collectors::BUILT_IN,
+        ] {
+            let refused = plan_events(&vocabulary, owner, &s, out.events.clone()).unwrap_err();
+            assert!(
+                refused.contains("only an extension's collector may"),
+                "{owner}: {refused}"
+            );
+        }
+        // Its extension declares no such type.
+        let refused = plan_events(&vocabulary, "my-gh", &s, out.events).unwrap_err();
+        assert!(
+            refused.contains("may emit only the event types `my-gh` declares"),
+            "{refused}"
         );
     }
 

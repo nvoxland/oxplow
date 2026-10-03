@@ -54,6 +54,7 @@ pub mod effort_lifecycle;
 pub mod effort_reactors;
 pub mod entity_metrics;
 pub mod event_bodies;
+pub mod event_lineage;
 pub mod event_pump;
 pub mod events;
 pub mod exec_consent;
