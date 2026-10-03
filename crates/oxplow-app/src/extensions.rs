@@ -2358,7 +2358,7 @@ pub async fn validate_extension(
     commands: Option<CommandSchemas<'_>>,
 ) -> Result<Extension, DomainError> {
     let mut ext = catalog.named(root, name)?;
-    check_extension(layer, catalog, root, &mut ext, commands).await;
+    prepare(layer, catalog, root, &mut ext, commands).await;
     Ok(ext)
 }
 
@@ -2543,13 +2543,26 @@ fn entity_stubs(ext: &Extension) -> Vec<oxplow_db::models::EntityStub> {
 /// entities (empty), its models, the other enabled extensions' — is an
 /// overlay of temp views every query reads through (P7.C6), so a fresh
 /// extension checks clean before its first sync.
-async fn check_extension(
+/// An extension version checked against a layer (P8.C2): its lenses, run
+/// through its own models, and that overlay — the temp views its models
+/// (and the other enabled extensions') compile to, published nowhere —
+/// for whatever else reads this version (a review's row counts).
+pub struct Prepared {
+    pub lenses: LensRuns,
+    pub overlay: Vec<oxplow_db::TempView>,
+}
+
+/// Check `ext` — its commands, components, models, advisories and lenses —
+/// reading through its own models' overlay, and report what's wrong in
+/// `ext.errors`. Each side of a review prepares its own, so a lens renders
+/// against its version's models, whichever are published.
+async fn prepare(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     ext: &mut Extension,
     commands: Option<CommandSchemas<'_>>,
-) -> LensRuns {
+) -> Prepared {
     check_commands(ext, root, commands);
     check_components(ext, commands);
     let others: Vec<Extension> = catalog
@@ -2583,7 +2596,7 @@ async fn check_extension(
             Vec::new()
         }
     };
-    let layer = &layer.with_overlay(overlay);
+    let layer = &layer.with_overlay(overlay.clone());
     crate::extension_commands::check_extension_commands(layer, ext, commands).await;
     for a in ext.advisories.clone() {
         let run = layer
@@ -2663,7 +2676,10 @@ async fn check_extension(
             }
         }
     }
-    runs
+    Prepared {
+        lenses: runs,
+        overlay,
+    }
 }
 
 /// What installing an extension from git would bring in, for a person to
@@ -2712,7 +2728,7 @@ pub async fn review_extension(
     };
     let mut extension = fetched.load();
     let load_errors = extension.errors.len();
-    let runs_after = check_extension(layer, catalog, root, &mut extension, Some(commands)).await;
+    let after = prepare(layer, catalog, root, &mut extension, Some(commands)).await;
     let problems = extension.errors.split_off(load_errors);
     let installed: Option<Extension> = replacing.and_then(|name| {
         catalog
@@ -2728,10 +2744,14 @@ pub async fn review_extension(
     let effects = if load_errors > 0 {
         None
     } else {
-        let runs_before = match &installed {
-            Some(e) => run_lenses(layer, e).await,
-            None => LensRuns::new(),
+        // The installed side through its own models, too: what's
+        // published may not be it (a disabled extension, a model that
+        // failed, another worktree's copy).
+        let before = match &installed {
+            Some(e) => Some(prepare(layer, catalog, root, &mut e.clone(), Some(commands)).await),
+            None => None,
         };
+        let no_runs = LensRuns::new();
         Some(
             crate::extension_effects::effects(
                 layer,
@@ -2740,12 +2760,12 @@ pub async fn review_extension(
                     .map(|e| crate::extension_effects::Version {
                         extension: e,
                         read: &read_installed,
-                        lenses: &runs_before,
+                        lenses: before.as_ref().map_or(&no_runs, |p| &p.lenses),
                     }),
                 crate::extension_effects::Version {
                     extension: &extension,
                     read: &read_candidate,
-                    lenses: &runs_after,
+                    lenses: &after.lenses,
                 },
             )
             .await,
@@ -3785,6 +3805,57 @@ empty: No tasks.
 
     fn head(repo: &Path) -> String {
         run_git(repo, &["rev-parse", "HEAD"]).unwrap()
+    }
+
+    /// P8.C2: each side of a review reads through its own overlay — a lens
+    /// over a model whose SQL changed renders against each version's own
+    /// SQL, though neither version's models are published.
+    #[tokio::test]
+    async fn each_side_of_a_review_reads_its_own_models() {
+        let project = tempfile::tempdir().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        write(
+            repo.path(),
+            "extension.yaml",
+            "name: shared\ndescription: Shared lenses\nmodels:\n  - name: x\n    version: 1\n    description: X.\n    columns:\n      - { name: n, type: \"\", doc: N. }\n",
+        );
+        write(repo.path(), "models/x.sql", "SELECT 1 AS n\n");
+        write(
+            repo.path(),
+            "lenses/count.yaml",
+            "title: Count\nquery: SELECT n FROM v_shared_x\nviz: number\n",
+        );
+        git(repo.path(), &["init", "-q", "-b", "main"]);
+        git(repo.path(), &["add", "."]);
+        git(repo.path(), &["commit", "-q", "-m", "init"]);
+        let url = repo.path().to_string_lossy().to_string();
+        let sl = layer().await;
+        let none = &|_: &str| -> Option<serde_json::Value> { None };
+        let first = review_extension(&sl, &cat(), project.path(), &url, None, None, none)
+            .await
+            .unwrap();
+        install_extension(project.path(), &url, None, &first.sha).unwrap();
+        write(repo.path(), "models/x.sql", "SELECT 2 AS n\n");
+        git(repo.path(), &["commit", "-qam", "two"]);
+        let update = review_update(&sl, &cat(), project.path(), "shared", none)
+            .await
+            .unwrap();
+        let count = update
+            .effects
+            .as_ref()
+            .unwrap()
+            .lenses
+            .iter()
+            .find(|l| l.id == "shared/count")
+            .unwrap();
+        assert_eq!(
+            (
+                count.before.as_deref(),
+                count.after.as_deref(),
+                count.error.as_deref()
+            ),
+            (Some("1"), Some("2"), None)
+        );
     }
 
     /// P6b.E2: an update is reviewed against the installed version — a

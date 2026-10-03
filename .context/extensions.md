@@ -954,6 +954,15 @@ disk load; `None` when that revision has no `extension.yaml`. It's what
 lets a review compare two revisions of an extension, neither of which
 need be on disk.
 
+**Each side on its own overlay** (P8.C2). A check is `prepare` →
+`Prepared { lenses, overlay }`: the extension's models (with the other
+enabled extensions') compile to temp views, published nowhere, and its
+lenses, advisories and commands read through that overlay. A review
+prepares **both** sides — the candidate and the installed version — so a
+lens over a model whose SQL changed renders against each version's own
+SQL, whatever the database has published (a disabled extension, a model
+that failed, another worktree's copy).
+
 ## Commands in core menus (`ui.commands`)
 
 `ui.commands` (stable, P6b.C4; `extensions/ui_commands.rs`) puts a
