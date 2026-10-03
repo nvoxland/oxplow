@@ -2166,7 +2166,7 @@ async fn a_named_instance_says_which_provider_it_is() {
     // doesn't declare, or an id already taken, is refused.
     let providers = &fx.svc.providers;
     let refused = providers
-        .add_instance(&Actor::Human, "tracker/acme", "nope")
+        .add_instance(&Actor::Human, "tracker/acme", "nope", Scope::Project)
         .await
         .unwrap_err();
     assert!(
@@ -2174,7 +2174,7 @@ async fn a_named_instance_says_which_provider_it_is() {
         "names what it declares: {refused}"
     );
     let added = providers
-        .add_instance(&Actor::Human, "tracker/acme", "fake")
+        .add_instance(&Actor::Human, "tracker/acme", "fake", Scope::Project)
         .await
         .unwrap();
     assert_eq!(
@@ -2186,7 +2186,7 @@ async fn a_named_instance_says_which_provider_it_is() {
         ("fake", "acme", false)
     );
     let taken = providers
-        .add_instance(&Actor::Human, "tracker/acme", "fake")
+        .add_instance(&Actor::Human, "tracker/acme", "fake", Scope::Project)
         .await
         .unwrap_err();
     assert!(taken.to_string().contains("already"), "{taken}");
@@ -2196,7 +2196,7 @@ async fn a_named_instance_says_which_provider_it_is() {
         stream_id: None,
     };
     assert!(providers
-        .add_instance(&agent, "tracker/other", "fake")
+        .add_instance(&agent, "tracker/other", "fake", Scope::Project)
         .await
         .is_err());
     providers
@@ -2208,4 +2208,299 @@ async fn a_named_instance_says_which_provider_it_is() {
         .await
         .iter()
         .all(|v| v.instance != "tracker/acme"));
+}
+
+/// Another project on the same machine as `fx`: its own repo and
+/// database, the same global config dir and keychain. The tracker
+/// extension (running the fake with `hooks`) is installed and approved
+/// there unless `with_tracker` is false.
+async fn sibling_project(
+    fx: &EffortFixture,
+    hooks: &str,
+    with_tracker: bool,
+) -> (std::sync::Arc<crate::Services>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    if with_tracker {
+        write_extension(dir.path(), hooks);
+    }
+    let global = fx.svc.layout.state_dir.join("global-config");
+    let svc = std::sync::Arc::new(
+        crate::Services::in_memory_on_machine(dir.path(), global, fx.svc.secrets.clone()).unwrap(),
+    );
+    if with_tracker {
+        let ext = extension(dir.path());
+        let config = svc.config.read().unwrap().clone();
+        let program = exec_consent::list(
+            &svc.approvals,
+            &svc.layout.project_dir,
+            &config,
+            std::slice::from_ref(&ext),
+        )
+        .into_iter()
+        .find(|p| p.kind == ProgramKind::Provider)
+        .unwrap();
+        exec_consent::approve_program(
+            &svc.approvals,
+            &svc.layout.project_dir,
+            &config,
+            std::slice::from_ref(&ext),
+            ProgramKind::Provider,
+            &program.name,
+            program.version.as_deref().unwrap(),
+        )
+        .unwrap();
+    }
+    (svc, dir)
+}
+
+const SHARED: &str = "tracker/fake_shared";
+
+async fn state_of(svc: &crate::Services, instance: &str) -> Option<InstanceState> {
+    svc.providers
+        .list()
+        .await
+        .into_iter()
+        .find(|v| v.instance == instance)
+        .map(|v| v.health.state)
+}
+
+/// P9.B2: a global instance belongs to the person, not a project: it runs
+/// in every project of this machine that has its extension, and isn't
+/// listed where the extension isn't.
+#[tokio::test]
+async fn a_global_instance_runs_in_every_project_with_the_extension() {
+    let (fx, _ext) = approved("").await;
+    let providers = &fx.svc.providers;
+    let added = providers
+        .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
+        .await
+        .unwrap();
+    assert_eq!((added.scope, added.overridden), (Scope::Global, false));
+    providers
+        .set_instance(&Actor::Human, SHARED, true, json!({ "team": "shared" }))
+        .await
+        .unwrap();
+    // It is in the machine's file, not the project's.
+    assert!(fx.svc.config.read().unwrap().extension_instances.is_empty());
+    let global = fx.svc.layout.state_dir.join("global-config");
+    let file = oxplow_config::GlobalInstances::load(&global).unwrap();
+    assert!(file.instances[SHARED].enabled);
+    assert_eq!(state_of(&fx.svc, SHARED).await, Some(InstanceState::Ready));
+
+    let (other, _other_dir) = sibling_project(&fx, "", true).await;
+    other.providers.reconcile().await;
+    let there = other
+        .providers
+        .list()
+        .await
+        .into_iter()
+        .find(|v| v.instance == SHARED)
+        .expect("listed where its extension is");
+    assert_eq!(
+        (there.scope, there.health.state),
+        (Scope::Global, InstanceState::Ready)
+    );
+    assert!(other.commands.spec("fake_shared.estimate").is_some());
+
+    let (bare, _bare_dir) = sibling_project(&fx, "", false).await;
+    bare.providers.reconcile().await;
+    assert_eq!(
+        state_of(&bare, SHARED).await,
+        None,
+        "no such extension there"
+    );
+
+    // An agent has no path to the machine's file.
+    let agent = Actor::Agent {
+        thread_id: Some(fx.thread),
+        stream_id: None,
+    };
+    assert!(providers
+        .add_instance(&agent, "tracker/fake_other", "fake", Scope::Global)
+        .await
+        .is_err());
+    // Removing it stops it everywhere it is read.
+    providers
+        .remove_instance(&Actor::Human, SHARED)
+        .await
+        .unwrap();
+    assert_eq!(state_of(&fx.svc, SHARED).await, None);
+    assert!(other.providers.reconcile_if_global_changed().await);
+    assert_eq!(state_of(&other, SHARED).await, None);
+    assert!(other.commands.spec("fake_shared.estimate").is_none());
+}
+
+/// P9.B2: a project's entry of the same name replaces the global one
+/// there, whole — and only there.
+#[tokio::test]
+async fn a_project_entry_overrides_a_global_instance_whole() {
+    let (fx, _ext) = approved("").await;
+    let providers = &fx.svc.providers;
+    providers
+        .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
+        .await
+        .unwrap();
+    providers
+        .set_instance(&Actor::Human, SHARED, true, json!({ "team": "shared" }))
+        .await
+        .unwrap();
+    let (other, _other_dir) = sibling_project(&fx, "", true).await;
+    other.providers.reconcile().await;
+    assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Ready));
+
+    // The other project turns it off for itself.
+    other.config.write().unwrap().extension_instances.insert(
+        SHARED.into(),
+        oxplow_config::ExtensionInstanceConfig {
+            enabled: false,
+            provider: Some("fake".into()),
+            ..Default::default()
+        },
+    );
+    other.providers.reconcile().await;
+    let there = other
+        .providers
+        .list()
+        .await
+        .into_iter()
+        .find(|v| v.instance == SHARED)
+        .unwrap();
+    assert_eq!(
+        (
+            there.scope,
+            there.overridden,
+            there.enabled,
+            there.health.state
+        ),
+        (Scope::Global, true, false, InstanceState::Off)
+    );
+    assert_eq!(there.config, json!({}), "the entry replaces it whole");
+    assert_eq!(state_of(&fx.svc, SHARED).await, Some(InstanceState::Ready));
+}
+
+/// P9.B2: a global instance's credential is the person's, set once for
+/// every project; a project instance's stays that project's.
+#[tokio::test]
+async fn a_global_instances_credential_is_shared_across_projects() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    let credentialed = |root: &Path| {
+        let manifest = root
+            .join("oxplow/extensions")
+            .join(EXT)
+            .join("extension.yaml");
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+    };
+    write_extension(&project, "needs:FAKE_TOKEN");
+    credentialed(&project);
+    let ext = extension(&project);
+    approve(&fx, &ext);
+    let providers = &fx.svc.providers;
+    providers
+        .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
+        .await
+        .unwrap();
+    providers
+        .set_credential(SHARED, "FAKE_TOKEN", Some("s3cret"))
+        .unwrap();
+    providers
+        .set_instance(&Actor::Human, SHARED, true, json!({ "team": "shared" }))
+        .await
+        .unwrap();
+    assert_eq!(state_of(&fx.svc, SHARED).await, Some(InstanceState::Ready));
+
+    // Another project: the same extension, approved there; nothing set there.
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    write_extension(dir.path(), "needs:FAKE_TOKEN");
+    credentialed(dir.path());
+    let global = fx.svc.layout.state_dir.join("global-config");
+    let other = std::sync::Arc::new(
+        crate::Services::in_memory_on_machine(dir.path(), global, fx.svc.secrets.clone()).unwrap(),
+    );
+    let other_ext = extension(dir.path());
+    let config = other.config.read().unwrap().clone();
+    let program = exec_consent::list(
+        &other.approvals,
+        dir.path(),
+        &config,
+        std::slice::from_ref(&other_ext),
+    )
+    .into_iter()
+    .find(|p| p.kind == ProgramKind::Provider)
+    .unwrap();
+    exec_consent::approve_program(
+        &other.approvals,
+        dir.path(),
+        &config,
+        std::slice::from_ref(&other_ext),
+        ProgramKind::Provider,
+        &program.name,
+        program.version.as_deref().unwrap(),
+    )
+    .unwrap();
+    // A project instance of the same provider there has no token of its own.
+    other.config.write().unwrap().extension_instances.insert(
+        INSTANCE.into(),
+        oxplow_config::ExtensionInstanceConfig {
+            enabled: true,
+            config: json!({ "team": "core" }),
+            ..Default::default()
+        },
+    );
+    other.providers.reconcile().await;
+    assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Ready));
+    assert!(matches!(
+        state_of(&other, INSTANCE).await,
+        Some(InstanceState::Unconfigured { .. })
+    ));
+}
+
+/// tsk820: a call's outcome is its instance's while that instance runs.
+/// One that finishes after the instance was stopped — the first read an
+/// enable starts, say — changes nothing: not "Ready" for something that
+/// isn't running, not a failure counted against it.
+#[tokio::test]
+async fn a_call_finishing_after_its_instance_stopped_changes_nothing() {
+    let (fx, ext) = approved("").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    first_read(&fx).await;
+    let was_running = fx.svc.providers.get(INSTANCE).await.unwrap();
+    configure(&fx, false, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    let state = || {
+        fx.svc
+            .providers
+            .health(INSTANCE)
+            .map(|h| (h.state, h.consecutive_failures))
+    };
+    assert_eq!(state(), Some((InstanceState::Off, 0)));
+
+    fx.svc
+        .providers
+        .call_succeeded(&was_running, std::time::Duration::from_millis(5))
+        .await;
+    assert_eq!(state(), Some((InstanceState::Off, 0)), "a late success");
+    fx.svc
+        .providers
+        .call_failed(&was_running, "the process went away".into())
+        .await;
+    assert_eq!(state(), Some((InstanceState::Off, 0)), "a late failure");
+
+    // Running again, it is a new instance: the old one's late results
+    // still aren't its.
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    first_read(&fx).await;
+    fx.svc
+        .providers
+        .call_failed(&was_running, "the old process went away".into())
+        .await;
+    assert_eq!(state(), Some((InstanceState::Ready, 0)));
 }

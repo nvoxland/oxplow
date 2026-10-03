@@ -79,6 +79,35 @@ pub struct HostDeps {
     /// How long a `check` or `invoke` may take before it is cancelled and
     /// counted as a failure.
     pub call_timeout: Duration,
+    /// This machine's global config dir, where the person's global
+    /// instances are kept (`instances.yaml`); none, there are none.
+    pub global_dir: Option<PathBuf>,
+}
+
+/// Whose an instance is (P9.B2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum Scope {
+    /// The project's: in its `extensionInstances`, shared with the team;
+    /// its credentials are this project's on this machine.
+    Project,
+    /// The person's: in this machine's `instances.yaml`, running in every
+    /// project that has its extension; its credentials are set once.
+    Global,
+}
+
+/// The keychain scope of a global instance's credentials (a project's is
+/// the project's key).
+const GLOBAL_CREDENTIALS: &str = "global";
+
+/// The global instances as last read, and the file's time then.
+#[derive(Default)]
+struct GlobalFile {
+    read_at: Option<std::time::SystemTime>,
+    loaded: bool,
+    instances: BTreeMap<String, oxplow_config::ExtensionInstanceConfig>,
+    /// The file's time at the last reconcile.
+    reconciled_at: Option<std::time::SystemTime>,
 }
 
 /// A config problem `check` reported.
@@ -158,6 +187,10 @@ impl InstanceHealth {
 pub struct ProviderInstanceView {
     /// `<extension>/<instance id>`.
     pub instance: String,
+    /// The project's, or the person's on this machine (every project).
+    pub scope: Scope,
+    /// A global instance this project's own entry replaces here.
+    pub overridden: bool,
     pub extension: String,
     /// The provider (its program) this is an instance of.
     pub provider: String,
@@ -211,6 +244,8 @@ pub struct Instance {
     /// commands' namespace, its capability provider's id. A provider's
     /// default instance has the provider's.
     pub id: String,
+    /// Whose it is: where its credentials are kept.
+    pub scope: Scope,
     pub ext: Extension,
     pub spec: ProviderSpec,
     pub config: Value,
@@ -243,7 +278,7 @@ impl Instance {
         let mut credentials = BTreeMap::new();
         for name in &self.spec.credentials {
             let account = crate::collector_runner::instance_credential_account(
-                &self.deps.project,
+                credential_scope(&self.deps, self.scope),
                 &self.ext.name,
                 &self.id,
                 name,
@@ -442,7 +477,7 @@ impl Instance {
         match result {
             Ok(out) => {
                 if let Some(r) = registry {
-                    r.call_succeeded(&self.name, started.elapsed()).await;
+                    r.call_succeeded(self, started.elapsed()).await;
                 }
                 Ok(out)
             }
@@ -454,7 +489,7 @@ impl Instance {
                 );
                 let err = self.command_error(e);
                 if let (true, Some(r)) = (counts, registry) {
-                    r.failed(&self.name, err.to_string()).await;
+                    r.call_failed(self, err.to_string()).await;
                 }
                 Err(err)
             }
@@ -540,6 +575,17 @@ pub struct ProviderRegistry {
     disables: parking_lot::Mutex<BTreeMap<String, u64>>,
     /// The failure policy instances share with every plugin contribution.
     pub(super) plugins: crate::plugin_health::PluginHealth,
+    /// This machine's global instances, re-read when their file changes.
+    global: parking_lot::Mutex<GlobalFile>,
+}
+
+/// Where `scope`'s credentials are kept: the project's key, or the
+/// machine's.
+fn credential_scope(deps: &HostDeps, scope: Scope) -> &str {
+    match scope {
+        Scope::Project => &deps.project,
+        Scope::Global => GLOBAL_CREDENTIALS,
+    }
 }
 
 /// An instance's `plugin_health` key: `<extension>/<instance id>`.
@@ -558,6 +604,8 @@ pub(crate) struct Resolved {
     pub spec: ProviderSpec,
     /// The instance's id.
     pub id: String,
+    /// Whose it is.
+    pub scope: Scope,
 }
 
 fn listed_or_none(ids: &[&str]) -> String {
@@ -582,6 +630,7 @@ impl ProviderRegistry {
             health: parking_lot::Mutex::new(BTreeMap::new()),
             reconciling: tokio::sync::Mutex::new(()),
             disables: parking_lot::Mutex::new(BTreeMap::new()),
+            global: parking_lot::Mutex::new(GlobalFile::default()),
         })
     }
 
@@ -663,6 +712,7 @@ impl ProviderRegistry {
             ext: ext.clone(),
             spec: spec.clone(),
             id: id.to_string(),
+            scope: self.scope_of(instance).0,
         })
     }
 
@@ -671,10 +721,72 @@ impl ProviderRegistry {
         self.resolve(instance).ok().map(|r| (r.ext, r.spec))
     }
 
+    /// The instances in effect here: this machine's global ones, each
+    /// replaced whole by the project's entry of the same name.
     pub(super) fn instances_config(
         &self,
     ) -> BTreeMap<String, oxplow_config::ExtensionInstanceConfig> {
+        let mut all = self.global_instances();
+        all.extend(self.project_instances());
+        all
+    }
+
+    /// The project's own entries (`extensionInstances`).
+    fn project_instances(&self) -> BTreeMap<String, oxplow_config::ExtensionInstanceConfig> {
         crate::config_service::read_config(&self.deps.config).extension_instances
+    }
+
+    /// When the machine's instances file last changed (none: no file).
+    fn global_mtime(&self) -> Option<std::time::SystemTime> {
+        let dir = self.deps.global_dir.as_ref()?;
+        std::fs::metadata(dir.join(oxplow_config::INSTANCES_FILE))
+            .and_then(|m| m.modified())
+            .ok()
+    }
+
+    /// This machine's global instances, re-read when their file changed.
+    /// A file that doesn't load keeps what was last read (and says so).
+    fn global_instances(&self) -> BTreeMap<String, oxplow_config::ExtensionInstanceConfig> {
+        let Some(dir) = self.deps.global_dir.as_ref() else {
+            return BTreeMap::new();
+        };
+        let mtime = self.global_mtime();
+        let mut file = self.global.lock();
+        if !file.loaded || file.read_at != mtime {
+            match oxplow_config::GlobalInstances::load(dir) {
+                Ok(read) => file.instances = read.instances,
+                Err(error) => {
+                    tracing::warn!(%error, "the global instances file didn't load; keeping what was last read")
+                }
+            }
+            file.loaded = true;
+            file.read_at = mtime;
+        }
+        file.instances.clone()
+    }
+
+    /// Whose `instance` is, and whether a project entry replaces a global
+    /// one here. An instance configured nowhere is the project's.
+    fn scope_of(&self, instance: &str) -> (Scope, bool) {
+        if self.global_instances().contains_key(instance) {
+            (
+                Scope::Global,
+                self.project_instances().contains_key(instance),
+            )
+        } else {
+            (Scope::Project, false)
+        }
+    }
+
+    /// The machine's instances file changed since the last reconcile
+    /// (another project's oxplow wrote it): reconcile. Called on the sync
+    /// timer; `true` when it did.
+    pub async fn reconcile_if_global_changed(&self) -> bool {
+        if self.global.lock().reconciled_at == self.global_mtime() {
+            return false;
+        }
+        self.reconcile().await;
+        true
     }
 
     /// What approving `instance` as it is on disk would change against
@@ -715,6 +827,7 @@ impl ProviderRegistry {
         cfg: Option<&oxplow_config::ExtensionInstanceConfig>,
     ) -> ProviderInstanceView {
         let instance = spec::instance_name(&ext.name, id);
+        let (scope, overridden) = self.scope_of(&instance);
         let dir = host::ext_dir(&self.deps.project_dir, ext);
         let declared =
             spec::read_declarations(spec, &|rel| std::fs::read_to_string(dir.join(rel)).ok()).ok();
@@ -738,6 +851,8 @@ impl ProviderRegistry {
             })
             .unwrap_or_default();
         ProviderInstanceView {
+            scope,
+            overridden,
             extension: ext.name.clone(),
             provider: spec.id.clone(),
             instance_id: id.to_string(),
@@ -760,7 +875,7 @@ impl ProviderRegistry {
                         .deps
                         .secrets
                         .get(&crate::collector_runner::instance_credential_account(
-                            &self.deps.project,
+                            credential_scope(&self.deps, scope),
                             &ext.name,
                             id,
                             name,
@@ -806,7 +921,16 @@ impl ProviderRegistry {
                 Ok(r) => self.view_of(&r.ext, &r.spec, &r.id, Some(cfg)),
                 Err(reason) => {
                     let (extension, id) = instance.split_once('/').unwrap_or((instance, ""));
+                    // An instance of an extension this project doesn't
+                    // have is the person's elsewhere: not this project's
+                    // to list.
+                    let (scope, overridden) = self.scope_of(instance);
+                    if scope == Scope::Global && !overridden {
+                        continue;
+                    }
                     ProviderInstanceView {
+                        scope,
+                        overridden,
                         extension: extension.into(),
                         provider: cfg.provider.clone().unwrap_or_else(|| id.into()),
                         instance_id: id.into(),
@@ -842,7 +966,9 @@ impl ProviderRegistry {
     /// Make the running instances match the project's config.
     pub async fn reconcile(&self) {
         let _one = self.reconciling.lock().await;
+        let seen = self.global_mtime();
         let configured = self.instances_config();
+        self.global.lock().reconciled_at = seen;
         let running: Vec<String> = self.running.lock().await.keys().cloned().collect();
         for name in running {
             if !configured.get(&name).is_some_and(|c| c.enabled) {
@@ -850,7 +976,12 @@ impl ProviderRegistry {
             }
         }
         for (name, cfg) in configured {
-            let Resolved { ext, spec, id } = match self.resolve(&name) {
+            let Resolved {
+                ext,
+                spec,
+                id,
+                scope,
+            } = match self.resolve(&name) {
                 Ok(resolved) => resolved,
                 Err(reason) => {
                     self.stop(&name).await;
@@ -885,12 +1016,15 @@ impl ProviderRegistry {
                 if current.config == cfg.config
                     && current.spec == spec
                     && current.ext.path == ext.path
+                    && current.scope == scope
                 {
                     continue;
                 }
                 self.stop(&name).await;
             }
-            let _ = self.enable_instance(&ext, &spec, &id, cfg.config).await;
+            let _ = self
+                .enable_scoped(&ext, &spec, &id, scope, cfg.config)
+                .await;
         }
         // The config may name another active provider (P7.A2).
         let config = crate::config_service::read_config(&self.deps.config);
@@ -916,18 +1050,20 @@ impl ProviderRegistry {
         spec: &ProviderSpec,
         config: Value,
     ) -> Result<(), HostError> {
-        self.check_as(ext, spec, &spec.id, config).await
+        self.check_as(ext, spec, &spec.id, Scope::Project, config)
+            .await
     }
 
-    /// [`Self::check`] as instance `id` (its own credentials).
+    /// [`Self::check`] as instance `id` of `scope` (its own credentials).
     async fn check_as(
         &self,
         ext: &Extension,
         spec: &ProviderSpec,
         id: &str,
+        scope: Scope,
         config: Value,
     ) -> Result<(), HostError> {
-        let instance = self.instance(ext, spec, id, config).await?;
+        let instance = self.instance(ext, spec, id, scope, config).await?;
         instance.start().await.map(|_| ())
     }
 
@@ -936,6 +1072,7 @@ impl ProviderRegistry {
         ext: &Extension,
         spec: &ProviderSpec,
         id: &str,
+        scope: Scope,
         config: Value,
     ) -> Result<Arc<Instance>, HostError> {
         let name = spec::instance_name(&ext.name, id);
@@ -943,6 +1080,7 @@ impl ProviderRegistry {
         Ok(Arc::new(Instance {
             name,
             id: id.to_string(),
+            scope,
             ext: ext.clone(),
             spec: spec.clone(),
             config,
@@ -979,6 +1117,19 @@ impl ProviderRegistry {
         id: &str,
         config: Value,
     ) -> Result<(), HostError> {
+        self.enable_scoped(ext, spec, id, Scope::Project, config)
+            .await
+    }
+
+    /// [`Self::enable_instance`] for an instance of `scope`.
+    async fn enable_scoped(
+        &self,
+        ext: &Extension,
+        spec: &ProviderSpec,
+        id: &str,
+        scope: Scope,
+        config: Value,
+    ) -> Result<(), HostError> {
         let name = spec::instance_name(&ext.name, id);
         let refuse = |message: String| HostError::Failed {
             name: name.clone(),
@@ -1000,7 +1151,7 @@ impl ProviderRegistry {
         if self.work_items.get(id).is_ok() {
             return Err(refuse(format!("`{id}` is already a provider")));
         }
-        let instance = match self.instance(ext, spec, id, config).await {
+        let instance = match self.instance(ext, spec, id, scope, config).await {
             Ok(i) => i,
             Err(e) => {
                 self.start_failed(&name, e.clone()).await;
@@ -1197,14 +1348,27 @@ impl ProviderRegistry {
         enabled: bool,
         config: Value,
     ) -> Result<ProviderInstanceView, CommandError> {
-        let Resolved { ext, spec, id } =
-            self.resolve(instance)
-                .map_err(|message| CommandError::Invalid {
-                    field: Some("/instance".into()),
-                    message,
-                })?;
+        let Resolved {
+            ext,
+            spec,
+            id,
+            scope,
+        } = self
+            .resolve(instance)
+            .map_err(|message| CommandError::Invalid {
+                field: Some("/instance".into()),
+                message,
+            })?;
+        // It is written where it lives: the project's entry (its own, or
+        // its replacement of a global one), else the machine's file.
+        let project = self.project_instances();
+        let home = if scope == Scope::Global && !project.contains_key(instance) {
+            Scope::Global
+        } else {
+            Scope::Project
+        };
         if enabled {
-            match self.check_as(&ext, &spec, &id, config.clone()).await {
+            match self.check_as(&ext, &spec, &id, scope, config.clone()).await {
                 Ok(()) => {}
                 Err(HostError::Unconfigured { problems, .. }) => {
                     let first = problems.first();
@@ -1243,7 +1407,10 @@ impl ProviderRegistry {
             )
             .await?;
         }
-        let mut all = self.instances_config();
+        let mut all = match home {
+            Scope::Project => project,
+            Scope::Global => self.global_instances(),
+        };
         let sync_minutes = all.get(instance).and_then(|c| c.sync_minutes);
         let provider = all.get(instance).and_then(|c| c.provider.clone());
         all.insert(
@@ -1255,21 +1422,16 @@ impl ProviderRegistry {
                 provider,
             },
         );
-        bus.run(
-            actor,
-            crate::commands::config_commands::SET,
-            json!({ "key": "extensionInstances", "value": all }),
-            true,
-        )
-        .await?;
-        self.reconcile().await;
+        self.write_instances(actor, home, all).await?;
         self.view(instance).await
     }
 
     /// A person adds another instance of `provider`: `instance`
     /// (`<extension>/<instance id>`), off and unconfigured until they set
-    /// it up. Written through `config.set` (`extensionInstances` is a
-    /// person's key, so an agent's is refused or proposed). Refused when
+    /// it up — the project's (written through `config.set`:
+    /// `extensionInstances` is a person's key, so an agent's is refused or
+    /// proposed) or, with `Scope::Global`, their own on this machine
+    /// (`instances.yaml`, a person's only). Refused when
     /// the extension doesn't declare `provider`, or the id is taken — by
     /// another instance, or as another provider's own id.
     pub async fn add_instance(
@@ -1277,6 +1439,7 @@ impl ProviderRegistry {
         actor: &Actor,
         instance: &str,
         provider: &str,
+        scope: Scope,
     ) -> Result<ProviderInstanceView, CommandError> {
         let invalid = |message: String| CommandError::Invalid {
             field: Some("/instance".into()),
@@ -1285,10 +1448,13 @@ impl ProviderRegistry {
         let Resolved { ext, id, .. } = self
             .resolve_as(instance, Some(provider))
             .map_err(&invalid)?;
-        let mut all = self.instances_config();
-        if all.contains_key(instance) {
+        if self.instances_config().contains_key(instance) {
             return Err(invalid(format!("`{instance}` is already an instance")));
         }
+        let mut all = match scope {
+            Scope::Project => self.project_instances(),
+            Scope::Global => self.global_instances(),
+        };
         if id != provider && ext.providers.iter().any(|p| p.id == id) {
             return Err(invalid(format!(
                 "`{id}` is already the id of one of `{}`'s providers (its default instance)",
@@ -1304,26 +1470,43 @@ impl ProviderRegistry {
                 provider: (id != provider).then(|| provider.to_string()),
             },
         );
-        self.write_instances(actor, all).await?;
+        self.write_instances(actor, scope, all).await?;
         self.view(instance).await
     }
 
     /// A person removes `instance`: it stops, its config entry and its
-    /// credentials on this machine go.
+    /// credentials on this machine go. A project's replacement of a global
+    /// instance is what goes first — the global one then shows through.
     pub async fn remove_instance(&self, actor: &Actor, instance: &str) -> Result<(), CommandError> {
-        let mut all = self.instances_config();
         let resolved = self.resolve(instance).ok();
-        if all.remove(instance).is_none() {
+        let mut project = self.project_instances();
+        let mut global = self.global_instances();
+        // A project's replacement of a global one: the global one stays.
+        let still_there = project.contains_key(instance) && global.contains_key(instance);
+        let (home, all) = if project.remove(instance).is_some() {
+            (Scope::Project, project)
+        } else if global.remove(instance).is_some() {
+            (Scope::Global, global)
+        } else {
             return Err(CommandError::Invalid {
                 field: Some("/instance".into()),
                 message: format!("no provider instance `{instance}`"),
             });
+        };
+        self.write_instances(actor, home, all).await?;
+        if still_there {
+            return Ok(());
         }
-        self.write_instances(actor, all).await?;
-        if let Some(Resolved { ext, spec, id }) = resolved {
+        if let Some(Resolved {
+            ext,
+            spec,
+            id,
+            scope,
+        }) = resolved
+        {
             for name in &spec.credentials {
                 let account = crate::collector_runner::instance_credential_account(
-                    &self.deps.project,
+                    credential_scope(&self.deps, scope),
                     &ext.name,
                     &id,
                     name,
@@ -1337,23 +1520,50 @@ impl ProviderRegistry {
         Ok(())
     }
 
-    /// Write `extensionInstances` as `actor` (a person: the key is
-    /// human-only) and reconcile.
+    /// Write `scope`'s instances as `actor` and reconcile: the project's
+    /// through `config.set` (`extensionInstances` is a person's key), the
+    /// machine's file directly — a person's only: no command reaches it,
+    /// so no agent or lens can.
     async fn write_instances(
         &self,
         actor: &Actor,
+        scope: Scope,
         all: BTreeMap<String, oxplow_config::ExtensionInstanceConfig>,
     ) -> Result<(), CommandError> {
-        let bus = self.bus.upgrade().ok_or_else(|| CommandError::Failed {
-            message: "the command bus is gone".into(),
-        })?;
-        bus.run(
-            actor,
-            crate::commands::config_commands::SET,
-            json!({ "key": "extensionInstances", "value": all }),
-            matches!(actor, Actor::Human),
-        )
-        .await?;
+        match scope {
+            Scope::Project => {
+                let bus = self.bus.upgrade().ok_or_else(|| CommandError::Failed {
+                    message: "the command bus is gone".into(),
+                })?;
+                bus.run(
+                    actor,
+                    crate::commands::config_commands::SET,
+                    json!({ "key": "extensionInstances", "value": all }),
+                    matches!(actor, Actor::Human),
+                )
+                .await?;
+            }
+            Scope::Global => {
+                if !matches!(actor, Actor::Human) {
+                    return Err(CommandError::Denied {
+                        reason: "this machine's global instances are a person's to change".into(),
+                    });
+                }
+                let dir = self
+                    .deps
+                    .global_dir
+                    .clone()
+                    .ok_or_else(|| CommandError::Failed {
+                        message: "this machine has no global config dir to keep instances in"
+                            .into(),
+                    })?;
+                oxplow_config::GlobalInstances { instances: all }
+                    .save(&dir)
+                    .map_err(|e| CommandError::Failed {
+                        message: e.to_string(),
+                    })?;
+            }
+        }
         self.reconcile().await;
         Ok(())
     }
@@ -1367,7 +1577,12 @@ impl ProviderRegistry {
         name: &str,
         value: Option<&str>,
     ) -> Result<(), DomainError> {
-        let Resolved { ext, spec, id } = self.resolve(instance).map_err(DomainError::Invalid)?;
+        let Resolved {
+            ext,
+            spec,
+            id,
+            scope,
+        } = self.resolve(instance).map_err(DomainError::Invalid)?;
         if !spec.credentials.iter().any(|c| c == name) {
             return Err(DomainError::Invalid(format!(
                 "provider `{}` declares no credential `{name}` (it declares: {})",
@@ -1380,7 +1595,7 @@ impl ProviderRegistry {
             )));
         }
         let account = crate::collector_runner::instance_credential_account(
-            &self.deps.project,
+            credential_scope(&self.deps, scope),
             &ext.name,
             &id,
             name,
@@ -1406,14 +1621,19 @@ impl ProviderRegistry {
         instance: &str,
         config: Value,
     ) -> Result<ProviderInstanceView, CommandError> {
-        let Resolved { ext, spec, id } =
-            self.resolve(instance)
-                .map_err(|message| CommandError::Invalid {
-                    field: Some("/instance".into()),
-                    message,
-                })?;
+        let Resolved {
+            ext,
+            spec,
+            id,
+            scope,
+        } = self
+            .resolve(instance)
+            .map_err(|message| CommandError::Invalid {
+                field: Some("/instance".into()),
+                message,
+            })?;
         let mut view = self.view(instance).await?;
-        view.health.state = match self.check_as(&ext, &spec, &id, config).await {
+        view.health.state = match self.check_as(&ext, &spec, &id, scope, config).await {
             Ok(()) => InstanceState::Ready,
             Err(HostError::Unapproved(_)) => InstanceState::Unapproved,
             Err(HostError::Unconfigured { problems, .. }) => InstanceState::Unconfigured {
@@ -1583,7 +1803,33 @@ impl ProviderRegistry {
             .is_some_and(|t| t.unix_ms() > now)
     }
 
-    pub(super) async fn call_succeeded(&self, instance: &str, took: Duration) {
+    /// Whether `instance` is the one running under its name: a stopped
+    /// instance's late results — and those of the one a restart replaced —
+    /// aren't the running one's (tsk820).
+    async fn is_current(&self, instance: &Instance) -> bool {
+        self.running
+            .lock()
+            .await
+            .get(&instance.name)
+            .is_some_and(|running| std::ptr::eq(Arc::as_ptr(running), instance))
+    }
+
+    /// A call `instance` made failed: counted like any failure, while it
+    /// is the running instance. A call cut short by its own stop isn't one.
+    pub(super) async fn call_failed(&self, instance: &Instance, error: String) {
+        if self.is_current(instance).await {
+            self.failed(&instance.name, error).await;
+        }
+    }
+
+    /// A call `instance` made succeeded: its health says so, while it is
+    /// the running instance.
+    pub(super) async fn call_succeeded(&self, instance: &Instance, took: Duration) {
+        if !self.is_current(instance).await {
+            return;
+        }
+        let made_by = instance;
+        let instance = instance.name.as_str();
         if let Err(e) = self
             .plugins
             .succeeded(&plugin_key(instance), Some(took))
@@ -1592,6 +1838,15 @@ impl ProviderRegistry {
             tracing::warn!(instance, error = %e, "recording its health failed");
         }
         let ms = took.as_secs_f64() * 1000.0;
+        // Under the lock a stop takes: it either sees this state and
+        // replaces it, or has already removed the instance.
+        let running = self.running.lock().await;
+        if !running
+            .get(instance)
+            .is_some_and(|r| std::ptr::eq(Arc::as_ptr(r), made_by))
+        {
+            return;
+        }
         let mut health = self.health.lock();
         let h = health
             .entry(instance.to_string())

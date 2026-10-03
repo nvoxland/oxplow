@@ -156,7 +156,7 @@ impl Instance {
         let (finished, result) = match outcome {
             Ok(records) => {
                 if let Some(r) = &registry {
-                    r.call_succeeded(&self.name, started.elapsed()).await;
+                    r.call_succeeded(self, started.elapsed()).await;
                 }
                 (
                     None,
@@ -168,7 +168,7 @@ impl Instance {
             }
             Err(ReadFailure { error, counts, .. }) => {
                 if let (true, Some(r)) = (counts, &registry) {
-                    r.failed(&self.name, error.to_string()).await;
+                    r.call_failed(self, error.to_string()).await;
                 }
                 (Some(error.to_string()), Err(error))
             }
@@ -573,6 +573,9 @@ pub fn spawn_sync_scheduler(state: Arc<crate::Services>) {
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             tick.tick().await;
+            // Another project's oxplow may have changed this machine's
+            // global instances.
+            state.providers.reconcile_if_global_changed().await;
             state.providers.sync_due().await;
         }
     });

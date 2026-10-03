@@ -392,6 +392,37 @@ extension's `source:<project>:<ext>:<name>` accounts. An extension's
 `ui.commands` name the default instance's commands (`linear.estimate`);
 another instance's are on the bus under its own namespace.
 
+**Scope** (P9.B2). An instance is the **project's** (above: shared with
+the team in `project.yaml`) or the **person's** — global, in this
+machine's `instances.yaml` in the global config dir
+(`oxplow_config::GlobalInstances`: `instances: { "<ext>/<id>": { enabled,
+config, provider? } }`, the same entries and the same validation):
+
+- a global instance applies in **every project whose catalog has its
+  extension enabled**; where the extension isn't, it isn't listed at all;
+- a project's entry of the same name **replaces it there, whole**
+  (`instances_config()` is the one merge: global, then project) — to turn
+  it off or configure it differently in one project. Its scope stays
+  global (`ProviderInstanceView { scope, overridden }`), and so do its
+  credentials;
+- its credentials are the person's, set once:
+  `instance:global:<ext>/<id>:<name>` (a project instance's are
+  `instance:<project>:…`);
+- **consent stays per project**: the hash is of *this* project's
+  extension folder and approvals are kept per project, so a global
+  instance in a project that hasn't approved the program is `unapproved`
+  there, and its row says so;
+- it is written where it lives (`set_instance`: the project's entry if
+  there is one, else the file; `add_instance(…, scope)`;
+  `remove_instance` takes a project's replacement first, and the global
+  one then shows through). The file is written only by the registry for a
+  person (`Actor::Human`; anyone else is `Denied`) — no command reaches
+  it, so no agent or lens can;
+- another project's oxplow re-reads it by its modification time, on the
+  per-minute sync tick (`reconcile_if_global_changed`); the one that
+  wrote it reconciles at once. A file that doesn't load keeps what was
+  last read, with a warning.
+
 The key is human-only (`HUMAN_ONLY_KEYS`: enabling runs a program) and
 shared with the team; whether it *runs* is per machine (approval,
 credentials, health). The config object is the provider's
@@ -455,9 +486,18 @@ it runs, cleared when it ends. Settings → Integrations appends both to
 the instance's status (neither is a problem colour). The fake's
 `rate-limit:<ms>` hook refuses its next `invoke` or `read` that way.
 
+**A call's outcome is its instance's while that instance runs**
+(tsk820): `call_succeeded` / `call_failed` take the `Instance` that made
+the call and do nothing unless it is still the one running under its name
+(`is_current`, by identity). A call that finishes after its instance was
+stopped — the first read an enable starts, cut short or just late —
+neither marks it `ready` again nor counts a failure against it, and a
+restarted instance never inherits the old one's results.
+
 **Health** (`InstanceHealth { state, consecutive_failures, last_ok_at,
 mean_invoke_ms, rate_limited_until, activity }`, per machine, in memory): `state` is `off`,
-`missing` (configured, but no enabled extension declares it),
+`missing { reason }` (configured, but it names no provider an enabled
+extension declares; the reason says what to add),
 `unapproved`, `unconfigured { problems }`, `checking`, `ready`,
 `failing { errors }` (the last five) or `disabled { reason }`. A failed
 start or call counts (a refused input or a cancel doesn't); a success

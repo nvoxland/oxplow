@@ -5,6 +5,8 @@ import { integrationRow } from "./integrationsModel.js";
 
 const view = (over: Partial<ProviderInstanceView>): ProviderInstanceView => ({
   instance: "tracker/linear",
+  scope: "project",
+  overridden: false,
   extension: "tracker",
   provider: "linear",
   instanceId: "linear",
@@ -82,6 +84,25 @@ test("each instance of a provider is its own choice, by instance id", async () =
     ["linear", "linear (tracker/linear)"],
     ["linear_acme", "linear_acme (tracker/linear_acme)"],
   ]);
+});
+
+// P9.B2: a global instance is the person's on this machine — the row says
+// so, and that its program is approved per project.
+test("a global instance's row says whose it is", () => {
+  const ready = { ...view({}).health, state: { state: "ready" as const } };
+  expect(integrationRow(view({ scope: "global", enabled: true, health: ready })).label).toBe(
+    "tracker/linear · work items · yours, in every project",
+  );
+  expect(integrationRow(view({ scope: "global", overridden: true })).label).toBe(
+    "tracker/linear · work items · yours, replaced by this project's",
+  );
+  const unapproved = integrationRow(
+    view({ scope: "global", approved: false, enabled: true, health: { ...view({}).health, state: { state: "unapproved" } } }),
+  );
+  expect(unapproved.status).toBe(
+    "Not approved in this project: its program is approved per project, under Data → Programs",
+  );
+  expect(integrationRow(view({})).label).toBe("tracker/linear · work items");
 });
 
 test("a missing instance says why, and what to add", () => {

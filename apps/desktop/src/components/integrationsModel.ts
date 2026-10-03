@@ -28,7 +28,12 @@ export function integrationRow(v: ProviderInstanceView, now: Date = new Date()):
       status = s.reason;
       break;
     case "unapproved":
-      status = "Not approved on this machine: approve it under Data → Programs";
+      // A global instance runs in every project, but consent is about the
+      // code in this one.
+      status =
+        v.scope === "global"
+          ? "Not approved in this project: its program is approved per project, under Data → Programs"
+          : "Not approved on this machine: approve it under Data → Programs";
       break;
     case "unconfigured":
       status = `Config problems: ${s.problems.map((p) => `${p.path || "/"} ${p.message}`).join("; ")}`;
@@ -57,7 +62,9 @@ export function integrationRow(v: ProviderInstanceView, now: Date = new Date()):
   const enableLabel = s.state === "disabled" ? "Enable again" : v.enabled ? "Disable" : "Enable";
   return {
     key: v.instance,
-    label: `${v.instance} · ${v.capability.replace(/_/g, " ")}`,
+    label: `${v.instance} · ${v.capability.replace(/_/g, " ")}${
+      v.scope !== "global" ? "" : v.overridden ? " · yours, replaced by this project's" : " · yours, in every project"
+    }`,
     status,
     enableLabel,
     needsApproval: !v.approved,

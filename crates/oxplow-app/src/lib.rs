@@ -862,7 +862,7 @@ impl Services {
                 oxplow_ai::client::Client::default(),
                 machine.secrets.clone(),
                 Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
-                machine.config_dir,
+                machine.config_dir.clone(),
             )
             // Read live, so project.yaml edits and reloads apply at once.
             .with_project_overrides(Arc::new(move || {
@@ -1159,6 +1159,7 @@ impl Services {
                 backoff: machine.provider_backoff,
                 copies: machine.provider_copies.clone(),
                 call_timeout: machine.provider_call_timeout,
+                global_dir: machine.config_dir.clone(),
             },
             &commands,
             work_items.clone(),
@@ -1413,6 +1414,23 @@ impl Services {
     /// hitting the filesystem.
     pub fn in_memory(project_dir: impl Into<PathBuf>) -> Result<Self, AppInitError> {
         let project_dir = project_dir.into();
+        let global = project_dir.join(".oxplow/global-config");
+        Self::in_memory_on_machine(
+            project_dir,
+            global,
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        )
+    }
+
+    /// [`Self::in_memory`] for one of several projects on one machine:
+    /// `global_dir` and `secrets` stand in for the machine's global config
+    /// dir and keychain, shared by every project built on them.
+    pub fn in_memory_on_machine(
+        project_dir: impl Into<PathBuf>,
+        global_dir: PathBuf,
+        secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
+    ) -> Result<Self, AppInitError> {
+        let project_dir = project_dir.into();
         let state_dir = project_dir.join(".oxplow");
         ensure_state_dir(&state_dir)?;
         let layout = AppLayout {
@@ -1423,12 +1441,12 @@ impl Services {
         let config = oxplow_config::load_project_config(&project_dir)?;
         // Tests never touch the real keychain or the user's ai.yaml.
         let machine = MachineEnv {
-            secrets: Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-            config_dir: Some(state_dir.join("global-config")),
-            approvals_file: Some(state_dir.join("global-config/approvals.json")),
+            secrets,
+            config_dir: Some(global_dir.clone()),
+            approvals_file: Some(global_dir.join("approvals.json")),
             // A test's failing provider restarts at once.
             provider_backoff: std::time::Duration::ZERO,
-            provider_copies: state_dir.join("global-config/provider-copies"),
+            provider_copies: global_dir.join("provider-copies"),
             // A test's hung provider fails fast.
             provider_call_timeout: std::time::Duration::from_secs(2),
             lsp_request_timeout: std::time::Duration::from_secs(2),

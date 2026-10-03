@@ -847,6 +847,9 @@ pub enum ConfigError {
     Parse(#[from] serde_yaml::Error),
     #[error(".oxplow/project.yaml validation: {0}")]
     Invalid(String),
+    /// The user-global instances file ([`GlobalInstances`]).
+    #[error("instances.yaml: {0}")]
+    Instances(String),
 }
 
 /// Raw `zones:` row. `match` accepts a scalar or a sequence, so a
@@ -1577,6 +1580,77 @@ pub struct ExtensionInstanceConfig {
     /// instance id is the provider id.
     #[serde(default)]
     pub provider: Option<String>,
+}
+
+impl Default for ExtensionInstanceConfig {
+    /// Off and unconfigured: what a newly added instance is.
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            config: empty_object(),
+            sync_minutes: None,
+            provider: None,
+        }
+    }
+}
+
+/// The file of this machine's **global** provider instances, in the
+/// global config dir ([`global_config_dir`]).
+pub const INSTANCES_FILE: &str = "instances.yaml";
+
+/// Provider instances that belong to the person rather than a project
+/// (P9.B2): `instances: { "<extension>/<instance id>": { enabled, config,
+/// provider? } }`, the same entries as a project's `extensionInstances`.
+/// Each applies in every project that has its extension enabled; a
+/// project's entry of the same name replaces it there.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GlobalInstances {
+    #[serde(default)]
+    pub instances: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
+}
+
+impl GlobalInstances {
+    /// Load from `dir/instances.yaml`; a missing file is none.
+    pub fn load(dir: &Path) -> Result<GlobalInstances, ConfigError> {
+        let text = match std::fs::read_to_string(dir.join(INSTANCES_FILE)) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(GlobalInstances::default())
+            }
+            Err(e) => return Err(ConfigError::Instances(e.to_string())),
+        };
+        let loaded: GlobalInstances =
+            serde_yaml::from_str(&text).map_err(|e| ConfigError::Instances(e.to_string()))?;
+        loaded.validated()
+    }
+
+    /// Validate and write to `dir/instances.yaml`.
+    pub fn save(&self, dir: &Path) -> Result<(), ConfigError> {
+        let checked = self.clone().validated()?;
+        let doc = serde_json::json!({ "instances": instances_as_written(&checked.instances) });
+        let text =
+            serde_yaml::to_string(&doc).map_err(|e| ConfigError::Instances(e.to_string()))?;
+        std::fs::create_dir_all(dir).map_err(|e| ConfigError::Instances(e.to_string()))?;
+        std::fs::write(dir.join(INSTANCES_FILE), text)
+            .map_err(|e| ConfigError::Instances(e.to_string()))
+    }
+
+    /// The rules a project's `extensionInstances` follow, said of this file.
+    fn validated(self) -> Result<GlobalInstances, ConfigError> {
+        validate_extension_instances(self.instances)
+            .map(|instances| GlobalInstances { instances })
+            .map_err(|e| match e {
+                ConfigError::Invalid(message) => ConfigError::Instances(
+                    message.replacen("extensionInstances: ", "", 1).replacen(
+                        "extensionInstances.",
+                        "",
+                        1,
+                    ),
+                ),
+                other => other,
+            })
+    }
 }
 
 /// How often an instance's collectors are read when its config doesn't
@@ -3234,6 +3308,58 @@ mod tests {
             err.contains("`provider`") && err.contains("Lin-ear"),
             "{err}"
         );
+    }
+
+    /// P9.B2: the user-global instances file — the same entries as a
+    /// project's `extensionInstances`, for every project of this machine.
+    #[test]
+    fn global_instances_load_save_and_say_what_is_wrong() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(GlobalInstances::load(dir.path())
+            .unwrap()
+            .instances
+            .is_empty());
+        let mut global = GlobalInstances::default();
+        global.instances.insert(
+            "tracker/linear_acme".into(),
+            ExtensionInstanceConfig {
+                enabled: true,
+                config: serde_json::json!({ "team": "ACME" }),
+                sync_minutes: None,
+                provider: Some("linear".into()),
+            },
+        );
+        global.save(dir.path()).unwrap();
+        let text = std::fs::read_to_string(dir.path().join(INSTANCES_FILE)).unwrap();
+        assert!(
+            text.contains("tracker/linear_acme") && text.contains("provider: linear"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("syncMinutes"),
+            "an absent schedule isn't written: {text}"
+        );
+        assert_eq!(GlobalInstances::load(dir.path()).unwrap(), global);
+
+        std::fs::write(
+            dir.path().join(INSTANCES_FILE),
+            "instances:\n  tracker/Linear: { enabled: true }\n",
+        )
+        .unwrap();
+        let err = GlobalInstances::load(dir.path()).unwrap_err().to_string();
+        assert!(
+            err.contains("instances.yaml") && err.contains("tracker/Linear"),
+            "{err}"
+        );
+        assert!(!err.contains("project.yaml"), "{err}");
+        std::fs::write(dir.path().join(INSTANCES_FILE), "extensionInstances: {}\n").unwrap();
+        let err = GlobalInstances::load(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("instances.yaml"), "{err}");
+        // An invalid set is never written.
+        let mut bad = GlobalInstances::default();
+        bad.instances
+            .insert("nope".into(), ExtensionInstanceConfig::default());
+        assert!(bad.save(dir.path()).is_err());
     }
 
     #[test]

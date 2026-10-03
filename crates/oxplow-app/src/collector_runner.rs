@@ -145,14 +145,15 @@ pub fn project_key(project_dir: &Path) -> String {
 /// declaring the same name.
 /// The keychain account of a provider instance's credential `name`: an
 /// instance's own, so two instances of one provider (two workspaces) hold
-/// two keys.
+/// two keys. `scope` is the project's key for a project's instance, or
+/// `global` for the person's (one value for every project).
 pub fn instance_credential_account(
-    project: &str,
+    scope: &str,
     extension: &str,
     instance_id: &str,
     name: &str,
 ) -> String {
-    format!("instance:{project}:{extension}/{instance_id}:{name}")
+    format!("instance:{scope}:{extension}/{instance_id}:{name}")
 }
 
 pub fn credential_account(project: &str, extension: &str, name: &str) -> String {

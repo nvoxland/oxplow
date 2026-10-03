@@ -1,5 +1,5 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
-import type { ExtensionChange, OpOutcome, ProviderEffect, Reads, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
+import type { ExtensionChange, OpOutcome, ProviderEffect, Reads, Scope, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
 import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
 export { onRemoteReconnect, triggerRemoteResync };
@@ -898,9 +898,15 @@ export async function setProviderInstance(
 }
 
 /// A person adds another instance of an extension's provider
-/// (`<extension>/<instance id>`), off until configured and enabled.
-export async function addProviderInstance(instance: string, provider: string): Promise<ProviderInstanceView[]> {
-  return unwrap(await commands.addProviderInstance(instance, provider));
+/// (`<extension>/<instance id>`) — this project's, or their own on this
+/// machine (`global`: every project with the extension) — off until
+/// configured and enabled.
+export async function addProviderInstance(
+  instance: string,
+  provider: string,
+  scope: Scope,
+): Promise<ProviderInstanceView[]> {
+  return unwrap(await commands.addProviderInstance(instance, provider, scope));
 }
 
 /// A person removes an instance: it stops; its config and its credentials

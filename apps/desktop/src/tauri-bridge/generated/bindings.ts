@@ -290,7 +290,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	addProviderInstance: (instance: string, provider: string) => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("add_provider_instance", { instance, provider })),
+	addProviderInstance: (instance: string, provider: string, scope: Scope) => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("add_provider_instance", { instance, provider, scope })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -4352,6 +4352,10 @@ export type ProviderEffect = {
 export type ProviderInstanceView = {
 	// `<extension>/<instance id>`.
 	instance: string,
+	// The project's, or the person's on this machine (every project).
+	scope: Scope,
+	// A global instance this project's own entry replaces here.
+	overridden: boolean,
 	extension: string,
 	// The provider (its program) this is an instance of.
 	provider: string,
@@ -4601,6 +4605,19 @@ export type RowSample = {
 	before: unknown | null,
 	after: unknown | null,
 };
+
+// Whose an instance is (P9.B2).
+export type Scope = 
+/**
+ *  The project's: in its `extensionInstances`, shared with the team;
+ *  its credentials are this project's on this machine.
+ */
+"project" | 
+/**
+ *  The person's: in this machine's `instances.yaml`, running in every
+ *  project that has its extension; its credentials are set once.
+ */
+"global";
 
 /**
  *  One ranked search result. `stream_id` is `None` for project-global

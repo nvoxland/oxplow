@@ -43,15 +43,17 @@ pub async fn set_provider_instance(
 }
 
 /// A person adds another instance of an extension's `provider`
-/// (`instance` = `<extension>/<instance id>`): off until they configure
-/// and enable it.
+/// (`instance` = `<extension>/<instance id>`), the project's or — `scope:
+/// global` — their own on this machine: off until they configure and
+/// enable it.
 pub async fn add_provider_instance(
     svc: &Services,
     instance: String,
     provider: String,
+    scope: oxplow_app::providers::Scope,
 ) -> Result<Vec<ProviderInstanceView>, IpcError> {
     svc.providers
-        .add_instance(&Actor::Human, &instance, &provider)
+        .add_instance(&Actor::Human, &instance, &provider, scope)
         .await?;
     Ok(svc.providers.list().await)
 }
@@ -110,7 +112,7 @@ mod tests {
         for (name, input) in [
             (
                 "add_provider_instance",
-                json!({ "instance": "tracker/fake_two", "provider": "fake" }),
+                json!({ "instance": "tracker/fake_two", "provider": "fake", "scope": "project" }),
             ),
             (
                 "set_instance_credential",

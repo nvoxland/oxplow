@@ -14,6 +14,8 @@ let replacements: unknown[] = [];
 const credentialSaves: Array<[string, string, string | null]> = [];
 const instance = {
   instance: "tracker/fake",
+  scope: "project",
+  overridden: false,
   extension: "tracker",
   provider: "fake",
   instanceId: "fake",
