@@ -29,6 +29,11 @@ rmcp = { workspace = true, features = [
     "transport-streamable-http-server",
 ] }
 axum = { version = "0.8" }
+# What `Http` (the streamable-HTTP client that reads every 401 as one)
+# names in rmcp's client trait.
+reqwest = { workspace = true }
+futures = { workspace = true }
+sse-stream = "0.2"
 schemars = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

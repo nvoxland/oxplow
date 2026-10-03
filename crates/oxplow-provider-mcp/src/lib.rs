@@ -13,8 +13,10 @@
 //! The server is a program in the folder, spoken to over its stdio, or
 //! (P9.B4) one reached over streamable HTTP at `--url`, its bearer token
 //! the value of the credential `--auth-env` names. A server that answers
-//! `401` is `Auth` — the host renews a signed-in credential and tries
-//! again.
+//! `401` — with a `WWW-Authenticate` challenge or without — is `Auth`: the
+//! host renews a signed-in credential and tries again. A `403` is the
+//! server refusing what the token may do; a renewed token carries the same
+//! grant, so that is an ordinary failure, naming the scope it wants.
 //!
 //! It answers `initialize` with the checked-in declarations, and starts
 //! the server (an MCP client) at `check`, refusing it when
@@ -38,10 +40,12 @@ use oxplow_collect_plugin::SandboxBudget;
 use oxplow_provider_protocol::codec::notify;
 use oxplow_provider_protocol::model::*;
 use oxplow_provider_protocol::{Id, Incoming, Peer, ProtocolError};
+use rmcp::model::ClientJsonRpcMessage;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use rmcp::service::RunningService;
 use rmcp::transport::streamable_http_client::{
-    AuthRequiredError, StreamableHttpClientTransportConfig,
+    AuthRequiredError, InsufficientScopeError, SseError, StreamableHttpClient,
+    StreamableHttpClientTransportConfig, StreamableHttpError, StreamableHttpPostResponse,
 };
 use rmcp::transport::{ConfigureCommandExt, StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::{RoleClient, ServiceExt};
@@ -289,37 +293,187 @@ fn internal(message: impl Into<String>) -> ProtocolError {
     ProtocolError::Internal(message.into())
 }
 
-/// Whether `error` is a server answering `401`: its bearer isn't one it
-/// takes.
-fn unauthorized(error: &(dyn std::error::Error + 'static)) -> bool {
+/// The streamable-HTTP client a server by `url` is reached with: rmcp's
+/// reqwest client (no pooled idle connections, no redirects — its
+/// defaults), except that **every** `401` is [`AuthRequiredError`]. rmcp
+/// raises that only for a `401` carrying `WWW-Authenticate`; a bare one
+/// it reports as an unexpected response (a POST, worded `HTTP 401 …`) or
+/// a reqwest status error (a GET or DELETE). A `401` whose body is a
+/// JSON-RPC error reaches the session as that error, its status gone —
+/// what the server said is all there is to go on then.
+#[derive(Clone)]
+struct Http(reqwest::Client);
+
+impl Http {
+    fn new() -> Self {
+        Http(
+            reqwest::Client::builder()
+                .pool_max_idle_per_host(0)
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("a reqwest client builds"),
+        )
+    }
+}
+
+type HttpError = StreamableHttpError<reqwest::Error>;
+type SseStream = futures::stream::BoxStream<'static, Result<sse_stream::Sse, SseError>>;
+type Headers = HashMap<reqwest::header::HeaderName, reqwest::header::HeaderValue>;
+
+/// A `401` however rmcp reported it, as [`AuthRequiredError`].
+fn auth_required(error: HttpError) -> HttpError {
+    let unauthorized = match &error {
+        StreamableHttpError::UnexpectedServerResponse(said) => {
+            said.starts_with(&format!("HTTP {}", reqwest::StatusCode::UNAUTHORIZED))
+        }
+        StreamableHttpError::Client(e) => e.status() == Some(reqwest::StatusCode::UNAUTHORIZED),
+        _ => false,
+    };
+    if unauthorized {
+        StreamableHttpError::AuthRequired(AuthRequiredError::new(String::new()))
+    } else {
+        error
+    }
+}
+
+impl StreamableHttpClient for Http {
+    type Error = reqwest::Error;
+
+    async fn post_message(
+        &self,
+        uri: Arc<str>,
+        message: ClientJsonRpcMessage,
+        session_id: Option<Arc<str>>,
+        auth_header: Option<String>,
+        custom_headers: Headers,
+    ) -> Result<StreamableHttpPostResponse, HttpError> {
+        self.0
+            .post_message(uri, message, session_id, auth_header, custom_headers)
+            .await
+            .map_err(auth_required)
+    }
+
+    async fn post_message_with_max_sse_event_size(
+        &self,
+        uri: Arc<str>,
+        message: ClientJsonRpcMessage,
+        session_id: Option<Arc<str>>,
+        auth_header: Option<String>,
+        custom_headers: Headers,
+        max_sse_event_size: usize,
+    ) -> Result<StreamableHttpPostResponse, HttpError> {
+        self.0
+            .post_message_with_max_sse_event_size(
+                uri,
+                message,
+                session_id,
+                auth_header,
+                custom_headers,
+                max_sse_event_size,
+            )
+            .await
+            .map_err(auth_required)
+    }
+
+    async fn delete_session(
+        &self,
+        uri: Arc<str>,
+        session_id: Arc<str>,
+        auth_header: Option<String>,
+        custom_headers: Headers,
+    ) -> Result<(), HttpError> {
+        self.0
+            .delete_session(uri, session_id, auth_header, custom_headers)
+            .await
+            .map_err(auth_required)
+    }
+
+    async fn get_stream(
+        &self,
+        uri: Arc<str>,
+        session_id: Option<Arc<str>>,
+        last_event_id: Option<String>,
+        auth_header: Option<String>,
+        custom_headers: Headers,
+    ) -> Result<SseStream, HttpError> {
+        self.0
+            .get_stream(uri, session_id, last_event_id, auth_header, custom_headers)
+            .await
+            .map_err(auth_required)
+    }
+
+    async fn get_stream_with_max_sse_event_size(
+        &self,
+        uri: Arc<str>,
+        session_id: Option<Arc<str>>,
+        last_event_id: Option<String>,
+        auth_header: Option<String>,
+        custom_headers: Headers,
+        max_sse_event_size: usize,
+    ) -> Result<SseStream, HttpError> {
+        self.0
+            .get_stream_with_max_sse_event_size(
+                uri,
+                session_id,
+                last_event_id,
+                auth_header,
+                custom_headers,
+                max_sse_event_size,
+            )
+            .await
+            .map_err(auth_required)
+    }
+}
+
+/// How the server refused the bearer, if it did.
+enum Refused<'a> {
+    /// `401`: it doesn't take the token.
+    Token,
+    /// `403`: it takes the token, but not for this.
+    Scope(&'a InsufficientScopeError),
+}
+
+/// Whether `error` is the server refusing the bearer, and how.
+fn refused<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<Refused<'a>> {
     let mut at = Some(error);
     while let Some(current) = at {
         if current.is::<AuthRequiredError>() {
-            return true;
+            return Some(Refused::Token);
+        }
+        if let Some(scope) = current.downcast_ref::<InsufficientScopeError>() {
+            return Some(Refused::Scope(scope));
         }
         // A transport's error is carried, not chained.
         if let Some(carried) = current.downcast_ref::<rmcp::transport::DynamicTransportError>() {
-            return unauthorized(carried.error.as_ref());
+            return refused(carried.error.as_ref());
         }
         if let Some(rmcp::ServiceError::TransportSend(carried)) = current.downcast_ref() {
-            return unauthorized(carried);
+            return refused(carried);
         }
         if let Some(rmcp::service::ClientInitializeError::TransportError { error, .. }) =
             current.downcast_ref()
         {
-            return unauthorized(error);
+            return refused(error);
         }
         at = current.source();
     }
-    false
+    None
 }
 
 /// A failure talking to the server: `Auth` when it refused the bearer.
 fn server_error(what: String, error: &(dyn std::error::Error + 'static)) -> ProtocolError {
-    if unauthorized(error) {
-        ProtocolError::Auth(format!("{what}: the MCP server refused its bearer token"))
-    } else {
-        internal(format!("{what}: {error}"))
+    match refused(error) {
+        Some(Refused::Token) => {
+            ProtocolError::Auth(format!("{what}: the MCP server refused its bearer token"))
+        }
+        Some(Refused::Scope(scope)) => internal(format!(
+            "{what}: the MCP server takes its bearer token but it may not do this{}",
+            scope
+                .get_required_scope()
+                .map(|s| format!(" (it wants scope `{s}`)"))
+                .unwrap_or_default()
+        )),
+        None => internal(format!("{what}: {error}")),
     }
 }
 
@@ -372,7 +526,7 @@ async fn connect(server: &Server) -> Result<Client, Unstarted> {
                 };
                 config = config.auth_header(token);
             }
-            let transport = StreamableHttpClientTransport::from_config(config);
+            let transport = StreamableHttpClientTransport::with_client(Http::new(), config);
             Ok(().serve(transport).await.map_err(|e| {
                 server_error(format!("the MCP server at `{url}` didn't initialize"), &e)
             })?)

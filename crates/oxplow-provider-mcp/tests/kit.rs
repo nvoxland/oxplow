@@ -94,7 +94,12 @@ async fn the_notes_extension_passes_plugin_test_with_its_server_by_url() {
         .unwrap();
     let url = format!("http://{}/mcp", listener.local_addr().unwrap());
     let server = tokio::spawn(async move {
-        let _ = oxplow_provider_mcp::notes::serve_http(listener, None).await;
+        let _ = oxplow_provider_mcp::notes::serve_http(
+            listener,
+            None,
+            oxplow_provider_mcp::notes::Refusal::Challenge,
+        )
+        .await;
     });
     let manifest = std::fs::read_to_string(ext.join("extension.yaml")).unwrap();
     let by_command = "      mcp: { command: [bin/notes-server] }\n";

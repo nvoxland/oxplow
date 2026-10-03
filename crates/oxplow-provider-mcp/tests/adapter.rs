@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
+use oxplow_provider_mcp::notes::Refusal;
 use oxplow_provider_protocol::codec::notify;
 use oxplow_provider_protocol::model::*;
 use oxplow_provider_protocol::{Incoming, Peer, ProtocolError};
@@ -482,13 +483,22 @@ async fn shutdown_with_a_call_in_flight_stops_the_server() {
 /// The notes server over HTTP on loopback (at `port`, or any), behind
 /// `bearer`: its url, and the task serving it.
 async fn http_notes(port: u16, bearer: Option<&str>) -> (String, tokio::task::JoinHandle<()>) {
+    http_notes_refusing(port, bearer, Refusal::Challenge).await
+}
+
+/// [`http_notes`], refusing a wrong bearer as `refusal` says.
+async fn http_notes_refusing(
+    port: u16,
+    bearer: Option<&str>,
+    refusal: Refusal,
+) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
         .await
         .unwrap();
     let url = format!("http://{}/mcp", listener.local_addr().unwrap());
     let bearer = bearer.map(str::to_string);
     let task = tokio::spawn(async move {
-        let _ = oxplow_provider_mcp::notes::serve_http(listener, bearer).await;
+        let _ = oxplow_provider_mcp::notes::serve_http(listener, bearer, refusal).await;
     });
     (url, task)
 }
@@ -623,5 +633,50 @@ async fn a_server_by_url_is_pinned_and_called() {
         "{:?}",
         refused.problems
     );
+    server.abort();
+}
+
+/// tsk831: a `401` is `Auth` however the server words it — many send no
+/// `WWW-Authenticate` — so the host renews a signed-in token whenever a
+/// server stops taking it. A `403` isn't: the server knows the token and
+/// refuses what it may do, which a renewed token (the same grant) won't
+/// change.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_401_is_auth_however_it_is_worded() {
+    let ext = extension();
+    for refusal in [Refusal::Challenge, Refusal::Bare] {
+        let (url, server) = http_notes_refusing(0, Some("s3cret"), refusal).await;
+        // Refused at the start ...
+        let (_child, wrong) = spawn_by_url(ext.path(), &url, Some("wrong"));
+        let refused = try_check(&wrong).await;
+        assert!(
+            matches!(refused, Err(ProtocolError::Auth(_))),
+            "{refusal:?} at check: {refused:?}"
+        );
+        // ... and mid-session.
+        let port: u16 = url::Url::parse(&url).unwrap().port().unwrap();
+        let (_child, peer) = spawn_by_url(ext.path(), &url, Some("s3cret"));
+        let handle = try_check(&peer).await.unwrap().handle.unwrap();
+        server.abort();
+        let _ = server.await;
+        let (_, server) = http_notes_refusing(port, Some("rotated"), refusal).await;
+        let refused = invoke(&peer, &handle, "create", json!({ "title": "Late" })).await;
+        assert!(
+            matches!(refused, Err(ProtocolError::Auth(_))),
+            "{refusal:?} mid-session: {refused:?}"
+        );
+        server.abort();
+    }
+
+    let (url, server) = http_notes_refusing(0, Some("s3cret"), Refusal::Forbidden).await;
+    let (_child, short) = spawn_by_url(ext.path(), &url, Some("wrong"));
+    let refused = try_check(&short).await;
+    match refused {
+        Err(ProtocolError::Internal(message)) => assert!(
+            message.contains("may not") && message.contains("notes:write"),
+            "{message}"
+        ),
+        other => panic!("a 403 is the server's refusal, not Auth: {other:?}"),
+    }
     server.abort();
 }

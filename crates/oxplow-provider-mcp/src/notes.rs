@@ -7,7 +7,7 @@
 //! It is served over stdio ([`serve_stdio`], a server by `command`) or
 //! over streamable HTTP at `/mcp` ([`serve_http`], a server by `url`,
 //! P9.B4), there optionally behind a bearer token — anything else is
-//! answered `401`.
+//! refused the way [`Refusal`] says.
 
 use std::sync::{Arc, Mutex};
 
@@ -218,12 +218,26 @@ pub async fn serve_stdio() -> std::io::Result<()> {
     Ok(())
 }
 
+/// How the HTTP server refuses a request without its bearer token: the
+/// ways services answer one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// `401` with `WWW-Authenticate: Bearer` (RFC 6750 §3).
+    Challenge,
+    /// `401` and nothing more.
+    Bare,
+    /// `403` with `WWW-Authenticate: Bearer error="insufficient_scope"`:
+    /// the token is known but may not do this.
+    Forbidden,
+}
+
 /// Serve the notes over streamable HTTP at `/mcp` on `listener`, every
 /// session over one book. With `bearer`, a request without `Authorization:
-/// Bearer <bearer>` is answered `401`.
+/// Bearer <bearer>` is refused as `refusal` says.
 pub async fn serve_http(
     listener: tokio::net::TcpListener,
     bearer: Option<String>,
+    refusal: Refusal,
 ) -> std::io::Result<()> {
     use axum::http::{header, StatusCode};
     use axum::response::IntoResponse;
@@ -251,11 +265,22 @@ pub async fn serve_http(
                             .get(header::AUTHORIZATION)
                             .and_then(|v| v.to_str().ok());
                         match expected {
-                            Some(expected) if given != Some(expected.as_str()) => (
-                                StatusCode::UNAUTHORIZED,
-                                [(header::WWW_AUTHENTICATE, "Bearer")],
-                            )
-                                .into_response(),
+                            Some(expected) if given != Some(expected.as_str()) => match refusal {
+                                Refusal::Challenge => (
+                                    StatusCode::UNAUTHORIZED,
+                                    [(header::WWW_AUTHENTICATE, "Bearer")],
+                                )
+                                    .into_response(),
+                                Refusal::Bare => StatusCode::UNAUTHORIZED.into_response(),
+                                Refusal::Forbidden => (
+                                    StatusCode::FORBIDDEN,
+                                    [(
+                                        header::WWW_AUTHENTICATE,
+                                        r#"Bearer error="insufficient_scope", scope="notes:write""#,
+                                    )],
+                                )
+                                    .into_response(),
+                            },
                             _ => next.run(request).await,
                         }
                     }

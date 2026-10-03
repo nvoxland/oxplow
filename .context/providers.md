@@ -271,7 +271,18 @@ added, removed or changed (`ProviderEffect.tools`).
 - **A `401` is `Auth`** (at the server's initialize, `tools/list` or a
   tool call), so a signed-in bearer is renewed and the call tried once
   more ("Credentials and sign-in"); a pasted one is a failure that says
-  the bearer was refused.
+  the bearer was refused. That holds with or without a
+  `WWW-Authenticate` challenge (tsk831): rmcp types only a challenged
+  `401`, so the adapter reaches the server through its own client
+  (`Http`, rmcp's reqwest client delegated to) that reads a bare one —
+  rmcp's `HTTP 401 …` response error or reqwest's status error — as
+  the same. The one shape it can't see is a `401` whose body is a
+  JSON-RPC error: rmcp hands that to the session as the server's error,
+  without its status. **A `403` isn't `Auth`**: the server takes the
+  token but refuses what it may do, and a renewed token carries the same
+  grant — it is an ordinary failure naming the scope the server wants
+  (from its `insufficient_scope` challenge). The notes server's
+  `Refusal` (`Challenge | Bare | Forbidden`) serves each.
 - **What the approval covers** is the url, the mapping, the pins, the
   declarations and the grants — **not the server's code**, which runs
   elsewhere (`ProjectProgram.remote`: the hash covers the url's bytes

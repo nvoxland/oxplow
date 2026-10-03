@@ -4785,14 +4785,17 @@ name = "oxplow-provider-mcp"
 version = "0.7.0"
 dependencies = [
  "axum",
+ "futures",
  "oxplow-app",
  "oxplow-collect-plugin",
  "oxplow-provider-protocol",
  "oxplow-sdk",
+ "reqwest",
  "rmcp",
  "schemars 1.2.2",
  "serde",
  "serde_json",
+ "sse-stream",
  "tempfile",
  "tokio",
  "url",

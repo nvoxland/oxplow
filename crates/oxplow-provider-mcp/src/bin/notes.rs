@@ -16,7 +16,12 @@ async fn main() {
                         eprintln!("notes: http://{local}/mcp");
                     }
                     let bearer = std::env::var("NOTES_BEARER").ok();
-                    oxplow_provider_mcp::notes::serve_http(listener, bearer).await
+                    oxplow_provider_mcp::notes::serve_http(
+                        listener,
+                        bearer,
+                        oxplow_provider_mcp::notes::Refusal::Challenge,
+                    )
+                    .await
                 }
                 Err(e) => Err(e),
             }
