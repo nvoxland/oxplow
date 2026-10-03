@@ -45,6 +45,9 @@ pub fn asset_name(kind: &str) -> String {
 pub(crate) struct SearchableKind {
     /// The view its rows come from.
     view: String,
+    /// The view's SQL as compiled: an edit of the model changes it — and
+    /// what the index holds — without touching the tables (tsk851).
+    sql: String,
     id_pattern: String,
     /// The tables behind the view.
     tables: Vec<String>,
@@ -132,34 +135,38 @@ impl Materializer for KindSearchIndex {
 /// The searchable kinds `ref_kind` lists, each with the tables behind its
 /// view.
 async fn searchable_kinds(db: &Database) -> Result<BTreeMap<String, SearchableKind>, DomainError> {
-    let kinds: Vec<(String, String, String)> = db
+    // Each kind with its view's compiled SQL (none while the view isn't
+    // published).
+    let kinds: Vec<(String, String, String, Option<String>)> = db
         .read(|tx| {
             let mut st = tx
                 .prepare(
-                    "SELECT kind, searchable, id_pattern FROM ref_kind \
-                     WHERE searchable IS NOT NULL ORDER BY kind",
+                    "SELECT k.kind, k.searchable, k.id_pattern, \
+                            (SELECT sql FROM sqlite_master WHERE type = 'view' AND name = k.searchable) \
+                     FROM ref_kind k WHERE k.searchable IS NOT NULL ORDER BY k.kind",
                 )
                 .map_err(oxplow_db::map_sql_err)?;
             let rows = st
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
                 .map_err(oxplow_db::map_sql_err)?
                 .collect::<rusqlite::Result<_>>()
                 .map_err(oxplow_db::map_sql_err)?;
             Ok(rows)
         })
         .await?;
-    let views: Vec<String> = kinds.iter().map(|(_, view, _)| view.clone()).collect();
+    let views: Vec<String> = kinds.iter().map(|(_, view, _, _)| view.clone()).collect();
     let tables = crate::assets::tables_behind(db, &views).await?;
     Ok(kinds
         .into_iter()
         // A view the compiler hasn't published (yet, or any more) has
         // nothing to index; it registers once the registry lists it.
-        .filter_map(|(kind, view, id_pattern)| {
+        .filter_map(|(kind, view, id_pattern, sql)| {
             let tables = tables.get(&view)?.clone();
             Some((
                 kind,
                 SearchableKind {
                     view,
+                    sql: sql?,
                     id_pattern,
                     tables,
                 },
@@ -423,6 +430,19 @@ ref_kinds:
         assert_eq!(
             found(svc, "gadget", &["13"]).await,
             vec![("13".to_string(), "Gadget polish".to_string())]
+        );
+
+        // Its model's SQL changes, its tables don't (tsk851): the index
+        // follows the new SQL without waiting for a collector to write.
+        write(
+            &root,
+            "oxplow/extensions/acme/models/found.sql",
+            "SELECT CAST('acme_pr:' || n AS TEXT) AS ref, CAST(title || ' (open)' AS TEXT) AS title, body FROM ref('pr')",
+        );
+        svc.extension_models.sync().await.unwrap();
+        assert_eq!(
+            found(svc, "open", &["13"]).await,
+            vec![("13".to_string(), "Gadget polish (open)".to_string())]
         );
 
         // No longer searchable: its entries leave.

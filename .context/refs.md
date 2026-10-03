@@ -122,6 +122,13 @@ desktop routes them through `searchHitTarget`. Core kinds are indexed by
 core (`search.index`). A plugin kind is never `revisioned`: no plugin
 kind has a reader for a revision (extensions.md "Ref kinds").
 
+A kind's index is re-registered — and recomputed whole — when anything
+that decides its rows changes (`SearchableKind`): its view, the view's
+**compiled SQL** (from `sqlite_master`; an edit of the model changes what
+is indexed without touching the tables, tsk851), its id pattern, or the
+tables behind the view; otherwise it recomputes when a commit touches
+one of those tables.
+
 `refs::validate_ref` parses a ref and checks it against the kind
 registry. The event log's `append_tx` runs it on every `subject`
 entry, so an event naming `zones`, `config:`, `nope:thing`,
