@@ -132,9 +132,16 @@ impl Materializer for KindSearchIndex {
     }
 }
 
-/// The searchable kinds `ref_kind` lists, each with the tables behind its
-/// view.
-async fn searchable_kinds(db: &Database) -> Result<BTreeMap<String, SearchableKind>, DomainError> {
+/// The searchable kinds `ref_kind` lists: every one of them, and those
+/// whose view is published, each with what decides its rows.
+struct Searchable {
+    /// Every kind `ref_kind` says is searchable, its view published or not.
+    declared: std::collections::BTreeSet<String>,
+    /// Those whose view is published: what to index.
+    ready: BTreeMap<String, SearchableKind>,
+}
+
+async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
     // Each kind with its view's compiled SQL (none while the view isn't
     // published).
     let kinds: Vec<(String, String, String, Option<String>)> = db
@@ -156,7 +163,8 @@ async fn searchable_kinds(db: &Database) -> Result<BTreeMap<String, SearchableKi
         .await?;
     let views: Vec<String> = kinds.iter().map(|(_, view, _, _)| view.clone()).collect();
     let tables = crate::assets::tables_behind(db, &views).await?;
-    Ok(kinds
+    let declared = kinds.iter().map(|(kind, ..)| kind.clone()).collect();
+    let ready = kinds
         .into_iter()
         // A view the compiler hasn't published (yet, or any more) has
         // nothing to index; it registers once the registry lists it.
@@ -172,17 +180,24 @@ async fn searchable_kinds(db: &Database) -> Result<BTreeMap<String, SearchableKi
                 },
             ))
         })
-        .collect())
+        .collect();
+    Ok(Searchable { declared, ready })
 }
 
 impl Assets {
     /// Keep one search index per searchable plugin kind (see the module):
     /// new or changed ones (re)registered, gone ones stopped and their
     /// entries removed — also those of a kind that went while oxplow
-    /// wasn't running (an `asset_state` row with no kind behind it). Run
-    /// at start and when `ref_kind` or the model registry changes.
+    /// wasn't running (an `asset_state` row with no kind behind it). A
+    /// kind still declared searchable whose view isn't published — at
+    /// start, before the extension models compile again — keeps its
+    /// entries: "not compiled yet" isn't "gone" (tsk852). Run at start and
+    /// when `ref_kind` or the model registry changes.
     pub async fn sync_search_kinds(&self) -> Result<(), DomainError> {
-        let wanted = searchable_kinds(self.db()).await?;
+        let Searchable {
+            declared,
+            ready: wanted,
+        } = searchable_kinds(self.db()).await?;
         let mut have = self.search_kinds.lock().await;
         for (kind, old) in have.clone() {
             if wanted.get(&kind) != Some(&old) {
@@ -203,7 +218,7 @@ impl Assets {
             have.insert(kind.clone(), spec.clone());
         }
         // What was indexed for a kind that is no longer searchable goes.
-        let keep: Vec<String> = wanted.keys().map(|k| asset_name(k)).collect();
+        let keep: Vec<String> = declared.iter().map(|k| asset_name(k)).collect();
         self.db()
             .transaction(move |tx| {
                 let mut st = tx
@@ -462,6 +477,51 @@ ref_kinds:
             .await
             .unwrap();
         assert_eq!(state, 0);
+    }
+
+    /// tsk852: at start, extension models are dropped and compiled again,
+    /// so for a moment a searchable kind's view isn't there. That is "not
+    /// compiled yet", not "gone": its entries stay until `ref_kind` stops
+    /// saying it is searchable.
+    #[tokio::test]
+    async fn a_kind_whose_view_isnt_compiled_yet_keeps_its_entries() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        svc.search_store
+            .upsert("acme_pr", "12", None, "Widget frobnicator", "")
+            .await
+            .unwrap();
+        svc.db
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO ref_kind (kind, extension, label, id_pattern, revisioned, wikilinks, searchable) \
+                     VALUES ('acme_pr', 'acme', 'Pull request', '^\\d+$', 0, '[]', 'v_acme_found')",
+                    [],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                tx.execute(
+                    "INSERT INTO asset_state (asset, computed_at, events_to, elapsed_ms) \
+                     VALUES ('search:acme_pr', '2026-01-01T00:00:00Z', 0, 1)",
+                    [],
+                )
+                .map(|_| ())
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        Assets::new(svc.db.clone(), Duration::from_millis(50))
+            .sync_search_kinds()
+            .await
+            .unwrap();
+        let left: Vec<String> = svc
+            .search_store
+            .search("widget", None, &[], 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|h| h.kind)
+            .collect();
+        assert_eq!(left, vec!["acme_pr"]);
     }
 
     /// A kind that went while oxplow wasn't running (its index recorded,

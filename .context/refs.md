@@ -127,7 +127,11 @@ that decides its rows changes (`SearchableKind`): its view, the view's
 **compiled SQL** (from `sqlite_master`; an edit of the model changes what
 is indexed without touching the tables, tsk851), its id pattern, or the
 tables behind the view; otherwise it recomputes when a commit touches
-one of those tables.
+one of those tables. A kind's entries leave only when `ref_kind` stops
+declaring it searchable (its extension removed, its `searchable:`
+dropped) — never because its view isn't published at the moment: at
+start the extension models are dropped and compiled again, and "not
+compiled yet" isn't "gone" (tsk852).
 
 `refs::validate_ref` parses a ref and checks it against the kind
 registry. The event log's `append_tx` runs it on every `subject`
