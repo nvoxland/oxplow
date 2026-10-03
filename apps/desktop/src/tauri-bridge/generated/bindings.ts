@@ -5274,6 +5274,13 @@ export type WorkItemsFeatures = {
 	 *  tasks do), so `effort.open` must not open a second.
 	 */
 	in_progress_opens_effort: boolean,
+	/**
+	 *  A write sent twice with one idempotency key is done once, the
+	 *  second answered as the first (the protocol's
+	 *  `InvokeParams.idempotency_key`): the host may send a write again
+	 *  when its reply was lost.
+	 */
+	idempotent_writes?: boolean,
 };
 
 /**

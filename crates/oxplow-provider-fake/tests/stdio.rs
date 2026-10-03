@@ -61,15 +61,163 @@ async fn invoke(
     command: &str,
     input: Value,
 ) -> Result<InvokeResult, ProtocolError> {
+    keyed(peer, handle, command, input, None).await
+}
+
+/// [`invoke`], sent with an idempotency key.
+async fn keyed(
+    peer: &Peer,
+    handle: &Handle,
+    command: &str,
+    input: Value,
+    key: Option<&str>,
+) -> Result<InvokeResult, ProtocolError> {
     peer.call(
         method::INVOKE,
         &InvokeParams {
             handle: handle.clone(),
             command: command.into(),
             input,
+            idempotency_key: key.map(str::to_string),
         },
     )
     .await
+}
+
+/// The refs of every item it has, by a read from the start.
+async fn refs(
+    peer: &Peer,
+    handle: &Handle,
+    incoming: &mut UnboundedReceiver<Incoming>,
+) -> Vec<String> {
+    let result: ReadResult = peer
+        .call(
+            method::READ,
+            &ReadParams {
+                handle: handle.clone(),
+                collector: "work_items".into(),
+                state: None,
+            },
+        )
+        .await
+        .expect("read");
+    let mut refs = Vec::new();
+    while refs.len() < result.records as usize {
+        if let Some(Incoming::Notification { method, params }) = incoming.recv().await {
+            if method == notify::RECORD {
+                refs.push(
+                    params["row"]["ref"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                );
+            }
+        }
+    }
+    refs
+}
+
+/// P10: the fake declares `idempotent_writes` and keeps it: a write sent
+/// twice with one key is done once, and both answers are the same. A key
+/// reused for another write is refused. `forget-keys` breaks the promise
+/// (what the kit must catch); `plain-writes` doesn't make it.
+#[tokio::test]
+async fn the_same_key_writes_once_and_answers_alike() {
+    let (_child, peer, mut incoming) = spawn("");
+    let declared = initialize(&peer).await;
+    assert_eq!(
+        declared.capabilities[0].features["idempotent_writes"],
+        json!(true)
+    );
+    let handle = check(&peer).await;
+    let input = json!({ "title": "Once" });
+    let first = keyed(&peer, &handle, "create", input.clone(), Some("k-1"))
+        .await
+        .unwrap();
+    let again = keyed(&peer, &handle, "create", input, Some("k-1"))
+        .await
+        .unwrap();
+    assert_eq!(first, again);
+    assert_eq!(refs(&peer, &handle, &mut incoming).await.len(), 1);
+    let reused = keyed(
+        &peer,
+        &handle,
+        "create",
+        json!({ "title": "Other" }),
+        Some("k-1"),
+    )
+    .await;
+    assert!(
+        matches!(&reused, Err(ProtocolError::InvalidInput { field, .. }) if field == "/idempotency_key"),
+        "{reused:?}"
+    );
+    // Without a key, every send is a write.
+    invoke(&peer, &handle, "create", json!({ "title": "Twice" }))
+        .await
+        .unwrap();
+    invoke(&peer, &handle, "create", json!({ "title": "Twice" }))
+        .await
+        .unwrap();
+    assert_eq!(refs(&peer, &handle, &mut incoming).await.len(), 3);
+
+    // `forget-keys`: it declares the promise and doesn't keep it.
+    let (_child, forgetful, mut incoming) = spawn("forget-keys");
+    initialize(&forgetful).await;
+    let handle = check(&forgetful).await;
+    for _ in 0..2 {
+        keyed(
+            &forgetful,
+            &handle,
+            "create",
+            json!({ "title": "Once" }),
+            Some("k-1"),
+        )
+        .await
+        .unwrap();
+    }
+    assert_eq!(refs(&forgetful, &handle, &mut incoming).await.len(), 2);
+
+    // `plain-writes`: it doesn't declare it.
+    let (_child, plain, _incoming) = spawn("plain-writes");
+    let declared = initialize(&plain).await;
+    assert_eq!(
+        declared.capabilities[0].features["idempotent_writes"],
+        json!(false)
+    );
+    assert_eq!(declared, oxplow_provider_fake::plain_declarations());
+}
+
+/// P10: `lose-reply` — the next write lands but its answer never comes (a
+/// reply lost on the way); sent again with its key, it is answered as the
+/// first would have been, and it was done once.
+#[tokio::test]
+async fn a_lost_reply_is_answered_when_its_write_is_sent_again() {
+    let (_child, peer, mut incoming) = spawn("lose-reply");
+    initialize(&peer).await;
+    let handle = check(&peer).await;
+    let lost = tokio::time::timeout(
+        Duration::from_millis(300),
+        keyed(
+            &peer,
+            &handle,
+            "create",
+            json!({ "title": "Lost" }),
+            Some("k-1"),
+        ),
+    )
+    .await;
+    assert!(lost.is_err(), "no answer came: {lost:?}");
+    let answered = keyed(
+        &peer,
+        &handle,
+        "create",
+        json!({ "title": "Lost" }),
+        Some("k-1"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(answered.events.len(), 1);
+    assert_eq!(refs(&peer, &handle, &mut incoming).await.len(), 1);
 }
 
 #[tokio::test]

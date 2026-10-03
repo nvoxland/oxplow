@@ -83,6 +83,7 @@ async fn invoke(
             handle: handle.clone(),
             command: command.into(),
             input,
+            idempotency_key: None,
         },
     )
     .await

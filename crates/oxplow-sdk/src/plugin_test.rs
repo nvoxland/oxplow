@@ -951,6 +951,7 @@ async fn session(
                     handle: handle.clone(),
                     command: command.into(),
                     input: input.clone(),
+                    idempotency_key: None,
                 },
             )
             .await

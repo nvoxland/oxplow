@@ -15,6 +15,13 @@
     "handle": {
       "$ref": "#/$defs/Handle"
     },
+    "idempotency_key": {
+      "description": "The write's idempotency key, when the host may send it again (a\nreply lost, a call cut off). A provider that declares\n`idempotent_writes` does a write sent twice with one key once and\nanswers the second as the first; a key sent with another write is\n`InvalidInput` at `/idempotency_key`. One that doesn't declare it\nmay ignore the key.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "input": true
   },
   "required": [

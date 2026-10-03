@@ -37,11 +37,13 @@ schemars), host → provider:
 | `initialize` | `InitializeParams { protocol_version, host }` → `InitializeResult { protocol_version, provider, capabilities, commands, event_types, collectors, config_schema }` | what the provider is and declares: `CapabilityDecl { capability, features }`, `CommandDecl { name, summary, input_schema, confirm, effect, undoable }`, `EventTypeDecl { type, v, schema }`, `CollectorDecl { name, entity, description }` |
 | `check` | `CheckParams { config, credentials }` → `CheckResult { problems, handle? }` | validate an instance's config (credentials by name — the values stay in the keychain and reach the provider through its environment); `Problem { path, message }`; a clean check returns the opaque `Handle` the other calls carry |
 | `discover` | `{ handle }` → `DiscoverResult { entities }` | the entities the instance can read (`EntityDecl { name, description, schema }`) |
-| `invoke` | `InvokeParams { handle, command, input }` → `InvokeResult { result, events, inverse? }` | run a declared command; the host logs its `EventDraft { type, v, payload, subject }`s |
+| `invoke` | `InvokeParams { handle, command, input, idempotency_key? }` → `InvokeResult { result, events, inverse? }` | run a declared command; the host logs its `EventDraft { type, v, payload, subject }`s ("Idempotency" for the key) |
 | `read` | `ReadParams { handle, collector, state? }` → `ReadResult { records }` | run a collector, streaming `$/record` and `$/state` first |
 | `shutdown` | → `null` | |
 
-`PROTOCOL_VERSION` is `"1"`.
+`PROTOCOL_VERSION` is `"2"` (P10: `InvokeParams.idempotency_key`). A
+provider's declarations carry the version, so a bump changes what was
+approved: every provider is approved again.
 
 **Errors** (`errors.rs`): JSON-RPC's standard codes plus
 `NotConfigured` (-32001), `Auth` (-32002, `data.credential` — the
@@ -66,8 +68,8 @@ stub generation for provider authors.
 A scripted **work-items** provider, lib + bin (the `oxplow-acp-fake`
 pattern), that the host's tests and the conformance kit drive over real
 stdio. `declarations()` is its `InitializeResult`: the `work_items`
-capability (hierarchy, comments, links and delete; not
-`in_progress_opens_effort`), the work-items verbs `create` / `update` /
+capability (hierarchy, comments, links, delete and `idempotent_writes`;
+not `in_progress_opens_effort`), the work-items verbs `create` / `update` /
 `transition` (undoable: its inverse moves the item back) / `link` /
 `comment` / `delete` over the contract's inputs (`state` /
 `native_state`, its `native.points`; `additionalProperties: false`), one
@@ -99,7 +101,13 @@ read is refused `RateLimited`), `needs:<NAME>` (`check` reports
 `<NAME>` unless the credential the process holds is `<value>` — a
 service that takes one token and no other, for the sign-in tests) and
 `refuse-auth` (invoke and read answer an `Auth` that names no
-credential).
+credential), `lose-reply` (the next invoke lands and is never answered),
+`forget-keys` (it declares `idempotent_writes` and does a re-sent write
+again — what the kit must catch) and, at start, `plain-writes` (it
+declares no `idempotent_writes` — `plain_declarations()` — and ignores
+keys). **It keeps `idempotent_writes`:** an `invoke` sent again with its
+`idempotency_key` is done once and answered as the first was; the key
+sent with another write is `InvalidInput` at `/idempotency_key`.
 `tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
 notifications against the goldens.
 
@@ -964,11 +972,17 @@ providers (`capabilities::apply_active`), so choosing one on Settings →
 Integrations ("Active for work items", P7.A2) takes effect with the
 config change.
 
-## Idempotency: designed, not built
+## Idempotency
+
+**Status (P10):** the wire contract and the fake are built —
+`InvokeParams.idempotency_key`, `WorkItemsFeatures.idempotent_writes`,
+`PROTOCOL_VERSION` `"2"`, and the fake declaring and keeping the promise
+(see the fake). The host's keys, the kit's check and automatic retry are
+the rest of P10; until they land the rules below stand.
 
 A write to a provider may land without oxplow learning it did (a crash, a
 timeout, a dropped pipe after the service accepted it). Sending it again
-is safe only if the provider can tell it is the same write. **No
+is safe only if the provider can tell it is the same write. **No real
 provider can today**, so oxplow never re-sends an External step by
 itself: an effect's interrupted reaction is recorded `failed` and waits
 for a person's `effect.retry`, asked first

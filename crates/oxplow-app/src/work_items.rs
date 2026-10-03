@@ -37,6 +37,8 @@ pub fn oxplow_provider() -> WorkItemsProvider {
             links: true,
             delete: true,
             in_progress_opens_effort: true,
+            // Its writes run in the bus's transaction: never sent twice.
+            idempotent_writes: false,
         },
         external: None,
     }

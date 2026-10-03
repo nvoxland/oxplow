@@ -47,7 +47,18 @@
 //!   naming `<NAME>` unless the credential `<NAME>` the process holds is
 //!   `<value>` (its service takes that token and no other).
 //! - `refuse-auth` — `invoke` and `read` answer `Auth` naming no
-//!   credential (a service that doesn't say which token it refused).
+//!   credential (a service that doesn't say which token it refused);
+//! - `lose-reply` — the next `invoke` lands but is never answered (a
+//!   reply lost on the way);
+//! - `forget-keys` — it declares `idempotent_writes` but does a write sent
+//!   again with its key a second time (what the kit must catch);
+//! - `plain-writes` (at start) — it doesn't declare `idempotent_writes`
+//!   ([`plain_declarations`]) and ignores keys.
+//!
+//! **Idempotent writes:** it declares `idempotent_writes` and keeps it — an
+//! `invoke` sent again with its `idempotency_key` is done once and
+//! answered as the first was; the key sent with another write is
+//! `InvalidInput` at `/idempotency_key`.
 
 use oxplow_domain::vocabulary::Vocabulary;
 use std::collections::{BTreeMap, HashMap};
@@ -89,6 +100,13 @@ pub struct Hooks {
     /// `refuse-auth`: every `invoke` and `read` is refused `Auth` naming
     /// no credential.
     pub refuse_auth: bool,
+    /// `lose-reply`: the next `invoke` lands and is never answered.
+    pub lose_reply: bool,
+    /// `forget-keys`: a write sent again with its key is done again.
+    pub forget_keys: bool,
+    /// `plain-writes`: it doesn't declare `idempotent_writes`, and ignores
+    /// keys.
+    pub plain_writes: bool,
 }
 
 impl Hooks {
@@ -115,6 +133,9 @@ impl Hooks {
                 None if part == "fail-next" => self.fail_next = 1,
                 None if part == "crash" => self.crash = true,
                 None if part == "refuse-auth" => self.refuse_auth = true,
+                None if part == "lose-reply" => self.lose_reply = true,
+                None if part == "forget-keys" => self.forget_keys = true,
+                None if part == "plain-writes" => self.plain_writes = true,
                 None if part == "bad-declarations" => self.bad_declarations = true,
                 None if part == "progress" => self.progress = true,
                 None if part == "bad-record" => self.bad_record = true,
@@ -168,6 +189,15 @@ pub fn bad_declarations() -> InitializeResult {
 
 /// What the fake declares — the checked-in declarations a host approves.
 pub fn declarations() -> InitializeResult {
+    declared(true)
+}
+
+/// What it declares under `plain-writes`: no `idempotent_writes`.
+pub fn plain_declarations() -> InitializeResult {
+    declared(false)
+}
+
+fn declared(idempotent_writes: bool) -> InitializeResult {
     let string = json!({ "type": "string" });
     let state = json!({ "type": "string",
                         "enum": ["todo", "in_progress", "blocked", "done", "canceled"] });
@@ -194,7 +224,7 @@ pub fn declarations() -> InitializeResult {
             capability: "work_items".into(),
             features: json!({
                 "hierarchy": true, "comments": true, "links": true, "delete": true,
-                "in_progress_opens_effort": false
+                "in_progress_opens_effort": false, "idempotent_writes": idempotent_writes
             }),
         }],
         commands: vec![
@@ -276,6 +306,8 @@ struct World {
     next: u64,
     /// Bumped by every write.
     rev: u64,
+    /// Each idempotency key's write — its command and input — and answer.
+    answered: HashMap<String, (String, Value, Value)>,
     in_flight: HashMap<Id, oneshot::Sender<()>>,
 }
 
@@ -434,8 +466,11 @@ async fn handle(
                     p.protocol_version
                 )));
             }
-            let declared = if world.lock().await.hooks.bad_declarations {
+            let hooks = world.lock().await.hooks.clone();
+            let declared = if hooks.bad_declarations {
                 bad_declarations()
+            } else if hooks.plain_writes {
+                plain_declarations()
             } else {
                 declarations()
             };
@@ -499,7 +534,34 @@ async fn handle(
             let p: InvokeParams = parse(params)?;
             require_handle(&p.handle)?;
             slow(world).await;
-            invoke(world, &p.command, p.input).await
+            let hooks = world.lock().await.hooks.clone();
+            // Under `plain-writes` a key means nothing; `forget-keys`
+            // drops it (breaking the promise it declares).
+            let key = p
+                .idempotency_key
+                .filter(|_| !hooks.plain_writes && !hooks.forget_keys);
+            if let Some(key) = &key {
+                if let Some((command, input, answer)) = world.lock().await.answered.get(key) {
+                    if *command == p.command && *input == p.input {
+                        return Ok(answer.clone());
+                    }
+                    return Err(ProtocolError::InvalidInput {
+                        field: "/idempotency_key".into(),
+                        message: format!("key `{key}` was sent with another write"),
+                    });
+                }
+            }
+            let answer = invoke(world, &p.command, p.input.clone()).await?;
+            let mut w = world.lock().await;
+            if let Some(key) = key {
+                w.answered.insert(key, (p.command, p.input, answer.clone()));
+            }
+            if std::mem::take(&mut w.hooks.lose_reply) {
+                drop(w);
+                // Landed, and never answered.
+                std::future::pending::<()>().await;
+            }
+            Ok(answer)
         }
         method::READ => {
             take_rate_limit(world).await?;

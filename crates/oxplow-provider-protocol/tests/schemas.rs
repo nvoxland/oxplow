@@ -75,7 +75,7 @@ fn every_wire_type_has_a_golden_schema_that_matches_its_rust_type() {
 #[test]
 fn a_message_validates_against_its_golden() {
     use oxplow_provider_protocol::schemas::{for_message, validate};
-    let ok = serde_json::json!({ "protocol_version": "1", "host": { "name": "oxplow", "version": "0.7.0" } });
+    let ok = serde_json::json!({ "protocol_version": "2", "host": { "name": "oxplow", "version": "0.7.0" } });
     assert_eq!(
         validate(for_message("initialize", false).unwrap(), &ok),
         Ok(())

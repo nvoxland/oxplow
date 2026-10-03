@@ -698,6 +698,8 @@ impl Instance {
                     handle,
                     command: command.into(),
                     input: input.clone(),
+                    // The host sends keys from P7 (tsk871).
+                    idempotency_key: None,
                 },
                 self.deps.call_timeout,
             )

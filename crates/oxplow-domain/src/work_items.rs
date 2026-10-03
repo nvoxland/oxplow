@@ -73,6 +73,12 @@ pub struct WorkItemsFeatures {
     /// Moving an item to `in_progress` opens its effort itself (oxplow's
     /// tasks do), so `effort.open` must not open a second.
     pub in_progress_opens_effort: bool,
+    /// A write sent twice with one idempotency key is done once, the
+    /// second answered as the first (the protocol's
+    /// `InvokeParams.idempotency_key`): the host may send a write again
+    /// when its reply was lost.
+    #[serde(default)]
+    pub idempotent_writes: bool,
 }
 
 /// An item as its provider now has it — what `v_work_item` holds, and

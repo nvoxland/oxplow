@@ -363,7 +363,7 @@ mod tests {
         let transcript = vec![
             (
                 Side::Host,
-                json!({ "jsonrpc": "2.0", "id": 7, "method": "initialize", "params": { "protocol_version": "1", "host": { "name": "oxplow", "version": "0.7.0" } } }),
+                json!({ "jsonrpc": "2.0", "id": 7, "method": "initialize", "params": { "protocol_version": "2", "host": { "name": "oxplow", "version": "0.7.0" } } }),
             ),
             (
                 Side::Provider,

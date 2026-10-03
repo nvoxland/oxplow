@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// The protocol version this crate speaks.
-pub const PROTOCOL_VERSION: &str = "1";
+pub const PROTOCOL_VERSION: &str = "2";
 
 pub mod method {
     pub const INITIALIZE: &str = "initialize";
@@ -171,6 +171,14 @@ pub struct InvokeParams {
     /// A declared command's name.
     pub command: String,
     pub input: Value,
+    /// The write's idempotency key, when the host may send it again (a
+    /// reply lost, a call cut off). A provider that declares
+    /// `idempotent_writes` does a write sent twice with one key once and
+    /// answers the second as the first; a key sent with another write is
+    /// `InvalidInput` at `/idempotency_key`. One that doesn't declare it
+    /// may ignore the key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<String>,
 }
 
 /// An event a command produced, for the host to log (its type is one

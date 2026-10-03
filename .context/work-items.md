@@ -120,7 +120,9 @@ item).
   inverse is named by its **verb**.
 - **`WorkItemsFeatures`**: `hierarchy`, `comments`, `links`, `delete`,
   `in_progress_opens_effort` (moving an item to `in_progress` opens its
-  effort itself).
+  effort itself), `idempotent_writes` (a write sent twice with one
+  idempotency key is done once — [providers.md](./providers.md)
+  "Idempotency").
 - **`WorkItemsRegistry`** (`Services.work_items`): providers by name;
   `for_ref` picks one by the ref's provider segment, and an unknown one
   is refused naming the registered providers; `active()` /
