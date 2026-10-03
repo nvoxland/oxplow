@@ -313,10 +313,16 @@ key** (`key: [<column>]`, the table's primary key) — one declared
 INTEGER, unique per row, like a row id or a seq. A watermark two rows
 shared would let the second slip under `>` unseen, since nothing reaches
 the primary key to catch it (tsk777); a unique one can't. Its
-SQL may not group, de-duplicate, window, cap or combine sets (`GROUP BY`,
-`DISTINCT`, `OVER`, `LIMIT`, `UNION` / `INTERSECT` / `EXCEPT`, an
-aggregate call) or read the clock (a date function, `CURRENT_*`,
-`'now'`). At run time it refills whole instead when it must:
+SQL is a filter and projection over **inner joins** of append-only
+inputs: it may not group, de-duplicate, window, cap or combine sets
+(`GROUP BY`, `DISTINCT`, `OVER`, `LIMIT`, `UNION` / `INTERSECT` /
+`EXCEPT`, an aggregate call — `json_group_*` included), outer-join
+(`LEFT` / `RIGHT` / `FULL JOIN`), use a subquery (`EXISTS`, `IN (SELECT
+…)`, a scalar one, a CTE — any `SELECT` after the first), or read the
+clock or randomness (a date function, `CURRENT_*`, `'now'`, `random()`).
+An outer join or a subquery makes a row already appended depend on rows
+that land later on another input, which no append re-emits and nothing
+at run time notices (tsk778). At run time it refills whole instead when it must:
 - an input was **rewritten** — an UPDATE or DELETE, not only inserts
   (`Changed.rewrote`, P8.B3; an event payload expiring is an UPDATE);
 - it's the **first build** since it registered (an open, a changed

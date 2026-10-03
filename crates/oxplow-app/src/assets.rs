@@ -847,9 +847,11 @@ mod tests {
 
     /// Output that isn't monotone in the watermark — the latest row per
     /// key, which a new row *replaces* — hits the primary key on append,
-    /// and the model refills whole instead of failing. (A row that appears
-    /// below the watermark is the other non-monotone case; nothing at run
-    /// time can see it, which is why `plugin test` checks every
+    /// and the model refills whole instead of failing. The compiler refuses
+    /// this shape (its `NOT EXISTS` subquery, tsk778); the materializer is
+    /// driven directly here to pin the runtime safety net. (A row that
+    /// appears below the watermark is the other non-monotone case; nothing
+    /// at run time can see it, which is why `plugin test` checks every
     /// incremental model against a full refill.)
     #[tokio::test]
     async fn a_replaced_row_refills_instead_of_failing() {

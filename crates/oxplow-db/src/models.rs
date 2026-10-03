@@ -398,9 +398,12 @@ fn check_materialize(decl: &ModelDecl, at: &str) -> Result<(), DomainError> {
 }
 
 /// An incremental model's SQL keeps a row once it has appeared and never
-/// rewrites one: no grouping, de-duplication, window, cap, set operation
-/// or reading of the clock (`file:line` of the first, pointing at
-/// `on_change`).
+/// rewrites one — a filter and projection over inner joins of append-only
+/// inputs: no grouping, de-duplication, window, cap, set operation, outer
+/// join, subquery (`EXISTS`, `IN (SELECT …)`, a scalar one — a row already
+/// appended would change when a later row lands on another input, tsk778),
+/// randomness or reading of the clock (`file:line` of the first, pointing
+/// at `on_change`).
 fn check_incremental_sql(decl: &ModelDecl, sql: &str, file: &str) -> Result<(), DomainError> {
     if decl
         .materialize
@@ -410,7 +413,7 @@ fn check_incremental_sql(decl: &ModelDecl, sql: &str, file: &str) -> Result<(), 
     {
         return Ok(());
     }
-    const AGGREGATES: [&str; 8] = [
+    const AGGREGATES: [&str; 12] = [
         "count",
         "sum",
         "avg",
@@ -419,6 +422,10 @@ fn check_incremental_sql(decl: &ModelDecl, sql: &str, file: &str) -> Result<(), 
         "max",
         "group_concat",
         "string_agg",
+        "json_group_array",
+        "json_group_object",
+        "random",
+        "randomblob",
     ];
     const CLOCK: [&str; 6] = [
         "date",
@@ -430,11 +437,21 @@ fn check_incremental_sql(decl: &ModelDecl, sql: &str, file: &str) -> Result<(), 
     ];
     let tokens = crate::sql_tokens::tokenize(sql)?;
     let sig: Vec<_> = crate::sql_tokens::significant(&tokens).collect();
+    let mut selects = 0;
     for (i, t) in sig.iter().enumerate() {
         let next = sig.get(i + 1);
         let called = next.is_some_and(|n| n.is_punct('('));
+        if t.is_word("select") {
+            selects += 1;
+        }
+        let outer = ["left", "right", "full"].iter().any(|w| t.is_word(w))
+            && sig[i + 1..].iter().take(2).any(|n| n.is_word("join"));
         let what = if t.is_word("group") && next.is_some_and(|n| n.is_word("by")) {
             Some("GROUP BY".to_string())
+        } else if outer {
+            Some(format!("{} JOIN", t.text.to_ascii_uppercase()))
+        } else if t.is_word("exists") || (t.is_word("select") && selects > 1) {
+            Some("a subquery".to_string())
         } else if ["distinct", "over", "limit", "union", "intersect", "except"]
             .iter()
             .any(|w| t.is_word(w))
@@ -2257,10 +2274,32 @@ mod tests {
                 "SELECT id, v FROM source('streams') WHERE v > datetime('now', '-1 day')",
                 "datetime(",
             ),
+            // A row already appended can change when a later row lands on
+            // another input (tsk778).
+            (
+                "SELECT s.id, t.v FROM source('streams') s\nLEFT JOIN source('threads') t ON t.id = s.id",
+                "LEFT JOIN",
+            ),
+            (
+                "SELECT id, v FROM source('streams') s\nWHERE NOT EXISTS (SELECT 1 FROM source('threads') t WHERE t.id = s.id)",
+                "a subquery",
+            ),
+            (
+                "SELECT id, v FROM source('streams') WHERE id IN (SELECT id FROM source('threads'))",
+                "a subquery",
+            ),
+            (
+                "SELECT id, json_group_array(v) AS v FROM source('streams')",
+                "json_group_array(",
+            ),
+            ("SELECT id, random() AS v FROM source('streams')", "random("),
         ] {
             let e = err(decl("  key: [id]\n"), sql);
+            let line = if sql.contains('\n') { 2 } else { 1 };
             assert!(
-                e.contains("models/a.sql:1:") && e.contains(what) && e.contains("on_change"),
+                e.contains(&format!("models/a.sql:{line}:"))
+                    && e.contains(what)
+                    && e.contains("on_change"),
                 "{sql}: {e}"
             );
         }
