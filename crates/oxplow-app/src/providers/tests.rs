@@ -2918,19 +2918,32 @@ async fn a_newer_sign_in_replaces_the_one_under_way() {
         .unwrap();
     assert!(first.contains(&format!("127.0.0.1%3A{port}")), "{first}");
     // The second takes the same port: the first no longer listens.
-    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
-    assert_eq!(sim.grants(), vec!["authorization_code"]);
-    // The first's page now leads nowhere of ours: its `state` is refused.
-    let stale = reqwest::get(&first).await;
+    let second = providers
+        .begin_sign_in(INSTANCE, "FAKE_TOKEN")
+        .await
+        .unwrap();
+    // The first's page now comes back to the second's listener, which
+    // refuses it: its `state` isn't the one the second started with.
+    let stale = reqwest::get(&first).await.unwrap();
+    assert_eq!(stale.status().as_u16(), 400);
     assert!(
-        stale.map(|r| r.status().as_u16()).unwrap_or(0) != 200,
-        "nobody answers the abandoned sign-in"
+        sim.grants().is_empty(),
+        "no code of the first was exchanged"
     );
-    assert_eq!(sim.grants().len(), 1);
+    // The second, still waiting, finishes.
+    let mut ui = fx.svc.events.subscribe_ui();
+    assert!(reqwest::get(&second).await.unwrap().status().is_success());
+    loop {
+        if let Ok(crate::events::OxplowEvent::CredentialChanged { error, .. }) = ui.recv().await {
+            assert_eq!(error, None);
+            break;
+        }
+    }
+    assert_eq!(sim.grants(), vec!["authorization_code"]);
 
     // Removing the instance abandons a sign-in under way: the port is
     // free again, and nothing is kept for what's gone.
-    providers
+    let third = providers
         .begin_sign_in(INSTANCE, "FAKE_TOKEN")
         .await
         .unwrap();
@@ -2939,6 +2952,17 @@ async fn a_newer_sign_in_replaces_the_one_under_way() {
         .await
         .unwrap();
     std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
+    assert!(
+        reqwest::get(&third).await.is_err(),
+        "nothing answers its page"
+    );
+    let account = crate::collector_runner::instance_credential_account(
+        &fx.svc.providers.deps.project,
+        EXT,
+        "fake",
+        "FAKE_TOKEN",
+    );
+    assert_eq!(fx.svc.secrets.get(&account).unwrap(), None, "no token kept");
 }
 
 /// The adapter manifest with its server reached by url, authenticated by
@@ -3135,4 +3159,92 @@ async fn sign_in_is_refused_until_the_endpoints_are_approved() {
     // Approved as it is now, it signs in.
     write_oauth_extension(&project, "", &sim.authorize_url, &sim.token_url, "");
     assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+}
+
+/// A port no one listens on now.
+fn free_port() -> u16 {
+    let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    l.local_addr().unwrap().port()
+}
+
+/// tsk826: two sign-ins for one credential started at once leave one
+/// listening — the later one — and the earlier one's page leads nowhere.
+#[tokio::test(flavor = "multi_thread")]
+async fn two_sign_ins_at_once_leave_one_listening() {
+    let port = free_port();
+    let (fx, sim) = signing_in("", &format!("          redirect_port: {port}\n")).await;
+    configure(&fx, true, json!({ "team": "core" }));
+    let svc = fx.svc.clone();
+    let (a, b) = tokio::join!(
+        tokio::spawn({
+            let svc = svc.clone();
+            async move { svc.providers.begin_sign_in(INSTANCE, "FAKE_TOKEN").await }
+        }),
+        tokio::spawn({
+            let svc = svc.clone();
+            async move { svc.providers.begin_sign_in(INSTANCE, "FAKE_TOKEN").await }
+        }),
+    );
+    let (a, b) = (a.unwrap().unwrap(), b.unwrap().unwrap());
+    let mut ok = 0;
+    for url in [&a, &b] {
+        if let Ok(resp) = reqwest::get(url.as_str()).await {
+            if resp.status().is_success() {
+                ok += 1;
+            }
+        }
+    }
+    assert_eq!(ok, 1, "exactly one sign-in is still listening");
+    assert_eq!(sim.grants(), vec!["authorization_code"]);
+}
+
+/// tsk826: removing a project's replacement of a global instance ends a
+/// sign-in under way for it too.
+#[tokio::test]
+async fn removing_a_project_replacement_ends_its_sign_in() {
+    let port = free_port();
+    let (fx, _sim) = signing_in("", &format!("          redirect_port: {port}\n")).await;
+    let providers = &fx.svc.providers;
+    providers
+        .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
+        .await
+        .unwrap();
+    configure_named(&fx, SHARED, Some("fake"), json!({ "team": "mine" }));
+    providers.begin_sign_in(SHARED, "FAKE_TOKEN").await.unwrap();
+    providers
+        .remove_instance(&Actor::Human, SHARED)
+        .await
+        .unwrap();
+    std::net::TcpListener::bind(("127.0.0.1", port)).expect("its sign-in stopped listening");
+}
+
+/// tsk828: several calls refused at once renew the sign-in once, and each
+/// is tried again on the one renewed token.
+#[tokio::test(flavor = "multi_thread")]
+async fn calls_refused_together_renew_once() {
+    let (fx, sim) = signing_in("", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+    first_read(&fx).await;
+    // Its service now takes only the next token; the process holds at-2.
+    set_hooks(&fx, "accepts:FAKE_TOKEN=at-3").await;
+    let calls: Vec<_> = (0..3)
+        .map(|_| {
+            let svc = fx.svc.clone();
+            tokio::spawn(async move {
+                svc.commands
+                    .run(
+                        &Actor::Human,
+                        "work_item.create",
+                        json!({ "provider": "fake", "title": "x" }),
+                        false,
+                    )
+                    .await
+            })
+        })
+        .collect();
+    for call in calls {
+        call.await.unwrap().unwrap();
+    }
+    assert_eq!(sim.grants(), vec!["authorization_code", "refresh_token"]);
 }

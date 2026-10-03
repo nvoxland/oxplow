@@ -16,7 +16,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 use oxplow_ai::secrets::SecretStore;
 
-use super::spec::OAuthDecl;
+use super::spec::{ClientAuth, OAuthDecl};
 
 /// What a sign-in yields, as kept in the keychain (JSON).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,10 +121,30 @@ pub fn state(secrets: &dyn SecretStore, account: &str) -> SignInState {
     }
 }
 
+/// One renewal of an account at a time in this process: every instance
+/// built for it (a running one, a Settings Check, a replacement during a
+/// reconcile) and every project open in the process shares the account.
+fn renewal_lock(account: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: std::sync::LazyLock<
+        parking_lot::Mutex<
+            std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>,
+        >,
+    > = std::sync::LazyLock::new(Default::default);
+    LOCKS.lock().entry(account.to_string()).or_default().clone()
+}
+
 /// The access token for the credential kept under `account`, renewed
 /// first (and kept) when it is about to lapse — or, with `renew`, because
 /// the service refused it. A renewal the service refuses for good
 /// (`invalid_grant`) leaves the token marked as needing the person.
+///
+/// Renewals of one account are serialized in this process (a second
+/// finds the token the first stored), and every write first re-reads what
+/// is stored (tsk827): a renewal never writes over a sign-out, and a
+/// refusal for a token another process already replaced uses the
+/// replacement rather than marking the account lapsed. Across processes
+/// the keychain offers no compare-and-swap, so that check narrows the
+/// window rather than closing it.
 pub async fn access_token(
     secrets: &dyn SecretStore,
     account: &str,
@@ -132,15 +152,26 @@ pub async fn access_token(
     client_secret: Option<&str>,
     renew: bool,
 ) -> Result<String, CredentialProblem> {
+    let lock = renewal_lock(account);
+    let _one = lock.lock().await;
     let token = stored(secrets, account)
         .map_err(CredentialProblem::Failed)?
         .ok_or(CredentialProblem::NotSignedIn)?;
     if !renew && !token.lapses_within(RENEW_MARGIN_MS) {
         return Ok(token.access_token);
     }
-    let again = |token: &OAuthToken, why: String| match store(secrets, account, &token.lapsed()) {
-        Ok(()) => CredentialProblem::SignInAgain(why),
-        Err(e) => CredentialProblem::Failed(e),
+    // What is stored now, against the token this renewal began with.
+    let now = || stored(secrets, account).map_err(CredentialProblem::Failed);
+    // Mark it needing the person — unless it changed meanwhile.
+    let again = |why: String| -> Result<String, CredentialProblem> {
+        match now()? {
+            None => Err(CredentialProblem::NotSignedIn),
+            Some(current) if current != token => usable(current, why),
+            Some(_) => match store(secrets, account, &token.lapsed()) {
+                Ok(()) => Err(CredentialProblem::SignInAgain(why)),
+                Err(e) => Err(CredentialProblem::Failed(e)),
+            },
+        }
     };
     if token.refresh_token.is_none() {
         let why = if token.lapses_within(0) {
@@ -151,18 +182,34 @@ pub async fn access_token(
             // Inside the margin but still good, with no way to renew.
             return Ok(token.access_token);
         };
-        return Err(again(&token, why.to_string()));
+        return again(why.to_string());
     }
     match refresh(decl, client_secret, &token).await {
-        Ok(renewed) => {
-            store(secrets, account, &renewed).map_err(CredentialProblem::Failed)?;
-            Ok(renewed.access_token)
-        }
-        Err(OAuthError::Revoked(why)) => Err(again(&token, why)),
+        Ok(renewed) => match now()? {
+            // Signed out while it renewed: stays signed out.
+            None => Err(CredentialProblem::NotSignedIn),
+            // Replaced meanwhile (another process, a new sign-in): theirs.
+            Some(current) if current != token => usable(current, "replaced".into()),
+            Some(_) => {
+                store(secrets, account, &renewed).map_err(CredentialProblem::Failed)?;
+                Ok(renewed.access_token)
+            }
+        },
+        Err(OAuthError::Revoked(why)) => again(why),
         // The endpoint couldn't be reached: a token that's still good is
         // still good.
         Err(OAuthError::Failed(_)) if !renew && !token.lapses_within(0) => Ok(token.access_token),
         Err(OAuthError::Failed(why)) => Err(CredentialProblem::Failed(why)),
+    }
+}
+
+/// A token that replaced the one a renewal began with: its access token,
+/// unless it has already lapsed with no way to renew.
+fn usable(current: OAuthToken, why: String) -> Result<String, CredentialProblem> {
+    match current.state() {
+        SignInState::SignedIn { .. } => Ok(current.access_token),
+        SignInState::SignInAgain => Err(CredentialProblem::SignInAgain(why)),
+        SignInState::NotSignedIn => Err(CredentialProblem::NotSignedIn),
     }
 }
 
@@ -189,36 +236,85 @@ pub struct HttpRequest {
     pub method: String,
     /// The path and query.
     pub target: String,
+    /// Each header, its name lower-cased.
+    pub headers: Vec<(String, String)>,
     pub body: String,
 }
 
-/// Read one HTTP/1.1 request: its line, headers and `Content-Length` body.
+impl HttpRequest {
+    /// The first header named `name` (lower-case).
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+/// The most bytes of a request's line and headers read.
+pub const MAX_REQUEST_HEAD: usize = 16 * 1024;
+/// The largest body read (a token request's form is a few hundred bytes).
+pub const MAX_REQUEST_BODY: usize = 64 * 1024;
+/// How long one connection may take to send its request.
+const REQUEST_READ_WAIT: Duration = Duration::from_secs(10);
+/// How many connections are read at once while waiting for the redirect.
+const MAX_READING: usize = 16;
+
+fn too_large(what: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!("the request's {what} is too large"),
+    )
+}
+
+/// Read one HTTP/1.1 request: its line, headers and `Content-Length` body,
+/// within [`MAX_REQUEST_HEAD`] and [`MAX_REQUEST_BODY`] — a line that
+/// never ends, or a body larger than that, is an error, not a wait.
 pub async fn read_request(conn: &mut TcpStream) -> std::io::Result<HttpRequest> {
     let mut reader = BufReader::new(conn);
-    let mut line = String::new();
-    reader.read_line(&mut line).await?;
-    let mut parts = line.split_whitespace();
-    let (method, target) = (
-        parts.next().unwrap_or_default().to_string(),
-        parts.next().unwrap_or_default().to_string(),
-    );
-    let mut length = 0usize;
-    loop {
-        let mut header = String::new();
-        if reader.read_line(&mut header).await? == 0 || header.trim().is_empty() {
-            break;
-        }
-        if let Some((name, value)) = header.split_once(':') {
-            if name.eq_ignore_ascii_case("content-length") {
-                length = value.trim().parse().unwrap_or(0);
+    let (method, target, headers, length) = {
+        let mut head = (&mut reader).take(MAX_REQUEST_HEAD as u64);
+        let mut next_line = async || -> std::io::Result<String> {
+            let mut line = String::new();
+            let n = head.read_line(&mut line).await?;
+            // Cut short by the bound: no end of line within it.
+            if n > 0 && !line.ends_with('\n') {
+                return Err(too_large("head"));
+            }
+            Ok(line)
+        };
+        let line = next_line().await?;
+        let mut parts = line.split_whitespace();
+        let (method, target) = (
+            parts.next().unwrap_or_default().to_string(),
+            parts.next().unwrap_or_default().to_string(),
+        );
+        let mut length = 0usize;
+        let mut headers = Vec::new();
+        loop {
+            let header = next_line().await?;
+            if header.trim().is_empty() {
+                break;
+            }
+            if let Some((name, value)) = header.split_once(':') {
+                let (name, value) = (name.trim().to_ascii_lowercase(), value.trim().to_string());
+                if name == "content-length" {
+                    length = value.parse().unwrap_or(0);
+                }
+                headers.push((name, value));
             }
         }
+        (method, target, headers, length)
+    };
+    if length > MAX_REQUEST_BODY {
+        return Err(too_large("body"));
     }
-    let mut body = vec![0u8; length.min(64 * 1024)];
+    let mut body = vec![0u8; length];
     reader.read_exact(&mut body).await?;
     Ok(HttpRequest {
         method,
         target,
+        headers,
         body: String::from_utf8_lossy(&body).into_owned(),
     })
 }
@@ -323,12 +419,37 @@ async fn await_redirect(
     verifier: &str,
     redirect_uri: &str,
 ) -> Result<OAuthToken, String> {
+    // Each connection is read on its own, within a deadline: one that
+    // sends nothing (another process, a browser's idle socket) never holds
+    // up the real redirect.
+    let mut reading: tokio::task::JoinSet<(TcpStream, Option<HttpRequest>)> =
+        tokio::task::JoinSet::new();
     loop {
-        let (mut conn, _) = listener
-            .accept()
-            .await
-            .map_err(|e| format!("the sign-in's redirect: {e}"))?;
-        let Ok(request) = read_request(&mut conn).await else {
+        let (mut conn, request) = tokio::select! {
+            accepted = listener.accept(), if reading.len() < MAX_READING => {
+                let (mut conn, _) =
+                    accepted.map_err(|e| format!("the sign-in's redirect: {e}"))?;
+                reading.spawn(async move {
+                    let request = tokio::time::timeout(REQUEST_READ_WAIT, read_request(&mut conn))
+                        .await
+                        .ok()
+                        .and_then(Result::ok);
+                    (conn, request)
+                });
+                continue;
+            }
+            Some(read) = reading.join_next() => match read {
+                Ok(read) => read,
+                Err(_) => continue,
+            },
+        };
+        let Some(request) = request else {
+            let _ = respond(
+                &mut conn,
+                "400 Bad Request",
+                "That isn't a request oxplow reads.",
+            )
+            .await;
             continue;
         };
         let (path, query) = request
@@ -435,11 +556,33 @@ pub async fn refresh(
 #[derive(Deserialize)]
 struct TokenResponse {
     access_token: Option<String>,
+    /// What kind of token: the only kind oxplow sends is a bearer token.
+    /// Absent is read as bearer (some services leave it out).
+    token_type: Option<String>,
     refresh_token: Option<String>,
+    /// Seconds; some services write it as a string.
+    #[serde(default, deserialize_with = "seconds")]
     expires_in: Option<i64>,
     scope: Option<String>,
     error: Option<String>,
     error_description: Option<String>,
+}
+
+/// A number of seconds written as a number or a string of digits.
+fn seconds<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Seconds {
+        Number(i64),
+        Text(String),
+    }
+    match Option::<Seconds>::deserialize(d)? {
+        None => Ok(None),
+        Some(Seconds::Number(n)) => Ok(Some(n)),
+        Some(Seconds::Text(s)) => s.trim().parse().map(Some).map_err(|_| {
+            serde::de::Error::custom(format!("`expires_in` `{s}` isn't a number of seconds"))
+        }),
+    }
 }
 
 async fn token_request(
@@ -448,30 +591,64 @@ async fn token_request(
     grant: &[(&str, &str)],
 ) -> Result<OAuthToken, OAuthError> {
     let failed = |why: String| OAuthError::Failed(format!("the token request failed: {why}"));
+    // The client authenticates one way (RFC 6749 §2.3.1): its id and
+    // secret in an `Authorization: Basic` header — what every service must
+    // take — or, for a service that says so, in the form.
+    let basic = match (client_secret, decl.client_auth) {
+        (Some(secret), ClientAuth::Basic) => {
+            let encode =
+                |s: &str| url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>();
+            Some(format!(
+                "Basic {}",
+                base64::engine::general_purpose::STANDARD.encode(format!(
+                    "{}:{}",
+                    encode(&decl.client_id),
+                    encode(secret)
+                ))
+            ))
+        }
+        _ => None,
+    };
     // Built before any await: the serializer isn't `Send`.
     let body = {
         let mut form = url::form_urlencoded::Serializer::new(String::new());
         for (name, value) in grant {
             form.append_pair(name, value);
         }
-        form.append_pair("client_id", &decl.client_id);
-        if let Some(secret) = client_secret {
-            form.append_pair("client_secret", secret);
+        if basic.is_none() {
+            form.append_pair("client_id", &decl.client_id);
+            if let Some(secret) = client_secret {
+                form.append_pair("client_secret", secret);
+            }
         }
         form.finish()
     };
+    // A token request is never sent on: a redirect would re-send the code,
+    // the verifier, the refresh token or the secret somewhere the approval
+    // doesn't name (tsk829).
     let client = reqwest::Client::builder()
         .timeout(TOKEN_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| failed(e.to_string()))?;
-    let response = client
+    let mut request = client
         .post(&decl.token_url)
         .header("Content-Type", "application/x-www-form-urlencoded")
-        .header("Accept", "application/json")
+        .header("Accept", "application/json");
+    if let Some(basic) = basic {
+        request = request.header("Authorization", basic);
+    }
+    let response = request
         .body(body)
         .send()
         .await
         .map_err(|e| failed(e.to_string()))?;
+    if response.status().is_redirection() {
+        return Err(failed(format!(
+            "{}: the token endpoint redirected, and a token request is never sent on",
+            response.status()
+        )));
+    }
     let status = response.status();
     let text = response.text().await.map_err(|e| failed(e.to_string()))?;
     let answer: TokenResponse = serde_json::from_str(&text)
@@ -487,6 +664,14 @@ async fn token_request(
     let Some(access_token) = answer.access_token.filter(|_| status.is_success()) else {
         return Err(failed(format!("{status}: no access token in the answer")));
     };
+    if let Some(kind) = answer
+        .token_type
+        .filter(|t| !t.eq_ignore_ascii_case("bearer"))
+    {
+        return Err(failed(format!(
+            "the service issued a `{kind}` token; oxplow sends bearer tokens only"
+        )));
+    }
     let now = oxplow_domain::Timestamp::now().unix_ms();
     Ok(OAuthToken {
         access_token,
@@ -512,6 +697,7 @@ mod tests {
             scopes: vec!["read".into(), "write".into()],
             client_secret: None,
             redirect_port: None,
+            client_auth: ClientAuth::Basic,
         }
     }
 
@@ -652,8 +838,57 @@ mod tests {
             sim.secrets(),
             vec![Some("s3cret".to_string()), Some("s3cret".to_string())]
         );
+        // tsk829: in the `Authorization` header (`client_secret_basic`,
+        // what every service must take), unless the service says `post`.
+        assert_eq!(sim.client_auths(), vec!["basic", "basic"]);
         // And never in the URL the browser opens.
         assert!(!sign_in.authorize_url.contains("s3cret"));
+
+        let post = OAuthDecl {
+            client_auth: ClientAuth::Post,
+            ..d
+        };
+        refresh(&post, Some("s3cret"), &token).await.unwrap();
+        assert_eq!(sim.client_auths(), vec!["basic", "basic", "post"]);
+    }
+
+    /// tsk829: a token request is never sent on: a redirect would re-send
+    /// the code, the verifier or the refresh token (and the client secret)
+    /// somewhere the approval doesn't name.
+    #[tokio::test]
+    async fn a_token_endpoint_that_redirects_is_refused() {
+        let sim = OAuthSim::start().await;
+        let elsewhere = OAuthSim::start().await;
+        let d = decl(&sim);
+        let sign_in = begin(&d, None).await.unwrap();
+        browse(&sign_in.authorize_url).await;
+        let token = sign_in.done.await.unwrap().unwrap();
+        sim.redirect_token_requests(&elsewhere.token_url);
+        assert!(matches!(
+            refresh(&d, None, &token).await,
+            Err(OAuthError::Failed(_))
+        ));
+        assert!(elsewhere.grants().is_empty(), "nothing was sent on");
+    }
+
+    /// tsk829: the answer's `token_type` must be one oxplow sends (bearer);
+    /// an `expires_in` written as a string is still a lifetime.
+    #[tokio::test]
+    async fn a_token_answer_is_read_as_services_write_it() {
+        let sim = OAuthSim::start().await;
+        let d = decl(&sim);
+        let sign_in = begin(&d, None).await.unwrap();
+        browse(&sign_in.authorize_url).await;
+        let token = sign_in.done.await.unwrap().unwrap();
+        sim.expires_in_as_string();
+        let renewed = refresh(&d, None, &token).await.unwrap();
+        assert!(renewed.expires_at.is_some(), "{renewed:?}");
+        sim.set_token_type("mac");
+        let refused = refresh(&d, None, &token).await;
+        assert!(
+            matches!(&refused, Err(OAuthError::Failed(why)) if why.contains("mac")),
+            "{refused:?}"
+        );
     }
 
     /// Sign in against `sim` and keep the token under `account`.
@@ -780,5 +1015,220 @@ mod tests {
         let again = begin(&d, None).await.unwrap();
         browse(&again.authorize_url).await;
         assert!(again.done.await.unwrap().is_ok());
+    }
+
+    /// The loopback port a sign-in's redirect comes back on.
+    fn redirect_port(authorize_url: &str) -> u16 {
+        let url = url::Url::parse(authorize_url).unwrap();
+        let redirect = url
+            .query_pairs()
+            .find(|(k, _)| k == "redirect_uri")
+            .unwrap()
+            .1
+            .into_owned();
+        url::Url::parse(&redirect).unwrap().port().unwrap()
+    }
+
+    /// tsk825: a connection that sends nothing (another process, a
+    /// browser's idle socket) doesn't hold up the real redirect.
+    #[tokio::test]
+    async fn an_idle_connection_doesnt_hold_up_the_redirect() {
+        let sim = OAuthSim::start().await;
+        let sign_in = begin(&decl(&sim), None).await.unwrap();
+        let port = redirect_port(&sign_in.authorize_url);
+        let _idle = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let mut half = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        // A head that promises a body it never sends.
+        half.write_all(b"POST /callback HTTP/1.1\r\nContent-Length: 10\r\n\r\n")
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let (status, _) =
+            tokio::time::timeout(Duration::from_secs(10), browse(&sign_in.authorize_url))
+                .await
+                .expect("the redirect is answered");
+        assert_eq!(status, 200);
+        assert!(sign_in.done.await.unwrap().is_ok());
+    }
+
+    /// tsk825: a request's head and body are bounded: a line with no end,
+    /// or a body larger than any redirect's, is refused rather than read.
+    #[tokio::test]
+    async fn a_request_is_read_within_its_bounds() {
+        async fn read_after(bytes: Vec<u8>) -> std::io::Result<HttpRequest> {
+            let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let writer = tokio::spawn(async move {
+                let mut c = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+                let _ = c.write_all(&bytes).await;
+                // Keep the connection open while the reader decides.
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            });
+            let (mut conn, _) = listener.accept().await.unwrap();
+            let out = read_request(&mut conn).await;
+            writer.abort();
+            out
+        }
+        let endless = vec![b'a'; MAX_REQUEST_HEAD + 10];
+        assert!(read_after(endless).await.is_err());
+        let huge = format!(
+            "POST /token HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            MAX_REQUEST_BODY + 1
+        );
+        assert!(read_after(huge.into_bytes()).await.is_err());
+        let fine = read_after(b"GET /callback?x=1 HTTP/1.1\r\nHost: a\r\n\r\n".to_vec())
+            .await
+            .unwrap();
+        assert_eq!(
+            (fine.method.as_str(), fine.target.as_str()),
+            ("GET", "/callback?x=1")
+        );
+    }
+
+    /// tsk827: two renewals of one account at once — two starts of an
+    /// instance, a Settings Check — don't both spend the refresh token.
+    /// With rotation the second would be refused and mark the account
+    /// lapsed; serialized, the second finds the fresh token.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn concurrent_renewals_of_one_account_renew_once() {
+        let sim = OAuthSim::start().await;
+        let secrets = std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default());
+        let d = decl(&sim);
+        sim.set_ttl(30);
+        signed_in(&sim, secrets.as_ref(), "acct").await;
+        sim.set_ttl(3600);
+        sim.rotate_refresh_tokens();
+        sim.delay_token_requests(100);
+        let run = || {
+            let (secrets, d) = (secrets.clone(), d.clone());
+            tokio::spawn(
+                async move { access_token(secrets.as_ref(), "acct", &d, None, false).await },
+            )
+        };
+        let (a, b) = (run(), run());
+        let (a, b) = (a.await.unwrap(), b.await.unwrap());
+        assert!(a.is_ok() && b.is_ok(), "{a:?} {b:?}");
+        assert_eq!(a, b, "both have the one renewed token");
+        assert_eq!(sim.grants(), vec!["authorization_code", "refresh_token"]);
+        assert_eq!(
+            state(secrets.as_ref(), "acct"),
+            SignInState::SignedIn { until: None }
+        );
+    }
+
+    /// tsk827: signing out while a renewal is in flight stays signed out:
+    /// the renewal doesn't write its token back over the deletion.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_sign_out_during_a_renewal_stays_signed_out() {
+        let sim = OAuthSim::start().await;
+        let secrets = std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default());
+        let d = decl(&sim);
+        signed_in(&sim, secrets.as_ref(), "acct").await;
+        sim.delay_token_requests(300);
+        let renewing = {
+            let (secrets, d) = (secrets.clone(), d.clone());
+            tokio::spawn(
+                async move { access_token(secrets.as_ref(), "acct", &d, None, true).await },
+            )
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        secrets.delete("acct").unwrap();
+        assert_eq!(renewing.await.unwrap(), Err(CredentialProblem::NotSignedIn));
+        assert_eq!(state(secrets.as_ref(), "acct"), SignInState::NotSignedIn);
+    }
+
+    /// tsk827: a refusal for a token another process has already replaced
+    /// (its renewal rotated the refresh token) uses the replacement rather
+    /// than marking the account lapsed.
+    #[tokio::test]
+    async fn a_refusal_of_a_token_already_replaced_uses_the_replacement() {
+        let sim = OAuthSim::start().await;
+        let secrets = std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default());
+        let d = decl(&sim);
+        let first = signed_in(&sim, secrets.as_ref(), "acct").await;
+        sim.rotate_refresh_tokens();
+        sim.delay_token_requests(300);
+        // Another process (no lock shared with this one) renews first...
+        let other = {
+            let (secrets, d, first) = (secrets.clone(), d.clone(), first.clone());
+            tokio::spawn(async move {
+                let theirs = refresh(&d, None, &first).await.unwrap();
+                store(secrets.as_ref(), "acct", &theirs).unwrap();
+                theirs
+            })
+        };
+        // ...and this one, reading the first token meanwhile, is refused.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let ours = access_token(secrets.as_ref(), "acct", &d, None, true).await;
+        let theirs = other.await.unwrap();
+        assert_eq!(ours, Ok(theirs.access_token.clone()));
+        assert_eq!(stored(secrets.as_ref(), "acct").unwrap(), Some(theirs));
+    }
+
+    /// A code from `sim` for `client_id`, redirected to `redirect_uri`,
+    /// bound to `verifier` — as the person's browser would bring it back.
+    async fn code_for(
+        sim: &OAuthSim,
+        client_id: &str,
+        redirect_uri: &str,
+        verifier: &str,
+    ) -> String {
+        let mut url = url::Url::parse(&sim.authorize_url).unwrap();
+        url.query_pairs_mut()
+            .append_pair("response_type", "code")
+            .append_pair("client_id", client_id)
+            .append_pair("redirect_uri", redirect_uri)
+            .append_pair("state", "s")
+            .append_pair("code_challenge", &pkce_challenge(verifier))
+            .append_pair("code_challenge_method", "S256");
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let resp = client.get(url).send().await.unwrap();
+        let to = resp.headers()["location"].to_str().unwrap().to_string();
+        url::Url::parse(&to)
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == "code")
+            .unwrap()
+            .1
+            .into_owned()
+    }
+
+    /// tsk830: the stand-in server holds a code to what it was issued for
+    /// (RFC 6749 §4.1.3): the same client, the same redirect, the same
+    /// verifier — so a client that mixed them up would fail here.
+    #[tokio::test]
+    async fn a_code_is_exchanged_only_as_it_was_issued() {
+        let sim = OAuthSim::start().await;
+        let d = decl(&sim);
+        let verifier = "v".repeat(43);
+        let other = "w".repeat(43);
+        let redirect = "http://127.0.0.1:1/callback";
+        for (client, to, with, says) in [
+            (
+                "someone-else",
+                redirect,
+                verifier.as_str(),
+                "another client",
+            ),
+            (
+                "oxplow-test",
+                "http://127.0.0.1:2/callback",
+                verifier.as_str(),
+                "another redirect",
+            ),
+            ("oxplow-test", redirect, other.as_str(), "another verifier"),
+        ] {
+            let code = code_for(&sim, client, redirect, &verifier).await;
+            let refused = exchange(&d, None, &code, with, to).await;
+            assert!(
+                matches!(refused, Err(OAuthError::Revoked(_))),
+                "{says}: {refused:?}"
+            );
+        }
+        let code = code_for(&sim, "oxplow-test", redirect, &verifier).await;
+        assert!(exchange(&d, None, &code, &verifier, redirect).await.is_ok());
     }
 }

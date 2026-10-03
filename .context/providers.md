@@ -512,6 +512,7 @@ credentials:
       client_id: oxplow
       scopes: [read, write]
       client_secret: CLIENT_SECRET # optional: the NAME of a pasted credential
+      client_auth: basic           # how the secret is sent: basic (default) | post
       redirect_port: 8123          # optional: for a service that wants a fixed redirect
 ```
 
@@ -529,7 +530,19 @@ form; sign-in is a provider's.
   over reqwest), one mechanism for every provider. The listener is its
   own, not a daemon route: the daemon is per project and bearer-gated,
   and a global instance's sign-in belongs to no project. It waits five
-  minutes; a sign-in nobody waits for any more stops listening.
+  minutes; a sign-in nobody waits for any more stops listening. Each
+  connection is read on its own task with a deadline (10 s) and caps
+  (16 KiB head, 64 KiB body), so an idle or oversized connection gets a
+  `400` and never holds up the real redirect (tsk825).
+- **Token requests** (`token_request`): the client secret goes in an
+  HTTP Basic header (`client_secret_basic`, each half form-encoded — RFC
+  6749 §2.3.1; the default every server must accept) or, with
+  `client_auth: post`, in the form; with Basic neither id nor secret is
+  in the form. A token endpoint that answers with a redirect is an error
+  — reqwest follows none, so the secret and the code go to the declared
+  endpoint only. An answer whose `token_type` isn't `Bearer` is refused
+  (a missing one reads as bearer), and `expires_in` is read as a number
+  or a numeric string (tsk829).
 - **The token is one keychain secret** — JSON `{ access_token,
   refresh_token?, expires_at?, scope? }` under the credential's instance
   account. The provider's process is handed **the access token alone**,
@@ -544,7 +557,18 @@ form; sign-in is a provider's.
   process started since the refused call is left alone, so two callers
   renew once). None of that counts as a failure; an `Auth` after the
   renewal does, like any other. A provider with no signed-in credential
-  gets no retry.
+  gets no retry. Renewals of one account are **serialized** in-process
+  (`renewal_lock`): a caller that waited re-reads the keychain and uses
+  what the first renewed, so a rotating refresh token is spent once
+  (tsk827). The write compares first: a sign-out during the renewal
+  stays signed out, a token replaced meanwhile (a new sign-in, another
+  process) is used rather than overwritten, and a refused renewal marks
+  the token lapsed only if it is still the one that was refused. Calls
+  refused together renew once (tsk828): `Instance.renewed_at` records
+  the last renewal, `reauthorize` returns early when one happened since
+  the refused call, and a call cut off because a renewal ended its
+  process (peer closed) is retried like an `Auth` — in `invoke` and in
+  the sync's `read`.
 - **A renewal the service refuses for good** (`invalid_grant`, or no
   refresh token to renew with) rewrites the kept token as lapsed with no
   refresh token — never deleted — so the credential reads
@@ -567,7 +591,15 @@ form; sign-in is a provider's.
   `credential_changed` restarts the instance on it, and the renderer
   hears `CredentialChanged { instance, name, error }` — the keychain is
   no model, so this is one of the bus's UI-only signals. A second
-  sign-in for the same credential abandons the first.
+  sign-in for the same credential abandons the first. Sign-ins are
+  tracked per instance and credential (`sign_ins`, each with a sequence
+  number): `begin_sign_in` holds `sign_in_gate` while it abandons the
+  old one, binds the listener and records the new one, so two clicks at
+  once leave one listening; a finished sign-in untracks itself only if
+  it is still the tracked one. Removing an instance — a project entry
+  that uncovers a global one too — abandons its sign-ins first, so
+  nothing is kept for what's gone (tsk826). The row's Sign in is off
+  while one starts.
   `set_instance_credential` refuses a value for a signed-in credential;
   with no value it signs out.
 - **The view**: `ProviderInstanceView.credentials` is
@@ -580,8 +612,11 @@ form; sign-in is a provider's.
   machine, so sign-in works only where the browser and the core share a
   host (a tunnel to `redirect_port` otherwise). No real OAuth service
   has been exercised: the tests run against `oauth_sim.rs`, a stand-in
-  authorization server that checks the PKCE verifier, issues refresh
-  tokens, and can expire, rotate and revoke them.
+  authorization server that holds each code to the client, redirect and
+  PKCE challenge it was issued for (RFC 6749 §4.1.3), reads the client
+  from a Basic header or the form, issues refresh tokens, and can
+  expire, rotate, revoke, delay, redirect token requests and answer
+  with another `token_type` or a string `expires_in` (tsk830).
 
 The key is human-only (`HUMAN_ONLY_KEYS`: enabling runs a program) and
 shared with the team; whether it *runs* is per machine (approval,

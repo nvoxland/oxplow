@@ -196,6 +196,13 @@ pub struct InstanceCredential {
     pub sign_in: Option<oauth::SignInState>,
 }
 
+/// A sign-in waiting for its redirect.
+struct SignInUnderWay {
+    /// Which start it was ([`ProviderRegistry`]'s `sign_in_seq`).
+    seq: u64,
+    task: tokio::task::JoinHandle<()>,
+}
+
 /// An instance as Settings → Integrations shows it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -273,6 +280,8 @@ pub struct Instance {
     live: tokio::sync::Mutex<Option<Live>>,
     /// One start at a time; held across a start, which `live` never is.
     starting: tokio::sync::Mutex<()>,
+    /// When its sign-in was last renewed because its service refused it.
+    renewed_at: parking_lot::Mutex<Option<Instant>>,
     not_before: parking_lot::Mutex<Option<Instant>>,
     /// One read per collector at a time (tsk715): a second waits, then
     /// resumes from the checkpoint the first left.
@@ -457,11 +466,23 @@ impl Instance {
     /// process, so the next call starts on them. False when it has none
     /// to renew. A process started since `called` is already on newer
     /// tokens than the refused call's and is left alone.
+    /// Whether its sign-in was renewed (and its process ended for that)
+    /// after `t`.
+    pub(super) fn renewed_since(&self, t: Instant) -> bool {
+        self.renewed_at.lock().is_some_and(|at| at > t)
+    }
+
     pub(super) async fn reauthorize(&self, called: Instant) -> bool {
         if !self.signs_in() {
             return false;
         }
         let _one = self.starting.lock().await;
+        // Renewed since the refused call (another caller refused at the
+        // same time got here first), or started since on newer tokens:
+        // nothing to do but try again (tsk828).
+        if self.renewed_since(called) {
+            return true;
+        }
         {
             let mut live = self.live.lock().await;
             if live.as_ref().is_some_and(|l| l.since > called) {
@@ -469,6 +490,7 @@ impl Instance {
             }
             live.take();
         }
+        *self.renewed_at.lock() = Some(Instant::now());
         // What can't be renewed shows when it next starts (its `check`
         // names the credential); here the only question is whether to
         // try again.
@@ -582,11 +604,12 @@ impl Instance {
                     }
                 }
             }
-            // Its service refused its credentials: once, on renewed ones.
-            if matches!(result, Err(ProtocolError::Auth(_)))
-                && !reauthorized
-                && self.reauthorize(started).await
-            {
+            // Its service refused its credentials — or the process was
+            // ended under this call to renew them for another caller: once,
+            // on renewed ones.
+            let refused = matches!(result, Err(ProtocolError::Auth(_)))
+                || (result.is_err() && peer.is_closed() && self.renewed_since(started));
+            if refused && !reauthorized && self.reauthorize(started).await {
                 reauthorized = true;
                 continue;
             }
@@ -736,7 +759,12 @@ pub struct ProviderRegistry {
     global: parking_lot::Mutex<GlobalFile>,
     /// Sign-ins under way, by `(instance, credential)`: a newer one for
     /// the same credential replaces the older.
-    sign_ins: parking_lot::Mutex<BTreeMap<(String, String), tokio::task::JoinHandle<()>>>,
+    sign_ins: parking_lot::Mutex<BTreeMap<(String, String), SignInUnderWay>>,
+    /// Held while a sign-in is started or abandoned, so two at once for
+    /// one credential leave exactly one listening (tsk826).
+    sign_in_gate: tokio::sync::Mutex<()>,
+    /// Numbers each sign-in, so a finished one untracks only itself.
+    sign_in_seq: std::sync::atomic::AtomicU64,
 }
 
 /// Where `scope`'s credentials are kept: the project's key, or the
@@ -792,6 +820,8 @@ impl ProviderRegistry {
             disables: parking_lot::Mutex::new(BTreeMap::new()),
             global: parking_lot::Mutex::new(GlobalFile::default()),
             sign_ins: parking_lot::Mutex::new(BTreeMap::new()),
+            sign_in_gate: tokio::sync::Mutex::new(()),
+            sign_in_seq: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -1255,6 +1285,7 @@ impl ProviderRegistry {
             registry: self.me.clone(),
             live: tokio::sync::Mutex::new(None),
             starting: tokio::sync::Mutex::new(()),
+            renewed_at: parking_lot::Mutex::new(None),
             not_before: parking_lot::Mutex::new(None),
             reading: parking_lot::Mutex::new(std::collections::HashMap::new()),
         }))
@@ -1644,6 +1675,10 @@ impl ProviderRegistry {
     /// credentials on this machine go. A project's replacement of a global
     /// instance is what goes first — the global one then shows through.
     pub async fn remove_instance(&self, actor: &Actor, instance: &str) -> Result<(), CommandError> {
+        // A sign-in under way would store a token for what's gone — or,
+        // for a project's replacement of a global one, under the removed
+        // entry's account (tsk826).
+        self.abandon_sign_ins(|(of, _)| of == instance).await;
         let resolved = self.resolve(instance).ok();
         let mut project = self.project_instances();
         let mut global = self.global_instances();
@@ -1670,8 +1705,6 @@ impl ProviderRegistry {
             scope,
         }) = resolved
         {
-            // A sign-in under way would store a token for what's gone.
-            self.abandon_sign_ins(|(of, _)| of == instance).await;
             for name in &spec.credential_names() {
                 let account = crate::collector_runner::instance_credential_account(
                     credential_scope(&self.deps, scope),
@@ -1855,14 +1888,19 @@ impl ProviderRegistry {
             }
         };
         let key = (instance.to_string(), name.to_string());
-        // Before the new one listens: a fixed `redirect_port` is the old
-        // one's until it stops.
-        self.abandon_sign_ins(|k| *k == key).await;
+        // One start at a time: the old one stops listening before the new
+        // one binds (a fixed `redirect_port` is the old one's until then),
+        // and the new one is tracked before another can start.
+        let _gate = self.sign_in_gate.lock().await;
+        self.abandon_sign_ins_locked(|k| *k == key).await;
         let sign_in = oauth::begin(&oauth_decl, client_secret)
             .await
             .map_err(DomainError::Invalid)?;
         let (me, deps) = (self.me.clone(), self.deps.clone());
         let (instance, name) = key.clone();
+        let seq = self
+            .sign_in_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let done = sign_in.done;
         let waiting = tokio::spawn(async move {
             let outcome = match done.await {
@@ -1870,10 +1908,14 @@ impl ProviderRegistry {
                 Err(why) => Err(why),
             };
             if let Some(registry) = me.upgrade() {
-                registry
-                    .sign_ins
-                    .lock()
-                    .remove(&(instance.clone(), name.clone()));
+                {
+                    // Untrack itself only: a newer one may hold the key.
+                    let mut sign_ins = registry.sign_ins.lock();
+                    let key = (instance.clone(), name.clone());
+                    if sign_ins.get(&key).is_some_and(|s| s.seq == seq) {
+                        sign_ins.remove(&key);
+                    }
+                }
                 if outcome.is_ok() {
                     registry.credential_changed(&instance).await;
                 }
@@ -1885,22 +1927,30 @@ impl ProviderRegistry {
                     error: outcome.err(),
                 });
         });
-        self.sign_ins.lock().insert(key, waiting);
+        self.sign_ins
+            .lock()
+            .insert(key, SignInUnderWay { seq, task: waiting });
         Ok(sign_in.authorize_url)
     }
 
     /// Stop waiting for the sign-ins `which` picks: each stops listening
     /// before this returns (its port is free), and stores nothing.
     async fn abandon_sign_ins(&self, which: impl Fn(&(String, String)) -> bool) {
+        let _gate = self.sign_in_gate.lock().await;
+        self.abandon_sign_ins_locked(which).await;
+    }
+
+    /// [`Self::abandon_sign_ins`], the gate already held.
+    async fn abandon_sign_ins_locked(&self, which: impl Fn(&(String, String)) -> bool) {
         let abandoned: Vec<_> = {
             let mut sign_ins = self.sign_ins.lock();
             let keys: Vec<_> = sign_ins.keys().filter(|k| which(k)).cloned().collect();
             keys.iter().filter_map(|k| sign_ins.remove(k)).collect()
         };
         for waiting in abandoned {
-            waiting.abort();
+            waiting.task.abort();
             // Ended (or cancelled): its listener is dropped with it.
-            let _ = waiting.await;
+            let _ = waiting.task.await;
         }
     }
 

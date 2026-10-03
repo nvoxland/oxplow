@@ -311,6 +311,8 @@ function SignInRow({
   onChanged(): void;
 }) {
   const [waiting, setWaiting] = useState(false);
+  // A sign-in is being started: a second click would start another.
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const id = `${instance}-${name}`;
   const line = signInLine(state);
@@ -327,11 +329,14 @@ function SignInRow({
 
   async function signIn() {
     setError(null);
+    setStarting(true);
     try {
       await openInSystemBrowser(await beginOauthSignIn(instance, name));
       setWaiting(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStarting(false);
     }
   }
 
@@ -355,7 +360,7 @@ function SignInRow({
       <button
         type="button"
         data-testid={`sign-in-button-${id}`}
-        disabled={!approved}
+        disabled={!approved || starting}
         title={
           approved
             ? "Open the service's sign-in page in your browser; the token it gives is kept in this machine's keychain"

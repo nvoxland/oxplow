@@ -1469,6 +1469,9 @@ export type CheckReport_Serialize = {
 	against: string | null,
 };
 
+// How a client authenticates to a token endpoint.
+export type ClientAuth = "basic" | "post";
+
 /**
  *  Per-project collection profile (the `collection:` block). Written by
  *  `/oxplow:configure` and read by the collection subsystem
@@ -3976,6 +3979,13 @@ export type OAuthDecl = {
 	 *  wants one registered; any free port otherwise.
 	 */
 	redirect_port?: number | null,
+	/**
+	 *  How the client secret is sent with a token request: `basic` (an
+	 *  `Authorization` header, RFC 6749 §2.3.1 — what every service must
+	 *  take; the default) or `post` (in the form, for a service that wants
+	 *  that).
+	 */
+	client_auth?: ClientAuth,
 };
 
 /**

@@ -14,6 +14,8 @@ let replacements: unknown[] = [];
 const credentialSaves: Array<[string, string, string | null]> = [];
 const STATIC_CREDENTIALS: unknown[] = [{ name: "FAKE_TOKEN", set: false, signIn: null }];
 const signIns: Array<[string, string]> = [];
+/** What a sign-in's start waits on (resolved unless a test holds it). */
+let signInGate: Promise<void> = Promise.resolve();
 const added: Array<[string, string, string]> = [];
 const removed: string[] = [];
 /** Further instances the listing returns after the provider's own. */
@@ -65,6 +67,7 @@ mock.module("../api.js", () => ({
   },
   beginOauthSignIn: async (inst: string, name: string) => {
     signIns.push([inst, name]);
+    await signInGate;
     return "https://auth.example.com/authorize?state=abc";
   },
   openInSystemBrowser: async (url: string) => {
@@ -251,6 +254,27 @@ test("Sign in is off while the provider isn't approved", async () => {
     expect(signIns).toEqual([]);
   } finally {
     instance.approved = approved;
+  }
+});
+
+// tsk826: a second click while a sign-in is starting doesn't start another.
+test("Sign in is off while a sign-in starts", async () => {
+  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" } }];
+  let release = () => {};
+  signInGate = new Promise((resolve) => {
+    release = resolve;
+  });
+  try {
+    const view = render(<IntegrationsSection />);
+    const button = (await waitFor(() => view.getByTestId("sign-in-button-tracker/fake-FAKE_TOKEN"))) as HTMLButtonElement;
+    fireEvent.click(button);
+    await waitFor(() => expect(button.disabled).toBe(true));
+    fireEvent.click(button);
+    expect(signIns).toEqual([["tracker/fake", "FAKE_TOKEN"]]);
+    release();
+    await waitFor(() => expect(button.disabled).toBe(false));
+  } finally {
+    signInGate = Promise.resolve();
   }
 });
 

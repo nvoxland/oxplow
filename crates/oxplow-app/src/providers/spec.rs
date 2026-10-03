@@ -109,6 +109,21 @@ pub struct OAuthDecl {
     /// wants one registered; any free port otherwise.
     #[serde(default)]
     pub redirect_port: Option<u16>,
+    /// How the client secret is sent with a token request: `basic` (an
+    /// `Authorization` header, RFC 6749 §2.3.1 — what every service must
+    /// take; the default) or `post` (in the form, for a service that wants
+    /// that).
+    #[serde(default)]
+    pub client_auth: ClientAuth,
+}
+
+/// How a client authenticates to a token endpoint.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientAuth {
+    #[default]
+    Basic,
+    Post,
 }
 
 /// One credential a provider declares.
@@ -139,7 +154,10 @@ impl CredentialDecl {
             parts.push(format!("scopes {}", oauth.scopes.join(", ")));
         }
         if let Some(secret) = &oauth.client_secret {
-            parts.push(format!("client secret {secret}"));
+            parts.push(match oauth.client_auth {
+                ClientAuth::Basic => format!("client secret {secret}"),
+                ClientAuth::Post => format!("client secret {secret}, sent in the form"),
+            });
         }
         if let Some(port) = oauth.redirect_port {
             parts.push(format!("redirect port {port}"));

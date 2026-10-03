@@ -133,7 +133,14 @@ impl Instance {
                 .and_then(|s| s.state);
             let outcome = match self.connection().await {
                 Ok((peer, handle)) => {
-                    let outcome = self.stream(actor, &peer, handle, &decl, resume).await;
+                    let mut outcome = self.stream(actor, &peer, handle, &decl, resume).await;
+                    // Ended under it to renew the sign-in for another
+                    // caller: as refused, so it tries again on the renewal.
+                    if let Err(failure) = &mut outcome {
+                        if peer.is_closed() && self.renewed_since(called) {
+                            failure.auth = true;
+                        }
+                    }
                     self.forget_if_closed(&peer).await;
                     outcome
                 }
