@@ -364,7 +364,12 @@ to `runtime.handleHookEnvelope`, which:
    and sets the status Idle — so a turn that died without a Stop reads idle
    after the restart instead of running, then stalled. The ACP client posts
    the same `SessionStart`; there is no separate boot kind.
-   `SessionEnd` logs `agent.session.ended` every time, and when
+   `SessionEnd` first closes the turns **that session** opened and left
+   open — an exit mid-turn sends no Stop — as interrupted ("session
+   ended"), status Stopped (tsk449), so no turn holds the quiet-period
+   snapshot trigger open after its agent is gone; another session's turns
+   are left alone. (A crash that sends no `SessionEnd` is closed by the
+   next `SessionStart`, above.) It logs `agent.session.ended` every time, and when
    `reason` is `clear` and the id is the resume id it blanks it: `/clear`
    starts a fresh session with no HTTP hook, so until its first prompt the
    token would still point at the cleared one. Other end reasons keep it so

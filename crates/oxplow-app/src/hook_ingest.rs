@@ -23,8 +23,10 @@
 //!   `agent.session.started`, status Idle.
 //! - A session id seen for the first time on a thread (on any kind)
 //!   becomes its resume id and logs `agent.session.started` once.
-//! - `SessionEnd`: `agent.session.ended`; `reason: clear` of the resume
-//!   session clears the resume id.
+//! - `SessionEnd`: closes the turns that session left open (interrupted,
+//!   "session ended" — an exit mid-turn sends no Stop, tsk449), status
+//!   Stopped when it closed one; `agent.session.ended`; `reason: clear` of
+//!   the resume session clears the resume id.
 //!
 //! Agent status is the log: a thread's status is its newest
 //! `agent.status.changed`, read and compared inside the same transaction
@@ -41,7 +43,8 @@ use specta::Type;
 use thiserror::Error;
 
 use oxplow_db::agent_stores::{
-    activity_anchors_tx, close_turn_tx, last_status_tx, open_turn_ids_tx, open_turn_tx, TurnEnd,
+    activity_anchors_tx, close_turn_tx, last_status_tx, open_session_turn_ids_tx, open_turn_ids_tx,
+    open_turn_tx, TurnEnd,
 };
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
@@ -447,6 +450,22 @@ fn record_tx(
         }
         HookKind::SessionEnd => {
             if let Some(sid) = session {
+                // A session that ends mid-turn (an exit with no Stop)
+                // leaves no one to close its turn (tsk449).
+                let end = TurnEnd {
+                    answer: Some("session ended"),
+                    ..TurnEnd::new(now, TurnOutcome::Interrupted)
+                };
+                for id in open_session_turn_ids_tx(conn, thread, sid)? {
+                    if close_turn_tx(conn, ev, id, &end)?.is_some() && applied.closed_turn.is_none()
+                    {
+                        applied.closed_turn = Some(id);
+                    }
+                }
+                if applied.closed_turn.is_some() {
+                    status = Some((AgentStatusState::Stopped, Some("session ended".into())));
+                }
+                applied.turn = open_turn_ids_tx(conn, thread)?.first().copied();
                 end_session_tx(conn, ev, thread, &row, sid, &body, now)?;
             }
         }
@@ -957,6 +976,56 @@ mod tests {
         assert_eq!(resume().await, "");
         let ended = of_type(&logged(&svc).await, "agent.session.ended").len();
         assert_eq!(ended, 3, "every end is logged, s1's exit and its clear");
+    }
+
+    /// tsk449: a session that ends without a Stop (an exit mid-turn) closes
+    /// its own open turn — interrupted, "session ended" — so the turn
+    /// doesn't hold the quiet-period trigger open forever. Another
+    /// session's end leaves it alone.
+    #[tokio::test]
+    async fn a_session_ending_mid_turn_closes_its_turn() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("s1"),
+            json!({"prompt": "go"}),
+        ))
+        .await
+        .unwrap();
+        let open = |svc: &HookIngestService| {
+            let db = svc.db.clone();
+            async move {
+                db.read(move |c| oxplow_db::agent_stores::open_turn_ids_tx(c, tid))
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(open(&svc).await.len(), 1);
+        svc.ingest(hook(
+            HookKind::SessionEnd,
+            tid,
+            Some("other"),
+            json!({"reason": "other"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(open(&svc).await.len(), 1, "another session's end");
+        svc.ingest(hook(
+            HookKind::SessionEnd,
+            tid,
+            Some("s1"),
+            json!({"reason": "prompt_input_exit"}),
+        ))
+        .await
+        .unwrap();
+        assert!(open(&svc).await.is_empty());
+        let events = logged(&svc).await;
+        let ended = of_type(&events, "agent.turn.ended");
+        assert_eq!(ended.len(), 1);
+        assert_eq!(ended[0].envelope.payload["outcome"], "interrupted");
+        let status = of_type(&events, "agent.status.changed");
+        assert_eq!(status.last().unwrap().envelope.payload["state"], "stopped");
     }
 
     /// Every prompt is logged — one inside an open turn is a re-prompt —

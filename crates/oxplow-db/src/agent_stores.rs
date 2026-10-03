@@ -104,6 +104,30 @@ pub fn open_turn_ids_tx(
     Ok(rows.into_iter().map(AgentTurnId::new).collect())
 }
 
+/// The thread's open turns that harness session `session` opened, newest
+/// first.
+pub fn open_session_turn_ids_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    session: &str,
+) -> Result<Vec<AgentTurnId>, DomainError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id FROM agent_turn
+              WHERE thread_id = ?1 AND session_id = ?2 AND ended_at IS NULL
+              ORDER BY started_at DESC, id DESC",
+        )
+        .map_err(map_sql_err)?;
+    let rows = stmt
+        .query_map(rusqlite::params![thread.value(), session], |r| {
+            r.get::<_, i64>(0)
+        })
+        .map_err(map_sql_err)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_sql_err)?;
+    Ok(rows.into_iter().map(AgentTurnId::new).collect())
+}
+
 /// Open a turn on `thread` and log `agent.turn.started`, in the caller's
 /// transaction. The turn starts at its stream's current snapshot.
 pub fn open_turn_tx(
