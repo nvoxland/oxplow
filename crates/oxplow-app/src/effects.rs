@@ -246,6 +246,10 @@ pub async fn start_after(
         .await
 }
 
+/// What a reaction that another delivery already recorded answers (the
+/// bus's lost race, `RunOrigin::Effect`): not a failure of the effect.
+pub const ALREADY_REACTED: &str = "already reacted to event";
+
 /// How a reaction whose commands ran ended: `ok`, or `failed` with the
 /// step error when a step outside the transaction failed partway.
 pub fn ran(audit_id: i64, failed: Option<String>) -> oxplow_db::effect_run_store::Finished {

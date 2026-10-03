@@ -1502,8 +1502,9 @@ project's), plus:
 
 ## Health, disable and repair (P7.C1–C3)
 
-Every contribution that runs — a provider instance, a collector — shares
-one failure policy (`plugin_health.rs`, the `plugin_health` table read as
+Every contribution that runs — a provider instance, a collector, an effect
+(P8.D11, kind `effect`, V150) — shares one failure policy
+(`plugin_health.rs`, the `plugin_health` table read as
 `v_plugin_health`):
 
 - **Counting.** A failed run or call counts; a good one starts the count
@@ -1513,7 +1514,10 @@ one failure policy (`plugin_health.rs`, the `plugin_health` table read as
   provider instance stops. A disabled collector doesn't run: the
   scheduler, the `collector.triggers` consumer and the snapshot sweep skip
   it, and `collector.sync` refuses it with its reason (`Invalid` at
-  `/id`). Nothing cascades: a lens over its view still runs, carrying a
+  `/id`). A disabled effect stops reacting (`effect.triggers` skips it).
+  For an effect only a `failed` reaction counts — an interrupted one
+  included, a lost race to another delivery not; `skipped` and `proposed`
+  never do, and a reaction whose commands ran starts the count over. Nothing cascades: a lens over its view still runs, carrying a
   warning (`LensRun.warnings`) that its rows aren't refreshing.
 - **Repairing.** The `plugin.repair` pump consumer files a work item on
   the active work-items provider, as the system: title `Repair <plugin>

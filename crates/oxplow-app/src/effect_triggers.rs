@@ -130,25 +130,61 @@ impl AsyncEventConsumer for EffectTriggers {
         let Some(svc) = self.services.upgrade() else {
             return Err(DomainError::Busy("services are shutting down".into()));
         };
+        let health =
+            crate::plugin_health::PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
         for (ext, decl) in effects(&svc) {
             if !reacts_to(&decl, event) {
                 continue;
             }
-            if let Err(error) = react(&svc, &ext, &decl, event).await {
-                if matches!(error, DomainError::Busy(_)) {
-                    return Err(error);
+            // Off after three failures in a row, until a person enables it.
+            let key = plugin_key(&decl);
+            if !matches!(health.disabled_reason(&key).await, Ok(None)) {
+                continue;
+            }
+            let started = std::time::Instant::now();
+            let counted = match react(&svc, &ext, &decl, event).await {
+                Ok(Reacted::Ran) => health.succeeded(&key, Some(started.elapsed())).await,
+                Ok(Reacted::Failed(reason)) => health.failed(&key, &reason).await.map(|_| ()),
+                // Skipped, proposed or nothing to do: neither counts.
+                Ok(Reacted::Other) => Ok(()),
+                Err(error) if matches!(error, DomainError::Busy(_)) => return Err(error),
+                Err(error) => {
+                    tracing::warn!(effect = %decl.name(), %error, "effect failed");
+                    Ok(())
                 }
-                tracing::warn!(effect = %decl.name(), %error, "effect failed");
+            };
+            if let Err(error) = counted {
+                tracing::warn!(effect = %decl.name(), %error, "recording the effect's health failed");
             }
         }
         Ok(())
     }
 }
 
+/// Its health's key: the extension, `effect`, its id.
+pub fn plugin_key(decl: &EffectDecl) -> oxplow_db::PluginKey {
+    oxplow_db::PluginKey {
+        plugin: decl.extension.clone(),
+        contribution: decl.id.clone(),
+        kind: "effect",
+    }
+}
+
+/// How a reaction went, as health counts it: only `Failed` is a failure.
+enum Reacted {
+    /// Its commands ran.
+    Ran,
+    Failed(String),
+    /// Skipped, proposed, not its to run (unapproved, before approval,
+    /// its own event), or already recorded.
+    Other,
+}
+
 /// Record how `key`'s reaction ended outside a run (skipped, failed
-/// before any command ran, interrupted). A reaction already recorded —
-/// by its run, its proposal or a concurrent delivery — stays as it is.
-async fn finish(svc: &Services, key: &EffectRunKey, done: Finished) -> Result<(), DomainError> {
+/// before any command ran, interrupted); whether this recorded it. A
+/// reaction already recorded — by its run, its proposal or a concurrent
+/// delivery — stays as it is.
+async fn finish(svc: &Services, key: &EffectRunKey, done: Finished) -> Result<bool, DomainError> {
     let (key, vocabulary) = (key.clone(), svc.vocabulary.clone());
     let recorded = svc
         .db
@@ -156,8 +192,9 @@ async fn finish(svc: &Services, key: &EffectRunKey, done: Finished) -> Result<()
         .await;
     svc.event_pump.wake();
     match recorded {
-        Err(DomainError::Invalid(_)) => Ok(()),
-        other => other,
+        Ok(()) => Ok(true),
+        Err(DomainError::Invalid(_)) => Ok(false),
+        Err(e) => Err(e),
     }
 }
 
@@ -176,7 +213,7 @@ async fn react(
     ext: &Extension,
     decl: &EffectDecl,
     event: &StoredEvent,
-) -> Result<(), DomainError> {
+) -> Result<Reacted, DomainError> {
     let key = EffectRunKey {
         effect: decl.name(),
         event_id: event.envelope.id.to_string(),
@@ -191,44 +228,51 @@ async fn react(
     match state {
         None => {}
         Some(RunState::Started) => {
-            return finish(
-                svc,
-                &key,
-                ended(
-                    RunState::Failed,
-                    "interrupted: a step outside oxplow may have run, so it isn't sent again",
-                ),
-            )
-            .await;
+            let reason = "interrupted: a step outside oxplow may have run, so it isn't sent again";
+            return Ok(
+                if finish(svc, &key, ended(RunState::Failed, reason)).await? {
+                    Reacted::Failed(reason.into())
+                } else {
+                    Reacted::Other
+                },
+            );
         }
-        Some(_) => return Ok(()),
+        Some(_) => return Ok(Reacted::Other),
     }
     let start = effects::start_after(&svc.db, &key.effect).await?;
     let project_dir = &svc.layout.project_dir;
     if effects::gate(&svc.approvals, project_dir, ext, decl, start, event.seq) != Gate::Runs {
-        return Ok(());
+        return Ok(Reacted::Other);
     }
     let (own, depth) = lineage(svc, event, &format!("effect:{}", key.effect)).await?;
     if own {
-        return Ok(());
+        return Ok(Reacted::Other);
     }
     if depth >= MAX_CHAIN {
-        return finish(
-            svc,
-            &key,
-            ended(
-                RunState::Skipped,
-                format!("loop guard: {depth} effect runs already led to this event"),
-            ),
-        )
-        .await;
+        let why = format!("loop guard: {depth} effect runs already led to this event");
+        finish(svc, &key, ended(RunState::Skipped, why)).await?;
+        return Ok(Reacted::Other);
     }
+    // A failure counts once: not when the reaction was already recorded
+    // (its run lost a race to another delivery, or finished it failed).
+    let failed = |reason: String| async {
+        Ok(
+            if finish(svc, &key, ended(RunState::Failed, reason.clone())).await? {
+                Reacted::Failed(reason)
+            } else {
+                Reacted::Other
+            },
+        )
+    };
     let composed = match run_script(svc, decl, event).await {
         Ok(c) => c,
-        Err(reason) => return finish(svc, &key, ended(RunState::Failed, reason)).await,
+        Err(reason) => return failed(reason).await,
     };
     let (calls, events) = match composed {
-        Reaction::Skip(why) => return finish(svc, &key, ended(RunState::Skipped, why)).await,
+        Reaction::Skip(why) => {
+            finish(svc, &key, ended(RunState::Skipped, why)).await?;
+            return Ok(Reacted::Other);
+        }
         Reaction::Run { calls, events } => (calls, events),
     };
     let events = match own_events(
@@ -238,16 +282,29 @@ async fn react(
         events,
     ) {
         Ok(events) => events,
-        Err(e) => return finish(svc, &key, ended(RunState::Failed, e.to_string())).await,
+        Err(e) => return failed(e.to_string()).await,
     };
     let input = json!({ "calls": calls });
     let command = effect_command(&svc.commands, calls, events)
         .map_err(|e| DomainError::Invariant(e.to_string()))?;
     match svc.commands.run_effect(key.clone(), command, input).await {
-        // Recorded with the run, or with its proposal.
-        Ok(_) | Err(CommandError::Proposed { .. }) => Ok(()),
+        Ok(_) => Ok(Reacted::Ran),
+        // Recorded with its proposal: a person decides.
+        Err(CommandError::Proposed { .. }) => Ok(Reacted::Other),
         Err(CommandError::Busy { message }) => Err(DomainError::Busy(message)),
-        Err(e) => finish(svc, &key, ended(RunState::Failed, e.to_string())).await,
+        // Another delivery recorded it: not this effect's failure.
+        Err(CommandError::Invalid { message, .. })
+            if message.contains(effects::ALREADY_REACTED) =>
+        {
+            Ok(Reacted::Other)
+        }
+        // Recorded here, or already by the bus (a step failed partway):
+        // a failure either way.
+        Err(e) => {
+            let reason = e.to_string();
+            finish(svc, &key, ended(RunState::Failed, reason.clone())).await?;
+            Ok(Reacted::Failed(reason))
+        }
     }
 }
 
@@ -672,6 +729,106 @@ mod tests {
         assert!(
             svc.task_store.get(fx.task).await.unwrap().is_some(),
             "nothing deleted"
+        );
+    }
+
+    /// P8.D11: three failed reactions in a row disable the effect — it
+    /// stops reacting — and the disable files a repair work item naming
+    /// its failures.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn three_failures_disable_an_effect_and_file_a_repair_item() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        extension(
+            &svc.layout.project_dir,
+            MARK_DONE,
+            &[("mark.star", "def transform(x):\n    return 1 // 0\n")],
+        );
+        approve(svc).await;
+        let consumer = EffectTriggers::new(Arc::downgrade(svc));
+        for _ in 0..3 {
+            let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+            consumer.handle(&ev).await.unwrap();
+        }
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT kind, state FROM v_plugin_health WHERE plugin = 'acme'"
+            )
+            .await,
+            json!([["effect", "disabled"]])
+        );
+        let fourth = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        consumer.handle(&fourth).await.unwrap();
+        assert_eq!(
+            rows(svc, "SELECT count(*) FROM v_effect_run").await,
+            json!([[3]]),
+            "disabled: it no longer reacts"
+        );
+        let disabled = svc
+            .event_log_store
+            .read_after(0, 10_000)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|e| e.envelope.event_type == "plugin.disabled")
+            .expect("the disable is logged");
+        assert_eq!(disabled.envelope.payload["kind"], json!("effect"));
+        crate::plugin_repair::PluginRepair::new(Arc::downgrade(svc))
+            .handle(&disabled)
+            .await
+            .unwrap();
+        let repair = rows(
+            svc,
+            "SELECT repair_item FROM v_plugin_health WHERE plugin = 'acme'",
+        )
+        .await;
+        assert!(repair[0][0].is_string(), "a repair item is filed: {repair}");
+    }
+
+    /// Skipped and proposed reactions aren't failures.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn skipped_and_proposed_reactions_dont_count_as_failures() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let skip = MARK_DONE
+            .replace("id: mark-done", "id: skips")
+            .replace("entry: mark.star", "entry: skip.star");
+        let propose = MARK_DONE
+            .replace("id: mark-done", "id: proposes")
+            .replace("entry: mark.star", "entry: drop.star");
+        extension(
+            &svc.layout.project_dir,
+            &format!("{skip}{propose}"),
+            &[
+                ("skip.star", "def transform(x):\n    return {\"skip\": \"not today\"}\n"),
+                (
+                    "drop.star",
+                    "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.delete\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n",
+                ),
+            ],
+        );
+        approve(svc).await;
+        let consumer = EffectTriggers::new(Arc::downgrade(svc));
+        for _ in 0..3 {
+            let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+            consumer.handle(&ev).await.unwrap();
+        }
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT state, count(*) FROM v_effect_run GROUP BY state ORDER BY state"
+            )
+            .await,
+            json!([["proposed", 3], ["skipped", 3]])
+        );
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT count(*) FROM v_plugin_health WHERE state != 'ok'"
+            )
+            .await,
+            json!([[0]])
         );
     }
 }

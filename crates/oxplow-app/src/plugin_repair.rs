@@ -144,10 +144,10 @@ pub async fn gather(svc: &Services, key: &PluginKey, reason: &str) -> RepairCont
         current_engine: crate::extensions::manifest_v2::current_engine().to_string(),
         ..RepairContext::default()
     };
-    let list = if key.kind == "provider" {
-        "providers"
-    } else {
-        "collectors"
+    let list = match key.kind {
+        "provider" => "providers",
+        "effect" => "effects",
+        _ => "collectors",
     };
     if key.plugin == oxplow_config::collectors::PROJECT {
         c.manifest = Some(".oxplow/project.yaml".into());
@@ -226,6 +226,31 @@ async fn recent_errors(svc: &Services, key: &PluginKey, reason: &str) -> Vec<Str
             errors = found;
         }
     }
+    if key.kind == "effect" {
+        // Its failed reactions (`v_effect_run`), newest first.
+        let effect = format!("{}/{}", key.plugin, key.contribution);
+        if let Ok(found) = svc
+            .db
+            .read(move |c| {
+                let mut st = c
+                    .prepare(
+                        "SELECT reason FROM effect_run
+                          WHERE effect = ?1 AND state = 'failed' AND reason IS NOT NULL
+                          ORDER BY id DESC LIMIT ?2",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = st
+                    .query_map(rusqlite::params![effect, ERRORS_SHOWN as i64], |r| {
+                        r.get::<_, String>(0)
+                    })
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(rows.filter_map(Result::ok).collect::<Vec<_>>())
+            })
+            .await
+        {
+            errors = found;
+        }
+    }
     if errors.is_empty() {
         errors.push(reason.to_string());
         let health = crate::plugin_health::PluginHealth::new(
@@ -297,10 +322,10 @@ impl AsyncEventConsumer for PluginRepair {
                 .unwrap_or_default()
                 .to_string(),
             contribution: text("contribution"),
-            kind: if text("kind") == "collector" {
-                "collector"
-            } else {
-                "provider"
+            kind: match text("kind").as_str() {
+                "collector" => "collector",
+                "effect" => "effect",
+                _ => "provider",
             },
         };
         let reason = text("reason");

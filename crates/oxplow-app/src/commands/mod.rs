@@ -1642,8 +1642,10 @@ fn lost_race(
         RunOrigin::Undo(audit_id) => format!("audit row {audit_id} was already undone"),
         RunOrigin::Approval(id) => format!("proposal:{id} was already decided"),
         RunOrigin::Effect(key) => format!(
-            "effect `{}` already reacted to event {}",
-            key.effect, key.event_id
+            "effect `{}` {} {}",
+            key.effect,
+            crate::effects::ALREADY_REACTED,
+            key.event_id
         ),
         RunOrigin::Call => return Err(e),
     };

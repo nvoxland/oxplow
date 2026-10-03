@@ -1,5 +1,5 @@
 //! One failure policy for every plugin contribution (P7.C1): a provider
-//! instance, a collector.
+//! instance, a collector, an effect (P8.D11).
 //!
 //! [`PluginHealth`] keeps each contribution's `plugin_health` row (V135,
 //! read as `v_plugin_health`). A failure counts; [`FAILURES_TO_DISABLE`]
@@ -7,7 +7,8 @@
 //! — and it stays off, across restarts, until a person runs
 //! `plugin.enable` (`plugin.enabled@1`). A success starts the count over.
 //! What "off" means is the contribution's: the provider registry stops
-//! the instance; a collector's scheduler skips it.
+//! the instance; a collector's scheduler skips it; an effect stops
+//! reacting (`effect_triggers`).
 
 use oxplow_domain::vocabulary::VocabularyHandle;
 use std::sync::{Arc, Weak};
@@ -220,6 +221,7 @@ impl PluginHealth {
 enum Kind {
     Provider,
     Collector,
+    Effect,
 }
 
 impl Kind {
@@ -227,6 +229,7 @@ impl Kind {
         match self {
             Kind::Provider => "provider",
             Kind::Collector => "collector",
+            Kind::Effect => "effect",
         }
     }
 }
@@ -236,9 +239,9 @@ impl Kind {
 struct EnableInput {
     /// The extension.
     plugin: String,
-    /// `provider` or `collector`: a provider and a collector may share an id.
+    /// `provider`, `collector` or `effect`: two kinds may share an id.
     kind: Kind,
-    /// Its provider's or collector's id.
+    /// Its provider's, collector's or effect's id.
     contribution: String,
 }
 
@@ -255,9 +258,9 @@ pub fn enable_command(
     Command::new(
         CommandSpec {
             name: ENABLE.into(),
-            summary: "Enable a disabled extension provider or collector on this machine again, \
-                      clearing an automatic disable (a provider's process restarts, a system the \
-                      bus doesn't own)."
+            summary: "Enable a disabled extension provider, collector or effect on this machine \
+                      again, clearing an automatic disable (a provider's process restarts, a \
+                      system the bus doesn't own)."
                 .into(),
             input_schema: serde_json::to_value(schemars::schema_for!(EnableInput))
                 .expect("schema serializes"),
@@ -293,7 +296,7 @@ pub fn enable_command(
                 // the registry knows (enabled from Settings before it ever
                 // failed).
                 if health.get(&key).await?.is_none()
-                    && (kind == Kind::Collector || providers.find(&instance).is_none())
+                    && (kind != Kind::Provider || providers.find(&instance).is_none())
                 {
                     return Err(CommandError::Invalid {
                         field: Some("/contribution".into()),
