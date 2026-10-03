@@ -1791,6 +1791,20 @@ back). A failed run keeps the last good counts and cursor.
 logs its `collector.synced@1`. Read as `v_collector_run`; see
 [semantic-layer.md](./semantic-layer.md) "Collectors".
 
+### `effect_run` — `crates/oxplow-db/src/effect_run_store.rs`
+
+V149 (P8.D10), rebuilt by V156 (P9.D4). Each **attempt** at an
+extension effect's reaction to an event: `effect` (`<extension>/<id>`),
+`event_id` / `event_seq`, `attempt` (from 1), `origin` (`live` — the
+event's delivery; `retry` — a person's `effect.retry`; `backfill`),
+`state` (`started` / `ok` / `skipped` / `proposed` / `failed`), `reason`,
+`audit_id`, `proposal_id`, `started_at`, `finished_at`. `UNIQUE (effect,
+event_id, attempt)`: an attempt is made once, and the reaction's state is
+its latest attempt's (`latest_tx`; `v_effect_run.latest`). The command
+bus writes an attempt's row in its run's transaction, or claims it
+`started` first when a step runs outside it (`claim_tx` / `finish_tx`).
+See [extensions.md](./extensions.md) "Effects".
+
 ### `plugin_health` — `SqlitePluginHealthStore` (`crates/oxplow-db/src/plugin_health_store.rs`)
 
 V135 (P7.C1). Each plugin contribution's health on this machine, keyed

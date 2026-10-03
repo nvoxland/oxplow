@@ -20,6 +20,7 @@ import {
   approveCollector,
   discardDeadLetter,
   retryDeadLetter,
+  runCommand,
   syncCollector,
   subscribeOxplowEvents,
   type CollectorListing,
@@ -36,7 +37,14 @@ import {
   type EntityRowModel,
   type ProviderEffectState,
 } from "./dataSectionModel.js";
-import { letterLine, useUndelivered, type UndeliveredEvent } from "../delivery.js";
+import {
+  letterLine,
+  reactionLine,
+  useFailedReactions,
+  useUndelivered,
+  type FailedReaction,
+  type UndeliveredEvent,
+} from "../delivery.js";
 import { collectorRan, collectorRowModel } from "./extensionRowModel.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import { recordOpError } from "./opErrorsStore.js";
@@ -49,6 +57,7 @@ export function DataSection() {
   const [programs, setPrograms] = useState<ProjectProgram[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const undelivered = useUndelivered();
+  const failedReactions = useFailedReactions();
   // What approving each unapproved provider would change, by instance.
   const [effects, setEffects] = useState<Record<string, ProviderEffectState>>({});
 
@@ -135,6 +144,26 @@ export function DataSection() {
       }
     } catch (e) {
       recordOpError({ label: `${retry ? "Retry" : "Discard"} event ${l.eventSeq} for ${l.consumer}`, message: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Have an effect react again to an event it failed on: the person's
+   *  second click was the confirmation `effect.retry` asks for. */
+  async function retryReaction(r: FailedReaction) {
+    setBusy(`reaction-${r.effect}-${r.eventId}`);
+    try {
+      const out = await runCommand("effect.retry", { effect: r.effect, event: `event:${r.eventId}` }, true);
+      const result = out.result as { outcome?: string; reason?: string } | null;
+      showToast({
+        message:
+          result?.outcome === "ok"
+            ? `${r.effect} reacted to event ${r.eventSeq}.`
+            : `${r.effect}: ${result?.outcome ?? "no outcome"}${result?.reason ? ` (${result.reason})` : ""}.`,
+      });
+    } catch (e) {
+      recordOpError({ label: `Retry ${r.effect} on event ${r.eventSeq}`, message: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(null);
     }
@@ -274,6 +303,26 @@ export function DataSection() {
         })
       )}
       <h3 style={subheadStyle}>Delivery</h3>
+      {failedReactions.map((r) => {
+        const key = `${r.effect}-${r.eventId}`;
+        return (
+          <div key={key} data-testid={`reaction-row-${key}`} style={rowStyle}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span>{reactionLine(r)}</span>
+              <span style={{ flex: 1 }} />
+              <InlineConfirm
+                triggerLabel="Retry"
+                confirmLabel="Retry"
+                testIdPrefix={`reaction-retry-${key}`}
+                title="Run the effect on this event again, as it is now. If the failed attempt was interrupted, a step outside oxplow may already have run — retrying sends it again."
+                disabled={busy !== null}
+                onConfirm={() => void retryReaction(r)}
+              />
+            </div>
+            <div style={errorStyle}>{r.reason}</div>
+          </div>
+        );
+      })}
       {undelivered.length === 0 ? (
         <div style={mutedStyle} data-testid="data-delivery-empty">
           Every event reached its consumers.

@@ -19,6 +19,7 @@ pub mod comment;
 pub mod compose;
 pub mod config_commands;
 pub mod dashboard;
+pub mod effect;
 pub mod effort;
 pub mod effort_report;
 pub mod extension_install;

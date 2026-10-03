@@ -17,17 +17,24 @@
 //! 4. Its script composes, over the event and its `input` rows:
 //!    `{ skip: "why" }` is `skipped`; `{ commands, events? }` runs as
 //!    `command.sequence` by `Actor::Effect` (`CommandBus::run_effect`),
-//!    whose `effect_run` row and `effect.result@2` land with the run, its
+//!    whose `effect_run` row and `effect.result@3` land with the run, its
 //!    proposal, or — when it failed before anything ran — here.
 //!
 //! An effect that fails is recorded, never dead-letters the event: one
 //! broken effect doesn't hold up the others. It holds `Services` weakly:
 //! the pump that runs it is part of it.
+//!
+//! [`run_reaction`] is that reaction, and it is also what a person's
+//! `effect.retry` of a failed one runs (P9.D4): the next **attempt**, the
+//! same steps from 3 on, with what started it (`ReactionOrigin`) recorded.
+//! Nothing here re-sends a step outside oxplow by itself: no provider
+//! promises a write is safe to repeat (`.context/providers.md`
+//! "Idempotency"), so a retry is a person's, asked first.
 
 use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
-use oxplow_db::effect_run_store::{EffectRunKey, Finished, RunState};
+use oxplow_db::effect_run_store::{EffectRunKey, Finished, ReactionOrigin, RunState};
 use oxplow_domain::{CommandCall, CommandError, DomainError, StoredEvent};
 use serde_json::json;
 
@@ -105,10 +112,15 @@ impl EffectTriggers {
     }
 }
 
-/// Register the consumer on `svc`'s pump (boot, before it spawns).
+/// Register the consumer on `svc`'s pump (boot, before it spawns), and
+/// the commands a person runs effects with (`effect.retry`): they hold
+/// `Services` as the consumer does.
 pub fn register(svc: &Arc<Services>) {
     svc.event_pump
         .register_async(Arc::new(EffectTriggers::new(Arc::downgrade(svc))));
+    svc.commands
+        .register(crate::commands::effect::retry_command(Arc::downgrade(svc)))
+        .expect("effect.retry registers");
 }
 
 /// The enabled extensions' effects, in the primary worktree (where, like
@@ -207,19 +219,14 @@ impl AsyncEventConsumer for EffectTriggers {
             let program = effects::effect_program(&ext, &decl);
             let hash = self.folder_hash(&load, &svc.layout.project_dir, &program);
             let approved = effects::is_approved(&svc.approvals, &program, hash.as_deref());
-            let counted = match react(&svc, &ext, &decl, approved, event).await {
-                Ok(Reacted::Ran) => health.succeeded(&key, Some(started.elapsed())).await,
-                Ok(Reacted::Failed(reason)) => health.failed(&key, &reason).await.map(|_| ()),
-                // Skipped, proposed or nothing to do: neither counts.
-                Ok(Reacted::Other) => Ok(()),
+            let reacted =
+                run_reaction(&svc, &ext, &decl, approved, event, ReactionOrigin::Live).await;
+            match reacted {
+                Ok(reacted) => count(&health, &decl, &reacted, started.elapsed()).await,
                 Err(error) if matches!(error, DomainError::Busy(_)) => return Err(error),
                 Err(error) => {
                     tracing::warn!(effect = %decl.name(), %error, "effect failed");
-                    Ok(())
                 }
-            };
-            if let Err(error) = counted {
-                tracing::warn!(effect = %decl.name(), %error, "recording the effect's health failed");
             }
         }
         Ok(())
@@ -235,14 +242,40 @@ pub fn plugin_key(decl: &EffectDecl) -> oxplow_db::PluginKey {
     }
 }
 
-/// How a reaction went, as health counts it: only `Failed` is a failure.
-enum Reacted {
+/// How an attempt at a reaction went, as health counts it: only `Failed`
+/// is a failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Reacted {
     /// Its commands ran.
     Ran,
     Failed(String),
-    /// Skipped, proposed, not its to run (unapproved, before approval,
-    /// its own event), or already recorded.
-    Other,
+    /// Its script decided there was nothing to do, or the loop guard
+    /// stopped it: recorded `skipped`, with why.
+    Skipped(String),
+    /// A command it composed asks a person: recorded with its proposal.
+    Proposed,
+    /// Nothing was attempted: not its to run (unapproved, before its
+    /// approval, its own event) or already recorded by another delivery.
+    Nothing,
+}
+
+/// Count an attempt toward the effect's health: a run is a success, a
+/// failure a failure (three in a row disable it); nothing else counts.
+pub(crate) async fn count(
+    health: &crate::plugin_health::PluginHealth,
+    decl: &EffectDecl,
+    reacted: &Reacted,
+    took: std::time::Duration,
+) {
+    let key = plugin_key(decl);
+    let counted = match reacted {
+        Reacted::Ran => health.succeeded(&key, Some(took)).await,
+        Reacted::Failed(reason) => health.failed(&key, reason).await.map(|_| ()),
+        Reacted::Skipped(_) | Reacted::Proposed | Reacted::Nothing => Ok(()),
+    };
+    if let Err(error) = counted {
+        tracing::warn!(effect = %decl.name(), %error, "recording the effect's health failed");
+    }
 }
 
 /// Record how `key`'s reaction ended outside a run (skipped, failed
@@ -272,61 +305,114 @@ fn ended(state: RunState, reason: impl Into<String>) -> Finished {
     }
 }
 
-/// `decl`'s reaction to `event`.
-async fn react(
+/// Why [`run_reaction`] made no attempt for a person's `origin` (a
+/// retry, a backfill): what they asked for isn't there to do.
+pub(crate) const NOT_FAILED: &str = "didn't fail";
+pub(crate) const NOT_REACTED: &str = "hasn't reacted";
+
+/// An attempt at `decl`'s reaction to `event`, started by `origin`:
+///
+/// - `Live` (the pump): the first attempt, made only if there was none —
+///   a redelivery finds the reaction and runs nothing (an attempt left
+///   `started` is recorded `failed`: interrupted) — and only for an event
+///   logged after the effect's approval;
+/// - `Retry` (a person's `effect.retry`): the next attempt at a reaction
+///   whose latest **failed**; `Invalid` otherwise. The person named the
+///   event, so when it was logged doesn't matter;
+/// - `Backfill`: the first attempt at an event the effect never reacted
+///   to, whenever it was logged.
+///
+/// Every origin needs the effect `approved` as it is now, and passes the
+/// loop guard.
+pub(crate) async fn run_reaction(
     svc: &Arc<Services>,
     ext: &Extension,
     decl: &EffectDecl,
     approved: bool,
     event: &StoredEvent,
+    origin: ReactionOrigin,
 ) -> Result<Reacted, DomainError> {
-    let key = EffectRunKey {
-        effect: decl.name(),
-        event_id: event.envelope.id.to_string(),
-        event_seq: event.seq,
-    };
-    let state = {
-        let key = key.clone();
+    let (effect, event_id) = (decl.name(), event.envelope.id.to_string());
+    let latest = {
+        let (effect, event_id) = (effect.clone(), event_id.clone());
         svc.db
-            .read(move |tx| oxplow_db::effect_run_store::state_tx(tx, &key))
+            .read(move |tx| oxplow_db::effect_run_store::latest_tx(tx, &effect, &event_id))
             .await?
     };
-    match state {
-        None => {}
-        Some(RunState::Started) => {
+    let attempt = match (origin, latest) {
+        (ReactionOrigin::Live | ReactionOrigin::Backfill, None) => 1,
+        (ReactionOrigin::Live, Some((attempt, RunState::Started))) => {
+            let key = EffectRunKey {
+                effect,
+                event_id,
+                event_seq: event.seq,
+                attempt,
+                origin,
+            };
             let reason = "interrupted: a step outside oxplow may have run, so it isn't sent again";
             return Ok(
                 if finish(svc, &key, ended(RunState::Failed, reason)).await? {
                     Reacted::Failed(reason.into())
                 } else {
-                    Reacted::Other
+                    Reacted::Nothing
                 },
             );
         }
-        Some(_) => return Ok(Reacted::Other),
-    }
-    let start = effects::start_after(&svc.db, &key.effect).await?;
-    if effects::gate(approved, start, event.seq) != Gate::Runs {
-        return Ok(Reacted::Other);
+        (ReactionOrigin::Live | ReactionOrigin::Backfill, Some(_)) => return Ok(Reacted::Nothing),
+        (ReactionOrigin::Retry, Some((attempt, RunState::Failed))) => attempt + 1,
+        (ReactionOrigin::Retry, Some((_, state))) => {
+            return Err(DomainError::Invalid(format!(
+                "effect `{effect}`'s reaction to event {event_id} {NOT_FAILED} (it is `{}`): \
+                 only a failed reaction is retried",
+                state.as_str()
+            )))
+        }
+        (ReactionOrigin::Retry, None) => {
+            return Err(DomainError::Invalid(format!(
+                "effect `{effect}` {NOT_REACTED} to event {event_id}: there is nothing to retry"
+            )))
+        }
+    };
+    let key = EffectRunKey {
+        effect,
+        event_id,
+        event_seq: event.seq,
+        attempt,
+        origin,
+    };
+    // The live consumer never reacts to the past; a person's retry or
+    // backfill names what to react to, and needs only the approval.
+    let runs = match origin {
+        ReactionOrigin::Live => {
+            let start = effects::start_after(&svc.db, &key.effect).await?;
+            effects::gate(approved, start, event.seq) == Gate::Runs
+        }
+        ReactionOrigin::Retry | ReactionOrigin::Backfill => approved,
+    };
+    if !runs {
+        return Ok(Reacted::Nothing);
     }
     let lineage =
         crate::event_lineage::lineage(&svc.db, event, &format!("effect:{}", key.effect)).await?;
     // Its own run's events never trigger it, and aren't worth a record.
     if lineage.own {
-        return Ok(Reacted::Other);
+        return Ok(Reacted::Nothing);
     }
+    let skipped = |why: String| async {
+        finish(svc, &key, ended(RunState::Skipped, why.clone())).await?;
+        Ok(Reacted::Skipped(why))
+    };
     if let Some(why) = lineage.refusal() {
-        finish(svc, &key, ended(RunState::Skipped, why)).await?;
-        return Ok(Reacted::Other);
+        return skipped(why).await;
     }
-    // A failure counts once: not when the reaction was already recorded
+    // A failure counts once: not when the attempt was already recorded
     // (its run lost a race to another delivery, or finished it failed).
     let failed = |reason: String| async {
         Ok(
             if finish(svc, &key, ended(RunState::Failed, reason.clone())).await? {
                 Reacted::Failed(reason)
             } else {
-                Reacted::Other
+                Reacted::Nothing
             },
         )
     };
@@ -335,10 +421,7 @@ async fn react(
         Err(reason) => return failed(reason).await,
     };
     let (calls, events) = match composed {
-        Reaction::Skip(why) => {
-            finish(svc, &key, ended(RunState::Skipped, why)).await?;
-            return Ok(Reacted::Other);
-        }
+        Reaction::Skip(why) => return skipped(why).await,
         Reaction::Run { calls, events } => (calls, events),
     };
     let events = match own_events(
@@ -356,13 +439,13 @@ async fn react(
     match svc.commands.run_effect(key.clone(), command, input).await {
         Ok(_) => Ok(Reacted::Ran),
         // Recorded with its proposal: a person decides.
-        Err(CommandError::Proposed { .. }) => Ok(Reacted::Other),
+        Err(CommandError::Proposed { .. }) => Ok(Reacted::Proposed),
         Err(CommandError::Busy { message }) => Err(DomainError::Busy(message)),
         // Another delivery recorded it: not this effect's failure.
         Err(CommandError::Invalid { message, .. })
             if message.contains(effects::ALREADY_REACTED) =>
         {
-            Ok(Reacted::Other)
+            Ok(Reacted::Nothing)
         }
         // Recorded here, or already by the bus (a step failed partway):
         // a failure either way.
@@ -372,6 +455,18 @@ async fn react(
             Ok(Reacted::Failed(reason))
         }
     }
+}
+
+/// The approval hash of `program`'s folder as it is now.
+pub(crate) fn approved_now(svc: &Services, program: &crate::exec_consent::ProjectProgram) -> bool {
+    let hash = program.hash(&svc.layout.project_dir).ok();
+    effects::is_approved(&svc.approvals, program, hash.as_deref())
+}
+
+/// The enabled effect `<extension>/<id>` in the primary worktree, with
+/// its extension.
+pub(crate) fn find_effect(svc: &Services, name: &str) -> Option<(Extension, EffectDecl)> {
+    effects(svc).into_iter().find(|(_, d)| d.name() == name)
 }
 
 /// The run of an effect's reaction: the registered `command.sequence` —
@@ -635,23 +730,181 @@ mod tests {
         approve(svc).await;
         let before = title(&fx).await;
         let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
-        let key = EffectRunKey {
-            effect: "acme/mark-done".into(),
-            event_id: ev.envelope.id.to_string(),
-            event_seq: ev.seq,
-        };
+        interrupt(svc, &ev).await;
+        assert_eq!(title(&fx).await, before, "not sent again");
+        let run = rows(svc, "SELECT state, reason FROM v_effect_run").await;
+        assert_eq!(run[0][0], json!("failed"));
+        assert!(run[0][1].as_str().unwrap().contains("interrupted"), "{run}");
+    }
+
+    /// `acme/mark-done`'s reaction to `ev`, claimed `started` (a step
+    /// outside oxplow under way) and then found by a redelivery: failed.
+    async fn interrupt(svc: &Arc<Services>, ev: &StoredEvent) {
+        let key = EffectRunKey::first(
+            "acme/mark-done",
+            ev.envelope.id.to_string(),
+            ev.seq,
+            ReactionOrigin::Live,
+        );
         svc.db
             .transaction(move |tx| oxplow_db::effect_run_store::claim_tx(tx, &key, "t"))
             .await
             .unwrap();
         EffectTriggers::new(Arc::downgrade(svc))
+            .handle(ev)
+            .await
+            .unwrap();
+    }
+
+    async fn retry(
+        svc: &Services,
+        actor: &oxplow_domain::Actor,
+        ev: &StoredEvent,
+        confirmed: bool,
+    ) -> Result<oxplow_domain::CommandOutcome, CommandError> {
+        svc.commands
+            .run(
+                actor,
+                crate::commands::effect::RETRY,
+                json!({ "effect": "acme/mark-done", "event": format!("event:{}", ev.envelope.id) }),
+                confirmed,
+            )
+            .await
+    }
+
+    /// P9.D4: a person retries a reaction that failed — here one
+    /// interrupted with a step outside oxplow under way. It is asked
+    /// first, runs the effect once more as the next attempt, and is
+    /// recorded with which attempt it was and what started it. An agent
+    /// can't; a reaction that didn't fail isn't retried.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_person_retries_an_interrupted_reaction() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        approve(svc).await;
+        register(svc);
+        let before = title(&fx).await;
+        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        interrupt(svc, &ev).await;
+        assert_eq!(title(&fx).await, before);
+
+        // An agent may not; a person is asked, and told why to think.
+        let agent = oxplow_domain::Actor::Agent {
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        assert!(matches!(
+            retry(svc, &agent, &ev, true).await,
+            Err(CommandError::Denied { .. })
+        ));
+        let human = oxplow_domain::Actor::Human;
+        match retry(svc, &human, &ev, false).await {
+            Err(CommandError::NeedsConfirmation { preview }) => {
+                assert!(
+                    preview.summary.contains("may already have run"),
+                    "{}",
+                    preview.summary
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(title(&fx).await, before, "asking ran nothing");
+
+        let out = retry(svc, &human, &ev, true).await.unwrap();
+        assert_eq!(
+            out.result,
+            json!({ "effect": "acme/mark-done", "event": format!("event:{}", ev.envelope.id), "attempt": 2, "outcome": "ok" })
+        );
+        assert_eq!(
+            title(&fx).await,
+            format!("{before} (done)"),
+            "ran once more"
+        );
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT attempt, origin, state, latest FROM v_effect_run ORDER BY attempt"
+            )
+            .await,
+            json!([[1, "live", "failed", 0], [2, "retry", "ok", 1]])
+        );
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT v, json_extract(payload, '$.attempt'), json_extract(payload, '$.origin'), json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result' ORDER BY seq"
+            )
+            .await,
+            json!([[3, 1, "live", "failed"], [3, 2, "retry", "ok"]])
+        );
+        // It succeeded: nothing left to retry, and a redelivery of the
+        // event still runs nothing.
+        let refused = retry(svc, &human, &ev, true).await.unwrap_err();
+        assert!(refused.to_string().contains("didn't fail"), "{refused}");
+        EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
             .await
             .unwrap();
-        assert_eq!(title(&fx).await, before, "not sent again");
-        let run = rows(svc, "SELECT state, reason FROM v_effect_run").await;
-        assert_eq!(run[0][0], json!("failed"));
-        assert!(run[0][1].as_str().unwrap().contains("interrupted"), "{run}");
+        assert_eq!(title(&fx).await, format!("{before} (done)"));
+        // A reaction never made isn't one to retry either.
+        let other = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let refused = retry(svc, &human, &other, true).await.unwrap_err();
+        assert!(refused.to_string().contains("hasn't reacted"), "{refused}");
+    }
+
+    /// P9.D4: a retry runs the effect as it is now, so it needs what a
+    /// live reaction needs — the effect enabled, and approved as it is.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_retry_needs_a_current_approval_and_an_enabled_effect() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        approve(svc).await;
+        register(svc);
+        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        interrupt(svc, &ev).await;
+        let human = oxplow_domain::Actor::Human;
+
+        // Disabled (three failures would; here a person's record of one).
+        let health =
+            crate::plugin_health::PluginHealth::new(svc.db.clone(), svc.vocabulary.clone());
+        let decl = effects(svc).into_iter().next().unwrap().1;
+        health
+            .disable(&plugin_key(&decl), "off for the test")
+            .await
+            .unwrap();
+        let refused = retry(svc, &human, &ev, true).await.unwrap_err();
+        assert!(refused.to_string().contains("is disabled"), "{refused}");
+        health.enable(&plugin_key(&decl), "human").await.unwrap();
+
+        // Edited since it was approved: a person approves it first.
+        extension(
+            &svc.layout.project_dir,
+            MARK_DONE,
+            &[("mark.star", &format!("{MARK}# edited\n"))],
+        );
+        let refused = retry(svc, &human, &ev, true).await.unwrap_err();
+        assert!(refused.to_string().contains("approv"), "{refused}");
+        assert_eq!(
+            rows(svc, "SELECT count(*) FROM v_effect_run").await,
+            json!([[1]]),
+            "no attempt was made"
+        );
+        // No such effect, no such event.
+        let unknown = svc
+            .commands
+            .run(
+                &human,
+                crate::commands::effect::RETRY,
+                json!({ "effect": "acme/nope", "event": format!("event:{}", ev.envelope.id) }),
+                true,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(unknown, CommandError::Invalid { .. }),
+            "{unknown:?}"
+        );
     }
 
     /// The loop guard: an effect never reacts to what its own run caused,

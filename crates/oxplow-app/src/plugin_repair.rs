@@ -234,8 +234,12 @@ async fn recent_errors(svc: &Services, key: &PluginKey, reason: &str) -> Vec<Str
             .read(move |c| {
                 let mut st = c
                     .prepare(
-                        "SELECT reason FROM effect_run
+                        // Where each reaction stands: a failure a
+                        // person's retry got past isn't one any more.
+                        "SELECT reason FROM effect_run r
                           WHERE effect = ?1 AND state = 'failed' AND reason IS NOT NULL
+                            AND attempt = (SELECT max(attempt) FROM effect_run l
+                                            WHERE l.effect = r.effect AND l.event_id = r.event_id)
                           ORDER BY id DESC LIMIT ?2",
                     )
                     .map_err(oxplow_db::map_sql_err)?;

@@ -3,6 +3,11 @@
  * → "Event pump"): read from `v_event_dead_letter`, retried or discarded by
  * a person through `retry_dead_letter` / `discard_dead_letter`. Settings →
  * Data lists them under Delivery; Alerts shows one row while any wait.
+ *
+ * Beside them, the reactions of extensions' effects that failed (P9.D4,
+ * `v_effect_run`'s latest attempts): never attempted again by themselves —
+ * a step outside oxplow may already have run — so a person retries one
+ * (`effect.retry`, asked first).
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -76,4 +81,67 @@ export function useUndelivered(): UndeliveredEvent[] {
   useEffect(load, [load]);
   useRerunOnChange(reads, load);
   return letters;
+}
+
+/** An effect's reaction to an event whose latest attempt failed. */
+export interface FailedReaction {
+  /** `<extension>/<id>`. */
+  effect: string;
+  eventId: string;
+  eventSeq: number;
+  /** The attempt that failed, from 1. */
+  attempt: number;
+  reason: string;
+  eventType: string;
+}
+
+export function reactionsFromResult(result: SqlQueryResult): FailedReaction[] {
+  return result.rows.map((row) => {
+    const at = (name: string) => row[result.columns.indexOf(name)] ?? null;
+    return {
+      effect: String(at("effect")),
+      eventId: String(at("event_id")),
+      eventSeq: Number(at("event_seq")),
+      attempt: Number(at("attempt") ?? 1),
+      reason: String(at("reason") ?? ""),
+      eventType: String(at("event_type") ?? "an event"),
+    };
+  });
+}
+
+/** What a failed reaction's row says. */
+export function reactionLine(r: FailedReaction): string {
+  const line = `${r.effect} failed on ${r.eventType} (event ${r.eventSeq})`;
+  return r.attempt > 1 ? `${line}, attempt ${r.attempt}` : line;
+}
+
+/** The reactions whose latest attempt failed, newest first, and what was read. */
+export async function readFailedReactions(): Promise<{ reactions: FailedReaction[]; reads: Reads }> {
+  const res = await querySql(
+    `SELECT r.effect, r.event_id, r.event_seq, r.attempt, r.reason, e.type AS event_type
+       FROM v_effect_run r LEFT JOIN v_event e ON e.id = r.event_id
+      WHERE r.latest = 1 AND r.state = 'failed' ORDER BY r.id DESC`,
+    [],
+    200,
+  );
+  return { reactions: reactionsFromResult(res), reads: res.reads };
+}
+
+/** The failed reactions, re-read when they change. */
+export function useFailedReactions(): FailedReaction[] {
+  const [reactions, setReactions] = useState<FailedReaction[]>([]);
+  const [reads, setReads] = useState<Reads>(NO_READS);
+  const load = useCallback(() => {
+    void readFailedReactions()
+      .then((r) => {
+        setReactions(r.reactions);
+        setReads(r.reads);
+      })
+      .catch((e: unknown) => {
+        recordOpError({ label: "Read failed reactions", message: e instanceof Error ? e.message : String(e) });
+      });
+  }, []);
+  useEffect(load, [load]);
+  useRerunOnChange(reads, load);
+  return reactions;
 }

@@ -1648,6 +1648,37 @@ fails never dead-letters the event. An approved proposal runs its calls
 as the person; the script's own events go only with a run that doesn't
 ask.
 
+**Attempts and a person's retry** (P9.D4). A reaction is `(effect,
+event)`; `effect_run` holds its **attempts** (`attempt` from 1, `origin`
+`live | retry | backfill`, V156), and the reaction's state is its latest
+attempt's (`v_effect_run.latest`). The live consumer makes one attempt
+and never another. A failed reaction is attempted again only by a
+person: `effect.retry { effect, event }` (`commands/effect.rs` —
+human-only, `Confirm::Always`, `External`, registered with the consumer
+at boot) runs `effect_triggers::run_reaction(…, ReactionOrigin::Retry)`,
+the same steps as a live reaction from the loop guard on, as the next
+attempt:
+- the reaction's latest attempt must be `failed` (`Invalid` otherwise: one
+  that ran, was skipped or left a proposal isn't retried; one never made
+  has nothing to retry);
+- the effect must be enabled and **approved as it is now** — a retry runs
+  today's script, composing afresh from the event, not what the failed
+  attempt composed;
+- when the event was logged doesn't matter (`start_after_seq` is the live
+  consumer's rule; the person named the event);
+- it counts toward the effect's health like any attempt, and is recorded
+  `effect.result@3 { …, attempt, origin: retry }` (v2 upcasts as `attempt:
+  1, origin: live`).
+
+It asks every time because of what a failure can hide: an attempt
+interrupted with a step outside oxplow under way may have landed that
+step, and a retry sends it again. The confirmation's text says so.
+Settings → Data → Delivery lists the reactions whose latest attempt
+failed (`useFailedReactions`), each with its reason and **Retry**
+(`InlineConfirm`). **Nothing retries by itself**: that needs an
+idempotency contract no provider has ([providers.md](./providers.md)
+"Idempotency").
+
 ## Commands
 
 An extension's `commands:` (a stable kind, P6b; `extension_commands.rs`)

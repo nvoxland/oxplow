@@ -789,6 +789,36 @@ providers (`capabilities::apply_active`), so choosing one on Settings →
 Integrations ("Active for work items", P7.A2) takes effect with the
 config change.
 
+## Idempotency: designed, not built
+
+A write to a provider may land without oxplow learning it did (a crash, a
+timeout, a dropped pipe after the service accepted it). Sending it again
+is safe only if the provider can tell it is the same write. **No
+provider can today**, so oxplow never re-sends an External step by
+itself: an effect's interrupted reaction is recorded `failed` and waits
+for a person's `effect.retry`, asked first
+([extensions.md](./extensions.md) "Effects"); a failed command is
+reported, not retried.
+
+Automatic retry needs this contract, recorded here as its condition (P9
+decided against building it without a provider to hold to it):
+
+- `features.idempotent_writes: true` in a provider's capability
+  declaration: it promises that two `invoke`s carrying the same key
+  perform the write once and answer alike;
+- `InvokeParams.idempotency_key`, sent on every write to such a provider.
+  For an effect's step: derived from `effect:<effect>:<event id>` and the
+  step's position — stable across attempts, so a retry is the same key;
+- the host retries an interrupted External step automatically **only**
+  toward a provider declaring the feature, and still at most a bounded
+  number of times; toward any other, a person's retry stays the rule;
+- the conformance kit checks the promise (the same key twice: one item,
+  the same result) before a provider may declare it.
+
+Linear's API takes no idempotency key on `commentCreate` or
+`issueCreate`, so the reference provider couldn't declare it honestly;
+the fake could, which would prove the host and nothing about a service.
+
 ## The conformance kit (`crates/oxplow-sdk/src/conformance.rs`, `plugin_test.rs`)
 
 What `oxplow plugin test <name> [--bless] [--json]` runs for each
