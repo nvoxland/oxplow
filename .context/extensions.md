@@ -1293,6 +1293,42 @@ helpers consult and `useRefKinds` subscribes to:
   scheme through, and the link's text becomes its title from the
   `resolve` model (`usePluginRefTitle`) unless the author labelled it.
 
+## Effects (experimental)
+
+`effects:` (a private extension only; `effects.rs`) are scripts that react
+to a logged event by composing commands, run as
+`Actor::Effect { effect: "<extension>/<id>" }` — an agent's invoker
+rights, no thread, never a confirmation (commands.md "Only a person
+confirms"):
+
+```yaml
+effects:
+  - id: announce-done          # [a-z0-9-]+, unique in the extension
+    summary: Note a finished item on its thread.
+    on: [work_item.transitioned]   # core types and its own declared ones
+    where: { to: done }            # optional: payload fields equal to these
+    input: "SELECT title FROM v_work_item WHERE ref = :work_item"   # optional; payload fields bound
+    entry: effects/announce.star   # transform({event, rows}) → {commands, events?} | {skip}
+    after: [page_ref.work_item]    # optional: consumers it waits for
+```
+
+**Loading** (P8.D9) reads `on`/`where` through the collectors'
+`parse_trigger` (one rule for both) against core types and the
+extension's own `event_types`, and needs the script in the folder,
+defining `transform`; what's wrong is `extension.yaml:<line>`.
+
+**Consent and start position** (P8.D9). An effect is a project program
+(`exec_consent::ProgramKind::Effect`, key `effect:<extension>/<id>`,
+listed in Settings → Data with what approving means): its approval hash
+covers the script and **every file of its extension's folder** — the
+manifest decides when and with what it runs — so any edit stops it until
+a person approves it again. Approving (the RPC, a person's only) also
+sets `effect_state.start_after_seq` (V148) to the log's head
+(`effects::approved`): an effect never reacts to an event logged before
+its latest approval — not the backlog, not what happened while it waited
+to be re-approved. `effects::gate(...)` is the one check: `Unapproved`,
+`BeforeApproval` or `Runs`.
+
 ## Commands
 
 An extension's `commands:` (a stable kind, P6b; `extension_commands.rs`)

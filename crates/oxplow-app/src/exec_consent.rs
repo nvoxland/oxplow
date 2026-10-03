@@ -225,6 +225,9 @@ pub enum ProgramKind {
     /// An extension's provider (`providers:`): a long-lived program
     /// implementing a capability, approved with its declarations.
     Provider,
+    /// An extension's effect (`effects:`, P8.D9): a script that reacts to
+    /// events by running commands, approved over its extension's folder.
+    Effect,
 }
 
 /// A program the project's config would run.
@@ -262,6 +265,7 @@ impl ProjectProgram {
             ProgramKind::AcpAgent => format!("acp:{}", self.name),
             ProgramKind::Advisories => format!("advisories:{}", self.name),
             ProgramKind::Provider => format!("provider:{}", self.name),
+            ProgramKind::Effect => format!("effect:{}", self.name),
         }
     }
 
@@ -317,6 +321,18 @@ impl ProjectProgram {
                         rel == Path::new("extension.yaml") || rel.starts_with("lenses")
                     })?
                     .as_bytes(),
+                );
+            }
+            // The script, and every file of its extension: the manifest
+            // says when and with what it runs.
+            ProgramKind::Effect => {
+                h.update(self.program.as_bytes());
+                h.update([0u8]);
+                h.update(std::fs::read(&file)?);
+                h.update([2u8]);
+                h.update(
+                    tree_hash(&project_dir.join(self.tree.as_deref().unwrap_or_default()))?
+                        .as_bytes(),
                 );
             }
             ProgramKind::AcpAgent => {
@@ -593,6 +609,7 @@ pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
         ProgramKind::AcpAgent => "ACP agent",
         ProgramKind::Advisories => "extension advisories",
         ProgramKind::Provider => "provider",
+        ProgramKind::Effect => "effect",
     };
     format!(
         "{what} `{name}` runs `{program}` from the project's config and needs a person's approval first \
@@ -645,6 +662,11 @@ pub fn list(
         e.providers
             .iter()
             .map(move |spec| provider_program(e, spec))
+    }));
+    out.extend(extensions.iter().filter(|e| e.enabled).flat_map(|e| {
+        e.effects
+            .iter()
+            .map(move |decl| crate::effects::effect_program(e, decl))
     }));
     for p in &mut out {
         p.version = p.hash(project_dir).ok();

@@ -2094,6 +2094,33 @@ export type DryRun =
 // A fresh, empty one: no usable project database.
 "emptyDatabase";
 
+/**
+ *  An effect as loaded (valid ones; invalid ones are in the extension's
+ *  `errors`).
+ */
+export type EffectDecl = {
+	id: string,
+	extension: string,
+	summary: string,
+	// The event types it reacts to.
+	on: string[],
+	/**
+	 *  Payload fields that must equal these values (the collectors'
+	 *  `where`).
+	 */
+	filter: { [key in string]: string },
+	// SQL whose rows the script gets, the event's payload fields bound.
+	input: string | null,
+	// The script's path in the folder.
+	entry: string,
+	// Its source.
+	script: string,
+	// Consumers it waits for on each event.
+	after: string[],
+	// `file:line` of the declaration.
+	declaredAt: string,
+};
+
 // Everything installing or updating an extension would change.
 export type EffectReport = {
 	lenses: LensEffect[],
@@ -2543,6 +2570,11 @@ export type Extension_Deserialize = {
 	 */
 	refKinds: RefKindDecl[],
 	/**
+	 *  Effects it declares (experimental: a private extension's only;
+	 *  valid ones — each runs only once a person approves it, `effects`).
+	 */
+	effects: EffectDecl[],
+	/**
 	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).
 	 */
@@ -2646,6 +2678,11 @@ export type Extension_Serialize = {
 	 *  valid ones — the vocabulary registers them, `vocabulary_reactor`).
 	 */
 	refKinds: RefKindDecl[],
+	/**
+	 *  Effects it declares (experimental: a private extension's only;
+	 *  valid ones — each runs only once a person approves it, `effects`).
+	 */
+	effects: EffectDecl[],
 	/**
 	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).
@@ -4138,7 +4175,12 @@ export type ProgramKind =
  *  An extension's provider (`providers:`): a long-lived program
  *  implementing a capability, approved with its declarations.
  */
-"provider";
+"provider" | 
+/**
+ *  An extension's effect (`effects:`, P8.D9): a script that reacts to
+ *  events by running commands, approved over its extension's folder.
+ */
+"effect";
 
 // A program the project's config would run.
 export type ProjectProgram = {

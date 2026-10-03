@@ -84,6 +84,16 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
       approveTitle: `Runs ${p.program} as a long-lived provider with these grants, approving every file in ${p.tree ?? "its extension"} (its declarations included). Approve only if you trust this extension; any change needs approval again.`,
     };
   }
+  if (p.kind === "effect") {
+    return {
+      key: `${p.kind}:${p.name}`,
+      label: `Effect ${p.name}`,
+      command: p.program,
+      status: p.approved ? "Approved on this machine" : "Not approved: it won't run",
+      approved: p.approved,
+      approveTitle: `Runs ${p.program} on events logged after you approve, composing commands with an agent's rights (a command that asks becomes a proposal for you), approving every file in ${p.tree ?? "its extension"}. Approve only if you trust this extension; any change needs approval again.`,
+    };
+  }
   const command = [...(p.env ?? []), p.program, ...p.args].join(" ");
   const what = p.kind === "collector" ? "Collector" : p.kind === "plugin" ? "Collection plugin" : "ACP agent";
   return {

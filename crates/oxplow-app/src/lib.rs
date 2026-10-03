@@ -47,6 +47,7 @@ pub mod dashboard_tiles;
 pub mod diagnostics;
 pub mod duplication_scan;
 pub mod effective_config;
+pub mod effects;
 pub mod effort_evidence;
 pub mod effort_lifecycle;
 pub mod effort_reactors;

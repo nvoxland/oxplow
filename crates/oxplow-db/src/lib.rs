@@ -19,6 +19,7 @@ pub mod comment_store;
 pub mod dashboard_store;
 mod database;
 pub mod diagnostic_store;
+pub mod effect_state_store;
 pub mod effort_evidence_store;
 pub mod effort_store;
 pub mod event_content_store;

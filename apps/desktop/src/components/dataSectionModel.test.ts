@@ -83,6 +83,26 @@ test("programRow shows a provider with the secrets and hosts it gets", () => {
   expect(m.approveTitle).toContain("every file in oxplow/extensions/tracker");
 });
 
+test("programRow shows an effect as reacting to events from approval on (P8.D9)", () => {
+  const m = programRow({
+    kind: "effect",
+    name: "acme/announce-done",
+    program: "oxplow/extensions/acme/effects/announce.star",
+    args: [],
+    env: [],
+    credentials: [],
+    network: [],
+    tree: "oxplow/extensions/acme",
+    approved: false,
+    version: "abc",
+  });
+  expect(m.label).toBe("Effect acme/announce-done");
+  expect(m.command).toBe("oxplow/extensions/acme/effects/announce.star");
+  expect(m.status).toBe("Not approved: it won't run");
+  expect(m.approveTitle).toContain("events logged after you approve");
+  expect(m.approveTitle).toContain("every file in oxplow/extensions/acme");
+});
+
 import { canApprove, providerEffectLines } from "./dataSectionModel.js";
 import type { ProviderEffect } from "../tauri-bridge/generated/bindings.js";
 

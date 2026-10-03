@@ -926,6 +926,9 @@ pub struct Extension {
     /// Ref kinds it declares (experimental: a private extension's only;
     /// valid ones — the vocabulary registers them, `vocabulary_reactor`).
     pub ref_kinds: Vec<crate::extension_ref_kinds::RefKindDecl>,
+    /// Effects it declares (experimental: a private extension's only;
+    /// valid ones — each runs only once a person approves it, `effects`).
+    pub effects: Vec<crate::effects::EffectDecl>,
     /// `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
     /// read-only).
     pub origin: String,
@@ -1396,6 +1399,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         custom_components: Vec::new(),
         event_types: Default::default(),
         ref_kinds: Vec::new(),
+        effects: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
         enabled: true,
@@ -1518,6 +1522,24 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 &|rel| files.read(rel),
             );
             ext.event_types = declared;
+            ext.errors.extend(errors);
+        }
+        // An experimental kind: a shared manifest's is refused by `check`.
+        // After `event_types`: an effect may react to its own types.
+        if let Some(v) = m.effects.as_ref().filter(|_| m.sharing == Sharing::Private) {
+            let declared = ext.event_types.types.clone();
+            let (effects, errors) = crate::effects::parse_effects(
+                name,
+                v,
+                &file,
+                &manifest,
+                &|rel| files.read(rel),
+                &|t: &str| {
+                    oxplow_domain::events::schema::is_core_type(t)
+                        || declared.iter().any(|d| d.event_type == t)
+                },
+            );
+            ext.effects = effects;
             ext.errors.extend(errors);
         }
         if let Some(v) = &m.collectors {
@@ -2252,6 +2274,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.custom_components.clear();
         ext.event_types = Default::default();
         ext.ref_kinds.clear();
+        ext.effects.clear();
         ext.advisories.clear();
         ext.measures.clear();
         ext.dimensions.clear();

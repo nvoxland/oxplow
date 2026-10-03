@@ -372,8 +372,9 @@ fn parse_every(s: &str) -> Option<u32> {
 }
 
 /// The `trigger:` value: `manual`, `{ every: 15m }` or
-/// `{ on: [types], where?: { field: value } }`.
-fn parse_trigger(
+/// `{ on: [types], where?: { field: value } }`. An extension's effect
+/// (`effects:`) reads its `on`/`where` through it too.
+pub fn parse_trigger(
     value: Option<&serde_yaml::Value>,
     knows_event: &dyn Fn(&str) -> bool,
 ) -> Result<Trigger, String> {
