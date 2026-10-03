@@ -703,12 +703,24 @@ the instance's status (neither is a problem colour). The fake's
 `rate-limit:<ms>` hook refuses its next `invoke` or `read` that way.
 
 **A call's outcome is its instance's while that instance runs**
-(tsk820): `call_succeeded` / `call_failed` take the `Instance` that made
-the call and do nothing unless it is still the one running under its name
-(`is_current`, by identity). A call that finishes after its instance was
-stopped — the first read an enable starts, cut short or just late —
-neither marks it `ready` again nor counts a failure against it, and a
-restarted instance never inherits the old one's results.
+(tsk820, tsk836). Every health write a running instance causes takes the
+`Instance` that caused it and does nothing unless it is still the one
+running under its name (`is_running`, by identity) — checked and written
+under the `running` lock a stop takes: `call_succeeded`, `call_failed`
+and `failed`, a (re)start's `start_failed` (its stop is
+`take_if_current`, never by name), `disable` (the persistent disable
+too), `note_rate_limit` and `set_activity`. A call that finishes after
+its instance was stopped — the first read an enable starts, cut short or
+just late — neither marks it `ready` again nor counts a failure against
+it, and a restarted instance never inherits the old one's results.
+**A stopped instance never starts again**: `tear_down` marks it
+`stopped` before it ends its process, and `connection()` refuses to
+start one that is (and ends a process whose start finished after the
+stop). So a `provider.sync` still holding the old instance when a person
+turned it off and on, or when an approval restarted it, can't bring a
+process back — nor report its restart's `unapproved`, `unconfigured`,
+changed declarations or failure against the successor. An enable's first
+start, before the instance runs, reports by name (`made_by: None`).
 
 **Health** (`InstanceHealth { state, consecutive_failures, last_ok_at,
 mean_invoke_ms, rate_limited_until, activity }`, per machine, in memory): `state` is `off`,

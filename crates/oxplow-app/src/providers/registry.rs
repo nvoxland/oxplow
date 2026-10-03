@@ -278,6 +278,9 @@ pub struct Instance {
     pub(super) deps: HostDeps,
     pub(super) registry: Weak<ProviderRegistry>,
     live: tokio::sync::Mutex<Option<Live>>,
+    /// Stopped (torn down): it never starts again, so a late caller still
+    /// holding it can't bring back a process nobody runs (tsk836).
+    stopped: std::sync::atomic::AtomicBool,
     /// One start at a time; held across a start, which `live` never is.
     starting: tokio::sync::Mutex<()>,
     /// When its sign-in was last renewed because its service refused it.
@@ -506,6 +509,12 @@ impl Instance {
     pub(super) async fn connection(
         &self,
     ) -> Result<(oxplow_provider_protocol::Peer, Handle), CommandError> {
+        let stopped = || CommandError::Failed {
+            message: format!("provider `{}` was stopped", self.name),
+        };
+        if self.is_stopped() {
+            return Err(stopped());
+        }
         {
             let live = self.live.lock().await;
             if let Some(l) = live.as_ref().filter(|l| !l.conn.peer.is_closed()) {
@@ -526,6 +535,9 @@ impl Instance {
             });
         }
         let _one = self.starting.lock().await;
+        if self.is_stopped() {
+            return Err(stopped());
+        }
         // Another caller may have started it while this one waited.
         if let Some(l) = self
             .live
@@ -538,19 +550,35 @@ impl Instance {
         }
         match self.start().await {
             Ok(l) => {
+                let mut live = self.live.lock().await;
+                // Stopped while it started: the new process goes with it
+                // (a stop marks it stopped before it takes `live`).
+                if self.is_stopped() {
+                    return Err(stopped());
+                }
                 *self.not_before.lock() = None;
                 let out = (l.conn.peer.clone(), l.handle.clone());
-                *self.live.lock().await = Some(l);
+                *live = Some(l);
                 Ok(out)
             }
             Err(e) => {
                 let message = e.to_string();
                 if let Some(r) = self.registry.upgrade() {
-                    r.start_failed(&self.name, e).await;
+                    r.start_failed(&self.name, Some(self), e).await;
                 }
                 Err(CommandError::Failed { message })
             }
         }
+    }
+
+    fn is_stopped(&self) -> bool {
+        self.stopped.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Whether it has a process.
+    #[cfg(test)]
+    pub(super) async fn has_process(&self) -> bool {
+        self.live.lock().await.is_some()
     }
 
     /// Send the running process a `fake/hooks` notification (the fake
@@ -628,7 +656,7 @@ impl Instance {
     ) -> Option<CommandError> {
         let wait = retry_after_ms.map(Duration::from_millis);
         if let Some(r) = self.registry.upgrade() {
-            r.note_rate_limit(&self.name, wait);
+            r.note_rate_limit(self, wait).await;
         }
         match wait {
             Some(wait) if !retried && wait <= RATE_LIMIT_WAIT_MAX => {
@@ -1284,6 +1312,7 @@ impl ProviderRegistry {
             deps: self.deps.clone(),
             registry: self.me.clone(),
             live: tokio::sync::Mutex::new(None),
+            stopped: std::sync::atomic::AtomicBool::new(false),
             starting: tokio::sync::Mutex::new(()),
             renewed_at: parking_lot::Mutex::new(None),
             not_before: parking_lot::Mutex::new(None),
@@ -1351,7 +1380,7 @@ impl ProviderRegistry {
         let instance = match self.instance(ext, spec, id, scope, config).await {
             Ok(i) => i,
             Err(e) => {
-                self.start_failed(&name, e.clone()).await;
+                self.start_failed(&name, None, e.clone()).await;
                 return Err(e);
             }
         };
@@ -1396,12 +1425,14 @@ impl ProviderRegistry {
             // It may come up: enabled and failing, its next call restarts
             // it with backoff.
             Err(e @ HostError::Failed { .. }) => {
-                self.admit(&bus, instance, epoch).await.map_err(&refuse)?;
-                self.failed(&name, e.to_string()).await;
+                self.admit(&bus, instance.clone(), epoch)
+                    .await
+                    .map_err(&refuse)?;
+                self.failed(&name, Some(&instance), e.to_string()).await;
                 Ok(())
             }
             Err(e) => {
-                self.start_failed(&name, e.clone()).await;
+                self.start_failed(&name, None, e.clone()).await;
                 Err(e)
             }
         }
@@ -1508,6 +1539,9 @@ impl ProviderRegistry {
         {
             tracing::warn!(instance = %running.name, error = %e, "withdrawing a provider's features failed");
         }
+        running
+            .stopped
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         running.live.lock().await.take();
     }
 
@@ -2016,38 +2050,58 @@ impl ProviderRegistry {
     }
 
     /// A start failed: set the state it says, counting a failure.
-    async fn start_failed(&self, instance: &str, e: HostError) {
-        match e {
-            HostError::Unapproved(_) => {
-                self.stop(instance).await;
-                self.set_state(instance, InstanceState::Unapproved);
-            }
-            HostError::Unconfigured { problems, .. } => {
-                self.stop(instance).await;
-                self.set_state(
-                    instance,
-                    InstanceState::Unconfigured {
-                        problems: problems
-                            .into_iter()
-                            .map(|p| ConfigProblem {
-                                path: p.path,
-                                message: p.message,
-                            })
-                            .collect(),
-                    },
-                );
-            }
+    /// `made_by` is the running instance whose (re)start it was; a start
+    /// of one no longer running is no one's, and changes nothing — never
+    /// the state, health or enablement of the instance now running under
+    /// its name (tsk836). `None`: an enable's first start, before the
+    /// instance runs.
+    async fn start_failed(&self, instance: &str, made_by: Option<&Instance>, e: HostError) {
+        let unstarted = match e {
+            HostError::Unapproved(_) => InstanceState::Unapproved,
+            HostError::Unconfigured { problems, .. } => InstanceState::Unconfigured {
+                problems: problems
+                    .into_iter()
+                    .map(|p| ConfigProblem {
+                        path: p.path,
+                        message: p.message,
+                    })
+                    .collect(),
+            },
             // It isn't what was approved: off until a person looks.
             HostError::DeclarationsChanged { .. } => {
-                self.disable(instance, e.to_string()).await;
+                return self.disable(instance, made_by, e.to_string()).await;
             }
-            HostError::Failed { .. } => self.failed(instance, e.to_string()).await,
+            HostError::Failed { .. } => return self.failed(instance, made_by, e.to_string()).await,
+        };
+        if let Some(made_by) = made_by {
+            let Some(running) = self.take_if_current(made_by).await else {
+                return;
+            };
+            self.tear_down(running).await;
         }
+        self.set_state(instance, unstarted);
+    }
+
+    /// Remove `made_by` from the running instances if it is the one running
+    /// under its name.
+    async fn take_if_current(&self, made_by: &Instance) -> Option<Arc<Instance>> {
+        let mut running = self.running.lock().await;
+        if !is_running(&running, made_by) {
+            return None;
+        }
+        running.remove(&made_by.name)
     }
 
     /// A start or call failed: count it ([`crate::plugin_health`]); the
     /// verdict either backs the next start off or stops the instance.
-    pub(super) async fn failed(&self, instance: &str, error: String) {
+    /// `made_by` as for [`Self::start_failed`]: the count, the health and
+    /// any stop are its while it runs — checked and written under the
+    /// lock a stop takes, so a successor never inherits them.
+    pub(super) async fn failed(&self, instance: &str, made_by: Option<&Instance>, error: String) {
+        let mut running = self.running.lock().await;
+        if made_by.is_some_and(|i| !is_running(&running, i)) {
+            return;
+        }
         let verdict = match self.plugins.failed(&plugin_key(instance), &error).await {
             Ok(v) => v,
             Err(e) => {
@@ -2074,9 +2128,13 @@ impl ProviderRegistry {
             h.consecutive_failures
         };
         match verdict {
-            crate::plugin_health::Verdict::Disabled { reason } => self.halt(instance, reason).await,
+            crate::plugin_health::Verdict::Disabled { reason } => {
+                let removed = self.halt_locked(&mut running, instance);
+                drop(running);
+                self.halted(instance, removed, reason).await;
+            }
             crate::plugin_health::Verdict::Backoff { .. } => {
-                if let Some(i) = self.get(instance).await {
+                if let Some(i) = running.get(instance) {
                     let wait = self
                         .deps
                         .backoff
@@ -2089,45 +2147,68 @@ impl ProviderRegistry {
     }
 
     /// Stop `instance` and keep it off on this machine until a person
-    /// enables it, for `reason` (`plugin.disabled@1`).
-    pub(super) async fn disable(&self, instance: &str, reason: String) {
+    /// enables it, for `reason` (`plugin.disabled@1`) — when `made_by` is
+    /// given, only while it is the one running.
+    pub(super) async fn disable(&self, instance: &str, made_by: Option<&Instance>, reason: String) {
+        let mut running = self.running.lock().await;
+        if made_by.is_some_and(|i| !is_running(&running, i)) {
+            return;
+        }
         if let Err(e) = self.plugins.disable(&plugin_key(instance), &reason).await {
             tracing::error!(instance, error = %e, "recording the disable failed");
         }
-        self.halt(instance, reason).await;
+        let removed = self.halt_locked(&mut running, instance);
+        drop(running);
+        self.halted(instance, removed, reason).await;
     }
 
-    /// Stop a disabled `instance` and show why.
-    async fn halt(&self, instance: &str, reason: String) {
-        let removed = {
-            let mut running = self.running.lock().await;
-            *self
-                .disables
-                .lock()
-                .entry(instance.to_string())
-                .or_default() += 1;
-            running.remove(instance)
-        };
+    /// Take a disabled `instance` out of the running ones, under their
+    /// lock: a start under way (its epoch) won't admit it either.
+    fn halt_locked(
+        &self,
+        running: &mut BTreeMap<String, Arc<Instance>>,
+        instance: &str,
+    ) -> Option<Arc<Instance>> {
+        *self
+            .disables
+            .lock()
+            .entry(instance.to_string())
+            .or_default() += 1;
+        running.remove(instance)
+    }
+
+    /// End what [`Self::halt_locked`] took, and show why.
+    async fn halted(&self, instance: &str, removed: Option<Arc<Instance>>, reason: String) {
         if let Some(running) = removed {
             self.tear_down(running).await;
         }
         self.set_state(instance, InstanceState::Disabled { reason });
     }
 
-    /// Its service said to wait (`wait`, when it said how long).
-    pub(super) fn note_rate_limit(&self, instance: &str, wait: Option<Duration>) {
+    /// Its service said to wait (`wait`, when it said how long) — while
+    /// `made_by` is the running instance.
+    pub(super) async fn note_rate_limit(&self, made_by: &Instance, wait: Option<Duration>) {
         let until = oxplow_domain::Timestamp::from_unix_ms(
             oxplow_domain::Timestamp::now().unix_ms()
                 + wait.unwrap_or(RATE_LIMIT_WAIT_MAX).as_millis() as i64,
         );
-        if let Some(h) = self.health.lock().get_mut(instance) {
+        let running = self.running.lock().await;
+        if !is_running(&running, made_by) {
+            return;
+        }
+        if let Some(h) = self.health.lock().get_mut(&made_by.name) {
             h.rate_limited_until = Some(until.to_string());
         }
     }
 
-    /// What a read in progress says it's doing; `None` when it ends.
-    pub(super) fn set_activity(&self, instance: &str, activity: Option<String>) {
-        if let Some(h) = self.health.lock().get_mut(instance) {
+    /// What a read in progress says it's doing; `None` when it ends —
+    /// while `made_by` is the running instance.
+    pub(super) async fn set_activity(&self, made_by: &Instance, activity: Option<String>) {
+        let running = self.running.lock().await;
+        if !is_running(&running, made_by) {
+            return;
+        }
+        if let Some(h) = self.health.lock().get_mut(&made_by.name) {
             h.activity = activity;
         }
     }
@@ -2143,33 +2224,23 @@ impl ProviderRegistry {
             .is_some_and(|t| t.unix_ms() > now)
     }
 
-    /// Whether `instance` is the one running under its name: a stopped
-    /// instance's late results — and those of the one a restart replaced —
-    /// aren't the running one's (tsk820).
-    async fn is_current(&self, instance: &Instance) -> bool {
-        self.running
-            .lock()
-            .await
-            .get(&instance.name)
-            .is_some_and(|running| std::ptr::eq(Arc::as_ptr(running), instance))
-    }
-
     /// A call `instance` made failed: counted like any failure, while it
-    /// is the running instance. A call cut short by its own stop isn't one.
+    /// is the running instance (tsk820). A call cut short by its own stop
+    /// isn't one.
     pub(super) async fn call_failed(&self, instance: &Instance, error: String) {
-        if self.is_current(instance).await {
-            self.failed(&instance.name, error).await;
-        }
+        self.failed(&instance.name, Some(instance), error).await;
     }
 
     /// A call `instance` made succeeded: its health says so, while it is
-    /// the running instance.
-    pub(super) async fn call_succeeded(&self, instance: &Instance, took: Duration) {
-        if !self.is_current(instance).await {
+    /// the running instance — checked and written under the lock a stop
+    /// takes, so a stop either sees this and replaces it, or has already
+    /// removed the instance.
+    pub(super) async fn call_succeeded(&self, made_by: &Instance, took: Duration) {
+        let running = self.running.lock().await;
+        if !is_running(&running, made_by) {
             return;
         }
-        let made_by = instance;
-        let instance = instance.name.as_str();
+        let instance = made_by.name.as_str();
         if let Err(e) = self
             .plugins
             .succeeded(&plugin_key(instance), Some(took))
@@ -2178,15 +2249,6 @@ impl ProviderRegistry {
             tracing::warn!(instance, error = %e, "recording its health failed");
         }
         let ms = took.as_secs_f64() * 1000.0;
-        // Under the lock a stop takes: it either sees this state and
-        // replaces it, or has already removed the instance.
-        let running = self.running.lock().await;
-        if !running
-            .get(instance)
-            .is_some_and(|r| std::ptr::eq(Arc::as_ptr(r), made_by))
-        {
-            return;
-        }
         let mut health = self.health.lock();
         let h = health
             .entry(instance.to_string())
@@ -2248,6 +2310,15 @@ async fn copy_approved(
         name,
         message: format!("copying it to run: {e}"),
     })?
+}
+
+/// Whether `instance` is the one running under its name: a stopped
+/// instance's late results — and those of the one a restart replaced —
+/// aren't the running one's (tsk820, tsk836).
+fn is_running(running: &BTreeMap<String, Arc<Instance>>, instance: &Instance) -> bool {
+    running
+        .get(&instance.name)
+        .is_some_and(|r| std::ptr::eq(Arc::as_ptr(r), instance))
 }
 
 fn now() -> String {

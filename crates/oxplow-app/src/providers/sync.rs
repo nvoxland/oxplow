@@ -171,7 +171,7 @@ impl Instance {
             break outcome;
         };
         if let Some(r) = self.registry.upgrade() {
-            r.set_activity(&self.name, None);
+            r.set_activity(self, None).await;
         }
         let registry = self.registry.upgrade();
         let (finished, result) = match outcome {
@@ -266,7 +266,8 @@ impl Instance {
                         serde_json::from_value::<notify::Progress>(params),
                         self.registry.upgrade(),
                     ) {
-                        r.set_activity(&self.name, Some(activity_of(&decl.name, &p)));
+                        r.set_activity(self, Some(activity_of(&decl.name, &p)))
+                            .await;
                     }
                 }
                 _ => {}

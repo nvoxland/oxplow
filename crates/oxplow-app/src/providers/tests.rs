@@ -1196,7 +1196,7 @@ async fn a_disable_while_starting_keeps_the_instance_off() {
     };
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     providers
-        .disable(INSTANCE, "a person turned it off".into())
+        .disable(INSTANCE, None, "a person turned it off".into())
         .await;
     let _ = starting.await.unwrap();
     assert!(!fx.svc.commands.namespace_owner("fake").is_some());
@@ -2521,6 +2521,40 @@ async fn a_call_finishing_after_its_instance_stopped_changes_nothing() {
         .call_failed(&was_running, "the old process went away".into())
         .await;
     assert_eq!(state(), Some((InstanceState::Ready, 0)));
+}
+
+/// tsk836: a stopped instance never starts again. A read still holding
+/// it — a `provider.sync` looping over collectors when a person turned
+/// it off and on — doesn't restart its process, and whatever that late
+/// read meets is never the running successor's: here the extension's
+/// folder changed since its approval, which a restart of the old one
+/// would report as `unapproved` and stop the healthy successor for.
+#[tokio::test]
+async fn a_late_read_on_a_stopped_instance_doesnt_touch_its_successor() {
+    let (fx, _ext) = approved("").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    first_read(&fx).await;
+    let was_running = fx.svc.providers.get(INSTANCE).await.unwrap();
+    configure(&fx, false, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    let successor = fx.svc.providers.get(INSTANCE).await.unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&was_running, &successor));
+    // The folder isn't what was approved any more.
+    write_extension(&fx.svc.layout.project_dir, "progress");
+
+    let late = was_running.read(&Actor::Human, "work_items").await;
+    assert!(late.is_err(), "a stopped instance doesn't read: {late:?}");
+    let still = fx.svc.providers.get(INSTANCE).await.expect("still running");
+    assert!(std::sync::Arc::ptr_eq(&still, &successor));
+    assert_eq!(
+        fx.svc.providers.health(INSTANCE).map(|h| h.state),
+        Some(InstanceState::Ready)
+    );
+    // Nothing of it came back to life.
+    assert!(!was_running.has_process().await);
 }
 
 /// The tracker extension, its provider's credential `FAKE_TOKEN` obtained
