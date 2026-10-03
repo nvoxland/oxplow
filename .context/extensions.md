@@ -1303,8 +1303,12 @@ ref_kinds:
 ```
 
 **Loading** (after models and pages) refuses, at `extension.yaml:<line>`:
-a kind outside the extension's namespace, an unanchored or broken id
-regex, a `resolve` that isn't one of its models with `ref` and `title`, a
+a kind outside the extension's namespace, an unanchored, broken or
+non-portable id regex (the desktop runs it in JS's backtracking engine,
+so it's held to a subset both engines read alike and neither backtracks
+on — characters, classes, `.`, `\d \w \s`, escaped punctuation and
+quantifiers; no groups, alternation or other escapes — and the renderer
+never matches an id over 256 characters; tsk797), a `resolve` that isn't one of its models with `ref` and `title`, a
 `page` that isn't one of its pages, a `wikilink` core already reads
 (a core kind, `git`, `dir`, `finding`, `tsk`), an icon not in
 `REF_KIND_ICONS` (lucide names the desktop maps), a duplicate.

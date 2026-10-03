@@ -137,6 +137,42 @@ pub fn parse_ref_kinds(
     (out, errors)
 }
 
+/// An id pattern both regex engines read the same and neither backtracks
+/// on: the desktop matches it in JS (a backtracking engine) to resolve
+/// `[[…]]`, oxplow in Rust (tsk797). So: characters, classes (`[…]`),
+/// `.`, the shorthands `\d \w \s` (and their negations), escaped
+/// punctuation, and quantifiers (`? * + {n} {n,m}`) — no groups, no
+/// alternation, no other escapes (`\p{…}`, backreferences, flags).
+fn portable_id_pattern(pattern: &str) -> Result<(), String> {
+    let mut chars = pattern.chars().peekable();
+    let mut in_class = false;
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.next() {
+                Some('d' | 'D' | 'w' | 'W' | 's' | 'S') => {}
+                Some(e) if e.is_ascii_punctuation() => {}
+                Some(e) => {
+                    return Err(format!(
+                        "`\\{e}` isn't one both engines read alike; use `\\d`, `\\w`, `\\s`, a class or an escaped punctuation mark"
+                    ))
+                }
+                None => return Err("it ends in a lone `\\`".into()),
+            },
+            '[' if !in_class => in_class = true,
+            ']' if in_class => in_class = false,
+            '(' | ')' if !in_class => {
+                return Err("no groups: an id pattern is a run of characters, classes and quantifiers".into())
+            }
+            '|' if !in_class => return Err("no alternation (`|`): use a class".into()),
+            _ => {}
+        }
+    }
+    if in_class {
+        return Err("a class (`[`) isn't closed".into());
+    }
+    Ok(())
+}
+
 fn decl_of(
     extension: &str,
     models: &[oxplow_db::models::ModelSource],
@@ -164,6 +200,7 @@ fn decl_of(
             f.id
         )));
     }
+    portable_id_pattern(&f.id).map_err(|why| named(format!("`id: {}`: {why}", f.id)))?;
     oxplow_domain::refs::kind::KindSpec::new(&f.kind, &f.id).map_err(|e| named(e.to_string()))?;
     let model = models
         .iter()
@@ -312,7 +349,12 @@ ref_kinds:
     #[test]
     fn a_broken_ref_kind_is_an_error_at_its_line() {
         for (from, to, says) in [
-            ("id: '^\\d+$'", "id: '^(\\d+$'", "bad id regex"),
+            ("id: '^\\d+$'", "id: '^(\\d+$'", "no groups"),
+            // Patterns the renderer's JS engine would backtrack on, or read
+            // differently from Rust's (tsk797).
+            ("id: '^\\d+$'", "id: '^(a+)+$'", "no groups"),
+            ("id: '^\\d+$'", "id: '^a|b$'", "no alternation"),
+            ("id: '^\\d+$'", "id: '^\\p{L}+$'", "`\\p`"),
             ("id: '^\\d+$'", "id: '\\d+'", "anchored"),
             ("kind: acme_pr", "kind: other_pr", "must be `acme_<name>`"),
             (

@@ -55,6 +55,12 @@ describe("an extension's ref kind (P8.D7)", () => {
     expect(preprocessWikilinks("see [[pr:12]]")).toContain("oxplow-invalid:");
   });
 
+  test("an over-long id never reaches the pattern (tsk797)", () => {
+    setRefKinds([ACME_PR]);
+    expect(pluginWikilinkRef(`pr:${"1".repeat(300)}`)).toBeNull();
+    expect(pluginWikilinkRef(`pr:${"1".repeat(200)}`)).toBe(`acme_pr:${"1".repeat(200)}`);
+  });
+
   test("reads v_ref_kind rows", () => {
     const kinds = refKindsFromResult({
       columns: ["kind", "extension", "label", "id_pattern", "wikilinks", "resolve", "page", "icon"],
