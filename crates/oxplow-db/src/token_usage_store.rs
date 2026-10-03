@@ -3,8 +3,8 @@
 //! plus a per-session read cursor so successive Stops only sum the new tail
 //! of the transcript.
 //!
-//! Modeled on `observation_store` (typed-id columns stored as raw INTEGER,
-//! `db.call`/`db.call_mut`, `map_sql_err`). See migration
+//! Typed-id columns stored as raw INTEGER, `db.call`/`db.call_mut`,
+//! `map_sql_err`. See migration
 //! `V35__agent_token_usage.sql` and `.context/data-model.md`.
 
 use rusqlite::{params, OptionalExtension};

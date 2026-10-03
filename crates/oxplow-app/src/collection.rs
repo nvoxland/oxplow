@@ -982,7 +982,7 @@ impl CollectionService {
         skip_if_stale: bool,
     ) -> Result<CoverageIngest, DomainError> {
         // OBSERVE-ALWAYS (tsk270): record absolute coverage regardless of effort;
-        // the effort-relative diff is derived at read.
+        // the effort-relative diff is derived with the effort's evidence.
         let Some(stream_id) = self.stream_id_for(thread).await? else {
             return Ok(CoverageIngest::NoOpenEffort);
         };
@@ -1262,8 +1262,8 @@ impl CollectionService {
     /// coverage — per-file instrumented/covered line-sets, verbatim, in the
     /// `coverage-detail` finding + an `oxplow.coverage.abs_pct` headline + the
     /// run (pinned to the stream's current snapshot) — with NO effort baseline.
-    /// The effort-relative diff-coverage is derived later at READ from these
-    /// line-sets ([`diff_coverage_for_effort`]). Attribution rides the unified
+    /// The effort-relative diff-coverage is derived from these line-sets with
+    /// the effort's evidence ([`diff_coverage_for_effort`]). Attribution rides the unified
     /// `"run"` ledger (auto-claimed when unambiguous, else reconciled/claimed).
     /// The id of a coverage sub-measure (`oxplow.coverage.branch`/`.function`,
     /// tsk123) IFF an enabled spec consumes it — else `None` (the per-measure
@@ -1454,21 +1454,26 @@ impl CollectionService {
     }
 
     /// Derive the effort-relative **diff-coverage** from a run's stored ABSOLUTE
-    /// per-file line-sets, against the effort's start snapshot (tsk270). The body
-    /// is the pre-tsk270 `store_diff_coverage` computation, moved to read time so
-    /// a coverage run claimed AFTER the effort closed still produces a diff and
-    /// nothing is frozen at reconcile. Returns `(summary_pct, diff_payload)` or
-    /// `None` when the effort has no start snapshot or no changed instrumented
-    /// lines overlap. `diff_payload` is the same shape the panel already renders.
+    /// per-file line-sets (tsk270): the lines that changed between the effort's
+    /// start snapshot and `measured`, the snapshot the run's capture is pinned
+    /// to — the code the run measured, never a working tree (tsk862), so it
+    /// holds for a worktree stream and doesn't drift after the run. Computed
+    /// when the evidence is (`effort_evidence`), so a run claimed after the
+    /// effort closed still produces a diff. Returns `(summary_pct,
+    /// diff_payload)`, or `None` when either snapshot is unknown, a side's
+    /// bytes are gone, or no changed instrumented lines overlap.
+    /// `diff_payload` is the shape the panel renders.
     async fn diff_coverage_for_effort(
         &self,
         effort: &Effort,
+        measured: Option<i64>,
         abs_payload: &serde_json::Value,
     ) -> Result<Option<(f64, serde_json::Value)>, DomainError> {
-        let Some(start) = effort.start_snapshot_id else {
+        let (Some(start), Some(measured)) = (effort.start_snapshot_id, measured) else {
             return Ok(None);
         };
         let start_tree = self.snapshots.tree_at(start).await?;
+        let measured_tree = self.snapshots.tree_at(measured).await?;
         let to_set = |v: Option<&serde_json::Value>| -> BTreeSet<u32> {
             v.and_then(|v| v.as_array())
                 .map(|a| {
@@ -1490,7 +1495,10 @@ impl CollectionService {
             let Some(path) = f.get("path").and_then(|p| p.as_str()) else {
                 continue;
             };
-            let changed = self.changed_lines_for(path, &start_tree);
+            let Some(changed) = self.changed_lines_between(path, &start_tree, &measured_tree)
+            else {
+                return Ok(None);
+            };
             if changed.is_empty() {
                 continue;
             }
@@ -1898,8 +1906,8 @@ impl CollectionService {
             tracing::warn!(error = %e, "test-run ride-along failed");
         }
         // Coverage ride-along (OBSERVE-ALWAYS, tsk270): record the ABSOLUTE
-        // report regardless of effort; the effort-relative diff is derived later
-        // at read (the effort's diff coverage lands in v_effort_observation,
+        // report regardless of effort; the effort-relative diff is derived with
+        // the effort's evidence (it lands in v_effort_observation,
         // where oxplow-analytics' coverage-target advisory reads it).
         // A transient error here used to silently drop the run's coverage
         // (tsk79) — now it retries once and, when both attempts (or the parse
@@ -2421,23 +2429,13 @@ impl CollectionService {
         Ok(Some(0))
     }
 
-    /// Effort-review observations for an effort, newest-first. Pass `kind` to
-    /// filter. Backed by the metric substrate (tsk215) via
-    /// [`effort_observations_from_metrics`](Self::effort_observations_from_metrics).
-    pub async fn list_for_effort(
-        &self,
-        effort_id: &str,
-        kind: Option<&str>,
-    ) -> Result<Vec<oxplow_db::EffortObservation>, DomainError> {
-        Ok(self.effort_observations_from_metrics(effort_id, kind).await)
-    }
-
     /// Reconstruct the effort-review observations for `effort_id` from the
     /// **metric substrate** (tsk215): the coverage/test/analysis headline
     /// samples that fall in the effort's time window + their verbatim
     /// `*-detail` finding payloads, shaped as `EffortObservation` rows so the
-    /// effort panel renders off the model. The substrate successor to
-    /// `list_for_effort` (which reads the legacy `effort_observation` table).
+    /// effort panel renders off the model. Computed only for the
+    /// `effort_evidence` asset, which stores the rows
+    /// (`v_effort_observation`); readers read those (tsk862).
     /// One row per run, newest-first; `kind` optionally filters.
     pub async fn effort_observations_from_metrics(
         &self,
@@ -2501,7 +2499,7 @@ impl CollectionService {
                 "diff-coverage" => {
                     let derived = match effort.as_ref() {
                         Some(eff) => self
-                            .diff_coverage_for_effort(eff, &payload)
+                            .diff_coverage_for_effort(eff, c.snapshot_id, &payload)
                             .await
                             .ok()
                             .flatten(),
@@ -2525,17 +2523,12 @@ impl CollectionService {
                 }
             };
             out.push(oxplow_db::EffortObservation {
-                id: c.id,
-                stream_id: oxplow_domain::StreamId::new(c.stream_id).to_string(),
-                effort_id: effort_id.to_string(),
                 kind: obs_kind.to_string(),
                 provenance: c.provenance.clone(),
                 source: c.source.clone(),
                 metric_value,
                 payload_json,
                 local_snapshot_id: c.snapshot_id,
-                closest_vcs_rev: c.closest_vcs_rev.clone(),
-                vcs_rev_exact: c.vcs_rev_exact,
                 created_at: c.captured_at,
             });
         }
@@ -2553,8 +2546,8 @@ impl CollectionService {
     /// - **run + operational** (`Run`/`Window`): before→after (or `sum` flow) over
     ///   the facts of the effort's OWN captures (`metric_capture.effort_id`,
     ///   stamped at ingest — tsk37), so overlapping efforts stay disjoint.
-    /// - **coverage** (`Coverage`): effort-relative diff derived at read (still on
-    ///   the legacy detail payload — a documented special case).
+    /// - **coverage** (`Coverage`): effort-relative diff derived from each run's
+    ///   detail payload (line-sets aren't facts — a documented special case).
     ///
     /// Returns only metrics the effort moved/touched, grouped code-health →
     /// coverage → tests → operational, then by title.
@@ -2640,8 +2633,8 @@ impl CollectionService {
                         .await
                 }
                 // Coverage stays effort-relative + on the legacy detail payload
-                // (line-sets aren't in facts yet) — derive the diff at read via the
-                // spec's legacy definition (tsk270, T-D scope guard).
+                // (line-sets aren't in facts yet) — derive the diff from it via
+                // the spec's legacy definition (tsk270, T-D scope guard).
                 EffortAttributionFamily::Coverage => {
                     self.coverage_delta_for_spec(spec, &effort).await
                 }
@@ -3084,8 +3077,8 @@ impl CollectionService {
     /// effort's start snapshot), so neither the time window nor a stored value
     /// is right. For each coverage run CAPTURE this effort claimed (ledger —
     /// the capture is the run, T-E1), derive its diff-coverage from the
-    /// capture's ABSOLUTE per-file line-sets (`detail_json`) at read, then
-    /// before→after over the derived sequence.
+    /// capture's ABSOLUTE per-file line-sets (`detail_json`) against the
+    /// snapshot it measured, then before→after over the derived sequence.
     async fn coverage_delta_for_spec(
         &self,
         spec: &oxplow_db::MetricSpec,
@@ -3115,7 +3108,10 @@ impl CollectionService {
                 .filter(|env| env["kind"].as_str() == Some("coverage-detail"))
                 .and_then(|env| env.get("payload").cloned());
             if let Some(abs) = payload {
-                if let Ok(Some((pct, _))) = self.diff_coverage_for_effort(effort, &abs).await {
+                if let Ok(Some((pct, _))) = self
+                    .diff_coverage_for_effort(effort, c.snapshot_id, &abs)
+                    .await
+                {
                     derived.push(pct);
                     latest_cap = Some(c.id);
                 }
@@ -3142,24 +3138,49 @@ impl CollectionService {
         ))
     }
 
-    /// End-side changed line numbers (1-based) for `path` between its
-    /// start-snapshot content and the current working-tree content.
-    /// Files absent from disk (deleted) or unchanged yield an empty set.
-    fn changed_lines_for(&self, path: &str, start_tree: &oxplow_db::SnapshotTree) -> BTreeSet<u32> {
-        let old = start_tree
-            .get(path)
-            .and_then(|entry| entry.content_ref())
-            .and_then(|r| self.content.read_ref(&r).ok())
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            .unwrap_or_default();
-        let Ok(new_bytes) = std::fs::read(self.project_dir.join(path)) else {
-            return BTreeSet::new();
+    /// The measured side's changed line numbers (1-based) for `path` between
+    /// `start` and `measured`. Empty when the run's tree doesn't have it, it
+    /// is unchanged, or a side is too big to have kept its bytes; a path new
+    /// since the start is all changed. `None` when a side's bytes should be
+    /// there and aren't (collected): no honest diff exists.
+    fn changed_lines_between(
+        &self,
+        path: &str,
+        start: &oxplow_db::SnapshotTree,
+        measured: &oxplow_db::SnapshotTree,
+    ) -> Option<BTreeSet<u32>> {
+        let Some(now) = measured.get(path) else {
+            return Some(BTreeSet::new());
         };
-        let new = String::from_utf8_lossy(&new_bytes).into_owned();
-        if old == new {
-            return BTreeSet::new();
+        let before = start.get(path);
+        if before.is_some_and(|b| b.identity() == now.identity()) {
+            return Some(BTreeSet::new());
         }
-        diff_new_side_lines(&old, &new)
+        // `Some(None)`: no bytes kept by design (oversize); `None`: gone.
+        let text = |entry: &oxplow_db::TreeEntry| -> Option<Option<String>> {
+            match entry.content_ref() {
+                None => Some(None),
+                Some(r) => self
+                    .content
+                    .read_ref(&r)
+                    .ok()
+                    .map(|bytes| Some(String::from_utf8_lossy(&bytes).into_owned())),
+            }
+        };
+        let Some(new) = text(now)? else {
+            return Some(BTreeSet::new());
+        };
+        let old = match before {
+            Some(b) => match text(b)? {
+                Some(old) => old,
+                None => return Some(BTreeSet::new()),
+            },
+            None => String::new(),
+        };
+        if old == new {
+            return Some(BTreeSet::new());
+        }
+        Some(diff_new_side_lines(&old, &new))
     }
 }
 
@@ -3322,7 +3343,7 @@ const COVERAGE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_mill
 
 /// Build the ABSOLUTE coverage payload from a report (tsk270): whole-report %
 /// plus per-file instrumented/covered line-sets, stored verbatim so the
-/// effort-relative diff can be derived later at read. Returns
+/// effort-relative diff can be derived with the effort's evidence. Returns
 /// `(abs_pct, covered, instrumented, payload)`; `None` when nothing is
 /// instrumented.
 fn coverage_abs_payload(
@@ -3948,8 +3969,8 @@ mod tests {
         /// Build the fixture. `report_xml` Some → write it + configure the
         /// collection profile (cobertura/coverage.xml); None → leave
         /// collection unconfigured. The effort's start snapshot holds
-        /// `src/foo.rs` as `a\nb\nc\n`; the working tree has `a\nB\nc\nd\n`
-        /// (lines 2 changed, 4 added).
+        /// `src/foo.rs` as `a\nb\nc\n`; the stream's latest snapshot (and the
+        /// working tree) has `a\nB\nc\nd\n` (lines 2 changed, 4 added).
         async fn build(report_xml: Option<&str>) -> Harness {
             build_full(report_xml, false).await
         }
@@ -4055,9 +4076,28 @@ mod tests {
                 .await
                 .unwrap();
 
-            // Current working-tree content: line 2 changed, line 4 added.
+            // The code the test run measures: line 2 changed, line 4 added —
+            // on disk, and in the stream's latest snapshot (what a coverage
+            // capture is pinned to and diffed against the start).
             std::fs::create_dir_all(project_dir.join("src")).unwrap();
-            std::fs::write(project_dir.join("src/foo.rs"), "a\nB\nc\nd\n").unwrap();
+            std::fs::write(project_dir.join("src/foo.rs"), NEW_FOO).unwrap();
+            let new_hash = blobs.write(NEW_FOO.as_bytes()).unwrap();
+            let measured = snapshots.create_snapshot(stream.id).await.unwrap();
+            snapshots
+                .capture(FileSnapshot {
+                    id: 0,
+                    stream_id: stream.id,
+                    path: "src/foo.rs".into(),
+                    blob_hash: Some(new_hash),
+                    size_bytes: NEW_FOO.len() as i64,
+                    captured_at: now,
+                    storage: oxplow_db::SnapshotStorage::Oxplow,
+                    snapshot_id: Some(measured),
+                    mtime_ms: None,
+                    content_hash: None,
+                })
+                .await
+                .unwrap();
             // Optional git repo + base commit so HEAD has a parent.
             if git_init {
                 git_in(&project_dir, &["init", "-q"]);
@@ -4145,9 +4185,8 @@ mod tests {
             // The DIFF is derived at read against the effort's changed lines.
             let rows = h
                 .service
-                .list_for_effort(&h.effort_id, Some("diff-coverage"))
-                .await
-                .unwrap();
+                .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
+                .await;
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].provenance, "observed");
             assert!(
@@ -4158,6 +4197,63 @@ mod tests {
             let cov: DiffCovPayload = serde_json::from_str(payload).expect("payload parses");
             let foo = cov.files.iter().find(|f| f.path == "src/foo.rs").unwrap();
             assert_eq!(foo.uncovered, vec![4]);
+        }
+
+        /// The harness's measured `src/foo.rs` (start: `a b c`).
+        const NEW_FOO: &str = "a\nB\nc\nd\n";
+
+        /// The derived diff-coverage % of the harness's effort, if any.
+        async fn diff_pct(h: &Harness) -> Option<f64> {
+            let rows = h
+                .service
+                .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
+                .await;
+            assert!(rows.len() <= 1, "{rows:?}");
+            rows.first().and_then(|r| r.metric_value)
+        }
+
+        /// tsk862: the diff is of the code the run measured — the snapshot
+        /// its capture is pinned to — so an edit after the run moves nothing.
+        #[tokio::test]
+        async fn diff_coverage_ignores_edits_after_the_run() {
+            let h = build(Some(COBERTURA_50PCT)).await;
+            h.service
+                .ingest_coverage(&h.thread, None, None, false)
+                .await
+                .unwrap();
+            std::fs::write(h.tmp.path().join("src/foo.rs"), "x\n").unwrap();
+            let pct = diff_pct(&h).await.expect("a diff");
+            assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
+        }
+
+        /// tsk862: the diff reads snapshots, never a working tree — a
+        /// worktree stream's files aren't under the project directory.
+        #[tokio::test]
+        async fn a_worktree_streams_diff_uses_its_snapshots() {
+            let h = build(Some(COBERTURA_50PCT)).await;
+            h.service
+                .ingest_coverage(&h.thread, None, None, false)
+                .await
+                .unwrap();
+            std::fs::remove_file(h.tmp.path().join("src/foo.rs")).unwrap();
+            let pct = diff_pct(&h).await.expect("a diff from snapshots alone");
+            assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
+        }
+
+        /// tsk862: a baseline whose bytes are gone (collected) can't be
+        /// diffed — no row, not "every line changed".
+        #[tokio::test]
+        async fn an_expired_baseline_gives_no_diff() {
+            let h = build(Some(COBERTURA_50PCT)).await;
+            h.service
+                .ingest_coverage(&h.thread, None, None, false)
+                .await
+                .unwrap();
+            let keep = std::collections::HashSet::from([BlobStore::hash(NEW_FOO.as_bytes())]);
+            BlobStore::new(h.tmp.path().join(".oxplow/snapshots"))
+                .gc(&keep)
+                .unwrap();
+            assert_eq!(diff_pct(&h).await, None);
         }
 
         #[tokio::test]
@@ -4208,9 +4304,8 @@ mod tests {
             // No pollution: neither effort shows a diff-coverage observation yet.
             assert!(h
                 .service
-                .list_for_effort(&h.effort_id, Some("diff-coverage"))
+                .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
                 .await
-                .unwrap()
                 .is_empty());
 
             // The agent claims the run for eff1 (late-claim is the same path).
@@ -4233,9 +4328,8 @@ mod tests {
             // Now eff1's diff-coverage is derived at read (50%, line 4 uncovered).
             let rows = h
                 .service
-                .list_for_effort(&h.effort_id, Some("diff-coverage"))
-                .await
-                .unwrap();
+                .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
+                .await;
             assert_eq!(rows.len(), 1, "claimed run now surfaces a derived diff");
             assert!((rows[0].metric_value.unwrap() - 50.0).abs() < 1e-6);
         }
@@ -4616,11 +4710,9 @@ mod tests {
             assert!(id.is_some());
             let rows = h
                 .service
-                .list_for_effort(&h.effort_id, Some("test-run"))
-                .await
-                .unwrap();
+                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
+                .await;
             assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].stream_id, "str1");
             assert!(rows[0]
                 .payload_json
                 .as_deref()
@@ -6614,9 +6706,8 @@ mod tests {
                 .unwrap();
             let rows = h
                 .service
-                .list_for_effort(&h.effort_id, Some("test-run"))
-                .await
-                .unwrap();
+                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
+                .await;
             let payload: serde_json::Value =
                 serde_json::from_str(rows[0].payload_json.as_deref().unwrap()).unwrap();
             // Counts derived from the tree (1 pass, 1 fail, 1 skip).
@@ -6680,9 +6771,8 @@ mod tests {
             // diff-coverage observation surfaces for it.
             let rows = h
                 .service
-                .list_for_effort(&h.effort_id, Some("diff-coverage"))
-                .await
-                .unwrap();
+                .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
+                .await;
             assert!(
                 rows.is_empty(),
                 "no changed instrumented lines → no diff observation"
@@ -6752,9 +6842,8 @@ mod tests {
             // to the agent; the command-only "ran-record" marker is retired.
             let obs = h
                 .service
-                .list_for_effort(&h.effort_id, Some("test-run"))
-                .await
-                .unwrap();
+                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
+                .await;
             assert!(obs.is_empty(), "no substrate row for a report-less run");
             // The fired nudge also records an `oxplow.nudge` event FACT,
             // subject = the nudge kind (tsk216; the legacy sample is gone, T-E2).
@@ -6968,9 +7057,8 @@ mod tests {
             assert!(result.is_none());
             let obs = h
                 .service
-                .list_for_effort(&h.effort_id, Some("test-run"))
-                .await
-                .unwrap();
+                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
+                .await;
             assert!(obs.is_empty());
         }
 
@@ -7072,9 +7160,8 @@ mod tests {
             assert!(id.is_some());
             let rows = h
                 .service
-                .list_for_effort(&h.effort_id, Some("static-analysis"))
-                .await
-                .unwrap();
+                .effort_observations_from_metrics(&h.effort_id, Some("static-analysis"))
+                .await;
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].provenance, "observed");
             // metric = error+warning count (lower = better).
@@ -7178,9 +7265,8 @@ mod tests {
             assert!(recorded.is_some(), "the run is acknowledged");
             let rows = h
                 .service
-                .list_for_effort(&h.effort_id, Some("static-analysis"))
-                .await
-                .unwrap();
+                .effort_observations_from_metrics(&h.effort_id, Some("static-analysis"))
+                .await;
             assert!(
                 rows.is_empty(),
                 "no substrate row for a report-less analyzer run"
@@ -7258,9 +7344,8 @@ mod tests {
             // findings list + counts, provenance observed, analyzer label.
             let rows = h
                 .service
-                .list_for_effort(&h.effort_id, Some("static-analysis"))
-                .await
-                .unwrap();
+                .effort_observations_from_metrics(&h.effort_id, Some("static-analysis"))
+                .await;
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].provenance, "observed");
             assert_eq!(rows[0].source, "analysis-report");
@@ -7321,9 +7406,8 @@ mod tests {
             // The observation landed, pinned to no local snapshot.
             let rows = h
                 .service
-                .list_for_effort(&no_base.id.to_string(), Some("static-analysis"))
-                .await
-                .unwrap();
+                .effort_observations_from_metrics(&no_base.id.to_string(), Some("static-analysis"))
+                .await;
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].local_snapshot_id, None);
         }
@@ -7363,15 +7447,13 @@ mod tests {
             assert!(result.is_none());
             assert!(h
                 .service
-                .list_for_effort(&h.effort_id, Some("static-analysis"))
+                .effort_observations_from_metrics(&h.effort_id, Some("static-analysis"))
                 .await
-                .unwrap()
                 .is_empty());
             assert!(h
                 .service
-                .list_for_effort(&h.effort_id, Some("test-run"))
+                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
                 .await
-                .unwrap()
                 .is_empty());
         }
     }

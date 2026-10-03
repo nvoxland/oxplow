@@ -30,7 +30,6 @@ pub mod event_type_store;
 pub mod fact_store;
 pub mod git_store;
 pub mod models;
-pub mod observation_store;
 pub mod page_ref_projections;
 pub mod page_ref_store;
 pub mod panel_layout_store;
@@ -82,6 +81,7 @@ pub use dashboard_store::{
 };
 pub use database::{map_sql_err, Database, DbInitError};
 pub use diagnostic_store::{DiagnosticRow, SqliteDiagnosticStore};
+pub use effort_evidence_store::EffortObservation;
 pub use effort_evidence_store::SqliteEffortEvidenceStore;
 pub use effort_store::{
     Effort, EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortFileChange, EffortStore,
@@ -94,7 +94,6 @@ pub use fact_store::{
     NewMetricCapture, NewMetricSpec, SqliteFactStore, TestCaseResult, TestCaseStat,
 };
 pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
-pub use observation_store::EffortObservation;
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};
 pub use plugin_health_store::{PluginHealthRow, PluginKey, SqlitePluginHealthStore};

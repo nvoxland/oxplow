@@ -30,10 +30,12 @@ section for the column.
 > sole store for coverage/test/analysis facts. The hook ride-along records into
 > `metric_sample` + `metric_finding` (the rich detail — test suite/case tree,
 > coverage per-file uncovered lines, analysis payload — lives in verbatim
-> `*-detail` findings); the effort-review panel reconstructs its observation rows
-> from there via `CollectionService::effort_observations_from_metrics` (the
-> `list_effort_observations` IPC/MCP). The `EffortObservation` type survives only
-> as the read/IPC shape. Everything below about the **collector plugins**, the
+> `*-detail` findings). The `effort_evidence` asset computes each effort's
+> observation rows from there (`CollectionService::effort_observations_from_metrics`)
+> and stores them (`effort_observation_row`, read as `v_effort_observation`);
+> the panel and MCP `list_effort_observations` read those stored rows
+> (`SqliteEffortEvidenceStore::list_observations`, tsk862) — the evidence is
+> computed once. `EffortObservation` is that row. Everything below about the **collector plugins**, the
 > **hybrid ingestion** seam, and the **nudges** is unchanged — only the storage
 > moved. (One micro-change: a *report-less* run — analyzer/tests ran but produced
 > no parseable report — no longer leaves a "ran-record" row; the report-less
@@ -291,9 +293,15 @@ at record: `observe_coverage` stores the **absolute** whole-report coverage
 (per-file coverage facts + the instrumented/covered line-sets in the capture's
 `coverage-detail` detail envelope — `metric_capture.detail_json`, T-E1; the
 legacy `coverage-detail` finding is still dual-written until T-E2), and the
-effort-relative diff is DERIVED at read
+effort-relative diff is DERIVED with the effort's evidence
 (`diff_coverage_for_effort`) — so a coverage run claimed *after* the effort closed
-still produces a diff. The earlier `find_single_open_for_thread` *drop-gates* on
+still produces a diff. The diff is between two **snapshots**, never a working
+tree (tsk862): the effort's start snapshot and the one the coverage capture is
+pinned to (`metric_capture.snapshot_id`, the stream's latest when the report was
+read — the code the run measured). So it holds for a worktree stream, and an
+edit after the run moves nothing. A path new since the start counts all its
+lines as changed; a side whose bytes were collected (blob GC) gives **no row**,
+not "every line changed"; an oversize file (no bytes kept) contributes nothing. The earlier `find_single_open_for_thread` *drop-gates* on
 the producers are gone — the helper stays only as the Class-A auto-attribute
 optimization.
 
@@ -417,9 +425,11 @@ covered in [data-model.md](./data-model.md),
 
 1. Pick a `kind` string and a `payload_json` shape (parsed in TS / by the
    agent — opaque to Rust, so no migration to enrich it).
-2. Write it via `SqliteEffortObservationStore::record` with the right
-   `provenance` and (where applicable) a freshness pin.
-3. Surface it on the effort-review UI.
+2. Record the run as a capture whose `detail_json` envelope carries that
+   kind, with the right `provenance` and a snapshot pin, and map the envelope
+   kind in `CollectionService::effort_observations_from_metrics` — the
+   `effort_evidence` asset then stores it with the effort's other rows.
+3. Surface it on the effort-review UI (it reads `v_effort_observation`).
 
 Prefer `observed` over `asserted` wherever oxplow can compute or parse the
 fact itself — that's the difference between an understanding surface and a

@@ -174,19 +174,14 @@ mod tests {
     #[tokio::test]
     async fn analytics_effort_lenses_read_the_observation_payloads() {
         let f = crate::test_fixtures::services_with_effort().await;
-        let obs = |seq: i64, kind: &str, value: Option<f64>, payload: serde_json::Value| {
+        let obs = |kind: &str, value: Option<f64>, payload: serde_json::Value| {
             oxplow_db::EffortObservation {
-                id: seq,
-                stream_id: "1".into(),
-                effort_id: f.effort.to_string(),
                 kind: kind.into(),
                 provenance: "observed".into(),
                 source: "post-tool-bash".into(),
                 metric_value: value,
                 payload_json: Some(payload.to_string()),
                 local_snapshot_id: None,
-                closest_vcs_rev: None,
-                vcs_rev_exact: false,
                 created_at: oxplow_domain::Timestamp::now(),
             }
         };
@@ -204,10 +199,9 @@ mod tests {
             .replace_observations(
                 f.effort.value(),
                 vec![
-                    obs(1, "test-run", None, run("failed")),
-                    obs(2, "test-run", None, run("passed")),
+                    obs("test-run", None, run("failed")),
+                    obs("test-run", None, run("passed")),
                     obs(
-                        3,
                         "diff-coverage",
                         Some(60.0),
                         serde_json::json!({

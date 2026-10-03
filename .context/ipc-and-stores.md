@@ -596,19 +596,21 @@ store, runtime, IPC, and UI are tool-agnostic.
 The collection subsystem (`.context/collection.md`) follows the same
 7-layer shape with a couple of slice patterns worth calling out:
 
-- **One read IPC, one event.** `list_effort_observations(effortId,
-  kind?)` (`crates/oxplow-tauri-ipc/src/commands/effort.rs`, over
-  `Services.observation_store`) is `Both` in the surface-parity manifest
-  — same name on IPC and MCP. Mutations are the `test.ingest_coverage` /
-  `test.record_run` commands (agents run them; P8.A8) since the UI never writes
-  observations. A view of them re-runs on `ModelsChanged` (P8.A2: the
-  bespoke `EffortObservationsChanged` had no listener and is gone).
+- **Stored once, read as a model.** The `effort_evidence` asset computes
+  each effort's observations and stores them (`v_effort_observation`); the
+  panel reads the model, and MCP `list_effort_observations` (agent-only in
+  the surface-parity manifest) reads the same stored rows
+  (`SqliteEffortEvidenceStore::list_observations`, tsk862). Mutations are the
+  `test.ingest_coverage` / `test.record_run` commands (agents run them;
+  P8.A8) since the UI never writes observations. A view of them re-runs on
+  `ModelsChanged` (P8.A2: the bespoke `EffortObservationsChanged` had no
+  listener and is gone).
 - **The engine lives in `oxplow-app`, not a store.** `CollectionService`
   (`crates/oxplow-app/src/collection.rs`) owns the orchestration
   (effort resolution, coverage parse via `oxplow-coverage`, changed-line
   diff, freshness pin) and is called from both the MCP tools and the
-  control-plane PostToolUse hook. The store
-  (`SqliteEffortObservationStore`) stays a thin typed read/write surface.
+  control-plane PostToolUse hook; the evidence store
+  (`SqliteEffortEvidenceStore`) stays a thin typed read/write surface.
 
 ## Agent nudges
 

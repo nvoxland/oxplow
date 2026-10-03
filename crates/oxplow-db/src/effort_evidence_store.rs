@@ -2,10 +2,32 @@
 //! it (`v_effort_metric_delta`, `v_effort_observation`). Rows are replaced
 //! wholesale per effort by core's refresher. See `.context/semantic-layer.md`.
 
-use oxplow_domain::DomainError;
+use serde::{Deserialize, Serialize};
+use specta::Type;
+
+use oxplow_domain::{DomainError, Timestamp};
 
 use crate::database::map_sql_err;
-use crate::{Database, EffortMetricDelta, EffortObservation};
+use crate::{Database, EffortMetricDelta};
+
+/// One effort-review observation: a run the effort claimed, as its evidence
+/// (`effort_observation_row`, read as `v_effort_observation`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct EffortObservation {
+    /// `test-run` | `diff-coverage` | `static-analysis`.
+    pub kind: String,
+    /// `observed` (oxplow saw it directly) | `asserted` (agent reported it).
+    pub provenance: String,
+    /// Free-form origin tag, e.g. `post-tool-bash` / `agent`.
+    pub source: String,
+    /// Headline numeric (e.g. coverage %); kind-specific, nullable.
+    pub metric_value: Option<f64>,
+    /// Kind-specific structured payload (parsed by the UI, opaque to Rust).
+    pub payload_json: Option<String>,
+    /// The snapshot the run was captured against.
+    pub local_snapshot_id: Option<i64>,
+    pub created_at: Timestamp,
+}
 
 fn now() -> String {
     serde_json::to_value(oxplow_domain::Timestamp::now())
@@ -50,6 +72,54 @@ impl SqliteEffortEvidenceStore {
                     .map_err(map_sql_err)?;
                 }
                 Ok(())
+            })
+            .await
+    }
+
+    /// `effort_id`'s stored observations, in their stored order (newest
+    /// first); `kind` filters.
+    pub async fn list_observations(
+        &self,
+        effort_id: i64,
+        kind: Option<String>,
+    ) -> Result<Vec<EffortObservation>, DomainError> {
+        self.db
+            .read(move |c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT kind, provenance, source, metric_value, payload_json,
+                                local_snapshot_id, created_at
+                           FROM effort_observation_row
+                          WHERE effort_id = ?1 AND (?2 IS NULL OR kind = ?2)
+                          ORDER BY seq",
+                    )
+                    .map_err(map_sql_err)?;
+                let rows = stmt
+                    .query_map(rusqlite::params![effort_id, kind], |r| {
+                        Ok((
+                            EffortObservation {
+                                kind: r.get(0)?,
+                                provenance: r.get(1)?,
+                                source: r.get(2)?,
+                                metric_value: r.get(3)?,
+                                payload_json: r.get(4)?,
+                                local_snapshot_id: r.get(5)?,
+                                created_at: Timestamp::now(),
+                            },
+                            r.get::<_, String>(6)?,
+                        ))
+                    })
+                    .map_err(map_sql_err)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(map_sql_err)?;
+                rows.into_iter()
+                    .map(|(o, created)| {
+                        Ok(EffortObservation {
+                            created_at: crate::database::string_to_ts(&created)?,
+                            ..o
+                        })
+                    })
+                    .collect()
             })
             .await
     }
@@ -152,20 +222,10 @@ mod tests {
         store
             .replace_observations(
                 1,
-                vec![EffortObservation {
-                    id: 0,
-                    stream_id: "1".into(),
-                    effort_id: "eff1".into(),
-                    kind: "diff-coverage".into(),
-                    provenance: "observed".into(),
-                    source: "post-tool-bash".into(),
-                    metric_value: Some(72.5),
-                    payload_json: Some("{}".into()),
-                    local_snapshot_id: None,
-                    closest_vcs_rev: None,
-                    vcs_rev_exact: false,
-                    created_at: oxplow_domain::Timestamp::now(),
-                }],
+                vec![
+                    observation("diff-coverage", 72.5),
+                    observation("test-run", 1.0),
+                ],
             )
             .await
             .unwrap();
@@ -181,8 +241,26 @@ mod tests {
             json!([["a", 4.0, 3.0, "warn", 9]])
         );
         assert_eq!(
-            q("SELECT kind, metric_value FROM v_effort_observation WHERE effort_id = 1").await,
-            json!([["diff-coverage", 72.5]])
+            q("SELECT kind, metric_value FROM v_effort_observation WHERE effort_id = 1 ORDER BY seq").await,
+            json!([["diff-coverage", 72.5], ["test-run", 1.0]])
         );
+        let read = store
+            .list_observations(1, Some("diff-coverage".into()))
+            .await
+            .unwrap();
+        assert_eq!(read, vec![observation("diff-coverage", 72.5)]);
+        assert_eq!(store.list_observations(1, None).await.unwrap().len(), 2);
+    }
+
+    fn observation(kind: &str, value: f64) -> EffortObservation {
+        EffortObservation {
+            kind: kind.into(),
+            provenance: "observed".into(),
+            source: "post-tool-bash".into(),
+            metric_value: Some(value),
+            payload_json: Some("{}".into()),
+            local_snapshot_id: None,
+            created_at: Timestamp::from_unix_ms(1_790_000_000_000),
+        }
     }
 }

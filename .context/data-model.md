@@ -1560,11 +1560,11 @@ Coverage / test / static-analysis facts live in the **fact substrate**
 detail that used to live in `payload_json` (test suite/case tree, coverage
 per-file line-sets, analysis payload) rides verbatim in
 `metric_capture.detail_json` (the `{"kind": …, "payload": …}` envelope, T-E1).
-The effort-review panel reconstructs its rows from the effort's ledger-claimed
-captures via `CollectionService::effort_observations_from_metrics` (the
-`list_effort_observations` IPC/MCP). The `EffortObservation` struct
-(`observation_store.rs`) survives **only** as that read/IPC shape — no table, no
-store. The `provenance`/`source` trust spine and the `observed`/`asserted`
+The `effort_evidence` asset rebuilds each effort's rows from its ledger-claimed
+captures (`CollectionService::effort_observations_from_metrics`) and stores them
+in `effort_observation_row` (V80, read as `v_effort_observation`); the panel and
+MCP `list_effort_observations` read those. `EffortObservation`
+(`effort_evidence_store.rs`) is that row (tsk862). The `provenance`/`source` trust spine and the `observed`/`asserted`
 distinction carry on every capture (see `.context/metrics.md`).
 
 ### `metric_definition`/`metric_run`/`metric_sample`/`metric_finding` (+ `metric_dimension`/`metric_subject`) — **RETIRED** (dropped in `V49__drop_legacy_metric_tables.sql`, T-E3/tsk50)

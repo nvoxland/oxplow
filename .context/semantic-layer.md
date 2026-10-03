@@ -474,9 +474,17 @@ provenance. A registered asset builds once at registration (its
 backfill); a failed recompute is logged and the next change retries.
 
 Derived data whose inputs include the world **outside** the tables (a
-snapshot's blobs, the VCS tree, a program, a provider) is ingestion
+working tree, the VCS tree, a program, a provider) is ingestion
 instead — a collector or a pump consumer, at-least-once and checkpointed
 (target-architecture.md §8.2).
+
+A **snapshot blob named by a table row** counts as a table input (tsk862):
+content-addressed, it never changes under its name, so a recompute after the
+row lands reads what any later one would. `effort_evidence`'s diff coverage
+reads the blobs of the effort's start snapshot and of the snapshot a
+coverage capture is pinned to. A blob can only go away (collected), and the
+asset then says so on its next recompute — the diff gives no row — rather
+than reading something else. A working tree is never such an input.
 
 The metric cube is the first asset (inputs `metric_capture`, `fact`): see
 [metrics.md](./metrics.md). What a burst costs it is in
@@ -531,7 +539,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_code_quality_scan`, `v_code_quality_finding` | code-quality scans and their findings (duplicate blocks, with the peer in `extra_json`) (V80) |
 | `v_dashboard`, `v_dashboard_item` | user dashboards and their tiles (V80) |
 | `v_effort_metric_delta` | per effort, how each metric moved (baseline → current, `crossing`). **Stored, not a live query:** the metric engine computes it (`CollectionService::refresh_effort_evidence`) and `effort_evidence.rs` refreshes it on `effort.finished` (the `effort.evidence` pump consumer) and for every open effort as the **asset** `effort_evidence` (`OpenEffortEvidence`, P7.B6: its inputs `metric_capture`, `fact`, `effort_attribution`, `agent_token_usage`; its own tables aren't, so it can't loop); readers hear the rows move as `ModelsChanged` (V80) |
-| `v_effort_observation` | per effort, test runs / diff coverage / analysis rebuilt from its claimed captures; refreshed the same way (V80) |
+| `v_effort_observation` | per effort, test runs / diff coverage / analysis rebuilt from its claimed captures; refreshed the same way (V80). Diff coverage is start snapshot vs the capture's snapshot (collection.md). MCP `list_effort_observations` reads these stored rows (tsk862) |
 | `v_change`, `v_change_file`, `v_change_function`, `v_change_import`, `v_change_duplicate` | stored change analysis (see "Change analysis" below) (V81) |
 | `v_commit`, `v_commit_file`, `v_commit_task`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`) — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_task` reads the indexer's task-mention edges. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these models (`apps/desktop/src/vcsHistory.ts`) |
 | `v_test_case_stat` | each test's summary per stream, branch and producer (V139, tsk733): last status and duration, runs, failures, flips, last failed / passed, max and mean duration — updated with every run, the home of per-test history since a run writes change-only per-case facts |

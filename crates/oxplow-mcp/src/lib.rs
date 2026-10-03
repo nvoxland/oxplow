@@ -2038,10 +2038,15 @@ impl OxplowMcp {
                 ))
             }
         };
+        let effort = oxplow_domain::EffortId::try_from_str(&effort_id).ok_or_else(|| {
+            McpError::invalid_params(format!("`{effort_id}` is not an effort id"), None)
+        })?;
+        // The stored evidence (the `effort_evidence` asset's rows), not a
+        // second computation of it.
         let rows = self
             .services
-            .collection
-            .list_for_effort(&effort_id, params.0.kind.as_deref())
+            .effort_evidence_store
+            .list_observations(effort.value(), params.0.kind)
             .await
             .map_err(internal)?;
         json_result(&rows)
@@ -4568,6 +4573,68 @@ mod tests {
             .await
             .unwrap_err();
         assert!(!err.message.is_empty());
+    }
+
+    /// tsk862: an effort's observations are its stored evidence rows —
+    /// the computation lives in the `effort_evidence` asset, run once.
+    #[tokio::test]
+    async fn mcp_observations_are_the_stored_rows() {
+        use oxplow_db::EffortStore as _;
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let (_proj, services, server) = boot();
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let task_id = services
+            .task_store
+            .insert(&make_task(Some(thread.id), "evidence"))
+            .await
+            .unwrap();
+        let effort = services
+            .effort_store
+            .start(&work_item_ref(task_id), &thread.id, None)
+            .await
+            .unwrap();
+        let row = |kind: &str, value: f64| oxplow_db::EffortObservation {
+            kind: kind.into(),
+            provenance: "observed".into(),
+            source: "post-tool-bash".into(),
+            metric_value: Some(value),
+            payload_json: Some("{}".into()),
+            local_snapshot_id: None,
+            created_at: oxplow_domain::Timestamp::from_unix_ms(1_790_000_000_000),
+        };
+        services
+            .effort_evidence_store
+            .replace_observations(
+                effort.id.value(),
+                vec![row("diff-coverage", 72.5), row("test-run", 1.0)],
+            )
+            .await
+            .unwrap();
+        let read = |effort_id: Option<String>, thread_id: Option<String>| {
+            server.list_effort_observations(Parameters(ListEffortObservationsParams {
+                effort_id,
+                thread_id,
+                kind: Some("diff-coverage".into()),
+            }))
+        };
+        let by_effort: Vec<oxplow_db::EffortObservation> = serde_json::from_str(&text_payload(
+            read(Some(effort.id.to_string()), None).await.unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(by_effort, vec![row("diff-coverage", 72.5)]);
+        let by_thread: Vec<oxplow_db::EffortObservation> = serde_json::from_str(&text_payload(
+            read(None, Some(thread.id.to_string())).await.unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(by_thread, by_effort);
     }
 
     #[tokio::test]

@@ -483,17 +483,12 @@ mod tests {
     async fn bundled_coverage_advisory_fires_once_below_target() {
         let f = crate::test_fixtures::services_with_effort().await;
         let obs = |pct: f64| oxplow_db::EffortObservation {
-            id: 0,
-            stream_id: "1".into(),
-            effort_id: f.effort.to_string(),
             kind: "diff-coverage".into(),
             provenance: "observed".into(),
             source: "post-tool-bash".into(),
             metric_value: Some(pct),
             payload_json: None,
             local_snapshot_id: None,
-            closest_vcs_rev: None,
-            vcs_rev_exact: false,
             created_at: oxplow_domain::Timestamp::now(),
         };
         f.svc

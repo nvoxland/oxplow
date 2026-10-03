@@ -1339,7 +1339,7 @@ families:
 | **File** — snapshot-scan metric (`display_kind` ∈ {`gauge`, `findings`}, a source measure, no formula, non-producer, non-operational — includes the `static-quality` built-in code metrics, whose captures are never effort-stamped; tsk43) | Σ over the effort's **claimed files** (`effort_file`) of `(current − baseline)`, each fact contributing per the spec's **aggregation** (`count` ⇒ 1 per offender — matching the Metrics page — else the fact value); facts are scoped to the effort's **stream** (worktree). Baseline capture = latest before the effort start; current = latest at/before the effort end (newest when open; a capture STAMPED with this effort — an `effort.finished` collector run — also counts). A CLOSED effort with no in-window capture yields no row (never a post-close capture, never a fabricated drop-to-zero). A claimed file absent from a capture = 0 (sparse emission → a drop-to-zero is seen), and the producers' EMPTY zero-hit captures are spliced into the timeline so a scan that found nothing is eligible as baseline/current (tsk44). **No claims, or repo-scalar facts with no path** → the repo-wide before→after fallback. `file_delta_from_facts` |
 | **Run** — tests (category `testing`) + the `oxplow.analysis.*` producer pair | before→after (or `sum` flow) over `aggregate_series` of the facts of the effort's OWN captures (`facts_for_captures(measure, captures_for_effort)`). Analysis is classified Run via the producer-key check (its facts arrive on effort-stamped run-ingest captures), so it never reaches the File branch (the tsk272 guard) |
 | **Window** — operational (`agent.*`/`effort.*`/`task.*`) + formula/event specs | identical read to Run now that captures carry `effort_id`; kept a distinct family only to document it has no run-claim write side. `effort_stamped_delta` serves both |
-| **Coverage** (category `coverage`) | effort-relative: for each coverage run CAPTURE this effort **claimed** (ledger — the capture is the run, T-E1), `coverage_delta_for_spec` derives the **diff-coverage** at read (`diff_coverage_for_effort`) from the capture's ABSOLUTE per-file **line-sets** (`metric_capture.detail_json`, the `coverage-detail` envelope), then before→after over the derived sequence. The coverage FACTS carry num/den counts; the line-sets live only in the detail envelope |
+| **Coverage** (category `coverage`) | effort-relative: for each coverage run CAPTURE this effort **claimed** (ledger — the capture is the run, T-E1), `coverage_delta_for_spec` derives the **diff-coverage** (`diff_coverage_for_effort`, start snapshot vs the capture's own snapshot — collection.md) from the capture's ABSOLUTE per-file **line-sets** (`metric_capture.detail_json`, the `coverage-detail` envelope), then before→after over the derived sequence. The coverage FACTS carry num/den counts; the line-sets live only in the detail envelope |
 
 The family is chosen by **one classifier** — `classify_effort_attribution(spec)
 → EffortAttributionFamily` (`crates/oxplow-app/src/attribution.rs`, beside the
@@ -1394,8 +1394,9 @@ EFFORT REVIEW's `describe_run` reads the claimed capture + its envelope. The
 `get_capture` → the detail envelope); the metric-delta read (above) joins
 `capture.effort_id`. **Coverage** is effort-relative (diff vs the effort's start
 snapshot), so it observes the ABSOLUTE report always and DERIVES the effort diff
-at read (`diff_coverage_for_effort` over the capture's `coverage-detail`
-envelope) — a run claimed after close still yields a diff (tsk270). The mechanic
+with the effort's evidence (`diff_coverage_for_effort` over the capture's
+`coverage-detail` envelope, against the snapshot the capture measured) — a run
+claimed after close still yields a diff (tsk270, tsk862). The mechanic
 + trait (`AttributionKind`/`RunKind`) live in `.context/agent-model.md` +
 `.context/data-model.md`.
 

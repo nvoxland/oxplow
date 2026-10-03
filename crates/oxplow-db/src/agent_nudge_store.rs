@@ -3,8 +3,7 @@
 //! Previously fully ephemeral — see migration `V33__agent_nudge.sql` and
 //! `.context/agent-model.md` (Nudge persistence).
 //!
-//! A thin typed read/write surface modeled on
-//! [`crate::observation_store::SqliteEffortObservationStore`]. The one-shot
+//! A thin typed read/write surface. The one-shot
 //! dedup (so a nudge fires at most once per effort) lives in the
 //! service, so the store only ever records nudges that actually fired.
 
