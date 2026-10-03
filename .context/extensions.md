@@ -1710,7 +1710,11 @@ before an effect's approval. A person has it react to that past with
 `Confirm::Always`, `External`): the events in the range that match its
 `on` and `where` — each read at its type's newest version, as the pump
 delivers it — and that it **never reacted to** (`unreacted_tx`: no
-`effect_run` row), oldest first, each through
+`effect_run` row) and its own run didn't lead to (the loop guard's `own`,
+`event_lineage::lineage_tx`: such an event is never its trigger, so it
+isn't planned — an effect that changes what it reacts to would otherwise
+meet its own changes on every backfill and never get past them, tsk846),
+oldest first, each through
 `run_reaction(…, ReactionOrigin::Backfill)`: attempt 1 with `origin:
 backfill`, the same dedupe, loop guard, approval and health as a live
 reaction. So a second backfill finds nothing, the live consumer never

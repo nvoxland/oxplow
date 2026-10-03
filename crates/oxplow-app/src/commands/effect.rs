@@ -181,7 +181,10 @@ async fn ready(
 
 /// The events in `range` that `decl` reacts to (`on`, `where`, each read
 /// at its type's newest version, as the pump delivers it) and has never
-/// reacted to — oldest first.
+/// reacted to — oldest first. One its own run led to is never its trigger
+/// (the loop guard), so it is never planned either (tsk846): an effect
+/// that changes what it reacts to would otherwise meet its own changes on
+/// every backfill.
 fn unreacted_tx(
     tx: &rusqlite::Connection,
     vocabulary: &oxplow_domain::vocabulary::Vocabulary,
@@ -226,7 +229,12 @@ fn unreacted_tx(
         let Ok(event) = crate::event_pump::at_latest(vocabulary, &stored) else {
             continue;
         };
-        if crate::effects::reacts_to(decl, &event.envelope.event_type, &event.envelope.payload) {
+        if !crate::effects::reacts_to(decl, &event.envelope.event_type, &event.envelope.payload) {
+            continue;
+        }
+        let own =
+            crate::event_lineage::lineage_tx(tx, stored, &format!("effect:{}", decl.name()))?.own;
+        if !own {
             out.push(event);
         }
     }

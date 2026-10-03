@@ -51,29 +51,34 @@ pub async fn lineage(
     source: &str,
 ) -> Result<Lineage, DomainError> {
     let (first, source) = (event.clone(), source.to_string());
-    db.read(move |tx| {
-        let (mut own, mut depth) = (false, 0usize);
-        let mut current = Some(first);
-        for _ in 0..MAX_WALK {
-            let Some(e) = current.take() else { break };
-            let env = &e.envelope;
-            if env.source == source {
-                own = true;
-                break;
-            }
-            let effect_run =
-                env.event_type == "command.executed" && env.source.starts_with("effect:");
-            let collector_run =
-                env.event_type == "collector.synced" && env.payload["trigger"] == "on";
-            if effect_run || collector_run {
-                depth += 1;
-            }
-            current = match &env.cause {
-                Some(cause) => oxplow_db::event_log_store::get_tx(tx, cause)?,
-                None => None,
-            };
+    db.read(move |tx| lineage_tx(tx, first, &source)).await
+}
+
+/// [`lineage`] inside a transaction already open (a backfill's plan
+/// reads it for each candidate event).
+pub fn lineage_tx(
+    tx: &rusqlite::Connection,
+    event: StoredEvent,
+    source: &str,
+) -> Result<Lineage, DomainError> {
+    let (mut own, mut depth) = (false, 0usize);
+    let mut current = Some(event);
+    for _ in 0..MAX_WALK {
+        let Some(e) = current.take() else { break };
+        let env = &e.envelope;
+        if env.source == source {
+            own = true;
+            break;
         }
-        Ok(Lineage { own, depth })
-    })
-    .await
+        let effect_run = env.event_type == "command.executed" && env.source.starts_with("effect:");
+        let collector_run = env.event_type == "collector.synced" && env.payload["trigger"] == "on";
+        if effect_run || collector_run {
+            depth += 1;
+        }
+        current = match &env.cause {
+            Some(cause) => oxplow_db::event_log_store::get_tx(tx, cause)?,
+            None => None,
+        };
+    }
+    Ok(Lineage { own, depth })
 }

@@ -1343,6 +1343,37 @@ mod tests {
             .map(|o| o.result)
     }
 
+    /// tsk846: an event the effect's own run led to is never its trigger
+    /// (the loop guard), so a backfill never plans it either: otherwise
+    /// an effect that edits what it reacts to would find its own edits
+    /// "unreacted" on every backfill, and never get past them.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_backfill_never_plans_the_effects_own_events() {
+        use crate::commands::effect::BACKFILL_PLAN;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    input: \"SELECT title FROM v_work_item WHERE ref = :work_item\"\n    entry: bang.star\n";
+        let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": x[\"rows\"][0][\"title\"] + \"!\"}}]}\n";
+        extension(&svc.layout.project_dir, bang, &[("bang.star", script)]);
+        register(svc);
+        let r = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let edited = |source: &str| {
+            Envelope::typed::<WorkItemEdited>(
+                source,
+                &serde_json::from_value(json!({ "work_item": r, "fields": ["title"] })).unwrap(),
+            )
+        };
+        // A person's edit, and one the effect's own run made (its source).
+        let theirs = log(svc, edited("human")).await;
+        log(svc, edited("effect:acme/bang")).await;
+        approve(svc).await;
+        let plan = run_as_person(svc, BACKFILL_PLAN, json!({ "effect": "acme/bang" }))
+            .await
+            .unwrap();
+        assert_eq!(plan["planned"], json!(1), "{plan}");
+        assert_eq!(plan["from_seq"], json!(theirs.seq));
+    }
+
     /// P9.D5: an effect never reacts to what was logged before its
     /// approval — until a person backfills it. A backfill reacts, once
     /// each and oldest first, to the matching events the effect never
