@@ -391,6 +391,38 @@ async fn the_suite_finds_a_read_that_doesnt_restate_the_writes() {
     );
 }
 
+/// P10: a provider that declares `idempotent_writes` and doesn't keep
+/// it (the fake under `forget-keys`) fails the suite; one that doesn't
+/// declare it isn't asked.
+#[tokio::test]
+async fn the_suite_finds_a_provider_that_forgets_its_keys() {
+    for (hooks, finds) in [("forget-keys", true), ("plain-writes", false)] {
+        let (fx, ext) = approved(hooks).await;
+        fx.svc
+            .providers
+            .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+            .await
+            .unwrap();
+        first_read(&fx).await;
+        let provider = fx.svc.work_items.get("fake").unwrap();
+        let findings = suite(
+            &fx.svc.work_items_client(),
+            &provider.id,
+            provider.features,
+            None,
+            &ServicesProbe(&fx.svc),
+            &Actor::Human,
+        )
+        .await
+        .findings;
+        assert_eq!(
+            findings.iter().any(|f| f.check == "idempotent_writes"),
+            finds,
+            "{hooks}: {findings:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
     let (fx, ext) = approved("").await;

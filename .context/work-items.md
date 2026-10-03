@@ -233,9 +233,14 @@ changed the item logged an event naming it (oxplow's
 provider back restates what its writes recorded — after a
 `provider.sync` (`WorkItemsProbe::sync`; nothing to read for oxplow's
 own or a provider without collectors) every item it filed is the row it
-was (P7.A7; the fake's `stale-read` hook is the red); and delete
-follows its feature, cleaning up what the suite filed when the provider
-can. `native` is the provider's own fields for the items it files
+was (P7.A7; the fake's `stale-read` hook is the red); a provider that
+declares `idempotent_writes` keeps it — a create sent twice with one key
+(through `WorkItemsProbe::verbs`, the host's `ExternalVerbs`, since the
+bus never re-sends a key itself) answers alike, another key is another
+item, and after a read back two items carry the keyed title
+(`WorkItemsProbe::titled`; P10, the fake's `forget-keys` hook is the
+red); and delete follows its feature, cleaning up what the suite filed
+when the provider can. `native` is the provider's own fields for the items it files
 (oxplow's test passes the actor's thread, so `in_progress` claims). A
 `WorkItemsProbe` reads back what the host recorded (`ServicesProbe` over
 the database). It runs in-tree against oxplow's provider

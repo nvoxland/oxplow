@@ -9,7 +9,9 @@
 //! Each check is a [`Finding`] when it fails; an empty list passes.
 
 use async_trait::async_trait;
-use oxplow_domain::work_items::{CanonicalState, WorkItemRecord, WorkItemsFeatures};
+use std::sync::Arc;
+
+use oxplow_domain::work_items::{CanonicalState, ExternalVerbs, WorkItemRecord, WorkItemsFeatures};
 use oxplow_domain::Actor;
 
 use crate::commands::work_item::WorkItemUpdateInput;
@@ -47,6 +49,12 @@ pub trait WorkItemsProbe: Send + Sync {
     /// records restating its items; `false` when it has none to read
     /// (oxplow's own, a provider that declares no collector).
     async fn sync(&self, provider: &str) -> Result<bool, String>;
+    /// `provider`'s verbs as the host calls them (an external provider's),
+    /// for what the bus never sends itself: a write re-sent with its
+    /// idempotency key.
+    async fn verbs(&self, provider: &str) -> Option<Arc<dyn ExternalVerbs>>;
+    /// The refs of `provider`'s live rows titled `title`.
+    async fn titled(&self, provider: &str, title: &str) -> Vec<String>;
 }
 
 /// Run every check against `provider` (its id and declared features) as
@@ -275,7 +283,80 @@ pub async fn suite(
         }
     }
 
-    // 8. Delete follows its feature, and cleans up what the suite made
+    // 8. A provider that declares `idempotent_writes` keeps it (P10): a
+    //    create sent twice with one key is one item, answered alike —
+    //    after a read back too — and another key is another item.
+    if features.idempotent_writes {
+        match probe.verbs(provider).await {
+            None => fail(
+                "idempotent_writes",
+                "declared, but the host has no verbs to send a key to".into(),
+            ),
+            Some(verbs) => {
+                let title = "conformance keyed item";
+                let mut input = serde_json::json!({
+                    "title": title,
+                    "body": "made by the conformance suite",
+                });
+                if let Some(native) = &native {
+                    input["native"] = native.clone();
+                }
+                let key = format!("conformance:{}", uuid::Uuid::new_v4().simple());
+                let other_key = format!("conformance:{}", uuid::Uuid::new_v4().simple());
+                let first = verbs
+                    .invoke(actor, "create", input.clone(), Some(key.clone()))
+                    .await;
+                let again = verbs
+                    .invoke(actor, "create", input.clone(), Some(key))
+                    .await;
+                let other = verbs.invoke(actor, "create", input, Some(other_key)).await;
+                let item_of = |r: &serde_json::Value| r["ref"].as_str().map(str::to_string);
+                match (first, again, other) {
+                    (Ok(first), Ok(again), Ok(other)) => {
+                        for r in [&first, &again, &other]
+                            .into_iter()
+                            .filter_map(|o| item_of(&o.result))
+                        {
+                            if !created.contains(&r) {
+                                created.push(r);
+                            }
+                        }
+                        if first.result != again.result {
+                            fail(
+                                "idempotent_writes",
+                                format!(
+                                    "one key sent twice answered {} then {}",
+                                    first.result, again.result
+                                ),
+                            );
+                        }
+                        if item_of(&first.result) == item_of(&other.result) {
+                            fail("idempotent_writes", "another key gave the same item".into());
+                        }
+                        if let Ok(true) = probe.sync(provider).await {
+                            probe.settle().await;
+                            let rows = probe.titled(provider, title).await;
+                            if rows.len() != 2 {
+                                fail(
+                                    "idempotent_writes",
+                                    format!(
+                                        "after two keys (one sent twice) it has {} items: {rows:?}",
+                                        rows.len()
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    (first, again, other) => fail(
+                        "idempotent_writes",
+                        format!("a keyed create failed: {first:?} / {again:?} / {other:?}"),
+                    ),
+                }
+            }
+        }
+    }
+
+    // 9. Delete follows its feature, and cleans up what the suite made
     //    when the provider can (a person confirms it).
     let mut deleted_refs: Vec<String> = Vec::new();
     for r in created.iter().rev() {
@@ -430,6 +511,28 @@ impl WorkItemsProbe for ServicesProbe<'_> {
             .await
             .map(|_| true)
             .map_err(|e| e.to_string())
+    }
+
+    async fn verbs(&self, provider: &str) -> Option<Arc<dyn ExternalVerbs>> {
+        self.0.work_items.get(provider).ok()?.external
+    }
+
+    async fn titled(&self, provider: &str, title: &str) -> Vec<String> {
+        let (prefix, title) = (format!("work_item:{provider}:%"), title.to_string());
+        self.0
+            .db
+            .read(move |c| {
+                let mut stmt = c
+                    .prepare("SELECT ref FROM v_work_item WHERE ref LIKE ?1 AND title = ?2")
+                    .map_err(sql)?;
+                let rows = stmt
+                    .query_map([prefix, title], |r| r.get::<_, String>(0))
+                    .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                    .map_err(sql)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap_or_default()
     }
 
     async fn event_types(&self, item_ref: &str) -> Vec<String> {

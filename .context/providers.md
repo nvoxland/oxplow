@@ -149,7 +149,15 @@ overriding `https://api.linear.app/graphql`). Its example extension is
   `link` → `issueRelationCreate` (`blocks`, `relates_to` → `related`,
   `duplicates` → `duplicate`; other link types refused); `comment` →
   `commentCreate`; `delete` → the issue then `issueDelete` (Linear's
-  trash). Each records the issue as it now stands. A missing issue named
+  trash). Each records the issue as it now stands. **A create sent with
+  an idempotency key carries a client `id`** (P10: a v5 UUID over the
+  verb and the key, `client_id`) on `issueCreate`, `commentCreate` and
+  `issueRelationCreate`; a create refused whose id already names what it
+  would make was sent before and landed, so the provider looks it up
+  (`issue` / `comment` / `issueRelation` by id) and answers with it. It
+  does **not** declare `idempotent_writes` until a live run confirms
+  Linear refuses a repeated client id (`LinearSim` refuses one;
+  `a_repeated_create_is_one_issue`). A missing issue named
   in an input object (looked up first, below) is `InvalidInput` at its
   field; one named by a top-level `id` is whatever Linear answers —
   `InvalidInput` only if it tags the error `INVALID_INPUT` (to verify
@@ -984,8 +992,10 @@ the same key goes with each of its re-sends. A call refused (`Auth`,
 `RateLimited`) never landed and is sent again as before; one cut off
 under way because a renewal ended its process may have landed, so it is
 sent again **only to a provider declaring `idempotent_writes`** — to any
-other the cut-off is the call's failure. The kit's check and automatic
-retry are the rest of P10; until they land the rules below stand.
+other the cut-off is the call's failure. **The kit checks the promise**
+(the work-items suite, [work-items.md](./work-items.md) "Conformance"):
+a provider that declares it and doesn't keep it fails. Automatic retry
+is the rest of P10; until it lands the rules below stand.
 
 A write to a provider may land without oxplow learning it did (a crash, a
 timeout, a dropped pipe after the service accepted it). Sending it again
@@ -1011,9 +1021,10 @@ decided against building it without a provider to hold to it):
 - the conformance kit checks the promise (the same key twice: one item,
   the same result) before a provider may declare it.
 
-Linear's API takes no idempotency key on `commentCreate` or
-`issueCreate`, so the reference provider couldn't declare it honestly;
-the fake could, which would prove the host and nothing about a service.
+Linear takes a client-chosen `id` on its creates, so the reference
+provider sends one derived from the key (see "The Linear provider"), but
+declares nothing until a live run confirms a repeated id is refused: the
+fake proves the host, not a service.
 
 ## The conformance kit (`crates/oxplow-sdk/src/conformance.rs`, `plugin_test.rs`)
 

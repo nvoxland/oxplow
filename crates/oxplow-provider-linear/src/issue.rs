@@ -74,6 +74,27 @@ pub const COMMENT_CREATE: Operation = Operation {
     ),
 };
 
+/// A comment by its id: the issue it is on (a repeated create's lookup).
+pub const COMMENT: Operation = Operation {
+    name: "Comment",
+    document: concat!(
+        "query Comment($id: String!) { comment(id: $id) { issue { ",
+        issue_fields!(),
+        " } } }"
+    ),
+};
+
+/// A relation by its id: the issue it is from (a repeated create's
+/// lookup).
+pub const RELATION: Operation = Operation {
+    name: "IssueRelation",
+    document: concat!(
+        "query IssueRelation($id: String!) { issueRelation(id: $id) { issue { ",
+        issue_fields!(),
+        " } } }"
+    ),
+};
+
 pub const ISSUE_DELETE: Operation = Operation {
     name: "IssueDelete",
     document: "mutation IssueDelete($id: String!) { issueDelete(id: $id) { success } }",

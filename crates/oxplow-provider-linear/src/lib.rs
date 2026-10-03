@@ -308,7 +308,14 @@ async fn handle(
             let p: InvokeParams = parse(params)?;
             let (client, instance) = instance(world, &p.handle).await?;
             Ok(to_value(
-                invoke(&client, &instance, &p.command, &p.input).await?,
+                invoke(
+                    &client,
+                    &instance,
+                    &p.command,
+                    &p.input,
+                    p.idempotency_key.as_deref(),
+                )
+                .await?,
             ))
         }
         method::READ => {
@@ -594,13 +601,52 @@ async fn current(
     instance.record(&data["issue"])
 }
 
+/// The id a create sends, derived from its idempotency key (a v5 UUID
+/// over the verb and the key): the same write sent again carries the same
+/// id, which Linear refuses as taken. None without a key.
+fn client_id(verb: &str, key: Option<&str>) -> Option<String> {
+    key.map(|key| {
+        uuid::Uuid::new_v5(
+            &uuid::Uuid::NAMESPACE_OID,
+            format!("oxplow:linear:{verb}:{key}").as_bytes(),
+        )
+        .to_string()
+    })
+}
+
+/// Run create `op`, sending `id` (a client id) when there is one. A create
+/// refused whose id already names what it would make was sent before and
+/// landed: `lookup` reads that, and it is the answer. A rate limit or a
+/// refused key never landed, and is the error as it is.
+async fn create(
+    client: &Client,
+    op: graphql::Operation,
+    mut input: serde_json::Map<String, Value>,
+    id: Option<String>,
+    lookup: graphql::Operation,
+) -> Result<Value, ProtocolError> {
+    if let Some(id) = &id {
+        input.insert("id".into(), json!(id));
+    }
+    match client.run(op, json!({ "input": input })).await {
+        Ok(data) => Ok(data),
+        Err(e @ (ProtocolError::RateLimited { .. } | ProtocolError::Auth { .. })) => Err(e),
+        Err(e) => match id {
+            None => Err(e),
+            Some(id) => client.run(lookup, json!({ "id": id })).await.map_err(|_| e),
+        },
+    }
+}
+
 async fn invoke(
     client: &Client,
     instance: &Instance,
     command: &str,
     input: &Value,
+    key: Option<&str>,
 ) -> Result<InvokeResult, ProtocolError> {
     let team = &instance.team;
+    let id = client_id(command, key);
     match command {
         "create" => {
             required(input, "title")?;
@@ -610,14 +656,15 @@ async fn invoke(
             if let Some(project) = &instance.project {
                 fields.insert("projectId".into(), json!(project));
             }
-            let data = client
-                .run(issue::ISSUE_CREATE, json!({ "input": fields }))
+            let data = create(client, issue::ISSUE_CREATE, fields, id, issue::ISSUE)
                 .await
                 .map_err(at("/parent_ref"))?;
-            Ok(written(
-                instance.record(&data["issueCreate"]["issue"])?,
-                None,
-            ))
+            // A fresh create answers `issueCreate.issue`; a repeated one,
+            // looked up, `issue`.
+            let issue = data["issueCreate"]["issue"]
+                .as_object()
+                .map_or(&data["issue"], |_| &data["issueCreate"]["issue"]);
+            Ok(written(instance.record(issue)?, None))
         }
         "update" => {
             let id = instance.identifier(required(input, "ref")?, "/ref")?;
@@ -677,34 +724,42 @@ async fn invoke(
                     })
                 }
             };
-            let id = uuid_of(client, instance, item_ref, "/ref").await?;
+            let issue_id = uuid_of(client, instance, item_ref, "/ref").await?;
             let target = uuid_of(client, instance, target_ref, "/target").await?;
-            let data = client
-                .run(
-                    issue::RELATION_CREATE,
-                    json!({ "input": { "issueId": id, "relatedIssueId": target, "type": kind } }),
-                )
-                .await
-                .map_err(at("/target"))?;
-            Ok(written(
-                instance.record(&data["issueRelationCreate"]["issueRelation"]["issue"])?,
-                None,
-            ))
+            let fields = json!({ "issueId": issue_id, "relatedIssueId": target, "type": kind });
+            let data = create(
+                client,
+                issue::RELATION_CREATE,
+                fields.as_object().cloned().unwrap_or_default(),
+                id,
+                issue::RELATION,
+            )
+            .await
+            .map_err(at("/target"))?;
+            let relation = data["issueRelationCreate"]["issueRelation"]
+                .as_object()
+                .map_or(&data["issueRelation"], |_| {
+                    &data["issueRelationCreate"]["issueRelation"]
+                });
+            Ok(written(instance.record(&relation["issue"])?, None))
         }
         "comment" => {
             let body = required(input, "body")?;
-            let id = uuid_of(client, instance, required(input, "ref")?, "/ref").await?;
-            let data = client
-                .run(
-                    issue::COMMENT_CREATE,
-                    json!({ "input": { "issueId": id, "body": body } }),
-                )
-                .await
-                .map_err(at("/ref"))?;
-            Ok(written(
-                instance.record(&data["commentCreate"]["comment"]["issue"])?,
-                None,
-            ))
+            let issue_id = uuid_of(client, instance, required(input, "ref")?, "/ref").await?;
+            let fields = json!({ "issueId": issue_id, "body": body });
+            let data = create(
+                client,
+                issue::COMMENT_CREATE,
+                fields.as_object().cloned().unwrap_or_default(),
+                id,
+                issue::COMMENT,
+            )
+            .await
+            .map_err(at("/ref"))?;
+            let comment = data["commentCreate"]["comment"]
+                .as_object()
+                .map_or(&data["comment"], |_| &data["commentCreate"]["comment"]);
+            Ok(written(instance.record(&comment["issue"])?, None))
         }
         "delete" => {
             let id = instance.identifier(required(input, "ref")?, "/ref")?;

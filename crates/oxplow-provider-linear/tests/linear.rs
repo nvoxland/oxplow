@@ -77,13 +77,24 @@ async fn invoke(
     command: &str,
     input: Value,
 ) -> Result<InvokeResult, ProtocolError> {
+    keyed(peer, handle, command, input, None).await
+}
+
+/// [`invoke`], sent with an idempotency key.
+async fn keyed(
+    peer: &Peer,
+    handle: &Handle,
+    command: &str,
+    input: Value,
+    key: Option<&str>,
+) -> Result<InvokeResult, ProtocolError> {
     peer.call(
         method::INVOKE,
         &InvokeParams {
             handle: handle.clone(),
             command: command.into(),
             input,
-            idempotency_key: None,
+            idempotency_key: key.map(str::to_string),
         },
     )
     .await
@@ -550,4 +561,63 @@ async fn a_rate_limited_reply_is_rate_limited_with_its_retry_after() {
     assert!(invoke(&peer, &handle, "create", json!({ "title": "x" }))
         .await
         .is_ok());
+}
+
+/// P10: a create sent with an idempotency key carries an id derived from
+/// it, so sending it again is one issue (one comment, one relation): the
+/// service refuses the repeated id and the provider answers with what the
+/// first send made. It still doesn't declare `idempotent_writes` — that
+/// waits on a live run confirming Linear keeps client ids.
+#[tokio::test]
+async fn a_repeated_create_is_one_issue() {
+    let sim = LinearSim::start(KEY).await.unwrap();
+    let (_child, peer) = spawn(&sim, Some(KEY));
+    let declared = initialize(&peer).await;
+    assert_ne!(
+        declared.capabilities[0].features["idempotent_writes"],
+        json!(true)
+    );
+    let handle = checked(&peer).await;
+    let create = || {
+        keyed(
+            &peer,
+            &handle,
+            "create",
+            json!({ "title": "Once" }),
+            Some("k-1"),
+        )
+    };
+    let first = create().await.unwrap();
+    let again = create().await.unwrap();
+    assert_eq!(row(&first)["ref"], row(&again)["ref"]);
+    assert_eq!(sim.live_issues().len(), 1);
+    let item = row(&first)["ref"].as_str().unwrap().to_string();
+    let other = invoke(&peer, &handle, "create", json!({ "title": "Other" }))
+        .await
+        .unwrap();
+    let other = row(&other)["ref"].as_str().unwrap().to_string();
+
+    for _ in 0..2 {
+        keyed(
+            &peer,
+            &handle,
+            "comment",
+            json!({ "ref": item, "body": "once" }),
+            Some("c-1"),
+        )
+        .await
+        .unwrap();
+        keyed(
+            &peer,
+            &handle,
+            "link",
+            json!({ "ref": item, "target": other, "link_type": "blocks" }),
+            Some("l-1"),
+        )
+        .await
+        .unwrap();
+    }
+    let identifier = item.rsplit(':').next().unwrap();
+    assert_eq!(sim.comments(identifier), vec!["once"]);
+    assert_eq!(sim.relations().len(), 1);
 }

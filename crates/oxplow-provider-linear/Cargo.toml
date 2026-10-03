@@ -18,6 +18,8 @@ tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
+# A create's id, derived from its idempotency key (v5).
+uuid = { workspace = true, features = ["v5"] }
 
 [dev-dependencies]
 oxplow-app = { workspace = true }

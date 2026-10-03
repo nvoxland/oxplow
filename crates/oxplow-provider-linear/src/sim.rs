@@ -45,8 +45,12 @@ struct World {
     key: String,
     states: Vec<(String, String, String, f64)>,
     issues: Vec<Issue>,
-    relations: Vec<(String, String, String)>,
-    comments: Vec<(String, String)>,
+    /// `(id, issue, related, type)`.
+    relations: Vec<(String, String, String, String)>,
+    /// `(id, issue, body)`.
+    comments: Vec<(String, String, String)>,
+    /// Ids handed out so far (a create without its own id gets the next).
+    minted: usize,
     clock: u64,
     max_page: usize,
     rate_limit_secs: Option<u64>,
@@ -105,6 +109,7 @@ impl LinearSim {
             issues: Vec::new(),
             relations: Vec::new(),
             comments: Vec::new(),
+            minted: 0,
             clock: 0,
             max_page: 50,
             rate_limit_secs: None,
@@ -160,8 +165,8 @@ impl LinearSim {
         self.lock()
             .comments
             .iter()
-            .filter(|(i, _)| i == identifier)
-            .map(|(_, b)| b.clone())
+            .filter(|(_, i, _)| i == identifier)
+            .map(|(_, _, b)| b.clone())
             .collect()
     }
 
@@ -177,7 +182,11 @@ impl LinearSim {
 
     /// The relations as `(issue, related, type)`.
     pub fn relations(&self) -> Vec<(String, String, String)> {
-        self.lock().relations.clone()
+        self.lock()
+            .relations
+            .iter()
+            .map(|(_, from, to, kind)| (from.clone(), to.clone(), kind.clone()))
+            .collect()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, World> {
@@ -322,6 +331,28 @@ fn state_index(w: &World, id: &str) -> Result<usize, String> {
         .ok_or_else(|| format!("no workflow state `{id}`"))
 }
 
+/// A create's id: the client's own (`input.id`), refused when anything
+/// already has it — as Linear refuses a repeated id — else a new one.
+fn new_id(w: &mut World, input: &Value) -> Result<String, String> {
+    match input["id"].as_str() {
+        Some(id) => {
+            let taken = w.issues.iter().any(|i| i.id == id)
+                || w.comments.iter().any(|c| c.0 == id)
+                || w.relations.iter().any(|r| r.0 == id);
+            if taken {
+                return Err(format!(
+                    "Argument Validation Error: `{id}` is already in use"
+                ));
+            }
+            Ok(id.to_string())
+        }
+        None => {
+            w.minted += 1;
+            Ok(format!("00000000-0000-4000-8000-{:012}", w.minted))
+        }
+    }
+}
+
 fn tick(w: &mut World) -> u64 {
     w.clock += 1;
     w.clock
@@ -387,9 +418,10 @@ fn op(w: &mut World, operation: &str, vars: &Value) -> Result<Value, String> {
             if input["teamId"] != TEAM_ID {
                 return Err("no team".into());
             }
+            let id = new_id(w, input)?;
             let n = w.issues.len() + 1;
             let mut issue = Issue {
-                id: format!("00000000-0000-4000-8000-{n:012}"),
+                id,
                 identifier: format!("ENG-{n}"),
                 title: String::new(),
                 description: None,
@@ -417,6 +449,7 @@ fn op(w: &mut World, operation: &str, vars: &Value) -> Result<Value, String> {
         }
         "IssueRelationCreate" => {
             let input = &vars["input"];
+            let id = new_id(w, input)?;
             let from = find_uuid(w, input["issueId"].as_str().unwrap_or_default())?;
             let to = find_uuid(w, input["relatedIssueId"].as_str().unwrap_or_default())?;
             let kind = input["type"].as_str().unwrap_or_default().to_string();
@@ -427,18 +460,39 @@ fn op(w: &mut World, operation: &str, vars: &Value) -> Result<Value, String> {
                 w.issues[from].identifier.clone(),
                 w.issues[to].identifier.clone(),
             );
-            w.relations.push((pair.0, pair.1, kind));
+            w.relations.push((id, pair.0, pair.1, kind));
             Ok(json!({ "issueRelationCreate": { "success": true,
                        "issueRelation": { "issue": issue_json(w, &w.issues[from]) } } }))
         }
         "CommentCreate" => {
             let input = &vars["input"];
+            let id = new_id(w, input)?;
             let at = find_uuid(w, input["issueId"].as_str().unwrap_or_default())?;
             let body = input["body"].as_str().unwrap_or_default().to_string();
             let identifier = w.issues[at].identifier.clone();
-            w.comments.push((identifier, body));
+            w.comments.push((id, identifier, body));
             Ok(json!({ "commentCreate": { "success": true,
                        "comment": { "issue": issue_json(w, &w.issues[at]) } } }))
+        }
+        "Comment" => {
+            let id = vars["id"].as_str().unwrap_or_default();
+            let comment = w
+                .comments
+                .iter()
+                .find(|c| c.0 == id)
+                .ok_or("Entity not found: Comment")?;
+            let at = find(w, &comment.1)?;
+            Ok(json!({ "comment": { "issue": issue_json(w, &w.issues[at]) } }))
+        }
+        "IssueRelation" => {
+            let id = vars["id"].as_str().unwrap_or_default();
+            let relation = w
+                .relations
+                .iter()
+                .find(|r| r.0 == id)
+                .ok_or("Entity not found: IssueRelation")?;
+            let at = find(w, &relation.1)?;
+            Ok(json!({ "issueRelation": { "issue": issue_json(w, &w.issues[at]) } }))
         }
         "IssueDelete" => {
             let at = find(w, vars["id"].as_str().unwrap_or_default())?;
