@@ -1755,7 +1755,10 @@ the asset has one), `elapsed_ms`; V143 (P8.B4) adds `mode` (`full` /
 `incremental`), `watermark` and `row_count`; V151 adds `definition` (a
 materialized model's SELECT, hashed — a clocked asset recorded for
 another definition is due at once, tsk780). Written by the runner after
-each recompute; read as `v_asset`. See [semantic-layer.md](./semantic-layer.md)
+each recompute; read as `v_asset`. **`asset_failure`** (V152, tsk781):
+an asset's last recompute failure — `failed_at`, `error` — written when
+one fails and deleted in the transaction of the next success; `v_asset`
+(v3) joins it, so an asset that never succeeded is listed too. See [semantic-layer.md](./semantic-layer.md)
 "Assets".
 
 ### `collector_run` — `SqliteCollectorStore` (`crates/oxplow-db/src/collector_store.rs`)

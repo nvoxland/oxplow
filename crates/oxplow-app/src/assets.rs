@@ -312,9 +312,9 @@ async fn materialized_models(db: &Database) -> Result<BTreeMap<String, ModelAsse
 /// A materialized model (P7.B2): its table refilled, whole, from its
 /// SELECT in one transaction — when an input changes, or on its `every:`
 /// clock (P8.B2). An incremental one (P8.B4) appends the rows past its
-/// watermark instead, unless a refill is asked for; its primary key (the
-/// model's key) turns a row that should already have been there into a
-/// constraint error, and it refills instead.
+/// watermark — its key — instead, unless a refill is asked for. Either
+/// fails on SQL that emits one key twice; the failure is the asset's in
+/// `asset_failure`, and the last good rows stand.
 pub struct SqlModelMaterializer {
     db: Database,
     view: String,
@@ -441,18 +441,14 @@ impl Materializer for SqlModelMaterializer {
         Some(hex::encode(Sha256::digest(self.sql.as_bytes())))
     }
 
+    /// Refill whole, or append past the watermark. An append that hits
+    /// the key is a failure like any other: with the watermark the key, it
+    /// means the SELECT emitted one key twice, which a refill would hit
+    /// too (tsk781).
     async fn recompute(&self, full: bool) -> Result<Recomputed, DomainError> {
-        let Some(column) = self.incremental.as_deref().filter(|_| !full) else {
-            return self.refill().await;
-        };
-        match self.append(column).await {
-            Ok(done) => Ok(done),
-            // A row past the watermark that collides with one it holds:
-            // the output isn't monotone in the watermark after all.
-            Err(error) => {
-                tracing::warn!(view = %self.view, %error, "an incremental append failed; refilling whole");
-                self.refill().await
-            }
+        match self.incremental.as_deref().filter(|_| !full) {
+            Some(column) => self.append(column).await,
+            None => self.refill().await,
         }
     }
 }
@@ -547,8 +543,10 @@ async fn recompute(db: &Database, entry: &Entry) {
                             definition
                         ],
                     )
-                    .map(|_| ())
-                    .map_err(oxplow_db::map_sql_err)
+                    .map_err(oxplow_db::map_sql_err)?;
+                    tx.execute("DELETE FROM asset_failure WHERE asset = ?1", [&asset])
+                        .map(|_| ())
+                        .map_err(oxplow_db::map_sql_err)
                 })
                 .await;
             if let Err(error) = recorded {
@@ -562,6 +560,26 @@ async fn recompute(db: &Database, entry: &Entry) {
                     .store(true, std::sync::atomic::Ordering::SeqCst);
             }
             tracing::warn!(asset = %m.asset(), %error, "an asset's recompute failed; the next change tries again");
+            let (asset, at, message) = (
+                m.asset().to_string(),
+                Timestamp::now().to_string(),
+                error.to_string(),
+            );
+            let recorded = db
+                .transaction(move |tx| {
+                    tx.execute(
+                        "INSERT INTO asset_failure (asset, failed_at, error) VALUES (?1, ?2, ?3)
+                         ON CONFLICT (asset) DO UPDATE SET
+                            failed_at = excluded.failed_at, error = excluded.error",
+                        rusqlite::params![asset, at, message],
+                    )
+                    .map(|_| ())
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await;
+            if let Err(error) = recorded {
+                tracing::warn!(asset = %m.asset(), %error, "recording an asset's failure failed");
+            }
         }
     }
 }
@@ -917,16 +935,13 @@ mod tests {
         }
     }
 
-    /// Output that isn't monotone in the watermark — the latest row per
-    /// key, which a new row *replaces* — hits the primary key on append,
-    /// and the model refills whole instead of failing. The compiler refuses
-    /// this shape (its `NOT EXISTS` subquery, tsk778); the materializer is
-    /// driven directly here to pin the runtime safety net. (A row that
-    /// appears below the watermark is the other non-monotone case; nothing
-    /// at run time can see it, which is why `plugin test` checks every
-    /// incremental model against a full refill.)
+    /// tsk781: an append that hits the key is a failure, not a silent
+    /// refill — with the watermark the key (tsk777), only SQL that emits a
+    /// key twice can hit it, and a refill of the same SQL fails the same
+    /// way. (The shape below, the latest row per key, is one the compiler
+    /// refuses — tsk778; the materializer is driven directly.)
     #[tokio::test]
-    async fn a_replaced_row_refills_instead_of_failing() {
+    async fn an_append_that_hits_its_key_fails() {
         let db = Database::in_memory();
         db.transaction(|tx| {
             tx.execute_batch(
@@ -950,11 +965,63 @@ mod tests {
         write(&db, "INSERT INTO src (id, k) VALUES (1, 1), (2, 2);".into()).await;
         m.recompute(true).await.unwrap();
         write(&db, "INSERT INTO src (id, k) VALUES (3, 1);".into()).await;
-        let done = m.recompute(false).await.unwrap();
-        assert_eq!(done.mode, Some("full"));
+        let err = m.recompute(false).await.unwrap_err();
+        assert!(err.to_string().contains("UNIQUE"), "{err}");
         assert_eq!(
             rows(&db, "SELECT k, seq FROM m_v_latest ORDER BY k").await,
-            vec![(1, 3), (2, 2)]
+            vec![(1, 1), (2, 2)],
+            "nothing appended; the last good rows stand"
         );
+    }
+
+    /// `v_asset`'s last failure for `asset`, and when.
+    async fn surfaced(db: &Database, asset: &'static str) -> (Option<String>, Option<String>) {
+        db.read(move |tx| {
+            tx.query_row(
+                "SELECT error, failed_at FROM v_asset WHERE asset = ?1",
+                [asset],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap()
+    }
+
+    /// tsk781: a refill that fails — a keyed SELECT that emits one key
+    /// twice — is the asset's failure in `v_asset`, not only a log line;
+    /// the next success clears it.
+    #[tokio::test]
+    async fn a_failed_recompute_shows_in_v_asset_until_one_succeeds() {
+        let db = Database::in_memory();
+        write(
+            &db,
+            "CREATE TABLE src (id INTEGER, v INTEGER);
+             CREATE TABLE m_v_dup (id INTEGER, v INTEGER, PRIMARY KEY (id));
+             INSERT INTO src VALUES (1, 1), (1, 2);"
+                .into(),
+        )
+        .await;
+        let assets = Assets::new(db.clone(), Duration::from_millis(10));
+        assets.register(Arc::new(SqlModelMaterializer::new(
+            db.clone(),
+            "v_dup",
+            "SELECT id, v FROM src",
+            vec!["src".into()],
+            &oxplow_db::models::Materialize::Named(oxplow_db::models::MaterializePolicy::OnChange),
+        )));
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let (error, _) = surfaced(&db, "v_dup").await;
+        assert!(
+            error.as_deref().is_some_and(|e| e.contains("UNIQUE")),
+            "{error:?}"
+        );
+        write(&db, "DELETE FROM src WHERE v = 2;".into()).await;
+        assets.changed(&oxplow_db::changes::Changed {
+            tables: ["src".to_string()].into(),
+            rewrote: ["src".to_string()].into(),
+        });
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(surfaced(&db, "v_dup").await.0, None, "cleared by a success");
     }
 }

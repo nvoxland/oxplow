@@ -387,6 +387,61 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "doc": "The asset: `metric_cube`, or a materialized model's view (`v_<name>`).",
+          "name": "asset",
+          "type": "TEXT"
+        },
+        {
+          "doc": "When it was last recomputed (RFC 3339).",
+          "name": "computed_at",
+          "type": "TEXT"
+        },
+        {
+          "doc": "The event log's highest seq when that recompute began: what its inputs had seen.",
+          "name": "events_to",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "The snapshot it was computed against, when it has one.",
+          "name": "snapshot_id",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "How long the recompute took.",
+          "name": "elapsed_ms",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "For a materialized model: `full` (refilled whole) or `incremental` (rows past its watermark appended); NULL otherwise.",
+          "name": "mode",
+          "type": "TEXT"
+        },
+        {
+          "doc": "For an incremental model: the highest watermark value it holds.",
+          "name": "watermark",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "For a materialized model: how many rows it holds.",
+          "name": "row_count",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "When its last recompute failed, while no later one has succeeded (RFC 3339); NULL otherwise. Its rows are the last good ones.",
+          "name": "failed_at",
+          "type": "TEXT"
+        },
+        {
+          "doc": "Why that recompute failed (a materialized model's SELECT emitting one key twice, a query error).",
+          "name": "error",
+          "type": "TEXT"
+        }
+      ],
+      "key": []
     }
   },
   "branch": {

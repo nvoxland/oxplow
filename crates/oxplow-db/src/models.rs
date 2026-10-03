@@ -1241,8 +1241,8 @@ pub type FixtureRows = Vec<(String, Vec<serde_json::Map<String, serde_json::Valu
 /// Whether an incremental model kept by appending holds what a full refill
 /// would (P8.B5): `before` written, the model built whole, `after` written,
 /// the rows past its watermark appended — then compared with the SELECT's
-/// rows now. `None` when they match (an append that hits the key counts:
-/// the runtime refills then); else what differs. Run it in a rehearsal:
+/// rows now. `None` when they match; else what differs, or why the
+/// append failed. Run it in a rehearsal:
 /// it writes the rows and a temp table.
 pub fn incremental_matches_full(
     tx: &Connection,
@@ -1304,9 +1304,12 @@ pub fn incremental_matches_full(
         ),
         [mark],
     );
-    if appended.is_err() {
-        // The append repeats a key it holds: the runtime refills whole.
-        return Ok(None);
+    if let Err(e) = appended {
+        // With the watermark the key (tsk777), only SQL that emits one key
+        // twice hits it — and at run time that's a failure every time.
+        return Ok(Some(format!(
+            "fails to append the rows past `{watermark}`: {e} — its SQL emits one key more than once"
+        )));
     }
     let count = |q: String| -> Result<i64, DomainError> {
         tx.query_row(&format!("SELECT count(*) FROM ({q})"), [], |r| r.get(0))

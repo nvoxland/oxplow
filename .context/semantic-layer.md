@@ -331,14 +331,24 @@ at run time notices (tsk778). At run time it refills whole instead when it must:
   (`Changed.rewrote`, P8.B3; an event payload expiring is an UPDATE);
 - it's the **first build** since it registered (an open, a changed
   SELECT or contract — which also recreates the table);
-- the append **hits the primary key** — its SQL emitted one key twice
-  in a batch — logged, then refilled.
-The flag is sticky until a recompute succeeds. A row that appears
+The flag is sticky until a recompute succeeds. An append that **hits
+the primary key** isn't a reason to refill: with the watermark the key,
+only SQL that emits one key twice can hit it, and a refill of the same
+SQL fails the same way — it's a failure (tsk781).
+
+**A failed recompute is visible** (tsk781). Any recompute that fails —
+a keyed model's SELECT emitting one key twice, a query error — leaves
+the last good rows in place, keeps its retry flag, and is recorded in
+`asset_failure` (V152) until a recompute succeeds: `v_asset` (v3) shows
+its `failed_at` and `error`. (A materialized model's `key()` test reads
+its table, which by construction holds each key once — so a duplicate
+key shows as the asset's failure, not a failed test.) `plugin test`'s
+incremental check reports an append that fails on its fixture. A row that appears
 *below* the watermark is the case nothing at run time can see; `plugin
 test` checks each incremental model against a full refill (P8.B5).
 `asset_state` (V143) records each recompute's `mode` (`full` /
 `incremental`), the `watermark` it reached and the `row_count`;
-`v_asset` (v2) and `v_model` (v5, `mode`) show them.
+`v_asset` (v3) and `v_model` (v5, `mode`) show them.
 
 ## Metrics in SQL (P4.5)
 
