@@ -10,11 +10,12 @@
 //!     cargo test -p oxplow-provider-linear --test live -- --nocapture
 //! ```
 //!
-//! Use a scratch team: the run files issues in it, and the cleanup
-//! trashes **every issue the key's user created in that team since the
-//! run began** — one filed by hand meanwhile goes with them. Without the
-//! three variables the live test says it was skipped and passes; CI never
-//! sets them.
+//! Use a scratch team: the run files issues in it. Afterwards it trashes
+//! **exactly the issues the run reports it left** (`TestReport.left`: what
+//! a `create` example returned, and what the conformance suite filed and
+//! didn't delete) — never one filed by hand, nor another run's. Without
+//! the three variables the live test says it was skipped and passes; CI
+//! never sets them.
 //!
 //! The same suite runs against the simulator on every build, so the code
 //! a live run takes — cleanup included — is exercised. What only a live
@@ -25,21 +26,11 @@
 
 mod common;
 
-use oxplow_provider_linear::graphql::{Client, Operation, DEFAULT_URL};
-use oxplow_provider_linear::issue::ISSUE_DELETE;
-use oxplow_provider_linear::sim::LinearSim;
+use oxplow_provider_linear::graphql::{Client, DEFAULT_URL};
+use oxplow_provider_linear::issue::{ISSUE_CREATE, ISSUE_DELETE};
+use oxplow_provider_linear::sim::{LinearSim, TEAM_ID};
 use oxplow_sdk::plugin_test::{test_extension_in, TestReport};
-use serde_json::{json, Value};
-
-/// The issues the key's user created in a team since a time: what a run
-/// left behind. (Trashed issues aren't listed, so a second cleanup finds
-/// nothing.)
-const ISSUES_CREATED: Operation = Operation {
-    name: "IssuesCreated",
-    document: "query IssuesCreated($filter: IssueFilter!, $first: Int!, $after: String) { \
-               issues(filter: $filter, first: $first, after: $after) { nodes { id identifier } \
-               pageInfo { hasNextPage endCursor } } }",
-};
+use serde_json::json;
 
 /// Where a run goes: a team of a workspace, by an API key.
 struct Target {
@@ -49,44 +40,18 @@ struct Target {
     url: String,
 }
 
-/// Trash every issue the key's user created in the team since `since`
-/// (RFC 3339): their identifiers.
-async fn trash_created_since(target: &Target, since: &str) -> Vec<String> {
+/// Trash the issues `left` names (`work_item:<id>:ENG-5` refs): their
+/// identifiers.
+async fn trash(target: &Target, left: &[String]) -> Vec<String> {
     let client = Client::new(&target.url, &target.key);
-    let filter = json!({
-        "team": { "key": { "eq": target.team } },
-        "createdAt": { "gte": since },
-        "creator": { "isMe": { "eq": true } },
-    });
-    let mut found: Vec<(String, String)> = Vec::new();
-    let mut after = Value::Null;
-    loop {
-        let page = client
-            .run(
-                ISSUES_CREATED,
-                json!({ "filter": filter, "first": 50, "after": after }),
-            )
-            .await
-            .expect("listing the issues the run created");
-        let issues = &page["issues"];
-        for node in issues["nodes"].as_array().into_iter().flatten() {
-            found.push((
-                node["id"].as_str().unwrap_or_default().to_string(),
-                node["identifier"].as_str().unwrap_or_default().to_string(),
-            ));
-        }
-        if issues["pageInfo"]["hasNextPage"] != true {
-            break;
-        }
-        after = issues["pageInfo"]["endCursor"].clone();
-    }
     let mut trashed = Vec::new();
-    for (id, identifier) in found {
+    for item in left {
+        let identifier = item.rsplit(':').next().unwrap_or_default();
         client
-            .run(ISSUE_DELETE, json!({ "id": id }))
+            .run(ISSUE_DELETE, json!({ "id": identifier }))
             .await
             .unwrap_or_else(|e| panic!("trashing {identifier}: {e}"));
-        trashed.push(identifier);
+        trashed.push(identifier.to_string());
     }
     trashed
 }
@@ -112,14 +77,12 @@ async fn suite(target: &Target, network: &str) -> (TestReport, Vec<String>) {
         "config: { team: ENG }",
         &format!("config: {{ team: {} }}", target.team),
     );
-    // A minute's margin for a clock that isn't Linear's.
-    let since =
-        oxplow_domain::Timestamp::from_unix_ms(oxplow_domain::Timestamp::now().unix_ms() - 60_000)
-            .to_string();
-    let report = test_extension_in(dir.path(), "linear", true, env).await;
-    // Whatever the run came to, what it filed goes.
-    let trashed = trash_created_since(target, &since).await;
-    (report.unwrap(), trashed)
+    let report = test_extension_in(dir.path(), "linear", true, env)
+        .await
+        .expect("plugin test ran (had it not, it filed nothing)");
+    // Whatever the run came to, what it left goes.
+    let trashed = trash(target, &report.left).await;
+    (report, trashed)
 }
 
 /// The suite against the simulator: the path a live run takes, cleanup
@@ -132,6 +95,14 @@ async fn the_live_suite_runs_and_cleans_up_against_the_simulator() {
         team: "ENG".into(),
         url: sim.url.clone(),
     };
+    // Someone files an issue in the team by hand, as the run starts.
+    Client::new(&target.url, &target.key)
+        .run(
+            ISSUE_CREATE,
+            json!({ "input": { "teamId": TEAM_ID, "title": "Filed by hand" } }),
+        )
+        .await
+        .unwrap();
     let (report, trashed) = suite(&target, "network: [api.linear.app, localhost]").await;
     assert_eq!(report.errors, Vec::<String>::new());
     assert!(
@@ -139,13 +110,10 @@ async fn the_live_suite_runs_and_cleans_up_against_the_simulator() {
         "{:?}",
         report.ran
     );
-    // Everything the run filed is in the trash; nothing is left to find.
+    // Everything the run filed is in the trash, and nothing else: an
+    // issue filed beside the run (by hand, by another run) stays.
     assert!(!trashed.is_empty());
-    assert_eq!(sim.live_issues(), Vec::<String>::new());
-    assert_eq!(
-        trash_created_since(&target, "2000-01-01T00:00:00.000Z").await,
-        Vec::<String>::new()
-    );
+    assert_eq!(sim.live_issues(), vec!["ENG-1".to_string()]);
 }
 
 /// The suite against Linear itself, when asked for.

@@ -22,6 +22,17 @@ pub struct Finding {
     pub message: String,
 }
 
+/// What a run of the suite came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuiteRun {
+    /// The failed checks; none passes.
+    pub findings: Vec<Finding>,
+    /// The items it filed and didn't delete (a provider without `delete`,
+    /// or a run stopped by a failed delete): what is left in the
+    /// provider's own system for a person to clean up.
+    pub left: Vec<String>,
+}
+
 /// What the suite reads back from the host: the item's `v_work_item` row,
 /// its open efforts and the events naming it.
 #[async_trait]
@@ -49,7 +60,7 @@ pub async fn suite(
     native: Option<serde_json::Value>,
     probe: &dyn WorkItemsProbe,
     actor: &Actor,
-) -> Vec<Finding> {
+) -> SuiteRun {
     let mut findings = Vec::new();
     let mut fail = |check: &'static str, message: String| findings.push(Finding { check, message });
     let prefix = format!("work_item:{provider}:");
@@ -68,7 +79,10 @@ pub async fn suite(
         Ok(r) => r,
         Err(e) => {
             fail("create", format!("create failed: {e}"));
-            return findings;
+            return SuiteRun {
+                findings,
+                left: Vec::new(),
+            };
         }
     };
     created.push(item.clone());
@@ -263,6 +277,7 @@ pub async fn suite(
 
     // 8. Delete follows its feature, and cleans up what the suite made
     //    when the provider can (a person confirms it).
+    let mut deleted_refs: Vec<String> = Vec::new();
     for r in created.iter().rev() {
         let deleted = items.delete(&Actor::Human, r, true).await;
         if deleted.is_ok() != features.delete {
@@ -276,13 +291,20 @@ pub async fn suite(
             break;
         }
         if deleted.is_ok() {
+            deleted_refs.push(r.clone());
             probe.settle().await;
             if probe.record(r).await.is_some() {
                 fail("delete", format!("`{r}` is still a live row after delete"));
             }
         }
     }
-    findings
+    SuiteRun {
+        findings,
+        left: created
+            .into_iter()
+            .filter(|r| !deleted_refs.contains(r))
+            .collect(),
+    }
 }
 
 fn sql(e: rusqlite::Error) -> oxplow_domain::DomainError {
@@ -458,6 +480,8 @@ mod tests {
             &actor,
         )
         .await;
-        assert_eq!(findings, vec![]);
+        assert_eq!(findings.findings, vec![]);
+        // oxplow's own deletes: the suite leaves nothing behind.
+        assert_eq!(findings.left, Vec::<String>::new());
     }
 }

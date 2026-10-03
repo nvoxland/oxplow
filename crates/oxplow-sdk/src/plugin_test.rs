@@ -56,6 +56,11 @@ pub struct TestReport {
     pub blessed: Vec<String>,
     /// What ran: `check`, `provider <id>`, `<capability> suite`.
     pub ran: Vec<String>,
+    /// What the run made in a provider's own system and didn't remove —
+    /// the refs a provider example's `create` returned, and the items the
+    /// conformance suite filed and couldn't delete. Against a real
+    /// service, a person (or a live test) cleans up exactly these.
+    pub left: Vec<String>,
 }
 
 /// Run every test of extension `name` under `root`. `bless` writes the
@@ -92,6 +97,7 @@ pub async fn test_extension_in(
         warnings: checked.warnings.clone(),
         blessed: Vec::new(),
         ran: vec!["check".into()],
+        left: Vec::new(),
     };
     let ext = checked.extension;
     if report.errors.is_empty() {
@@ -950,6 +956,12 @@ async fn session(
             .await
         {
             Ok(out) => {
+                // A work item filed is left in the provider's system.
+                if spec.capability == providers::spec::WORK_ITEMS && command == "create" {
+                    if let Some(made) = out.result.get("ref").and_then(Value::as_str) {
+                        report.left.push(made.to_string());
+                    }
+                }
                 if let Some((path, want, got)) = first_mismatch(&expect, &out.result) {
                     report.errors.push(format!(
                         "{shown}:1: `{command}` returned {got} at `{path}`, the example expects \
@@ -1249,8 +1261,9 @@ async fn suite(
         Ok::<_, String>(findings)
     };
     match run.await {
-        Ok(findings) => {
-            for f in findings {
+        Ok(run) => {
+            report.left.extend(run.left);
+            for f in run.findings {
                 report.errors.push(format!(
                     "{manifest}:1: {} conformance `{}`: {} — fix: the provider's `{}` handling",
                     spec.capability, f.check, f.message, f.check
@@ -1279,6 +1292,9 @@ pub fn render(report: &TestReport, format: crate::Format) -> String {
             }
             for b in &report.blessed {
                 out.push_str(&format!("blessed: {b}\n"));
+            }
+            for l in &report.left {
+                out.push_str(&format!("left in the provider: {l}\n"));
             }
             out.push_str(&format!(
                 "{}: {} error{}, {} warning{}; ran {}\n",

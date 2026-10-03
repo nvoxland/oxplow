@@ -213,7 +213,9 @@ section, the Commands menu, decorations and feature-gated actions; then,
 with one extension, that the P6b mounts receive their params.
 
 `oxplow_app::work_items_conformance::suite(items, provider, features,
-native, probe, actor)` — plain functions returning `Finding`s, writing
+native, probe, actor)` — plain functions returning a `SuiteRun { findings,
+left }` (`left`: the items it filed and didn't delete, for a person to
+clean up in the provider's own system), writing
 through the `WorkItems` client (so it exercises the dispatching commands
 a person and an agent run) — is what every provider must do: create
 lands a `todo` row; an update changes only what it names; every

@@ -374,7 +374,8 @@ async fn the_suite_finds_a_read_that_doesnt_restate_the_writes() {
         &ServicesProbe(&fx.svc),
         &Actor::Human,
     )
-    .await;
+    .await
+    .findings;
     assert!(
         findings
             .iter()
@@ -406,7 +407,8 @@ async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
         &ServicesProbe(&fx.svc),
         &actor,
     )
-    .await;
+    .await
+    .findings;
     assert_eq!(findings, vec![]);
 
     // Its writes are `work_item.*` runs, audited once each; its health

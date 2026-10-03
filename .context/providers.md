@@ -195,16 +195,17 @@ workspace's ids, numbers and times can't match the golden, so the
 transcript is written into the copy, not compared) in an environment of
 its own — the key, and `LINEAR_API_URL` only for the simulator
 (`common::linear_env`; tsk832: the simulator's run and a live one share a
-binary, so neither may `set_var` what the other's provider reads) — and then **trashes
-every issue the key's user created in that team since the run began**
-(`IssuesCreated`: `team.key`, `createdAt >= start − 1 min`,
-`creator.isMe`; then `issueDelete`) — whatever the run came to. Use a
-scratch team: an issue filed there by hand during the run goes too.
+binary, so neither may `set_var` what the other's provider reads) — and then
+**trashes exactly the issues the run reports it left** (`TestReport.left`;
+`issueDelete` by identifier) — whatever the run came to. Never a time
+window: an issue filed by hand meanwhile, or by another run with the same
+key, stays, and a clock that isn't Linear's doesn't matter (tsk833).
 The suite is one function, and `the_live_suite_runs_and_cleans_up_against_the_simulator`
 runs it against `LinearSim` on every build, so the path a live run takes
-is exercised, cleanup included. **Nobody has run it against a workspace
+is exercised, cleanup included (an issue filed beside the run is still
+there after it). **Nobody has run it against a workspace
 yet** (there is none; a decision, 2026-10-03): whether Linear accepts the
-cleanup's filter, and everything the simulator assumes, is what the first
+`issueDelete` by identifier, and everything the simulator assumes, is what the first
 live run — or the GUI walk, tsk469 — will show.
 
 **Try it**: `scripts/install-linear.sh <project>` builds the binary into
@@ -880,6 +881,12 @@ collector examples ([extensions.md](./extensions.md) "The SDK"). The person runn
 approval check; credentials come from the environment (the declared
 names — for a signed-in credential, an access token the author got
 themselves: the kit never signs in — and never a client secret).
+The report's **`left`** lists what the run made in a provider's own
+system and didn't remove — the ref a work-items `create` example returned,
+and the items the conformance suite filed and couldn't delete
+(`work_items_conformance::SuiteRun.left`: everything, for a provider
+without `delete`); the text form prints each as `left in the provider:`.
+Against a real service that is what to clean up.
 `test_extension` reads this process's; `test_extension_in` takes a
 `HostEnv` instead — for the provider's credentials, its declared `env`
 and the throwaway host the conformance suite runs in
