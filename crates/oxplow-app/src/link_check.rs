@@ -72,6 +72,33 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
     out
 }
 
+/// What a command checks a body's links against: the project and its VCS
+/// (the database and vocabulary come with its transaction). Notes and
+/// oxplow's work items carry one.
+#[derive(Clone)]
+pub struct LinkDeps {
+    pub project_dir: std::path::PathBuf,
+    pub vcs: std::sync::Arc<dyn oxplow_domain::vcs::Vcs>,
+}
+
+impl LinkDeps {
+    /// The links in `body` that don't resolve, checked in the command's
+    /// transaction.
+    pub fn warnings(&self, ctx: &crate::commands::TxCtx<'_>, body: &str) -> Vec<LinkWarning> {
+        let graph = self.vcs.revision_graph(&self.project_dir);
+        check_links_in(
+            &LinkWorld {
+                conn: ctx.conn,
+                kinds: &ctx.events.vocabulary.kinds,
+                project_dir: &self.project_dir,
+                graph: &*graph,
+                this_page: None,
+            },
+            body,
+        )
+    }
+}
+
 /// [`check_links_in`] over the app's services, for the tools that report
 /// warnings rather than refuse (task and note bodies).
 pub async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {

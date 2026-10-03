@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 use oxplow_db::task_satellite::{add_thread_note_tx, note_tx, update_note_tx};
 use oxplow_domain::refs::build::thread_ref;
-use oxplow_domain::vcs::Vcs;
 use oxplow_domain::{
     Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
     NoteId,
@@ -24,7 +23,7 @@ use serde_json::{json, Value};
 use super::comment::author_of;
 use super::thread::{acting_thread, agent_scope};
 use super::{Command, Handler, HandlerOutput, TxCtx};
-use crate::link_check::{check_links_in, LinkWorld};
+use crate::link_check::LinkDeps;
 
 pub const ADD: &str = "knowledge.add_note";
 pub const UPDATE: &str = "knowledge.update_note";
@@ -50,13 +49,6 @@ pub struct UpdateInput {
     pub body: String,
 }
 
-/// What the notes check their links against: the project and its VCS.
-#[derive(Clone)]
-pub struct NoteDeps {
-    pub project_dir: std::path::PathBuf,
-    pub vcs: Arc<dyn Vcs>,
-}
-
 fn invalid(field: &str, message: String) -> CommandError {
     CommandError::Invalid {
         field: Some(field.into()),
@@ -72,19 +64,8 @@ fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError
 }
 
 /// The note and the links in its body that don't resolve.
-fn with_warnings(deps: &NoteDeps, ctx: &TxCtx<'_>, note: Value, body: &str) -> Value {
-    let graph = deps.vcs.revision_graph(&deps.project_dir);
-    let warnings = check_links_in(
-        &LinkWorld {
-            conn: ctx.conn,
-            kinds: &ctx.events.vocabulary.kinds,
-            project_dir: &deps.project_dir,
-            graph: &*graph,
-            this_page: None,
-        },
-        body,
-    );
-    json!({ "note": note, "link_warnings": warnings })
+fn with_warnings(deps: &LinkDeps, ctx: &TxCtx<'_>, note: Value, body: &str) -> Value {
+    json!({ "note": note, "link_warnings": deps.warnings(ctx, body) })
 }
 
 fn schema<T: JsonSchema>() -> Value {
@@ -106,7 +87,7 @@ fn spec(name: &str, summary: &str, schema: Value, undoable: bool) -> CommandSpec
 }
 
 /// `knowledge.add_note { thread?, body }`.
-pub fn add_command(deps: NoteDeps) -> Command {
+pub fn add_command(deps: LinkDeps) -> Command {
     Command::new(
         spec(
             ADD,
@@ -139,7 +120,7 @@ pub fn add_command(deps: NoteDeps) -> Command {
 }
 
 /// `knowledge.update_note { note, body }`; undone by its previous body.
-pub fn update_command(deps: NoteDeps) -> Command {
+pub fn update_command(deps: LinkDeps) -> Command {
     Command::new(
         spec(
             UPDATE,
@@ -183,7 +164,7 @@ pub fn update_command(deps: NoteDeps) -> Command {
 }
 
 /// The note commands, for the bus.
-pub fn commands(deps: NoteDeps) -> Vec<Command> {
+pub fn commands(deps: LinkDeps) -> Vec<Command> {
     vec![add_command(deps.clone()), update_command(deps)]
 }
 

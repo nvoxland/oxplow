@@ -1106,10 +1106,14 @@ impl Services {
             commands.register(command).expect("vcs commands register");
         }
         let acp = Arc::new(acp::manager::AcpManager::new());
+        let link_deps = link_check::LinkDeps {
+            project_dir: layout.project_dir.clone(),
+            vcs: vcs.clone(),
+        };
         for command in [
             commands::work_item::command(work_items.clone()),
-            commands::work_item::update_command(work_items.clone()),
-            commands::work_item::create_command(work_items.clone()),
+            commands::work_item::update_command(work_items.clone(), link_deps.clone()),
+            commands::work_item::create_command(work_items.clone(), link_deps.clone()),
             commands::work_item::link_command(work_items.clone()),
             commands::work_item::comment_command(work_items.clone()),
             commands::work_item::reorder_command(work_items.clone()),
@@ -1138,10 +1142,7 @@ impl Services {
                 vcs: vcs.clone(),
             },
         ))
-        .chain(commands::note::commands(commands::note::NoteDeps {
-            project_dir: layout.project_dir.clone(),
-            vcs: vcs.clone(),
-        }))
+        .chain(commands::note::commands(link_deps.clone()))
         .chain(commands::stream::commands(commands::stream::StreamDeps {
             streams: streams.clone(),
             snapshot_captures: snapshot_captures.clone(),

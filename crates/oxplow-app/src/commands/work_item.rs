@@ -23,6 +23,7 @@
 //! snapshot pin is the effort-lifecycle pump consumer's; callers that
 //! need it settle the pump (`TaskService::settle_lifecycle`).
 
+use crate::link_check::LinkDeps;
 use oxplow_domain::events::schema::{
     WorkItemCommented, WorkItemCommentedV1, WorkItemLinked, WorkItemLinkedV1,
 };
@@ -618,7 +619,8 @@ pub fn create_spec() -> CommandSpec {
         CREATE,
         "File a work item on a provider (the active one by default), optionally straight into \
          a state. oxplow's native fields: { thread, priority }; absent thread files onto the \
-         backlog, in_progress opens its effort in the same transaction.",
+         backlog, in_progress opens its effort in the same transaction. On oxplow the \
+         result carries `link_warnings`: the `[[…]]` links in the body that don't resolve.",
         schema_of::<WorkItemCreateInput>(),
         Confirm::Never,
         // Undoing a filing would be deleting an item — not what undo is for.
@@ -629,8 +631,9 @@ pub fn create_spec() -> CommandSpec {
 
 /// oxplow's core: `insert_logged_tx` — the row (at the end of its list),
 /// `work_item.created`, and the effort when filed `in_progress`, caused
-/// by the run. An agent's task is authored `agent`.
-fn tx_create(registry: WorkItemsRegistry) -> Arc<TxHandler> {
+/// by the run. An agent's task is authored `agent`. The result carries the
+/// body's `link_warnings` (tsk775).
+fn tx_create(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WorkItemCreateInput = parse(input)?;
         let parent_id = input
@@ -679,6 +682,7 @@ fn tx_create(registry: WorkItemsRegistry) -> Arc<TxHandler> {
             })?;
         let mut result = serde_json::to_value(&row).expect("Task serializes");
         result["ref"] = Value::String(work_item_ref(id));
+        result["link_warnings"] = json!(links.warnings(ctx, &row.description));
         Ok(HandlerOutput {
             result,
             inverse: None,
@@ -689,13 +693,13 @@ fn tx_create(registry: WorkItemsRegistry) -> Arc<TxHandler> {
     })
 }
 
-pub fn create_command(registry: WorkItemsRegistry) -> Command {
+pub fn create_command(registry: WorkItemsRegistry, links: LinkDeps) -> Command {
     dispatching(
         create_spec(),
         registry.clone(),
         "create",
         create_target,
-        tx_create(registry),
+        tx_create(registry, links),
     )
 }
 
@@ -730,7 +734,8 @@ pub fn update_spec() -> CommandSpec {
     spec(
         UPDATE,
         "Edit a work item's title, body, parent or native fields and, optionally, move it to \
-         a state — all in one run (see work_item.transition for the state's effects).",
+         a state — all in one run (see work_item.transition for the state's effects). On \
+         oxplow the result carries `link_warnings` for the body's `[[…]]` links.",
         schema_of::<WorkItemUpdateInput>(),
         Confirm::Never,
         true,
@@ -740,8 +745,9 @@ pub fn update_spec() -> CommandSpec {
 
 /// oxplow's core: `update_with_status_tx` — `work_item.edited` for the
 /// fields, then the status move with everything it implies, all caused
-/// by the run. The inverse restores exactly what was given.
-fn tx_update(registry: WorkItemsRegistry) -> Arc<TxHandler> {
+/// by the run. The inverse restores exactly what was given. The result
+/// carries the body's `link_warnings` (tsk775).
+fn tx_update(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WorkItemUpdateInput = parse(input)?;
         let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
@@ -803,8 +809,10 @@ fn tx_update(registry: WorkItemsRegistry) -> Arc<TxHandler> {
                 .priority
                 .map(|_| json!({ "priority": before.priority })),
         };
+        let mut result = serde_json::to_value(&after).expect("Task serializes");
+        result["link_warnings"] = json!(links.warnings(ctx, &after.description));
         Ok(HandlerOutput {
-            result: serde_json::to_value(&after).expect("Task serializes"),
+            result,
             inverse: Some(CommandCall {
                 name: UPDATE.into(),
                 input: serde_json::to_value(inverse).expect("input serializes"),
@@ -816,13 +824,13 @@ fn tx_update(registry: WorkItemsRegistry) -> Arc<TxHandler> {
     })
 }
 
-pub fn update_command(registry: WorkItemsRegistry) -> Command {
+pub fn update_command(registry: WorkItemsRegistry, links: LinkDeps) -> Command {
     dispatching(
         update_spec(),
         registry.clone(),
         "update",
         update_target,
-        tx_update(registry),
+        tx_update(registry, links),
     )
 }
 
@@ -1261,6 +1269,41 @@ mod tests {
     use super::*;
     use oxplow_db::EffortStore as _;
     use oxplow_domain::StreamId;
+
+    /// tsk775: filing or editing an oxplow task answers with the
+    /// `[[…]]` links in its body that don't resolve, as a note does, so an
+    /// agent fixes a broken link in the same turn.
+    #[tokio::test]
+    async fn a_task_body_answers_with_its_broken_links() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let run = |name: &'static str, input: Value| {
+            let bus = fx.svc.commands.clone();
+            async move { bus.run(&Actor::Human, name, input, false).await.unwrap() }
+        };
+        let filed = run(
+            CREATE,
+            json!({ "provider": "oxplow", "title": "linky", "body": "see [[tsk99999]] and [[#12]]" }),
+        )
+        .await;
+        let targets = |v: &Value| -> Vec<String> {
+            v["link_warnings"]
+                .as_array()
+                .unwrap_or_else(|| panic!("no link_warnings in {v}"))
+                .iter()
+                .map(|w| w["target"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(targets(&filed.result), vec!["tsk99999", "#12"]);
+        let item = filed.result["ref"].as_str().unwrap().to_string();
+        let edited = run(
+            UPDATE,
+            json!({ "ref": item, "body": "now see [[tsk99998]]" }),
+        )
+        .await;
+        assert_eq!(targets(&edited.result), vec!["tsk99998"]);
+        let fixed = run(UPDATE, json!({ "ref": item, "body": "no links" })).await;
+        assert_eq!(targets(&fixed.result), Vec::<String>::new());
+    }
 
     /// P5.C2: the commands take canonical refs and refuse another
     /// provider's, naming the registered ones.
