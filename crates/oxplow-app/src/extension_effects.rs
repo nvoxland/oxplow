@@ -396,10 +396,18 @@ async fn effect_outputs(
             (crate::effects::event_json(&e), None),
         );
     }
+    // Each side reads through its own models (its `input:` may read them).
+    let (layer_b, layer_a) = (
+        layer.with_overlay(before.map(|v| v.overlay.to_vec()).unwrap_or_default()),
+        layer.with_overlay(after.overlay.to_vec()),
+    );
     for (label, (event, rows)) in inputs {
-        let run = |decl: &Option<crate::effects::EffectDecl>| {
-            let (decl, event, rows) = (decl.clone(), event.clone(), rows.clone());
+        let run = |layer: &crate::sql_gateway::SqlGateway,
+                   decl: &Option<crate::effects::EffectDecl>| {
+            let (layer, decl, event, rows) =
+                (layer.clone(), decl.clone(), event.clone(), rows.clone());
             async move {
+                let layer = &layer;
                 let decl = decl?;
                 let event_type = event["type"].as_str().unwrap_or_default().to_string();
                 if !crate::effects::reacts_to(&decl, &event_type, &event["payload"]) {
@@ -428,7 +436,7 @@ async fn effect_outputs(
                 )
             }
         };
-        let (b, a) = (run(&db).await, run(&da).await);
+        let (b, a) = (run(&layer_b, &db).await, run(&layer_a, &da).await);
         if b.is_none() && a.is_none() {
             continue;
         }
@@ -1098,16 +1106,31 @@ async fn collector_outputs(
     if inputs.is_empty() && spec.input.is_some() {
         inputs.push(("input query".into(), None, None));
     }
+    // Each side reads through its own models (its `input:` may read them).
+    let (layer_b, layer_a) = (
+        layer.with_overlay(before.map(|v| v.overlay.to_vec()).unwrap_or_default()),
+        layer.with_overlay(after.overlay.to_vec()),
+    );
     for (label, event, rows) in inputs {
-        let run = |spec: &Option<CollectorSpec>, script: &Option<String>| {
-            let (spec, script, rows, event) =
-                (spec.clone(), script.clone(), rows.clone(), event.clone());
+        let run = |layer: &crate::sql_gateway::SqlGateway,
+                   spec: &Option<CollectorSpec>,
+                   script: &Option<String>| {
+            let (layer, spec, script, rows, event) = (
+                layer.clone(),
+                spec.clone(),
+                script.clone(),
+                rows.clone(),
+                event.clone(),
+            );
             async move {
                 let spec = spec?;
-                ran(dry_run_collector(layer, &spec, script, event.as_ref(), rows).await).ok()
+                ran(dry_run_collector(&layer, &spec, script, event.as_ref(), rows).await).ok()
             }
         };
-        let (b, a) = (run(&spec_b, &script_b).await, run(&spec_a, &script_a).await);
+        let (b, a) = (
+            run(&layer_b, &spec_b, &script_b).await,
+            run(&layer_a, &spec_a, &script_a).await,
+        );
         effect.outputs.push(CollectorOutput {
             input: label,
             change: change_of(b.as_ref(), a.as_ref()),
@@ -2107,6 +2130,78 @@ mod tests {
             "collectors/smart.star",
             &format!("def transform(input):\n    return {{\"entities\": {{\"summary\": [{{\"id\": r[\"id\"], \"text\": ai_summarize(\"{label}\")}} for r in input[\"rows\"]]}}}}\n"),
         );
+    }
+
+    /// tsk782: a collector's `input:` reads each side's own models — the
+    /// before side sees its version of a view, the after side its own.
+    #[tokio::test]
+    async fn a_collectors_input_reads_each_sides_own_models() {
+        let (old, new) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let write = |root: &std::path::Path, label: &str| {
+            let dir = root.join("oxplow/extensions/acme");
+            std::fs::create_dir_all(dir.join("collectors")).unwrap();
+            std::fs::write(
+                dir.join("extension.yaml"),
+                "manifest: 2\nname: acme\nintent:\n  purpose: Things.\n  origin: thread:thr1\n  examples: []\ncollectors:\n  - id: things\n    runtime: starlark\n    entry: collectors/things.star\n    input: \"SELECT id FROM v_acme_src\"\n    entities:\n      - { name: thing, key: id, columns: { id: int, label: text } }\n",
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join("collectors/things.star"),
+                format!("def transform(input):\n    return {{\"entities\": {{\"thing\": [{{\"id\": r[\"id\"], \"label\": \"{label}\"}} for r in input[\"rows\"]]}}}}\n"),
+            )
+            .unwrap();
+        };
+        write(old.path(), "a");
+        write(new.path(), "b");
+        let (eb, ea) = (
+            crate::extensions::load_project_extension(old.path(), "acme"),
+            crate::extensions::load_project_extension(new.path(), "acme"),
+        );
+        let reader = |root: std::path::PathBuf| {
+            move |rel: &str| {
+                std::fs::read_to_string(root.join("oxplow/extensions/acme").join(rel)).ok()
+            }
+        };
+        let (rb, ra) = (
+            reader(old.path().to_path_buf()),
+            reader(new.path().to_path_buf()),
+        );
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let runs = crate::extensions::LensRuns::new();
+        let view = |sql: &str| {
+            vec![oxplow_db::TempView {
+                name: "v_acme_src".into(),
+                sql: sql.into(),
+            }]
+        };
+        let (ob, oa) = (
+            view("SELECT 1 AS id"),
+            view("SELECT 1 AS id UNION ALL SELECT 2"),
+        );
+        let report = effects(
+            &layer,
+            Some(Version {
+                extension: &eb,
+                read: &rb,
+                lenses: &runs,
+                overlay: &ob,
+            }),
+            Version {
+                extension: &ea,
+                read: &ra,
+                lenses: &runs,
+                overlay: &oa,
+            },
+        )
+        .await;
+        let out = &report.collectors[0].outputs;
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(
+            out[0].before.as_ref().unwrap().counts["thing"],
+            1,
+            "{out:?}"
+        );
+        assert_eq!(out[0].after.as_ref().unwrap().counts["thing"], 2, "{out:?}");
     }
 
     /// tsk779: a side past the limit reads `limit` rows, truncated, and the

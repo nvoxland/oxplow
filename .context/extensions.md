@@ -1010,6 +1010,7 @@ in both versions — each version's intent-example fixtures that name it
 (`fixtures/<example>.yaml`, `input: { collector, rows }`), the latest
 five events its `on:` trigger matches, else its `input:` query once — by
 `collector_runner::dry_run_collector`: each version's own script text,
+its `input:` read through that version's own overlay (tsk782),
 storing nothing, with a `RefusingOracle` answering every `ai_*` builtin
 with an error (a review never spends or sends). `CollectorEffect.outputs`
 holds each input's `Ran { counts, rows (20 per entity), error? }` before
@@ -1022,8 +1023,8 @@ filter, input }`; a script-only change is `changed` too) and, when it
 changed, `outputs`: each input — both versions' fixtures that name it
 (`input: { effect, event, rows? }`) and the latest five events of its
 `on` types — composed by each version that reacts to it
-(`effects::dry_run`, nothing runs): `Composes { commands, skip?, error?
-}`. The lines read "Effect x: added — on t where k = v", "Effect x: on …
+(`effects::dry_run` through that side's overlay, nothing runs):
+`Composes { commands, skip?, error? }`. The lines read "Effect x: added — on t where k = v", "Effect x: on …
 → on …", "Effect x on fixture basic: runs [a] → skips (why)".
 
 **`oxplow plugin check <name> --effects [--against <rev>]`** (P8.C6).
