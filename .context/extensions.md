@@ -978,8 +978,11 @@ effort-review view of an extension change (P8.C below covers each).
 name)` loads project extension `name` as revision `rev` of the
 workspace holds it — a commit (`git:HEAD`), a snapshot, the working
 tree — through `Trees::corpus` into an in-memory `Tree` (the
-`ExtensionFiles` the loader reads; a custom component's bundle has
-nothing to stat there). At `git:HEAD` of a clean worktree it equals the
+`ExtensionFiles` the loader reads). A custom component's bundle is
+looked up three ways (`BundleLook`): on disk it's `Found` or `Absent` (an
+error); in a revision's tree it's checked from the tree's own paths when
+they're there, and `Unknown` — taken as declared, not an error — when
+they aren't, since a built bundle usually isn't committed (tsk784). At `git:HEAD` of a clean worktree it equals the
 disk load; `None` when that revision has no `extension.yaml`. It's what
 lets a review compare two revisions of an extension, neither of which
 need be on disk.

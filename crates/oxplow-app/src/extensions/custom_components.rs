@@ -66,6 +66,40 @@ pub struct BundleStat {
     pub symlink: Option<String>,
 }
 
+/// What looking a bundle up found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BundleLook {
+    /// It isn't there (on disk: not a folder).
+    Absent,
+    /// It can't be told from these files: a revision's tree, where a built
+    /// bundle usually isn't committed. Taken as declared (tsk784).
+    Unknown,
+    Found(BundleStat),
+}
+
+/// What files under `rel` say about a bundle, for a tree of paths and
+/// contents (a revision): their count, size and an `index.html`; `Unknown`
+/// when none are there.
+pub fn look_in_paths<'a>(rel: &str, files: impl Iterator<Item = (&'a str, usize)>) -> BundleLook {
+    let prefix = format!("{}/", rel.trim_end_matches('/'));
+    let mut stat = BundleStat::default();
+    for (path, len) in files {
+        let Some(inner) = path.strip_prefix(&prefix) else {
+            continue;
+        };
+        stat.files += 1;
+        stat.bytes += len as u64;
+        if inner == "index.html" {
+            stat.has_index = true;
+        }
+    }
+    if stat.files == 0 {
+        BundleLook::Unknown
+    } else {
+        BundleLook::Found(stat)
+    }
+}
+
 /// Walk `dir` (a bundle on disk): `None` when it isn't a directory. A
 /// symlink anywhere — the folder itself included — is reported, never
 /// followed.
@@ -138,7 +172,7 @@ pub fn parse_custom_components(
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
-    stat: &dyn Fn(&str) -> Option<BundleStat>,
+    stat: &dyn Fn(&str) -> BundleLook,
 ) -> (Vec<CustomComponent>, Vec<String>) {
     let block = key_line(manifest, "custom_components");
     let Some(items) = value.as_sequence() else {
@@ -208,28 +242,31 @@ pub fn parse_custom_components(
             ))
         } else {
             match stat(&bundle) {
-                None => Some(format!(
+                BundleLook::Unknown => None,
+                BundleLook::Absent => Some(format!(
                     "custom component `{}`: bundle `{bundle}` isn't a folder in the extension",
                     c.id
                 )),
-                Some(s) if s.symlink.is_some() => Some(format!(
+                BundleLook::Found(s) if s.symlink.is_some() => Some(format!(
                     "custom component `{}`: bundle `{bundle}` holds a symlink (`{}`); a bundle is \
                      plain files",
                     c.id,
                     s.symlink.unwrap_or_default()
                 )),
-                Some(s) if !s.has_index => Some(format!(
+                BundleLook::Found(s) if !s.has_index => Some(format!(
                     "custom component `{}`: bundle `{bundle}` has no `index.html`",
                     c.id
                 )),
-                Some(s) if s.files > MAX_BUNDLE_FILES || s.bytes > MAX_BUNDLE_BYTES => {
+                BundleLook::Found(s)
+                    if s.files > MAX_BUNDLE_FILES || s.bytes > MAX_BUNDLE_BYTES =>
+                {
                     Some(format!(
                         "custom component `{}`: bundle `{bundle}` is {} files, {} bytes; the most \
                          is {MAX_BUNDLE_FILES} files, {MAX_BUNDLE_BYTES} bytes",
                         c.id, s.files, s.bytes
                     ))
                 }
-                Some(_) => None,
+                BundleLook::Found(_) => None,
             }
         };
         match problem {
@@ -249,6 +286,37 @@ pub fn parse_custom_components(
 
 #[cfg(test)]
 mod tests {
+
+    /// tsk784: a revision's tree loads a custom component cleanly — checked
+    /// from the bundle's paths when the tree holds them, and taken as is
+    /// when it doesn't (a built bundle usually isn't committed). A bundle
+    /// that's there but has no `index.html` is still an error.
+    #[test]
+    fn a_revision_loads_a_custom_component_without_a_bogus_error() {
+        let manifest = "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: p, origin: null, examples: [] }\ncustom_components:\n  - { id: chart, bundle: ui/chart }\n";
+        let tree = |extra: &[(&str, &str)]| {
+            crate::extensions::Tree::new(
+                std::iter::once(("extension.yaml".to_string(), manifest.to_string()))
+                    .chain(extra.iter().map(|(p, b)| (p.to_string(), b.to_string()))),
+            )
+            .load("acme", "oxplow/extensions/acme")
+        };
+        let unbuilt = tree(&[]);
+        assert!(unbuilt.errors.is_empty(), "{:?}", unbuilt.errors);
+        assert_eq!(unbuilt.custom_components.len(), 1);
+        let built = tree(&[
+            ("ui/chart/index.html", "<html></html>"),
+            ("ui/chart/app.js", "1"),
+        ]);
+        assert!(built.errors.is_empty(), "{:?}", built.errors);
+        let broken = tree(&[("ui/chart/app.js", "1")]);
+        assert!(
+            broken.errors.join("\n").contains("has no `index.html`"),
+            "{:?}",
+            broken.errors
+        );
+    }
+
     use crate::extensions::{load_extensions, Extension, LensViz};
     use std::path::Path;
 

@@ -1115,7 +1115,7 @@ trait ExtensionFiles {
     fn list(&self, dir: &str) -> Vec<String>;
     /// What the folder `rel` holds, for a custom component's bundle;
     /// `None` when it isn't a folder (or the files aren't on disk).
-    fn bundle_stat(&self, rel: &str) -> Option<custom_components::BundleStat>;
+    fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook;
 }
 
 struct Disk(std::path::PathBuf);
@@ -1134,8 +1134,11 @@ impl ExtensionFiles for Disk {
             })
             .unwrap_or_default()
     }
-    fn bundle_stat(&self, rel: &str) -> Option<custom_components::BundleStat> {
-        custom_components::stat_bundle(&self.0.join(rel))
+    fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook {
+        match custom_components::stat_bundle(&self.0.join(rel)) {
+            Some(stat) => custom_components::BundleLook::Found(stat),
+            None => custom_components::BundleLook::Absent,
+        }
     }
 }
 
@@ -1175,10 +1178,11 @@ impl ExtensionFiles for Tree {
             .into_iter()
             .collect()
     }
-    /// A custom component's bundle is built on disk; a revision's tree has
-    /// none to stat.
-    fn bundle_stat(&self, _rel: &str) -> Option<custom_components::BundleStat> {
-        None
+    /// A bundle checked from the tree's own paths, when it holds them; a
+    /// built bundle usually isn't committed, so none is `Unknown`, not an
+    /// error (tsk784).
+    fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook {
+        custom_components::look_in_paths(rel, self.0.iter().map(|(p, b)| (p.as_str(), b.len())))
     }
 }
 
@@ -1377,8 +1381,8 @@ impl ExtensionFiles for Embedded {
             .collect()
     }
     /// A bundled extension is shared: it has no custom components.
-    fn bundle_stat(&self, _rel: &str) -> Option<custom_components::BundleStat> {
-        None
+    fn bundle_stat(&self, _rel: &str) -> custom_components::BundleLook {
+        custom_components::BundleLook::Absent
     }
 }
 
