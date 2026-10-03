@@ -146,6 +146,12 @@ export function backfillAsk(effect: string, planned: number): string {
     : `${effect} never reacted to ${planned} matching events. Backfilling runs it on each, oldest first, as it is now; it may call outside oxplow for every one.`;
 }
 
+/** A backfill's Run button: one run reacts to at most `batch` events. */
+export function backfillRunLabel(planned: number, batch: number): string {
+  if (planned > batch) return `Run on the first ${batch} of ${planned}`;
+  return `Run on ${planned} ${planned === 1 ? "event" : "events"}`;
+}
+
 /** How a backfill went, in a sentence or two. */
 export function backfillDone(r: BackfillResult): string {
   const also = [

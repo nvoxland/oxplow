@@ -104,7 +104,7 @@ test("programRow shows an effect as reacting to events from approval on (P8.D9)"
   expect(m.approveTitle).toContain("every file in oxplow/extensions/acme");
 });
 
-import { backfillAsk, backfillDone, canApprove, providerEffectLines } from "./dataSectionModel.js";
+import { backfillAsk, backfillDone, backfillRunLabel, canApprove, providerEffectLines } from "./dataSectionModel.js";
 import type { ProviderEffect } from "../tauri-bridge/generated/bindings.js";
 
 // P6b.E3: a provider's Approve waits for what approving would change; the
@@ -173,3 +173,11 @@ test("a backfill says how many events it would react to, and how it went", () =>
     "Reacted to 200 of 300 events; 100 remain — run it again for the rest.",
   );
 });
+
+// tsk849: a run makes at most a batch of reactions; its button says so.
+test("a backfill's button says how many one run reacts to", () => {
+  expect(backfillRunLabel(1, 200)).toBe("Run on 1 event");
+  expect(backfillRunLabel(200, 200)).toBe("Run on 200 events");
+  expect(backfillRunLabel(500, 200)).toBe("Run on the first 200 of 500");
+});
+

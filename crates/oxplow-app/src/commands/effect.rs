@@ -406,7 +406,9 @@ pub fn backfill_plan_command(services: Weak<Services>) -> Command {
         CommandSpec {
             name: BACKFILL_PLAN.into(),
             summary: "How many events an `effect.backfill` would have an effect react to: the \
-                      matching ones it never reacted to, and the log positions they span."
+                      matching ones it never reacted to, the log positions they span (pass \
+                      `to_seq` to the backfill to run on just these), and how many one run \
+                      reacts to (`batch`)."
                 .into(),
             input_schema: serde_json::to_value(schemars::schema_for!(BackfillInput))
                 .expect("schema serializes"),
@@ -436,11 +438,14 @@ pub fn backfill_plan_command(services: Weak<Services>) -> Command {
             let planned =
                 unreacted_tx(ctx.conn, ctx.events.vocabulary, &decl, &range, 0, SCAN_PAGE)?;
             Ok(HandlerOutput {
+                // `batch`: one `effect.backfill` reacts to at most that
+                // many; pass `to_seq` to it to run on just this range.
                 result: json!({
                     "effect": input.effect,
                     "planned": planned.count,
                     "from_seq": planned.from_seq,
                     "to_seq": planned.to_seq,
+                    "batch": BACKFILL_BATCH,
                 }),
                 ..HandlerOutput::default()
             })

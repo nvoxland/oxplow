@@ -33,7 +33,7 @@ mock.module("../api.js", () => ({
     ran.push([name, input, confirmed]);
     const result =
       name === "effect.backfill_plan"
-        ? { effect: "acme/mark-done", planned: 3, from_seq: 4, to_seq: 9 }
+        ? { effect: "acme/mark-done", planned: 3, from_seq: 4, to_seq: 9, batch: 200 }
         : name === "effect.backfill"
           ? { effect: "acme/mark-done", planned: 3, ran: 3, skipped: 0, proposed: 0, failed: 0, remaining: 0 }
           : retried;
@@ -149,7 +149,9 @@ test("Backfill… asks with the count and runs effect.backfill once confirmed", 
   const ask = await waitFor(() => view.getByTestId("effect-backfill-ask-effect:acme/mark-done"));
   expect(ask.textContent).toContain("never reacted to 3 matching events");
   expect(ran).toEqual([["effect.backfill_plan", { effect: "acme/mark-done" }, false]]);
+  expect(view.getByTestId("effect-backfill-run-effect:acme/mark-done").textContent).toBe("Run on 3 events");
   fireEvent.click(view.getByTestId("effect-backfill-run-effect:acme/mark-done"));
-  await waitFor(() => expect(ran[1]).toEqual(["effect.backfill", { effect: "acme/mark-done" }, true]));
+  // It runs on the range it showed (tsk849): what was logged since isn't in it.
+  await waitFor(() => expect(ran[1]).toEqual(["effect.backfill", { effect: "acme/mark-done", to_seq: 9 }, true]));
   await waitFor(() => expect(view.queryByTestId("effect-backfill-ask-effect:acme/mark-done")).toBeNull());
 });

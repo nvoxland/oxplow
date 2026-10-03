@@ -29,7 +29,7 @@ import type { ProjectProgram } from "../tauri-bridge/generated/bindings.js";
 import { indexRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import {
-  backfillAsk,
+  backfillAsk, backfillRunLabel,
   backfillDone,
   canApprove,
   entityRows,
@@ -384,15 +384,25 @@ const errorStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--se
  *  (`effect.backfill_plan`), and that the effect may call outside oxplow
  *  for each. The second click is the confirmation `effect.backfill` asks
  *  for; Escape (or Cancel) backs out. */
+/** What `effect.backfill_plan` answered: the run is bound to its range. */
+interface BackfillPlan {
+  planned: number;
+  toSeq: number | null;
+  batch: number;
+}
+
 function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) {
-  const [planned, setPlanned] = useState<number | null>(null);
+  const [plan, setPlan] = useState<BackfillPlan | null>(null);
+  const planned = plan?.planned ?? null;
+  const setPlanned = (p: null) => setPlan(p);
   const [busy, setBusy] = useState(false);
 
-  async function plan() {
+  async function count() {
     setBusy(true);
     try {
       const out = await runCommand("effect.backfill_plan", { effect });
-      setPlanned(Number((out.result as { planned?: number } | null)?.planned ?? 0));
+      const r = (out.result ?? {}) as { planned?: number; to_seq?: number | null; batch?: number };
+      setPlan({ planned: Number(r.planned ?? 0), toSeq: r.to_seq ?? null, batch: Number(r.batch ?? 0) });
     } catch (e) {
       recordOpError({ label: `Plan a backfill of ${effect}`, message: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -400,10 +410,12 @@ function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) 
     }
   }
 
+  // On the range it was shown (tsk849): what was logged since isn't in it.
   async function run() {
+    if (plan === null || plan.toSeq === null) return;
     setBusy(true);
     try {
-      const out = await runCommand("effect.backfill", { effect }, true);
+      const out = await runCommand("effect.backfill", { effect, to_seq: plan.toSeq }, true);
       showToast({ message: backfillDone(out.result as BackfillResult) });
       setPlanned(null);
     } catch (e) {
@@ -421,7 +433,7 @@ function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) 
           data-testid={`effect-backfill-${rowKey}`}
           title="Have it react to matching events logged before it was approved. You're shown how many first."
           disabled={busy}
-          onClick={() => void plan()}
+          onClick={() => void count()}
         >
           {busy ? "Counting…" : "Backfill…"}
         </button>
@@ -440,7 +452,7 @@ function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) 
       <span style={{ flex: 1 }} />
       {planned > 0 ? (
         <button type="button" autoFocus data-testid={`effect-backfill-run-${rowKey}`} disabled={busy} onClick={() => void run()}>
-          {busy ? "Running…" : `Run on ${planned} ${planned === 1 ? "event" : "events"}`}
+          {busy ? "Running…" : backfillRunLabel(planned, plan?.batch ?? planned)}
         </button>
       ) : null}
       <button type="button" data-testid={`effect-backfill-cancel-${rowKey}`} disabled={busy} onClick={() => setPlanned(null)}>

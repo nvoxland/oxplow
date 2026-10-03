@@ -1529,7 +1529,7 @@ mod tests {
             .result;
         assert_eq!(
             plan,
-            json!({ "effect": "acme/mark-done", "planned": 3, "from_seq": past[0].seq, "to_seq": past[2].seq })
+            json!({ "effect": "acme/mark-done", "planned": 3, "from_seq": past[0].seq, "to_seq": past[2].seq, "batch": crate::commands::effect::BACKFILL_BATCH })
         );
         // Running it is a person's, asked first.
         assert!(matches!(

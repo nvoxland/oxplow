@@ -1729,7 +1729,7 @@ proposed, failed, remaining, stopped? }` says what is left for another
 run. The effect must be enabled and approved as it is now.
 
 `effect.backfill_plan` (a read, anyone's) answers `{ planned, from_seq,
-to_seq }` for the same input: what a backfill would react to. Both read
+to_seq, batch }` for the same input: what a backfill would react to. Both read
 the candidates by log position a page at a time (`SCAN_PAGE`) to the end
 of the range, applying `where` to every one — never to a first window of
 them, which a selective `where` over a busy type would leave empty for
@@ -1738,7 +1738,10 @@ confirmation shows a command's summary and input, not a count, so the
 count is the plan's: an approved effect's row in Settings → Data →
 Programs has **Backfill…**, which reads the plan, says how many events
 the effect never reacted to and that it may call outside oxplow for each
-(`backfillAsk`), and runs only on the second click.
+(`backfillAsk`), and runs only on the second click — on the range it
+showed (`to_seq` from the plan, so what was logged in between isn't in
+it), its button saying what one run does: "Run on the first 200 of 500"
+when the plan is more than a `batch` (`backfillRunLabel`, tsk849).
 
 **There is no consumer-level replay.** Core's consumers are re-derivable
 (a projection is rebuilt, not replayed); replaying the log through every
