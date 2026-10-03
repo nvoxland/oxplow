@@ -213,6 +213,19 @@ pub(super) fn acting_thread_of(
 }
 
 /// An agent acts only on its own stream.
+/// An agent closes and reopens only its own thread (`verb`: what it does).
+fn own_thread_only(ctx: &TxCtx<'_>, id: ThreadId, verb: &str) -> Result<(), CommandError> {
+    match agent_scope(ctx)? {
+        Some((own, _)) if own != id => Err(CommandError::Denied {
+            reason: format!(
+                "an agent {verb} only its own thread (`{}`)",
+                thread_ref(own)
+            ),
+        }),
+        _ => Ok(()),
+    }
+}
+
 fn on_own_stream(ctx: &TxCtx<'_>, stream: StreamId) -> Result<(), CommandError> {
     match agent_scope(ctx)? {
         Some((_, own)) if own != stream => Err(CommandError::Denied {
@@ -528,16 +541,7 @@ pub fn close_command(acp: Arc<crate::acp::manager::AcpManager>) -> Command {
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
             let id = id_of(&input.thread, "thread", "/thread")?;
-            if let Some((own, _)) = agent_scope(ctx)? {
-                if own != id {
-                    return Err(CommandError::Denied {
-                        reason: format!(
-                            "an agent closes only its own thread (`{}`)",
-                            thread_ref(own)
-                        ),
-                    });
-                }
-            }
+            own_thread_only(ctx, id, "closes")?;
             let mut thread = load(ctx, id, "/thread")?;
             if thread.status == ThreadStatus::Closed {
                 return Ok(result(&thread));
@@ -570,15 +574,17 @@ pub fn reopen_command() -> Command {
     Command::new(
         spec(
             REOPEN,
-            "Reopen a closed thread (`thread:thr12`); it joins its stream's queue.",
+            "Reopen a closed thread (`thread:thr12`); it joins its stream's queue. An agent \
+             reopens only its own thread.",
             schema::<ThreadInput>(),
             Invokers::ALL,
             true,
         ),
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
-            let mut thread = load(ctx, id_of(&input.thread, "thread", "/thread")?, "/thread")?;
-            on_own_stream(ctx, thread.stream_id)?;
+            let id = id_of(&input.thread, "thread", "/thread")?;
+            own_thread_only(ctx, id, "reopens")?;
+            let mut thread = load(ctx, id, "/thread")?;
             if thread.status != ThreadStatus::Closed {
                 return Ok(result(&thread));
             }
@@ -786,7 +792,7 @@ mod tests {
     /// An agent acts on its own stream only, and closes only its own
     /// thread; close and reopen undo each other.
     #[tokio::test]
-    async fn an_agent_stays_on_its_own_stream_and_closes_only_its_own_thread() {
+    async fn an_agent_stays_on_its_own_stream_and_closes_and_reopens_only_its_own_thread() {
         let fx = services_with_effort().await;
         let second = create(&fx, "second").await;
         let err = run(
@@ -826,6 +832,26 @@ mod tests {
             .unwrap();
         let t = thread(&fx, second).await;
         assert_eq!((t.status, t.closed_at), (ThreadStatus::Queued, None));
+
+        // tsk788: and reopens only its own thread, as it closes only its own.
+        run(
+            &fx,
+            &Actor::Human,
+            CLOSE,
+            json!({ "thread": thread_ref(second) }),
+        )
+        .await
+        .unwrap();
+        let err = run(
+            &fx,
+            &agent(&fx),
+            REOPEN,
+            json!({ "thread": thread_ref(second) }),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+        assert_eq!(thread(&fx, second).await.status, ThreadStatus::Closed);
     }
 
     /// Rename and prompt undo to what they were; a prompt is a person's.
