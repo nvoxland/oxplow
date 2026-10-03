@@ -233,6 +233,7 @@ pub async fn validate_extension(
         &svc.extension_catalog,
         Some(&svc.sql),
         Some(svc.commands.as_ref()),
+        None,
     )
     .await
     .map_err(sdk_error)

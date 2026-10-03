@@ -68,6 +68,7 @@ pub async fn test_extension(root: &Path, name: &str, bless: bool) -> Result<Test
         &host.svc.extension_catalog,
         Some(&host.svc.sql),
         Some(host.svc.commands.as_ref()),
+        None,
     )
     .await?;
     let mut report = TestReport {

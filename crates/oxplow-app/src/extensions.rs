@@ -1314,9 +1314,10 @@ pub struct ReviewSide<'a> {
 }
 
 /// What going from `before` (none: a first install) to `after` would
-/// change (P8.C2–C5): each side prepared on its own overlay, then
-/// compared — lenses, models and their rows, collectors and their
-/// outputs, providers, config. `after.extension` gets its check's errors.
+/// change (P8.C2–C5): each side on its own overlay — `after` checked,
+/// `before` only read — then compared: lenses, models and their rows,
+/// collectors and their outputs, providers, config. `after.extension`
+/// gets its check's errors.
 pub async fn effects_between(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
@@ -1327,16 +1328,7 @@ pub async fn effects_between(
 ) -> crate::extension_effects::EffectReport {
     let prepared_after = prepare(layer, catalog, root, &mut after.extension, Some(commands)).await;
     let prepared_before = match &before {
-        Some(b) => Some(
-            prepare(
-                layer,
-                catalog,
-                root,
-                &mut b.extension.clone(),
-                Some(commands),
-            )
-            .await,
-        ),
+        Some(b) => Some(read_side(layer, catalog, root, &b.extension).await),
         None => None,
     };
     let no_runs = LensRuns::new();
@@ -2786,6 +2778,57 @@ pub struct Prepared {
     pub overlay: Vec<oxplow_db::TempView>,
 }
 
+/// The temp views `ext`'s models compile to — beside the other enabled
+/// extensions' — and what's wrong with them.
+async fn model_overlay(
+    layer: &crate::sql_gateway::SqlGateway,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
+    root: &Path,
+    ext: &Extension,
+) -> (Vec<oxplow_db::TempView>, Vec<String>) {
+    let others: Vec<Extension> = catalog
+        .get(root)
+        .iter()
+        .filter(|e| e.enabled && e.name != ext.name)
+        .cloned()
+        .collect();
+    let models: Vec<oxplow_db::models::ExtensionModels> = others
+        .iter()
+        .chain(std::iter::once(ext))
+        .filter(|e| !e.models.is_empty())
+        .map(|e| oxplow_db::models::ExtensionModels {
+            extension: e.name.clone(),
+            sources: e.models.clone(),
+        })
+        .collect();
+    let stubs: Vec<oxplow_db::models::EntityStub> = others
+        .iter()
+        .chain(std::iter::once(ext))
+        .flat_map(entity_stubs)
+        .collect();
+    match layer.check_extension_models(models, stubs).await {
+        Ok(mut checked) => (
+            checked.views,
+            checked.errors.remove(&ext.name).unwrap_or_default(),
+        ),
+        Err(e) => (Vec::new(), vec![format!("models: {e}")]),
+    }
+}
+
+/// A version as a review reads it: its lenses rendered on its own models'
+/// overlay, nothing checked — the earlier side of a review is what it was,
+/// not a candidate (tsk791).
+async fn read_side(
+    layer: &crate::sql_gateway::SqlGateway,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
+    root: &Path,
+    ext: &Extension,
+) -> Prepared {
+    let (overlay, _) = model_overlay(layer, catalog, root, ext).await;
+    let lenses = run_lenses(&layer.with_overlay(overlay.clone()), ext).await;
+    Prepared { lenses, overlay }
+}
+
 /// Check `ext` — its commands, components, models, advisories and lenses —
 /// reading through its own models' overlay, and report what's wrong in
 /// `ext.errors`. Each side of a review prepares its own, so a lens renders
@@ -2799,37 +2842,8 @@ async fn prepare(
 ) -> Prepared {
     check_commands(ext, root, commands);
     check_components(ext, commands);
-    let others: Vec<Extension> = catalog
-        .get(root)
-        .iter()
-        .filter(|e| e.enabled && e.name != ext.name)
-        .cloned()
-        .collect();
-    let models: Vec<oxplow_db::models::ExtensionModels> = others
-        .iter()
-        .chain(std::iter::once(&*ext))
-        .filter(|e| !e.models.is_empty())
-        .map(|e| oxplow_db::models::ExtensionModels {
-            extension: e.name.clone(),
-            sources: e.models.clone(),
-        })
-        .collect();
-    let stubs: Vec<oxplow_db::models::EntityStub> = others
-        .iter()
-        .chain(std::iter::once(&*ext))
-        .flat_map(entity_stubs)
-        .collect();
-    let overlay = match layer.check_extension_models(models, stubs).await {
-        Ok(mut checked) => {
-            ext.errors
-                .extend(checked.errors.remove(&ext.name).unwrap_or_default());
-            checked.views
-        }
-        Err(e) => {
-            ext.errors.push(format!("models: {e}"));
-            Vec::new()
-        }
-    };
+    let (overlay, errors) = model_overlay(layer, catalog, root, ext).await;
+    ext.errors.extend(errors);
     let layer = &layer.with_overlay(overlay.clone());
     crate::extension_commands::check_extension_commands(layer, ext, commands).await;
     for a in ext.advisories.clone() {
@@ -6309,6 +6323,76 @@ commands:
             report.lines.iter().any(|l| l == "Lens acme/count: changed"),
             "{:?}",
             report.lines
+        );
+    }
+
+    /// tsk791: the earlier side of a review is only read — its lenses
+    /// rendered on its own models — never checked: its command examples
+    /// don't run (here, a runaway one the later version removed).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_earlier_side_of_a_review_is_not_checked() {
+        use oxplow_domain::stores::StreamStore as _;
+        use oxplow_domain::vcs::Revision;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let ws = f.svc.layout.project_dir.clone();
+        let stream = f.svc.stream_store.list().await.unwrap()[0].id;
+        let snapshot = |files: Vec<(&'static str, String)>| {
+            let svc = f.svc.clone();
+            async move {
+                let id = svc.snapshot_store.create_snapshot(stream).await.unwrap();
+                for (path, body) in files {
+                    let hash = svc.blobs.write(body.as_bytes()).unwrap();
+                    svc.snapshot_store
+                        .capture(oxplow_db::FileSnapshot {
+                            id: 0,
+                            stream_id: stream,
+                            path: path.into(),
+                            blob_hash: Some(hash),
+                            size_bytes: body.len() as i64,
+                            captured_at: oxplow_domain::Timestamp::now(),
+                            storage: oxplow_db::SnapshotStorage::Oxplow,
+                            snapshot_id: Some(id),
+                            mtime_ms: None,
+                            content_hash: None,
+                        })
+                        .await
+                        .unwrap();
+                }
+                id
+            }
+        };
+        let manifest = "manifest: 2\nname: acme\nintent:\n  purpose: Count.\n  origin: thread:thr1\n  examples: []\n";
+        let command = "commands:\n  - name: spin\n    summary: Spin.\n    input_schema: { type: object }\n    entry: handlers/spin.star\n    examples:\n      - { name: once, input: {}, expect_commands: [] }\n";
+        let start = snapshot(vec![
+            (
+                "oxplow/extensions/acme/extension.yaml",
+                format!("{manifest}{command}"),
+            ),
+            (
+                "oxplow/extensions/acme/handlers/spin.star",
+                "def transform(x):\n    n = 0\n    for i in range(400000000):\n        n += i\n    return {\"commands\": []}\n".into(),
+            ),
+        ])
+        .await;
+        let end = snapshot(vec![(
+            "oxplow/extensions/acme/extension.yaml",
+            manifest.to_string(),
+        )])
+        .await;
+        let started = std::time::Instant::now();
+        let changes = extension_changes_between(
+            &f.svc,
+            &ws,
+            Some(&Revision::Snapshot(start)),
+            &Revision::Snapshot(end),
+        )
+        .await
+        .unwrap();
+        assert_eq!(changes.len(), 1, "{changes:?}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
         );
     }
 }

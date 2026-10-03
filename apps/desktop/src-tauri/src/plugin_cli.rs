@@ -192,26 +192,18 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                 }
             });
             let layer = db.map(oxplow_app::sql_gateway::SqlGateway::new);
-            // No running oxplow to ask which commands exist: launcher
-            // command entries are reported unchecked.
-            let mut report = block_on(oxplow_sdk::check(
+            // No running oxplow to ask which commands exist: the check
+            // starts a throwaway one, and its effects use the same.
+            let against = (p.effects || p.against.is_some())
+                .then(|| p.against.clone().unwrap_or_else(|| "HEAD".into()));
+            let report = block_on(oxplow_sdk::check(
                 &root,
                 &name,
                 &catalog,
                 layer.as_ref(),
                 None,
+                against.as_deref(),
             ))?;
-            if p.effects || p.against.is_some() {
-                let against = p.against.clone().unwrap_or_else(|| "HEAD".into());
-                report.effects = Some(block_on(oxplow_sdk::check_effects(
-                    &root,
-                    &name,
-                    &catalog,
-                    layer.as_ref(),
-                    &against,
-                ))?);
-                report.against = Some(against);
-            }
             let format = if p.json { Format::Json } else { Format::Text };
             let _ = write!(out, "{}", oxplow_sdk::render_findings(&report, format));
             if p.json {

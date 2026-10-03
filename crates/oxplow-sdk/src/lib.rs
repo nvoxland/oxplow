@@ -479,14 +479,16 @@ pub enum DryRun {
 /// against the semantic layer — `layer` (the project's), else a fresh
 /// in-memory database. This is what `validate_extension` returns
 /// and what `oxplow plugin check` prints. `commands` (the running app's
-/// registry) checks launcher command entries; without it they're reported
-/// unchecked.
+/// registry) checks launcher command entries; without it, a throwaway
+/// oxplow's does. With `against` (a git revision), the report also says
+/// what going from it to the working tree changes ([`CheckReport::effects`]).
 pub async fn check(
     root: &Path,
     name: &str,
     catalog: &ExtensionCatalog,
     layer: Option<&SqlGateway>,
     commands: Option<extensions::CommandSchemas<'_>>,
+    against: Option<&str>,
 ) -> Result<CheckReport, SdkError> {
     // No running oxplow to ask which commands exist: a throwaway one over
     // a copy of the project's extensions knows (core's and theirs).
@@ -516,6 +518,12 @@ pub async fn check(
             DomainError::NotFound => SdkError::NotFound(name.to_string()),
             other => SdkError::Domain(other),
         })?;
+    let effects = match (against, commands) {
+        (Some(rev), Some(commands)) => {
+            Some(effects_against(root, name, catalog, layer, rev, commands).await?)
+        }
+        _ => None,
+    };
     Ok(CheckReport {
         name: name.to_string(),
         ok: extension.errors.is_empty(),
@@ -523,36 +531,25 @@ pub async fn check(
         warnings: extension.warnings.clone(),
         dry_run,
         extension,
-        effects: None,
-        against: None,
+        effects,
+        against: against.map(str::to_string),
     })
 }
 
 /// What going from git revision `against` (`HEAD`, a branch, a sha) to the
 /// working tree changes for extension `name` (P8.C6) — the review an
 /// install or an effort shows, on the CLI: lenses, models and their rows,
-/// collectors and their outputs, providers, config. It reads the project's
-/// database through `layer` when given (else an empty one) and writes
-/// nothing: each side's models are temp views.
-pub async fn check_effects(
+/// collectors and their outputs, providers, config. It reads through
+/// `layer` and writes nothing: each side's models are temp views.
+async fn effects_against(
     root: &Path,
     name: &str,
     catalog: &ExtensionCatalog,
-    layer: Option<&SqlGateway>,
+    layer: &SqlGateway,
     against: &str,
+    commands: extensions::CommandSchemas<'_>,
 ) -> Result<oxplow_app::extension_effects::EffectReport, SdkError> {
     use oxplow_app::extensions::{effects_between, extension_tree_at, ReviewSide};
-    let host = throwaway::Host::start(root)
-        .await
-        .map_err(SdkError::Invalid)?;
-    let empty;
-    let layer = match layer {
-        Some(layer) => layer,
-        None => {
-            empty = SqlGateway::new(oxplow_db::Database::in_memory());
-            &empty
-        }
-    };
     // A revision's files through the VCS; nothing here reads a snapshot.
     let trees = oxplow_app::trees::Trees::new(
         std::sync::Arc::new(oxplow_app::vcs::GitProvider),
@@ -594,7 +591,7 @@ pub async fn check_effects(
             read: &read_before,
         }),
         &mut after,
-        host.svc.commands.as_ref(),
+        commands,
     )
     .await)
 }
@@ -753,9 +750,16 @@ mod tests {
                 "oxplow/extensions/demo/lenses/demo.yaml",
             ]
         );
-        let report = check(dir.path(), "demo", &ExtensionCatalog::new(), None, None)
-            .await
-            .unwrap();
+        let report = check(
+            dir.path(),
+            "demo",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert!(report.ok, "{}", render_findings(&report, Format::Text));
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
         // No project database: the SQL still dry-runs, on an empty one.
@@ -773,9 +777,16 @@ mod tests {
         let lens = dir.path().join("oxplow/extensions/demo/lenses/demo.yaml");
         let body = std::fs::read_to_string(&lens).unwrap();
         std::fs::write(&lens, body.replace("FROM v_task", "FROM v_no_such_view")).unwrap();
-        let report = check(dir.path(), "demo", &ExtensionCatalog::new(), None, None)
-            .await
-            .unwrap();
+        let report = check(
+            dir.path(),
+            "demo",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert!(
             report.errors.join("\n").contains("v_no_such_view"),
             "{:?}",
@@ -792,10 +803,17 @@ mod tests {
             vec!["oxplow/extensions/bare/extension.yaml"]
         );
         assert!(
-            check(dir.path(), "bare", &ExtensionCatalog::new(), None, None)
-                .await
-                .unwrap()
-                .ok
+            check(
+                dir.path(),
+                "bare",
+                &ExtensionCatalog::new(),
+                None,
+                None,
+                None
+            )
+            .await
+            .unwrap()
+            .ok
         );
     }
 
@@ -807,9 +825,16 @@ mod tests {
             "oxplow/extensions/team/extension.yaml",
             "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nref_kinds:\n  - kind: ticket\n",
         );
-        let report = check(dir.path(), "team", &ExtensionCatalog::new(), None, None)
-            .await
-            .unwrap();
+        let report = check(
+            dir.path(),
+            "team",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert!(!report.ok);
         let text = render_findings(&report, Format::Text);
         assert!(
@@ -824,7 +849,15 @@ mod tests {
         assert_eq!(json["ok"], false);
         assert_eq!(json["errors"].as_array().unwrap().len(), 1);
         assert!(matches!(
-            check(dir.path(), "nope", &ExtensionCatalog::new(), None, None).await,
+            check(
+                dir.path(),
+                "nope",
+                &ExtensionCatalog::new(),
+                None,
+                None,
+                None
+            )
+            .await,
             Err(SdkError::NotFound(_))
         ));
     }
@@ -839,9 +872,16 @@ mod tests {
             "oxplow/extensions/acme/extension.yaml",
             "manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{ name: a }]\nlauncher:\n  - { label: New Bug, category: Work, target: { command: work_item.create, input: { title: 7 } } }\n",
         );
-        let throwaway = check(dir.path(), "acme", &ExtensionCatalog::new(), None, None)
-            .await
-            .unwrap();
+        let throwaway = check(
+            dir.path(),
+            "acme",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert!(
             throwaway
                 .errors
@@ -862,6 +902,7 @@ mod tests {
             &ExtensionCatalog::new(),
             None,
             Some(&schemas),
+            None,
         )
         .await
         .unwrap();

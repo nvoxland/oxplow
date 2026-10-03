@@ -2169,6 +2169,11 @@ export type EffectReport = {
 	effects: EffectEffect[],
 	config: ConfigEffect | null,
 	/**
+	 *  What its dry runs didn't get to (`collector <id>`, `effect <id>`):
+	 *  the review stops running scripts at its deadline.
+	 */
+	outOfTime: string[],
+	/**
 	 *  The report as lines ([`summary`]): what the install review, `plugin
 	 *  check --effects` and an effort's review say, in one wording.
 	 */

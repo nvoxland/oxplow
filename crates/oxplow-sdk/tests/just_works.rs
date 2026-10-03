@@ -25,7 +25,7 @@ async fn project() -> tempfile::TempDir {
 async fn scaffolded(root: &Path, kind: &str, name: &str) {
     let kind = Kind::parse(kind).unwrap_or_else(|| panic!("`plugin new {kind}`"));
     scaffold(root, kind, name, Some("effort:eff1")).unwrap();
-    let report = check(root, name, &ExtensionCatalog::new(), None, None)
+    let report = check(root, name, &ExtensionCatalog::new(), None, None, None)
         .await
         .unwrap();
     assert!(report.ok, "{}", render_findings(&report, Format::Text));
@@ -374,9 +374,16 @@ async fn recorded_agent_runs_still_check_and_test_clean() {
             let ext = ext.unwrap().path();
             let name = ext.file_name().unwrap().to_string_lossy().to_string();
             copy(&ext, &extensions.join(&name));
-            let report = check(dir.path(), &name, &ExtensionCatalog::new(), None, None)
-                .await
-                .unwrap();
+            let report = check(
+                dir.path(),
+                &name,
+                &ExtensionCatalog::new(),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
             assert!(report.ok, "{}", render_findings(&report, Format::Text));
             let tested = test_extension(dir.path(), &name, false).await.unwrap();
             assert_eq!(tested.errors, Vec::<String>::new(), "{name}");

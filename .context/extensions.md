@@ -1015,7 +1015,9 @@ five events its `on:` trigger matches, else its `input:` query once — by
 `collector_runner::dry_run_collector`: each version's own script text,
 its `input:` read through that version's own overlay (tsk782),
 storing nothing, with a `RefusingOracle` answering every `ai_*` builtin
-with an error (a review never spends or sends). `CollectorEffect.outputs`
+with an error (a review never spends or sends), under the command
+scripts' `COMMAND_SCRIPT_BUDGET` (5 s, not a live collector's 120 s:
+someone waits on a review). `CollectorEffect.outputs`
 holds each input's `Ran { counts, rows (20 per entity), error? }` before
 and after. An exec or read collector is never run — approved or not —
 and says so in `not_run`. A collector whose entry's text changed though
@@ -1032,12 +1034,25 @@ changed, `outputs`: each input — both versions' fixtures that name it
 `Composes { commands, skip?, error? }`. The lines read "Effect x: added — on t where k = v", "Effect x: on …
 → on …", "Effect x on fixture basic: runs [a] → skips (why)".
 
+**A bounded review** (tsk791). Script dry runs — collectors' and
+effects' — share one deadline, `REVIEW_DEADLINE` (60 s, from the start
+of `effects`; `effects_within` takes another): past it, no further input
+runs, and each collector or effect that didn't get through its inputs
+is in `EffectReport.out_of_time` (`collector <id>`, `effect <id>`), with
+the line "Out of time: collector a and effect b — the review stops
+running scripts after 60s". Only the later side is *checked*
+(`prepare`: commands and their examples, components, advisories, lens
+shapes); the earlier side is only *read* (`read_side`: its models'
+overlay and its lenses rendered on it) — what it was, not whether it
+was right.
+
 **`oxplow plugin check <name> --effects [--against <rev>]`** (P8.C6).
-The same review on the CLI: `oxplow_sdk::check_effects` loads the
+The same review on the CLI: `oxplow_sdk::check(…, against)` — the check
+and its effects with one throwaway oxplow's command registry — loads the
 extension at git `HEAD` (or `--against`) — `extension_tree_at` through a
 `Trees` over the VCS alone — as `before` and the working tree as `after`,
 and runs `extensions::effects_between` (the install review's path too):
-each side prepared on its own overlay over the project's database read
+each side on its own overlay over the project's database read
 read-only (else an empty one), so it **writes nothing** — the database
 file is byte-identical after. Text output adds `effects against <rev>:`
 and the report's lines; `--json` adds `effects` (the `EffectReport`) and

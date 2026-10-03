@@ -1375,6 +1375,7 @@ impl OxplowMcp {
             &self.services.extension_catalog,
             Some(&self.services.sql),
             Some(self.services.commands.as_ref()),
+            None,
         )
         .await
         .map_err(|e| match e {

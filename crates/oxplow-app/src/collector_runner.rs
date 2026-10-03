@@ -584,7 +584,9 @@ pub enum DryRun {
 }
 
 /// Run collector `spec` — `script` being its entry's text in the version
-/// under review — on `event` / `rows`, storing nothing and asking no model.
+/// under review — on `event` / `rows`, storing nothing and asking no model,
+/// within the command scripts' budget (a review waits on it, so a runaway
+/// script is given up on in seconds, not a collector's two minutes).
 /// Only a derived collector (Starlark, jaq) runs; an exec or read one is
 /// [`DryRun::NotRun`] and nothing is spawned.
 pub async fn dry_run_collector(
@@ -610,6 +612,7 @@ pub async fn dry_run_collector(
         std::sync::Arc::new(RefusingOracle),
         event,
         rows,
+        crate::extension_commands::COMMAND_SCRIPT_BUDGET,
     )
     .await
     {
@@ -621,7 +624,8 @@ pub async fn dry_run_collector(
 /// Run a derived (starlark / jaq) collector: read its `input` rows (the
 /// trigger event's anchors bound by name) — or take `rows`, standing in
 /// for them (an example's fixture) — then run its script over
-/// `{"rows": [...], "event"?: {...}}` in the collector sandbox.
+/// `{"rows": [...], "event"?: {...}}` in the collector sandbox, within
+/// `budget`.
 pub async fn derive_collector(
     layer: &crate::sql_gateway::SqlGateway,
     script: String,
@@ -629,6 +633,7 @@ pub async fn derive_collector(
     oracle: std::sync::Arc<dyn oxplow_collect_plugin::AiOracle>,
     event: Option<&StoredEvent>,
     rows: Option<Vec<serde_json::Value>>,
+    budget: oxplow_collect_plugin::SandboxBudget,
 ) -> Result<ScriptOutput, String> {
     let rows = match (rows, &spec.input) {
         (Some(rows), _) => rows,
@@ -650,12 +655,12 @@ pub async fn derive_collector(
     let runtime = spec.runtime;
     let value = tokio::task::spawn_blocking(move || {
         use oxplow_collect_plugin::runtime::{
-            run_jaq, run_sandboxed_excluding, run_starlark_with_ai, SandboxBudget,
+            run_jaq, run_sandboxed_excluding, run_starlark_with_ai,
         };
         // The time its `ai_*` calls wait on a model isn't the script's.
         let host = std::sync::Arc::new(oxplow_collect_plugin::AiHost::new(oracle));
         let clock = host.clock();
-        run_sandboxed_excluding(&SandboxBudget::default(), &clock, move || match runtime {
+        run_sandboxed_excluding(&budget, &clock, move || match runtime {
             CollectorRuntime::Jaq => run_jaq(&script, &input),
             _ => run_starlark_with_ai(&script, &input, &host),
         })
@@ -1396,6 +1401,7 @@ async fn produce(
                     std::sync::Arc::new(oracle),
                     event,
                     rows,
+                    oxplow_collect_plugin::SandboxBudget::default(),
                 )
                 .await
             }

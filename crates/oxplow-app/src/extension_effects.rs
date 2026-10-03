@@ -365,9 +365,10 @@ async fn effect_outputs(
     before: Option<&Version<'_>>,
     after: &Version<'_>,
     effect: &mut EffectEffect,
-) {
+    deadline: std::time::Instant,
+) -> DryRuns {
     if effect.change == Change::Unchanged {
-        return;
+        return DryRuns::All;
     }
     let decl_of = |v: &Version<'_>| {
         v.extension
@@ -404,6 +405,9 @@ async fn effect_outputs(
         layer.with_overlay(after.overlay.to_vec()),
     );
     for (label, (event, rows)) in inputs {
+        if std::time::Instant::now() >= deadline {
+            return DryRuns::OutOfTime;
+        }
         let run = |layer: &crate::sql_gateway::SqlGateway,
                    decl: &Option<crate::effects::EffectDecl>| {
             let (layer, decl, event, rows) =
@@ -449,6 +453,7 @@ async fn effect_outputs(
             after: a,
         });
     }
+    DryRuns::All
 }
 
 fn trigger_text(t: &EffectTrigger) -> String {
@@ -599,6 +604,9 @@ pub struct EffectReport {
     /// composes on the same events.
     pub effects: Vec<EffectEffect>,
     pub config: Option<ConfigEffect>,
+    /// What its dry runs didn't get to (`collector <id>`, `effect <id>`):
+    /// the review stops running scripts at its deadline.
+    pub out_of_time: Vec<String>,
     /// The report as lines ([`summary`]): what the install review, `plugin
     /// check --effects` and an effort's review say, in one wording.
     pub lines: Vec<String>,
@@ -920,6 +928,13 @@ pub fn summary(report: &EffectReport) -> Vec<String> {
             ));
         }
     }
+    if !report.out_of_time.is_empty() {
+        out.push(format!(
+            "Out of time: {} — the review stops running scripts after {}s",
+            listed_and(&report.out_of_time),
+            REVIEW_DEADLINE.as_secs()
+        ));
+    }
     out
 }
 
@@ -1048,6 +1063,14 @@ fn collector_fixtures(v: &Version<'_>, id: &str) -> Vec<(String, Option<Vec<Valu
         .collect()
 }
 
+/// Whether a collector's or effect's dry runs all ran, or the review's
+/// deadline came first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DryRuns {
+    All,
+    OutOfTime,
+}
+
 /// Fill a collector's outputs: each input — both versions' fixtures for it,
 /// the latest events it'd run on — run on each version.
 async fn collector_outputs(
@@ -1055,7 +1078,8 @@ async fn collector_outputs(
     before: Option<&Version<'_>>,
     after: &Version<'_>,
     effect: &mut CollectorEffect,
-) {
+    deadline: std::time::Instant,
+) -> DryRuns {
     use crate::collector_runner::dry_run_collector;
     let spec_of = |v: &Version<'_>| {
         v.extension
@@ -1071,7 +1095,7 @@ async fn collector_outputs(
     };
     let (script_b, script_a) = (script(before, &spec_b), script(Some(after), &spec_a));
     if effect.change == Change::Unchanged && script_b == script_a {
-        return;
+        return DryRuns::All;
     }
     // A rewritten script is a change even when nothing runs it here.
     if spec_b.is_some() && spec_a.is_some() && script_b != script_a {
@@ -1081,7 +1105,7 @@ async fn collector_outputs(
         }
     }
     let Some(spec) = spec_a.clone().or(spec_b.clone()) else {
-        return;
+        return DryRuns::All;
     };
     if !spec.runtime.is_derived() {
         if let crate::collector_runner::DryRun::NotRun(why) =
@@ -1089,7 +1113,7 @@ async fn collector_outputs(
         {
             effect.not_run = Some(why);
         }
-        return;
+        return DryRuns::All;
     }
     // The inputs: fixtures (the candidate's first), then the events.
     let mut fixtures: BTreeMap<String, Option<Vec<Value>>> = BTreeMap::new();
@@ -1127,6 +1151,9 @@ async fn collector_outputs(
         layer.with_overlay(after.overlay.to_vec()),
     );
     for (label, event, rows) in inputs {
+        if std::time::Instant::now() >= deadline {
+            return DryRuns::OutOfTime;
+        }
         let run = |layer: &crate::sql_gateway::SqlGateway,
                    spec: &Option<CollectorSpec>,
                    script: &Option<String>| {
@@ -1153,6 +1180,7 @@ async fn collector_outputs(
             after: a,
         });
     }
+    DryRuns::All
 }
 
 fn provider_grants(p: &ProviderSpec) -> Grants {
@@ -1446,6 +1474,22 @@ pub async fn effects(
     before: Option<Version<'_>>,
     after: Version<'_>,
 ) -> EffectReport {
+    effects_within(layer, before, after, REVIEW_DEADLINE).await
+}
+
+/// How long a review spends running scripts (collectors' and effects' dry
+/// runs), all told; each run has the command scripts' own budget.
+pub const REVIEW_DEADLINE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// [`effects`], running scripts for at most `deadline`.
+pub async fn effects_within(
+    layer: &crate::sql_gateway::SqlGateway,
+    before: Option<Version<'_>>,
+    after: Version<'_>,
+    deadline: std::time::Duration,
+) -> EffectReport {
+    let deadline = std::time::Instant::now() + deadline;
+    let mut out_of_time = Vec::new();
     let name = &after.extension.name;
     let texts_before = before
         .as_ref()
@@ -1551,7 +1595,11 @@ pub async fn effects(
         &after.extension.collectors,
     );
     for c in &mut collectors {
-        collector_outputs(layer, before.as_ref(), &after, c).await;
+        if collector_outputs(layer, before.as_ref(), &after, c, deadline).await
+            == DryRuns::OutOfTime
+        {
+            out_of_time.push(format!("collector {}", c.id));
+        }
     }
     let mut effects = effects_diff(
         before
@@ -1560,7 +1608,9 @@ pub async fn effects(
         &after.extension.effects,
     );
     for e in &mut effects {
-        effect_outputs(layer, before.as_ref(), &after, e).await;
+        if effect_outputs(layer, before.as_ref(), &after, e, deadline).await == DryRuns::OutOfTime {
+            out_of_time.push(format!("effect {}", e.id));
+        }
     }
     let declared = |v: &Version<'_>| -> Vec<DeclaredProvider> {
         v.extension
@@ -1584,6 +1634,7 @@ pub async fn effects(
         providers,
         effects,
         config,
+        out_of_time,
         lines: Vec::new(),
     };
     report.lines = summary(&report);
@@ -2281,6 +2332,67 @@ mod tests {
         );
     }
 
+    /// tsk791: a review's dry run gets the command scripts' budget, not a
+    /// collector's two minutes, and the review stops running scripts at
+    /// its deadline — saying what it didn't run.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_runaway_collector_is_given_up_on_and_the_review_stops_at_its_deadline() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("oxplow/extensions/acme");
+        std::fs::create_dir_all(dir.join("collectors")).unwrap();
+        std::fs::create_dir_all(dir.join("fixtures")).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            "manifest: 2\nname: acme\nintent:\n  purpose: Things.\n  origin: thread:thr1\n  examples:\n    - { name: one, input: { collector: things }, expect: x }\n    - { name: two, input: { collector: things }, expect: x }\ncollectors:\n  - id: things\n    runtime: starlark\n    entry: collectors/things.star\n    entities:\n      - { name: thing, key: id, columns: { id: int } }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("collectors/things.star"),
+            "def transform(input):\n    n = 0\n    for i in range(400000000):\n        n += i\n    return {\"entities\": {\"thing\": []}}\n",
+        )
+        .unwrap();
+        for f in ["one", "two"] {
+            std::fs::write(
+                dir.join(format!("fixtures/{f}.yaml")),
+                "input:\n  collector: things\n  rows: []\n",
+            )
+            .unwrap();
+        }
+        let ext = crate::extensions::load_project_extension(root.path(), "acme");
+        let read = |rel: &str| std::fs::read_to_string(dir.join(rel)).ok();
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let runs = crate::extensions::LensRuns::new();
+        let started = std::time::Instant::now();
+        let report = effects_within(
+            &layer,
+            None,
+            Version {
+                extension: &ext,
+                read: &read,
+                lenses: &runs,
+                overlay: &[],
+            },
+            std::time::Duration::from_secs(1),
+        )
+        .await;
+        let budget = crate::extension_commands::COMMAND_SCRIPT_BUDGET.timeout;
+        assert!(
+            started.elapsed() < budget + std::time::Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+        let c = &report.collectors[0];
+        assert_eq!(c.outputs.len(), 1, "{:?}", c.outputs);
+        let error = c.outputs[0].after.as_ref().and_then(|r| r.error.clone());
+        assert!(error.is_some_and(|e| e.contains("time")), "{:?}", c.outputs);
+        assert_eq!(report.out_of_time, vec!["collector things".to_string()]);
+        assert!(
+            report.lines.iter().any(|l| l.starts_with("Out of time")),
+            "{:?}",
+            report.lines
+        );
+    }
+
     /// tsk779: a side past the limit reads `limit` rows, truncated, and the
     /// limit is what the gateway really returns — the note's number is the
     /// count it reports, not a larger one the gateway never reaches.
@@ -2758,6 +2870,7 @@ mod tests {
                 changed_keys: vec!["team".into()],
                 other_change: None,
             }),
+            out_of_time: vec![],
             lines: vec![],
         };
         assert_eq!(
