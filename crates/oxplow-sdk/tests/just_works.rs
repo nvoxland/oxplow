@@ -236,7 +236,6 @@ async fn a_scaffolded_effect_checks_tests_and_once_approved_reacts() {
     );
 }
 
-/// The fake provider's binary, built beside this test binary.
 /// P9.A4: a scaffolded custom component is a private extension whose
 /// bundle talks to oxplow through the served client library.
 #[tokio::test(flavor = "multi_thread")]
@@ -268,6 +267,7 @@ async fn a_scaffolded_component_checks_tests_and_uses_the_client_library() {
     );
 }
 
+/// The fake provider's binary, built beside this test binary.
 fn fake_bin() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     let bin = exe

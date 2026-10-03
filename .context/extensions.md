@@ -1267,7 +1267,8 @@ asks, never the frame. Both are UI RPCs (`ui` in surface parity).
 referrerPolicy="no-referrer">` at `componentBundleUrl` (the daemon's
 `/components/…` route; with no daemon base — `remoteBaseUrl()` null —
 the lens shows its table), under a **custom** badge. On the frame's first
-`load` the host posts `init { run, props, tokens, kitCss }` with one end
+`load` the host posts `init { protocol, run, props, tokens, kitCss }`
+(`initMessage`, the one builder) with one end
 of a `MessageChannel` (to `"*"`: the frame's origin is opaque; the port
 goes to that frame alone) and listens on the other end only. Frame
 messages (`parseFrameMessage`): `ready`, `{ id, method: query, asset,
@@ -1312,7 +1313,8 @@ carries `protocol` (`BRIDGE_PROTOCOL` in `componentBridge.ts`, `PROTOCOL`
 in the library — one number, bumped when a message's shape changes), and
 `connect` rejects a host speaking another. One app is one library
 version. `componentClient.test.ts` drives the served file against the
-real `createBridgeHost`, so the two can't drift. `oxplow plugin new
+real `createBridgeHost` and the real `init` (`initMessage`, which
+`CustomComponentViz` posts), so the two can't drift (tsk856). `oxplow plugin new
 component <name>` scaffolds a private extension — the component, its
 `viz: custom` lens and a bundle using the library — that checks and
 tests clean (`just_works.rs`). The reference is in

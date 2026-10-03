@@ -15,11 +15,10 @@ import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
 import {
-  BRIDGE_PROTOCOL,
   componentBundleUrl,
   componentNavigationTarget,
   createBridgeHost,
-  kitCss,
+  initMessage,
   tokensFromStyle,
 } from "./componentBridge.js";
 
@@ -173,18 +172,7 @@ function ComponentFrame({
     const tokens = tokensFromStyle(getComputedStyle(document.documentElement));
     // An opaque-origin frame can only be addressed with "*"; the port goes
     // to this frame's window alone.
-    frame.postMessage(
-      {
-        type: "init",
-        protocol: BRIDGE_PROTOCOL,
-        run: initial,
-        props: initial.lens.custom?.props ?? null,
-        tokens,
-        kitCss: kitCss(tokens),
-      },
-      "*",
-      [channel.port2],
-    );
+    frame.postMessage(initMessage(initial, tokens), "*", [channel.port2]);
   };
 
   return (

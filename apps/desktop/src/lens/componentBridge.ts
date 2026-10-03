@@ -91,6 +91,21 @@ export function kitCss(tokens: Record<string, string>): string {
   return `:root { ${vars} } body { margin: 0; font-family: var(--font-ui, system-ui, sans-serif); color: var(--text-primary); background: transparent; }`;
 }
 
+/** The `init` the host posts to a component's frame: the protocol it
+ *  speaks, the first run, the lens's `custom.props`, the theme's tokens
+ *  and the kit's CSS over them. One builder, so the library's tests read
+ *  the message the host really sends. */
+export function initMessage(run: LensRun, tokens: Record<string, string>) {
+  return {
+    type: "init" as const,
+    protocol: BRIDGE_PROTOCOL,
+    run,
+    props: run.lens.custom?.props ?? null,
+    tokens,
+    kitCss: kitCss(tokens),
+  };
+}
+
 export interface BridgeDeps {
   /** Run a declared lens (`run_component_query`). */
   query(asset: string, params: Record<string, SqlCell>): Promise<LensRun>;

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
-import { BRIDGE_PROTOCOL, createBridgeHost, type BridgeDeps } from "./componentBridge.js";
+import { BRIDGE_PROTOCOL, createBridgeHost, initMessage, type BridgeDeps } from "./componentBridge.js";
 // The library the daemon serves to component bundles (P9.A4): the one
 // place it and the host are proven to speak the same protocol. It is a
 // classic script — loading it defines the global `oxplow`.
@@ -14,7 +14,7 @@ const run = (n: number) =>
 
 /** A frame's window (where `init` arrives) and the host on the other end
  *  of its channel, as `CustomComponentViz` wires them. */
-function harness(deps: Partial<BridgeDeps> = {}, protocol: unknown = 1) {
+function harness(deps: Partial<BridgeDeps> = {}, protocol: unknown = BRIDGE_PROTOCOL) {
   const channel = new MessageChannel();
   let readies = 0;
   const host = createBridgeHost(
@@ -32,10 +32,13 @@ function harness(deps: Partial<BridgeDeps> = {}, protocol: unknown = 1) {
     run(1),
   );
   const frame = new EventTarget();
+  // The `init` the host really sends (`CustomComponentViz` posts this
+  // builder's message), so the library is proven against it (tsk856).
+  const first = { ...run(1), lens: { id: "x/burn", custom: { component: "burn", props: { color: "accent" } } } } as unknown as LensRun;
   const init = () =>
     frame.dispatchEvent(
       Object.assign(new Event("message"), {
-        data: { type: "init", protocol, run: run(1), props: { color: "accent" }, tokens: { "--accent": "#08f" }, kitCss: ":root {}" },
+        data: { ...initMessage(first, { "--accent": "#08f" }), protocol },
         ports: [channel.port2],
       }),
     );
@@ -55,8 +58,8 @@ test("connect resolves with what init carried and says ready once", async () => 
   expect(c.run.result.rows).toEqual([[1]]);
   expect(c.props).toEqual({ color: "accent" });
   expect(c.tokens).toEqual({ "--accent": "#08f" });
-  expect(c.kitCss).toBe(":root {}");
-  expect(c.protocol).toBe(1);
+  expect(c.kitCss).toContain("--accent: #08f");
+  expect(c.protocol).toBe(BRIDGE_PROTOCOL);
   await settle();
   expect(h.readies()).toBe(1);
   h.close();
