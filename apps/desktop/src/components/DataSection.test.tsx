@@ -11,6 +11,8 @@ const ran: Array<[string, unknown, boolean]> = [];
 /** What `effect.retry` answers. */
 let retried: unknown = { effect: "acme/mark-done", event: "event:e1", attempt: 2, outcome: "ok" };
 const letter = { id: 7, consumer: "change.analyze", event_seq: 41, error: "boom", attempts: 2, first_failed_at: "t", last_failed_at: "t" };
+/** What `effect.backfill_plan` counts. */
+let plannedCount = 3;
 mock.module("../api.js", () => ({
   ...realApi,
   querySql: async (sql: string) =>
@@ -33,7 +35,7 @@ mock.module("../api.js", () => ({
     ran.push([name, input, confirmed]);
     const result =
       name === "effect.backfill_plan"
-        ? { effect: "acme/mark-done", planned: 3, from_seq: 4, to_seq: 9, batch: 200 }
+        ? { effect: "acme/mark-done", planned: plannedCount, from_seq: 4, to_seq: 9, batch: 200 }
         : name === "effect.backfill"
           ? { effect: "acme/mark-done", planned: 3, ran: 3, skipped: 0, proposed: 0, failed: 0, remaining: 0 }
           : retried;
@@ -155,3 +157,23 @@ test("Backfill… asks with the count and runs effect.backfill once confirmed", 
   await waitFor(() => expect(ran[1]).toEqual(["effect.backfill", { effect: "acme/mark-done", to_seq: 9 }, true]));
   await waitFor(() => expect(view.queryByTestId("effect-backfill-ask-effect:acme/mark-done")).toBeNull());
 });
+
+// tsk850: with nothing to backfill only Close is there — focused, so
+// Escape closes the note without a click into it first.
+test("Escape closes Backfill's nothing-to-backfill note", async () => {
+  plannedCount = 0;
+  try {
+    const view = render(<DataSection />);
+    await waitFor(() => view.getByTestId("program-row-effect:acme/mark-done"));
+    fireEvent.click(view.getByTestId("effect-backfill-effect:acme/mark-done"));
+    const ask = await waitFor(() => view.getByTestId("effect-backfill-ask-effect:acme/mark-done"));
+    expect(ask.textContent).toContain("nothing to backfill");
+    const close = view.getByTestId("effect-backfill-cancel-effect:acme/mark-done");
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
+    await waitFor(() => expect(view.queryByTestId("effect-backfill-ask-effect:acme/mark-done")).toBeNull());
+  } finally {
+    plannedCount = 3;
+  }
+});
+

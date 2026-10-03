@@ -394,7 +394,6 @@ interface BackfillPlan {
 function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) {
   const [plan, setPlan] = useState<BackfillPlan | null>(null);
   const planned = plan?.planned ?? null;
-  const setPlanned = (p: null) => setPlan(p);
   const [busy, setBusy] = useState(false);
 
   async function count() {
@@ -417,7 +416,7 @@ function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) 
     try {
       const out = await runCommand("effect.backfill", { effect, to_seq: plan.toSeq }, true);
       showToast({ message: backfillDone(out.result as BackfillResult) });
-      setPlanned(null);
+      setPlan(null);
     } catch (e) {
       recordOpError({ label: `Backfill ${effect}`, message: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -445,7 +444,7 @@ function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) 
       data-testid={`effect-backfill-ask-${rowKey}`}
       style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}
       onKeyDown={(e) => {
-        if (e.key === "Escape") setPlanned(null);
+        if (e.key === "Escape") setPlan(null);
       }}
     >
       <span style={mutedStyle}>{backfillAsk(effect, planned)}</span>
@@ -455,7 +454,15 @@ function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) 
           {busy ? "Running…" : backfillRunLabel(planned, plan?.batch ?? planned)}
         </button>
       ) : null}
-      <button type="button" data-testid={`effect-backfill-cancel-${rowKey}`} disabled={busy} onClick={() => setPlanned(null)}>
+      {/* With nothing to run, Close is all there is: focused, so Escape
+          reaches the row's handler (tsk850). */}
+      <button
+        type="button"
+        autoFocus={planned === 0}
+        data-testid={`effect-backfill-cancel-${rowKey}`}
+        disabled={busy}
+        onClick={() => setPlan(null)}
+      >
         {planned > 0 ? "Cancel" : "Close"}
       </button>
     </div>
