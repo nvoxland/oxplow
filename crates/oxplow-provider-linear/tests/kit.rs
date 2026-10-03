@@ -9,15 +9,11 @@
 mod common;
 
 use oxplow_provider_linear::sim::LinearSim;
-use oxplow_sdk::plugin_test::test_extension;
+use oxplow_sdk::plugin_test::test_extension_in;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_example_extension_passes_plugin_test() {
     let sim = LinearSim::start("lin_api_kit").await.unwrap();
-    // `plugin test` takes credentials and declared env from its own
-    // environment, as a person running it would.
-    std::env::set_var("LINEAR_API_KEY", "lin_api_kit");
-    std::env::set_var("LINEAR_API_URL", &sim.url);
     let dir = tempfile::tempdir().unwrap();
     let ext = common::install_example(dir.path()).await;
     let example = common::example_dir();
@@ -30,7 +26,10 @@ async fn the_example_extension_passes_plugin_test() {
     );
 
     let bless = std::env::var_os("OXPLOW_BLESS").is_some();
-    let report = test_extension(dir.path(), "linear", bless).await.unwrap();
+    let env = common::linear_env("lin_api_kit", Some(&sim.url));
+    let report = test_extension_in(dir.path(), "linear", bless, env)
+        .await
+        .unwrap();
     assert_eq!(report.errors, Vec::<String>::new());
     if bless {
         std::fs::create_dir_all(example.join("fixtures/transcripts")).unwrap();

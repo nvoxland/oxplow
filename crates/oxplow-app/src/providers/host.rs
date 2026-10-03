@@ -78,6 +78,11 @@ pub fn effect_of(raw: &str) -> Result<CommandEffect, String> {
 /// Reads a host environment variable (tests pass their own).
 pub type HostEnv = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
+/// This process's environment, as a [`HostEnv`].
+pub fn process_env() -> HostEnv {
+    Arc::new(|name| std::env::var(name).ok())
+}
+
 /// Everything a spawn needs.
 pub struct Launch {
     /// `<extension>/<instance id>`.

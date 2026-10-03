@@ -4880,6 +4880,7 @@ dependencies = [
 name = "oxplow-sdk"
 version = "0.7.0"
 dependencies = [
+ "oxplow-ai",
  "oxplow-app",
  "oxplow-config",
  "oxplow-db",

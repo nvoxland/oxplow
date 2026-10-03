@@ -2230,7 +2230,13 @@ async fn sibling_project(
     }
     let global = fx.svc.layout.state_dir.join("global-config");
     let svc = std::sync::Arc::new(
-        crate::Services::in_memory_on_machine(dir.path(), global, fx.svc.secrets.clone()).unwrap(),
+        crate::Services::in_memory_on_machine(
+            dir.path(),
+            global,
+            fx.svc.secrets.clone(),
+            crate::providers::host::process_env(),
+        )
+        .unwrap(),
     );
     if with_tracker {
         let ext = extension(dir.path());
@@ -2422,7 +2428,13 @@ async fn a_global_instances_credential_is_shared_across_projects() {
     credentialed(dir.path());
     let global = fx.svc.layout.state_dir.join("global-config");
     let other = std::sync::Arc::new(
-        crate::Services::in_memory_on_machine(dir.path(), global, fx.svc.secrets.clone()).unwrap(),
+        crate::Services::in_memory_on_machine(
+            dir.path(),
+            global,
+            fx.svc.secrets.clone(),
+            crate::providers::host::process_env(),
+        )
+        .unwrap(),
     );
     let other_ext = extension(dir.path());
     let config = other.config.read().unwrap().clone();

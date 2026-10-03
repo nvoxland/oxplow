@@ -54,3 +54,18 @@ pub fn rewrite(ext: &Path, file: &str, from: &str, to: &str) {
     assert!(text.contains(from), "{file} has no `{from}`");
     std::fs::write(&path, text.replace(from, to)).unwrap();
 }
+
+/// The environment a `plugin test` run of the example sees: this key, and
+/// `LINEAR_API_URL` only when `url` is given (Linear's own otherwise) —
+/// whatever this process holds for either. Each run names its own, so
+/// tests running at once never meet (no `set_var`: the kit and the live
+/// suite share a binary's threads).
+pub fn linear_env(key: &str, url: Option<&str>) -> oxplow_app::providers::host::HostEnv {
+    let key = key.to_string();
+    let url = url.map(str::to_string);
+    std::sync::Arc::new(move |name| match name {
+        "LINEAR_API_KEY" => Some(key.clone()),
+        "LINEAR_API_URL" => url.clone(),
+        _ => std::env::var(name).ok(),
+    })
+}

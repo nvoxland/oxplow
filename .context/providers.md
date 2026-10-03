@@ -190,9 +190,12 @@ OXPLOW_LIVE_LINEAR=1 LINEAR_API_KEY=lin_api_… LINEAR_TEAM=ENG \
 
 Without all three the test prints that it was skipped and passes; CI
 never sets them. It copies the example into a throwaway repo, points its
-fixture config at `LINEAR_TEAM`, runs `test_extension` with `bless` (a
+fixture config at `LINEAR_TEAM`, runs `test_extension_in` with `bless` (a
 workspace's ids, numbers and times can't match the golden, so the
-transcript is written into the copy, not compared), and then **trashes
+transcript is written into the copy, not compared) in an environment of
+its own — the key, and `LINEAR_API_URL` only for the simulator
+(`common::linear_env`; tsk832: the simulator's run and a live one share a
+binary, so neither may `set_var` what the other's provider reads) — and then **trashes
 every issue the key's user created in that team since the run began**
 (`IssuesCreated`: `team.key`, `createdAt >= start − 1 min`,
 `creator.isMe`; then `issueDelete`) — whatever the run came to. Use a
@@ -877,6 +880,11 @@ collector examples ([extensions.md](./extensions.md) "The SDK"). The person runn
 approval check; credentials come from the environment (the declared
 names — for a signed-in credential, an access token the author got
 themselves: the kit never signs in — and never a client secret).
+`test_extension` reads this process's; `test_extension_in` takes a
+`HostEnv` instead — for the provider's credentials, its declared `env`
+and the throwaway host the conformance suite runs in
+(`Services::in_memory_on_machine` takes the machine's environment, as
+`MachineEnv.host_env`) — so tests running at once never share one.
 
 - **`ReferenceClient`** spawns the provider exactly as the host does
   (`host::spawn`: scrubbed env, sandbox, kill on drop) and taps both

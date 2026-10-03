@@ -59,8 +59,22 @@ pub struct TestReport {
 }
 
 /// Run every test of extension `name` under `root`. `bless` writes the
-/// golden transcripts instead of comparing them.
+/// golden transcripts instead of comparing them. A provider's credentials
+/// and declared `env` come from this process's environment, as for a
+/// person running `oxplow plugin test`.
 pub async fn test_extension(root: &Path, name: &str, bless: bool) -> Result<TestReport, SdkError> {
+    test_extension_in(root, name, bless, host::process_env()).await
+}
+
+/// [`test_extension`] in the environment `env` names, not this process's:
+/// for a caller that runs several at once (tests), whose environments
+/// mustn't meet.
+pub async fn test_extension_in(
+    root: &Path,
+    name: &str,
+    bless: bool,
+    env: host::HostEnv,
+) -> Result<TestReport, SdkError> {
     let host = Host::start(root).await.map_err(SdkError::Invalid)?;
     let checked = crate::check(
         &host.root,
@@ -84,7 +98,7 @@ pub async fn test_extension(root: &Path, name: &str, bless: bool) -> Result<Test
         examples(&host, &ext, &mut report).await;
         for spec in &ext.providers {
             report.ran.push(format!("provider {}", spec.id));
-            test_provider(root, &ext, spec, bless, &mut report).await;
+            test_provider(root, &ext, spec, bless, &env, &mut report).await;
         }
         questions(&host, &ext, &mut report).await;
         incremental_models(&host, &ext, &mut report).await;
@@ -724,11 +738,14 @@ fn fixture_config(dir: &Path, rel: &str, spec: &ProviderSpec) -> Result<Value, S
 /// signs in for, that is an access token the author got themselves — the
 /// kit never signs in — and a client secret is never the process's, here
 /// as in the host.
-fn env_credentials(spec: &ProviderSpec) -> std::collections::BTreeMap<String, String> {
+fn env_credentials(
+    spec: &ProviderSpec,
+    env: &host::HostEnv,
+) -> std::collections::BTreeMap<String, String> {
     spec.credential_names()
         .into_iter()
         .filter(|n| !spec.is_client_secret(n))
-        .filter_map(|n| std::env::var(&n).ok().map(|v| (n, v)))
+        .filter_map(|n| env(&n).map(|v| (n, v)))
         .collect()
 }
 
@@ -737,6 +754,7 @@ async fn test_provider(
     ext: &Extension,
     spec: &ProviderSpec,
     bless: bool,
+    env: &host::HostEnv,
     report: &mut TestReport,
 ) {
     let rel = ext.path.trim_end_matches('/').to_string();
@@ -768,8 +786,8 @@ async fn test_provider(
         ext_dir: dir.clone(),
         spec: spec.clone(),
         declared: declared.clone(),
-        credentials: env_credentials(spec),
-        host_env: Arc::new(|n| std::env::var(n).ok()),
+        credentials: env_credentials(spec, env),
+        host_env: env.clone(),
     };
     let client = match ReferenceClient::start(&launch).await {
         Ok(c) => c,
@@ -796,6 +814,7 @@ async fn test_provider(
         declared: &declared,
         dir: &dir,
         rel: &rel,
+        env,
     };
     session(&client, &under_test, config.clone(), report).await;
     let recorded = client.finish().await;
@@ -807,7 +826,7 @@ async fn test_provider(
         ));
     }
     transcript(&dir, &rel, spec, &recorded.transcript, bless, report);
-    suite(root, ext, spec, config, report).await;
+    suite(root, ext, spec, config, env, report).await;
 }
 
 /// The provider a session tests.
@@ -819,6 +838,8 @@ struct UnderTest<'a> {
     /// The extension folder, shown as `rel`.
     dir: &'a Path,
     rel: &'a str,
+    /// The environment its credentials come from.
+    env: &'a host::HostEnv,
 }
 
 /// Initialize, check, and the intent examples, over the tapped client.
@@ -834,6 +855,7 @@ async fn session(
         declared,
         dir,
         rel,
+        env,
     } = *t;
     let decl_file = format!("{rel}/{}", spec.declarations);
     let fixture = format!("{rel}/fixtures/provider-{}.yaml", spec.id);
@@ -864,7 +886,7 @@ async fn session(
             method::CHECK,
             &CheckParams {
                 config,
-                credentials: env_credentials(spec).into_keys().collect(),
+                credentials: env_credentials(spec, env).into_keys().collect(),
             },
         )
         .await
@@ -1153,6 +1175,7 @@ async fn suite(
     ext: &Extension,
     spec: &ProviderSpec,
     config: Value,
+    env: &host::HostEnv,
     report: &mut TestReport,
 ) {
     let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
@@ -1165,7 +1188,13 @@ async fn suite(
             .init_repository(tmp.path())
             .await
             .map_err(|e| e.to_string())?;
-        let svc = oxplow_app::Services::in_memory(tmp.path()).map_err(|e| e.to_string())?;
+        let svc = oxplow_app::Services::in_memory_on_machine(
+            tmp.path(),
+            tmp.path().join(".oxplow/global-config"),
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+            env.clone(),
+        )
+        .map_err(|e| e.to_string())?;
         let hosted = svc
             .extension_catalog
             .get(tmp.path())
@@ -1187,7 +1216,7 @@ async fn suite(
             &version,
         )?;
         let project = oxplow_app::collector_runner::project_key(tmp.path());
-        for (name, value) in env_credentials(spec) {
+        for (name, value) in env_credentials(spec, env) {
             svc.secrets
                 .set(
                     &oxplow_app::collector_runner::instance_credential_account(

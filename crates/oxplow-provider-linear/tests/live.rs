@@ -28,7 +28,7 @@ mod common;
 use oxplow_provider_linear::graphql::{Client, Operation, DEFAULT_URL};
 use oxplow_provider_linear::issue::ISSUE_DELETE;
 use oxplow_provider_linear::sim::LinearSim;
-use oxplow_sdk::plugin_test::{test_extension, TestReport};
+use oxplow_sdk::plugin_test::{test_extension_in, TestReport};
 use serde_json::{json, Value};
 
 /// The issues the key's user created in a team since a time: what a run
@@ -97,14 +97,12 @@ async fn trash_created_since(target: &Target, since: &str) -> Vec<String> {
 /// The transcript is blessed into the throwaway copy rather than compared:
 /// a workspace's issue numbers, ids and times aren't the golden's.
 async fn suite(target: &Target, network: &str) -> (TestReport, Vec<String>) {
-    // `plugin test` takes credentials and declared env from its own
-    // environment, as a person running it would.
-    std::env::set_var("LINEAR_API_KEY", &target.key);
-    if target.url == DEFAULT_URL {
-        std::env::remove_var("LINEAR_API_URL");
-    } else {
-        std::env::set_var("LINEAR_API_URL", &target.url);
-    }
+    // The run's key and endpoint are its own, never this process's: the
+    // simulator's run and a live one share the binary.
+    let env = common::linear_env(
+        &target.key,
+        (target.url != DEFAULT_URL).then_some(target.url.as_str()),
+    );
     let dir = tempfile::tempdir().unwrap();
     let ext = common::install_example(dir.path()).await;
     common::rewrite(&ext, "extension.yaml", "network: [api.linear.app]", network);
@@ -118,7 +116,7 @@ async fn suite(target: &Target, network: &str) -> (TestReport, Vec<String>) {
     let since =
         oxplow_domain::Timestamp::from_unix_ms(oxplow_domain::Timestamp::now().unix_ms() - 60_000)
             .to_string();
-    let report = test_extension(dir.path(), "linear", true).await;
+    let report = test_extension_in(dir.path(), "linear", true, env).await;
     // Whatever the run came to, what it filed goes.
     let trashed = trash_created_since(target, &since).await;
     (report.unwrap(), trashed)

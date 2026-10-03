@@ -13,6 +13,7 @@ publish = false
 # implementation and one set of messages.
 
 [dependencies]
+oxplow-ai = { workspace = true }
 oxplow-app = { workspace = true }
 oxplow-config = { workspace = true }
 oxplow-db = { workspace = true }

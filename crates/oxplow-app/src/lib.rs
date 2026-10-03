@@ -432,6 +432,9 @@ struct MachineEnv {
     provider_call_timeout: std::time::Duration,
     /// How long a code-intelligence request waits for its language server.
     lsp_request_timeout: std::time::Duration,
+    /// The environment a provider's declared `env` is read from: this
+    /// process's, or the one a test or `plugin test` run names.
+    host_env: providers::host::HostEnv,
 }
 
 /// All the long-lived services oxplow needs to serve a UI.
@@ -715,6 +718,7 @@ impl Services {
                 .join(collector_runner::project_key(&layout.project_dir)),
             provider_call_timeout: std::time::Duration::from_secs(60),
             lsp_request_timeout: std::time::Duration::from_secs(30),
+            host_env: providers::host::process_env(),
         };
         Self::build(layout, config, db, machine)
     }
@@ -1157,7 +1161,7 @@ impl Services {
                 catalog: extension_catalog.clone(),
                 db: db.clone(),
                 log: (*event_log_store).clone(),
-                host_env: Arc::new(|name| std::env::var(name).ok()),
+                host_env: machine.host_env.clone(),
                 backoff: machine.provider_backoff,
                 copies: machine.provider_copies.clone(),
                 call_timeout: machine.provider_call_timeout,
@@ -1422,16 +1426,19 @@ impl Services {
             project_dir,
             global,
             Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+            providers::host::process_env(),
         )
     }
 
     /// [`Self::in_memory`] for one of several projects on one machine:
-    /// `global_dir` and `secrets` stand in for the machine's global config
-    /// dir and keychain, shared by every project built on them.
+    /// `global_dir`, `secrets` and `host_env` stand in for the machine's
+    /// global config dir, keychain and environment, shared by every
+    /// project built on them.
     pub fn in_memory_on_machine(
         project_dir: impl Into<PathBuf>,
         global_dir: PathBuf,
         secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
+        host_env: providers::host::HostEnv,
     ) -> Result<Self, AppInitError> {
         let project_dir = project_dir.into();
         let state_dir = project_dir.join(".oxplow");
@@ -1453,6 +1460,7 @@ impl Services {
             // A test's hung provider fails fast.
             provider_call_timeout: std::time::Duration::from_secs(2),
             lsp_request_timeout: std::time::Duration::from_secs(2),
+            host_env,
         };
         Self::build(layout, config, Database::in_memory(), machine)
     }
