@@ -2411,6 +2411,54 @@
         "event_type",
         "v"
       ]
+    },
+    "2": {
+      "columns": [
+        {
+          "doc": "`namespace.name`; an extension's namespace is its name with `-` read as `_`.",
+          "name": "event_type",
+          "type": "TEXT"
+        },
+        {
+          "doc": "The schema version.",
+          "name": "v",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "The extension that declares it; NULL for a core type.",
+          "name": "extension",
+          "type": "TEXT"
+        },
+        {
+          "doc": "What it records, as its extension declares; NULL for a core type.",
+          "name": "summary",
+          "type": "TEXT"
+        },
+        {
+          "doc": "1 while the running vocabulary has it (it can be appended); 0 once its extension is gone, or while its extension's declaration of it is refused (a schema changed at a recorded version, a namespace collision).",
+          "name": "registered",
+          "type": "INTEGER"
+        },
+        {
+          "doc": "1 for the newest registered version of its type: what consumers read rows at.",
+          "name": "latest",
+          "type": ""
+        },
+        {
+          "doc": "The payload's JSON Schema, as first registered: a declared type's schema at a recorded version never changes.",
+          "name": "schema_json",
+          "type": "TEXT"
+        },
+        {
+          "doc": "When it was first registered (RFC 3339).",
+          "name": "recorded_at",
+          "type": "TEXT"
+        }
+      ],
+      "key": [
+        "event_type",
+        "v"
+      ]
     }
   },
   "fact": {

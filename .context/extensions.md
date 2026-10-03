@@ -1287,7 +1287,10 @@ The same pass restates `event_type_contract` (read as `v_event_type`:
 type, v, extension, summary, `registered`, `latest`, schema). A removed
 extension's types stay listed with `registered = 0`: their rows can't be
 appended any more but still read, and the pump delivers them at their
-logged version (`data-model.md` "event_log").
+logged version (`data-model.md` "event_log"). `registered` is 0 too for a
+type whose extension is there but whose declaration was refused (a
+schema changed at a recorded version, a namespace collision) — its
+health says why (`v_event_type` v2's column doc says so, tsk800).
 
 **Appending them (P8.D4).** Nothing else appends an extension's types:
 a command script's result (and an effect's, P8.D10) may carry
@@ -1420,6 +1423,10 @@ once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
 4. the script runs sandboxed over `{ event: { id, type, v, seq, source,
    subject, payload }, rows }` (`input` with the payload's fields bound):
    `{ skip: "why" }` is `skipped`; `{ commands, events? }` runs.
+   The script and its `input` rows run on a read **before** the run's
+   transaction: the composed calls are fixed by then, so a row can be
+   stale against what the run then sees (each command's own validation
+   is what holds — the composer doesn't re-read).
 
 A run is the registered `command.sequence` — its spec and compiled input
 schema, shared (`Command::with_handler`) — over what the script composed

@@ -1385,7 +1385,11 @@ events of their own.
 `inverse_json`, and `undone_by`) is written by the command bus through
 `command_audit_store::insert_tx` / `set_event_id_tx` / `mark_undone_tx`
 inside the run's transaction; `SqliteCommandAuditStore` reads it. See
-[commands.md](./commands.md).
+[commands.md](./commands.md). V147 rebuilt it (an `effect` actor kind in
+the CHECK) with `INSERT … SELECT` into the new AUTOINCREMENT table, which
+set `sqlite_sequence` to `max(id)` — any higher high-water mark was lost.
+Harmless while nothing deletes audit rows; a future rebuild that must
+keep it copies the old `sqlite_sequence` row too.
 
 **Status is written only by the status core.** `update_task_tx` writes
 a task's fields, never `status` / `completed_at`; `write_status_tx`
