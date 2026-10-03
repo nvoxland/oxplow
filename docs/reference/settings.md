@@ -246,57 +246,62 @@ its name to the list. Read-side filtering applies on every
 read, so paths added after they were already captured drop
 out of the UI immediately — no rescan, no purge.
 
-### Collection (tests & coverage)
+### Testing (tests & coverage)
 
-The `collection` block tells oxplow how to attach test results and
-diff coverage to each effort. Point it at the report files your test
-run already emits; oxplow parses each one fresher than the effort
-start, so a polyglot repo lights up per stack. Run
-`/oxplow:configure` to wire this up automatically.
+The `testing` block says how your tests run; **report collectors**
+read what a run writes and attach it to each effort: the individual
+tests, diff coverage and analyzer findings. Point a collector at a
+report file your test run already emits; after each test run oxplow
+sees, it reads the reports that run wrote, so a polyglot repo lights
+up per stack. Run `/oxplow:configure` to wire this up automatically.
 
 ```yaml
 # .oxplow/project.yaml
-collection:
-  testCommand: bun run test:collect    # informational; surfaced to the agent
-  reports:
-    - { path: target/coverage/lcov.info, format: lcov }
-    - { path: target/nextest/default/junit.xml, format: junit }
-    - { path: apps/desktop/test-report.xml, format: junit }
-  testRunPatterns: [bun test]          # extra substrings that count as a test run
+testing:
+  command: bun run test:collect      # surfaced to the agent
+  fastCommand: bun run test:fast     # the same without coverage, for iterating
+  runPatterns: [bun test]            # extra substrings that count as a test run
+  agentHint: Run tests with bun run test:collect.
+
+collectors:
+  - { id: tests.rust_coverage, records: coverage, entry: "oxplow:lcov", report: { path: target/coverage/lcov.info }, trigger: { on_run: test } }
+  - { id: tests.rust_junit, records: tests, entry: "oxplow:junit", report: { path: target/nextest/default/junit.xml }, trigger: { on_run: test } }
+  - { id: tests.desktop_junit, records: tests, entry: "oxplow:junit", report: { path: apps/desktop/test-report.xml }, trigger: { on_run: test } }
 ```
 
-Built-in formats are `lcov`, `cobertura`, `jacoco-xml` (coverage) and
-`junit` (the per-test tree). Coverage numbers come only from oxplow
-parsing the report, never from the agent, so they stay trustworthy.
+`records` is `tests`, `coverage` or `analysis`. The bundled parsers are
+`oxplow:junit`, `oxplow:lcov`, `oxplow:cobertura`, `oxplow:jacoco`,
+`oxplow:clippy` and `oxplow:eslint`. Coverage numbers come only from
+oxplow parsing the report, never from the agent, so they stay
+trustworthy. Each collector's last run shows in Settings → Data; one
+whose report fails to parse three times in a row is turned off until
+you turn it back on.
 
-#### Adding a format with a plugin
+#### A report format with no bundled parser
 
-For a format oxplow doesn't parse out of the box, add a
-`collection.plugins` entry — no recompile, no change to oxplow. A
-plugin is a small script that maps a report into oxplow's
-coverage/test shape:
+Give the collector its own parser — no recompile, no change to oxplow.
+A parser is a small script that maps a report into oxplow's
+coverage/test/analysis shape:
 
 ```yaml
-collection:
-  reports:
-    - { path: target/clover.xml, format: clover }
-  plugins:
-    - name: acme.clover   # namespaced; oxplow. is reserved
-      kind: coverage        # coverage | test
-      formats: [clover]     # format name(s) this plugin claims
-      runtime: jaq          # jaq (jq) | starlark | exec
-      input: xml            # host pre-parse: text | json | xml | lcov | lines
-      entryFile: oxplow/plugins/clover.jq   # the script file (jq program here)
+collectors:
+  - id: tests.clover
+    records: coverage
+    runtime: jaq                        # jaq (jq) | starlark | exec
+    entry: oxplow/parsers/clover.jq     # the script file
+    report: { path: target/clover.xml, format: xml }   # pre-parse: text | json | xml | lcov | lines
+    trigger: { on_run: test }
 ```
 
-The script lives in its own file (`entryFile`, a project-relative path),
-not inline in the yaml. The host reads it and pre-parses the report for
-you (per `input`), so the script only reshapes JSON. `jaq` (jq) is the
+The script lives in its own file (`entry`, a project-relative path), not
+inline in the yaml. The host reads it and pre-parses the report for you
+(per `format`), so the script only reshapes JSON. `jaq` (jq) is the
 simplest for XML/JSON; `starlark` covers logic jq can't express; `exec`
-runs an external program — `entryFile` is the executable — (raw report on
+runs an external program — `entry` is the executable — (raw report on
 stdin, JSON on stdout) as a last resort. jaq and starlark run in-process
-and sandboxed, so their output is trusted as measured; `exec` can do
-I/O, so its output is flagged lower-trust in the UI.
+and sandboxed, so their output is trusted as measured; an `exec` parser
+runs only once you approve it on your machine (Settings → Data →
+Programs), and its output is flagged lower-trust in the UI.
 
 The full authoring reference — host helpers, the exact output schemas,
 a worked example — lives in `.context/collection.md` in the oxplow

@@ -643,8 +643,9 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
 
 A **collector** brings data in: a program (`exec`), a sandboxed script
 (`starlark` / `jaq`) or a provider's read (`read`). It writes
-**entities** (rows a model can `ref()`) or **facts** (measurements on
-declared measures), never both. One declaration, `oxplow_config::collectors`
+**entities** (rows a model can `ref()`), **facts** (measurements on
+declared measures) or **records** (a test / coverage / analysis report it
+parses — the project's report collectors, tsk863), one of the three. One declaration, `oxplow_config::collectors`
 (`CollectorSpec`, `parse_collectors`), serves `extension.yaml` (v1
 `sources:` is migrated to it, each `schedule:` becoming a `trigger:`) and
 `.oxplow/project.yaml`. The real, tested example
@@ -695,6 +696,16 @@ extension's own declared event types, logged with the run (P9.D2;
   `collector_run` row and `collector.synced@1` with its `facts` count.
   Snapshot runs keep the delta / full-baseline machinery (pending-baseline
   queue, `scan_kind`, fingerprint, dominated-capture prune).
+- A **report collector** (`records: tests | coverage | analysis`,
+  tsk863) is the project's: it parses one `report:` file with a bundled
+  parser (`entry: "oxplow:<junit|lcov|cobertura|jacoco|clippy|eslint>"`)
+  or its own jaq / Starlark / exec script, on `trigger: { on_run: test |
+  analysis }` — when the `collection` reactor detects that kind of run and
+  the run wrote the report — or by hand (`collector.sync`, which records
+  in a thread). The collection service runs it and merges its output into
+  the run (`.context/collection.md`); its run, health and consent are any
+  collector's (`collector_run`, `collector.synced@1`, `plugin_health`, a
+  project program's approval).
 
 **Owners.** An extension (its name), `project` (`.oxplow/project.yaml`'s
 `collectors:`) or `built-in` (the bundled `oxplow.*` code metrics, run

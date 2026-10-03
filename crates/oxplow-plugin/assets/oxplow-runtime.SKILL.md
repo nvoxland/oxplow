@@ -327,13 +327,13 @@ is validated, policy-checked, audited to your thread and logged as
   `config.set { key, value }`, `config.unset { key }`. Zones live here
   (`config.set { key: "zones", value: [{ match, zone, color? }] }`;
   `list_zones` shows what the table matches). Keys that run a program or
-  pick the model (`agents`, `lsp`, `collection`, `ai`, `acpAgents`,
+  pick the model (`agents`, `lsp`, `testing`, `collectors`, `ai`, `acpAgents`,
   `agentModels`, `extensions`, `agentPromptAppend`, …) need the person's
   confirmation — your run is kept as a proposal for them.
 - Tasks and other work items: `work_item.*` (above); your effort's
   record: `effort.report`, `effort.amend`, `effort.record_decision`,
-  `effort.record_claim`; test evidence: `test.record_run`,
-  `test.ingest_coverage`, `test.ingest_analysis`; notes and comments:
+  `effort.record_claim`; test evidence: `test.record_run`, and
+  `collector.sync` for a report collector; notes and comments:
   `knowledge.add_note`, `knowledge.reply_comment`, ….
 
 Invalid input names the failing field; a denial says why. A run that

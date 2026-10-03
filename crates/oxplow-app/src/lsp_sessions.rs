@@ -890,7 +890,7 @@ mod tests {
             symbols_max_files_per_snapshot: oxplow_config::DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT,
             inject_session_context: true,
             icon_tint: None,
-            collection: Default::default(),
+            testing: Default::default(),
             metrics: Default::default(),
             collectors: Default::default(),
             collectors_yaml: None,

@@ -1,7 +1,7 @@
 [alias]
 # `cargo cov` runs the workspace test suite under instrumentation via
 # nextest, emitting BOTH reports oxplow's collection subsystem reads
-# (see .context/collection.md + the `collection:` block in oxplow.yaml):
+# (see .context/collection.md and the report collectors in .oxplow/project.yaml):
 #   * lcov coverage  → target/coverage/lcov.info  (diff coverage)
 #   * JUnit results  → target/nextest/default/junit.xml  (per-test tree,
 #                       via the [profile.default.junit] in .config/nextest.toml)

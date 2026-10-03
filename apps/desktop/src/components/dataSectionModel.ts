@@ -99,7 +99,7 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
     };
   }
   const command = [...(p.env ?? []), p.program, ...p.args].join(" ");
-  const what = p.kind === "collector" ? "Collector" : p.kind === "plugin" ? "Collection plugin" : "ACP agent";
+  const what = p.kind === "collector" ? "Collector" : "ACP agent";
   return {
     key: `${p.kind}:${p.name}`,
     label: `${what} ${p.name}`,

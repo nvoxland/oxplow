@@ -1465,8 +1465,9 @@ triggers the same flow on demand.
 
 The `/oxplow:configure` command (asset `crates/oxplow-plugin/assets/configure.md`)
 sets up the **collection** subsystem (see `.context/collection.md`): it has
-the agent instrument the project's test tooling to emit a standard-format
-coverage report at a stable path, then records the `collection:` profile in
+the agent instrument the project's test tooling to emit standard-format
+reports at stable paths, then records the `testing:` block and one report
+collector per report (`collectors:` with `records:`) in
 `.oxplow/project.yaml`. The standing `oxplow-collection` skill
 (`crates/oxplow-plugin/assets/oxplow-collection.SKILL.md`) loads when a task
 closes and on `/oxplow:configure`; it tells the agent to run the tests
@@ -1474,24 +1475,18 @@ before completing (so a report exists) and — critically — to **never parse
 or report coverage numbers itself**, because oxplow parses the report
 deterministically (`observed`). Both are wired in `write_plugin`
 (`crates/oxplow-plugin/src/lib.rs`). The ingestion side (PostToolUse test
-detector, coverage + static-analysis ride-alongs, the `test.ingest_coverage` /
-`test.ingest_analysis` / `test.record_run` commands and the
-`list_effort_observations` / `get_open_effort` MCP reads)
-is documented in `.context/collection.md`. `test.ingest_analysis` is the on-demand
-counterpart to `test.ingest_coverage` for static-analysis reports (e.g.
-`eslint-json`, `clippy-json`) — analysis previously had only the passive
-PostToolUse path. `get_open_effort({ thread_id })` answers "what is this
-thread's currently-open effort?" — returns `{ open, effortId, taskId,
-startedAt, hasStartSnapshot }` (`open:false` with null ids when none). It's
-the introspection counterpart to the implicit-open-effort tools above: find
-the `effortId` for `effort.amend`, confirm an effort is open before ingesting,
-or debug a `no_open_effort` / `no_baseline` (`hasStartSnapshot:false`) outcome
-without inferring it from task state or the UI.
-Report parsing is **pluggable**: those tools resolve a report's `format`
-against a `CollectorRegistry` (`crates/oxplow-collect-plugin`) — the four
-first-party parsers ship as bundled jaq plugins and a project can add its own
-via `collection.plugins` in `.oxplow/project.yaml`, no recompile. No new MCP tool was
-added; the existing tools are now registry-backed.
+detector, the report collectors a detected run reads, `collector.sync` for
+one run by hand, `test.record_run`, and the `list_effort_observations` /
+`get_open_effort` MCP reads) is documented in `.context/collection.md`.
+`get_open_effort({ thread_id })` answers "what is this thread's
+currently-open effort?" — returns `{ open, effortId, taskId, startedAt,
+hasStartSnapshot }` (`open:false` with null ids when none): the `effortId`
+for `effort.amend`, whether an effort is open before a run is recorded, and
+whether its diff coverage has a baseline (`hasStartSnapshot`).
+Report parsing is **pluggable**: a report collector names a bundled parser
+(`entry: oxplow:<junit|lcov|cobertura|jacoco|clippy|eslint>`, jq programs in
+`crates/oxplow-collect-plugin`) or its own jaq / Starlark / exec script, no
+recompile (tsk863).
 When the PostToolUse hook detects a test run but no configured report was
 refreshed, it returns a one-shot nudge via `hookSpecificOutput.additionalContext`
 steering the agent to the report-emitting command. See the "Report-less-run

@@ -170,50 +170,6 @@ pub struct LspServerConfig {
     pub args: Vec<String>,
 }
 
-/// One test/coverage report the project's test run emits. `format` selects
-/// the parser (collector): the built-ins are `lcov` | `cobertura` |
-/// `jacoco-xml` (coverage) and `junit` (test results), plus any format a
-/// project plugin (see [`PluginConfig`]) registers. The format name is no
-/// longer gate-kept here — it's resolved against the collector registry at
-/// collection time, so an unknown format surfaces as a warning rather than a
-/// config load failure.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
-pub struct ReportConfig {
-    pub path: String,
-    pub format: String,
-}
-
-/// A project-defined collection plugin — the generic, kind-agnostic
-/// definition mechanism. Mirrors `oxplow_collect_plugin::CollectorDescriptor`
-/// but with plain-string `kind`/`runtime` so this crate stays dependency-light
-/// (the collection layer maps it to a registered collector). `entry` is the
-/// jaq/Starlark script (or the program for `exec`); `args` are extra exec
-/// arguments.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
-pub struct PluginConfig {
-    pub name: String,
-    /// What the plugin observes: `coverage` | `test`.
-    pub kind: String,
-    /// Format name(s) this plugin claims (resolved against `reports[].format`).
-    pub formats: Vec<String>,
-    /// Transform tier: `jaq` | `starlark` | `exec`.
-    pub runtime: String,
-    /// How the host pre-parses the report before the transform:
-    /// `text` | `json` | `xml` | `lcov` | `lines` (default `text`). Applies to
-    /// the in-process tiers (jaq/starlark); `exec` always gets raw content.
-    // No `skip_serializing_if`: specta's unified-mode TS export forbids it.
-    #[serde(default)]
-    pub input: Option<String>,
-    /// Project-relative path to the script file: the jaq/Starlark program, or
-    /// the program to spawn for `exec`. Scripts live in their own files, not
-    /// inline in `.oxplow/project.yaml`. Required for all three runtimes.
-    #[serde(rename = "entryFile", default)]
-    pub entry_file: Option<String>,
-    /// Extra arguments for the `exec` runtime.
-    #[serde(default)]
-    pub args: Vec<String>,
-}
-
 /// A fact predicate on a `metrics:` spec (the `filter:` block) — the config
 /// mirror of the engine's `FactFilter` (epic tsk12). A conjunctive predicate
 /// keeping only the facts that match before aggregation: `minValue` for a
@@ -522,75 +478,41 @@ pub struct ResolvedDimension {
     pub entity: Option<EntityDimensionSpec>,
 }
 
-/// Per-project collection profile (the `collection:` block). Written by
-/// `/oxplow:configure` and read by the collection subsystem
-/// (`.context/collection.md`): the Bash-hook detector reads
-/// `test_run_patterns`, and the ride-along parses every `reports` entry
-/// fresher than the effort start. A repo with several test stacks lists
-/// each stack's report(s) here. All fields optional — an unconfigured
-/// project collects nothing extra.
+/// How this project's tests run (the `testing:` block), written by
+/// `/oxplow:configure`. The Bash-hook detector reads the commands and
+/// patterns to tell a test or analysis run; what such a run's reports hold
+/// is read by the report collectors (`collectors:` with `records:`, see
+/// [`collectors::Records`]). All optional.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
-pub struct CollectionConfig {
-    /// Command that runs the project's tests (informational; surfaced to
-    /// the agent so it knows how to produce the reports).
-    #[serde(rename = "testCommand")]
-    pub test_command: Option<String>,
-    /// Optional coverage-free counterpart to `test_command`, for the red/green
-    /// loop (tsk171). It must still emit a test report (JUnit) so the
-    /// progression lands in the effort's Tests panel, but it skips coverage
-    /// instrumentation and should accept a filter argument.
+pub struct TestingConfig {
+    /// The command that runs the project's tests and writes their reports
+    /// (counts as a test run; named in the report-less nudge).
+    pub command: Option<String>,
+    /// The coverage-free counterpart to `command`, for the red/green loop
+    /// (tsk171). It still writes a test report (JUnit), so the
+    /// progression lands in the effort's Tests panel, but skips coverage
+    /// and should accept a filter.
     ///
     /// This exists because the alternative is worse. When the only
-    /// report-emitting command is a full instrumented run of the whole suite,
-    /// "route every invocation through it" is unfollowable in a TDD loop, so it
-    /// gets dropped — and then NONE of the red→green runs are recorded. A
-    /// weaker rule that is actually followed beats a stricter one that isn't.
-    #[serde(rename = "fastTestCommand")]
-    pub fast_test_command: Option<String>,
-    /// Reports the test run emits — coverage (lcov/cobertura/jacoco-xml)
-    /// and/or test results (junit). oxplow parses each that is fresher
-    /// than the effort start, so several stacks coexist.
-    pub reports: Vec<ReportConfig>,
+    /// report-emitting command is a full instrumented run of the whole
+    /// suite, "route every invocation through it" is unfollowable in a TDD
+    /// loop, so it gets dropped — and then NONE of the red→green runs are
+    /// recorded. A weaker rule that is actually followed beats a stricter
+    /// one that isn't.
+    #[serde(rename = "fastCommand")]
+    pub fast_command: Option<String>,
     /// Extra command substrings that count as a test run, on top of the
     /// built-in defaults (pytest, cargo test, jest, …).
-    #[serde(rename = "testRunPatterns")]
-    pub test_run_patterns: Vec<String>,
-    /// Extra command substrings that count as a static-analysis run, on top
-    /// of the built-in defaults (cargo clippy, eslint, ruff, …). Mirrors
-    /// `test_run_patterns` for the analysis ride-along.
-    #[serde(rename = "analysisRunPatterns")]
-    pub analysis_run_patterns: Vec<String>,
-    /// Free-form hint injected verbatim into every agent system prompt.
-    /// Use it to tell the agent which test command to run, what coverage
-    /// threshold to meet, etc. — anything project-specific the agent
-    /// should know about the collection setup.
+    #[serde(rename = "runPatterns")]
+    pub run_patterns: Vec<String>,
+    /// Extra command substrings that count as a static-analysis run, on
+    /// top of the built-in defaults (cargo clippy, eslint, ruff, …).
+    #[serde(rename = "analysisPatterns")]
+    pub analysis_patterns: Vec<String>,
+    /// Free-form hint injected verbatim into every agent system prompt:
+    /// which test command to run, what coverage to meet, and so on.
     #[serde(rename = "agentHint")]
     pub agent_hint: Option<String>,
-    /// Project-defined collection plugins (jaq/starlark/exec parsers). Each
-    /// registers the formats it claims, so a project can add support for a new
-    /// report format without any change to oxplow itself.
-    #[serde(default)]
-    pub plugins: Vec<PluginConfig>,
-}
-
-impl CollectionConfig {
-    /// Coverage reports (lcov / cobertura / jacoco-xml).
-    pub fn coverage_reports(&self) -> impl Iterator<Item = &ReportConfig> {
-        self.reports
-            .iter()
-            .filter(|r| !is_test_report_format(&r.format))
-    }
-    /// Test-result reports (junit).
-    pub fn test_reports(&self) -> impl Iterator<Item = &ReportConfig> {
-        self.reports
-            .iter()
-            .filter(|r| is_test_report_format(&r.format))
-    }
-}
-
-/// `junit` is a test-result format; everything else known is coverage.
-pub fn is_test_report_format(format: &str) -> bool {
-    format.eq_ignore_ascii_case("junit")
 }
 
 /// What oxplow watches / snapshots / indexes, on top of the always-on
@@ -726,8 +648,8 @@ pub struct OxplowConfig {
     /// hand rather than through this derive.
     #[serde(rename = "iconTint")]
     pub icon_tint: Option<String>,
-    /// Per-project collection profile (test + coverage instrumentation).
-    pub collection: CollectionConfig,
+    /// How the project's tests run (the `testing:` block).
+    pub testing: TestingConfig,
     /// Project-declared metric SPECS (the `metrics:` block) — the author-able
     /// read surface (epic tsk12, E). Each entry enables a catalog metric
     /// (`use:`) or defines a new spec (`key:`) over a measure. The runner resolves
@@ -957,9 +879,9 @@ struct RawConfig {
     /// Hex colour composited behind the app icon so windows are tellable apart (macOS).
     #[serde(rename = "iconTint", default)]
     icon_tint: Option<String>,
-    /// Test and coverage collection: commands, report paths, run patterns, plugins. Runs programs.
+    /// How the project's tests run: its test commands, the extra command patterns that count as a test or analysis run, and a hint injected into every agent prompt. Steers agents.
     #[serde(default)]
-    collection: Option<RawCollectionBlock>,
+    testing: Option<RawTestingBlock>,
     /// Metric specs: enable a catalog metric (`use`) or define one (`key`) over a measure.
     #[serde(default)]
     metrics: Option<Vec<MetricEntry>>,
@@ -1000,54 +922,17 @@ struct RawConfig {
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct RawReport {
-    path: String,
-    format: String,
-}
-
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct RawPlugin {
-    name: String,
-    kind: String,
+struct RawTestingBlock {
     #[serde(default)]
-    formats: Vec<String>,
-    runtime: String,
-    #[serde(default)]
-    input: Option<String>,
-    #[serde(rename = "entryFile", default)]
-    entry_file: Option<String>,
-    #[serde(default)]
-    args: Vec<String>,
-}
-
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct RawCollectionBlock {
-    #[serde(rename = "testCommand", default)]
-    test_command: Option<String>,
-    #[serde(rename = "fastTestCommand", default)]
-    fast_test_command: Option<String>,
-    #[serde(default)]
-    reports: Option<Vec<RawReport>>,
-    // Back-compat: the pre-`reports` singular fields. Folded into
-    // `reports` on load so existing .oxplow/project.yaml files keep working.
-    #[serde(rename = "coverageReportPath", default)]
-    coverage_report_path: Option<String>,
-    #[serde(rename = "coverageFormat", default)]
-    coverage_format: Option<String>,
-    #[serde(rename = "testReportPath", default)]
-    test_report_path: Option<String>,
-    #[serde(rename = "testReportFormat", default)]
-    test_report_format: Option<String>,
-    #[serde(rename = "testRunPatterns", default)]
-    test_run_patterns: Option<Vec<String>>,
-    #[serde(rename = "analysisRunPatterns", default)]
-    analysis_run_patterns: Option<Vec<String>>,
+    command: Option<String>,
+    #[serde(rename = "fastCommand", default)]
+    fast_command: Option<String>,
+    #[serde(rename = "runPatterns", default)]
+    run_patterns: Option<Vec<String>>,
+    #[serde(rename = "analysisPatterns", default)]
+    analysis_patterns: Option<Vec<String>>,
     #[serde(rename = "agentHint", default)]
     agent_hint: Option<String>,
-    #[serde(default)]
-    plugins: Option<Vec<RawPlugin>>,
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -1313,65 +1198,25 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         );
     }
     {
-        let c = &config.collection;
-        let mut col = serde_yaml::Mapping::new();
-        if let Some(v) = &c.test_command {
-            col.insert("testCommand".into(), v.clone().into());
+        let c = &config.testing;
+        let mut m = serde_yaml::Mapping::new();
+        if let Some(v) = &c.command {
+            m.insert("command".into(), v.clone().into());
         }
-        if let Some(v) = &c.fast_test_command {
-            col.insert("fastTestCommand".into(), v.clone().into());
+        if let Some(v) = &c.fast_command {
+            m.insert("fastCommand".into(), v.clone().into());
         }
-        if !c.reports.is_empty() {
-            let reports: Vec<_> = c
-                .reports
-                .iter()
-                .map(|r| {
-                    let mut m = serde_yaml::Mapping::new();
-                    m.insert("path".into(), r.path.clone().into());
-                    m.insert("format".into(), r.format.clone().into());
-                    serde_yaml::Value::Mapping(m)
-                })
-                .collect();
-            col.insert("reports".into(), serde_yaml::Value::Sequence(reports));
+        if !c.run_patterns.is_empty() {
+            m.insert("runPatterns".into(), to_yaml(&c.run_patterns));
         }
-        if !c.test_run_patterns.is_empty() {
-            col.insert("testRunPatterns".into(), to_yaml(&c.test_run_patterns));
-        }
-        if !c.analysis_run_patterns.is_empty() {
-            col.insert(
-                "analysisRunPatterns".into(),
-                to_yaml(&c.analysis_run_patterns),
-            );
+        if !c.analysis_patterns.is_empty() {
+            m.insert("analysisPatterns".into(), to_yaml(&c.analysis_patterns));
         }
         if let Some(v) = &c.agent_hint {
-            col.insert("agentHint".into(), v.clone().into());
+            m.insert("agentHint".into(), v.clone().into());
         }
-        if !c.plugins.is_empty() {
-            let plugins: Vec<_> = c
-                .plugins
-                .iter()
-                .map(|p| {
-                    let mut m = serde_yaml::Mapping::new();
-                    m.insert("name".into(), p.name.clone().into());
-                    m.insert("kind".into(), p.kind.clone().into());
-                    m.insert("formats".into(), to_yaml(&p.formats));
-                    m.insert("runtime".into(), p.runtime.clone().into());
-                    if let Some(input) = &p.input {
-                        m.insert("input".into(), input.clone().into());
-                    }
-                    if let Some(entry_file) = &p.entry_file {
-                        m.insert("entryFile".into(), entry_file.clone().into());
-                    }
-                    if !p.args.is_empty() {
-                        m.insert("args".into(), to_yaml(&p.args));
-                    }
-                    serde_yaml::Value::Mapping(m)
-                })
-                .collect();
-            col.insert("plugins".into(), serde_yaml::Value::Sequence(plugins));
-        }
-        let set = !col.is_empty();
-        put("collection", serde_yaml::Value::Mapping(col), set);
+        let set = !m.is_empty();
+        put("testing", serde_yaml::Value::Mapping(m), set);
     }
     put(
         "metrics",
@@ -1539,7 +1384,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         symbols_max_files_per_snapshot: DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT,
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
         icon_tint: None,
-        collection: CollectionConfig::default(),
+        testing: TestingConfig::default(),
         metrics: Vec::new(),
         collectors: Vec::new(),
         collectors_yaml: None,
@@ -1998,7 +1843,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         other => other,
     };
 
-    let collection = validate_collection(raw.collection)?;
+    let testing = validate_testing(raw.testing)?;
     let metrics = validate_metrics(raw.metrics)?;
     let collectors_yaml = raw.collectors;
     let collectors = parse_project_collectors(collectors_yaml.as_ref())?;
@@ -2081,7 +1926,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         symbols_max_files_per_snapshot,
         inject_session_context,
         icon_tint,
-        collection,
+        testing,
         metrics,
         collectors,
         collectors_yaml,
@@ -2226,14 +2071,6 @@ fn validate_generated_list(list: Vec<String>, label: &str) -> Result<Vec<String>
     }
     Ok(out)
 }
-
-/// Transform tiers a project plugin may declare. `builtin-rust` is
-/// intentionally excluded — those are first-party, registered in code.
-const PLUGIN_RUNTIMES: &[&str] = &["jaq", "starlark", "exec"];
-/// Collector kinds a project plugin may target.
-const PLUGIN_KINDS: &[&str] = &["coverage", "test", "analysis"];
-/// Container pre-parsers a plugin may select for its input.
-const PLUGIN_INPUTS: &[&str] = &["text", "json", "xml", "lcov", "lines"];
 
 /// Read-time presentation kinds a `metrics:` spec may declare (`displayKind`).
 const METRIC_DISPLAY_KINDS: &[&str] = &["gauge", "findings", "test", "coverage", "event"];
@@ -3068,172 +2905,30 @@ fn validate_agents(raw: Option<Vec<AgentKind>>) -> Result<Vec<AgentKind>, Config
     Ok(seen)
 }
 
-/// Require a non-empty (already-trimmed) report format. The *value* is no
-/// longer gate-kept against a hardcoded list — format names resolve against
-/// the collector registry at collection time, so plugin-provided formats work
-/// and an unknown one surfaces as a warning, not a config load failure.
-fn require_format(field: &str, fmt: &str) -> Result<(), ConfigError> {
-    if fmt.is_empty() {
-        return Err(ConfigError::Invalid(format!(
-            "collection.{field} must be a non-empty string"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_plugins(raw: Option<Vec<RawPlugin>>) -> Result<Vec<PluginConfig>, ConfigError> {
-    let mut plugins = Vec::new();
-    for (i, p) in raw.into_iter().flatten().enumerate() {
-        let name = p.name.trim().to_string();
-        if name.is_empty() {
-            return Err(ConfigError::Invalid(format!(
-                "collection.plugins[{i}].name must be a non-empty string"
-            )));
-        }
-        // Names are namespaced `<vendor>.<id>`; `oxplow.` is reserved for the
-        // first-party built-ins so a project can't impersonate them.
-        if name.starts_with("oxplow.") {
-            return Err(ConfigError::Invalid(format!(
-                "collection.plugins[{i}].name \"{name}\" uses the reserved \"oxplow.\" namespace"
-            )));
-        }
-        if !name.contains('.') {
-            return Err(ConfigError::Invalid(format!(
-                "collection.plugins[{i}].name \"{name}\" must be namespaced as \"<vendor>.<id>\" (e.g. acme.clover)"
-            )));
-        }
-        let kind = p.kind.trim().to_ascii_lowercase();
-        if !PLUGIN_KINDS.contains(&kind.as_str()) {
-            return Err(ConfigError::Invalid(format!(
-                "collection.plugins[{i}].kind must be coverage | test | analysis (got \"{}\")",
-                p.kind
-            )));
-        }
-        let runtime = p.runtime.trim().to_ascii_lowercase();
-        if !PLUGIN_RUNTIMES.contains(&runtime.as_str()) {
-            return Err(ConfigError::Invalid(format!(
-                "collection.plugins[{i}].runtime must be jaq | starlark | exec (got \"{}\")",
-                p.runtime
-            )));
-        }
-        let mut formats = Vec::new();
-        for (j, f) in p.formats.into_iter().enumerate() {
-            let f = f.trim().to_string();
-            if f.is_empty() {
-                return Err(ConfigError::Invalid(format!(
-                    "collection.plugins[{i}].formats[{j}] must be a non-empty string"
-                )));
-            }
-            formats.push(f);
-        }
-        if formats.is_empty() {
-            return Err(ConfigError::Invalid(format!(
-                "collection.plugins[{i}].formats must list at least one format"
-            )));
-        }
-        let input = match p.input.map(|s| s.trim().to_ascii_lowercase()) {
-            Some(s) if !s.is_empty() => {
-                if !PLUGIN_INPUTS.contains(&s.as_str()) {
-                    return Err(ConfigError::Invalid(format!(
-                        "collection.plugins[{i}].input must be text | json | xml | lcov | lines (got \"{s}\")"
-                    )));
-                }
-                Some(s)
-            }
-            _ => None,
-        };
-        let entry_file = p
-            .entry_file
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
-        let entry_file = match entry_file {
-            Some(f) => f,
-            None => {
-                return Err(ConfigError::Invalid(format!(
-                    "collection.plugins[{i}].entryFile is required (the script file path)"
-                )))
-            }
-        };
-        if Path::new(&entry_file).is_absolute() || entry_file.split('/').any(|c| c == "..") {
-            return Err(ConfigError::Invalid(format!(
-                "collection.plugins[{i}].entryFile must be a project-relative path \
-                 without `..` (got \"{entry_file}\")"
-            )));
-        }
-        let args = p.args.into_iter().map(|a| a.trim().to_string()).collect();
-        plugins.push(PluginConfig {
-            name,
-            kind,
-            formats,
-            runtime,
-            input,
-            entry_file: Some(entry_file),
-            args,
-        });
-    }
-    Ok(plugins)
-}
-
-fn validate_collection(raw: Option<RawCollectionBlock>) -> Result<CollectionConfig, ConfigError> {
+fn validate_testing(raw: Option<RawTestingBlock>) -> Result<TestingConfig, ConfigError> {
     let Some(raw) = raw else {
-        return Ok(CollectionConfig::default());
+        return Ok(TestingConfig::default());
     };
     let opt_trimmed = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-
-    let mut reports = Vec::new();
-    // The `reports` list (canonical).
-    for (i, r) in raw.reports.into_iter().flatten().enumerate() {
-        let path = r.path.trim().to_string();
-        let format = r.format.trim().to_string();
-        if path.is_empty() {
-            return Err(ConfigError::Invalid(format!(
-                "collection.reports[{i}].path must be a non-empty string"
-            )));
-        }
-        require_format(&format!("reports[{i}].format"), &format)?;
-        reports.push(ReportConfig { path, format });
-    }
-    // Back-compat: fold the old singular fields into `reports`.
-    if let (Some(path), Some(format)) = (
-        opt_trimmed(raw.coverage_report_path),
-        opt_trimmed(raw.coverage_format),
-    ) {
-        require_format("coverageFormat", &format)?;
-        reports.push(ReportConfig { path, format });
-    }
-    if let (Some(path), Some(format)) = (
-        opt_trimmed(raw.test_report_path),
-        opt_trimmed(raw.test_report_format),
-    ) {
-        require_format("testReportFormat", &format)?;
-        reports.push(ReportConfig { path, format });
-    }
-
-    let validate_patterns = |field: &str, list: Option<Vec<String>>| {
+    let patterns = |field: &str, list: Option<Vec<String>>| {
         let mut out = Vec::new();
         for (i, p) in list.into_iter().flatten().enumerate() {
             let trimmed = p.trim().to_string();
             if trimmed.is_empty() {
                 return Err(ConfigError::Invalid(format!(
-                    "collection.{field}[{i}] must be a non-empty string"
+                    "testing.{field}[{i}] must be a non-empty string"
                 )));
             }
             out.push(trimmed);
         }
         Ok(out)
     };
-    let test_run_patterns = validate_patterns("testRunPatterns", raw.test_run_patterns)?;
-    let analysis_run_patterns =
-        validate_patterns("analysisRunPatterns", raw.analysis_run_patterns)?;
-    let plugins = validate_plugins(raw.plugins)?;
-    Ok(CollectionConfig {
-        test_command: opt_trimmed(raw.test_command),
-        fast_test_command: opt_trimmed(raw.fast_test_command),
-        reports,
-        test_run_patterns,
-        analysis_run_patterns,
+    Ok(TestingConfig {
+        command: opt_trimmed(raw.command),
+        fast_command: opt_trimmed(raw.fast_command),
+        run_patterns: patterns("runPatterns", raw.run_patterns)?,
+        analysis_patterns: patterns("analysisPatterns", raw.analysis_patterns)?,
         agent_hint: opt_trimmed(raw.agent_hint),
-        plugins,
     })
 }
 
@@ -4049,23 +3744,23 @@ lsp:
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
-            "collection:\n  testCommand: bun run test:collect\n  fastTestCommand: bun run test:fast\n",
+            "testing:\n  command: bun run test:collect\n  fastCommand: bun run test:fast\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(
-            cfg.collection.fast_test_command.as_deref(),
+            cfg.testing.fast_command.as_deref(),
             Some("bun run test:fast")
         );
         write_project_config(dir.path(), &cfg).unwrap();
         let reloaded = load_project_config(dir.path()).unwrap();
         assert_eq!(
-            reloaded.collection.fast_test_command.as_deref(),
+            reloaded.testing.fast_command.as_deref(),
             Some("bun run test:fast"),
             "survives a write/reload round-trip"
         );
         assert_eq!(
-            reloaded.collection.test_command.as_deref(),
+            reloaded.testing.command.as_deref(),
             Some("bun run test:collect"),
             "and doesn't displace the full command"
         );
@@ -4310,202 +4005,81 @@ lsp:
     }
 
     #[test]
-    fn collection_defaults_empty_when_absent() {
+    fn testing_defaults_empty_when_absent() {
         let dir = tempdir().unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.collection, CollectionConfig::default());
+        assert_eq!(cfg.testing, TestingConfig::default());
     }
 
     #[test]
-    fn parses_collection_block() {
+    fn parses_testing_block() {
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
             r#"
-collection:
-  testCommand: cargo cov
+testing:
+  command: cargo cov
   agentHint: "Run tests with cargo cov"
-  reports:
-    - { path: target/coverage/lcov.info, format: lcov }
-    - { path: target/nextest/default/junit.xml, format: junit }
-    - { path: apps/desktop/test-report.xml, format: junit }
-  testRunPatterns:
+  runPatterns:
     - cargo cov
     - bun test
+  analysisPatterns: [lint:collect]
 "#,
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.collection.test_command.as_deref(), Some("cargo cov"));
+        assert_eq!(cfg.testing.command.as_deref(), Some("cargo cov"));
         assert_eq!(
-            cfg.collection.agent_hint.as_deref(),
+            cfg.testing.agent_hint.as_deref(),
             Some("Run tests with cargo cov")
         );
-        assert_eq!(cfg.collection.reports.len(), 3);
-        assert_eq!(cfg.collection.coverage_reports().count(), 1);
-        assert_eq!(cfg.collection.test_reports().count(), 2);
-        assert_eq!(cfg.collection.reports[0].format, "lcov");
-        assert_eq!(
-            cfg.collection.test_run_patterns,
-            vec!["cargo cov", "bun test"]
+        assert_eq!(cfg.testing.run_patterns, vec!["cargo cov", "bun test"]);
+        assert_eq!(cfg.testing.analysis_patterns, vec!["lint:collect"]);
+    }
+
+    /// tsk863: reports are read by collectors (`records:`) now; the old
+    /// `collection:` block is a key the file doesn't have.
+    #[test]
+    fn a_collection_block_is_an_unknown_key() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "collection:\n  testCommand: cargo test\n",
+        )
+        .unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(
+            matches!(&err, ConfigError::Parse(e) if e.to_string().contains("collection")),
+            "{err:?}"
         );
     }
 
     #[test]
-    fn back_compat_singular_fields_fold_into_reports() {
+    fn rejects_an_empty_run_pattern() {
         let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "collection:\n  coverageReportPath: cov.info\n  coverageFormat: lcov\n  testReportPath: j.xml\n  testReportFormat: junit\n",
-        )
-        .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.collection.reports.len(), 2);
-        assert_eq!(cfg.collection.coverage_reports().count(), 1);
-        assert_eq!(cfg.collection.test_reports().next().unwrap().path, "j.xml");
-    }
-
-    #[test]
-    fn accepts_unrecognized_report_format_for_registry_resolution() {
-        // Format names are no longer gate-kept here — a plugin-provided format
-        // resolves against the collector registry at collection time.
-        let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "collection:\n  reports:\n    - { path: x.tap, format: tap }\n",
-        )
-        .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.collection.reports[0].format, "tap");
-    }
-
-    #[test]
-    fn rejects_empty_report_format() {
-        let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "collection:\n  reports:\n    - { path: x.tap, format: \"\" }\n",
-        )
-        .unwrap();
+        std::fs::write(cfg_path(dir.path()), "testing:\n  runPatterns: [\"  \"]\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("format")));
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("runPatterns")));
     }
 
     #[test]
-    fn parses_project_plugin_definition() {
-        let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "collection:\n  reports:\n    - { path: c.xml, format: clover }\n  plugins:\n    - name: acme.clover\n      kind: coverage\n      formats: [clover]\n      runtime: jaq\n      entryFile: oxplow/plugins/clover.jq\n",
-        )
-        .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.collection.plugins.len(), 1);
-        let p = &cfg.collection.plugins[0];
-        assert_eq!(p.name, "acme.clover");
-        assert_eq!(p.kind, "coverage");
-        assert_eq!(p.formats, vec!["clover"]);
-        assert_eq!(p.runtime, "jaq");
-        assert_eq!(p.entry_file.as_deref(), Some("oxplow/plugins/clover.jq"));
-    }
-
-    #[test]
-    fn rejects_plugin_entry_file_escaping_project() {
-        let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "collection:\n  plugins:\n    - name: acme.x\n      kind: coverage\n      formats: [x]\n      runtime: jaq\n      entryFile: ../../etc/passwd\n",
-        )
-        .unwrap();
-        let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("entryFile")));
-    }
-
-    #[test]
-    fn rejects_plugin_in_reserved_oxplow_namespace() {
-        let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "collection:\n  plugins:\n    - name: oxplow.clover\n      kind: coverage\n      formats: [clover]\n      runtime: jaq\n      entryFile: p.jq\n",
-        )
-        .unwrap();
-        let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("oxplow.")));
-    }
-
-    #[test]
-    fn rejects_plugin_without_namespace_prefix() {
-        let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "collection:\n  plugins:\n    - name: clover\n      kind: coverage\n      formats: [clover]\n      runtime: jaq\n      entryFile: p.jq\n",
-        )
-        .unwrap();
-        let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("namespaced")));
-    }
-
-    #[test]
-    fn rejects_plugin_with_unknown_runtime() {
-        let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "collection:\n  plugins:\n    - name: acme.x\n      kind: coverage\n      formats: [x]\n      runtime: wasm\n      entryFile: p.jq\n",
-        )
-        .unwrap();
-        let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("runtime")));
-    }
-
-    #[test]
-    fn rejects_plugin_missing_entry_file() {
-        let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "collection:\n  plugins:\n    - name: acme.x\n      kind: test\n      formats: [x]\n      runtime: starlark\n",
-        )
-        .unwrap();
-        let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("entryFile")));
-    }
-
-    #[test]
-    fn collection_round_trips_through_write() {
+    fn testing_round_trips_through_write() {
         let dir = tempdir().unwrap();
         let cfg = OxplowConfig {
-            collection: CollectionConfig {
-                test_command: Some("pytest".into()),
-                fast_test_command: None,
-                reports: vec![
-                    ReportConfig {
-                        path: "coverage.xml".into(),
-                        format: "cobertura".into(),
-                    },
-                    ReportConfig {
-                        path: "junit.xml".into(),
-                        format: "junit".into(),
-                    },
-                ],
-                test_run_patterns: vec!["tox".into()],
-                analysis_run_patterns: vec!["cargo clippy".into()],
+            testing: TestingConfig {
+                command: Some("pytest".into()),
+                fast_command: None,
+                run_patterns: vec!["tox".into()],
+                analysis_patterns: vec!["cargo clippy".into()],
                 agent_hint: Some("Run pytest, not bare python -m pytest".into()),
-                plugins: vec![PluginConfig {
-                    name: "acme.clover".into(),
-                    kind: "coverage".into(),
-                    formats: vec!["clover".into()],
-                    runtime: "jaq".into(),
-                    input: Some("xml".into()),
-                    entry_file: Some("oxplow/plugins/clover.jq".into()),
-                    args: vec![],
-                }],
             },
             ..default_config("test".into())
         };
         write_project_config(dir.path(), &cfg).unwrap();
         let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
-        assert!(raw.contains("collection:"), "got:\n{raw}");
+        assert!(raw.contains("testing:"), "got:\n{raw}");
         let loaded = load_project_config(dir.path()).unwrap();
-        assert_eq!(loaded.collection, cfg.collection);
+        assert_eq!(loaded.testing, cfg.testing);
     }
 
     /// Third-party keys that aren't part of oxplow's schema should

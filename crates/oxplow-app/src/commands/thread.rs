@@ -205,7 +205,7 @@ pub(super) fn acting_thread(
 }
 
 /// [`record_thread`] for a command that runs outside the transaction.
-pub(super) fn acting_thread_of(
+pub(crate) fn acting_thread_of(
     actor: &oxplow_domain::Actor,
     named: Option<&str>,
 ) -> Result<ThreadId, CommandError> {

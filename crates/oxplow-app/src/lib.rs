@@ -1190,6 +1190,26 @@ impl Services {
             extension_catalog.clone(),
             layout.project_dir.clone(),
         ));
+        let collection = collection::CollectionService::new(
+            fact_store.clone(),
+            nudge_store.clone(),
+            effort_store.clone(),
+            task_store.clone(),
+            thread_store.clone(),
+            snapshot_store.clone(),
+            snapshot_content.clone(),
+            vcs.clone(),
+            config_arc.clone(),
+            layout.project_dir.clone(),
+            attribution_store.clone(),
+        )
+        .with_approvals(approvals.clone())
+        .with_vocabulary(vocabulary.clone())
+        .with_run_log(collector_runner::RunLog {
+            db: db.clone(),
+            vocabulary: event_log_store.vocabulary().clone(),
+            layer: sql.clone(),
+        });
         let collector_runner = collector_runner::CollectorRunner {
             project_dir: layout.project_dir.clone(),
             approvals: approvals.clone(),
@@ -1202,6 +1222,7 @@ impl Services {
             ai: ai_compute.clone(),
             worktrees: worktrees.clone(),
             metrics: metrics.clone(),
+            collection: collection.clone(),
         };
         commands
             .register(collector_runner::sync_command(collector_runner.clone()))
@@ -1243,21 +1264,6 @@ impl Services {
         {
             commands.register(command).expect("core commands register");
         }
-        let collection = collection::CollectionService::new(
-            fact_store.clone(),
-            nudge_store.clone(),
-            effort_store.clone(),
-            task_store.clone(),
-            thread_store.clone(),
-            snapshot_store.clone(),
-            snapshot_content.clone(),
-            vcs.clone(),
-            config_arc.clone(),
-            layout.project_dir.clone(),
-            attribution_store.clone(),
-        )
-        .with_approvals(approvals.clone())
-        .with_vocabulary(vocabulary.clone());
         for command in commands::test_runs::commands(collection.clone())
             .into_iter()
             .chain(commands::extension_install::commands(
@@ -1479,7 +1485,7 @@ impl Services {
     /// derived state (the snapshot workspace filter, mirroring
     /// `set_generated`), and emit `ConfigChanged`. Called by the config
     /// fs-watcher when the file changes out-of-band — e.g. the agent
-    /// running `/oxplow:configure` writes a `collection:` block — so the
+    /// running `/oxplow:configure` writes a `testing:` block — so the
     /// edit goes live without a process restart. A full reload from disk
     /// is safe: the in-memory config is always exactly the file's content
     /// plus defaults (the same thing boot computes).
@@ -1653,16 +1659,15 @@ mod tests {
         let project = tempdir().unwrap();
         init_git(project.path());
         let services = Services::in_memory(project.path()).unwrap();
-        // Boot config has no collection profile.
+        // Boot config reads no reports.
         assert!(config_service::read_config(&services.config)
-            .collection
-            .reports
+            .collectors
             .is_empty());
 
         // Simulate `/oxplow:configure` writing the file out-of-band.
         std::fs::write(
             oxplow_config::config_path(project.path()),
-            "collection:\n  reports:\n    - { path: target/coverage/lcov.info, format: lcov }\n",
+            "collectors:\n  - { id: tests.coverage, records: coverage, entry: \"oxplow:lcov\", report: { path: target/coverage/lcov.info }, trigger: { on_run: test } }\n",
         )
         .unwrap();
 
@@ -1670,11 +1675,14 @@ mod tests {
 
         let cfg = config_service::read_config(&services.config);
         assert_eq!(
-            cfg.collection.reports.len(),
+            cfg.collectors.len(),
             1,
             "in-memory config should reflect the on-disk edit after reload"
         );
-        assert_eq!(cfg.collection.reports[0].path, "target/coverage/lcov.info");
+        assert_eq!(
+            cfg.collectors[0].report.as_ref().unwrap().path,
+            "target/coverage/lcov.info"
+        );
     }
 
     /// P5.A1 (tsk519): every `External` command — one that runs outside
@@ -1723,10 +1731,7 @@ mod tests {
                 "stream.adopt_worktree",
                 "stream.archive",
                 "stream.create_worktree",
-                // Report files and the stream's worktree, through the
-                // collector (P8.A8).
-                "test.ingest_analysis",
-                "test.ingest_coverage",
+                // A run's capture, through the collection service (P8.A8).
                 "test.record_run",
                 "vcs.checkout_branch",
                 "vcs.commit",

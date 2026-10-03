@@ -15,7 +15,7 @@ automatic; your job is small and is about making sure the data exists,
 When you finish work on a task, **run the project's tests before you
 close it** (`work_item.transition` + `effort.report`), so fresh test + coverage reports exist for oxplow to
 attribute to the effort. The test command is recorded in the
-`collection:` block of `.oxplow/project.yaml` (`testCommand`).
+`testing:` block of `.oxplow/project.yaml` (`command`).
 
 Run it three specific ways:
 
@@ -27,24 +27,24 @@ Run it three specific ways:
 
     Which command depends on what you're doing:
 
-    - **Iterating (red/green, one test, one crate): `fastTestCommand`** when the
+    - **Iterating (red/green, one test, one crate): `fastCommand`** when the
       project declares one. It emits the same test report but skips coverage
       instrumentation, and it takes a filter — so it's seconds, not minutes.
-    - **Before closing the task: `testCommand`.** The full run, with coverage.
+    - **Before closing the task: `command`.** The full run, with coverage.
       Diff coverage for the effort comes only from this one.
 
-    If the project declares no `fastTestCommand`, use `testCommand` throughout.
+    If the project declares no `fastCommand`, use `command` throughout.
     If that turns out to be too slow to run every cycle, say so and offer to add
     one — do NOT quietly fall back to a bare `cargo test`, which records
     nothing. An unrecorded run is the failure mode this rule exists to prevent.
-- **Prefix `OXPLOW_TASK=<your task id>`** (e.g. `OXPLOW_TASK=tsk42 <testCommand>`).
+- **Prefix `OXPLOW_TASK=<your task id>`** (e.g. `OXPLOW_TASK=tsk42 <command>`).
   The collection hook reads the token and pins the run to **exactly** your
   task's effort — correct even when several efforts are open.
 
     Without the token oxplow falls back to: the single open effort, else
     whichever open effort the command's target names (`-p <crate>`, a path arg),
     else **unattributed**. That covers a lot, but a whole-suite run
-    (`<testCommand>` with no filter) names nothing and cannot be resolved that
+    (`<command>` with no filter) names nothing and cannot be resolved that
     way.
 
     **Whenever you have more than one task in progress, prefix every run.**
@@ -67,32 +67,33 @@ Run it three specific ways:
   report it. Attribution uses the `OXPLOW_TASK=` token when present, else the
   single-open-effort rule.
 - **Individual tests + coverage are parsed by oxplow, not you.** Each
-  entry in `collection.reports` (JUnit → per-test tree; lcov / cobertura
-  / jacoco-xml → diff coverage over the effort's changed lines) is parsed
-  by oxplow when it's fresher than the effort start — so in a polyglot
-  repo each stack's report lights up on its own run. **Never read a
+  report collector (`collectors:` with `records:` — JUnit → per-test
+  tree; lcov / cobertura / jacoco → diff coverage over the effort's
+  changed lines) reads its report after a run that wrote it — so in a
+  polyglot repo each stack's report lights up on its own run. **Never read a
   report and type the numbers/test names** — that would make them
   `asserted` and untrustworthy. Let oxplow do it (`observed`).
 
 ## When the data is missing
 
-- **A stack isn't emitting a report** (its path isn't in
-  `collection.reports`, or no `collection:` block exists yet) → run
-  `/oxplow:configure`, which wires **every** test stack in the repo.
-- **Report is at a non-standard location for this run** → run
-  `test.ingest_coverage { report_path, format }` (`mcp__oxplow__run_command`) to ingest it
-  explicitly (it goes through the same deterministic parse path).
+- **A stack isn't emitting a report** (no report collector reads it, or
+  the project has none yet) → run `/oxplow:configure`, which wires
+  **every** test stack in the repo.
+- **A report was written outside a run oxplow saw** → run its collector
+  by hand: `collector.sync { owner: "project", id }`
+  (`mcp__oxplow__run_command`); it reads the report now and records it
+  in your thread, through the same deterministic parse.
 
 Do not file a follow-up to "add coverage later" — either it's
 configured and automatic, or you run `/oxplow:configure` now.
 
 ## A report format oxplow doesn't parse yet
 
-Parsers are **pluggable** — the built-ins (cobertura, lcov, jacoco,
-junit) are jaq plugins, and you can add a new format with **no recompile**
-by writing a `collection.plugins` entry in `.oxplow/project.yaml`: a `jaq`
-(JSON→JSON, primary), `starlark`, or `exec` transform that maps the
-report into oxplow's coverage/test schema. The host pre-parses the
-container for you (`input: xml | json | lcov | lines | text`) and the
-transform emits oxplow's coverage/test JSON schema. Coverage stays
+Parsers are **pluggable** — the bundled ones (`oxplow:junit`, `lcov`,
+`cobertura`, `jacoco`, `clippy`, `eslint`) are jq programs, and a report
+collector can name its **own** with no recompile: a `jaq` (JSON→JSON,
+primary), `starlark`, or `exec` script in the project that maps the
+report into oxplow's coverage/test/analysis schema. The host pre-parses
+the report for you (`report: { format: xml | json | lcov | lines | text }`)
+and the script emits the schema. Coverage stays
 `observed` because the in-process tiers can't do I/O.

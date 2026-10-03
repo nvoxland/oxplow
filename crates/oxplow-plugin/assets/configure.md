@@ -45,58 +45,66 @@ splitting `classname`+`name` on `::` / `.`.
 Make the **smallest** change that makes each report automatic, and
 leave the diffs for the user to review — these are committed files.
 
-## 3. Record every report in .oxplow/project.yaml
+## 3. Record the test commands and every report in .oxplow/project.yaml
 
-List **all** reports across **all** stacks under `collection.reports`:
+The commands go under `testing:`; each report is read by a **report
+collector** under `collectors:` — one per report, across **all**
+stacks:
 
 ```yaml
-collection:
-  testCommand: "<command that runs the tests>"   # informational
-  reports:
-    # Rust
-    - { path: target/coverage/lcov.info, format: lcov }
-    - { path: target/nextest/default/junit.xml, format: junit }
-    # Frontend
-    - { path: apps/desktop/coverage/cobertura-coverage.xml, format: cobertura }
-    - { path: apps/desktop/test-report.xml, format: junit }
-  # Extra command substrings that count as a test run, on top of the
-  # built-in defaults (pytest, cargo test, jest, go test, …):
-  testRunPatterns: [bun test]
+testing:
+  command: "<command that runs the tests and writes the reports>"
+  fastCommand: "<the same without coverage, taking a filter>"   # optional
+  # Extra command substrings that count as a test (or analysis) run, on
+  # top of the built-in defaults (pytest, cargo test, jest, go test, …):
+  runPatterns: [bun test]
+  analysisPatterns: [lint:collect]
+  agentHint: "Run tests with <command>."   # injected into every agent prompt
+
+collectors:
+  # Rust
+  - { id: tests.rust_coverage, records: coverage, entry: "oxplow:lcov", report: { path: target/coverage/lcov.info }, trigger: { on_run: test } }
+  - { id: tests.rust_junit, records: tests, entry: "oxplow:junit", report: { path: target/nextest/default/junit.xml }, trigger: { on_run: test } }
+  # Frontend
+  - { id: tests.desktop_coverage, records: coverage, entry: "oxplow:cobertura", report: { path: apps/desktop/coverage/cobertura-coverage.xml }, trigger: { on_run: test } }
+  - { id: tests.desktop_junit, records: tests, entry: "oxplow:junit", report: { path: apps/desktop/test-report.xml }, trigger: { on_run: test } }
 ```
 
-`format` ∈ `lcov` | `cobertura` | `jacoco-xml` (coverage) | `junit`
-(test results), **plus any format a project plugin registers** (next
-step). Once set, oxplow collects **automatically**: on each
-test run it sees, it parses every report **fresher than the effort
-start** (so a frontend run uses the frontend reports, a Rust run the
-Rust reports), merging JUnit into the per-test tree and coverage into
-diff coverage. You never parse or report any of these numbers yourself
-— oxplow does, so they stay trustworthy (`observed`, not `asserted`).
+`records` is what the report holds: `tests` (JUnit), `coverage` or
+`analysis` (linter findings). `entry: "oxplow:<parser>"` names a bundled
+parser: `junit`, `lcov`, `cobertura`, `jacoco`, `clippy`, `eslint`.
+`trigger: { on_run: test }` reads the report after each test run oxplow
+sees, when that run wrote it (an analyzer's report: `on_run: analysis`);
+without a trigger it runs only by hand (`collector.sync`). So a frontend
+run uses the frontend reports, a Rust run the Rust reports, JUnit
+merging into the per-test tree and coverage into diff coverage. You
+never parse or report any of these numbers yourself — oxplow does, so
+they stay trustworthy (`observed`, not `asserted`).
+
+Each run is recorded as the collector's (Settings → Data shows the last
+one). A collector whose report fails to parse three times in a row is
+turned off until a person turns it back on.
 
 ## 4. (Advanced) A stack whose report oxplow can't parse
 
-If a stack only emits a format that isn't one of the built-ins, don't
-fall back to asserting numbers — register a **plugin** instead, under
-`collection.plugins`. A plugin maps the report into oxplow's
-coverage/test shape and runs in-process (no recompile):
+If a stack only emits a format no bundled parser reads, don't fall back
+to asserting numbers — give its report collector its **own parser**: a
+script that maps the report into oxplow's coverage/test/analysis shape,
+run in-process (no recompile):
 
 ```yaml
-collection:
-  reports:
-    - { path: target/clover.xml, format: clover }
-  plugins:
-    - name: acme.clover   # namespaced; oxplow. is reserved
-      kind: coverage        # coverage | test
-      formats: [clover]     # format name(s) this plugin claims
-      runtime: jaq          # jaq (jq) | starlark | exec
-      input: xml            # host pre-parse: text | json | xml | lcov | lines
-      entryFile: oxplow/plugins/clover.jq   # the script file (a jq program here)
+collectors:
+  - id: tests.clover
+    records: coverage
+    runtime: jaq                        # jaq (jq) | starlark | exec
+    entry: oxplow/parsers/clover.jq     # the script file
+    report: { path: target/clover.xml, format: xml }   # host pre-parse: text | json | xml | lcov | lines
+    trigger: { on_run: test }
 ```
 
-The script goes in its own file (`entryFile`, project-relative), not
-inline in the yaml. Prefer `jaq` (jq) — the host pre-parses the
-container (`input`) so the script just reshapes JSON. Use `starlark`
-for logic jq can't express, or `exec` (`entryFile` is the executable;
-raw report on stdin → JSON on stdout) as
-a last resort. The host pre-parses the report (per `input:`); the
-parser's job is to emit oxplow's coverage/test JSON schema.
+The script goes in its own file (`entry`, project-relative), not inline
+in the yaml. Prefer `jaq` (jq) — the host pre-parses the report
+(`format`) so the script just reshapes JSON. Use `starlark` for logic jq
+can't express, or `exec` (`entry` is the executable; the raw report on
+stdin, JSON on stdout) as a last resort: a program runs only once a
+person approves it on their machine (Settings → Data → Programs).

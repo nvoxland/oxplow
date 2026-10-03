@@ -216,8 +216,8 @@ whose basename is `.oxplow/project.yaml`, it calls
 re-applies the snapshot `WorkspaceFilter` (mirroring `set_generated`),
 and emits `OxplowEvent::ConfigChanged`. Exists because config is
 otherwise read only once at boot — without it, an out-of-band edit
-(notably the agent running `/oxplow:configure`, which Writes a
-`collection:` block) wouldn't take effect until restart. The IPC
+(notably the agent running `/oxplow:configure`, which writes a
+`testing:` block and report collectors) wouldn't take effect until restart. The IPC
 setters (`set_generated`, `set_agent_prompt_append`) still mutate the
 in-memory config directly; this watcher covers every other edit path.
 

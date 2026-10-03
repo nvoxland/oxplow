@@ -212,10 +212,9 @@ fn approvals_file(home: &Path, project_dir: &Path) -> std::path::PathBuf {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum ProgramKind {
-    /// A project collector's program (`collectors:` with `runtime: exec`).
+    /// A project collector's program (`collectors:` with `runtime: exec`):
+    /// one that records facts, or a report parser (`records:`).
     Collector,
-    /// A collection plugin (`collection.plugins`) parsing test/coverage/analysis reports.
-    Plugin,
     /// An agent spoken to over ACP (`acpAgents`, tsk335).
     #[serde(rename = "acp-agent")]
     AcpAgent,
@@ -265,7 +264,6 @@ impl ProjectProgram {
     pub fn key(&self) -> String {
         match self.kind {
             ProgramKind::Collector => format!("collector:{}", self.name),
-            ProgramKind::Plugin => format!("plugin:{}", self.name),
             ProgramKind::AcpAgent => format!("acp:{}", self.name),
             ProgramKind::Advisories => format!("advisories:{}", self.name),
             ProgramKind::Provider => format!("provider:{}", self.name),
@@ -299,7 +297,7 @@ impl ProjectProgram {
         let mut h = Sha256::new();
         let file = project_dir.join(&self.program);
         match self.kind {
-            ProgramKind::Collector | ProgramKind::Plugin => {
+            ProgramKind::Collector => {
                 h.update(std::fs::read(&file)?);
                 if let Some(dir) = Path::new(&self.program)
                     .parent()
@@ -634,7 +632,6 @@ pub fn may_run_acp(
 pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
     let what = match kind {
         ProgramKind::Collector => "collector",
-        ProgramKind::Plugin => "collection plugin",
         ProgramKind::AcpAgent => "ACP agent",
         ProgramKind::Advisories => "extension advisories",
         ProgramKind::Provider => "provider",
@@ -674,16 +671,6 @@ pub fn list(
     for c in &config.collectors {
         if c.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
             push(ProgramKind::Collector, &c.id, c.entry.as_deref(), &[]);
-        }
-    }
-    for p in &config.collection.plugins {
-        if p.runtime == "exec" {
-            push(
-                ProgramKind::Plugin,
-                &p.name,
-                p.entry_file.as_deref(),
-                &p.args,
-            );
         }
     }
     out.extend(config.acp_agents.iter().map(acp_program));
@@ -799,7 +786,7 @@ mod tests {
         std::fs::write(dir.path().join("tools/parse.sh"), "cat").unwrap();
         let cfg = config(
             dir.path(),
-            "collectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\n  - { id: repo.star, runtime: starlark, entry: tools/x.star, facts: [repo.n] }\ncollection:\n  plugins:\n    - { name: acme.parse, kind: coverage, formats: [mine], runtime: exec, entryFile: tools/parse.sh }\n",
+            "collectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\n  - { id: repo.star, runtime: starlark, entry: tools/x.star, facts: [repo.n] }\n  - { id: tests.parse, records: coverage, runtime: exec, entry: tools/parse.sh, report: { path: c.txt } }\n",
         );
         let listed = list(&st, dir.path(), &cfg, &[]);
         assert_eq!(
@@ -809,7 +796,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 (ProgramKind::Collector, "repo.count", false),
-                (ProgramKind::Plugin, "acme.parse", false)
+                (ProgramKind::Collector, "tests.parse", false)
             ],
             "only exec entries, none approved yet"
         );
@@ -858,12 +845,13 @@ mod tests {
             "tools/count.sh",
             &args
         ));
-        // The plugin is still unapproved; approving one doesn't approve another.
+        // The report parser is still unapproved; approving one doesn't
+        // approve another.
         assert!(!may_run(
             &st,
             dir.path(),
-            ProgramKind::Plugin,
-            "acme.parse",
+            ProgramKind::Collector,
+            "tests.parse",
             "tools/parse.sh",
             &[]
         ));
@@ -872,7 +860,7 @@ mod tests {
             dir.path(),
             &cfg,
             &[],
-            ProgramKind::Plugin,
+            ProgramKind::Collector,
             "nope",
             &current(&st, dir.path(), &cfg, "nope")
         )

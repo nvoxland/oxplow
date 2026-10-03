@@ -178,12 +178,12 @@ fn assemble(
         out.push('\n');
     }
     if let Some(hint) = config
-        .collection
+        .testing
         .agent_hint
         .as_deref()
         .filter(|h| !h.is_empty())
     {
-        out.push_str("\n# Collection\n");
+        out.push_str("\n# Testing\n");
         out.push_str(hint);
         out.push('\n');
     }
@@ -231,7 +231,7 @@ mod tests {
             symbols_max_files_per_snapshot: oxplow_config::DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT,
             inject_session_context: true,
             icon_tint: None,
-            collection: Default::default(),
+            testing: Default::default(),
             metrics: Default::default(),
             collectors: Default::default(),
             collectors_yaml: None,
@@ -313,12 +313,12 @@ mod tests {
     }
 
     #[test]
-    fn collection_agent_hint_appended_when_set() {
+    fn testing_agent_hint_appended_when_set() {
         let dir = tempdir().unwrap();
         let mut cfg = config();
-        cfg.collection.agent_hint = Some("Run tests with bun run test:collect".into());
+        cfg.testing.agent_hint = Some("Run tests with bun run test:collect".into());
         let prompt = assemble_system_prompt(dir.path(), &cfg, &stream(), Some(&thread()));
-        assert!(prompt.contains("# Collection\n"));
+        assert!(prompt.contains("# Testing\n"));
         assert!(prompt.contains("bun run test:collect"));
     }
 

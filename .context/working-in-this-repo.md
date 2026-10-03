@@ -129,12 +129,12 @@ Frontend tests still use `bun test` (run from `apps/desktop/`); root
 
 **Closing a task → run `bun run test:collect`, not bare `cargo test` /
 `bun test`.** `test:collect` (`cargo cov && bun run --cwd apps/desktop
-test:junit`) is the configured `collection.testCommand` — it's the only
+test:junit`) is the configured `testing.command` — it's the only
 test run that emits the JUnit + lcov reports oxplow parses into the
 effort's "Coverage & tests" panel.
 
 **For the red/green loop, use `bun run test:fast` (the configured
-`collection.fastTestCommand`) rather than a bare `cargo test`.** It takes
+`testing.fastCommand`) rather than a bare `cargo test`.** It takes
 the same filters (`bun run test:fast -p oxplow-git symlink`) and still
 writes `target/nextest/default/junit.xml`, so the red→green progression
 lands in the panel — it just skips coverage instrumentation, which is the

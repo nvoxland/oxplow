@@ -1,5 +1,6 @@
-//! Pluggable, cross-language collection: the registry seam that lets report
-//! parsers be defined as plugins instead of hardcoded Rust `match` arms.
+//! Pluggable, cross-language collection: report parsers defined as scripts
+//! (a bundled set, plus a project's own report collectors' — tsk863)
+//! instead of hardcoded Rust `match` arms.
 //!
 //! The design is **two-layer** (see `.context/collection.md`):
 //!
@@ -13,18 +14,14 @@
 //!    [`oxplow_coverage`] so a plugin's output is exactly what oxplow stores.
 //!
 //! **There is never a formless observation.** Every collector declares a
-//! [`CollectorKind`]; the genericity lives in this uniform
-//! definition/registry mechanism over *typed* kinds, not in the data being a
-//! blob. A future kind (perf, structure-map, …) is a new
-//! [`CollectorKind`] + plugins that target it — not a new subsystem.
+//! [`CollectorKind`]; the genericity lives in this uniform definition
+//! mechanism over *typed* kinds, not in the data being a blob. A future
+//! kind (perf, structure-map, …) is a new [`CollectorKind`] + parsers that
+//! target it — not a new subsystem.
 //!
-//! This module is the registry + descriptor + typed contracts. The script
-//! runtimes (jaq / Starlark / exec) and the host helpers land in later steps;
-//! for now the only registered collectors are **builtin-rust** wrappers around
-//! the existing [`oxplow_coverage`] parsers, so behavior is unchanged.
-
-use std::collections::HashMap;
-use std::sync::Arc;
+//! A report collector (`.oxplow/project.yaml` `collectors:` with
+//! `records:`) names its parser: a bundled one ([`Collector::bundled`],
+//! `entry: oxplow:<name>`) or its own jaq / Starlark / exec program.
 
 use oxplow_coverage::{AnalysisReport, CoverageReport, TestReport};
 use serde::{Deserialize, Serialize};
@@ -55,8 +52,6 @@ pub enum CollectorKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CollectorRuntime {
-    /// A first-party parser compiled into oxplow. Highest trust.
-    BuiltinRust,
     /// jq via `jaq` — the primary script tier for JSON→JSON reshaping.
     Jaq,
     /// Starlark — the general script tier for imperative/odd formats.
@@ -234,18 +229,25 @@ pub enum CollectorInput {
 /// `json`, `xml`, `lcov` or `lines`): what a collector gets as
 /// `input.report`.
 pub fn parse_report(format: &str, content: &str) -> Result<serde_json::Value, CollectError> {
-    let input = match format {
-        "text" => CollectorInput::Text,
-        "json" => CollectorInput::Json,
-        "xml" => CollectorInput::Xml,
-        "lcov" => CollectorInput::Lcov,
-        "lines" => CollectorInput::Lines,
-        other => return Err(CollectError::UnknownFormat(other.to_string())),
-    };
-    input.parse(content)
+    CollectorInput::named(format)
+        .ok_or_else(|| CollectError::UnknownFormat(format.to_string()))?
+        .parse(content)
 }
 
 impl CollectorInput {
+    /// The container parser a `report.format` names (`text`, `json`, `xml`,
+    /// `lcov`, `lines`).
+    pub fn named(format: &str) -> Option<Self> {
+        Some(match format {
+            "text" => CollectorInput::Text,
+            "json" => CollectorInput::Json,
+            "xml" => CollectorInput::Xml,
+            "lcov" => CollectorInput::Lcov,
+            "lines" => CollectorInput::Lines,
+            _ => return None,
+        })
+    }
+
     /// Apply this container parser to raw report `content`.
     fn parse(self, content: &str) -> Result<serde_json::Value, CollectError> {
         Ok(match self {
@@ -258,31 +260,9 @@ impl CollectorInput {
     }
 }
 
-/// The declarative, serde-friendly definition of a collector — the shape a
-/// project lists in `.oxplow/project.yaml` (parsed in a later step) and the shape
-/// `crates/oxplow-plugin` ships bundled plugins as. `entry`/`args` are
-/// runtime-specific: a jaq/Starlark script body (or path), or an exec argv.
-/// Builtin-rust collectors are constructed in code and need no descriptor.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CollectorDescriptor {
-    pub name: String,
-    pub kind: CollectorKind,
-    pub formats: Vec<String>,
-    pub runtime: CollectorRuntime,
-    /// Script body or path (jaq/starlark), or the program for exec. Unused for
-    /// builtin-rust.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entry: Option<String>,
-    /// Extra arguments for the exec runtime.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub args: Vec<String>,
-}
-
-/// How a resolved collector actually runs.
+/// How a collector runs.
 #[derive(Clone)]
 enum Runner {
-    /// A compiled parser: report contents → typed output.
-    Builtin(fn(&str) -> Result<CollectorOutput, CollectError>),
     /// A jq program (jaq). The host pre-parses content via `input`, runs the
     /// program, then deserializes the result into the collector's kind.
     Jaq {
@@ -298,15 +278,55 @@ enum Runner {
     Exec { argv: Vec<String> },
 }
 
-/// A *resolved, executable* collector: its identity + kind + the formats it
-/// claims + a way to run it. The registry stores these (behind [`Arc`] so a
-/// single collector can be indexed under several format names cheaply).
+/// The parsers oxplow ships, named by `entry: oxplow:<name>`: what each
+/// records, how its report is pre-parsed, and its jq program. The config
+/// side (`oxplow_config::collectors::BUNDLED_PARSERS`) names the same set;
+/// a test holds them together.
+pub const BUNDLED: &[(&str, CollectorKind, CollectorInput, &str)] = &[
+    (
+        "junit",
+        CollectorKind::Test,
+        CollectorInput::Xml,
+        include_str!("plugins/junit.jq"),
+    ),
+    (
+        "lcov",
+        CollectorKind::Coverage,
+        CollectorInput::Lcov,
+        include_str!("plugins/lcov.jq"),
+    ),
+    (
+        "cobertura",
+        CollectorKind::Coverage,
+        CollectorInput::Xml,
+        include_str!("plugins/cobertura.jq"),
+    ),
+    (
+        "jacoco",
+        CollectorKind::Coverage,
+        CollectorInput::Xml,
+        include_str!("plugins/jacoco.jq"),
+    ),
+    (
+        "clippy",
+        CollectorKind::Analysis,
+        CollectorInput::Lines,
+        include_str!("plugins/clippy.jq"),
+    ),
+    (
+        "eslint",
+        CollectorKind::Analysis,
+        CollectorInput::Json,
+        include_str!("plugins/eslint.jq"),
+    ),
+];
+
+/// An executable report parser: its name, kind and a way to run it.
 #[derive(Clone)]
 pub struct Collector {
     name: String,
     kind: CollectorKind,
     runtime: CollectorRuntime,
-    formats: Vec<String>,
     runner: Runner,
     budget: SandboxBudget,
 }
@@ -316,33 +336,22 @@ impl Collector {
         name: impl Into<String>,
         kind: CollectorKind,
         runtime: CollectorRuntime,
-        formats: impl IntoIterator<Item = impl Into<String>>,
         runner: Runner,
     ) -> Self {
         Collector {
             name: name.into(),
             kind,
             runtime,
-            formats: formats.into_iter().map(Into::into).collect(),
             runner,
             budget: SandboxBudget::default(),
         }
     }
 
-    /// Construct a builtin-rust collector from a parse function.
-    pub fn builtin(
-        name: impl Into<String>,
-        kind: CollectorKind,
-        formats: impl IntoIterator<Item = impl Into<String>>,
-        run: fn(&str) -> Result<CollectorOutput, CollectError>,
-    ) -> Self {
-        Self::new(
-            name,
-            kind,
-            CollectorRuntime::BuiltinRust,
-            formats,
-            Runner::Builtin(run),
-        )
+    /// A bundled parser by its name (`junit`, `lcov`, …), named
+    /// `oxplow.<name>`.
+    pub fn bundled(name: &str) -> Option<Self> {
+        let (name, kind, input, program) = BUNDLED.iter().find(|(n, ..)| *n == name)?;
+        Some(Self::jaq(format!("oxplow.{name}"), *kind, *input, *program))
     }
 
     /// Construct a jaq (jq) collector: the host pre-parses content via `input`,
@@ -350,7 +359,6 @@ impl Collector {
     pub fn jaq(
         name: impl Into<String>,
         kind: CollectorKind,
-        formats: impl IntoIterator<Item = impl Into<String>>,
         input: CollectorInput,
         program: impl Into<String>,
     ) -> Self {
@@ -358,7 +366,6 @@ impl Collector {
             name,
             kind,
             CollectorRuntime::Jaq,
-            formats,
             Runner::Jaq {
                 input,
                 program: program.into(),
@@ -370,7 +377,6 @@ impl Collector {
     pub fn starlark(
         name: impl Into<String>,
         kind: CollectorKind,
-        formats: impl IntoIterator<Item = impl Into<String>>,
         input: CollectorInput,
         script: impl Into<String>,
     ) -> Self {
@@ -378,7 +384,6 @@ impl Collector {
             name,
             kind,
             CollectorRuntime::Starlark,
-            formats,
             Runner::Starlark {
                 input,
                 script: script.into(),
@@ -390,14 +395,12 @@ impl Collector {
     pub fn exec(
         name: impl Into<String>,
         kind: CollectorKind,
-        formats: impl IntoIterator<Item = impl Into<String>>,
         argv: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         Self::new(
             name,
             kind,
             CollectorRuntime::Exec,
-            formats,
             Runner::Exec {
                 argv: argv.into_iter().map(Into::into).collect(),
             },
@@ -422,18 +425,12 @@ impl Collector {
         self.runtime
     }
 
-    /// The format names this collector claims (lower-cased on registration).
-    pub fn formats(&self) -> &[String] {
-        &self.formats
-    }
-
     /// Run the collector against raw report `content`, producing typed output.
     /// In-process script tiers run under the sandbox budget; exec relies on the
     /// child process and is tagged lower-trust by the caller.
     pub fn run(&self, content: &str) -> Result<CollectorOutput, CollectError> {
         let kind = self.kind;
         match &self.runner {
-            Runner::Builtin(f) => f(content),
             Runner::Jaq { input, program } => {
                 let value = input.parse(content)?;
                 let program = program.clone();
@@ -464,131 +461,33 @@ impl std::fmt::Debug for Collector {
             .field("name", &self.name)
             .field("kind", &self.kind)
             .field("runtime", &self.runtime)
-            .field("formats", &self.formats)
             .finish()
-    }
-}
-
-/// Format string → collector. Replaces the old closed `enum CoverageFormat` +
-/// `match` and the duplicated `KNOWN_REPORT_FORMATS` whitelist: a format is
-/// valid iff a collector is registered for it.
-///
-/// **Registration order is precedence.** Builtins register first, bundled
-/// plugins next, then project-local plugins — a later [`register`] for the
-/// same format name overrides the earlier one, so a project can replace a
-/// shipped parser by claiming its format.
-///
-/// [`register`]: CollectorRegistry::register
-#[derive(Debug, Clone, Default)]
-pub struct CollectorRegistry {
-    /// Lower-cased format name → collector. Keyed by format (not collector
-    /// name) because resolution is always by the `reports[].format` string.
-    by_format: HashMap<String, Arc<Collector>>,
-}
-
-impl CollectorRegistry {
-    /// An empty registry. Use [`with_builtins`] for the default set.
-    ///
-    /// [`with_builtins`]: CollectorRegistry::with_builtins
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// A registry pre-loaded with the first-party collectors, named under the
-    /// reserved `oxplow.` namespace (`oxplow.cobertura` / `oxplow.lcov` /
-    /// `oxplow.jacoco` coverage + `oxplow.junit` tests). Format names stay bare
-    /// (`jacoco` aliases `jacoco-xml`); project plugins use their own
-    /// `<vendor>.` name prefix.
-    pub fn with_builtins() -> Self {
-        let mut reg = Self::new();
-        reg.register(Collector::jaq(
-            "oxplow.cobertura",
-            CollectorKind::Coverage,
-            ["cobertura"],
-            CollectorInput::Xml,
-            include_str!("plugins/cobertura.jq"),
-        ));
-        reg.register(Collector::jaq(
-            "oxplow.lcov",
-            CollectorKind::Coverage,
-            ["lcov"],
-            CollectorInput::Lcov,
-            include_str!("plugins/lcov.jq"),
-        ));
-        reg.register(Collector::jaq(
-            "oxplow.jacoco",
-            CollectorKind::Coverage,
-            ["jacoco", "jacoco-xml"],
-            CollectorInput::Xml,
-            include_str!("plugins/jacoco.jq"),
-        ));
-        reg.register(Collector::jaq(
-            "oxplow.junit",
-            CollectorKind::Test,
-            ["junit"],
-            CollectorInput::Xml,
-            include_str!("plugins/junit.jq"),
-        ));
-        reg.register(Collector::jaq(
-            "oxplow.clippy",
-            CollectorKind::Analysis,
-            ["clippy-json"],
-            CollectorInput::Lines,
-            include_str!("plugins/clippy.jq"),
-        ));
-        reg.register(Collector::jaq(
-            "oxplow.eslint",
-            CollectorKind::Analysis,
-            ["eslint-json"],
-            CollectorInput::Json,
-            include_str!("plugins/eslint.jq"),
-        ));
-        reg
-    }
-
-    /// Register a collector under each of its formats (lower-cased). A format
-    /// already present is overridden — later registration wins.
-    pub fn register(&mut self, collector: Collector) {
-        let collector = Arc::new(collector);
-        for fmt in collector.formats() {
-            self.by_format
-                .insert(fmt.trim().to_ascii_lowercase(), Arc::clone(&collector));
-        }
-    }
-
-    /// Resolve the collector for a format string (case-insensitive), if any.
-    pub fn resolve(&self, format: &str) -> Option<&Collector> {
-        self.by_format
-            .get(format.trim().to_ascii_lowercase().as_str())
-            .map(|a| a.as_ref())
-    }
-
-    /// True if some collector claims `format`. Config validation uses this
-    /// instead of a hardcoded whitelist.
-    pub fn is_known(&self, format: &str) -> bool {
-        self.by_format
-            .contains_key(format.trim().to_ascii_lowercase().as_str())
-    }
-
-    /// All registered format names (lower-cased), unordered — for diagnostics
-    /// and "unknown format, did you mean…" warnings.
-    pub fn known_formats(&self) -> impl Iterator<Item = &str> {
-        self.by_format.keys().map(|s| s.as_str())
-    }
-
-    /// Resolve and run in one step. Returns [`CollectError::UnknownFormat`]
-    /// when nothing is registered for `format`.
-    pub fn run(&self, format: &str, content: &str) -> Result<CollectorOutput, CollectError> {
-        let collector = self
-            .resolve(format)
-            .ok_or_else(|| CollectError::UnknownFormat(format.to_string()))?;
-        collector.run(content)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Run the bundled parser `name` over `content`.
+    fn bundled(name: &str, content: &str) -> Result<CollectorOutput, CollectError> {
+        Collector::bundled(name)
+            .unwrap_or_else(|| panic!("no bundled parser `{name}`"))
+            .run(content)
+    }
+
+    /// tsk863: every bundled parser is a jaq program of its kind; an unknown
+    /// name is none.
+    #[test]
+    fn the_bundled_parsers_are_named() {
+        for (name, kind, _, _) in BUNDLED {
+            let c = Collector::bundled(name).unwrap();
+            assert_eq!(c.kind(), *kind, "{name}");
+            assert_eq!(c.runtime(), CollectorRuntime::Jaq);
+            assert_eq!(c.name(), format!("oxplow.{name}"));
+        }
+        assert!(Collector::bundled("clover").is_none());
+    }
 
     const COBERTURA: &str = r#"<?xml version="1.0"?>
 <coverage>
@@ -615,46 +514,14 @@ mod tests {
 </testsuites>"#;
 
     #[test]
-    fn builtins_resolve_known_coverage_and_test_formats() {
-        let reg = CollectorRegistry::with_builtins();
-        for fmt in ["cobertura", "lcov", "jacoco", "jacoco-xml"] {
-            let c = reg.resolve(fmt).expect("coverage format registered");
-            assert_eq!(c.kind(), CollectorKind::Coverage, "{fmt}");
-            // The first-party parsers now ship as bundled jaq plugins.
-            assert_eq!(c.runtime(), CollectorRuntime::Jaq);
-        }
-        let j = reg.resolve("junit").expect("junit registered");
-        assert_eq!(j.kind(), CollectorKind::Test);
-    }
-
-    #[test]
-    fn resolution_is_case_and_whitespace_insensitive() {
-        let reg = CollectorRegistry::with_builtins();
-        assert!(reg.resolve("  Cobertura  ").is_some());
-        assert!(reg.is_known("JUNIT"));
-    }
-
-    #[test]
-    fn unknown_format_resolves_to_none_and_errors() {
-        let reg = CollectorRegistry::with_builtins();
-        assert!(reg.resolve("clover").is_none());
-        assert!(!reg.is_known("clover"));
-        match reg.run("clover", "") {
-            Err(CollectError::UnknownFormat(f)) => assert_eq!(f, "clover"),
-            other => panic!("expected UnknownFormat, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn builtin_collector_runs_and_yields_typed_output() {
-        let reg = CollectorRegistry::with_builtins();
-        let out = reg.run("cobertura", COBERTURA).expect("parses");
+        let out = bundled("cobertura", COBERTURA).expect("parses");
         let cov = out.as_coverage().expect("coverage output");
         let f = cov.files.get("src/a.rs").expect("file present");
         assert!(f.instrumented.contains(&1) && f.instrumented.contains(&2));
         assert!(f.covered.contains(&1) && !f.covered.contains(&2));
 
-        let out = reg.run("junit", JUNIT).expect("parses");
+        let out = bundled("junit", JUNIT).expect("parses");
         let test = out.as_test().expect("test output");
         assert_eq!(test.suites.len(), 1);
         assert_eq!(test.suites[0].cases.len(), 1);
@@ -664,8 +531,7 @@ mod tests {
     fn nested_junit_counts_each_case_once() {
         // tsk361: a nested testcase must not be double-counted under both
         // its file-suite and its describe-suite.
-        let reg = CollectorRegistry::with_builtins();
-        let out = reg.run("junit", JUNIT_NESTED).expect("parses");
+        let out = bundled("junit", JUNIT_NESTED).expect("parses");
         let test = out.as_test().expect("test output");
         let total: usize = test.suites.iter().map(|s| s.cases.len()).sum();
         assert_eq!(
@@ -675,47 +541,12 @@ mod tests {
     }
 
     #[test]
-    fn later_registration_overrides_format_by_name() {
-        fn always_empty(_c: &str) -> Result<CollectorOutput, CollectError> {
-            Ok(CollectorOutput::Coverage(CoverageReport::default()))
-        }
-        let mut reg = CollectorRegistry::with_builtins();
-        reg.register(Collector::builtin(
-            "project-lcov",
-            CollectorKind::Coverage,
-            ["lcov"],
-            always_empty,
-        ));
-        let c = reg.resolve("lcov").expect("still registered");
-        assert_eq!(c.name(), "project-lcov", "later registration wins");
-    }
-
-    #[test]
-    fn descriptor_round_trips_serde() {
-        let d = CollectorDescriptor {
-            name: "clover".into(),
-            kind: CollectorKind::Coverage,
-            formats: vec!["clover".into()],
-            runtime: CollectorRuntime::Jaq,
-            entry: Some(".files".into()),
-            args: vec![],
-        };
-        let json = serde_json::to_string(&d).expect("serialize");
-        // kind/runtime serialize in the wire forms config will use.
-        assert!(json.contains("\"coverage\""));
-        assert!(json.contains("\"jaq\""));
-        let back: CollectorDescriptor = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(back, d);
-    }
-
-    #[test]
     fn jaq_collector_runs_end_to_end_with_xml_input() {
         // Host pre-parses XML → tree, jaq maps it to coverage output.
         let program = r#"{ files: { (.attrs.file): { instrumented: [1, 2], covered: [1] } } }"#;
         let c = Collector::jaq(
             "xcov",
             CollectorKind::Coverage,
-            ["xcov"],
             CollectorInput::Xml,
             program,
         );
@@ -733,7 +564,6 @@ mod tests {
         let c = Collector::jaq(
             "lint",
             CollectorKind::Analysis,
-            ["lint"],
             CollectorInput::Json,
             program,
         );
@@ -895,39 +725,16 @@ def transform(input):
     #[test]
     fn starlark_collector_runs_end_to_end_with_xml_input() {
         let script = "def transform(input):\n    return {\"suites\": [{\"name\": input[\"tag\"], \"cases\": []}]}\n";
-        let c = Collector::starlark(
-            "xtest",
-            CollectorKind::Test,
-            ["xtest"],
-            CollectorInput::Xml,
-            script,
-        );
+        let c = Collector::starlark("xtest", CollectorKind::Test, CollectorInput::Xml, script);
         let out = c.run("<suite/>").expect("runs");
         assert_eq!(out.as_test().expect("test").suites[0].name, "suite");
-    }
-
-    #[test]
-    fn jaq_collector_works_through_registry_override() {
-        let program = "{ files: {} }";
-        let mut reg = CollectorRegistry::with_builtins();
-        reg.register(Collector::jaq(
-            "jaq-lcov",
-            CollectorKind::Coverage,
-            ["lcov"],
-            CollectorInput::Lcov,
-            program,
-        ));
-        let out = reg
-            .run("lcov", "SF:x\nDA:1,1\nend_of_record\n")
-            .expect("runs");
-        assert!(out.as_coverage().expect("coverage").files.is_empty());
     }
 
     #[cfg(unix)]
     #[test]
     fn exec_collector_round_trips_stdin_to_stdout() {
         // `cat` echoes the (already kind-shaped) JSON from stdin to stdout.
-        let c = Collector::exec("e", CollectorKind::Test, ["xexec"], ["cat"]);
+        let c = Collector::exec("e", CollectorKind::Test, ["cat"]);
         let out = c
             .run(r#"{"suites":[{"name":"s","cases":[]}]}"#)
             .expect("runs");
@@ -1048,9 +855,7 @@ def transform(input):
 
     #[test]
     fn builtin_cobertura_plugin_produces_expected_coverage() {
-        let out = CollectorRegistry::with_builtins()
-            .run("cobertura", GOLD_COBERTURA)
-            .expect("plugin runs");
+        let out = bundled("cobertura", GOLD_COBERTURA).expect("plugin runs");
         let mut expected = cov(&[
             ("src/foo.rs", &[1, 2, 5], &[1, 5]),
             ("src/bar.rs", &[10], &[]),
@@ -1062,9 +867,7 @@ def transform(input):
 
     #[test]
     fn builtin_lcov_plugin_produces_expected_coverage() {
-        let out = CollectorRegistry::with_builtins()
-            .run("lcov", GOLD_LCOV)
-            .expect("plugin runs");
+        let out = bundled("lcov", GOLD_LCOV).expect("plugin runs");
         let mut expected = cov(&[
             ("src/foo.rs", &[1, 2, 5], &[1, 5]),
             ("src/bar.rs", &[10], &[]),
@@ -1112,8 +915,7 @@ def transform(input):
         // than a wall-clock number — the failure mode was a timeout, and a
         // wall-clock assertion on a shared CI box is a flake generator.
         let sizes = workspace_lcov_sizes();
-        let out = CollectorRegistry::with_builtins()
-            .run("lcov", &lcov_with_sizes(&sizes))
+        let out = bundled("lcov", &lcov_with_sizes(&sizes))
             .expect("a whole-workspace report parses under the default budget");
 
         let parsed = out.as_coverage().unwrap();
@@ -1191,11 +993,10 @@ def transform(input):
         // ruins every one.
         let time_one_file = |lines: usize| {
             let content = lcov_with_sizes(&[lines]);
-            let reg = CollectorRegistry::with_builtins();
             (0..3)
                 .map(|_| {
                     let started = std::time::Instant::now();
-                    reg.run("lcov", &content).expect("parses");
+                    bundled("lcov", &content).expect("parses");
                     started.elapsed()
                 })
                 .min()
@@ -1224,25 +1025,21 @@ def transform(input):
 
     #[test]
     fn builtin_jacoco_plugin_produces_expected_coverage() {
-        let reg = CollectorRegistry::with_builtins();
         let mut expected = cov(&[
             ("com/example/Foo.java", &[1, 2], &[1]),
             ("Root.java", &[7], &[7]),
         ]);
         // Foo.java counters: BRANCH 3/4, METHOD 2/2. Root.java has none → 0.
         set_bf(&mut expected, "com/example/Foo.java", 4, 3, 2, 2);
-        for fmt in ["jacoco", "jacoco-xml"] {
-            let out = reg.run(fmt, GOLD_JACOCO).expect("plugin runs");
-            assert_eq!(out.as_coverage().unwrap(), &expected, "format {fmt}");
-        }
+        let out = bundled("jacoco", GOLD_JACOCO).expect("plugin runs");
+        assert_eq!(out.as_coverage().unwrap(), &expected);
     }
 
     #[test]
     fn builtin_junit_plugin_produces_expected_tree() {
         use oxplow_coverage::{TestStatus, TestSuite};
-        let reg = CollectorRegistry::with_builtins();
 
-        let nextest = reg.run("junit", GOLD_JUNIT_NEXTEST).expect("plugin runs");
+        let nextest = bundled("junit", GOLD_JUNIT_NEXTEST).expect("plugin runs");
         let expected_nextest = TestReport {
             suites: vec![TestSuite {
                 name: "oxplow-app".into(),
@@ -1265,7 +1062,7 @@ def transform(input):
         };
         assert_eq!(nextest.as_test().unwrap(), &expected_nextest);
 
-        let pytest = reg.run("junit", GOLD_JUNIT_PYTEST).expect("plugin runs");
+        let pytest = bundled("junit", GOLD_JUNIT_PYTEST).expect("plugin runs");
         let expected_pytest = TestReport {
             suites: vec![TestSuite {
                 name: "pytest".into(),
@@ -1282,7 +1079,6 @@ def transform(input):
 
     #[test]
     fn builtin_plugins_skip_bad_fields_without_failing_the_report() {
-        let reg = CollectorRegistry::with_builtins();
         // A non-numeric line number is skipped; the valid lines still land
         // (the old Rust parsers were field-tolerant — keep that).
         let cobertura = r#"<coverage><packages><package><classes>
@@ -1292,7 +1088,7 @@ def transform(input):
             <line number="2" hits="0"/>
           </lines></class>
         </classes></package></packages></coverage>"#;
-        let out = reg.run("cobertura", cobertura).expect("plugin still runs");
+        let out = bundled("cobertura", cobertura).expect("plugin still runs");
         let f = out.as_coverage().unwrap().files.get("src/a.rs").unwrap();
         assert_eq!(
             f.instrumented.iter().copied().collect::<Vec<_>>(),
@@ -1302,7 +1098,7 @@ def transform(input):
 
         // lcov: a garbage DA line is skipped, the rest survive.
         let lcov = "SF:src/a.rs\nDA:1,3\nDA:junk\nDA:2,0\nend_of_record\n";
-        let out = reg.run("lcov", lcov).expect("plugin still runs");
+        let out = bundled("lcov", lcov).expect("plugin still runs");
         let f = out.as_coverage().unwrap().files.get("src/a.rs").unwrap();
         assert_eq!(
             f.instrumented.iter().copied().collect::<Vec<_>>(),
@@ -1313,9 +1109,8 @@ def transform(input):
 
     #[test]
     fn builtin_plugins_surface_malformed_input_as_error() {
-        let reg = CollectorRegistry::with_builtins();
-        assert!(reg.run("cobertura", "<coverage><class").is_err());
-        assert!(reg.run("junit", "<testsuites><testcase").is_err());
+        assert!(bundled("cobertura", "<coverage><class").is_err());
+        assert!(bundled("junit", "<testsuites><testcase").is_err());
     }
 
     // ---- golden: bundled clippy / eslint analysis plugins ----
@@ -1353,9 +1148,7 @@ some plain text rustc emitted to the stream"#;
 
     #[test]
     fn builtin_clippy_plugin_produces_expected_findings() {
-        let out = CollectorRegistry::with_builtins()
-            .run("clippy-json", GOLD_CLIPPY)
-            .expect("plugin runs");
+        let out = bundled("clippy", GOLD_CLIPPY).expect("plugin runs");
         let expected = AnalysisReport {
             findings: vec![
                 finding(
@@ -1402,9 +1195,7 @@ some plain text rustc emitted to the stream"#;
 
     #[test]
     fn builtin_eslint_plugin_produces_expected_findings() {
-        let out = CollectorRegistry::with_builtins()
-            .run("eslint-json", GOLD_ESLINT)
-            .expect("plugin runs");
+        let out = bundled("eslint", GOLD_ESLINT).expect("plugin runs");
         let expected = AnalysisReport {
             findings: vec![
                 finding(
@@ -1435,15 +1226,5 @@ some plain text rustc emitted to the stream"#;
             ],
         };
         assert_eq!(out.as_analysis().unwrap(), &expected);
-    }
-
-    #[test]
-    fn builtin_analysis_plugins_register_under_analysis_kind() {
-        let reg = CollectorRegistry::with_builtins();
-        for fmt in ["clippy-json", "eslint-json"] {
-            let c = reg.resolve(fmt).expect("analysis format registered");
-            assert_eq!(c.kind(), CollectorKind::Analysis, "{fmt}");
-            assert_eq!(c.runtime(), CollectorRuntime::Jaq);
-        }
     }
 }

@@ -4,12 +4,14 @@
 //!
 //! A collector is a program (`exec`, approved by a person), a sandboxed
 //! script (`starlark` / `jaq`, no I/O, no approval) or a provider's read
-//! (`read`). It writes **entities** (rows a model can `ref()`) and/or
-//! **facts** (measurements on declared measures), and it runs when its
-//! **trigger** says: `manual`, `{ every: 15m }`, or
-//! `{ on: [<event types>], where: { <payload field>: <value> } }` — the
-//! last, when such an event is logged, after the consumers named in
-//! `after:` have handled it.
+//! (`read`). It writes **entities** (rows a model can `ref()`),
+//! **facts** (measurements on declared measures) or **records** (a test,
+//! coverage or analysis report it parses — the project's, tsk863), and it
+//! runs when its **trigger** says: `manual`, `{ every: 15m }`,
+//! `{ on: [<event types>], where: { <payload field>: <value> } }` — when
+//! such an event is logged, after the consumers named in `after:` have
+//! handled it — or, for a report collector, `{ on_run: test | analysis }`:
+//! when the agent runs the project's tests or an analyzer.
 //!
 //! ```yaml
 //! collectors:
@@ -25,6 +27,11 @@
 //!     credentials: [GITHUB_TOKEN]
 //!     network: [api.github.com]
 //!     entities: [...]
+//!   - id: tests.rust_coverage         # a report collector
+//!     records: coverage
+//!     entry: oxplow:lcov              # a bundled parser
+//!     report: { path: target/coverage/lcov.info }
+//!     trigger: { on_run: test }
 //! ```
 //!
 //! This module parses and validates; running one is the app's
@@ -94,7 +101,47 @@ pub enum Trigger {
         events: Vec<String>,
         filter: BTreeMap<String, String>,
     },
+    /// A report collector's: when the agent runs the project's tests or an
+    /// analyzer (the `collection` reactor detects the run), if its report
+    /// was written by that run.
+    OnRun { run: RunKind },
 }
+
+/// The kind of run a report collector reads after.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum RunKind {
+    Test,
+    Analysis,
+}
+
+/// What a report collector records: its parser's typed output, merged
+/// into the run (`.context/collection.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum Records {
+    /// A suite/case tree of test outcomes (a `test-run`).
+    Tests,
+    /// Per-file instrumented/covered lines (a coverage capture).
+    Coverage,
+    /// Linter/analyzer findings (a `static-analysis` capture).
+    Analysis,
+}
+
+/// The parsers oxplow ships, named by a report collector's
+/// `entry: oxplow:<name>`: what each records and how its report is read
+/// (`report.format`) before the parser sees it.
+pub const BUNDLED_PARSERS: &[(&str, Records, &str)] = &[
+    ("junit", Records::Tests, "xml"),
+    ("lcov", Records::Coverage, "lcov"),
+    ("cobertura", Records::Coverage, "xml"),
+    ("jacoco", Records::Coverage, "xml"),
+    ("clippy", Records::Analysis, "lines"),
+    ("eslint", Records::Analysis, "json"),
+];
+
+/// The prefix of a bundled parser's `entry`.
+pub const BUNDLED_ENTRY: &str = "oxplow:";
 
 /// What runs a collector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -195,6 +242,16 @@ pub struct CollectorSpec {
     /// The measures its facts land on (`repo.rust_clone`); a fact on any
     /// other is dropped.
     pub facts: Vec<String>,
+    /// A report collector's kind: it parses `report` with `entry` and its
+    /// output joins the run (`trigger: { on_run }`).
+    pub records: Option<Records>,
+}
+
+impl CollectorSpec {
+    /// The bundled parser a report collector names (`entry: oxplow:lcov`).
+    pub fn bundled_parser(&self) -> Option<&str> {
+        self.entry.as_deref()?.strip_prefix(BUNDLED_ENTRY)
+    }
 }
 
 /// Whether `p` is a host pattern a program may be allowed to reach: a
@@ -280,7 +337,8 @@ struct RawCollector {
     id: String,
     #[serde(default)]
     doc: String,
-    runtime: String,
+    #[serde(default)]
+    runtime: Option<String>,
     #[serde(default)]
     entry: Option<String>,
     #[serde(default)]
@@ -292,7 +350,7 @@ struct RawCollector {
     #[serde(default)]
     input: Option<String>,
     #[serde(default)]
-    report: Option<ReportInput>,
+    report: Option<RawReport>,
     #[serde(default)]
     sync: Option<String>,
     #[serde(default)]
@@ -305,6 +363,16 @@ struct RawCollector {
     entities: Vec<RawEntity>,
     #[serde(default)]
     facts: Vec<String>,
+    #[serde(default)]
+    records: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawReport {
+    path: String,
+    #[serde(default)]
+    format: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -366,7 +434,8 @@ pub fn parse_trigger(
     knows_event: &dyn Fn(&str) -> bool,
 ) -> Result<Trigger, String> {
     use serde_yaml::Value;
-    let shapes = "use `manual`, `{ every: 15m }` or `{ on: [<event type>], where?: {…} }`";
+    let shapes = "use `manual`, `{ every: 15m }`, `{ on: [<event type>], where?: {…} }` or \
+                  `{ on_run: test | analysis }`";
     let Some(value) = value else {
         return Ok(Trigger::Manual);
     };
@@ -380,9 +449,21 @@ pub fn parse_trigger(
     if let Some(stray) = map
         .keys()
         .filter_map(Value::as_str)
-        .find(|k| !matches!(*k, "every" | "on" | "where"))
+        .find(|k| !matches!(*k, "every" | "on" | "where" | "on_run"))
     {
         return Err(format!("trigger: unknown key `{stray}`; {shapes}"));
+    }
+    if let Some(run) = get("on_run") {
+        if map.len() > 1 {
+            return Err(format!("trigger: `on_run` stands alone; {shapes}"));
+        }
+        return match run.as_str() {
+            Some("test") => Ok(Trigger::OnRun { run: RunKind::Test }),
+            Some("analysis") => Ok(Trigger::OnRun {
+                run: RunKind::Analysis,
+            }),
+            _ => Err("trigger: `on_run` is `test` or `analysis`".into()),
+        };
     }
     match (get("every"), get("on")) {
         (Some(every), None) => {
@@ -461,10 +542,10 @@ fn is_inside(path: &str) -> bool {
 
 fn validate(
     owner: &str,
-    raw: RawCollector,
+    mut raw: RawCollector,
     knows_event: &dyn Fn(&str) -> bool,
 ) -> Result<CollectorSpec, String> {
-    let id = raw.id;
+    let id = std::mem::take(&mut raw.id);
     if !is_collector_id(&id) {
         return Err(format!(
             "collector id `{id}` must be lowercase identifiers (letters, digits, `_`), joined by \
@@ -478,18 +559,43 @@ fn validate(
         ));
     }
     let ctx = |m: String| format!("collector `{id}`: {m}");
-    let runtime = match raw.runtime.as_str() {
-        "exec" => CollectorRuntime::Exec,
-        "starlark" => CollectorRuntime::Starlark,
-        "jaq" | "jq" => CollectorRuntime::Jaq,
-        "read" => CollectorRuntime::Read,
-        other => {
+    let trigger = parse_trigger(raw.trigger.as_ref(), knows_event).map_err(&ctx)?;
+    if raw.records.is_some() {
+        return validate_report_collector(owner, id, raw, trigger);
+    }
+    if matches!(trigger, Trigger::OnRun { .. }) {
+        return Err(ctx(
+            "`on_run` is a report collector's trigger (`records:`)".into()
+        ));
+    }
+    let runtime = match raw.runtime.as_deref() {
+        Some("exec") => CollectorRuntime::Exec,
+        Some("starlark") => CollectorRuntime::Starlark,
+        Some("jaq" | "jq") => CollectorRuntime::Jaq,
+        Some("read") => CollectorRuntime::Read,
+        Some(other) => {
             return Err(ctx(format!(
                 "runtime `{other}` isn't supported (exec, starlark, jaq or read)"
             )))
         }
+        None => return Err(ctx("needs a `runtime` (exec, starlark, jaq or read)".into())),
     };
-    let trigger = parse_trigger(raw.trigger.as_ref(), knows_event).map_err(&ctx)?;
+    if raw
+        .entry
+        .as_deref()
+        .is_some_and(|e| e.starts_with(BUNDLED_ENTRY))
+    {
+        return Err(ctx(format!(
+            "`{BUNDLED_ENTRY}<parser>` names a report parser; it goes with `records:`"
+        )));
+    }
+    let report = match raw.report.take() {
+        None => None,
+        Some(r) => Some(ReportInput {
+            path: r.path,
+            format: r.format.unwrap_or_else(text_format),
+        }),
+    };
     let records_facts = !raw.facts.is_empty();
     if records_facts && !raw.entities.is_empty() {
         return Err(ctx(
@@ -498,8 +604,8 @@ fn validate(
     }
     if owner == PROJECT && !records_facts {
         return Err(ctx(
-            "a project collector records facts (`facts:`); one that writes entities belongs in \
-             an extension"
+            "a project collector records facts (`facts:`) or a report (`records:`); one that \
+             writes entities belongs in an extension"
                 .into(),
         ));
     }
@@ -518,8 +624,11 @@ fn validate(
                     .into(),
             ));
         }
-    } else if raw.report.is_some() {
-        return Err(ctx("`report` is read by fact collectors (`facts:`)".into()));
+    } else if report.is_some() {
+        return Err(ctx(
+            "`report` is read by fact collectors (`facts:`) and report collectors (`records:`)"
+                .into(),
+        ));
     }
     if !raw.after.is_empty() && !matches!(trigger, Trigger::On { .. }) {
         return Err(ctx("`after` goes with an `on:` trigger".into()));
@@ -542,7 +651,7 @@ fn validate(
             }
             if raw.entry.is_some()
                 || input.is_some()
-                || raw.report.is_some()
+                || report.is_some()
                 || !raw.entities.is_empty()
                 || !raw.facts.is_empty()
             {
@@ -584,10 +693,10 @@ fn validate(
         return Err(ctx(format!(
             "a `{}` collector can't take `env`, `credentials` or `network`; those need an \
              approved `exec` collector",
-            raw.runtime
+            raw.runtime.as_deref().unwrap_or_default()
         )));
     }
-    if let Some(report) = &raw.report {
+    if let Some(report) = &report {
         if !is_inside(&report.path) {
             return Err(ctx(format!(
                 "report `{}` must be a path inside the project",
@@ -713,14 +822,180 @@ fn validate(
         trigger,
         after: raw.after,
         input,
-        report: raw.report,
+        report,
         sync,
         env: raw.env,
         network,
         credentials: raw.credentials,
         entities,
         facts,
+        records: None,
     })
+}
+
+/// A report collector (`records:`, tsk863): the project's, reading one
+/// report file with a bundled parser (`entry: oxplow:<name>`) or its own
+/// script or program, on `{ on_run: test | analysis }` or by hand. It gets
+/// no `input`, `env`, `credentials` or `network`: its whole input is the
+/// report.
+fn validate_report_collector(
+    owner: &str,
+    id: String,
+    raw: RawCollector,
+    trigger: Trigger,
+) -> Result<CollectorSpec, String> {
+    let ctx = |m: String| format!("collector `{id}`: {m}");
+    let records = match raw.records.as_deref() {
+        Some("tests") => Records::Tests,
+        Some("coverage") => Records::Coverage,
+        Some("analysis") => Records::Analysis,
+        other => {
+            return Err(ctx(format!(
+                "records `{}`: use `tests`, `coverage` or `analysis`",
+                other.unwrap_or_default()
+            )))
+        }
+    };
+    if owner != PROJECT {
+        return Err(ctx(
+            "a report collector (`records:`) is the project's, in `.oxplow/project.yaml`".into(),
+        ));
+    }
+    if !raw.facts.is_empty() || !raw.entities.is_empty() {
+        return Err(ctx(
+            "records a report, or facts, or entities: one per collector".into(),
+        ));
+    }
+    if raw.input.is_some()
+        || raw.provider.is_some()
+        || raw.sync.is_some()
+        || !raw.after.is_empty()
+        || !raw.env.is_empty()
+        || !raw.credentials.is_empty()
+        || !raw.network.is_empty()
+    {
+        return Err(ctx(
+            "a report collector reads its `report` and nothing else: no `input`, `provider`, \
+             `sync`, `after`, `env`, `credentials` or `network`"
+                .into(),
+        ));
+    }
+    if !matches!(trigger, Trigger::OnRun { .. } | Trigger::Manual) {
+        return Err(ctx(
+            "a report collector runs `{ on_run: test | analysis }` or by hand (`manual`)".into(),
+        ));
+    }
+    let Some(report) = raw.report else {
+        return Err(ctx(
+            "names the `report: { path }` it reads, relative to the project".into(),
+        ));
+    };
+    if !is_inside(&report.path) {
+        return Err(ctx(format!(
+            "report `{}` must be a path inside the project",
+            report.path
+        )));
+    }
+    let Some(entry) = raw.entry else {
+        return Err(ctx(format!(
+            "needs an `entry`: a bundled parser (`{BUNDLED_ENTRY}<{}>`) or its own script",
+            BUNDLED_PARSERS
+                .iter()
+                .map(|(n, _, _)| *n)
+                .collect::<Vec<_>>()
+                .join("|")
+        )));
+    };
+    let (runtime, format) = if let Some(name) = entry.strip_prefix(BUNDLED_ENTRY) {
+        let Some((_, parses, format)) = BUNDLED_PARSERS.iter().find(|(n, _, _)| *n == name) else {
+            return Err(ctx(format!(
+                "`{entry}` isn't a bundled parser ({})",
+                BUNDLED_PARSERS
+                    .iter()
+                    .map(|(n, _, _)| format!("{BUNDLED_ENTRY}{n}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        };
+        if *parses != records {
+            return Err(ctx(format!(
+                "`{entry}` parses {}, not {}",
+                records_name(*parses),
+                records_name(records)
+            )));
+        }
+        if raw.runtime.is_some() || report.format.is_some() {
+            return Err(ctx(format!(
+                "`{entry}` brings its own runtime and report format; name neither"
+            )));
+        }
+        (CollectorRuntime::Jaq, format.to_string())
+    } else {
+        if !is_inside(&entry) {
+            return Err(ctx(format!(
+                "entry `{entry}` must be a path inside the project"
+            )));
+        }
+        let runtime = match raw.runtime.as_deref() {
+            Some("exec") => CollectorRuntime::Exec,
+            Some("starlark") => CollectorRuntime::Starlark,
+            Some("jaq" | "jq") => CollectorRuntime::Jaq,
+            other => {
+                return Err(ctx(format!(
+                    "a report parser runs as `jaq`, `starlark` or `exec` (got `{}`)",
+                    other.unwrap_or("nothing")
+                )))
+            }
+        };
+        let format = match (runtime, report.format) {
+            (CollectorRuntime::Exec, Some(_)) => {
+                return Err(ctx(
+                    "an `exec` parser reads the raw report on stdin; it takes no `format`".into(),
+                ))
+            }
+            (CollectorRuntime::Exec, None) => text_format(),
+            (_, format) => {
+                let format = format.unwrap_or_else(text_format);
+                if !REPORT_FORMATS.contains(&format.as_str()) {
+                    return Err(ctx(format!(
+                        "report format `{format}` isn't one of {}",
+                        REPORT_FORMATS.join(", ")
+                    )));
+                }
+                format
+            }
+        };
+        (runtime, format)
+    };
+    Ok(CollectorSpec {
+        id,
+        doc: raw.doc,
+        runtime,
+        entry: Some(entry),
+        provider: None,
+        trigger,
+        after: Vec::new(),
+        input: None,
+        report: Some(ReportInput {
+            path: report.path,
+            format,
+        }),
+        sync: CollectorSync::Replace,
+        env: Vec::new(),
+        network: Vec::new(),
+        credentials: Vec::new(),
+        entities: Vec::new(),
+        facts: Vec::new(),
+        records: Some(records),
+    })
+}
+
+fn records_name(r: Records) -> &'static str {
+    match r {
+        Records::Tests => "tests",
+        Records::Coverage => "coverage",
+        Records::Analysis => "analysis",
+    }
 }
 
 /// Rewrite a `gauges:` block (the retired fact producers, in
@@ -1103,6 +1378,114 @@ mod tests {
         );
         assert!(s.is_empty());
         assert!(e[0].contains("takes only `provider`"), "{e:?}");
+    }
+
+    fn parse_project(yaml: &str) -> (Vec<CollectorSpec>, Vec<String>) {
+        let v: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        parse_collectors(PROJECT, &v, &knows)
+    }
+
+    /// tsk863: a report collector names a bundled parser or its own
+    /// script, the report it reads, and the run it reads after.
+    #[test]
+    fn report_collectors() {
+        let (out, errors) = parse_project(
+            r#"
+- id: tests.rust_coverage
+  records: coverage
+  entry: oxplow:lcov
+  report: { path: target/coverage/lcov.info }
+  trigger: { on_run: test }
+- id: lint.custom
+  records: analysis
+  runtime: starlark
+  entry: oxplow/parsers/lint.star
+  report: { path: target/lint.json, format: json }
+  trigger: { on_run: analysis }
+- id: tests.by_hand
+  records: tests
+  runtime: exec
+  entry: bin/parse
+  report: { path: out.txt }
+"#,
+        );
+        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(out[0].records, Some(Records::Coverage));
+        assert_eq!(out[0].bundled_parser(), Some("lcov"));
+        assert_eq!(out[0].runtime, CollectorRuntime::Jaq);
+        assert_eq!(out[0].report.as_ref().unwrap().format, "lcov");
+        assert_eq!(out[0].trigger, Trigger::OnRun { run: RunKind::Test });
+        assert_eq!(out[1].runtime, CollectorRuntime::Starlark);
+        assert_eq!(out[1].report.as_ref().unwrap().format, "json");
+        assert_eq!(
+            out[1].trigger,
+            Trigger::OnRun {
+                run: RunKind::Analysis
+            }
+        );
+        assert_eq!(out[2].runtime, CollectorRuntime::Exec);
+        assert_eq!(out[2].trigger, Trigger::Manual);
+        assert_eq!(out[2].bundled_parser(), None);
+    }
+
+    #[test]
+    fn report_collectors_refuse_what_they_cant_be() {
+        let refused = |yaml: &str, needle: &str| {
+            let (out, errors) = parse_project(yaml);
+            assert!(out.is_empty(), "{yaml}");
+            assert!(
+                errors.iter().any(|e| e.contains(needle)),
+                "{yaml}: {errors:?}"
+            );
+        };
+        let base = "- id: r\n  report: { path: r.xml }\n";
+        refused(
+            &format!("{base}  records: coverage\n  entry: oxplow:junit\n"),
+            "parses tests, not coverage",
+        );
+        refused(
+            &format!("{base}  records: tests\n  entry: oxplow:nunit\n"),
+            "isn't a bundled parser",
+        );
+        refused(
+            &format!("{base}  records: tests\n  entry: oxplow:junit\n  runtime: jaq\n"),
+            "name neither",
+        );
+        refused(
+            "- id: r\n  records: tests\n  entry: oxplow:junit\n  report: { path: r.xml, format: xml }\n",
+            "name neither",
+        );
+        refused(
+            "- id: r\n  records: tests\n  runtime: exec\n  entry: p\n  report: { path: r.xml, format: xml }\n",
+            "stdin",
+        );
+        refused(
+            &format!("{base}  records: tests\n  entry: oxplow:junit\n  trigger: {{ on: [snapshot.taken] }}\n"),
+            "on_run",
+        );
+        refused(
+            "- id: r\n  records: tests\n  entry: oxplow:junit\n",
+            "report: { path }",
+        );
+        refused(
+            &format!("{base}  records: tests\n  entry: oxplow:junit\n  network: [api.x.com]\n"),
+            "nothing else",
+        );
+        refused(
+            &format!("{base}  records: logs\n  entry: oxplow:junit\n"),
+            "records `logs`",
+        );
+        refused(
+            "- id: r\n  runtime: jaq\n  entry: r.jq\n  facts: [a.b]\n  trigger: { on_run: test }\n",
+            "report collector's trigger",
+        );
+        refused(
+            "- id: r\n  runtime: jaq\n  entry: oxplow:lcov\n  facts: [a.b]\n",
+            "goes with `records:`",
+        );
+        // An extension's collectors don't read reports.
+        let (_, errors) = parse(&format!("{base}  records: tests\n  entry: oxplow:junit\n"));
+        assert!(errors.iter().any(|e| e.contains("project's")), "{errors:?}");
     }
 
     #[test]

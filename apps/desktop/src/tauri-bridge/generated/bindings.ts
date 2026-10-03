@@ -1472,66 +1472,6 @@ export type CheckReport_Serialize = {
 // How a client authenticates to a token endpoint.
 export type ClientAuth = "basic" | "post";
 
-/**
- *  Per-project collection profile (the `collection:` block). Written by
- *  `/oxplow:configure` and read by the collection subsystem
- *  (`.context/collection.md`): the Bash-hook detector reads
- *  `test_run_patterns`, and the ride-along parses every `reports` entry
- *  fresher than the effort start. A repo with several test stacks lists
- *  each stack's report(s) here. All fields optional — an unconfigured
- *  project collects nothing extra.
- */
-export type CollectionConfig = {
-	/**
-	 *  Command that runs the project's tests (informational; surfaced to
-	 *  the agent so it knows how to produce the reports).
-	 */
-	testCommand: string | null,
-	/**
-	 *  Optional coverage-free counterpart to `test_command`, for the red/green
-	 *  loop (tsk171). It must still emit a test report (JUnit) so the
-	 *  progression lands in the effort's Tests panel, but it skips coverage
-	 *  instrumentation and should accept a filter argument.
-	 * 
-	 *  This exists because the alternative is worse. When the only
-	 *  report-emitting command is a full instrumented run of the whole suite,
-	 *  "route every invocation through it" is unfollowable in a TDD loop, so it
-	 *  gets dropped — and then NONE of the red→green runs are recorded. A
-	 *  weaker rule that is actually followed beats a stricter one that isn't.
-	 */
-	fastTestCommand: string | null,
-	/**
-	 *  Reports the test run emits — coverage (lcov/cobertura/jacoco-xml)
-	 *  and/or test results (junit). oxplow parses each that is fresher
-	 *  than the effort start, so several stacks coexist.
-	 */
-	reports: ReportConfig[],
-	/**
-	 *  Extra command substrings that count as a test run, on top of the
-	 *  built-in defaults (pytest, cargo test, jest, …).
-	 */
-	testRunPatterns: string[],
-	/**
-	 *  Extra command substrings that count as a static-analysis run, on top
-	 *  of the built-in defaults (cargo clippy, eslint, ruff, …). Mirrors
-	 *  `test_run_patterns` for the analysis ride-along.
-	 */
-	analysisRunPatterns: string[],
-	/**
-	 *  Free-form hint injected verbatim into every agent system prompt.
-	 *  Use it to tell the agent which test command to run, what coverage
-	 *  threshold to meet, etc. — anything project-specific the agent
-	 *  should know about the collection setup.
-	 */
-	agentHint: string | null,
-	/**
-	 *  Project-defined collection plugins (jaq/starlark/exec parsers). Each
-	 *  registers the formats it claims, so a project can add support for a new
-	 *  report format without any change to oxplow itself.
-	 */
-	plugins?: PluginConfig[],
-};
-
 export type CollectorEffect = {
 	id: string,
 	change: Change,
@@ -1673,6 +1613,11 @@ export type CollectorSpec = {
 	 *  other is dropped.
 	 */
 	facts: string[],
+	/**
+	 *  A report collector's kind: it parses `report` with `entry` and its
+	 *  output joins the run (`trigger: { on_run }`).
+	 */
+	records: Records | null,
 };
 
 // How a run's entities land.
@@ -4096,8 +4041,8 @@ export type OxplowConfig = {
 	 *  hand rather than through this derive.
 	 */
 	iconTint: string | null,
-	// Per-project collection profile (test + coverage instrumentation).
-	collection: CollectionConfig,
+	// How the project's tests run (the `testing:` block).
+	testing: TestingConfig,
 	/**
 	 *  Project-declared metric SPECS (the `metrics:` block) — the author-able
 	 *  read surface (epic tsk12, E). Each entry enables a catalog metric
@@ -4323,44 +4268,13 @@ export type PlanEntry = {
 
 export type PlanStatus = "pending" | "in_progress" | "completed";
 
-/**
- *  A project-defined collection plugin — the generic, kind-agnostic
- *  definition mechanism. Mirrors `oxplow_collect_plugin::CollectorDescriptor`
- *  but with plain-string `kind`/`runtime` so this crate stays dependency-light
- *  (the collection layer maps it to a registered collector). `entry` is the
- *  jaq/Starlark script (or the program for `exec`); `args` are extra exec
- *  arguments.
- */
-export type PluginConfig = {
-	name: string,
-	// What the plugin observes: `coverage` | `test`.
-	kind: string,
-	// Format name(s) this plugin claims (resolved against `reports[].format`).
-	formats: string[],
-	// Transform tier: `jaq` | `starlark` | `exec`.
-	runtime: string,
-	/**
-	 *  How the host pre-parses the report before the transform:
-	 *  `text` | `json` | `xml` | `lcov` | `lines` (default `text`). Applies to
-	 *  the in-process tiers (jaq/starlark); `exec` always gets raw content.
-	 */
-	input?: string | null,
-	/**
-	 *  Project-relative path to the script file: the jaq/Starlark program, or
-	 *  the program to spawn for `exec`. Scripts live in their own files, not
-	 *  inline in `.oxplow/project.yaml`. Required for all three runtimes.
-	 */
-	entryFile?: string | null,
-	// Extra arguments for the `exec` runtime.
-	args?: string[],
-};
-
 // What kind of project program it is.
 export type ProgramKind = 
-// A project collector's program (`collectors:` with `runtime: exec`).
+/**
+ *  A project collector's program (`collectors:` with `runtime: exec`):
+ *  one that records facts, or a report parser (`records:`).
+ */
 "collector" | 
-// A collection plugin (`collection.plugins`) parsing test/coverage/analysis reports.
-"plugin" | 
 // An agent spoken to over ACP (`acpAgents`, tsk335).
 "acp-agent" | 
 /**
@@ -4605,6 +4519,18 @@ export type RecentProjectView = {
 };
 
 /**
+ *  What a report collector records: its parser's typed output, merged
+ *  into the run (`.context/collection.md`).
+ */
+export type Records = 
+// A suite/case tree of test outcomes (a `test-run`).
+"tests" | 
+// Per-file instrumented/covered lines (a coverage capture).
+"coverage" | 
+// Linter/analyzer findings (a `static-analysis` capture).
+"analysis";
+
+/**
  *  A ref kind an extension declares (valid ones; invalid ones are in its
  *  `errors`).
  */
@@ -4644,20 +4570,6 @@ export type RemoteBranchEntry = {
 	short_name: string,
 	last_commit_at: number,
 	last_commit_subject: string,
-};
-
-/**
- *  One test/coverage report the project's test run emits. `format` selects
- *  the parser (collector): the built-ins are `lcov` | `cobertura` |
- *  `jacoco-xml` (coverage) and `junit` (test results), plus any format a
- *  project plugin (see [`PluginConfig`]) registers. The format name is no
- *  longer gate-kept here — it's resolved against the collector registry at
- *  collection time, so an unknown format surfaces as a warning rather than a
- *  config load failure.
- */
-export type ReportConfig = {
-	path: string,
-	format: string,
 };
 
 /**
@@ -4739,6 +4651,9 @@ export type RowSample = {
 	before: unknown | null,
 	after: unknown | null,
 };
+
+// The kind of run a report collector reads after.
+export type RunKind = "test" | "analysis";
 
 // Whose an instance is (P9.B2).
 export type Scope = 
@@ -5014,6 +4929,50 @@ export type TestDecl = {
 	sql?: string | null,
 };
 
+/**
+ *  How this project's tests run (the `testing:` block), written by
+ *  `/oxplow:configure`. The Bash-hook detector reads the commands and
+ *  patterns to tell a test or analysis run; what such a run's reports hold
+ *  is read by the report collectors (`collectors:` with `records:`, see
+ *  [`collectors::Records`]). All optional.
+ */
+export type TestingConfig = {
+	/**
+	 *  The command that runs the project's tests and writes their reports
+	 *  (counts as a test run; named in the report-less nudge).
+	 */
+	command: string | null,
+	/**
+	 *  The coverage-free counterpart to `command`, for the red/green loop
+	 *  (tsk171). It still writes a test report (JUnit), so the
+	 *  progression lands in the effort's Tests panel, but skips coverage
+	 *  and should accept a filter.
+	 * 
+	 *  This exists because the alternative is worse. When the only
+	 *  report-emitting command is a full instrumented run of the whole
+	 *  suite, "route every invocation through it" is unfollowable in a TDD
+	 *  loop, so it gets dropped — and then NONE of the red→green runs are
+	 *  recorded. A weaker rule that is actually followed beats a stricter
+	 *  one that isn't.
+	 */
+	fastCommand: string | null,
+	/**
+	 *  Extra command substrings that count as a test run, on top of the
+	 *  built-in defaults (pytest, cargo test, jest, …).
+	 */
+	runPatterns: string[],
+	/**
+	 *  Extra command substrings that count as a static-analysis run, on
+	 *  top of the built-in defaults (cargo clippy, eslint, ruff, …).
+	 */
+	analysisPatterns: string[],
+	/**
+	 *  Free-form hint injected verbatim into every agent system prompt:
+	 *  which test command to run, what coverage to meet, and so on.
+	 */
+	agentHint: string | null,
+};
+
 // A line of a workspace file that matched a text search.
 export type TextSearchHit = {
 	path: string,
@@ -5140,7 +5099,13 @@ export type Trigger =
  *  each `filter` field equal to its value — after the consumers in
  *  the collector's `after` have handled the event.
  */
-{ kind: "on"; events: string[]; filter: { [key in string]: string } };
+{ kind: "on"; events: string[]; filter: { [key in string]: string } } | 
+/**
+ *  A report collector's: when the agent runs the project's tests or an
+ *  analyzer (the `collection` reactor detects the run), if its report
+ *  was written by that run.
+ */
+{ kind: "onRun"; run: RunKind };
 
 // What a kept earlier version is a version of.
 export type Twin = {

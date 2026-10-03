@@ -2173,7 +2173,7 @@ impl MetricsService {
                     id: &c.key,
                     trigger,
                     source: &ctx.source,
-                    cause: ctx.event.as_deref(),
+                    cause: ctx.event.as_deref().map(|e| (e.envelope.id.clone(), e.seq)),
                     status,
                     entities: Default::default(),
                     facts,

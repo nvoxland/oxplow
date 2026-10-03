@@ -19,7 +19,7 @@ const GROUPS: { title: string; matches(key: string): boolean }[] = [
     title: "Snapshots",
     matches: (k) => k.startsWith("snapshot") || k === "generated" || k === "symbolsMaxFilesPerSnapshot",
   },
-  { title: "Collection", matches: (k) => k === "collection" },
+  { title: "Testing", matches: (k) => k === "testing" },
   { title: "Language Servers", matches: (k) => k === "lsp" },
   { title: "Extensions", matches: (k) => k === "extensions" || k === "extensionInstances" },
   {

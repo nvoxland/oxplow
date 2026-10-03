@@ -2,8 +2,8 @@
 //! in-memory config when it changes on disk.
 //!
 //! Without this, a config edit made out-of-band — most importantly the
-//! agent running `/oxplow:configure`, which Writes a `collection:` block
-//! to `.oxplow/project.yaml` — wouldn't take effect until the app process
+//! agent running `/oxplow:configure`, which writes a `testing:` block and
+//! report collectors to `.oxplow/project.yaml` — wouldn't take effect until the app process
 //! restarted, because config is otherwise read once at `Services` boot.
 //! The IPC setters (`set_generated`, `set_agent_prompt_append`) mutate
 //! the in-memory config directly; this watcher covers every *other* way

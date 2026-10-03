@@ -33,8 +33,8 @@ test("a model whose count didn't come back reads as a dash, not zero", () => {
 });
 
 test("programRow says what runs and whether it will", () => {
-  const m = programRow({ kind: "plugin", name: "acme.parse", program: "tools/parse.sh", args: ["--x"], env: [], approved: false });
-  expect(m.label).toBe("Collection plugin acme.parse");
+  const m = programRow({ kind: "collector", name: "tests.parse", program: "tools/parse.sh", args: ["--x"], env: [], approved: false });
+  expect(m.label).toBe("Collector tests.parse");
   expect(m.command).toBe("tools/parse.sh --x");
   expect(m.status).toBe("Not approved: it won't run");
   expect(m.approveTitle).toContain("tools/parse.sh --x");

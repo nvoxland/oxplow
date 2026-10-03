@@ -22,8 +22,9 @@ use serde_json::json;
 use similar::{ChangeTag, TextDiff};
 
 use oxplow_collect_plugin::{
-    Collector, CollectorInput, CollectorKind, CollectorOutput, CollectorRegistry, CollectorRuntime,
+    Collector, CollectorInput, CollectorKind, CollectorOutput, CollectorRuntime,
 };
+use oxplow_config::collectors::{CollectorSpec, Records, RunKind, Trigger};
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
 use oxplow_db::{
@@ -37,8 +38,8 @@ use oxplow_domain::{DomainError, EffortId, TaskId, ThreadId};
 use crate::file_ref_version;
 use crate::metric_engine::threshold_state;
 
-/// Built-in command substrings that count as a test run. The collection
-/// profile's `testRunPatterns` extends (never replaces) this list.
+/// Built-in command substrings that count as a test run. The `testing:`
+/// block's `runPatterns` extends (never replaces) this list.
 const DEFAULT_TEST_PATTERNS: &[&str] = &[
     "pytest",
     "cargo test",
@@ -59,7 +60,7 @@ const DEFAULT_TEST_PATTERNS: &[&str] = &[
 ];
 
 /// Built-in command substrings that count as a static-analysis run. The
-/// collection profile's `analysisRunPatterns` extends (never replaces) this
+/// `testing:` block's `analysisPatterns` extends (never replaces) this
 /// list. Tool-agnostic: no command→tool knowledge lives here, only "did an
 /// analyzer run?" — the report a run regenerates is what gets parsed.
 const DEFAULT_ANALYSIS_PATTERNS: &[&str] = &[
@@ -292,20 +293,14 @@ pub fn parse_bash_post_tool(payload_json: &str) -> Option<BashInvocation> {
 pub const COVERAGE_TARGET_PCT: f64 = 80.0;
 pub const COVERAGE_FAIL_PCT: f64 = 50.0;
 
-/// Outcome of a coverage ingest, so the MCP tool can report precisely
-/// why nothing landed.
+/// What recording a coverage report came to, so a caller can say why
+/// nothing landed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CoverageIngest {
-    NoOpenEffort,
-    NotConfigured,
-    ReportMissing(String),
-    /// The report on disk predates the open effort — it's from an earlier
-    /// run that this test invocation didn't regenerate, so attributing it
-    /// would be misleading. Only the passive ride-along skips on this;
-    /// an explicit `ingest_coverage` ingests regardless.
-    StaleReport(String),
-    ParseError(String),
-    NoBaseline,
+    /// The thread has no stream to record in.
+    NoStream,
+    /// Nothing in the report was instrumented (or the coverage metric is
+    /// off).
     NoChangedCoverage,
     Stored {
         observation_id: i64,
@@ -315,18 +310,76 @@ pub enum CoverageIngest {
     },
 }
 
-/// Outcome of an analysis ingest (the on-demand `ingest_analysis` MCP path),
-/// so the tool can report precisely why nothing landed. Mirrors
-/// [`CoverageIngest`]'s shape.
+/// What a by-hand run of a report collector recorded
+/// ([`CollectionService::sync_report_collector`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReportSync {
+    /// A test run: its capture (the `run:<id>` agents claim), or none when
+    /// the report held no cases.
+    Tests {
+        run: Option<i64>,
+    },
+    Coverage(CoverageIngest),
+    Analysis(AnalysisIngest),
+}
+
+impl ReportSync {
+    /// As `collector.sync` answers: `status` (`stored`, or why nothing
+    /// landed) with what was recorded.
+    pub fn to_json(&self) -> serde_json::Value {
+        match self {
+            ReportSync::Tests { run: Some(run) } => {
+                json!({ "status": "stored", "records": "tests", "run": format!("run:{run}") })
+            }
+            ReportSync::Tests { run: None } => {
+                json!({ "status": "no_cases", "records": "tests" })
+            }
+            ReportSync::Coverage(CoverageIngest::NoStream)
+            | ReportSync::Analysis(AnalysisIngest::NotRecorded) => {
+                json!({ "status": "no_stream" })
+            }
+            ReportSync::Coverage(CoverageIngest::NoChangedCoverage) => {
+                json!({ "status": "no_coverage", "records": "coverage" })
+            }
+            ReportSync::Coverage(CoverageIngest::Stored {
+                observation_id,
+                summary_pct,
+                changed_lines,
+                covered_lines,
+            }) => json!({
+                "status": "stored",
+                "records": "coverage",
+                "run": format!("run:{observation_id}"),
+                "summaryPct": summary_pct,
+                "instrumentedLines": changed_lines,
+                "coveredLines": covered_lines,
+            }),
+            ReportSync::Analysis(AnalysisIngest::Stored {
+                observation_id,
+                error_count,
+                warning_count,
+                info_count,
+                note_count,
+                findings,
+            }) => json!({
+                "status": "stored",
+                "records": "analysis",
+                "run": format!("run:{observation_id}"),
+                "errorCount": error_count,
+                "warningCount": warning_count,
+                "infoCount": info_count,
+                "noteCount": note_count,
+                "findings": findings,
+            }),
+        }
+    }
+}
+
+/// What recording an analysis report came to. Mirrors [`CoverageIngest`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum AnalysisIngest {
-    NoOpenEffort,
-    NotConfigured,
-    ReportMissing(String),
-    /// The report on disk predates the open effort. Only a `skip_if_stale`
-    /// caller skips on this; the explicit MCP path passes `false`.
-    StaleReport(String),
-    ParseError(String),
+    /// Nothing was recorded (no stream).
+    NotRecorded,
     Stored {
         observation_id: i64,
         error_count: u64,
@@ -356,6 +409,10 @@ pub struct CollectionService {
     project_dir: PathBuf,
     /// This machine's program approvals (`exec_consent`).
     approvals: Arc<crate::exec_consent::ApprovalStore>,
+    /// Where a report collector's run is recorded (`collector_run`,
+    /// `collector.synced`) and its health kept (tsk863). Without one (unit
+    /// harnesses) a report is still read, its run unrecorded.
+    run_log: Option<crate::collector_runner::RunLog>,
     /// Kind-agnostic attribution ledger (tsk262/263) — runs (test/coverage/
     /// analysis) record their claim state here. A run is auto-attributed to the
     /// open effort at record time only when unambiguous (`find_single_open_for_thread`);
@@ -377,6 +434,9 @@ pub struct CollectionService {
 #[derive(Debug, Clone)]
 pub struct RunCause {
     pub event_id: String,
+    /// The event's place in the log: a report collector's run records it
+    /// (`last_event_id`) and dedupes on it.
+    pub seq: i64,
     pub anchors: oxplow_domain::Anchors,
     /// When the run finished (the event's time): what report freshness is
     /// judged against, however late the event is delivered.
@@ -441,6 +501,7 @@ impl CollectionService {
             config,
             project_dir,
             approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
+            run_log: None,
             attribution,
             metric_visibility,
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
@@ -456,9 +517,15 @@ impl CollectionService {
         self
     }
 
-    /// The program approvals project exec plugins are checked against.
+    /// The program approvals an `exec` report collector is checked against.
     pub fn with_approvals(mut self, approvals: Arc<crate::exec_consent::ApprovalStore>) -> Self {
         self.approvals = approvals;
+        self
+    }
+
+    /// Where report collectors' runs are recorded.
+    pub fn with_run_log(mut self, log: crate::collector_runner::RunLog) -> Self {
+        self.run_log = Some(log);
         self
     }
 
@@ -472,30 +539,275 @@ impl CollectionService {
             .map(|t| t.stream_id.to_string()))
     }
 
-    fn collection_cfg(&self) -> oxplow_config::CollectionConfig {
+    /// The project's `testing:` block, as it is now (hot-reloaded).
+    fn testing_cfg(&self) -> oxplow_config::TestingConfig {
         self.config
             .read()
-            .map(|c| c.collection.clone())
+            .map(|c| c.testing.clone())
             .unwrap_or_default()
     }
 
-    /// Build the collector registry for this project: the first-party
-    /// builtins plus any project-defined plugins from `collection.plugins`.
-    /// Cheap to rebuild (jaq/starlark programs compile lazily at run time),
-    /// so we construct it per ride-along — picking up hot-reloaded config.
-    fn registry(&self, cfg: &oxplow_config::CollectionConfig) -> CollectorRegistry {
-        let mut reg = CollectorRegistry::with_builtins();
-        for p in &cfg.plugins {
-            match plugin_to_collector(p, &self.project_dir, &self.approvals) {
-                Ok(c) => reg.register(c),
-                Err(e) => tracing::warn!(
-                    plugin = %p.name,
-                    error = %e,
-                    "collection plugin skipped"
-                ),
+    /// The project's report collectors (`collectors:` with `records:`), as
+    /// they are now.
+    fn report_collectors(&self) -> Vec<CollectorSpec> {
+        self.config
+            .read()
+            .map(|c| {
+                c.collectors
+                    .iter()
+                    .filter(|s| s.records.is_some())
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Whether the project declares report collector `id`.
+    pub fn is_report_collector(&self, id: &str) -> bool {
+        self.report_collectors().iter().any(|s| s.id == id)
+    }
+
+    /// The parser a report collector names: a bundled one, or its own jaq /
+    /// Starlark script or program — a program only once a person approved
+    /// it on this machine, as it is now (tsk331).
+    fn report_parser(&self, spec: &CollectorSpec) -> Result<Collector, ParserProblem> {
+        let records = spec
+            .records
+            .ok_or_else(|| ParserProblem::Broken(format!("`{}` records nothing", spec.id)))?;
+        if let Some(name) = spec.bundled_parser() {
+            return Collector::bundled(name).ok_or_else(|| {
+                ParserProblem::Broken(format!("no bundled parser `{name}` in this oxplow"))
+            });
+        }
+        let kind = match records {
+            Records::Tests => CollectorKind::Test,
+            Records::Coverage => CollectorKind::Coverage,
+            Records::Analysis => CollectorKind::Analysis,
+        };
+        let entry = spec.entry.as_deref().unwrap_or_default();
+        let abs = self.project_dir.join(entry);
+        if spec.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
+            use crate::exec_consent::{may_run, needs_approval, ProgramKind};
+            if !may_run(
+                &self.approvals,
+                &self.project_dir,
+                ProgramKind::Collector,
+                &spec.id,
+                entry,
+                &[],
+            ) {
+                return Err(ParserProblem::NeedsApproval(needs_approval(
+                    ProgramKind::Collector,
+                    &spec.id,
+                    entry,
+                )));
+            }
+            return Ok(Collector::exec(
+                spec.id.clone(),
+                kind,
+                [abs.to_string_lossy().into_owned()],
+            ));
+        }
+        // The host reads the script; the script never touches the files.
+        let script = std::fs::read_to_string(&abs)
+            .map_err(|e| ParserProblem::Broken(format!("entry `{entry}`: {e}")))?;
+        let format = spec.report.as_ref().map_or("text", |r| r.format.as_str());
+        let input = CollectorInput::named(format).ok_or_else(|| {
+            ParserProblem::Broken(format!("report format `{format}` isn't one oxplow reads"))
+        })?;
+        Ok(match spec.runtime {
+            oxplow_config::collectors::CollectorRuntime::Starlark => {
+                Collector::starlark(spec.id.clone(), kind, input, script)
+            }
+            _ => Collector::jaq(spec.id.clone(), kind, input, script),
+        })
+    }
+
+    /// Read one report collector's report (tsk863): when `window` is given,
+    /// only a report written inside it (the run's own). A disabled
+    /// collector, an unapproved program or a report that isn't there runs
+    /// nothing; anything that ran is recorded as the collector's run
+    /// (`collector_run`, `collector.synced`) and counts toward its health —
+    /// the third failure in a row disables it (P7.C2).
+    async fn read_report(
+        &self,
+        spec: &CollectorSpec,
+        window: Option<FreshWindow>,
+        how: &ReportRun<'_>,
+    ) -> ReportRead {
+        let Some(report) = spec.report.as_ref() else {
+            return ReportRead::Missing(String::new());
+        };
+        let abs = self.project_dir.join(&report.path);
+        if window.is_some_and(|w| !w.holds(&abs)) {
+            return ReportRead::NotFresh;
+        }
+        let Ok(content) = std::fs::read_to_string(&abs) else {
+            return ReportRead::Missing(report.path.clone());
+        };
+        let key = crate::collector_runner::plugin_key(oxplow_config::collectors::PROJECT, &spec.id);
+        if let Some(log) = &self.run_log {
+            match log.health().disabled_reason(&key).await {
+                Ok(Some(reason)) => {
+                    return ReportRead::Disabled(format!(
+                        "collector `{}` is disabled: {reason}. A person can enable it again \
+                         (`plugin.enable`, Settings → Extensions).",
+                        spec.id
+                    ))
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(collector = %spec.id, error = %e, "reading its health failed")
+                }
             }
         }
-        reg
+        let started = std::time::Instant::now();
+        let parsed = match self.report_parser(spec) {
+            Err(ParserProblem::NeedsApproval(reason)) => {
+                if let Some(log) = &self.run_log {
+                    if let Err(e) = log
+                        .record_needs_approval(
+                            oxplow_config::collectors::PROJECT,
+                            &spec.id,
+                            how.cause.map(|c| c.seq),
+                            reason.clone(),
+                        )
+                        .await
+                    {
+                        tracing::warn!(collector = %spec.id, error = %e, "recording its run failed");
+                    }
+                }
+                return ReportRead::NeedsApproval(reason);
+            }
+            Err(ParserProblem::Broken(e)) => Err(e),
+            Ok(parser) => {
+                // A whole-workspace report is seconds of script work: off the
+                // async workers.
+                let exec =
+                    (parser.runtime() == CollectorRuntime::Exec).then(|| parser.name().to_string());
+                let label = parser
+                    .name()
+                    .strip_prefix("oxplow.")
+                    .unwrap_or(parser.name())
+                    .to_string();
+                tokio::task::spawn_blocking(move || parser.run(&content))
+                    .await
+                    .map_err(|e| format!("parser task failed: {e}"))
+                    .and_then(|r| r.map_err(|e| e.to_string()))
+                    .map(|output| (output, exec, label))
+            }
+        };
+        let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
+        let error = parsed.as_ref().err().cloned();
+        self.record_report_run(&spec.id, how, &key, elapsed, error)
+            .await;
+        match parsed {
+            Ok((output, exec, label)) => ReportRead::Parsed {
+                output,
+                exec,
+                label,
+            },
+            Err(e) => ReportRead::Failed(format!("{} ({}): {e}", report.path, spec.id)),
+        }
+    }
+
+    /// A report collector's run, recorded once per cause: its
+    /// `collector_run` row and `collector.synced`, then its health. A
+    /// redelivered run's record is already there, and its health already
+    /// counted.
+    async fn record_report_run(
+        &self,
+        id: &str,
+        how: &ReportRun<'_>,
+        key: &oxplow_db::PluginKey,
+        elapsed_ms: i64,
+        error: Option<String>,
+    ) {
+        let Some(log) = &self.run_log else {
+            return;
+        };
+        let recorded = log
+            .record_with(
+                crate::collector_runner::RunRecord {
+                    owner: oxplow_config::collectors::PROJECT,
+                    id,
+                    trigger: how.trigger,
+                    source: how.source,
+                    cause: how
+                        .cause
+                        .map(|c| (oxplow_domain::EventId(c.event_id.clone()), c.seq)),
+                    status: if error.is_some() { "error" } else { "ok" },
+                    entities: Default::default(),
+                    facts: 0,
+                    elapsed_ms,
+                    error: error.clone(),
+                },
+                None,
+            )
+            .await;
+        match recorded {
+            Ok(false) => {}
+            Ok(true) => {
+                let health = log.health();
+                let counted = match &error {
+                    None => {
+                        health
+                            .succeeded(
+                                key,
+                                Some(std::time::Duration::from_millis(elapsed_ms.max(0) as u64)),
+                            )
+                            .await
+                    }
+                    Some(e) => health.failed(key, e).await.map(|_| ()),
+                };
+                if let Err(e) = counted {
+                    tracing::warn!(collector = %id, error = %e, "recording its health failed");
+                }
+            }
+            Err(e) => tracing::warn!(collector = %id, error = %e, "recording its run failed"),
+        }
+    }
+
+    /// What a detected run's report collectors read (tsk863): each
+    /// collector whose `on_run` is `run` and whose report this run wrote
+    /// (inside `window`), merged by what it records. A collector reads only
+    /// after its own kind of run.
+    async fn read_run_reports(
+        &self,
+        run: RunKind,
+        window: FreshWindow,
+        cause: Option<&RunCause>,
+    ) -> RunReports {
+        let source = oxplow_domain::Actor::System.source();
+        let how = ReportRun {
+            trigger: "on",
+            source: &source,
+            cause,
+        };
+        let mut out = RunReports::default();
+        for spec in self.report_collectors() {
+            if spec.trigger != (Trigger::OnRun { run }) {
+                continue;
+            }
+            match self.read_report(&spec, Some(window), &how).await {
+                ReportRead::Parsed {
+                    output,
+                    exec,
+                    label,
+                } => out.add(output, exec, label),
+                ReportRead::Failed(e) => {
+                    tracing::warn!(collector = %spec.id, error = %e, "report collector failed");
+                    if spec.records == Some(Records::Coverage) {
+                        out.coverage_errors.push(e);
+                    }
+                }
+                ReportRead::Disabled(m) | ReportRead::NeedsApproval(m) => {
+                    tracing::warn!(collector = %spec.id, "{m}")
+                }
+                ReportRead::NotFresh | ReportRead::Missing(_) => {}
+            }
+        }
+        out
     }
 
     /// Record a `test-run` observation against the thread's open effort.
@@ -972,156 +1284,125 @@ impl CollectionService {
             .await;
     }
 
-    /// Ingest a SINGLE coverage report (the explicit MCP path). Uses the
-    /// override path/format, or the first configured coverage report.
-    pub async fn ingest_coverage(
+    /// Run report collector `id` by hand (`collector.sync`, tsk863): read
+    /// its report now, whenever it was written, and record what it parsed
+    /// in `thread` — a test run, a coverage capture or a static-analysis
+    /// capture — like a detected run's, with `collector.sync project/<id>`
+    /// as the run's command. The run is recorded as the collector's.
+    pub async fn sync_report_collector(
         &self,
         thread: &ThreadId,
-        report_path_override: Option<String>,
-        format_override: Option<String>,
-        skip_if_stale: bool,
-    ) -> Result<CoverageIngest, DomainError> {
-        // OBSERVE-ALWAYS (tsk270): record absolute coverage regardless of effort;
-        // the effort-relative diff is derived with the effort's evidence.
-        let Some(stream_id) = self.stream_id_for(thread).await? else {
-            return Ok(CoverageIngest::NoOpenEffort);
+        id: &str,
+        source: &str,
+    ) -> Result<ReportSync, crate::collector_runner::RunCollectorError> {
+        use crate::collector_runner::RunCollectorError;
+        let spec = self
+            .report_collectors()
+            .into_iter()
+            .find(|s| s.id == id)
+            .ok_or(RunCollectorError::NotFound)?;
+        let how = ReportRun {
+            trigger: "manual",
+            source,
+            cause: None,
         };
-        let cfg = self.collection_cfg();
-        let registry = self.registry(&cfg);
-        let (report_path, format_str) = match (report_path_override, format_override) {
-            (Some(p), Some(f)) => (p, f),
-            _ => match first_coverage_report(&cfg, &registry) {
-                Some(r) => (r.path.clone(), r.format.clone()),
-                None => return Ok(CoverageIngest::NotConfigured),
-            },
-        };
-        let Some(collector) = registry.resolve(&format_str) else {
-            return Ok(CoverageIngest::ParseError(format!(
-                "no collector registered for format \"{format_str}\""
-            )));
-        };
-        if collector.kind() != CollectorKind::Coverage {
-            return Ok(CoverageIngest::ParseError(format!(
-                "format \"{format_str}\" is not a coverage format"
-            )));
-        }
-        let abs = self.project_dir.join(&report_path);
-        let Ok(content) = std::fs::read_to_string(&abs) else {
-            return Ok(CoverageIngest::ReportMissing(report_path));
-        };
-        // Stale guard for the ride-along (skip_if_stale); the explicit
-        // MCP path passes false — the caller asked for it.
-        if skip_if_stale && !FreshWindow::ending_now().holds(&abs) {
-            return Ok(CoverageIngest::StaleReport(report_path));
-        }
-        let report = match collector.run(&content) {
-            Ok(CollectorOutput::Coverage(r)) => r,
-            Ok(_) => {
-                return Ok(CoverageIngest::ParseError(
-                    "collector did not produce coverage output".into(),
-                ))
+        let mut reads = RunReports::default();
+        match self.read_report(&spec, None, &how).await {
+            ReportRead::Parsed {
+                output,
+                exec,
+                label,
+            } => reads.add(output, exec, label),
+            ReportRead::Failed(e) => return Err(RunCollectorError::Failed(e)),
+            ReportRead::Disabled(m) => return Err(RunCollectorError::Disabled(m)),
+            ReportRead::NeedsApproval(m) => return Err(RunCollectorError::NeedsApproval(m)),
+            ReportRead::Missing(path) => {
+                return Err(RunCollectorError::Failed(format!(
+                    "collector `{id}`: report `{path}` isn't there; run what writes it first"
+                )))
             }
-            Err(e) => return Ok(CoverageIngest::ParseError(e.to_string())),
-        };
-        self.observe_coverage(
-            thread,
-            &stream_id,
-            &report,
-            &coverage_source(collector),
-            None,
-        )
-        .await
-    }
-
-    /// Ingest a SINGLE analysis report (the explicit MCP path) — the on-demand
-    /// counterpart to [`ingest_coverage`]. Resolves `format` via the collector
-    /// registry, parses the report as `CollectorKind::Analysis`, and records a
-    /// `static-analysis` observation against the thread's open effort via
-    /// `record_static_analysis` (provenance `observed`). Uses the override
-    /// path/format, or the first configured analysis report.
-    pub async fn ingest_analysis(
-        &self,
-        thread: &ThreadId,
-        report_path_override: Option<String>,
-        format_override: Option<String>,
-        skip_if_stale: bool,
-    ) -> Result<AnalysisIngest, DomainError> {
-        // OBSERVE-ALWAYS (tsk269): analysis findings are absolute, so we record
-        // regardless of open-effort count; `record_static_analysis` attributes via
-        // the ledger.
-        let cfg = self.collection_cfg();
-        let registry = self.registry(&cfg);
-        let (report_path, format_str) = match (report_path_override, format_override) {
-            (Some(p), Some(f)) => (p, f),
-            _ => match first_analysis_report(&cfg, &registry) {
-                Some(r) => (r.path.clone(), r.format.clone()),
-                None => return Ok(AnalysisIngest::NotConfigured),
-            },
-        };
-        let Some(collector) = registry.resolve(&format_str) else {
-            return Ok(AnalysisIngest::ParseError(format!(
-                "no collector registered for format \"{format_str}\""
-            )));
-        };
-        if collector.kind() != CollectorKind::Analysis {
-            return Ok(AnalysisIngest::ParseError(format!(
-                "format \"{format_str}\" is not an analysis format"
-            )));
+            ReportRead::NotFresh => unreachable!("a by-hand run reads the report as it is"),
         }
-        let source = analysis_source(collector);
-        let analyzer = collector
-            .name()
-            .strip_prefix("oxplow.")
-            .unwrap_or(collector.name())
-            .to_string();
-        let abs = self.project_dir.join(&report_path);
-        let Ok(content) = std::fs::read_to_string(&abs) else {
-            return Ok(AnalysisIngest::ReportMissing(report_path));
-        };
-        // Stale guard for the ride-along (skip_if_stale); the explicit MCP
-        // path passes false — the caller asked for it.
-        if skip_if_stale && !FreshWindow::ending_now().holds(&abs) {
-            return Ok(AnalysisIngest::StaleReport(report_path));
-        }
-        // No baseline gate: findings are ABSOLUTE (current-file), not
-        // diff-relative like coverage, so they don't need a start snapshot to
-        // be meaningful. `record_static_analysis` stores with pin = None when
-        // there's no snapshot — matching the passive ride-along path. (tsk86)
-        let report = match collector.run(&content) {
-            Ok(CollectorOutput::Analysis(r)) => r,
-            Ok(_) => {
-                return Ok(AnalysisIngest::ParseError(
-                    "collector did not produce analysis output".into(),
-                ))
+        let command = format!("collector.sync project/{id}");
+        let storage = RunCollectorError::Storage;
+        Ok(match spec.records {
+            Some(Records::Tests) => {
+                let Some((report, source)) = reads.tests() else {
+                    return Ok(ReportSync::Tests { run: None });
+                };
+                let run = self
+                    .record_test_run(
+                        thread,
+                        &command,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "observed",
+                        &source,
+                        Some(report),
+                        None,
+                    )
+                    .await
+                    .map_err(storage)?;
+                ReportSync::Tests { run }
             }
-            Err(e) => return Ok(AnalysisIngest::ParseError(e.to_string())),
-        };
-        let (mut error_count, mut warning_count, mut info_count, mut note_count) = (0u64, 0, 0, 0);
-        for f in &report.findings {
-            use oxplow_coverage::Severity::*;
-            match f.severity {
-                Error => error_count += 1,
-                Warning => warning_count += 1,
-                Info => info_count += 1,
-                Note => note_count += 1,
+            Some(Records::Coverage) => {
+                let Some(stream_id) = self.stream_id_for(thread).await.map_err(storage)? else {
+                    return Ok(ReportSync::Coverage(CoverageIngest::NoStream));
+                };
+                let Some((report, source)) = reads.coverage() else {
+                    return Ok(ReportSync::Coverage(CoverageIngest::NoChangedCoverage));
+                };
+                ReportSync::Coverage(
+                    self.observe_coverage(thread, &stream_id, report, &source, None)
+                        .await
+                        .map_err(storage)?,
+                )
             }
-        }
-        let findings = report.findings.len();
-        let command = format!("ingest_analysis {report_path}");
-        match self
-            .record_static_analysis(thread, &command, Some(&report), &[analyzer], &source)
-            .await?
-        {
-            Some(observation_id) => Ok(AnalysisIngest::Stored {
-                observation_id,
-                error_count,
-                warning_count,
-                info_count,
-                note_count,
-                findings,
-            }),
-            None => Ok(AnalysisIngest::NoOpenEffort),
-        }
+            Some(Records::Analysis) | None => {
+                let Some((report, source)) = reads.analysis() else {
+                    return Ok(ReportSync::Analysis(AnalysisIngest::NotRecorded));
+                };
+                let (mut error_count, mut warning_count, mut info_count, mut note_count) =
+                    (0u64, 0, 0, 0);
+                for f in &report.findings {
+                    use oxplow_coverage::Severity::*;
+                    match f.severity {
+                        Error => error_count += 1,
+                        Warning => warning_count += 1,
+                        Info => info_count += 1,
+                        Note => note_count += 1,
+                    }
+                }
+                // No baseline gate: findings are ABSOLUTE (current-file),
+                // not diff-relative like coverage (tsk86).
+                ReportSync::Analysis(
+                    match self
+                        .record_static_analysis(
+                            thread,
+                            &command,
+                            Some(report),
+                            &reads.analyzers,
+                            &source,
+                        )
+                        .await
+                        .map_err(storage)?
+                    {
+                        Some(observation_id) => AnalysisIngest::Stored {
+                            observation_id,
+                            error_count,
+                            warning_count,
+                            info_count,
+                            note_count,
+                            findings: report.findings.len(),
+                        },
+                        None => AnalysisIngest::NotRecorded,
+                    },
+                )
+            }
+        })
     }
 
     /// The capture-spine detail envelope (T-E1, tsk48): the verbatim per-run
@@ -1792,17 +2073,17 @@ impl CollectionService {
         let Some(bash) = parse_bash_post_tool(payload_json) else {
             return Ok(None);
         };
-        let cfg = self.collection_cfg();
+        let cfg = self.testing_cfg();
         // The project's OWN configured commands count as test-run patterns
-        // without having to be restated in `testRunPatterns` — if you declared
+        // without having to be restated in `runPatterns` — if you declared
         // it as the way to run tests, running it is a test run. This is what
-        // makes `fastTestCommand` (tsk171) detectable when its script name
+        // makes `fastCommand` (tsk171) detectable when its script name
         // doesn't happen to contain a built-in pattern like `cargo test`.
-        let mut test_patterns = cfg.test_run_patterns.clone();
-        test_patterns.extend(cfg.test_command.clone());
-        test_patterns.extend(cfg.fast_test_command.clone());
+        let mut test_patterns = cfg.run_patterns.clone();
+        test_patterns.extend(cfg.command.clone());
+        test_patterns.extend(cfg.fast_command.clone());
         let is_test = detect_test_run(&bash.command, &test_patterns);
-        let is_analysis = detect_analysis_run(&bash.command, &cfg.analysis_run_patterns);
+        let is_analysis = detect_analysis_run(&bash.command, &cfg.analysis_patterns);
         let is_commit = detect_git_commit(&bash.command);
         let is_revert = detect_git_revert(&bash.command);
         if !is_test && !is_analysis && !is_commit && !is_revert {
@@ -1833,7 +2114,6 @@ impl CollectionService {
         if (is_commit || is_revert) && !is_test && !is_analysis {
             return Ok(None);
         }
-        let registry = self.registry(&cfg);
         // Reports this run could have written: judged at the run's own
         // time, so a redelivery (a crash before the checkpoint, a retried
         // dead letter, a pump backlog) sees what the first delivery saw.
@@ -1841,14 +2121,17 @@ impl CollectionService {
 
         // Static-analysis ride-along (OBSERVE-ALWAYS): when an analyzer ran,
         // record a static-analysis observation — command-only (the ran-record)
-        // when no fresh analysis report exists, or carrying merged findings when
-        // one does. Classification is by collector kind, not a format heuristic.
+        // when none of its report collectors read a report it wrote, or
+        // carrying their merged findings.
         if is_analysis {
-            let (report, source, analyzers) =
-                match self.merge_fresh_analysis(window, &cfg, &registry) {
-                    Some((r, source, analyzers)) => (Some(r), source, analyzers),
-                    None => (None, "analysis-report".to_string(), Vec::new()),
-                };
+            let reads = self
+                .read_run_reports(RunKind::Analysis, window, cause)
+                .await;
+            let (report, source) = match reads.analysis() {
+                Some((r, source)) => (Some(r.clone()), source),
+                None => (None, "analysis-report".to_string()),
+            };
+            let analyzers = reads.analyzers.clone();
             // Leg isolation (tsk79): one leg's transient error must not kill
             // the legs after it — the test-run + coverage recording below is
             // independent of whether this analysis write landed.
@@ -1872,15 +2155,15 @@ impl CollectionService {
         if !is_test {
             return Ok(None);
         }
-        // Merge every fresh test report into one per-test tree (each test stack
-        // regenerates its own report; the freshness window excludes stale ones
-        // from prior runs/other stacks).
-        let report = self.merge_fresh_test_reports(window, &cfg, &registry);
+        // The test run's report collectors, each reading the report it wrote
+        // (each test stack writes its own; the freshness window leaves out
+        // stale ones from prior runs or other stacks), merged by kind.
+        let reads = self.read_run_reports(RunKind::Test, window, cause).await;
         // Trust tier rides in `source`: "post-tool-bash" for the plain hook /
-        // in-process collectors, "plugin-exec:<name>" when a lower-trust exec
-        // plugin produced the suites (mirrors the coverage path).
-        let (report, source) = match report {
-            Some((r, source)) => (Some(r), source),
+        // in-process parsers, "plugin-exec:<ids>" when a lower-trust program
+        // parser produced the suites (mirrors the coverage path).
+        let (report, source) = match reads.tests() {
+            Some((r, source)) => (Some(r.clone()), source),
             None => (None, "post-tool-bash".to_string()),
         };
         // Leg isolation (tsk79): a failed test-run write still lets the
@@ -1912,13 +2195,13 @@ impl CollectionService {
         // A transient error here used to silently drop the run's coverage
         // (tsk79) — now it retries once and, when both attempts (or the parse
         // of a fresh report) lose, records a durable `failed` capture.
-        let (coverage, coverage_errors) = self.merge_fresh_coverage(window, &cfg, &registry);
+        let coverage = reads.coverage();
         if let Some((merged, source)) = &coverage {
-            // The label says whether a lower-trust exec plugin produced it.
+            // The label says whether a lower-trust program parser produced it.
             self.coverage_ride_along_with_retry(thread, merged, source, cause)
                 .await;
-        } else if !coverage_errors.is_empty() {
-            self.record_coverage_failure(thread, &coverage_errors.join("; "), cause)
+        } else if !reads.coverage_errors.is_empty() {
+            self.record_coverage_failure(thread, &reads.coverage_errors.join("; "), cause)
                 .await;
         }
         // A run delivered after its freshness window can't be judged: the
@@ -1977,7 +2260,8 @@ impl CollectionService {
         // from the project's own config.
         let produced_report = report.is_some() || coverage.is_some();
         if !produced_report && self.mark_nudged(&effort.id).await {
-            let msg = report_nudge_message(&cfg, &bash.command);
+            let msg =
+                report_nudge_message(&cfg, !self.report_collectors().is_empty(), &bash.command);
             self.persist_nudge(
                 thread,
                 Some(&effort),
@@ -2101,199 +2385,6 @@ impl CollectionService {
             .claim_once(effort.value(), "report-less-run")
             .await
             .unwrap_or(false)
-    }
-
-    /// Merge every configured test report that exists and is fresher than
-    /// the effort start into one tree, via each format's collector. `None`
-    /// when nothing fresh/non-empty.
-    fn merge_fresh_test_reports(
-        &self,
-        window: FreshWindow,
-        cfg: &oxplow_config::CollectionConfig,
-        registry: &CollectorRegistry,
-    ) -> Option<(oxplow_coverage::TestReport, String)> {
-        let mut merged = oxplow_coverage::TestReport::default();
-        let mut exec_names: Vec<String> = Vec::new();
-        for r in &cfg.reports {
-            let Some(collector) = registry.resolve(&r.format) else {
-                tracing::warn!(format = %r.format, path = %r.path, "no collector for report format");
-                continue;
-            };
-            if collector.kind() != CollectorKind::Test {
-                continue;
-            }
-            let abs = self.project_dir.join(&r.path);
-            if !window.holds(&abs) {
-                continue;
-            }
-            let Ok(content) = std::fs::read_to_string(&abs) else {
-                continue;
-            };
-            match collector.run(&content) {
-                Ok(CollectorOutput::Test(parsed)) => {
-                    merged.suites.extend(parsed.suites);
-                    if collector.runtime() == CollectorRuntime::Exec {
-                        exec_names.push(collector.name().to_string());
-                    }
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::warn!(format = %r.format, error = %e, "test report parse failed")
-                }
-            }
-        }
-        if merged.suites.iter().all(|s| s.cases.is_empty()) {
-            return None;
-        }
-        let source = if exec_names.is_empty() {
-            "post-tool-bash".to_string()
-        } else {
-            format!("plugin-exec:{}", exec_names.join(","))
-        };
-        Some((merged, source))
-    }
-
-    /// Merge every configured coverage report that exists and is fresher
-    /// than the effort start into one file→coverage map, via each format's
-    /// collector. Returns the merged report plus a `source` label (lower-trust
-    /// `plugin-exec:*` when any contributing collector was an external
-    /// process). `None` when none contributed.
-    /// Returns the merged report (when any fresh report parsed) plus the parse
-    /// errors of fresh reports that did NOT parse — so the caller can make a
-    /// "fresh report existed but its coverage was lost" durable (tsk79)
-    /// instead of the miss living only in a tty warn.
-    fn merge_fresh_coverage(
-        &self,
-        window: FreshWindow,
-        cfg: &oxplow_config::CollectionConfig,
-        registry: &CollectorRegistry,
-    ) -> (
-        Option<(oxplow_coverage::CoverageReport, String)>,
-        Vec<String>,
-    ) {
-        let mut merged = oxplow_coverage::CoverageReport::default();
-        let mut exec_names: Vec<String> = Vec::new();
-        let mut errors: Vec<String> = Vec::new();
-        let mut any = false;
-        for r in &cfg.reports {
-            let Some(collector) = registry.resolve(&r.format) else {
-                tracing::warn!(format = %r.format, path = %r.path, "no collector for report format");
-                continue;
-            };
-            if collector.kind() != CollectorKind::Coverage {
-                continue;
-            }
-            let abs = self.project_dir.join(&r.path);
-            if !window.holds(&abs) {
-                continue;
-            }
-            let Ok(content) = std::fs::read_to_string(&abs) else {
-                continue;
-            };
-            match collector.run(&content) {
-                Ok(CollectorOutput::Coverage(parsed)) => {
-                    for (path, fc) in parsed.files {
-                        let entry = merged.files.entry(path).or_default();
-                        entry.instrumented.extend(fc.instrumented);
-                        entry.covered.extend(fc.covered);
-                        // Counters SUM where the line sets union (tsk160): two
-                        // toolchains reporting the same file each contribute
-                        // their own branches/functions. Dropping these left
-                        // observe_coverage's `*_found > 0` gate permanently
-                        // closed, so oxplow.coverage.branch/.function never got
-                        // a fact on this path.
-                        entry.branches_found =
-                            entry.branches_found.saturating_add(fc.branches_found);
-                        entry.branches_hit = entry.branches_hit.saturating_add(fc.branches_hit);
-                        entry.functions_found =
-                            entry.functions_found.saturating_add(fc.functions_found);
-                        entry.functions_hit = entry.functions_hit.saturating_add(fc.functions_hit);
-                    }
-                    if collector.runtime() == CollectorRuntime::Exec {
-                        exec_names.push(collector.name().to_string());
-                    }
-                    any = true;
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::warn!(format = %r.format, error = %e, "coverage report parse failed");
-                    errors.push(format!("{} ({}): {e}", r.path, r.format));
-                }
-            }
-        }
-        if !any {
-            return (None, errors);
-        }
-        let source = if exec_names.is_empty() {
-            "coverage-report".to_string()
-        } else {
-            format!("plugin-exec:{}", exec_names.join(","))
-        };
-        (Some((merged, source)), errors)
-    }
-
-    /// Merge every configured analysis report that exists and is fresher than
-    /// the effort start into one findings list, via each format's collector.
-    /// Returns the merged report, a `source` label (lower-trust `plugin-exec:*`
-    /// when any contributing collector was an external process), and the
-    /// contributing analyzer names (collector names, `oxplow.` prefix stripped)
-    /// for the UI's "which analyzer ran" label. `None` when none contributed.
-    fn merge_fresh_analysis(
-        &self,
-        window: FreshWindow,
-        cfg: &oxplow_config::CollectionConfig,
-        registry: &CollectorRegistry,
-    ) -> Option<(oxplow_coverage::AnalysisReport, String, Vec<String>)> {
-        let mut merged = oxplow_coverage::AnalysisReport::default();
-        let mut exec_names: Vec<String> = Vec::new();
-        let mut analyzers: Vec<String> = Vec::new();
-        let mut any = false;
-        for r in &cfg.reports {
-            let Some(collector) = registry.resolve(&r.format) else {
-                tracing::warn!(format = %r.format, path = %r.path, "no collector for report format");
-                continue;
-            };
-            if collector.kind() != CollectorKind::Analysis {
-                continue;
-            }
-            let abs = self.project_dir.join(&r.path);
-            if !window.holds(&abs) {
-                continue;
-            }
-            let Ok(content) = std::fs::read_to_string(&abs) else {
-                continue;
-            };
-            match collector.run(&content) {
-                Ok(CollectorOutput::Analysis(parsed)) => {
-                    merged.findings.extend(parsed.findings);
-                    let label = collector
-                        .name()
-                        .strip_prefix("oxplow.")
-                        .unwrap_or(collector.name())
-                        .to_string();
-                    if !analyzers.contains(&label) {
-                        analyzers.push(label);
-                    }
-                    if collector.runtime() == CollectorRuntime::Exec {
-                        exec_names.push(collector.name().to_string());
-                    }
-                    any = true;
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::warn!(format = %r.format, error = %e, "analysis report parse failed")
-                }
-            }
-        }
-        if !any {
-            return None;
-        }
-        let source = if exec_names.is_empty() {
-            "analysis-report".to_string()
-        } else {
-            format!("plugin-exec:{}", exec_names.join(","))
-        };
-        Some((merged, source, analyzers))
     }
 
     /// Record a `static-analysis` observation. OBSERVE-ALWAYS (tsk269): analysis
@@ -3218,16 +3309,20 @@ fn unattributed_run_message(command: &str, open: &[Effort]) -> String {
     )
 }
 
-fn report_nudge_message(cfg: &oxplow_config::CollectionConfig, command: &str) -> String {
+fn report_nudge_message(
+    cfg: &oxplow_config::TestingConfig,
+    has_report_collectors: bool,
+    command: &str,
+) -> String {
     let cmd = command.trim();
     if let Some(tc) = cfg
-        .test_command
+        .command
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
         match cfg
-            .fast_test_command
+            .fast_command
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
@@ -3244,15 +3339,15 @@ fn report_nudge_message(cfg: &oxplow_config::CollectionConfig, command: &str) ->
                  one) via `{tc}` in the foreground so they all show."
             ),
         }
-    } else if !cfg.reports.is_empty() {
+    } else if has_report_collectors {
         format!(
-            "Tests ran (`{cmd}`) but refreshed none of the configured collection reports, so \
-             this effort has no parsed tests/coverage. Re-run via the command that regenerates \
-             them and set `collection.testCommand` in .oxplow/project.yaml to make it one step."
+            "Tests ran (`{cmd}`) but wrote none of the reports this project's report collectors \
+             read, so this effort has no parsed tests/coverage. Re-run via the command that \
+             writes them, and set `testing.command` in .oxplow/project.yaml to make it one step."
         )
     } else {
         format!(
-            "Tests ran (`{cmd}`) but this project has no collection profile, so oxplow can't \
+            "Tests ran (`{cmd}`) but this project reads no test reports, so oxplow can't \
              attribute tests/coverage to the effort. Run /oxplow:configure to wire this stack's \
              report(s)."
         )
@@ -3390,6 +3485,146 @@ const REPORT_FRESH_SLACK_MS: i64 = 60 * 1000;
 
 /// The report mtimes a run could have produced: after `from`, no later than
 /// `to`. A report outside it belongs to an earlier run (or a later one).
+/// Why a report collector's parser couldn't be made.
+enum ParserProblem {
+    /// An `exec` parser nobody on this machine approved as it is now.
+    NeedsApproval(String),
+    /// Its script can't be read or its format isn't one oxplow reads.
+    Broken(String),
+}
+
+/// How a report collector is being run: what ran it (`on` / `manual`), as
+/// whom (an event source), and for which detected run.
+struct ReportRun<'a> {
+    trigger: &'static str,
+    source: &'a str,
+    cause: Option<&'a RunCause>,
+}
+
+/// What reading one report collector came to.
+#[derive(Debug)]
+enum ReportRead {
+    /// Its report wasn't written by this run: nothing ran.
+    NotFresh,
+    /// Its report isn't there: nothing ran.
+    Missing(String),
+    /// Its failures disabled it until a person enables it: nothing ran.
+    Disabled(String),
+    /// An `exec` parser nobody approved: recorded, nothing ran.
+    NeedsApproval(String),
+    /// It ran and parsed. `exec` names a program parser (a lower-trust
+    /// source); `label` is the parser (`clippy`, or the collector's id).
+    Parsed {
+        output: CollectorOutput,
+        exec: Option<String>,
+        label: String,
+    },
+    /// It ran and failed: recorded, counted toward disabling it.
+    Failed(String),
+}
+
+/// A detected run's report collectors' outputs, merged by kind, with the
+/// program parsers among them (their output is tagged lower-trust).
+#[derive(Debug, Default)]
+struct RunReports {
+    tests: Option<oxplow_coverage::TestReport>,
+    coverage: Option<oxplow_coverage::CoverageReport>,
+    analysis: Option<oxplow_coverage::AnalysisReport>,
+    /// The bundled analyzers whose findings joined (`clippy`, `eslint`),
+    /// or the collector's id for its own parser: the UI's "which analyzer
+    /// ran" label.
+    analyzers: Vec<String>,
+    /// Program parsers by kind.
+    exec_tests: Vec<String>,
+    exec_coverage: Vec<String>,
+    exec_analysis: Vec<String>,
+    /// Coverage reports this run wrote that failed to parse (tsk79: a lost
+    /// coverage run is recorded, not only logged).
+    coverage_errors: Vec<String>,
+}
+
+impl RunReports {
+    fn add(&mut self, output: CollectorOutput, exec: Option<String>, label: String) {
+        match output {
+            CollectorOutput::Test(parsed) => {
+                self.tests
+                    .get_or_insert_with(Default::default)
+                    .suites
+                    .extend(parsed.suites);
+                self.exec_tests.extend(exec);
+            }
+            CollectorOutput::Coverage(parsed) => {
+                let merged = self.coverage.get_or_insert_with(Default::default);
+                merge_coverage(merged, parsed);
+                self.exec_coverage.extend(exec);
+            }
+            CollectorOutput::Analysis(parsed) => {
+                self.analysis
+                    .get_or_insert_with(Default::default)
+                    .findings
+                    .extend(parsed.findings);
+                if !self.analyzers.contains(&label) {
+                    self.analyzers.push(label);
+                }
+                self.exec_analysis.extend(exec);
+            }
+        }
+    }
+
+    /// The merged test tree, unless no case was in it.
+    fn tests(&self) -> Option<(&oxplow_coverage::TestReport, String)> {
+        let t = self.tests.as_ref()?;
+        if t.suites.iter().all(|s| s.cases.is_empty()) {
+            return None;
+        }
+        Some((t, trust("post-tool-bash", &self.exec_tests)))
+    }
+
+    fn coverage(&self) -> Option<(&oxplow_coverage::CoverageReport, String)> {
+        Some((
+            self.coverage.as_ref()?,
+            trust("coverage-report", &self.exec_coverage),
+        ))
+    }
+
+    fn analysis(&self) -> Option<(&oxplow_coverage::AnalysisReport, String)> {
+        Some((
+            self.analysis.as_ref()?,
+            trust("analysis-report", &self.exec_analysis),
+        ))
+    }
+}
+
+/// A run's `source`: `observed` from oxplow's own parse, or flagged
+/// `plugin-exec:<ids>` when a program parser contributed ([[tsk162]]).
+fn trust(observed: &str, exec: &[String]) -> String {
+    if exec.is_empty() {
+        observed.to_string()
+    } else {
+        format!("plugin-exec:{}", exec.join(","))
+    }
+}
+
+/// Fold `parsed` into `merged`: line sets union and the branch/function
+/// counters SUM (tsk160) — two toolchains reporting the same file each
+/// contribute their own. Dropping the counters left `observe_coverage`'s
+/// `*_found > 0` gate closed, so `oxplow.coverage.branch`/`.function` never
+/// got a fact.
+fn merge_coverage(
+    merged: &mut oxplow_coverage::CoverageReport,
+    parsed: oxplow_coverage::CoverageReport,
+) {
+    for (path, fc) in parsed.files {
+        let entry = merged.files.entry(path).or_default();
+        entry.instrumented.extend(fc.instrumented);
+        entry.covered.extend(fc.covered);
+        entry.branches_found = entry.branches_found.saturating_add(fc.branches_found);
+        entry.branches_hit = entry.branches_hit.saturating_add(fc.branches_hit);
+        entry.functions_found = entry.functions_found.saturating_add(fc.functions_found);
+        entry.functions_hit = entry.functions_hit.saturating_add(fc.functions_hit);
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FreshWindow {
     from_ms: i64,
@@ -3444,115 +3679,32 @@ fn diff_new_side_lines(old: &str, new: &str) -> BTreeSet<u32> {
     changed
 }
 
-/// Convert a project plugin config into an executable collector, reading its
-/// script from `entryFile` (project-relative; config validation already
-/// rejects absolute / `..` paths). Host-side file I/O — the script itself
-/// still does none, so determinism holds. `Err` carries a reason for the
-/// skip-and-warn path.
-fn plugin_to_collector(
-    p: &oxplow_config::PluginConfig,
-    project_dir: &std::path::Path,
-    approvals: &crate::exec_consent::ApprovalStore,
-) -> Result<Collector, String> {
-    let kind = match p.kind.as_str() {
-        "coverage" => CollectorKind::Coverage,
-        "test" => CollectorKind::Test,
-        "analysis" => CollectorKind::Analysis,
-        other => return Err(format!("unknown kind \"{other}\"")),
-    };
-    let input = match p.input.as_deref().unwrap_or("text") {
-        "text" => CollectorInput::Text,
-        "json" => CollectorInput::Json,
-        "xml" => CollectorInput::Xml,
-        "lcov" => CollectorInput::Lcov,
-        "lines" => CollectorInput::Lines,
-        other => return Err(format!("unknown input \"{other}\"")),
-    };
-    let entry_file = p
-        .entry_file
-        .as_deref()
-        .ok_or_else(|| "missing entryFile".to_string())?;
-    let abs = project_dir.join(entry_file);
-    Ok(match p.runtime.as_str() {
-        "jaq" | "starlark" => {
-            // The host reads the script file; the script never touches the fs.
-            let script = std::fs::read_to_string(&abs)
-                .map_err(|e| format!("read entryFile \"{entry_file}\": {e}"))?;
-            if p.runtime == "jaq" {
-                Collector::jaq(p.name.clone(), kind, p.formats.clone(), input, script)
-            } else {
-                Collector::starlark(p.name.clone(), kind, p.formats.clone(), input, script)
-            }
-        }
-        "exec" => {
-            // A program from the repo's config: only once a person approved
-            // it on this machine, at this content and args (tsk331).
-            use crate::exec_consent::{may_run, needs_approval, ProgramKind};
-            if !may_run(
-                approvals,
-                project_dir,
-                ProgramKind::Plugin,
-                &p.name,
-                entry_file,
-                &p.args,
-            ) {
-                return Err(needs_approval(ProgramKind::Plugin, &p.name, entry_file));
-            }
-            // entryFile is the program to spawn (must be executable).
-            let mut argv = vec![abs.to_string_lossy().into_owned()];
-            argv.extend(p.args.iter().cloned());
-            Collector::exec(p.name.clone(), kind, p.formats.clone(), argv)
-        }
-        other => return Err(format!("unknown runtime \"{other}\"")),
-    })
-}
+/// What the collection tests declare (tsk863).
+#[cfg(test)]
+pub(crate) mod test_support {
+    use oxplow_config::collectors::CollectorSpec;
 
-/// The first configured report whose format resolves to a coverage collector
-/// (the default target of an `ingest_coverage` call without overrides).
-fn first_coverage_report<'a>(
-    cfg: &'a oxplow_config::CollectionConfig,
-    registry: &CollectorRegistry,
-) -> Option<&'a oxplow_config::ReportConfig> {
-    cfg.reports.iter().find(|r| {
-        registry
-            .resolve(&r.format)
-            .is_some_and(|c| c.kind() == CollectorKind::Coverage)
-    })
-}
-
-/// First configured report whose format resolves to an analysis collector —
-/// the default target for an `ingest_analysis` call with no override.
-fn first_analysis_report<'a>(
-    cfg: &'a oxplow_config::CollectionConfig,
-    registry: &CollectorRegistry,
-) -> Option<&'a oxplow_config::ReportConfig> {
-    cfg.reports.iter().find(|r| {
-        registry
-            .resolve(&r.format)
-            .is_some_and(|c| c.kind() == CollectorKind::Analysis)
-    })
-}
-
-/// Trust label for a coverage collector's output: in-process tiers are an
-/// observed `coverage-report`; the external-exec escape hatch is flagged
-/// `plugin-exec:<name>` so exec-produced coverage isn't stored as a
-/// first-party parse ([[tsk162]]).
-fn coverage_source(collector: &Collector) -> String {
-    if collector.runtime() == CollectorRuntime::Exec {
-        format!("plugin-exec:{}", collector.name())
-    } else {
-        "coverage-report".to_string()
-    }
-}
-
-/// Trust label for an analysis collector's output: in-process tiers are
-/// `observed` from an `analysis-report`; the external-exec escape hatch is
-/// flagged `plugin-exec:<name>` so the UI can mark it lower-trust.
-fn analysis_source(collector: &Collector) -> String {
-    if collector.runtime() == CollectorRuntime::Exec {
-        format!("plugin-exec:{}", collector.name())
-    } else {
-        "analysis-report".to_string()
+    /// A project report collector: `records` (`tests` / `coverage` /
+    /// `analysis`) read from `path` by `entry` (`oxplow:<parser>` or a
+    /// script) after a `run` (`test` / `analysis`).
+    pub(crate) fn report_collector(
+        id: &str,
+        records: &str,
+        entry: &str,
+        path: &str,
+        run: &str,
+    ) -> CollectorSpec {
+        let yaml = format!(
+            "- {{ id: {id}, records: {records}, entry: \"{entry}\", report: {{ path: \"{path}\" }}, trigger: {{ on_run: {run} }} }}"
+        );
+        let value: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+        let (mut specs, errors) = oxplow_config::collectors::parse_collectors(
+            oxplow_config::collectors::PROJECT,
+            &value,
+            &|_| true,
+        );
+        assert_eq!(errors, Vec::<String>::new());
+        specs.remove(0)
     }
 }
 
@@ -3596,13 +3748,21 @@ mod tests {
         );
     }
 
+    fn testing(command: Option<&str>, fast: Option<&str>) -> oxplow_config::TestingConfig {
+        oxplow_config::TestingConfig {
+            command: command.map(str::to_string),
+            fast_command: fast.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn report_nudge_names_configured_test_command() {
-        let cfg = oxplow_config::CollectionConfig {
-            test_command: Some("bun run test:collect".into()),
-            ..Default::default()
-        };
-        let msg = report_nudge_message(&cfg, "bun test");
+        let msg = report_nudge_message(
+            &testing(Some("bun run test:collect"), None),
+            true,
+            "bun test",
+        );
         // Echoes the project's own command — tool-agnostic, no built-in
         // tool→command knowledge in the hook.
         assert!(msg.contains("bun run test:collect"), "{msg}");
@@ -3614,12 +3774,11 @@ mod tests {
     /// and keeps the full one for the closing run.
     #[test]
     fn report_nudge_offers_the_fast_command_for_iterating() {
-        let cfg = oxplow_config::CollectionConfig {
-            test_command: Some("bun run test:collect".into()),
-            fast_test_command: Some("bun run test:fast".into()),
-            ..Default::default()
-        };
-        let msg = report_nudge_message(&cfg, "cargo test -p x");
+        let msg = report_nudge_message(
+            &testing(Some("bun run test:collect"), Some("bun run test:fast")),
+            true,
+            "cargo test -p x",
+        );
         assert!(msg.contains("`bun run test:fast`"), "{msg}");
         assert!(msg.contains("`bun run test:collect`"), "{msg}");
         assert!(!msg.contains("EVERY"), "{msg}");
@@ -3627,12 +3786,16 @@ mod tests {
 
     #[test]
     fn report_nudge_routes_to_configure_without_profile() {
-        // No collection profile at all → route to the agent-driven
-        // configure flow (which adapts to any tool).
-        let cfg = oxplow_config::CollectionConfig::default();
-        let msg = report_nudge_message(&cfg, "pytest -q tests/");
+        // Nothing reads reports → route to the agent-driven configure flow
+        // (which adapts to any tool).
+        let msg = report_nudge_message(&testing(None, None), false, "pytest -q tests/");
         assert!(msg.contains("/oxplow:configure"), "{msg}");
         assert!(msg.contains("pytest -q tests/"), "{msg}");
+        let with_collectors = report_nudge_message(&testing(None, None), true, "pytest");
+        assert!(
+            with_collectors.contains("testing.command"),
+            "{with_collectors}"
+        );
     }
 
     #[test]
@@ -3640,141 +3803,50 @@ mod tests {
         // The nudge ships in oxplow-app and fires in every downstream
         // project — it must never point at this repo's own `.context/`
         // docs, which don't exist in a user's project.
-        let with_cmd = oxplow_config::CollectionConfig {
-            test_command: Some("bun run test:collect".into()),
-            ..Default::default()
-        };
-        let with_reports = oxplow_config::CollectionConfig {
-            reports: vec![oxplow_config::ReportConfig {
-                path: "coverage/lcov.info".into(),
-                format: "lcov".into(),
-            }],
-            ..Default::default()
-        };
-        let no_profile = oxplow_config::CollectionConfig::default();
-        for cfg in [&with_cmd, &with_reports, &no_profile] {
-            let msg = report_nudge_message(cfg, "bun test");
+        for (cfg, collectors) in [
+            (testing(Some("bun run test:collect"), None), true),
+            (testing(None, None), true),
+            (testing(None, None), false),
+        ] {
+            let msg = report_nudge_message(&cfg, collectors, "bun test");
             assert!(!msg.contains(".context/"), "leaked repo path: {msg}");
         }
     }
 
+    /// tsk863: the parsers a report collector may name are the ones oxplow
+    /// ships, each recording what it parses and pre-parsing its report the
+    /// way its program expects.
     #[test]
-    fn project_plugin_config_converts_registers_and_runs() {
-        // The generic mechanism: a project-defined plugin (config + a script
-        // file, zero Rust) registers a new format and parses through the
-        // registry. The script lives in a file (entryFile), not the yaml.
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("oxplow/plugins")).unwrap();
-        std::fs::write(
-            dir.path().join("oxplow/plugins/clover.jq"),
-            r#"{ files: { (.attrs.file): { instrumented: [1], covered: [1] } } }"#,
-        )
-        .unwrap();
-        let p = oxplow_config::PluginConfig {
-            name: "acme.clover".into(),
-            kind: "coverage".into(),
-            formats: vec!["clover".into()],
-            runtime: "jaq".into(),
-            input: Some("xml".into()),
-            entry_file: Some("oxplow/plugins/clover.jq".into()),
-            args: vec![],
-        };
-        let collector = plugin_to_collector(
-            &p,
-            dir.path(),
-            &crate::exec_consent::ApprovalStore::for_tests(dir.path()),
-        )
-        .expect("config converts to collector");
-        assert_eq!(collector.kind(), CollectorKind::Coverage);
-        let mut reg = CollectorRegistry::with_builtins();
-        reg.register(collector);
-        let out = reg
-            .run("clover", r#"<cov file="src/a.rs"/>"#)
-            .expect("plugin runs");
-        assert!(out.as_coverage().unwrap().files.contains_key("src/a.rs"));
-        // Builtins still resolve alongside the project plugin.
-        assert!(reg.resolve("cobertura").is_some());
-        // An unknown format resolves to None — merge_* warns and skips it.
-        assert!(reg.resolve("nope").is_none());
+    fn the_bundled_parsers_agree_with_what_config_accepts() {
+        let config: Vec<(String, Records, String)> = oxplow_config::collectors::BUNDLED_PARSERS
+            .iter()
+            .map(|(n, r, f)| (n.to_string(), *r, f.to_string()))
+            .collect();
+        let shipped: Vec<(String, Records, String)> = oxplow_collect_plugin::BUNDLED
+            .iter()
+            .map(|(n, kind, input, _)| {
+                let records = match kind {
+                    CollectorKind::Test => Records::Tests,
+                    CollectorKind::Coverage => Records::Coverage,
+                    CollectorKind::Analysis => Records::Analysis,
+                };
+                let format = ["text", "json", "xml", "lcov", "lines"]
+                    .into_iter()
+                    .find(|f| CollectorInput::named(f) == Some(*input))
+                    .unwrap();
+                (n.to_string(), records, format.to_string())
+            })
+            .collect();
+        assert_eq!(config, shipped);
     }
 
     #[test]
-    fn exec_coverage_keeps_its_lower_trust_label() {
-        let exec = Collector::exec(
-            "acme.parse",
-            CollectorKind::Coverage,
-            ["mine"],
-            vec!["/bin/cat".to_string()],
+    fn a_program_parser_keeps_its_lower_trust_label() {
+        assert_eq!(trust("coverage-report", &[]), "coverage-report");
+        assert_eq!(
+            trust("coverage-report", &["tests.parse".into(), "x".into()]),
+            "plugin-exec:tests.parse,x"
         );
-        assert_eq!(coverage_source(&exec), "plugin-exec:acme.parse");
-        let builtin = CollectorRegistry::with_builtins()
-            .resolve("cobertura")
-            .cloned()
-            .unwrap();
-        assert_eq!(coverage_source(&builtin), "coverage-report");
-    }
-
-    #[test]
-    fn an_exec_plugin_runs_only_once_a_person_approved_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let approvals = crate::exec_consent::ApprovalStore::for_tests(dir.path());
-        std::fs::create_dir_all(dir.path().join("tools")).unwrap();
-        std::fs::write(dir.path().join("tools/parse.sh"), "cat").unwrap();
-        let p = oxplow_config::PluginConfig {
-            name: "acme.parse".into(),
-            kind: "coverage".into(),
-            formats: vec!["mine".into()],
-            runtime: "exec".into(),
-            input: None,
-            entry_file: Some("tools/parse.sh".into()),
-            args: vec!["--x".into()],
-        };
-        let err = plugin_to_collector(&p, dir.path(), &approvals).unwrap_err();
-        assert!(err.contains("approval"), "{err}");
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        std::fs::write(
-            oxplow_config::config_path(dir.path()),
-            "collection:\n  plugins:\n    - { name: acme.parse, kind: coverage, formats: [mine], runtime: exec, entryFile: tools/parse.sh, args: [--x] }\n",
-        )
-        .unwrap();
-        let cfg = oxplow_config::load_project_config(dir.path()).unwrap();
-        crate::exec_consent::approve_program(
-            &approvals,
-            dir.path(),
-            &cfg,
-            &[],
-            crate::exec_consent::ProgramKind::Plugin,
-            "acme.parse",
-            &crate::exec_consent::version_of(
-                &approvals,
-                dir.path(),
-                &cfg,
-                crate::exec_consent::ProgramKind::Plugin,
-                "acme.parse",
-            ),
-        )
-        .unwrap();
-        assert!(plugin_to_collector(&p, dir.path(), &approvals).is_ok());
-    }
-
-    #[test]
-    fn project_plugin_with_missing_entry_file_is_skipped() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = oxplow_config::PluginConfig {
-            name: "acme.clover".into(),
-            kind: "coverage".into(),
-            formats: vec!["clover".into()],
-            runtime: "jaq".into(),
-            input: Some("xml".into()),
-            entry_file: Some("oxplow/plugins/missing.jq".into()),
-            args: vec![],
-        };
-        assert!(plugin_to_collector(
-            &p,
-            dir.path(),
-            &crate::exec_consent::ApprovalStore::for_tests(dir.path())
-        )
-        .is_err());
     }
 
     #[test]
@@ -3967,12 +4039,39 @@ mod tests {
         }
 
         /// Build the fixture. `report_xml` Some → write it + configure the
-        /// collection profile (cobertura/coverage.xml); None → leave
-        /// collection unconfigured. The effort's start snapshot holds
+        /// `tests.coverage` report collector (cobertura/coverage.xml); None →
+        /// no report collector. The effort's start snapshot holds
         /// `src/foo.rs` as `a\nb\nc\n`; the stream's latest snapshot (and the
         /// working tree) has `a\nB\nc\nd\n` (lines 2 changed, 4 added).
         async fn build(report_xml: Option<&str>) -> Harness {
             build_full(report_xml, false).await
+        }
+
+        use super::super::test_support::report_collector;
+
+        /// Declare `specs` as the project's report collectors.
+        fn declare(h: &Harness, specs: Vec<CollectorSpec>) {
+            h.service.config.write().unwrap().collectors = specs;
+        }
+
+        /// What a run of `kind` that ended just now reads.
+        async fn run_reads(h: &Harness, kind: RunKind) -> RunReports {
+            h.service
+                .read_run_reports(kind, FreshWindow::ending_now(), None)
+                .await
+        }
+
+        /// Run the harness's coverage collector by hand (`collector.sync`).
+        async fn ingest_coverage(h: &Harness) -> CoverageIngest {
+            match h
+                .service
+                .sync_report_collector(&h.thread, "tests.coverage", "human")
+                .await
+                .unwrap()
+            {
+                ReportSync::Coverage(c) => c,
+                other => panic!("{other:?}"),
+            }
         }
 
         /// Like [`build`], plus `git_init`: `git init` the project and lay
@@ -4109,10 +4208,14 @@ mod tests {
             let mut cfg = oxplow_config::load_project_config(&project_dir).unwrap();
             if let Some(xml) = report_xml {
                 std::fs::write(project_dir.join("coverage.xml"), xml).unwrap();
-                cfg.collection.reports.push(oxplow_config::ReportConfig {
-                    path: "coverage.xml".into(),
-                    format: "cobertura".into(),
-                });
+                cfg.collectors
+                    .push(super::super::test_support::report_collector(
+                        "tests.coverage",
+                        "coverage",
+                        "oxplow:cobertura",
+                        "coverage.xml",
+                        "test",
+                    ));
             }
 
             let nudges = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
@@ -4138,7 +4241,12 @@ mod tests {
                 Arc::new(RwLock::new(cfg)),
                 project_dir,
                 Arc::new(oxplow_db::SqliteAttributionStore::new(db.clone())),
-            );
+            )
+            .with_run_log(crate::collector_runner::RunLog {
+                db: db.clone(),
+                vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
+                layer: crate::sql_gateway::SqlGateway::new(db.clone()),
+            });
             Harness {
                 service,
                 thread: thread.id,
@@ -4164,11 +4272,7 @@ mod tests {
             // tsk270: ingest records ABSOLUTE coverage (instruments {1,2,4},
             // covers {1,2} → 2/3 ≈ 66.7%); the effort-relative DIFF (changed∩instr
             // = {2,4}, covered {2} → 50%, line 4 uncovered) is derived at READ.
-            let outcome = h
-                .service
-                .ingest_coverage(&h.thread, None, None, false)
-                .await
-                .unwrap();
+            let outcome = ingest_coverage(&h).await;
             match outcome {
                 CoverageIngest::Stored {
                     summary_pct,
@@ -4217,10 +4321,7 @@ mod tests {
         #[tokio::test]
         async fn diff_coverage_ignores_edits_after_the_run() {
             let h = build(Some(COBERTURA_50PCT)).await;
-            h.service
-                .ingest_coverage(&h.thread, None, None, false)
-                .await
-                .unwrap();
+            ingest_coverage(&h).await;
             std::fs::write(h.tmp.path().join("src/foo.rs"), "x\n").unwrap();
             let pct = diff_pct(&h).await.expect("a diff");
             assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
@@ -4231,10 +4332,7 @@ mod tests {
         #[tokio::test]
         async fn a_worktree_streams_diff_uses_its_snapshots() {
             let h = build(Some(COBERTURA_50PCT)).await;
-            h.service
-                .ingest_coverage(&h.thread, None, None, false)
-                .await
-                .unwrap();
+            ingest_coverage(&h).await;
             std::fs::remove_file(h.tmp.path().join("src/foo.rs")).unwrap();
             let pct = diff_pct(&h).await.expect("a diff from snapshots alone");
             assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
@@ -4245,10 +4343,7 @@ mod tests {
         #[tokio::test]
         async fn an_expired_baseline_gives_no_diff() {
             let h = build(Some(COBERTURA_50PCT)).await;
-            h.service
-                .ingest_coverage(&h.thread, None, None, false)
-                .await
-                .unwrap();
+            ingest_coverage(&h).await;
             let keep = std::collections::HashSet::from([BlobStore::hash(NEW_FOO.as_bytes())]);
             BlobStore::new(h.tmp.path().join(".oxplow/snapshots"))
                 .gc(&keep)
@@ -4295,10 +4390,7 @@ mod tests {
 
             // Observe coverage — two efforts open ⇒ unclaimed.
             assert!(matches!(
-                h.service
-                    .ingest_coverage(&h.thread, None, None, false)
-                    .await
-                    .unwrap(),
+                ingest_coverage(&h).await,
                 CoverageIngest::Stored { .. }
             ));
             // No pollution: neither effort shows a diff-coverage observation yet.
@@ -4338,10 +4430,7 @@ mod tests {
         async fn ingest_coverage_mirrors_into_metric_substrate() {
             // git_init = true so a branch is present to capture.
             let h = build_full(Some(COBERTURA_50PCT), true).await;
-            h.service
-                .ingest_coverage(&h.thread, None, None, false)
-                .await
-                .unwrap();
+            ingest_coverage(&h).await;
 
             // The durable fact layer (epic tsk12; the legacy sample write is
             // gone, T-E2): one `oxplow.coverage` fact for the report's single
@@ -4395,10 +4484,7 @@ mod tests {
   </class>
 </classes></package></packages></coverage>"#;
             let h = build_full(Some(COBERTURA_BF), true).await;
-            h.service
-                .ingest_coverage(&h.thread, None, None, false)
-                .await
-                .unwrap();
+            ingest_coverage(&h).await;
 
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
             let bm = facts
@@ -4460,19 +4546,25 @@ mod tests {
 </classes></package></packages></coverage>"#;
             let h = build(None).await;
             std::fs::write(h.tmp.path().join("cov.xml"), COBERTURA_BF).unwrap();
-            let cfg = oxplow_config::CollectionConfig {
-                reports: vec![oxplow_config::ReportConfig {
-                    path: "cov.xml".into(),
-                    format: "cobertura".into(),
-                }],
-                ..Default::default()
-            };
+            declare(
+                &h,
+                vec![report_collector(
+                    "r0",
+                    "coverage",
+                    "oxplow:cobertura",
+                    "cov.xml",
+                    "test",
+                )],
+            );
             // Floor at the epoch so the just-written report is always fresh
             // (same approach as the merge_fresh_test_reports tests).
-            let registry = h.service.registry(&cfg);
-            let (merged, _errors) =
-                h.service
-                    .merge_fresh_coverage(FreshWindow::ending_now(), &cfg, &registry);
+            let (merged, _errors) = {
+                let reads = run_reads(&h, RunKind::Test).await;
+                (
+                    reads.coverage().map(|(r, s)| (r.clone(), s)),
+                    reads.coverage_errors.clone(),
+                )
+            };
             let (report, _source) = merged.expect("fresh cobertura report should merge");
             let fc = report
                 .files
@@ -4513,23 +4605,20 @@ mod tests {
             let h = build(None).await;
             std::fs::write(h.tmp.path().join("a.xml"), A).unwrap();
             std::fs::write(h.tmp.path().join("b.xml"), B).unwrap();
-            let cfg = oxplow_config::CollectionConfig {
-                reports: vec![
-                    oxplow_config::ReportConfig {
-                        path: "a.xml".into(),
-                        format: "cobertura".into(),
-                    },
-                    oxplow_config::ReportConfig {
-                        path: "b.xml".into(),
-                        format: "cobertura".into(),
-                    },
+            declare(
+                &h,
+                vec![
+                    report_collector("r0", "coverage", "oxplow:cobertura", "a.xml", "test"),
+                    report_collector("r1", "coverage", "oxplow:cobertura", "b.xml", "test"),
                 ],
-                ..Default::default()
+            );
+            let (merged, _errors) = {
+                let reads = run_reads(&h, RunKind::Test).await;
+                (
+                    reads.coverage().map(|(r, s)| (r.clone(), s)),
+                    reads.coverage_errors.clone(),
+                )
             };
-            let registry = h.service.registry(&cfg);
-            let (merged, _errors) =
-                h.service
-                    .merge_fresh_coverage(FreshWindow::ending_now(), &cfg, &registry);
             let (report, _source) = merged.expect("both reports should merge");
             let fc = report.files.get("src/foo.rs").expect("merged file");
 
@@ -5935,6 +6024,7 @@ mod tests {
             }
             let cause = RunCause {
                 event_id: "evt-anchored".into(),
+                seq: 0,
                 anchors: oxplow_domain::Anchors {
                     effort_id: Some(eid),
                     ..Default::default()
@@ -6635,10 +6725,7 @@ mod tests {
         #[tokio::test]
         async fn ingest_coverage_writes_coverage_detail_finding_to_substrate() {
             let h = build_full(Some(COBERTURA_50PCT), true).await;
-            h.service
-                .ingest_coverage(&h.thread, None, None, false)
-                .await
-                .unwrap();
+            ingest_coverage(&h).await;
             // The per-file line-sets ride in the coverage CAPTURE's detail
             // envelope (T-E1/T-E2 — the legacy coverage-detail finding is gone).
             let caps = oxplow_db::SqliteFactStore::new(h.db.clone())
@@ -6674,9 +6761,9 @@ mod tests {
             let h = build(None).await;
             // Run the bundled junit collector to build the suite/case tree
             // (oxplow-coverage no longer exposes a parse entry point).
-            let junit = match CollectorRegistry::with_builtins()
+            let junit = match Collector::bundled("junit")
+                .unwrap()
                 .run(
-                    "junit",
                     r#"<testsuites><testsuite name="oxplow-app">
                   <testcase classname="oxplow_app::collection" name="a"/>
                   <testcase classname="oxplow_app::collection" name="b"><failure/></testcase>
@@ -6730,24 +6817,235 @@ mod tests {
                 .await
                 .unwrap();
             assert!(matches!(
-                h.service
-                    .ingest_coverage(&h.thread, None, None, true)
-                    .await
-                    .unwrap(),
+                ingest_coverage(&h).await,
                 CoverageIngest::Stored { .. }
             ));
         }
 
+        const JUNIT_ONE: &str = r#"<testsuites><testsuite name="s"><testcase classname="c" name="t1"/></testsuite></testsuites>"#;
+
+        /// The rows `collector_run` has for project collector `id`:
+        /// `(status, error)`.
+        async fn collector_run(h: &Harness, id: &str) -> Option<(String, Option<String>)> {
+            let id = id.to_string();
+            h.db.read(move |c| {
+                use rusqlite::OptionalExtension;
+                c.query_row(
+                    "SELECT status, error FROM collector_run WHERE owner = 'project' AND id = ?1",
+                    [&id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap()
+        }
+
+        /// tsk863: a test run reads its `on_run: test` collectors, an
+        /// analyzer run its `on_run: analysis` ones — never the other's.
         #[tokio::test]
-        async fn ingest_coverage_not_configured() {
+        async fn a_run_reads_only_its_on_run_collectors() {
             let h = build(None).await;
-            assert_eq!(
-                h.service
-                    .ingest_coverage(&h.thread, None, None, true)
-                    .await
-                    .unwrap(),
-                CoverageIngest::NotConfigured
+            std::fs::write(h.tmp.path().join("tests.xml"), JUNIT_ONE).unwrap();
+            std::fs::write(h.tmp.path().join("clippy.json"), CLIPPY_JSON).unwrap();
+            declare(
+                &h,
+                vec![
+                    report_collector("tests.junit", "tests", "oxplow:junit", "tests.xml", "test"),
+                    report_collector(
+                        "lint.clippy",
+                        "analysis",
+                        "oxplow:clippy",
+                        "clippy.json",
+                        "analysis",
+                    ),
+                ],
             );
+            let test = run_reads(&h, RunKind::Test).await;
+            assert!(test.tests().is_some());
+            assert!(test.analysis().is_none());
+            assert_eq!(collector_run(&h, "lint.clippy").await, None, "not run");
+            let analysis = run_reads(&h, RunKind::Analysis).await;
+            assert!(analysis.analysis().is_some());
+            assert!(analysis.tests().is_none());
+        }
+
+        /// tsk863: what a report collector read is its run: a
+        /// `collector_run` row and a `collector.synced`, like any
+        /// collector's — caused by the detected run, once per run.
+        #[tokio::test]
+        async fn a_report_collector_run_is_recorded() {
+            let h = build(None).await;
+            std::fs::write(h.tmp.path().join("tests.xml"), JUNIT_ONE).unwrap();
+            declare(
+                &h,
+                vec![report_collector(
+                    "tests.junit",
+                    "tests",
+                    "oxplow:junit",
+                    "tests.xml",
+                    "test",
+                )],
+            );
+            let cause = RunCause {
+                event_id: oxplow_domain::EventId::generate().to_string(),
+                seq: 42,
+                anchors: Default::default(),
+                at: Timestamp::now(),
+            };
+            for _ in 0..2 {
+                h.service
+                    .read_run_reports(RunKind::Test, FreshWindow::around(cause.at), Some(&cause))
+                    .await;
+            }
+            assert_eq!(
+                collector_run(&h, "tests.junit").await,
+                Some(("ok".into(), None))
+            );
+            let synced: Vec<serde_json::Value> =
+                h.db.read(|c| {
+                    let mut stmt = c
+                        .prepare("SELECT payload FROM event_log WHERE type = 'collector.synced'")
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let rows = stmt
+                        .query_map([], |r| r.get::<_, String>(0))
+                        .map_err(oxplow_db::map_sql_err)?
+                        .map(|r| serde_json::from_str(&r.unwrap()).unwrap())
+                        .collect();
+                    Ok(rows)
+                })
+                .await
+                .unwrap();
+            assert_eq!(synced.len(), 1, "a redelivered run records nothing more");
+            assert_eq!(synced[0]["collector"], "collector:project/tests.junit");
+            assert_eq!(synced[0]["trigger"], "on");
+            assert_eq!(synced[0]["status"], "ok");
+        }
+
+        /// tsk863: a program parser runs only once a person approved it on
+        /// this machine, like any project collector's program; until then
+        /// its run says why, and nothing is read.
+        #[cfg(unix)]
+        #[tokio::test]
+        async fn an_exec_parser_waits_for_the_collector_approval() {
+            use std::os::unix::fs::PermissionsExt;
+            let h = build(None).await;
+            let dir = h.tmp.path();
+            std::fs::create_dir_all(dir.join("tools")).unwrap();
+            let program = dir.join("tools/parse.sh");
+            std::fs::write(
+                &program,
+                "#!/bin/sh\ncat >/dev/null\necho '{\"suites\":[{\"name\":\"s\",\"cases\":[{\"classname\":\"c\",\"name\":\"t\",\"status\":\"passed\"}]}]}'\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::write(dir.join("out.txt"), "whatever the tool wrote").unwrap();
+            let value: serde_yaml::Value = serde_yaml::from_str(
+                "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }",
+            )
+            .unwrap();
+            let (specs, errors) = oxplow_config::collectors::parse_collectors(
+                oxplow_config::collectors::PROJECT,
+                &value,
+                &|_| true,
+            );
+            assert_eq!(errors, Vec::<String>::new());
+            declare(&h, specs);
+            let approvals = Arc::new(crate::exec_consent::ApprovalStore::for_tests(dir));
+            let service = h.service.clone().with_approvals(approvals.clone());
+            let read = |service: CollectionService| async move {
+                service
+                    .read_run_reports(RunKind::Test, FreshWindow::ending_now(), None)
+                    .await
+            };
+
+            assert!(read(service.clone()).await.tests().is_none());
+            let (status, error) = collector_run(&h, "tests.parse").await.unwrap();
+            assert_eq!(status, "needs_approval");
+            assert!(error.unwrap().contains("approval"));
+
+            let cfg = h.service.config.read().unwrap().clone();
+            let version = crate::exec_consent::version_of(
+                &approvals,
+                dir,
+                &cfg,
+                crate::exec_consent::ProgramKind::Collector,
+                "tests.parse",
+            );
+            crate::exec_consent::approve_program(
+                &approvals,
+                dir,
+                &cfg,
+                &[],
+                crate::exec_consent::ProgramKind::Collector,
+                "tests.parse",
+                &version,
+            )
+            .unwrap();
+            let reads = read(service).await;
+            let (tests, source) = reads.tests().expect("the approved program parsed");
+            assert_eq!(tests.suites[0].cases.len(), 1);
+            assert_eq!(
+                source, "plugin-exec:tests.parse",
+                "a program's output is lower-trust"
+            );
+            assert_eq!(collector_run(&h, "tests.parse").await.unwrap().0, "ok");
+        }
+
+        /// tsk863: a report collector is held to the plugin failure policy
+        /// (P7.C2): its third failed parse in a row disables it, and a
+        /// disabled one reads nothing until a person enables it.
+        #[tokio::test]
+        async fn three_failed_parses_disable_the_collector() {
+            let h = build(None).await;
+            std::fs::write(h.tmp.path().join("tests.xml"), "<testsuites><testcase").unwrap();
+            declare(
+                &h,
+                vec![report_collector(
+                    "tests.junit",
+                    "tests",
+                    "oxplow:junit",
+                    "tests.xml",
+                    "test",
+                )],
+            );
+            let health = crate::plugin_health::PluginHealth::new(
+                h.db.clone(),
+                oxplow_domain::vocabulary::VocabularyHandle::core(),
+            );
+            let key = crate::collector_runner::plugin_key("project", "tests.junit");
+            for n in 1..=3 {
+                assert_eq!(
+                    health.disabled_reason(&key).await.unwrap(),
+                    None,
+                    "before failure {n}"
+                );
+                run_reads(&h, RunKind::Test).await;
+                assert_eq!(collector_run(&h, "tests.junit").await.unwrap().0, "error");
+            }
+            assert!(health.disabled_reason(&key).await.unwrap().is_some());
+            // A good report now isn't read: the collector is off.
+            std::fs::write(h.tmp.path().join("tests.xml"), JUNIT_ONE).unwrap();
+            assert!(run_reads(&h, RunKind::Test).await.tests().is_none());
+            assert!(matches!(
+                h.service
+                    .sync_report_collector(&h.thread, "tests.junit", "human")
+                    .await,
+                Err(crate::collector_runner::RunCollectorError::Disabled(_))
+            ));
+        }
+
+        /// tsk863: `collector.sync` runs a collector the project declares.
+        #[tokio::test]
+        async fn an_undeclared_report_collector_is_not_found() {
+            let h = build(None).await;
+            assert!(matches!(
+                h.service
+                    .sync_report_collector(&h.thread, "tests.coverage", "human")
+                    .await,
+                Err(crate::collector_runner::RunCollectorError::NotFound)
+            ));
         }
 
         #[tokio::test]
@@ -6761,10 +7059,7 @@ mod tests {
             let h = build(Some(only_line_1)).await;
             // tsk270: observe records absolute coverage regardless (Stored)…
             assert!(matches!(
-                h.service
-                    .ingest_coverage(&h.thread, None, None, false)
-                    .await
-                    .unwrap(),
+                ingest_coverage(&h).await,
                 CoverageIngest::Stored { .. }
             ));
             // …but the effort's DERIVED diff is empty (line 1 is unchanged), so no
@@ -6821,10 +7116,10 @@ mod tests {
         async fn on_post_tool_use_nudges_on_report_less_test_run() {
             // A detected test command with no fresh report → nudge returned.
             let h = build(None).await;
-            // Configure a testCommand so the nudge names it.
+            // Configure a test command so the nudge names it.
             {
                 let mut cfg = h.service.config.write().unwrap();
-                cfg.collection.test_command = Some("bun run test:collect".into());
+                cfg.testing.command = Some("bun run test:collect".into());
             }
             let result = h
                 .service
@@ -6834,7 +7129,7 @@ mod tests {
             let nudge = result.expect("nudge returned for report-less run");
             assert!(
                 nudge.contains("bun run test:collect"),
-                "nudge should name the configured testCommand; got: {nudge}"
+                "nudge should name the configured test command; got: {nudge}"
             );
             // A report-LESS run produces no parseable counts, so the substrate
             // records no test sample → the effort panel shows no test-run row
@@ -6866,10 +7161,7 @@ mod tests {
             // renderer colors red/green from it and the nudge fires below target
             // — no hardcoded UI constant.
             let h = build_full(Some(COBERTURA_50PCT), true).await;
-            h.service
-                .ingest_coverage(&h.thread, None, None, false)
-                .await
-                .unwrap();
+            ingest_coverage(&h).await;
             // The policy rides the producer SPEC (T-E2: the legacy definition
             // write is gone) — seeded by seed_catalog.
             for spec in crate::producer_metrics::builtin_producer_specs() {
@@ -6900,19 +7192,21 @@ mod tests {
                 r#"<testsuites><testsuite name="suite"><testcase classname="c" name="t1"/></testsuite></testsuites>"#,
             )
             .unwrap();
-            let cfg = oxplow_config::CollectionConfig {
-                reports: vec![oxplow_config::ReportConfig {
-                    path: "tests.xml".into(),
-                    format: "junit".into(),
-                }],
-                test_command: Some("bun run test:collect".into()),
-                ..Default::default()
-            };
+            declare(
+                &h,
+                vec![report_collector(
+                    "r0",
+                    "tests",
+                    "oxplow:junit",
+                    "tests.xml",
+                    "test",
+                )],
+            );
             // Just written, so inside a window ending now.
-            let registry = h.service.registry(&cfg);
-            let report =
-                h.service
-                    .merge_fresh_test_reports(FreshWindow::ending_now(), &cfg, &registry);
+            let report = run_reads(&h, RunKind::Test)
+                .await
+                .tests()
+                .map(|(r, s)| (r.clone(), s));
             assert!(
                 report.is_some(),
                 "fresh JUnit report should be merged (effort start = epoch)"
@@ -6943,6 +7237,7 @@ mod tests {
                 Timestamp::from_unix_ms(Timestamp::now().unix_ms() - 2 * REPORT_FRESH_WINDOW_MS);
             let cause = RunCause {
                 event_id: "evt-late".into(),
+                seq: 0,
                 anchors: oxplow_domain::Anchors {
                     effort_id: Some(eid),
                     ..Default::default()
@@ -6974,7 +7269,7 @@ mod tests {
             let h = build(None).await;
             {
                 let mut cfg = h.service.config.write().unwrap();
-                cfg.collection.test_command = Some("bun run test:collect".into());
+                cfg.testing.command = Some("bun run test:collect".into());
             }
             let payload = bash_payload("bun test", 0);
             let first = h
@@ -7002,7 +7297,7 @@ mod tests {
             let h = build(None).await;
             {
                 let mut cfg = h.service.config.write().unwrap();
-                cfg.collection.test_command = Some("bun run test:collect".into());
+                cfg.testing.command = Some("bun run test:collect".into());
             }
             let payload = bash_payload("bun test --watch false", 0);
             h.service
@@ -7066,13 +7361,13 @@ mod tests {
         async fn on_post_tool_use_routes_to_configure_when_no_collection_profile() {
             // No collection block → nudge routes to /oxplow:configure.
             let h = build(None).await;
-            // collection has no testCommand and no reports by default.
+            // No test command and no report collectors by default.
             let result = h
                 .service
                 .on_post_tool_use(&h.thread, &bash_payload("bun test", 0))
                 .await
                 .unwrap();
-            let nudge = result.expect("nudge returned even without a collection profile");
+            let nudge = result.expect("nudge returned even without report collectors");
             assert!(
                 nudge.contains("/oxplow:configure"),
                 "nudge should route to /oxplow:configure when no profile exists; got: {nudge}"
@@ -7094,24 +7389,15 @@ mod tests {
             )
             .unwrap();
             // Just written, so inside a window ending now.
-            let cfg = oxplow_config::CollectionConfig {
-                reports: vec![
-                    oxplow_config::ReportConfig {
-                        path: "rust.xml".into(),
-                        format: "junit".into(),
-                    },
-                    oxplow_config::ReportConfig {
-                        path: "front.xml".into(),
-                        format: "junit".into(),
-                    },
+            declare(
+                &h,
+                vec![
+                    report_collector("r0", "tests", "oxplow:junit", "rust.xml", "test"),
+                    report_collector("r1", "tests", "oxplow:junit", "front.xml", "test"),
                 ],
-                ..Default::default()
-            };
-            let registry = h.service.registry(&cfg);
-            let (merged, source) = h
-                .service
-                .merge_fresh_test_reports(FreshWindow::ending_now(), &cfg, &registry)
-                .expect("both fresh reports merged");
+            );
+            let reads = run_reads(&h, RunKind::Test).await;
+            let (merged, source) = reads.tests().expect("both fresh reports merged");
             let names: Vec<&str> = merged.suites.iter().map(|s| s.name.as_str()).collect();
             assert!(
                 names.contains(&"rust-crate") && names.contains(&"frontend"),
@@ -7278,21 +7564,21 @@ mod tests {
             let h = build(None).await;
             std::fs::write(h.tmp.path().join("clippy.json"), CLIPPY_JSON).unwrap();
             // Just written, so inside a window ending now.
-            let cfg = oxplow_config::CollectionConfig {
-                reports: vec![oxplow_config::ReportConfig {
-                    path: "clippy.json".into(),
-                    format: "clippy-json".into(),
-                }],
-                ..Default::default()
-            };
-            let registry = h.service.registry(&cfg);
-            let (merged, source, analyzers) = h
-                .service
-                .merge_fresh_analysis(FreshWindow::ending_now(), &cfg, &registry)
-                .expect("fresh clippy report merged");
+            declare(
+                &h,
+                vec![report_collector(
+                    "r0",
+                    "analysis",
+                    "oxplow:clippy",
+                    "clippy.json",
+                    "analysis",
+                )],
+            );
+            let reads = run_reads(&h, RunKind::Analysis).await;
+            let (merged, source) = reads.analysis().expect("fresh clippy report merged");
             assert_eq!(merged.findings.len(), 2);
             assert_eq!(source, "analysis-report");
-            assert_eq!(analyzers, vec!["clippy".to_string()]);
+            assert_eq!(reads.analyzers, vec!["clippy".to_string()]);
         }
 
         // `eslint -f json`: errors (severity 2) + a warning (severity 1)
@@ -7309,20 +7595,29 @@ mod tests {
 
         #[tokio::test]
         async fn ingest_analysis_stores_static_analysis_from_eslint_report() {
-            // End-to-end TS path: registry-parse(eslint-json) → store, through
+            // End-to-end TS path: the bundled eslint parser → store, through
             // the real service entry point (not just the golden parser test).
             let h = build(None).await;
             std::fs::write(h.tmp.path().join("eslint.json"), ESLINT_JSON).unwrap();
-            let outcome = h
+            declare(
+                &h,
+                vec![report_collector(
+                    "lint.eslint",
+                    "analysis",
+                    "oxplow:eslint",
+                    "eslint.json",
+                    "analysis",
+                )],
+            );
+            let outcome = match h
                 .service
-                .ingest_analysis(
-                    &h.thread,
-                    Some("eslint.json".into()),
-                    Some("eslint-json".into()),
-                    false,
-                )
+                .sync_report_collector(&h.thread, "lint.eslint", "human")
                 .await
-                .unwrap();
+                .unwrap()
+            {
+                ReportSync::Analysis(a) => a,
+                other => panic!("{other:?}"),
+            };
             match outcome {
                 AnalysisIngest::Stored {
                     error_count,
@@ -7389,16 +7684,25 @@ mod tests {
             assert!(no_base.start_snapshot_id.is_none());
 
             std::fs::write(h.tmp.path().join("eslint.json"), ESLINT_JSON).unwrap();
-            let outcome = h
+            declare(
+                &h,
+                vec![report_collector(
+                    "lint.eslint",
+                    "analysis",
+                    "oxplow:eslint",
+                    "eslint.json",
+                    "analysis",
+                )],
+            );
+            let outcome = match h
                 .service
-                .ingest_analysis(
-                    &h.thread,
-                    Some("eslint.json".into()),
-                    Some("eslint-json".into()),
-                    false,
-                )
+                .sync_report_collector(&h.thread, "lint.eslint", "human")
                 .await
-                .unwrap();
+                .unwrap()
+            {
+                ReportSync::Analysis(a) => a,
+                other => panic!("{other:?}"),
+            };
             match outcome {
                 AnalysisIngest::Stored { findings, .. } => assert_eq!(findings, 3),
                 other => panic!("expected Stored with no baseline, got {other:?}"),
@@ -7412,20 +7716,30 @@ mod tests {
             assert_eq!(rows[0].local_snapshot_id, None);
         }
 
+        /// tsk863: a by-hand run of a collector whose report isn't there
+        /// says so; nothing ran, so nothing is recorded.
         #[tokio::test]
-        async fn ingest_analysis_reports_missing_report() {
+        async fn a_missing_report_is_named() {
             let h = build(None).await;
-            let outcome = h
+            declare(
+                &h,
+                vec![report_collector(
+                    "lint.eslint",
+                    "analysis",
+                    "oxplow:eslint",
+                    "nope.json",
+                    "analysis",
+                )],
+            );
+            let err = h
                 .service
-                .ingest_analysis(
-                    &h.thread,
-                    Some("nope.json".into()),
-                    Some("eslint-json".into()),
-                    false,
-                )
+                .sync_report_collector(&h.thread, "lint.eslint", "human")
                 .await
-                .unwrap();
-            assert_eq!(outcome, AnalysisIngest::ReportMissing("nope.json".into()));
+                .unwrap_err();
+            assert!(
+                matches!(&err, crate::collector_runner::RunCollectorError::Failed(m) if m.contains("nope.json")),
+                "{err:?}"
+            );
         }
 
         #[tokio::test]

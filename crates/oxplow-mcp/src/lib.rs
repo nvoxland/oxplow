@@ -1961,8 +1961,8 @@ impl OxplowMcp {
         description = "Discover the thread's currently-open effort. Returns `{ open, effortId, \
             taskId, startedAt, hasStartSnapshot }` — `open:false` (with null ids) when no effort \
             is open. Use this to find the `effortId` for `effort.amend`, to confirm an effort is \
-            open before `test.ingest_coverage` / `test.ingest_analysis` / `test.record_run`, and to debug a \
-            `no_open_effort` / `no_baseline` outcome (`hasStartSnapshot:false` ⇒ no baseline)."
+            open before `collector.sync` on a report collector or `test.record_run`, and to see \
+            whether its diff coverage has a baseline (`hasStartSnapshot:false` ⇒ none)."
     )]
     async fn get_open_effort(
         &self,

@@ -1179,9 +1179,9 @@ pub struct RunRecord<'a> {
     pub trigger: &'static str,
     /// Who ran it, as an event source (`system`, `human`, `agent:<thread>`).
     pub source: &'a str,
-    /// The trigger event (`on`): the run's `last_event_id`, its event's
-    /// cause and dedupe key.
-    pub cause: Option<&'a StoredEvent>,
+    /// The trigger event's id and seq (`on`): the run's `last_event_id`,
+    /// its event's cause and dedupe key.
+    pub cause: Option<(oxplow_domain::EventId, i64)>,
     /// `ok` or `error`.
     pub status: &'a str,
     pub entities: BTreeMap<String, i64>,
@@ -1243,13 +1243,13 @@ impl RunLog {
             error: r.error.clone(),
             row_counts: r.entities.clone(),
             cursor: None,
-            last_event_id: r.cause.map(|e| e.seq),
+            last_event_id: r.cause.as_ref().map(|(_, seq)| *seq),
         };
         let synced = Synced {
             source: r.source.to_string(),
             collector: oxplow_domain::refs::build::collector_ref(r.owner, r.id),
             trigger: r.trigger,
-            cause: r.cause.map(|e| (e.envelope.id.clone(), e.seq)),
+            cause: r.cause,
         };
         let envelope = synced.envelope(r.status, r.entities, r.facts, r.elapsed_ms, r.error);
         let vocabulary = self.vocabulary.clone();
@@ -1273,6 +1273,36 @@ impl RunLog {
                 oxplow_db::collector_store::record_run_in(tx, &run)
                     .map_err(oxplow_db::map_sql_err)?;
                 Ok(true)
+            })
+            .await
+    }
+}
+
+impl RunLog {
+    /// A run that couldn't start: an exec collector nobody on this machine
+    /// approved. Its `collector_run` row says so (`needs_approval`, the
+    /// reason as its error); nothing ran, so nothing is announced and its
+    /// health doesn't move.
+    pub async fn record_needs_approval(
+        &self,
+        owner: &str,
+        id: &str,
+        last_event_id: Option<i64>,
+        reason: String,
+    ) -> Result<(), DomainError> {
+        let run = CollectorRun {
+            owner: owner.to_string(),
+            id: id.to_string(),
+            status: "needs_approval".into(),
+            last_run_at: now_rfc3339(),
+            error: Some(reason),
+            row_counts: BTreeMap::new(),
+            cursor: None,
+            last_event_id,
+        };
+        self.db
+            .transaction(move |tx| {
+                oxplow_db::collector_store::record_run_in(tx, &run).map_err(oxplow_db::map_sql_err)
             })
             .await
     }
@@ -1609,6 +1639,8 @@ pub struct CollectorRunner {
     pub catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
     pub ai: Arc<crate::ai_compute::AiCompute>,
     pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
+    /// Runs the project's report collectors (`records:`, tsk863).
+    pub collection: crate::collection::CollectionService,
     /// The fact engine, which runs the collectors that record facts.
     pub metrics: crate::metrics_service::MetricsService,
 }
@@ -1677,10 +1709,12 @@ impl CollectorRunner {
     }
 }
 
-/// `collector.sync { owner, id }`: run an approved collector now
+/// `collector.sync { owner, id, thread? }`: run an approved collector now
 /// (External: it runs the collector's program or script). Any actor may
 /// run it; none approves through it — consent is a person's, in Settings
-/// → Data. Run by the system it's the `every:` schedule's run.
+/// → Data. Run by the system it's the `every:` schedule's run. A project
+/// report collector (`records:`, tsk863) records what it parses in a
+/// thread: an agent's own, or the one a person names.
 pub const SYNC: &str = "collector.sync";
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1690,6 +1724,10 @@ pub struct SyncInput {
     pub owner: String,
     /// The collector's `id` in its owner's `collectors:`.
     pub id: String,
+    /// For a report collector: the thread its run is recorded in
+    /// (`thread:thr3`); an agent's is always its own.
+    #[serde(default)]
+    pub thread: Option<String>,
 }
 
 pub fn sync_command(sync: CollectorRunner) -> crate::commands::Command {
@@ -1702,7 +1740,10 @@ pub fn sync_command(sync: CollectorRunner) -> crate::commands::Command {
             name: SYNC.into(),
             summary: "Run an approved collector now, refreshing what it collects (runs the \
                       collector's program or script, which the bus doesn't own). It never \
-                      approves: an unapproved exec collector is refused."
+                      approves: an unapproved exec collector is refused. A project report \
+                      collector (`records:`) reads its report now and records what it parses \
+                      in `thread` (an agent's own): point at the report, never report numbers \
+                      yourself."
                 .into(),
             input_schema: serde_json::to_value(schemars::schema_for!(SyncInput))
                 .expect("schema serializes"),
@@ -1716,6 +1757,7 @@ pub fn sync_command(sync: CollectorRunner) -> crate::commands::Command {
         Handler::External(std::sync::Arc::new(move |actor, input| {
             let sync = sync.clone();
             let source = actor.source();
+            let acting = actor.clone();
             let trigger = match actor {
                 oxplow_domain::Actor::System => RunTrigger::Every,
                 _ => RunTrigger::Manual,
@@ -1726,25 +1768,54 @@ pub fn sync_command(sync: CollectorRunner) -> crate::commands::Command {
                         field: None,
                         message: e.to_string(),
                     })?;
-                let report =
-                    sync.sync(&input.owner, &input.id, trigger, &source)
+                let failed = |e: RunCollectorError| match e {
+                    RunCollectorError::NotFound => CommandError::Invalid {
+                        field: Some("/id".into()),
+                        message: format!(
+                            "no collector `{}/{}` in the project's extensions",
+                            input.owner, input.id
+                        ),
+                    },
+                    RunCollectorError::NeedsApproval(m) | RunCollectorError::Disabled(m) => {
+                        CommandError::Invalid {
+                            field: Some("/id".into()),
+                            message: m,
+                        }
+                    }
+                    RunCollectorError::Failed(m) => CommandError::Failed { message: m },
+                    RunCollectorError::Storage(e) => CommandError::from(e),
+                };
+                if input.owner == oxplow_config::collectors::PROJECT
+                    && sync.collection.is_report_collector(&input.id)
+                {
+                    let thread = crate::commands::thread::acting_thread_of(
+                        &acting,
+                        input.thread.as_deref(),
+                    )?;
+                    let recorded = sync
+                        .collection
+                        .sync_report_collector(&thread, &input.id, &source)
                         .await
-                        .map_err(|e| match e {
-                            RunCollectorError::NotFound => CommandError::Invalid {
-                                field: Some("/id".into()),
-                                message: format!(
-                                    "no collector `{}/{}` in the project's extensions",
-                                    input.owner, input.id
-                                ),
-                            },
-                            RunCollectorError::NeedsApproval(m)
-                            | RunCollectorError::Disabled(m) => CommandError::Invalid {
-                                field: Some("/id".into()),
-                                message: m,
-                            },
-                            RunCollectorError::Failed(m) => CommandError::Failed { message: m },
-                            RunCollectorError::Storage(e) => CommandError::from(e),
-                        })?;
+                        .map_err(failed)?;
+                    return Ok(HandlerOutput {
+                        result: serde_json::json!({
+                            "owner": input.owner,
+                            "id": input.id,
+                            "recorded": recorded.to_json(),
+                        }),
+                        ..HandlerOutput::default()
+                    });
+                }
+                if input.thread.is_some() {
+                    return Err(CommandError::Invalid {
+                        field: Some("/thread".into()),
+                        message: "`thread` is for a project report collector (`records:`)".into(),
+                    });
+                }
+                let report = sync
+                    .sync(&input.owner, &input.id, trigger, &source)
+                    .await
+                    .map_err(failed)?;
                 Ok(HandlerOutput {
                     result: serde_json::to_value(report).expect("report serializes"),
                     ..HandlerOutput::default()

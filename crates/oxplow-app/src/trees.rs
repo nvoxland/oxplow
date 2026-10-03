@@ -691,7 +691,7 @@ mod tests {
             "*\n!.gitignore\n!project.yaml\n",
         )
         .unwrap();
-        std::fs::write(ws.join(".oxplow/project.yaml"), "collection:\n  a: 1\n").unwrap();
+        std::fs::write(ws.join(".oxplow/project.yaml"), "testing:\n  command: x\n").unwrap();
         std::fs::write(ws.join("normal.txt"), "x\n").unwrap();
         let c1 = commit_all(&ws, "c1");
         let d = f

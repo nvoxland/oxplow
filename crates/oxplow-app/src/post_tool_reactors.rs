@@ -30,6 +30,7 @@ pub const POST_TOOL_ADVISORIES: &str = "advisories.post_tool";
 fn cause_of(event: &StoredEvent) -> RunCause {
     RunCause {
         event_id: event.envelope.id.as_str().to_string(),
+        seq: event.seq,
         anchors: event.envelope.anchors.clone(),
         at: event.envelope.at,
     }
@@ -279,7 +280,7 @@ mod tests {
     async fn nudges_are_delivered_once_by_thread() {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
-        svc.config.write().unwrap().collection.test_command = Some("bun run test:collect".into());
+        svc.config.write().unwrap().testing.command = Some("bun run test:collect".into());
         svc.hook_ingest
             .ingest(hook(f.thread, HookKind::PostToolUse, bash("bun test")))
             .await

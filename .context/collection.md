@@ -48,55 +48,67 @@ section for the column.
   `EffortObservation` wire type (`kind` ∈ `test-run`/`diff-coverage`/
   `static-analysis`, `metric_value`, `payload_json`, freshness pin) is the
   read/IPC shape only — see [metrics.md](./metrics.md) for the substrate.
-- **Pluggable parsers — `oxplow-collect-plugin`** (`crates/oxplow-collect-plugin/`).
-  Report parsing is **not baked in**: a `CollectorRegistry` maps a `format`
-  string → a *collector* that turns report text into a **typed output** for its
-  kind (coverage = per-file `{ instrumented, covered }` line-sets; test =
-  `TestReport { suites → cases }`; analysis = `AnalysisReport { findings }`,
-  each finding `{ path, line?, column?, severity, rule?, message }`). The typed
-  shapes live in `oxplow-coverage`, which is now just a pure-types crate
-  (+ legacy Rust parsers kept only as the golden-test oracle). The six
-  first-party parsers (cobertura, lcov, jacoco coverage; junit tests; clippy,
-  eslint analysis) ship as **bundled jaq plugins** (`src/plugins/*.jq`)
-  registered by `CollectorRegistry::with_builtins()` — same behavior as before,
-  just no longer a closed `match`. Projects add formats via `collection.plugins` (below) with
-  no change to oxplow. See **Pluggable parsers** below for the model + how to
-  author one. Paths/classnames are verbatim from the report; the caller maps
-  paths to repo-relative and the UI builds the test tree from `classname`+`name`.
-- **Collection profile** (`collection:` block in `.oxplow/project.yaml`, parsed by
-  `crates/oxplow-config/src/lib.rs`): `testCommand`, `fastTestCommand`,
-  `reports: [{ path,
-  format }]`, `testRunPatterns`, `analysisRunPatterns`, and `plugins: [...]`
-  (project-defined parsers — see below). `format` is no longer gate-kept against a hardcoded
-  list; it's resolved against the collector registry at collection time, so a
-  plugin-provided format works and an unknown one is a *warning*, not a config
-  error. The `reports` list is what makes a **polyglot repo** work — list every
-  stack's report(s); the ride-along parses each that's fresher than the effort
-  start, so each stack lights up on its own run.
+- **Report collectors** (tsk863) — reading a report is a **collector**:
+  a `collectors:` entry in `.oxplow/project.yaml` with `records: tests |
+  coverage | analysis`, the `report: { path }` it reads, a parser in
+  `entry`, and `trigger: { on_run: test | analysis }` (or none: by hand).
+  One declaration, runtime, consent and run log for "read a report file",
+  shared with every other collector (`.context/semantic-layer.md`
+  "Collectors"). Validation (`crates/oxplow-config/src/collectors.rs`,
+  `validate_report_collector`): the project's only (not an extension's);
+  no `input`, `env`, `credentials`, `network`, `after` or `sync`; the
+  trigger is `on_run` or `manual`; a `records:` collector writes no facts
+  or entities. Example:
 
-  **`fastTestCommand` (tsk171)** is the coverage-free counterpart to
-  `testCommand`, for the red/green loop. It must still emit a test report, but
+  ```yaml
+  collectors:
+    - { id: tests.rust_coverage, records: coverage, entry: "oxplow:lcov", report: { path: target/coverage/lcov.info }, trigger: { on_run: test } }
+    - { id: lint.clippy, records: analysis, entry: "oxplow:clippy", report: { path: target/clippy.json }, trigger: { on_run: analysis } }
+  ```
+- **Parsers — `oxplow-collect-plugin`** (`crates/oxplow-collect-plugin/`).
+  A parser turns report text into a **typed output** for its kind
+  (coverage = per-file `{ instrumented, covered }` line-sets; tests =
+  `TestReport { suites → cases }`; analysis = `AnalysisReport { findings }`,
+  each finding `{ path, line?, column?, severity, rule?, message }`). The
+  typed shapes live in `oxplow-coverage`. `entry: "oxplow:<name>"` names a
+  **bundled** parser (`Collector::bundled`, the `BUNDLED` table: `junit`,
+  `lcov`, `cobertura`, `jacoco`, `clippy`, `eslint` — jq programs in
+  `src/plugins/*.jq`); the config side names the same set with what each
+  records and how its report is pre-parsed (`BUNDLED_PARSERS`), and
+  `the_bundled_parsers_agree_with_what_config_accepts` holds the two
+  together. Any other `entry` is the project's own `jaq` / `starlark` /
+  `exec` parser (`runtime:`, `report.format` = the host pre-parse). There
+  is no format registry: a collector names its parser. Paths/classnames
+  are verbatim from the report; the caller maps paths to repo-relative and
+  the UI builds the test tree from `classname`+`name`.
+- **`testing:` block** (`TestingConfig`, `crates/oxplow-config/src/lib.rs`):
+  `command`, `fastCommand`, `runPatterns`, `analysisPatterns`,
+  `agentHint` — how the project's tests run, read by the detector and the
+  agent prompt. Human-only (its hint steers every agent). The old
+  `collection:` block (with `reports:` and `plugins:`) is gone: the file
+  rejects it as an unknown key (`a_collection_block_is_an_unknown_key`).
+
+  **`fastCommand` (tsk171)** is the coverage-free counterpart to
+  `command`, for the red/green loop. It must still emit a test report, but
   skips instrumentation and should accept a filter. It exists because
-  `testCommand` in a coverage-instrumented repo is far too slow to run every
+  `command` in a coverage-instrumented repo is far too slow to run every
   cycle (here: ~11s for the full suite vs 0.007s for one filtered test), so
   "route every invocation through it" was unfollowable — and an unfollowable
   rule doesn't degrade gracefully, it gets dropped entirely and NONE of the
   red→green runs get recorded. A weaker rule that is followed beats a stricter
   one that isn't.
 
-  Both configured commands are also treated as implicit `testRunPatterns` by
-  `on_post_tool_use`, so a fast command whose script name contains no built-in
-  pattern (`bun run test:fast`) is still detected as a test run without having
-  to be restated. (The pre-`reports` singular
-  fields `coverageReportPath`/`coverageFormat`/`testReportPath`/`testReportFormat`
-  are still read for back-compat and folded into `reports`.) All optional.
-  Edits hot-reload via the config watcher (`ConfigWatcher`, see
-  `git-integration.md`), so `/oxplow:configure` takes effect without a
-  restart.
+  Both commands are also treated as implicit `runPatterns` by
+  `on_post_tool_use`, so a fast command whose script name contains no
+  built-in pattern (`bun run test:fast`) is still detected as a test run
+  without having to be restated. All optional. Edits hot-reload via the
+  config watcher (`ConfigWatcher`, see `git-integration.md`), so
+  `/oxplow:configure` takes effect without a restart.
 - **`/oxplow:configure` command** + **`oxplow-collection` skill** (assets in
   `crates/oxplow-plugin/`). `/configure` does two durable things: instruments
   the project's test tooling to emit a standard-format report at a stable
-  path, and records the profile in `.oxplow/project.yaml`. The standing skill keeps
+  path, and records the `testing:` block and the report collectors in
+  `.oxplow/project.yaml`. The standing skill keeps
   coverage flowing after configure (run tests before closing a task; never
   type the numbers) so instrumentation doesn't bit-rot.
 
@@ -106,20 +118,30 @@ Two paths feed the store (see [agent-model.md](./agent-model.md) for the
 hook + MCP wiring):
 
 - **Passive** — the PostToolUse Bash hook detects a test run (built-in
-  patterns + the profile's `testRunPatterns`) and/or a static-analysis run
-  (built-in patterns + `analysisRunPatterns`, via `detect_analysis_run`) and
-  records the matching observation(s) against the open effort. It then walks
-  **every** entry in `collection.reports` and ingests the ones fresher than
-  the effort start (`merge_fresh_test_reports` / `merge_fresh_coverage` /
-  `merge_fresh_analysis` in `collection.rs`): JUnit reports merge into one
+  patterns + `testing.runPatterns` + the two commands) and/or a
+  static-analysis run (built-in patterns + `testing.analysisPatterns`, via
+  `detect_analysis_run`) and records the matching observation(s) against
+  the open effort. It then runs **every** report collector whose `on_run`
+  is that kind of run and whose report the run wrote (its mtime inside the
+  run's freshness window) — `read_run_reports` in `collection.rs`, each
+  through `read_report`: a disabled collector, an unapproved program or a
+  report that isn't there runs nothing; anything that ran is the
+  collector's run (`collector_run` + `collector.synced`, through the
+  collector runner's `RunLog`, deduped per detected run) and counts toward
+  its health — the third failed parse in a row disables it (P7.C2,
+  `plugin_health`); an `exec` parser nobody approved records
+  `needs_approval` and doesn't run. A test run only reads `on_run: test`
+  collectors, an analyzer run only `on_run: analysis` ones. What they
+  parsed merges by kind (`RunReports`): JUnit reports into one
   suite/case tree embedded in the `test-run` payload (`suites`) — the
   `junit.jq` plugin takes each `<testcase>` from its IMMEDIATE parent
   `<testsuite>`'s direct children (NOT a recursive descent), so a NESTED
   testsuite (bun emits file-suite → describe-suite → testcase) doesn't
   double-count a case under both levels (tsk361); coverage
-  reports merge into one `diff-coverage` observation over the effort's changed
-  lines; analysis reports merge into one `static-analysis` observation
-  (findings + per-severity counts). All `observed`, no agent step.
+  reports into one coverage capture (line sets union, branch/function
+  counters sum, tsk160) — the effort's diff coverage is derived from it;
+  analysis reports into one `static-analysis` observation (findings +
+  per-severity counts). All `observed`, no agent step.
   **Attribution (tsk347):** the run is pinned to its effort via the `"run"`
   ledger. An agent forces EXACT attribution by prefixing the command with
   `OXPLOW_TASK=<task id>` — `parse_task_token` reads it and
@@ -196,7 +218,8 @@ hook + MCP wiring):
   `test.run.recorded` (subject `run:<capture>`, anchored to the tool's turn,
   caused by the tool event) and each coverage capture `test.coverage.recorded`
   in the capture's transaction (`SqliteFactStore::record_facts_logged`); the
-  `test.record_run` / `test.ingest_coverage` commands log them too, anchored
+  `test.record_run` command and a by-hand `collector.sync` of a report
+  collector log them too, anchored
   to the thread (in the collector's transaction: they're `External`, so their
   events aren't caused by the run's `command.executed`). The hook waits ≤2.5 s for the `collection` and
   `advisories.post_tool` consumers (`EventPump::settle`; the advisories
@@ -235,30 +258,19 @@ hook + MCP wiring):
   the analyzer-ran record: when an analyzer is detected but regenerated no
   parseable report, it's stored command-only (no findings, no metric), the
   same way a `test-run` records command-only when no JUnit report is fresh.
-- **Active (commands, P8.A8)** — `test.ingest_coverage` and
-  `test.ingest_analysis` (`commands/test_runs.rs`, `External`, audited to the
-  actor; an agent's go on its own thread) are thin explicit entry points (same registry parse path) for on-demand or
-  non-standard-location reports. Both pass `skip_if_stale = false`, so they
-  ingest regardless of mtime — the caller explicitly asked. `test.ingest_analysis`
-  is the on-demand counterpart to `test.ingest_coverage`: it resolves `format` via
-  the registry, parses as `CollectorKind::Analysis`, and records a
-  `static-analysis` observation against the open effort via the same private
-  `record_static_analysis` the passive ride-along uses (provenance `observed`,
-  source `analysis-report` / `plugin-exec:<name>`). `report_path`/`format`
-  default to the first analysis report in `collection.reports`; it returns a
-  status JSON — `stored` with per-severity counts, or a reason
-  (`no_open_effort` / `not_configured` / `report_missing` / `stale_report` /
-  `parse_error`). **No baseline gate**: unlike coverage (which intersects with
-  the effort's changed lines and therefore *needs* a start snapshot),
-  analysis findings are *absolute* — current-file findings, not diff-relative —
-  so `test.ingest_analysis` stores even when the open effort has no start snapshot
-  (pin = `None`). This keeps the active path in agreement with the passive
-  ride-along, which already records with no baseline (tsk86). It exists because
-  analysis had no active
-  path — only the passive PostToolUse hook — so the eslint/TS format could
-  never be exercised end-to-end in a repo that runs no eslint; the active
-  entry closes that symmetry gap (and serves on-demand / odd-location
-  reports). `test.record_run` is the one `asserted` writer, for richer
+- **Active (commands)** — `collector.sync { owner: "project", id,
+  thread? }` runs a report collector by hand
+  (`CollectionService::sync_report_collector`, tsk863): it reads the
+  report as it is now, whenever it was written, records what it parsed in
+  the thread (an agent's own; a person names one) like a detected run's —
+  a test run, a coverage capture or a static-analysis capture, with
+  `collector.sync project/<id>` as the run's command — and answers
+  `{ recorded: { status, records, run } }` (`run:<capture>`, what
+  `claim_runs` takes). The run is the collector's (`trigger: manual`). It
+  replaced `test.ingest_coverage` / `test.ingest_analysis` (P8.A8). **No
+  baseline gate** for analysis: findings are *absolute* (current-file),
+  so they store even when the effort has no start snapshot (tsk86).
+  `test.record_run` is the one `asserted` writer, for richer
   pass/fail counts the exit code alone can't give; its counts also become
   status-sliced `oxplow.test_case` facts (no case identity) so the
   `oxplow.tests.*` specs read them, and it returns the capture id (the run
@@ -270,6 +282,8 @@ hook + MCP wiring):
   falling back to HEAD with `exact = false` when the tree is dirty (the normal
   case). This is the fold's only ancestry material and is **not backfillable**;
   see the stamping note in [metrics.md](./metrics.md).
+  Left for later: running report collectors from `test.run.recorded`
+  (a run reported by command) — it changes `v_test_run`'s grain.
 
 **Observe-always (tsk269/tsk270).** Tests, analysis, **and coverage** are recorded
 **regardless of how many efforts are open** — attribution is deferred to the
@@ -282,8 +296,8 @@ within 10 minutes before the run's event and at most a minute after it. It is
 judged at the event's own time (`RunCause.at`), not at delivery, so a redelivery
 (a crash before the checkpoint, a retried dead letter, a pump backlog) sees what
 the first delivery saw; a run delivered more than 10 minutes late is recorded
-but gets no nudges (tsk505). The explicit MCP ingest uses a window ending now.
-It needs no open effort. **A run's effort is the one its event was anchored
+but gets no nudges (tsk505). A by-hand `collector.sync` reads the report
+whenever it was written. Neither needs an open effort. **A run's effort is the one its event was anchored
 to** (`run_effort`, tsk507) — for the effort-relative advisories, the
 static-analysis snapshot pin and the `oxplow.nudge` fact — so a late delivery
 keeps the effort it ran in; only a live call with no event resolves the
@@ -322,16 +336,12 @@ reconcile + window-dominance + the agent's claim — never guessed onto one.
 the agent fix attribution at the close boundary; `effort.amend` does it after the fact. See
 [agent-model.md](./agent-model.md) for the full claim→reconcile loop.
 
-Both paths resolve `format` → collector via the registry and **classify by the
-collector's kind** (coverage vs test vs analysis), not a format-name heuristic.
-An unknown format is `tracing::warn!`-logged and skipped (not silently dropped).
-Trust tier rides in `source`: in-process tiers (jaq/Starlark) are deterministic
-and do no I/O → `observed` / `coverage-report` / `analysis-report`; the
-external-exec escape hatch can do I/O, so its output is tagged
-`plugin-exec:<name>` so the UI can mark it lower-trust. Every path carries it,
-including coverage: `coverage_source(collector)` on direct ingest, the merged
-label on the ride-along (before tsk331 coverage hard-coded `coverage-report`).
-The `provenance` column stays `observed` vs `asserted`.
+Both paths classify by the collector's `records:` (its parser's kind), not a
+format-name heuristic. Trust tier rides in `source`: in-process tiers
+(jaq/Starlark) are deterministic and do no I/O → `post-tool-bash` /
+`coverage-report` / `analysis-report`; an `exec` parser can do I/O, so its
+output is tagged `plugin-exec:<collector ids>` (`trust`) so the UI can mark it
+lower-trust. The `provenance` column stays `observed` vs `asserted`.
 
 The `static-analysis` payload is `{ command?, analyzer?, findings:[…],
 errorCount, warningCount, infoCount, noteCount }`; its `metric_value` is the
@@ -365,16 +375,16 @@ was refreshed by it (the agent ran `bun test` instead of the
 report-emitting `bun run test:collect`, for example), the `collection`
 reactor persists a one-shot nudge, which the thread's next tool-hook
 response delivers (`take_undelivered`; see Nudge persistence). The nudge names the project's
-own `collection.testCommand` when set — and, when a `fastTestCommand` is
-declared, offers that for iterating and `testCommand` for the closing run
-(this repo's `agentHint` says the same) — points at the configured `reports`
-paths if a profile exists without a `testCommand`, or routes to
-`/oxplow:configure` when no profile is present at all.
+own `testing.command` when set — and, when a `fastCommand` is declared,
+offers that for iterating and `command` for the closing run (this repo's
+`agentHint` says the same) — says the run wrote none of the reports the
+project's report collectors read when there are some but no `command`, or
+routes to `/oxplow:configure` when the project reads no reports at all.
 
 **Tool-agnostic design:** the hook never encodes tool→command knowledge.
 It keys only on (1) "was this a test run?" (substring match against
-built-in patterns + `testRunPatterns`) and (2) "did a configured report
-get refreshed?" (its mtime inside the run's freshness window). The tool-specific command it
+built-in patterns + `runPatterns`) and (2) "did a report collector read a
+report this run wrote?" (its mtime inside the run's freshness window). The tool-specific command it
 names comes entirely from the project's config, so it works for any
 test tool, current or future.
 
@@ -437,8 +447,8 @@ dashboard of numbers nobody trusts.
 
 ## Pluggable parsers (collector plugins)
 
-Report parsing is a **two-layer** design so a new format is config + a small
-script, never a Rust change (`crates/oxplow-collect-plugin/`):
+Report parsing is a **two-layer** design so a new format is a report
+collector + a small script, never a Rust change (`crates/oxplow-collect-plugin/`):
 
 1. **Container parse (host-owned).** The host reads the report file(s) and, per
    the collector's declared `input`, normalizes the bytes into a generic JSON
@@ -463,9 +473,10 @@ JSON→JSON reshaping), `starlark` (general/imperative; note: standard Starlark
 forbids recursion + `while`, so deep tree-walks are impractical — jaq suits XML
 better), `exec` (external process, JSON stdin→stdout — the escape hatch; can do
 I/O, so it's tagged lower-trust, and **runs only once a person approved it on
-this machine**: `plugin_to_collector` refuses an unapproved one with the
-reason; see architecture.md → "A repo's config never runs a program without
-consent"). All three tiers run under a `SandboxBudget`
+this machine** — a project collector's program (`ProgramKind::Collector`),
+approved in Settings → Data → Programs like any other; until then its run is
+recorded `needs_approval` and nothing is read (see architecture.md → "A
+repo's config never runs a program without consent"). All three tiers run under a `SandboxBudget`
 (wall-clock timeout) so a runaway/malformed script is surfaced as an error, not
 a hang.
 
@@ -585,54 +596,50 @@ The two bundled analysis plugins are the canonical templates: `clippy.jq`
 severity) and `eslint.jq` (`input: json`; severity `2`→error / `1`→warning,
 null `ruleId` → no rule).
 
-### Authoring a parser plugin
+### Authoring a parser
 
-Register it in `.oxplow/project.yaml` — no recompile. The **script lives in its own
-file** (`entryFile`, project-relative; absolute paths and `..` are rejected),
-not inline in the yaml. Example: a Clover (XML) coverage parser in jaq,
-claiming the `clover` format that a `reports[]` entry then references:
+Declare a report collector with its own `entry` — no recompile. The
+**script lives in its own file** (project-relative; absolute paths and `..`
+are rejected), not inline in the yaml. Example: a Clover (XML) coverage
+parser in jaq:
 
 ```yaml
-collection:
-  reports:
-    - { path: target/clover.xml, format: clover }
-  plugins:
-    - name: acme.clover     # namespaced; "oxplow." is reserved for built-ins
-      kind: coverage          # coverage | test | analysis
-      formats: [clover]       # format name(s) this plugin claims
-      runtime: jaq            # jaq | starlark | exec
-      input: xml              # text | json | xml | lcov | lines (jaq/starlark only)
-      entryFile: oxplow/plugins/clover.jq
+collectors:
+  - id: tests.clover
+    records: coverage            # tests | coverage | analysis
+    runtime: jaq                 # jaq | starlark | exec
+    entry: oxplow/parsers/clover.jq
+    report: { path: target/clover.xml, format: xml }   # text | json | xml | lcov | lines
+    trigger: { on_run: test }
 ```
 
 ```jq
-# oxplow/plugins/clover.jq — input value (.) → coverage output schema
+# oxplow/parsers/clover.jq — input value (.) → coverage output schema
 { files: reduce ([.. | select((type=="object") and (.tag=="file"))][]) as $f
     ({}; . + { ($f.attrs.path): {
         instrumented: [ $f | .. | select(.tag?=="line") | (.attrs.num|tonumber?) ],
         covered:      [ $f | .. | select((.tag?=="line") and ((.attrs.count//"0")|tonumber? // 0)>0) | (.attrs.num|tonumber?) ] } }) }
 ```
 
-`entryFile` resolves relative to the project root; the host reads it (the
-script still does no I/O, so determinism holds). For `starlark`, point
-`entryFile` at a `.star` file defining `def transform(input): … return {…}`
-(the host appends the `json.encode(transform(...))` call; the `json` stdlib
-**and** the `parse_xml`/`parse_json`/`lcov_records`/`lines`/`regex_find`/`xpath`
-host builtins are available, so a Starlark plugin can self-parse raw
-`input: text`). For `exec`, `entryFile` is the program to spawn (executable,
-with a shebang); optional `args: [...]`; it gets raw report bytes on stdin and
-must print the kind's JSON to stdout.
+The host reads the script (it still does no I/O, so determinism holds). For
+`starlark`, point `entry` at a `.star` file defining `def transform(input): …
+return {…}` (the host appends the `json.encode(transform(...))` call; the
+`json` stdlib **and** the `parse_xml`/`parse_json`/`lcov_records`/`lines`/
+`regex_find`/`xpath` host builtins are available, so a Starlark parser can
+self-parse raw `format: text`). For `exec`, `entry` is the program to spawn
+(executable, with a shebang); it gets the raw report on stdin (so it takes no
+`format`) and must print the kind's JSON to stdout.
 
-The first-party parsers in `src/plugins/*.jq` are the canonical templates. New
-formats are verified by a golden test that the plugin reproduces the reference
-parser's output (`crates/oxplow-collect-plugin/src/lib.rs` tests).
+The bundled parsers in `src/plugins/*.jq` are the canonical templates. New
+ones are verified by a golden test that the parser reproduces the reference
+output (`crates/oxplow-collect-plugin/src/lib.rs` tests).
 
 ### Report-derived RATIO metrics (a fact collector, not the ride-along)
 
 A tool that emits a whole-project **ratio** (not line-sets/findings) — e.g. TS
 `type-coverage`'s `--json-output` (`{correctCount, totalCount, percent}`) — is a
-**fact collector** with `report: { path, format }`, NOT a `reports[]` ride-along
-entry (the ride-along only classifies the `coverage`/`test`/`analysis` kinds).
+**fact collector** with `report: { path, format }`, NOT a report collector
+(`records:` reads only the `tests`/`coverage`/`analysis` kinds).
 The fact engine reads the report, parses it per `format` (`parse_report`) and
 hands it to the jaq/starlark script as `input.report`; the script returns a
 `{facts:[{measure, value, num, den}]}` ratio fact. tsk126 dogfoods this as
