@@ -60,6 +60,12 @@ pub trait Materializer: Send + Sync {
     fn every(&self) -> Option<Duration> {
         None
     }
+    /// A fingerprint of what it computes (a model's SELECT), recorded with
+    /// each recompute: a clocked asset whose definition changed is due at
+    /// once. `None` when there's nothing to tell apart.
+    fn definition(&self) -> Option<String> {
+        None
+    }
     /// `full`: refill whole — an input saw a rewrite, or this is the first
     /// build since it registered. Only an incremental model does less
     /// otherwise.
@@ -131,7 +137,13 @@ impl Assets {
         let task = tokio::spawn(async move {
             let entry = looping;
             if let Some(every) = entry.materializer.every() {
-                let mut wait = until_due(&db, entry.materializer.asset(), every).await;
+                let mut wait = until_due(
+                    &db,
+                    entry.materializer.asset(),
+                    entry.materializer.definition(),
+                    every,
+                )
+                .await;
                 loop {
                     tokio::time::sleep(wait).await;
                     recompute(&db, &entry).await;
@@ -423,6 +435,12 @@ impl Materializer for SqlModelMaterializer {
         self.every
     }
 
+    /// Its compiled SELECT, hashed.
+    fn definition(&self) -> Option<String> {
+        use sha2::{Digest, Sha256};
+        Some(hex::encode(Sha256::digest(self.sql.as_bytes())))
+    }
+
     async fn recompute(&self, full: bool) -> Result<Recomputed, DomainError> {
         let Some(column) = self.incremental.as_deref().filter(|_| !full) else {
             return self.refill().await;
@@ -440,17 +458,22 @@ impl Materializer for SqlModelMaterializer {
 }
 
 /// How long until a clocked asset is due: `every` after its last recorded
-/// recompute, nothing when it never ran (or the record is unreadable) or
-/// is overdue.
-async fn until_due(db: &Database, asset: &str, every: Duration) -> Duration {
+/// recompute, nothing when it never ran (or the record is unreadable), is
+/// overdue, or last computed another `definition` (its SELECT changed).
+async fn until_due(
+    db: &Database,
+    asset: &str,
+    definition: Option<String>,
+    every: Duration,
+) -> Duration {
     let asset = asset.to_string();
     let last = db
         .read(move |tx| {
             use rusqlite::OptionalExtension;
             tx.query_row(
-                "SELECT computed_at FROM asset_state WHERE asset = ?1",
+                "SELECT computed_at, definition FROM asset_state WHERE asset = ?1",
                 [&asset],
-                |r| r.get::<_, String>(0),
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
             )
             .optional()
             .map_err(oxplow_db::map_sql_err)
@@ -458,7 +481,8 @@ async fn until_due(db: &Database, asset: &str, every: Duration) -> Duration {
         .await
         .ok()
         .flatten()
-        .and_then(|at| Timestamp::parse(&at).ok());
+        .filter(|(_, recorded)| *recorded == definition)
+        .and_then(|(at, _)| Timestamp::parse(&at).ok());
     let Some(last) = last else {
         return Duration::ZERO;
     };
@@ -495,6 +519,7 @@ async fn recompute(db: &Database, entry: &Entry) {
         }
     };
     let started = Instant::now();
+    let definition = m.definition();
     match m.recompute(full).await {
         Ok(done) => {
             let elapsed = started.elapsed().as_millis() as i64;
@@ -503,13 +528,13 @@ async fn recompute(db: &Database, entry: &Entry) {
                 .transaction(move |tx| {
                     tx.execute(
                         "INSERT INTO asset_state (asset, computed_at, events_to, snapshot_id, elapsed_ms,
-                                                  mode, watermark, row_count)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                                                  mode, watermark, row_count, definition)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                          ON CONFLICT (asset) DO UPDATE SET
                             computed_at = excluded.computed_at, events_to = excluded.events_to,
                             snapshot_id = excluded.snapshot_id, elapsed_ms = excluded.elapsed_ms,
                             mode = excluded.mode, watermark = excluded.watermark,
-                            row_count = excluded.row_count",
+                            row_count = excluded.row_count, definition = excluded.definition",
                         rusqlite::params![
                             asset,
                             at,
@@ -518,7 +543,8 @@ async fn recompute(db: &Database, entry: &Entry) {
                             elapsed,
                             done.mode,
                             done.watermark,
-                            done.row_count
+                            done.row_count,
+                            definition
                         ],
                     )
                     .map(|_| ())
@@ -617,6 +643,7 @@ mod tests {
     struct Clocked {
         runs: Arc<AtomicUsize>,
         every: Duration,
+        definition: Option<&'static str>,
     }
 
     #[async_trait]
@@ -629,6 +656,9 @@ mod tests {
         }
         fn every(&self) -> Option<Duration> {
             Some(self.every)
+        }
+        fn definition(&self) -> Option<String> {
+            self.definition.map(str::to_string)
         }
         async fn recompute(&self, _full: bool) -> Result<Recomputed, DomainError> {
             self.runs.fetch_add(1, Ordering::SeqCst);
@@ -646,6 +676,7 @@ mod tests {
         assets.register(Arc::new(Clocked {
             runs: runs.clone(),
             every: Duration::from_millis(400),
+            definition: None,
         }));
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(runs.load(Ordering::SeqCst), 1, "the first build");
@@ -682,11 +713,52 @@ mod tests {
         assets.register(Arc::new(Clocked {
             runs: runs.clone(),
             every: Duration::from_millis(500),
+            definition: None,
         }));
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert_eq!(runs.load(Ordering::SeqCst), 0, "still fresh");
         tokio::time::sleep(Duration::from_millis(500)).await;
         assert_eq!(runs.load(Ordering::SeqCst), 1, "due, so recomputed");
+    }
+
+    /// tsk780: a fresh record of a *different* definition (the model's
+    /// SELECT was edited) doesn't hold the clock: it rebuilds at once.
+    #[tokio::test]
+    async fn a_clocked_asset_whose_definition_changed_rebuilds_at_once() {
+        let db = Database::in_memory();
+        let at = Timestamp::now().to_string();
+        db.transaction(move |tx| {
+            tx.execute(
+                "INSERT INTO asset_state (asset, computed_at, events_to, elapsed_ms, definition)
+                 VALUES ('counting', ?1, 0, 1, 'old')",
+                [&at],
+            )
+            .map(|_| ())
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let assets = Assets::new(db.clone(), Duration::from_millis(10));
+        assets.register(Arc::new(Clocked {
+            runs: runs.clone(),
+            every: Duration::from_secs(3600),
+            definition: Some("new"),
+        }));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "rebuilt for its new SQL");
+        let recorded: Option<String> = db
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT definition FROM asset_state WHERE asset = 'counting'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(recorded.as_deref(), Some("new"));
     }
 
     /// A table `src` and the table of an incremental model over it, keyed

@@ -1751,8 +1751,11 @@ provider (P7.A2). Published as `v_capability_provider`; see
 V130 (P7.B1). Each asset's last recompute: `asset` (the primary key —
 `metric_cube`, a materialized model's view), `computed_at`, `events_to`
 (the event log's highest seq as the recompute began), `snapshot_id` (when
-the asset has one), `elapsed_ms`. Written by the runner after each
-recompute; read as `v_asset`. See [semantic-layer.md](./semantic-layer.md)
+the asset has one), `elapsed_ms`; V143 (P8.B4) adds `mode` (`full` /
+`incremental`), `watermark` and `row_count`; V151 adds `definition` (a
+materialized model's SELECT, hashed — a clocked asset recorded for
+another definition is due at once, tsk780). Written by the runner after
+each recompute; read as `v_asset`. See [semantic-layer.md](./semantic-layer.md)
 "Assets".
 
 ### `collector_run` — `SqliteCollectorStore` (`crates/oxplow-db/src/collector_store.rs`)

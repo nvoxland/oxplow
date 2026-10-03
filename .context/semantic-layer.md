@@ -298,7 +298,11 @@ answer moves with time (`'now'`, "the last 180 days") rather than with a
 write. The runner wakes at the persisted `asset_state.computed_at +
 every` (at once when it never ran or is overdue), so a restart doesn't
 rebuild a fresh one; a contract change recreates the table and drops its
-`asset_state` row, so the next recompute is its first build.
+`asset_state` row, so the next recompute is its first build. Each
+recompute records the asset's `definition` (a model's SELECT, hashed —
+`Materializer::definition`, V151), and a record of another definition
+doesn't hold the clock: an edited SELECT rebuilds at once rather than
+serving the old SQL's rows until the clock comes round (tsk780).
 `model.materialize` records `every 1h` (V142 rebuilt `model` for the
 wider CHECK); `v_model` is v4. oxplow-analytics' `co_change_pair` is
 `every: 1h`.
