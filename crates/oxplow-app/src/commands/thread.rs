@@ -36,6 +36,7 @@ pub const CREATE: &str = "thread.create";
 pub const RENAME: &str = "thread.rename";
 pub const SET_PROMPT: &str = "thread.set_prompt";
 pub const PROMOTE: &str = "thread.promote";
+pub const DEMOTE: &str = "thread.demote";
 pub const CLOSE: &str = "thread.close";
 pub const REOPEN: &str = "thread.reopen";
 pub const REORDER: &str = "thread.reorder";
@@ -466,13 +467,50 @@ pub fn promote_command() -> Command {
             thread.status = ThreadStatus::Active;
             thread.updated_at = now;
             save(ctx, &thread)?;
+            // Undone by promoting the demoted writer back — or, when the
+            // stream had none, by demoting this one (tsk787).
+            let inverse = match before {
+                Some(w) => call(PROMOTE, json!({ "thread": thread_ref(w) })),
+                None => call(DEMOTE, json!({ "thread": input.thread })),
+            };
             Ok(HandlerOutput {
-                inverse: before.and_then(|w| call(PROMOTE, json!({ "thread": thread_ref(w) }))),
+                inverse,
                 ..result(&thread)
             })
         })),
     )
     .expect("thread.promote is a valid command")
+}
+
+/// `thread.demote { thread }` — a person's: the stream's writer joins the
+/// queue, leaving the stream with none. Undone by promoting it back; the
+/// inverse of a promote onto a stream that had no writer.
+pub fn demote_command() -> Command {
+    Command::new(
+        spec(
+            DEMOTE,
+            "Move a stream's writer back into the queue, leaving the stream with no writer. \
+             A person's.",
+            schema::<ThreadInput>(),
+            PEOPLE,
+            true,
+        ),
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            let input: ThreadInput = parse(input)?;
+            let mut thread = load(ctx, id_of(&input.thread, "thread", "/thread")?, "/thread")?;
+            if thread.status != ThreadStatus::Active {
+                return Ok(result(&thread));
+            }
+            thread.status = ThreadStatus::Queued;
+            thread.updated_at = Timestamp::now();
+            save(ctx, &thread)?;
+            Ok(HandlerOutput {
+                inverse: call(PROMOTE, json!({ "thread": input.thread })),
+                ..result(&thread)
+            })
+        })),
+    )
+    .expect("thread.demote is a valid command")
 }
 
 /// `thread.close { thread }`: an ACP thread's session stops once the close
@@ -615,6 +653,7 @@ pub fn commands(
         rename_command(),
         set_prompt_command(),
         promote_command(),
+        demote_command(),
         close_command(acp),
         reopen_command(),
         reorder_command(),
@@ -715,6 +754,33 @@ mod tests {
             .unwrap();
         assert_eq!(thread(&fx, fx.thread).await.status, ThreadStatus::Active);
         assert_eq!(thread(&fx, second).await.status, ThreadStatus::Queued);
+    }
+
+    /// tsk787: promoting onto a stream with no writer undoes by demoting
+    /// it back; `thread.demote` is a person's, and undoes by promoting.
+    #[tokio::test]
+    async fn promote_from_no_writer_undoes_by_demoting() {
+        let fx = services_with_effort().await;
+        let me = thread_ref(fx.thread);
+        let denied = run(&fx, &agent(&fx), DEMOTE, json!({ "thread": me }))
+            .await
+            .unwrap_err();
+        assert!(matches!(denied, CommandError::Denied { .. }), "{denied:?}");
+        let demoted = run(&fx, &Actor::Human, DEMOTE, json!({ "thread": me }))
+            .await
+            .unwrap();
+        assert_eq!(thread(&fx, fx.thread).await.status, ThreadStatus::Queued);
+        let promoted = run(&fx, &Actor::Human, PROMOTE, json!({ "thread": me }))
+            .await
+            .unwrap();
+        assert_eq!(thread(&fx, fx.thread).await.status, ThreadStatus::Active);
+        fx.svc
+            .commands
+            .undo(&Actor::Human, promoted.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        assert_eq!(thread(&fx, fx.thread).await.status, ThreadStatus::Queued);
+        let _ = demoted;
     }
 
     /// An agent acts on its own stream only, and closes only its own
