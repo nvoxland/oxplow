@@ -237,6 +237,37 @@ async fn a_scaffolded_effect_checks_tests_and_once_approved_reacts() {
 }
 
 /// The fake provider's binary, built beside this test binary.
+/// P9.A4: a scaffolded custom component is a private extension whose
+/// bundle talks to oxplow through the served client library.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_component_checks_tests_and_uses_the_client_library() {
+    let dir = project().await;
+    scaffolded(dir.path(), "component", "burn-down").await;
+    assert!(tested(dir.path(), "burn-down")
+        .await
+        .contains(&"example basic".to_string()));
+    let svc = booted(dir.path()).await;
+    let ext = loaded(&svc, dir.path(), "burn-down");
+    assert_eq!(ext.sharing, oxplow_app::extensions::Sharing::Private);
+    assert_eq!(ext.custom_components.len(), 1);
+    let component = &ext.custom_components[0];
+    let html = std::fs::read_to_string(
+        dir.path()
+            .join(&ext.path)
+            .join(&component.bundle)
+            .join("index.html"),
+    )
+    .unwrap();
+    assert!(
+        html.contains("/component-lib/oxplow-component.js"),
+        "{html}"
+    );
+    assert!(
+        ext.lenses.iter().any(|l| l.custom.is_some()),
+        "a `viz: custom` lens renders it"
+    );
+}
+
 fn fake_bin() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     let bin = exe

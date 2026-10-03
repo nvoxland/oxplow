@@ -14,7 +14,14 @@ import { CommandConfirm } from "../components/CommandConfirm.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
-import { componentBundleUrl, componentNavigationTarget, createBridgeHost, kitCss, tokensFromStyle } from "./componentBridge.js";
+import {
+  BRIDGE_PROTOCOL,
+  componentBundleUrl,
+  componentNavigationTarget,
+  createBridgeHost,
+  kitCss,
+  tokensFromStyle,
+} from "./componentBridge.js";
 
 export function CustomComponentViz({
   run,
@@ -147,7 +154,14 @@ function ComponentFrame({
     // An opaque-origin frame can only be addressed with "*"; the port goes
     // to this frame's window alone.
     frame.postMessage(
-      { type: "init", run: initial, props: initial.lens.custom?.props ?? null, tokens, kitCss: kitCss(tokens) },
+      {
+        type: "init",
+        protocol: BRIDGE_PROTOCOL,
+        run: initial,
+        props: initial.lens.custom?.props ?? null,
+        tokens,
+        kitCss: kitCss(tokens),
+      },
       "*",
       [channel.port2],
     );

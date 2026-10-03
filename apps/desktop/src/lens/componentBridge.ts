@@ -9,16 +9,22 @@
 ///                 { id, method: "query", asset, params }     a declared lens's run
 ///                 { id, method: "invoke", command, input }   a declared command
 ///                 { id, method: "navigate", ref }            open a page
-///   host → frame  { type: "init", run, props, tokens, kitCss }
+///   host → frame  { type: "init", protocol, run, props, tokens, kitCss }
 ///                 { type: "update", run }                    the lens re-ran
 ///                 { id, ok: true, result } | { id, ok: false, error: { code, message } }
 ///
 /// A command that asks is confirmed by the person in the host, never in
-/// the frame.
+/// the frame. The daemon serves a client library wrapping this
+/// (`/component-lib/oxplow-component.js`, `oxplow.connect()`); it checks
+/// `protocol` against the one it speaks.
 import { needsConfirmation } from "../ipc-error.js";
 import { refFromTabId } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { CommandOutcome, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+
+/// The protocol above, by number: bumped when a message's shape changes,
+/// with the served library (`crates/oxplow-daemon/assets/`).
+export const BRIDGE_PROTOCOL = 1;
 
 export type BridgeRequest =
   | { id: string; method: "query"; asset: string; params: Record<string, SqlCell> }

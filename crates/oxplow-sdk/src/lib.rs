@@ -57,11 +57,15 @@ pub enum Kind {
     /// An effect (experimental, so private): a script reacting to a logged
     /// event by composing commands, run once a person approves it.
     Effect,
+    /// A custom component (experimental, so private): a web bundle a
+    /// `viz: custom` lens renders in a sandboxed frame, talking to oxplow
+    /// through the served client library.
+    Component,
 }
 
 impl Kind {
     pub const NAMES: &'static str =
-        "`lens`, `extension`, `provider`, `collector`, `command` or `effect`";
+        "`lens`, `extension`, `provider`, `collector`, `command`, `effect` or `component`";
 
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
@@ -71,6 +75,7 @@ impl Kind {
             "collector" => Some(Kind::Collector),
             "command" => Some(Kind::Command),
             "effect" => Some(Kind::Effect),
+            "component" => Some(Kind::Component),
             _ => None,
         }
     }
@@ -130,7 +135,7 @@ pub fn scaffold(
     let ns = oxplow_app::extension_commands::command_namespace(name);
     // The intent example, and its fixture (what `plugin test` runs).
     let (example_input, example_expect, fixture_expect) = match kind {
-        Kind::Lens => (
+        Kind::Lens | Kind::Component => (
             format!("{{ lens: {name}, params: {{ stream_id: 1 }} }}"),
             "one row per open task in the stream, newest first",
             Some("{ rows: $any }".to_string()),
@@ -224,6 +229,16 @@ pub fn scaffold(
              \x20   where: { to: done }\n\
              \x20   entry: effects/on-done.star\n",
         ),
+        Kind::Component => manifest.push_str(&format!(
+            "custom_components:\n\
+             \x20 # A web bundle (components/{name}/) a `viz: custom` lens renders in a\n\
+             \x20 # sandboxed frame: scripts only, no network, no storage. Beyond its lens's\n\
+             \x20 # own rows it may query the lenses in `assets` and run the commands in\n\
+             \x20 # `commands` — as the person looking at it — and nothing else.\n\
+             \x20 - id: {name}\n\
+             \x20   assets: []\n\
+             \x20   commands: []\n"
+        )),
         Kind::Lens | Kind::Extension => {}
     }
     write(&format!("{rel_dir}/extension.yaml"), manifest)?;
@@ -341,6 +356,60 @@ pub fn scaffold(
              \x20   ]}\n"
                 .to_string(),
         )?,
+        Kind::Component => {
+            write(
+                &format!("{rel_dir}/lenses/{name}.yaml"),
+                format!(
+                    "title: {title}\n\
+                     description: \"TODO: what this view answers.\"\n\
+                     params:\n\
+                     \x20 # Filled in with the viewer's stream unless a value is given.\n\
+                     \x20 - {{ name: stream_id, label: Stream }}\n\
+                     # The rows the component gets (`component.run`), and what an agent reads:\n\
+                     # agents always see the table, never the frame.\n\
+                     query: |\n\
+                     \x20 SELECT id, title, status\n\
+                     \x20 FROM v_task\n\
+                     \x20 WHERE stream_id = :stream_id AND status IN ('ready', 'in_progress', 'blocked')\n\
+                     \x20 ORDER BY updated_at DESC\n\
+                     viz: custom\n\
+                     custom: {{ component: {name} }}\n\
+                     launcher: {{ category: Work }}\n",
+                    title = title_case(name)
+                ),
+            )?;
+            write(
+                &format!("{rel_dir}/components/{name}/index.html"),
+                "<!doctype html>\n\
+                 <meta charset=\"utf-8\">\n\
+                 <div id=\"out\"></div>\n\
+                 <!-- oxplow's client library (it defines `oxplow`), then this bundle's own\n\
+                 \x20    script. Both are plain scripts: a sandboxed frame can't load modules. -->\n\
+                 <script src=\"/component-lib/oxplow-component.js\"></script>\n\
+                 <script src=\"app.js\"></script>\n"
+                    .to_string(),
+            )?;
+            write(
+                &format!("{rel_dir}/components/{name}/app.js"),
+                "// Runs in a sandboxed frame. `oxplow.connect()` resolves once oxplow has\n\
+                 // handed over the lens's rows:\n\
+                 //   component.run                     the lens's latest run ({ result: { columns, rows } })\n\
+                 //   component.onUpdate(fn)            the lens re-ran\n\
+                 //   component.query(asset, params)    a lens listed in `assets`\n\
+                 //   component.invoke(command, input)  a command listed in `commands`\n\
+                 //   component.navigate(ref)           open one of oxplow's pages\n\
+                 oxplow.connect().then((component) => {\n\
+                 \x20 component.applyKitCss();\n\
+                 \x20 const out = document.getElementById(\"out\");\n\
+                 \x20 const render = (run) => {\n\
+                 \x20   out.textContent = run.result.rows.length + \" open tasks\";\n\
+                 \x20 };\n\
+                 \x20 render(component.run);\n\
+                 \x20 component.onUpdate(render);\n\
+                 });\n"
+                    .to_string(),
+            )?;
+        }
         Kind::Extension => {}
     }
     Ok(Scaffolded {

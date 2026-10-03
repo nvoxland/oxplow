@@ -25,10 +25,16 @@ use oxplow_app::extensions::custom_components::MAX_BUNDLE_BYTES;
 
 use crate::DaemonState;
 
+/// Where the component client library is served: a folder of its own,
+/// beside `/components/` (whose routes would read a path under it as a
+/// bundle's).
+pub const LIB_PATH: &str = "/component-lib/";
+
 /// The largest single file served (a bundle's whole cap).
 pub const MAX_FILE_BYTES: u64 = MAX_BUNDLE_BYTES;
 
-/// The CSP on every bundle file. `sandbox allow-scripts` makes the
+/// The CSP on every bundle file. `lib` is the client library's folder
+/// ([`LIB_PATH`]), a script source only. `sandbox allow-scripts` makes the
 /// document's origin opaque however it is loaded — the host's iframe
 /// attribute is not the only fence. `source` is the bundle's own folder
 /// (`http://<host>/components/<ext>/<component>/`), named beside `'self'`
@@ -36,13 +42,49 @@ pub const MAX_FILE_BYTES: u64 = MAX_BUNDLE_BYTES;
 /// anywhere. `style-src 'unsafe-inline'` is there because the host sends
 /// the kit's CSS and theme tokens as text the bundle injects as a
 /// `<style>`; inline *scripts* stay refused.
-pub fn bundle_csp(source: &str) -> String {
+pub fn bundle_csp(source: &str, lib: &str) -> String {
     let own = format!(" {source}");
     format!(
-        "sandbox allow-scripts; default-src 'none'; script-src 'self'{own}; style-src 'self' 'unsafe-inline'{own}; \
+        "sandbox allow-scripts; default-src 'none'; script-src 'self'{own} {lib}; style-src 'self' 'unsafe-inline'{own}; \
          img-src 'self' data: blob:{own}; font-src 'self' data:{own}; connect-src 'none'; \
          form-action 'none'; base-uri 'none'"
     )
+}
+
+/// The client library a bundle loads to talk to the host (P9.A4): a
+/// classic script defining `oxplow.connect()`. A module would be fetched
+/// with CORS, which a sandboxed frame's opaque origin never passes and
+/// nothing served to a frame allows.
+const LIB_JS: &str = include_str!("../assets/oxplow-component.js");
+/// Its types, for bundle authors.
+const LIB_TYPES: &str = include_str!("../assets/oxplow-component.d.ts");
+
+/// `/component-lib/{file}` — the client library or its types, to a
+/// loopback `Host` only. Ungated and outside CORS like a bundle; it's
+/// oxplow's own code, the same for every project.
+pub async fn component_lib(AxumPath(file): AxumPath<String>, headers: HeaderMap) -> Response {
+    if loopback_host(&headers).is_none() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let (body, content_type) = match file.as_str() {
+        "oxplow-component.js" => (LIB_JS, "text/javascript; charset=utf-8"),
+        "oxplow-component.d.ts" => (LIB_TYPES, "text/plain; charset=utf-8"),
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let mut response = body.into_response();
+    let h = response.headers_mut();
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    h.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    // It changes only with the app, which a revalidation notices.
+    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    h.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    response
 }
 
 /// The `Content-Type` for a bundle file, by extension; unknown types are
@@ -197,7 +239,12 @@ async fn serve(
         }
     };
     set(h, header::CONTENT_TYPE, content_type_for(&file));
-    set(h, header::CONTENT_SECURITY_POLICY, &bundle_csp(&source));
+    let lib = format!("http://{host}{LIB_PATH}");
+    set(
+        h,
+        header::CONTENT_SECURITY_POLICY,
+        &bundle_csp(&source, &lib),
+    );
     set(h, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
     set(h, header::CACHE_CONTROL, "no-store");
     set(h, header::REFERRER_POLICY, "no-referrer");
@@ -236,10 +283,35 @@ mod tests {
 
     #[test]
     fn the_csp_sandboxes_the_bundle_itself() {
-        let csp = bundle_csp("http://127.0.0.1:1/components/x/c/");
+        let csp = bundle_csp(
+            "http://127.0.0.1:1/components/x/c/",
+            "http://127.0.0.1:1/component-lib/",
+        );
         let directives: Vec<&str> = csp.split(';').map(str::trim).collect();
         assert!(directives.contains(&"sandbox allow-scripts"), "{csp}");
         assert!(directives.contains(&"connect-src 'none'"), "{csp}");
+    }
+
+    /// P9.A4: a bundle may load its own scripts and the client library —
+    /// named, because a sandboxed frame's origin is opaque and `'self'`
+    /// matches nothing.
+    #[test]
+    fn the_csp_names_the_client_library_beside_the_bundle() {
+        let csp = bundle_csp(
+            "http://127.0.0.1:1/components/x/c/",
+            "http://127.0.0.1:1/component-lib/",
+        );
+        let script = csp
+            .split(';')
+            .map(str::trim)
+            .find(|d| d.starts_with("script-src"))
+            .unwrap();
+        assert_eq!(
+            script,
+            "script-src 'self' http://127.0.0.1:1/components/x/c/ http://127.0.0.1:1/component-lib/"
+        );
+        // Scripts only: the library is no stylesheet, image or font source.
+        assert_eq!(csp.matches("/component-lib/").count(), 1, "{csp}");
     }
 
     #[test]

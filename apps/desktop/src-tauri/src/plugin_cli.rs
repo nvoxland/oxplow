@@ -14,14 +14,15 @@ use oxplow_sdk::{Format, Kind};
 
 const USAGE: &str = "\
 usage:
-  oxplow plugin new <lens|extension|provider|collector|command|effect> <name> [--origin <ref>] [--root <dir>]
+  oxplow plugin new <lens|extension|provider|collector|command|effect|component> <name> [--origin <ref>] [--root <dir>]
       scaffold oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a lens with a row action; a
       provider's declarations, stub program and test config; a Starlark
       collector with a model and a lens over it; a command composing core
-      commands. Each checks clean and passes `test` as written (a provider
-      once a real program replaces its stub)
+      commands; an effect reacting to an event; a custom component with
+      its lens and bundle. Each checks clean and passes `test` as written
+      (a provider once a real program replaces its stub)
   oxplow plugin check <name|path> [--effects] [--against <rev>] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
       its models, commands, lenses and advisories — against the project's
@@ -397,7 +398,7 @@ mod tests {
         assert_eq!(cli(&["frobnicate"]).0, 2);
         let (code, _, err) = cli(&["new", "widget", "x", "--root", root]);
         assert_eq!(code, 2);
-        assert!(err.contains("`command` or `effect`"), "{err}");
+        assert!(err.contains("`effect` or `component`"), "{err}");
         let (code, _, err) = cli(&["check", "nope", "--root", root]);
         assert_eq!(code, 1);
         assert!(err.contains("no extension `nope`"), "{err}");

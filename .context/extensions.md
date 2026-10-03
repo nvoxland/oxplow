@@ -1208,8 +1208,32 @@ kind needs to be promoted. `tokens` are the root's CSS custom properties
 kit stylesheet to share yet. No gesture check on invoke: the frame's
 clicks don't reliably activate the host across webviews, and the real
 bounds are the declared list, the person's policy and the host's
-confirmation. The protocol and a reference `index.html` are in
-`docs/guide/lenses.md`; there's no served client library yet.
+confirmation.
+
+**The client library** (P9.A4). A bundle doesn't speak the protocol by
+hand: the daemon serves `oxplow-component.js` (and its `.d.ts`) at
+`/component-lib/<file>` — embedded in the daemon
+(`crates/oxplow-daemon/assets/`, `components::component_lib`), served
+like a bundle (loopback `Host` only, ungated, outside CORS, `nosniff`),
+and named in every bundle's CSP `script-src` beside the bundle's own
+folder (`bundle_csp(source, lib)`; a sandboxed frame's origin is opaque,
+so `'self'` matches nothing). It is a **classic script that defines the
+global `oxplow`**, not a module: module scripts are fetched with CORS,
+which an opaque origin never passes and nothing served to a frame allows
+— the same reason a bundle's own scripts are classic. `oxplow.connect()`
+waits for `init`, answers `ready`, and resolves with `{ run (the latest),
+props, tokens, kitCss, protocol, onUpdate(fn) → unsubscribe, query(asset,
+params), invoke(command, input), navigate(ref), applyKitCss() }`; a
+failed request rejects with the host's `{ code, message }`. `init`
+carries `protocol` (`BRIDGE_PROTOCOL` in `componentBridge.ts`, `PROTOCOL`
+in the library — one number, bumped when a message's shape changes), and
+`connect` rejects a host speaking another. One app is one library
+version. `componentClient.test.ts` drives the served file against the
+real `createBridgeHost`, so the two can't drift. `oxplow plugin new
+component <name>` scaffolds a private extension — the component, its
+`viz: custom` lens and a bundle using the library — that checks and
+tests clean (`just_works.rs`). The reference is in
+`docs/guide/lenses.md`.
 
 ## Decorators (experimental)
 

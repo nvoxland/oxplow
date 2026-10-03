@@ -198,53 +198,45 @@ custom: { component: burndown, props: { color: accent } }
 ```
 
 The bundle lives in `components/burndown/` and needs an `index.html`.
-oxplow hands it a `MessagePort` in an `init` message; everything goes
-over that port:
+It loads oxplow's client library, then its own script:
 
 ```html
 <!doctype html>
 <div id="out"></div>
+<script src="/component-lib/oxplow-component.js"></script>
 <script src="app.js"></script>
 ```
 
 ```js
 // app.js
-let port, next = 0;
-const pending = new Map();
-const call = (msg) => new Promise((resolve, reject) => {
-  const id = String(next++);
-  pending.set(id, { resolve, reject });
-  port.postMessage({ id, ...msg });
-});
-window.addEventListener("message", (e) => {
-  if (e.data?.type !== "init") return;
-  port = e.ports[0];
-  port.onmessage = ({ data }) => {
-    if (data.type === "update") return render(data.run);
-    const p = pending.get(data.id);
-    pending.delete(data.id);
-    data.ok ? p.resolve(data.result) : p.reject(data.error);
+oxplow.connect().then((component) => {
+  component.applyKitCss();               // look like oxplow
+  const render = (run) => {
+    document.getElementById("out").textContent = `${run.result.rows.length} days`;
   };
-  render(e.data.run);              // the lens's own rows
-  port.postMessage({ type: "ready" });
+  render(component.run);                 // the lens's own rows
+  component.onUpdate(render);            // the lens re-ran
 });
-function render(run) {
-  document.getElementById("out").textContent = `${run.result.rows.length} days`;
-}
-// Elsewhere:
-//   await call({ method: "query", asset: "open-tasks", params: {} })
-//   await call({ method: "invoke", command: "work_item.transition", input: { ref, to: "done" } })
-//   await call({ method: "navigate", ref: "work_item:oxplow:tsk42" })  // oxplow pages only
+// Elsewhere, with `component` in hand:
+//   await component.query("open-tasks", {})
+//   await component.invoke("work_item.transition", { ref, to: "done" })
+//   await component.navigate("work_item:oxplow:tsk42")   // oxplow pages only
 ```
 
-`init` also carries `props`, the theme's CSS variables (`tokens`) and
-`kitCss`, a small stylesheet built from them. If the component doesn't
-say `ready` within 3 seconds, or navigates itself somewhere else, oxplow
-shows the lens's table instead. Agents always read the table.
+`oxplow plugin new component <name>` writes all of this for you.
+
+`component` also carries `props`, the theme's CSS variables (`tokens`)
+and `kitCss`, a small stylesheet built from them. A request that fails
+rejects with `{ code, message }`. Both scripts are plain scripts, not
+modules — a sandboxed frame can't load modules. Types for the library
+are served beside it (`/component-lib/oxplow-component.d.ts`).
+
+If the component doesn't connect within 3 seconds, or navigates itself
+somewhere else, oxplow shows the lens's table instead. Agents always
+read the table.
 
 A command that needs confirmation is confirmed by you in oxplow, not
-inside the frame. There's no client library yet; the snippet above is
-the whole protocol.
+inside the frame.
 
 ## Sharing
 

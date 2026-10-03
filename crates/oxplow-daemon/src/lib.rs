@@ -286,7 +286,9 @@ pub fn router(state: DaemonState) -> Router {
         .route(
             "/components/{stream}/{ext}/{component}/{*path}",
             get(components::component_file),
-        );
+        )
+        // The client library a bundle loads (P9.A4).
+        .route("/component-lib/{file}", get(components::component_lib));
     Router::new()
         .route("/health", get(health))
         .merge(guarded)
@@ -445,7 +447,10 @@ mod tests {
             assert_eq!(h["referrer-policy"], "no-referrer");
             assert_eq!(
                 h["content-security-policy"].to_str().unwrap(),
-                components::bundle_csp(&format!("{base}/components/primary/x/c/"))
+                components::bundle_csp(
+                    &format!("{base}/components/primary/x/c/"),
+                    &format!("{base}/component-lib/")
+                )
             );
             assert!(
                 h.get("access-control-allow-origin").is_none(),
@@ -496,6 +501,54 @@ mod tests {
         assert_eq!(resp.status(), 404, "a disabled extension's");
     }
 
+    /// P9.A4: the component client library — one fixed file, served like a
+    /// bundle's: ungated, outside CORS, to a loopback `Host` only.
+    #[tokio::test]
+    async fn the_client_library_is_served_to_loopback_only_as_javascript() {
+        let (svc, _dir) = services();
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
+            .await
+            .unwrap();
+        let base = format!("http://{}", daemon.bind_addr);
+        let bare = reqwest::Client::new();
+        let resp = bare
+            .get(format!("{base}/component-lib/oxplow-component.js"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let h = resp.headers();
+        assert_eq!(h["content-type"], "text/javascript; charset=utf-8");
+        assert_eq!(h["x-content-type-options"], "nosniff");
+        assert_eq!(h["cache-control"], "no-cache");
+        assert!(
+            h.get("access-control-allow-origin").is_none(),
+            "outside CORS"
+        );
+        assert!(resp.text().await.unwrap().contains("global.oxplow = "));
+        let types = bare
+            .get(format!("{base}/component-lib/oxplow-component.d.ts"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(types.status(), 200);
+        for path in [
+            "/component-lib/other.js",
+            "/component-lib/",
+            "/component-lib",
+        ] {
+            let resp = bare.get(format!("{base}{path}")).send().await.unwrap();
+            assert_eq!(resp.status(), 404, "{path}");
+        }
+        let rebound = bare
+            .get(format!("{base}/component-lib/oxplow-component.js"))
+            .header("host", "evil.example")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rebound.status(), 404, "only a loopback Host");
+    }
+
     /// DNS rebinding: a page whose name now resolves to 127.0.0.1 reaches
     /// the daemon with its own `Host`; only a loopback `Host` is served.
     #[tokio::test]
@@ -531,7 +584,10 @@ mod tests {
             assert_eq!(resp.status(), 200, "{host}");
             assert_eq!(
                 resp.headers()["content-security-policy"].to_str().unwrap(),
-                components::bundle_csp(&format!("http://{host}/components/primary/x/c/")),
+                components::bundle_csp(
+                    &format!("http://{host}/components/primary/x/c/"),
+                    &format!("http://{host}/component-lib/")
+                ),
             );
         }
         for host in [

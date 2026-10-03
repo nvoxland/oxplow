@@ -23,6 +23,10 @@ failure after your edit is yours:
   item's Commands menu;
 - `provider` — a work-items provider's declarations and a stub program
   (red until you write the program);
+- `effect` — a script reacting to a logged event by composing commands
+  (private; runs only once a person approves it);
+- `component` — a custom component (private): its `viz: custom` lens and
+  a web bundle on oxplow's client library;
 - `extension` — the manifest only.
 
 ## 0. Answering with a lens (`show_lens`)
@@ -213,8 +217,14 @@ empty: Nothing is waiting on you.
   and its files, at most 256 files / 5 MiB) runs sandboxed — no network,
   no storage, no token — and reaches oxplow only by asking the host to
   run one of its `assets` lenses, invoke one of its `commands` (the
-  person confirms in the host) or navigate. See `docs/guide/lenses.md`
-  for the protocol.
+  person confirms in the host) or navigate. Its `index.html` loads
+  oxplow's client library with a plain `<script
+  src="/component-lib/oxplow-component.js">` before its own plain script
+  (no modules: a sandboxed frame can't load them), and the script calls
+  `oxplow.connect().then((component) => …)` for `component.run`,
+  `onUpdate`, `query`, `invoke` and `navigate`. `oxplow plugin new
+  component <name>` scaffolds a working one; `docs/guide/lenses.md` has
+  the reference.
 - **Pages** give a lens a place of its own: `pages: [{ id, title, icon?,
   category, lens }]` opens it full-page at `page:ext.<extension>.<id>` and
   lists it in the launcher under `category` (Work, Code, Git, Activity,
