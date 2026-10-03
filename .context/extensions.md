@@ -995,7 +995,7 @@ that failed, another worktree's copy).
 
 **A model's rows** (P8.C3). Each changed, added or removed model's
 `ModelEffect.rows` is a `RowDiff { before, after, keyed?, note? }`: each
-side's rows read through that side's own overlay (up to 100 000,
+side's rows read through that side's own overlay (up to 10 000 — the read gateway's own cap, `MAX_ROW_LIMIT`, tsk779;
 `ROW_DIFF_LIMIT`). When both versions declare the same non-empty `key`
 (P8.B1) it's a merge-join by key — `KeyedDiff { key, added, removed,
 changed, samples }`, up to 20 sample rows in key order, each with its key

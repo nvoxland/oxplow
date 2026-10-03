@@ -78,8 +78,11 @@ pub struct ModelEffect {
     pub rows: Option<RowDiff>,
 }
 
-/// The most rows a side's diff reads; past it, counts only.
-pub const ROW_DIFF_LIMIT: usize = 100_000;
+/// The most rows a side's diff reads; past it, counts only. It is the
+/// read gateway's own cap: a review reads through the same read-only path
+/// as everything else, and a larger number would be one it never returns
+/// (tsk779).
+pub const ROW_DIFF_LIMIT: usize = oxplow_db::semantic_layer::MAX_ROW_LIMIT;
 /// The most sample changes a keyed diff keeps.
 pub const ROW_DIFF_SAMPLES: usize = 20;
 
@@ -2058,7 +2061,10 @@ mod tests {
         let big = side(&["n"], vec![vec![json!(1)]], true);
         let diff = row_diff(Some((&before, &key)), Some((&big, &key)));
         assert!(diff.keyed.is_none());
-        assert!(diff.note.unwrap().contains("100000"), "names the limit");
+        assert!(
+            diff.note.unwrap().contains(&ROW_DIFF_LIMIT.to_string()),
+            "names the limit"
+        );
 
         let added = row_diff(None, Some((&after, &key)));
         assert_eq!((added.before, added.after), (None, Some(2)));
@@ -2100,6 +2106,36 @@ mod tests {
         w(
             "collectors/smart.star",
             &format!("def transform(input):\n    return {{\"entities\": {{\"summary\": [{{\"id\": r[\"id\"], \"text\": ai_summarize(\"{label}\")}} for r in input[\"rows\"]]}}}}\n"),
+        );
+    }
+
+    /// tsk779: a side past the limit reads `limit` rows, truncated, and the
+    /// limit is what the gateway really returns — the note's number is the
+    /// count it reports, not a larger one the gateway never reaches.
+    #[tokio::test]
+    async fn a_side_past_the_row_limit_reads_exactly_the_limit() {
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let overlay = [oxplow_db::TempView {
+            name: "v_many".into(),
+            sql: format!(
+                "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < {}) \
+                 SELECT i AS id FROM n",
+                ROW_DIFF_LIMIT + 1
+            ),
+        }];
+        let rows = rows_of(&layer, &overlay, "v_many").await.unwrap();
+        assert!(rows.truncated);
+        assert_eq!(rows.rows.len(), ROW_DIFF_LIMIT);
+        let diff = row_diff(
+            Some((&rows, &["id".to_string()][..])),
+            Some((&rows, &["id".to_string()][..])),
+        );
+        assert_eq!(diff.before, Some(ROW_DIFF_LIMIT as i64));
+        assert!(
+            diff.note
+                .as_deref()
+                .is_some_and(|n| n.contains(&format!("over {ROW_DIFF_LIMIT} rows"))),
+            "{diff:?}"
         );
     }
 
