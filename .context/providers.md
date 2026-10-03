@@ -514,6 +514,16 @@ config, provider? } }`, the same entries and the same validation):
   one then shows through). The file is written only by the registry for a
   person (`Actor::Human`; anyone else is `Denied`) — no command reaches
   it, so no agent or lens can;
+- **every change is one read-modify-write of the instances as they are
+  then** (tsk837): `write_instances` takes an `edit` of them, under the
+  registry's `instances_gate` (one change at a time in a process, never
+  held across a check or a reconcile — `set_instance` checks first, then
+  takes the gate, re-resolves and edits) and, for the file,
+  `GlobalInstances::update` — under `instances.yaml.lock`, which every
+  oxplow on the machine takes, it reads the file as it is, edits,
+  validates and writes it atomically (temp file and rename). So Enables
+  on two rows at once both stand, two oxplows never drop each other's
+  entry, and a reader never sees half a file;
 - another project's oxplow re-reads it by its modification time, on the
   per-minute sync tick (`reconcile_if_global_changed`); the one that
   wrote it reconciles at once. A file that doesn't load keeps what was

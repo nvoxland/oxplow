@@ -1625,15 +1625,41 @@ impl GlobalInstances {
         loaded.validated()
     }
 
-    /// Validate and write to `dir/instances.yaml`.
-    pub fn save(&self, dir: &Path) -> Result<(), ConfigError> {
-        let checked = self.clone().validated()?;
+    /// Change `dir/instances.yaml` in one read-modify-write: under a lock
+    /// every oxplow on the machine takes (`instances.yaml.lock`), `edit`
+    /// the file as it is now, then validate and write it atomically — so
+    /// two windows or two oxplows never drop each other's change, and a
+    /// reader never sees half a file (tsk837). The outer error is the
+    /// file's (it couldn't be locked, read, validated or written); the
+    /// inner is `edit`'s refusal, which writes nothing.
+    pub fn update<E>(
+        dir: &Path,
+        edit: impl FnOnce(
+            &mut std::collections::BTreeMap<String, ExtensionInstanceConfig>,
+        ) -> Result<(), E>,
+    ) -> Result<Result<(), E>, ConfigError> {
+        use fs2::FileExt;
+        let failed = |e: std::io::Error| ConfigError::Instances(e.to_string());
+        let path = dir.join(INSTANCES_FILE);
+        std::fs::create_dir_all(dir).map_err(failed)?;
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(atomic::lock_path(&path))
+            .map_err(failed)?;
+        lock.lock_exclusive().map_err(failed)?;
+        let mut current = GlobalInstances::load(dir)?;
+        if let Err(refused) = edit(&mut current.instances) {
+            return Ok(Err(refused));
+        }
+        let checked = current.validated()?;
         let doc = serde_json::json!({ "instances": instances_as_written(&checked.instances) });
         let text =
             serde_yaml::to_string(&doc).map_err(|e| ConfigError::Instances(e.to_string()))?;
-        std::fs::create_dir_all(dir).map_err(|e| ConfigError::Instances(e.to_string()))?;
-        std::fs::write(dir.join(INSTANCES_FILE), text)
-            .map_err(|e| ConfigError::Instances(e.to_string()))
+        atomic::write_atomic(&path, text.as_bytes()).map_err(failed)?;
+        Ok(Ok(()))
     }
 
     /// The rules a project's `extensionInstances` follow, said of this file.
@@ -3329,7 +3355,13 @@ mod tests {
                 provider: Some("linear".into()),
             },
         );
-        global.save(dir.path()).unwrap();
+        let written = global.instances.clone();
+        GlobalInstances::update(dir.path(), |all| {
+            *all = written;
+            Ok::<_, ()>(())
+        })
+        .unwrap()
+        .unwrap();
         let text = std::fs::read_to_string(dir.path().join(INSTANCES_FILE)).unwrap();
         assert!(
             text.contains("tracker/linear_acme") && text.contains("provider: linear"),
@@ -3356,10 +3388,53 @@ mod tests {
         let err = GlobalInstances::load(dir.path()).unwrap_err().to_string();
         assert!(err.contains("instances.yaml"), "{err}");
         // An invalid set is never written.
-        let mut bad = GlobalInstances::default();
-        bad.instances
-            .insert("nope".into(), ExtensionInstanceConfig::default());
-        assert!(bad.save(dir.path()).is_err());
+        std::fs::remove_file(dir.path().join(INSTANCES_FILE)).unwrap();
+        assert!(GlobalInstances::update(dir.path(), |all| {
+            all.insert("nope".into(), ExtensionInstanceConfig::default());
+            Ok::<_, ()>(())
+        })
+        .is_err());
+        assert!(!dir.path().join(INSTANCES_FILE).exists());
+        // An edit's refusal writes nothing.
+        assert_eq!(
+            GlobalInstances::update(dir.path(), |_| Err("no")).unwrap(),
+            Err("no")
+        );
+    }
+
+    /// tsk837: each change to the machine's instances is one
+    /// read-modify-write of the file as it is then, under a lock other
+    /// processes take too — so writers at once never drop each other's
+    /// entry.
+    #[test]
+    fn global_instance_updates_at_once_all_land() {
+        let dir = tempfile::tempdir().unwrap();
+        let writers: Vec<_> = (0..16)
+            .map(|n| {
+                let dir = dir.path().to_path_buf();
+                std::thread::spawn(move || {
+                    GlobalInstances::update(&dir, |all| {
+                        all.insert(
+                            format!("tracker/linear_{n}"),
+                            ExtensionInstanceConfig {
+                                provider: Some("linear".into()),
+                                ..ExtensionInstanceConfig::default()
+                            },
+                        );
+                        Ok::<_, ()>(())
+                    })
+                    .unwrap()
+                    .unwrap();
+                })
+            })
+            .collect();
+        for w in writers {
+            w.join().unwrap();
+        }
+        assert_eq!(
+            GlobalInstances::load(dir.path()).unwrap().instances.len(),
+            16
+        );
     }
 
     #[test]

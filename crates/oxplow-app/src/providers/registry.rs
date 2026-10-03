@@ -791,6 +791,10 @@ pub struct ProviderRegistry {
     /// Held while a sign-in is started or abandoned, so two at once for
     /// one credential leave exactly one listening (tsk826).
     sign_in_gate: tokio::sync::Mutex<()>,
+    /// One change to a person's instances at a time in this process: each
+    /// reads them as they are and writes them back before another reads
+    /// (tsk837). Never held across a check or a reconcile.
+    instances_gate: tokio::sync::Mutex<()>,
     /// Numbers each sign-in, so a finished one untracks only itself.
     sign_in_seq: std::sync::atomic::AtomicU64,
 }
@@ -849,6 +853,7 @@ impl ProviderRegistry {
             global: parking_lot::Mutex::new(GlobalFile::default()),
             sign_ins: parking_lot::Mutex::new(BTreeMap::new()),
             sign_in_gate: tokio::sync::Mutex::new(()),
+            instances_gate: tokio::sync::Mutex::new(()),
             sign_in_seq: std::sync::atomic::AtomicU64::new(0),
         })
     }
@@ -1590,14 +1595,6 @@ impl ProviderRegistry {
                 field: Some("/instance".into()),
                 message,
             })?;
-        // It is written where it lives: the project's entry (its own, or
-        // its replacement of a global one), else the machine's file.
-        let project = self.project_instances();
-        let home = if scope == Scope::Global && !project.contains_key(instance) {
-            Scope::Global
-        } else {
-            Scope::Project
-        };
         if enabled {
             match self.check_as(&ext, &spec, &id, scope, config.clone()).await {
                 Ok(()) => {}
@@ -1638,22 +1635,42 @@ impl ProviderRegistry {
             )
             .await?;
         }
-        let mut all = match home {
-            Scope::Project => project,
-            Scope::Global => self.global_instances(),
-        };
-        let sync_minutes = all.get(instance).and_then(|c| c.sync_minutes);
-        let provider = all.get(instance).and_then(|c| c.provider.clone());
-        all.insert(
-            instance.to_string(),
-            oxplow_config::ExtensionInstanceConfig {
-                enabled,
-                config,
-                sync_minutes,
-                provider,
-            },
-        );
-        self.write_instances(actor, home, all).await?;
+        {
+            // The instances as they are now, not as they were before the
+            // check: another row's change meanwhile stands.
+            let gate = self.instances_gate.lock().await;
+            let Resolved { scope, .. } =
+                self.resolve(instance)
+                    .map_err(|message| CommandError::Invalid {
+                        field: Some("/instance".into()),
+                        message,
+                    })?;
+            // It is written where it lives: the project's entry (its own,
+            // or its replacement of a global one), else the machine's file.
+            let home = if scope == Scope::Global && !self.project_instances().contains_key(instance)
+            {
+                Scope::Global
+            } else {
+                Scope::Project
+            };
+            self.write_instances(&gate, actor, home, |all| {
+                let was = all.get(instance);
+                let sync_minutes = was.and_then(|c| c.sync_minutes);
+                let provider = was.and_then(|c| c.provider.clone());
+                all.insert(
+                    instance.to_string(),
+                    oxplow_config::ExtensionInstanceConfig {
+                        enabled,
+                        config,
+                        sync_minutes,
+                        provider,
+                    },
+                );
+                Ok(())
+            })
+            .await?;
+        }
+        self.reconcile().await;
         self.view(instance).await
     }
 
@@ -1679,29 +1696,35 @@ impl ProviderRegistry {
         let Resolved { ext, id, .. } = self
             .resolve_as(instance, Some(provider))
             .map_err(&invalid)?;
-        if self.instances_config().contains_key(instance) {
-            return Err(invalid(format!("`{instance}` is already an instance")));
-        }
-        let mut all = match scope {
-            Scope::Project => self.project_instances(),
-            Scope::Global => self.global_instances(),
-        };
         if id != provider && ext.providers.iter().any(|p| p.id == id) {
             return Err(invalid(format!(
                 "`{id}` is already the id of one of `{}`'s providers (its default instance)",
                 ext.name
             )));
         }
-        all.insert(
-            instance.to_string(),
-            oxplow_config::ExtensionInstanceConfig {
-                enabled: false,
-                config: json!({}),
-                sync_minutes: None,
-                provider: (id != provider).then(|| provider.to_string()),
-            },
-        );
-        self.write_instances(actor, scope, all).await?;
+        {
+            let gate = self.instances_gate.lock().await;
+            if self.instances_config().contains_key(instance) {
+                return Err(invalid(format!("`{instance}` is already an instance")));
+            }
+            self.write_instances(&gate, actor, scope, |all| {
+                if all.contains_key(instance) {
+                    return Err(invalid(format!("`{instance}` is already an instance")));
+                }
+                all.insert(
+                    instance.to_string(),
+                    oxplow_config::ExtensionInstanceConfig {
+                        enabled: false,
+                        config: json!({}),
+                        sync_minutes: None,
+                        provider: (id != provider).then(|| provider.to_string()),
+                    },
+                );
+                Ok(())
+            })
+            .await?;
+        }
+        self.reconcile().await;
         self.view(instance).await
     }
 
@@ -1713,22 +1736,28 @@ impl ProviderRegistry {
         // for a project's replacement of a global one, under the removed
         // entry's account (tsk826).
         self.abandon_sign_ins(|(of, _)| of == instance).await;
-        let resolved = self.resolve(instance).ok();
-        let mut project = self.project_instances();
-        let mut global = self.global_instances();
-        // A project's replacement of a global one: the global one stays.
-        let still_there = project.contains_key(instance) && global.contains_key(instance);
-        let (home, all) = if project.remove(instance).is_some() {
-            (Scope::Project, project)
-        } else if global.remove(instance).is_some() {
-            (Scope::Global, global)
-        } else {
-            return Err(CommandError::Invalid {
-                field: Some("/instance".into()),
-                message: format!("no provider instance `{instance}`"),
-            });
+        let missing = || CommandError::Invalid {
+            field: Some("/instance".into()),
+            message: format!("no provider instance `{instance}`"),
         };
-        self.write_instances(actor, home, all).await?;
+        let (resolved, still_there) = {
+            let gate = self.instances_gate.lock().await;
+            let resolved = self.resolve(instance).ok();
+            let in_project = self.project_instances().contains_key(instance);
+            let in_global = self.global_instances().contains_key(instance);
+            // A project's replacement of a global one: the global one stays.
+            let home = match (in_project, in_global) {
+                (true, _) => Scope::Project,
+                (false, true) => Scope::Global,
+                (false, false) => return Err(missing()),
+            };
+            self.write_instances(&gate, actor, home, |all| {
+                all.remove(instance).map(|_| ()).ok_or_else(missing)
+            })
+            .await?;
+            (resolved, in_project && in_global)
+        };
+        self.reconcile().await;
         if still_there {
             return Ok(());
         }
@@ -1755,21 +1784,29 @@ impl ProviderRegistry {
         Ok(())
     }
 
-    /// Write `scope`'s instances as `actor` and reconcile: the project's
+    /// Change `scope`'s instances as `actor` by `edit`, which sees them as
+    /// they are now — under the `instances_gate` the caller holds (`_gate`)
+    /// and, for the machine's file, its cross-process lock: the project's
     /// through `config.set` (`extensionInstances` is a person's key), the
     /// machine's file directly — a person's only: no command reaches it,
-    /// so no agent or lens can.
+    /// so no agent or lens can. The caller reconciles once it lets go of
+    /// the gate.
     async fn write_instances(
         &self,
+        _gate: &tokio::sync::MutexGuard<'_, ()>,
         actor: &Actor,
         scope: Scope,
-        all: BTreeMap<String, oxplow_config::ExtensionInstanceConfig>,
+        edit: impl FnOnce(
+            &mut BTreeMap<String, oxplow_config::ExtensionInstanceConfig>,
+        ) -> Result<(), CommandError>,
     ) -> Result<(), CommandError> {
         match scope {
             Scope::Project => {
                 let bus = self.bus.upgrade().ok_or_else(|| CommandError::Failed {
                     message: "the command bus is gone".into(),
                 })?;
+                let mut all = self.project_instances();
+                edit(&mut all)?;
                 bus.run(
                     actor,
                     crate::commands::config_commands::SET,
@@ -1792,14 +1829,13 @@ impl ProviderRegistry {
                         message: "this machine has no global config dir to keep instances in"
                             .into(),
                     })?;
-                oxplow_config::GlobalInstances { instances: all }
-                    .save(&dir)
-                    .map_err(|e| CommandError::Failed {
+                oxplow_config::GlobalInstances::update(&dir, edit).map_err(|e| {
+                    CommandError::Failed {
                         message: e.to_string(),
-                    })?;
+                    }
+                })??;
             }
         }
-        self.reconcile().await;
         Ok(())
     }
 

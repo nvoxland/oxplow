@@ -2019,6 +2019,43 @@ fn configure_named(
 
 const SECOND: &str = "tracker/fake_second";
 
+/// tsk837: a person's Enables on two rows at once — the second while the
+/// first still checks — both stand. Each write is a read-modify-write of
+/// the instances as they are when it writes, not as they were before its
+/// check.
+#[tokio::test]
+async fn enabling_two_instances_at_once_keeps_both() {
+    let (fx, _ext) = approved("slow-check:400").await;
+    configure(&fx, false, json!({ "team": "core" }));
+    configure_named(&fx, SECOND, Some("fake"), json!({ "team": "second" }));
+    fx.svc
+        .config
+        .write()
+        .unwrap()
+        .extension_instances
+        .get_mut(SECOND)
+        .unwrap()
+        .enabled = false;
+    let providers = fx.svc.providers.clone();
+    let first = tokio::spawn(async move {
+        providers
+            .set_instance(&Actor::Human, INSTANCE, true, json!({ "team": "core" }))
+            .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    fx.svc
+        .providers
+        .set_instance(&Actor::Human, SECOND, true, json!({ "team": "second" }))
+        .await
+        .unwrap();
+    first.await.unwrap().unwrap();
+    let written = fx.svc.config.read().unwrap().extension_instances.clone();
+    for name in [INSTANCE, SECOND] {
+        assert!(written[name].enabled, "{name}: {written:?}");
+    }
+    assert_eq!(written[SECOND].provider.as_deref(), Some("fake"));
+}
+
 /// P9.B1: two instances of one provider run side by side — one approved
 /// program, two processes — each under its own id: its refs' segment, its
 /// commands' namespace, its `v_capability_provider` row, its health.
