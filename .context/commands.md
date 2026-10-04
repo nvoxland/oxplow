@@ -76,8 +76,13 @@ A command is a typed operation named `<capability|plugin>.<verb>`
    returns `HandlerOutput::unchanged` (tsk861): a plain call then leaves
    no record — no audit row, no `command.executed`, `audit_id: None` —
    like a read (`knowledge.relocate_comment` re-run on every render is
-   the case). An undo, an approval or an effect's reaction is recorded
-   regardless: its row must be marked.
+   the case). The bus enforces it (tsk901): an unchanged call's
+   transaction is **rolled back**, so nothing it wrote lands unaudited,
+   and one that also returns events or an inverse is refused (audited as
+   `error`). An undo, an approval or an effect's reaction is recorded
+   regardless: its row must be marked (`an_undo_or_approval_that_changes_
+   nothing_is_still_recorded`). Only `Tx` handlers may say it; an
+   `External` run is always recorded.
 6. Post-commit: wake the event pump.
 
 A `Read` command stops after step 4: its handler runs in

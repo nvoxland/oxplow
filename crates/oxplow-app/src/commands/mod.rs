@@ -85,11 +85,15 @@ pub struct HandlerOutput {
     /// already recorded. The handler itself must stay pure: it can run
     /// more than once (`Database::transaction` retries on SQLITE_BUSY).
     pub after_commit: Option<Box<dyn FnOnce() + Send + Sync>>,
-    /// The run found nothing to change and wrote nothing (a re-located
-    /// comment anchor already where it was). A call that changed nothing
-    /// leaves no record — no audit row, no `command.executed` — like a
-    /// read; an undo, an approval or an effect's reaction is still
-    /// recorded, since its row must be marked.
+    /// The run found nothing to change (a re-located comment anchor
+    /// already where it was). A `Tx` call that says so leaves no record —
+    /// no audit row, no `command.executed` — like a read, and its
+    /// transaction is rolled back, so nothing it wrote lands unaudited; one
+    /// that also returns events or an inverse (a change) is refused
+    /// (tsk901). An undo, an approval or an effect's reaction is recorded
+    /// anyway, since its row must be marked. Honoured for `Tx` handlers
+    /// only: an `External` one's work is outside the database, so it is
+    /// always recorded.
     pub unchanged: bool,
 }
 
@@ -876,6 +880,10 @@ impl CommandBus {
                 // so it leaves no audit row.
                 let lost: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
                 let lost_c = lost.clone();
+                // A call that changed nothing: its answer, its transaction
+                // rolled back (tsk901).
+                let unchanged: Arc<parking_lot::Mutex<Option<HandlerOutput>>> = Arc::default();
+                let unchanged_c = unchanged.clone();
                 let origin_tx = origin.clone();
                 let ran = self
                     .db
@@ -896,7 +904,20 @@ impl CommandBus {
                         };
                         let out = match handler(&ctx, input_c.clone()) {
                             Ok(out) if out.unchanged && matches!(origin_tx, RunOrigin::Call) => {
-                                return Ok((out, None));
+                                if !out.events.is_empty() || out.inverse.is_some() {
+                                    *failed_c.lock() = Some(CommandError::Failed {
+                                        message: format!(
+                                            "`{}` said it changed nothing but returned events \
+                                             or an inverse",
+                                            spec_c.name
+                                        ),
+                                    });
+                                } else {
+                                    *unchanged_c.lock() = Some(out);
+                                }
+                                return Err(oxplow_domain::DomainError::Invariant(
+                                    "changed nothing; rolled back".into(),
+                                ));
                             }
                             Ok(out) => out,
                             // A lock blip retries the whole run.
@@ -955,13 +976,15 @@ impl CommandBus {
                                 &recorded,
                             )?;
                         }
-                        Ok((out, Some(recorded)))
+                        Ok((out, recorded))
                     })
                     .await;
                 match ran {
-                    Ok((out, Some(recorded))) => Ok(finish(out, recorded)),
-                    Ok((out, None)) => Ok(unrecorded(out)),
+                    Ok((out, recorded)) => Ok(finish(out, recorded)),
                     Err(db_err) => {
+                        if let Some(out) = unchanged.lock().take() {
+                            return Ok(unrecorded(out));
+                        }
                         if let Some(e) = lost.lock().take() {
                             return Err(e);
                         }
@@ -977,9 +1000,6 @@ impl CommandBus {
                 self.claim(&origin).await?;
                 let invocation = origin.invocation(actor, 0, &spec.name, &input);
                 match handler(invocation, input.clone()).await {
-                    Ok(out) if out.unchanged && matches!(origin, RunOrigin::Call) => {
-                        Ok(unrecorded(out))
-                    }
                     Ok(out) => Ok(self
                         .record_external(actor, spec, &input, out, origin.clone())
                         .await),
@@ -2419,6 +2439,155 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
         assert_eq!(kv_value(&db, "b").await, None);
+    }
+
+    /// A `Tx` handler that writes `k = v` and says it changed nothing —
+    /// with `events` when `v == "with-events"`; `inverse` names
+    /// `kv.noop`.
+    fn kv_unchanged() -> Handler {
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            let k = input["k"].as_str().unwrap_or_default().to_string();
+            let v = input["v"].as_str().unwrap_or_default().to_string();
+            ctx.conn
+                .execute(
+                    "INSERT INTO kv (k, v) VALUES (?1, ?2) ON CONFLICT (k) DO UPDATE SET v = excluded.v",
+                    [&k, &v],
+                )
+                .map_err(|e| CommandError::Failed {
+                    message: e.to_string(),
+                })?;
+            let events = if v == "with-events" {
+                vec![Envelope::typed::<ConfigChanged>(
+                    "test",
+                    &ConfigChangedV1 {
+                        key: k.clone(),
+                        before: Value::Null,
+                        after: Value::String(v.clone()),
+                    },
+                )]
+            } else {
+                Vec::new()
+            };
+            Ok(HandlerOutput {
+                result: json!({ "k": k }),
+                inverse: None,
+                events,
+                after_commit: None,
+                unchanged: true,
+            })
+        }))
+    }
+
+    /// A `Tx` handler that writes `k = v` and is undone by `kv.noop`.
+    fn kv_undone_by_noop() -> Handler {
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            let k = input["k"].as_str().unwrap_or_default().to_string();
+            let v = input["v"].as_str().unwrap_or_default().to_string();
+            ctx.conn
+                .execute("INSERT INTO kv (k, v) VALUES (?1, ?2)", [&k, &v])
+                .map_err(|e| CommandError::Failed {
+                    message: e.to_string(),
+                })?;
+            Ok(HandlerOutput {
+                result: json!({ "k": k }),
+                inverse: Some(CommandCall {
+                    name: "kv.noop".into(),
+                    input: json!({ "k": format!("{k}-undo"), "v": "x" }),
+                }),
+                ..HandlerOutput::default()
+            })
+        }))
+    }
+
+    /// tsk901: a call that says it changed nothing keeps nothing — what it
+    /// wrote is rolled back, so it can't land unaudited — and one that
+    /// returns events (a change) while saying so is refused.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_unchanged_call_keeps_nothing_and_cant_carry_events() {
+        let (db, bus) = bus();
+        bus.register(
+            Command::new(
+                kv_spec("kv.noop", Invokers::ALL, Confirm::Never),
+                kv_unchanged(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let out = bus
+            .run(&Actor::Human, "kv.noop", json!({"k": "a", "v": "1"}), false)
+            .await
+            .unwrap();
+        assert_eq!(out.audit_id, None);
+        assert_eq!(kv_value(&db, "a").await, None, "its write rolled back");
+        let err = bus
+            .run(
+                &Actor::Human,
+                "kv.noop",
+                json!({"k": "b", "v": "with-events"}),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("changed nothing"), "{err}");
+        assert_eq!(kv_value(&db, "b").await, None);
+        // The refused call is audited as the failure it is; the unchanged
+        // one left nothing.
+        let rows = audits(&db).await;
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(
+            rows[0].outcome,
+            oxplow_domain::events::schema::CommandOutcome::Error
+        );
+    }
+
+    /// tsk901: an undo, or a person's approval, whose run changes nothing
+    /// is still recorded — its row has to be marked.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_undo_or_approval_that_changes_nothing_is_still_recorded() {
+        let (db, bus) = bus();
+        bus.register(
+            Command::new(
+                kv_spec("kv.noop", Invokers::ALL, Confirm::Always),
+                kv_unchanged(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        bus.register(
+            Command::new(
+                kv_spec("kv.mark", Invokers::ALL, Confirm::Never),
+                kv_undone_by_noop(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let marked = bus
+            .run(&Actor::Human, "kv.mark", json!({"k": "a", "v": "1"}), false)
+            .await
+            .unwrap();
+        let undo = bus
+            .undo(&Actor::Human, marked.audit_id.unwrap(), true)
+            .await
+            .unwrap();
+        assert!(undo.audit_id.is_some(), "the undo is recorded");
+        let row = bus
+            .audit_store()
+            .get(marked.audit_id.unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.undone_by, undo.audit_id);
+
+        let err = bus
+            .run(&agent(), "kv.noop", json!({"k": "c", "v": "1"}), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
+        let rows = pending(&db).await;
+        let approved = bus.approve(&Actor::Human, rows[0].id).await.unwrap();
+        assert!(approved.audit_id.is_some(), "the approval is recorded");
+        let p = proposal(&db, rows[0].id).await;
+        assert_eq!(p.decision, oxplow_db::ProposalDecision::Approved);
     }
 
     #[tokio::test(flavor = "multi_thread")]
