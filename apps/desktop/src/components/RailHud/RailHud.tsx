@@ -121,6 +121,8 @@ function useRailSections(available: string[]): {
   value: RailSectionsValue;
   order: RailSectionId[];
   hidden: RailSectionId[];
+  /** The stored layout has arrived: what shows is the person's layout. */
+  loaded: boolean;
   show(id: RailSectionId): void;
   reveal(id: RailSectionId): void;
 } {
@@ -139,12 +141,14 @@ function useRailSections(available: string[]): {
   // a write over a layout not read yet, never a load undoing an edit
   // (tsk972).
   const loaded = useRef(false);
+  const [layoutLoaded, setLayoutLoaded] = useState(false);
   const pending = useRef<Array<(base: PanelPlacement[]) => PanelPlacement[]>>([]);
   useEffect(() => {
     let live = true;
     const arrive = (base: PanelPlacement[]) => {
       if (!live) return;
       loaded.current = true;
+      setLayoutLoaded(true);
       const edits = pending.current.splice(0);
       if (edits.length === 0) {
         setStored(base);
@@ -244,7 +248,7 @@ function useRailSections(available: string[]): {
     () => ({ isExpanded, setCollapsed: collapse, dragHandle, dropZone, dropSide, hide }),
     [isExpanded, collapse, dragHandle, dropZone, dropSide, hide],
   );
-  return { value, order: layout.order, hidden: layout.hidden, show, reveal };
+  return { value, order: layout.order, hidden: layout.hidden, loaded: layoutLoaded, show, reveal };
 }
 
 /** Uniform section: drag handle + chevron + title (+ optional count and
@@ -518,6 +522,9 @@ export function RailHud({
   return (
     <aside
       data-testid="rail-hud"
+      // Busy until the person's stored layout has arrived: until then the
+      // sections show their defaults.
+      aria-busy={!sections.loaded}
       style={{
         width: width.value,
         flexShrink: 0,

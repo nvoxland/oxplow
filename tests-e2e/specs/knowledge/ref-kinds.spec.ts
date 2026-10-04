@@ -20,5 +20,5 @@ test("an extension's ref renders as a link and opens its page", async ({ page, d
   await page.getByTestId("launcher-hit-wiki:platypus-notes").click();
   await page.getByTestId("page-wiki").locator(`a[href="e2e_item:${n}"]`).click();
   // The extension's `item` page: its lens over `v_e2e_item`.
-  await expect(page.getByTestId("lens-row-0")).toContainText("Platypus item");
+  await expect(page.getByTestId("page-lens").getByTestId("lens-row-0")).toContainText("Platypus item");
 });
