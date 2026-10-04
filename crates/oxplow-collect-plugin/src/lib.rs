@@ -290,49 +290,6 @@ enum Runner {
     Exec { argv: Vec<String> },
 }
 
-/// The parsers oxplow ships, named by `entry: oxplow:<name>`: what each
-/// records, how its report is pre-parsed, and its jq program. The config
-/// side (`oxplow_config::collectors::BUNDLED_PARSERS`) names the same set;
-/// a test holds them together.
-pub const BUNDLED: &[(&str, CollectorKind, CollectorInput, &str)] = &[
-    (
-        "junit",
-        CollectorKind::Test,
-        CollectorInput::Xml,
-        include_str!("plugins/junit.jq"),
-    ),
-    (
-        "lcov",
-        CollectorKind::Coverage,
-        CollectorInput::Lcov,
-        include_str!("plugins/lcov.jq"),
-    ),
-    (
-        "cobertura",
-        CollectorKind::Coverage,
-        CollectorInput::Xml,
-        include_str!("plugins/cobertura.jq"),
-    ),
-    (
-        "jacoco",
-        CollectorKind::Coverage,
-        CollectorInput::Xml,
-        include_str!("plugins/jacoco.jq"),
-    ),
-    (
-        "clippy",
-        CollectorKind::Analysis,
-        CollectorInput::Lines,
-        include_str!("plugins/clippy.jq"),
-    ),
-    (
-        "eslint",
-        CollectorKind::Analysis,
-        CollectorInput::Json,
-        include_str!("plugins/eslint.jq"),
-    ),
-];
-
 /// An executable report parser: its name, kind and a way to run it.
 #[derive(Clone)]
 pub struct Collector {
@@ -360,10 +317,23 @@ impl Collector {
     }
 
     /// A bundled parser by its name (`junit`, `lcov`, …), named
-    /// `oxplow.<name>`.
+    /// `oxplow.<name>`: what the config's one table
+    /// (`oxplow_config::collectors::BUNDLED_PARSERS`) says it is.
     pub fn bundled(name: &str) -> Option<Self> {
-        let (name, kind, input, program) = BUNDLED.iter().find(|(n, ..)| *n == name)?;
-        Some(Self::jaq(format!("oxplow.{name}"), *kind, *input, *program))
+        use oxplow_config::collectors::Records;
+        let p = oxplow_config::collectors::bundled_parser(name)?;
+        let kind = match p.records {
+            Records::Tests => CollectorKind::Test,
+            Records::Coverage => CollectorKind::Coverage,
+            Records::Analysis => CollectorKind::Analysis,
+        };
+        let input = CollectorInput::named(p.format)?;
+        Some(Self::jaq(
+            format!("oxplow.{}", p.name),
+            kind,
+            input,
+            p.program,
+        ))
     }
 
     /// Construct a jaq (jq) collector: the host pre-parses content via `input`,
@@ -488,15 +458,21 @@ mod tests {
             .run(content)
     }
 
-    /// tsk863: every bundled parser is a jaq program of its kind; an unknown
-    /// name is none.
+    /// tsk863: every bundled parser is a jaq program of what it records,
+    /// reading a format oxplow pre-parses; an unknown name is none.
     #[test]
     fn the_bundled_parsers_are_named() {
-        for (name, kind, _, _) in BUNDLED {
-            let c = Collector::bundled(name).unwrap();
-            assert_eq!(c.kind(), *kind, "{name}");
+        use oxplow_config::collectors::Records;
+        for p in oxplow_config::collectors::BUNDLED_PARSERS {
+            let c = Collector::bundled(p.name).unwrap_or_else(|| panic!("{}", p.name));
+            let kind = match p.records {
+                Records::Tests => CollectorKind::Test,
+                Records::Coverage => CollectorKind::Coverage,
+                Records::Analysis => CollectorKind::Analysis,
+            };
+            assert_eq!(c.kind(), kind, "{}", p.name);
             assert_eq!(c.runtime(), CollectorRuntime::Jaq);
-            assert_eq!(c.name(), format!("oxplow.{name}"));
+            assert_eq!(c.name(), format!("oxplow.{}", p.name));
         }
         assert!(Collector::bundled("clover").is_none());
     }

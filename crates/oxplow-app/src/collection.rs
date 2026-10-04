@@ -3986,33 +3986,6 @@ mod tests {
         }
     }
 
-    /// tsk863: the parsers a report collector may name are the ones oxplow
-    /// ships, each recording what it parses and pre-parsing its report the
-    /// way its program expects.
-    #[test]
-    fn the_bundled_parsers_agree_with_what_config_accepts() {
-        let config: Vec<(String, Records, String)> = oxplow_config::collectors::BUNDLED_PARSERS
-            .iter()
-            .map(|(n, r, f)| (n.to_string(), *r, f.to_string()))
-            .collect();
-        let shipped: Vec<(String, Records, String)> = oxplow_collect_plugin::BUNDLED
-            .iter()
-            .map(|(n, kind, input, _)| {
-                let records = match kind {
-                    CollectorKind::Test => Records::Tests,
-                    CollectorKind::Coverage => Records::Coverage,
-                    CollectorKind::Analysis => Records::Analysis,
-                };
-                let format = ["text", "json", "xml", "lcov", "lines"]
-                    .into_iter()
-                    .find(|f| CollectorInput::named(f) == Some(*input))
-                    .unwrap();
-                (n.to_string(), records, format.to_string())
-            })
-            .collect();
-        assert_eq!(config, shipped);
-    }
-
     #[test]
     fn a_program_parser_keeps_its_lower_trust_label() {
         assert_eq!(trust("coverage-report", &[]), "coverage-report");
@@ -4259,7 +4232,7 @@ mod tests {
         }
 
         /// Run the harness's coverage collector by hand (`collector.sync`).
-        async fn ingest_coverage(h: &Harness) -> CoverageIngest {
+        async fn sync_coverage(h: &Harness) -> CoverageIngest {
             match h
                 .service
                 .sync_report_collector(&h.thread, "tests.coverage", "human", None)
@@ -4461,7 +4434,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn ingest_coverage_stores_diff_coverage_over_changed_lines() {
+        async fn a_coverage_report_stores_diff_coverage_over_changed_lines() {
             let h = build(Some(COBERTURA_50PCT)).await;
             // Changed lines {2,4}; report instruments {1,2,4}, covers {1,2}.
             // So changed∩instrumented = {2,4}, covered = {2} → 50%, line 4
@@ -4474,7 +4447,7 @@ mod tests {
             // tsk270: ingest records ABSOLUTE coverage (instruments {1,2,4},
             // covers {1,2} → 2/3 ≈ 66.7%); the effort-relative DIFF (changed∩instr
             // = {2,4}, covered {2} → 50%, line 4 uncovered) is derived at READ.
-            let outcome = ingest_coverage(&h).await;
+            let outcome = sync_coverage(&h).await;
             match outcome {
                 CoverageIngest::Stored {
                     run,
@@ -4526,18 +4499,21 @@ mod tests {
         #[tokio::test]
         async fn diff_coverage_ignores_edits_after_the_run() {
             let h = build(Some(COBERTURA_50PCT)).await;
-            ingest_coverage(&h).await;
+            sync_coverage(&h).await;
             std::fs::write(h.tmp.path().join("src/foo.rs"), "x\n").unwrap();
             let pct = diff_pct(&h).await.expect("a diff");
             assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
         }
 
-        /// tsk862: the diff reads snapshots, never a working tree — a
-        /// worktree stream's files aren't under the project directory.
+        /// tsk862: the diff reads snapshots, never a working tree: with the
+        /// file gone from the checkout it is still computed — so a worktree
+        /// stream, whose files aren't under the project directory, gets one
+        /// too (its report is read from its own worktree:
+        /// `a_worktree_threads_report_is_read_from_its_worktree`).
         #[tokio::test]
-        async fn a_worktree_streams_diff_uses_its_snapshots() {
+        async fn the_diff_comes_from_snapshots_not_the_checkout() {
             let h = build(Some(COBERTURA_50PCT)).await;
-            ingest_coverage(&h).await;
+            sync_coverage(&h).await;
             std::fs::remove_file(h.tmp.path().join("src/foo.rs")).unwrap();
             let pct = diff_pct(&h).await.expect("a diff from snapshots alone");
             assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
@@ -4668,7 +4644,7 @@ mod tests {
 </classes>"#;
             let absolute = absolute.replace("</classes>", outside);
             std::fs::write(h.tmp.path().join("coverage.xml"), absolute).unwrap();
-            ingest_coverage(&h).await;
+            sync_coverage(&h).await;
 
             let pct = diff_pct(&h).await.expect("a diff");
             assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
@@ -4689,7 +4665,7 @@ mod tests {
         #[tokio::test]
         async fn an_expired_baseline_gives_no_diff() {
             let h = build(Some(COBERTURA_50PCT)).await;
-            ingest_coverage(&h).await;
+            sync_coverage(&h).await;
             let keep = std::collections::HashSet::from([BlobStore::hash(NEW_FOO.as_bytes())]);
             BlobStore::new(h.tmp.path().join(".oxplow/snapshots"))
                 .gc(&keep)
@@ -4736,7 +4712,7 @@ mod tests {
 
             // Observe coverage — two efforts open ⇒ unclaimed.
             assert!(matches!(
-                ingest_coverage(&h).await,
+                sync_coverage(&h).await,
                 CoverageIngest::Stored { .. }
             ));
             // No pollution: neither effort shows a diff-coverage observation yet.
@@ -4773,10 +4749,10 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn ingest_coverage_mirrors_into_metric_substrate() {
+        async fn a_coverage_report_mirrors_into_metric_substrate() {
             // git_init = true so a branch is present to capture.
             let h = build_full(Some(COBERTURA_50PCT), true).await;
-            ingest_coverage(&h).await;
+            sync_coverage(&h).await;
 
             // The durable fact layer (epic tsk12; the legacy sample write is
             // gone, T-E2): one `oxplow.coverage` fact for the report's single
@@ -4810,7 +4786,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn ingest_coverage_records_branch_and_function_facts() {
+        async fn a_coverage_report_records_branch_and_function_facts() {
             // tsk123: a report carrying branch (condition-coverage) + function
             // (methods) data lands per-file facts on oxplow.coverage.branch /
             // .function beside the line facts, num/den = hit/found so the headline
@@ -4830,7 +4806,7 @@ mod tests {
   </class>
 </classes></package></packages></coverage>"#;
             let h = build_full(Some(COBERTURA_BF), true).await;
-            ingest_coverage(&h).await;
+            sync_coverage(&h).await;
 
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
             let bm = facts
@@ -4866,15 +4842,15 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn merge_fresh_coverage_preserves_branch_and_function_counts() {
+        async fn merged_coverage_reports_keep_branch_and_function_counts() {
             // tsk160: the passive ride-along is the PRIMARY ingestion path, and
             // it merges per-file coverage from every fresh report. It used to
             // copy only the line sets, so branch/function counters arrived as 0
             // and observe_coverage's `*_found > 0` gate meant
             // oxplow.coverage.branch/.function never got a fact here — while the
-            // explicit ingest_coverage path (which passes the parse straight
-            // through) worked. Same report as
-            // `ingest_coverage_records_branch_and_function_facts`: branch 3/4,
+            // by-hand sync path (which passes the parse straight through)
+            // worked. Same report as
+            // `a_coverage_report_records_branch_and_function_facts`: branch 3/4,
             // function 1/2.
             const COBERTURA_BF: &str = r#"<?xml version="1.0"?>
 <coverage><packages><package name="p"><classes>
@@ -4903,7 +4879,7 @@ mod tests {
                 )],
             );
             // Floor at the epoch so the just-written report is always fresh
-            // (same approach as the merge_fresh_test_reports tests).
+            // (same approach as the merged-test-report tests).
             let (merged, _errors) = {
                 let reads = run_reads(&h, RunKind::Test).await;
                 (
@@ -4930,7 +4906,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn merge_fresh_coverage_sums_counts_across_reports() {
+        async fn merged_coverage_reports_sum_counts() {
             // Two reports covering the same file (a polyglot repo reporting from
             // more than one toolchain, which 0.5 explicitly supports) must SUM
             // their branch/function counters, matching how the line sets union.
@@ -7106,9 +7082,9 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn ingest_coverage_writes_coverage_detail_finding_to_substrate() {
+        async fn a_coverage_report_writes_its_detail_to_the_capture() {
             let h = build_full(Some(COBERTURA_50PCT), true).await;
-            ingest_coverage(&h).await;
+            sync_coverage(&h).await;
             // The per-file line-sets ride in the coverage CAPTURE's detail
             // envelope (T-E1/T-E2 — the legacy coverage-detail finding is gone).
             let caps = oxplow_db::SqliteFactStore::new(h.db.clone())
@@ -7192,7 +7168,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn ingest_coverage_observes_with_no_open_effort() {
+        async fn a_coverage_report_is_observed_with_no_open_effort() {
             // tsk270 observe-always: coverage is recorded even with no open effort
             // (absolute), just left unattributed — no longer dropped.
             let h = build(Some(COBERTURA_50PCT)).await;
@@ -7201,7 +7177,7 @@ mod tests {
                 .await
                 .unwrap();
             assert!(matches!(
-                ingest_coverage(&h).await,
+                sync_coverage(&h).await,
                 CoverageIngest::Stored { .. }
             ));
         }
@@ -7392,6 +7368,85 @@ mod tests {
             assert_eq!(collector_run(&h, "tests.parse").await.unwrap().0, "ok");
         }
 
+        /// tsk935: a by-hand sync (`collector.sync`, whoever asks — an
+        /// agent can't approve) runs no unapproved program, and an approved
+        /// one whose program changed asks again before it runs.
+        #[tokio::test]
+        async fn a_by_hand_sync_waits_for_approval_and_a_changed_parser_asks_again() {
+            use std::os::unix::fs::PermissionsExt;
+            let h = build(None).await;
+            let dir = h.tmp.path();
+            std::fs::create_dir_all(dir.join("tools")).unwrap();
+            let program = dir.join("tools/parse.sh");
+            let script = |extra: &str| {
+                format!(
+                    "#!/bin/sh\ncat >/dev/null\n{extra}echo '{{\"suites\":[{{\"name\":\"s\",\"cases\":[{{\"classname\":\"c\",\"name\":\"t\",\"status\":\"passed\"}}]}}]}}'\n"
+                )
+            };
+            std::fs::write(&program, script("")).unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::write(dir.join("out.txt"), "whatever the tool wrote").unwrap();
+            let value: serde_yaml::Value = serde_yaml::from_str(
+                "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }",
+            )
+            .unwrap();
+            let (specs, errors) = oxplow_config::collectors::parse_collectors(
+                oxplow_config::collectors::PROJECT,
+                &value,
+                &|_| true,
+            );
+            assert_eq!(errors, Vec::<String>::new());
+            declare(&h, specs);
+            let approvals = Arc::new(crate::exec_consent::ApprovalStore::for_tests(dir));
+            let service = h.service.clone().with_approvals(approvals.clone());
+            let sync = || {
+                let service = service.clone();
+                let thread = h.thread;
+                async move {
+                    service
+                        .sync_report_collector(&thread, "tests.parse", "agent", None)
+                        .await
+                }
+            };
+            assert!(
+                matches!(sync().await, Err(crate::collector_runner::RunCollectorError::NeedsApproval(m)) if m.contains("approval")),
+                "unapproved"
+            );
+            let cfg = h.service.config.read().unwrap().clone();
+            let approve = || {
+                let version = crate::exec_consent::version_of(
+                    &approvals,
+                    dir,
+                    &cfg,
+                    crate::exec_consent::ProgramKind::Collector,
+                    "tests.parse",
+                );
+                crate::exec_consent::approve_program(
+                    &approvals,
+                    dir,
+                    &cfg,
+                    &[],
+                    crate::exec_consent::ProgramKind::Collector,
+                    "tests.parse",
+                    &version,
+                )
+                .unwrap();
+            };
+            approve();
+            assert!(
+                matches!(sync().await, Ok(ReportSync::Tests { run: Some(_) })),
+                "approved, it runs"
+            );
+            std::fs::write(&program, script("echo changed >&2\n")).unwrap();
+            assert!(
+                matches!(
+                    sync().await,
+                    Err(crate::collector_runner::RunCollectorError::NeedsApproval(_))
+                ),
+                "a changed program asks again"
+            );
+        }
+
         /// tsk863: a report collector is held to the plugin failure policy
         /// (P7.C2): its third failed parse in a row disables it, and a
         /// disabled one reads nothing until a person enables it.
@@ -7448,7 +7503,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn ingest_coverage_no_changed_coverage_when_report_misses_changed_lines() {
+        async fn a_coverage_report_missing_the_changed_lines_has_no_diff() {
             // Report only instruments line 1 (unchanged) → no changed line
             // intersects → NoChangedCoverage.
             let only_line_1 = r#"<?xml version="1.0"?>
@@ -7458,7 +7513,7 @@ mod tests {
             let h = build(Some(only_line_1)).await;
             // tsk270: observe records absolute coverage regardless (Stored)…
             assert!(matches!(
-                ingest_coverage(&h).await,
+                sync_coverage(&h).await,
                 CoverageIngest::Stored { .. }
             ));
             // …but the effort's DERIVED diff is empty (line 1 is unchanged), so no
@@ -7564,7 +7619,7 @@ mod tests {
             // renderer colors red/green from it and the nudge fires below target
             // — no hardcoded UI constant.
             let h = build_full(Some(COBERTURA_50PCT), true).await;
-            ingest_coverage(&h).await;
+            sync_coverage(&h).await;
             // The policy rides the producer SPEC (T-E2: the legacy definition
             // write is gone) — seeded by seed_catalog.
             for spec in crate::producer_metrics::builtin_producer_specs() {
@@ -7586,7 +7641,7 @@ mod tests {
         #[tokio::test]
         async fn on_post_tool_use_no_nudge_when_report_produced() {
             // A detected test command that regenerated a fresh JUnit report →
-            // no nudge. We use merge_fresh_test_reports directly: this
+            // no nudge. We read the run's reports directly: this
             // exercises exactly the branch that suppresses the nudge
             // (produced_report is true).
             let h = build(None).await;
@@ -7853,7 +7908,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn merge_fresh_test_reports_unions_suites_from_multiple_stacks() {
+        async fn merged_test_reports_union_suites_from_several_stacks() {
             let h = build(None).await;
             // Two JUnit reports from different stacks, both written now.
             std::fs::write(
@@ -8050,7 +8105,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn merge_fresh_analysis_unions_findings_from_reports() {
+        async fn merged_analysis_reports_union_findings() {
             let h = build(None).await;
             std::fs::write(h.tmp.path().join("clippy.json"), CLIPPY_JSON).unwrap();
             // Just written, so inside a window ending now.
@@ -8084,7 +8139,7 @@ mod tests {
         ]"#;
 
         #[tokio::test]
-        async fn ingest_analysis_stores_static_analysis_from_eslint_report() {
+        async fn an_eslint_report_stores_static_analysis() {
             // End-to-end TS path: the bundled eslint parser → store, through
             // the real service entry point (not just the golden parser test).
             let h = build(None).await;
@@ -8152,7 +8207,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn ingest_analysis_stores_with_no_baseline() {
+        async fn an_analysis_report_stores_with_no_baseline() {
             // Findings are ABSOLUTE (current-file), not diff-relative like
             // coverage — so an effort with no start snapshot must still store
             // (pin = None), matching the passive ride-along. Regression guard

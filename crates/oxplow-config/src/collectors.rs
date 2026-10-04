@@ -128,17 +128,65 @@ pub enum Records {
     Analysis,
 }
 
+/// A parser oxplow ships (tsk935: the one table — the config check and
+/// the parser runtime both read it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BundledParser {
+    /// What `entry: oxplow:<name>` names.
+    pub name: &'static str,
+    /// What it records.
+    pub records: Records,
+    /// How its report is read (`report.format`) before it sees it.
+    pub format: &'static str,
+    /// Its jq program.
+    pub program: &'static str,
+}
+
 /// The parsers oxplow ships, named by a report collector's
-/// `entry: oxplow:<name>`: what each records and how its report is read
-/// (`report.format`) before the parser sees it.
-pub const BUNDLED_PARSERS: &[(&str, Records, &str)] = &[
-    ("junit", Records::Tests, "xml"),
-    ("lcov", Records::Coverage, "lcov"),
-    ("cobertura", Records::Coverage, "xml"),
-    ("jacoco", Records::Coverage, "xml"),
-    ("clippy", Records::Analysis, "lines"),
-    ("eslint", Records::Analysis, "json"),
+/// `entry: oxplow:<name>`.
+pub const BUNDLED_PARSERS: &[BundledParser] = &[
+    BundledParser {
+        name: "junit",
+        records: Records::Tests,
+        format: "xml",
+        program: include_str!("parsers/junit.jq"),
+    },
+    BundledParser {
+        name: "lcov",
+        records: Records::Coverage,
+        format: "lcov",
+        program: include_str!("parsers/lcov.jq"),
+    },
+    BundledParser {
+        name: "cobertura",
+        records: Records::Coverage,
+        format: "xml",
+        program: include_str!("parsers/cobertura.jq"),
+    },
+    BundledParser {
+        name: "jacoco",
+        records: Records::Coverage,
+        format: "xml",
+        program: include_str!("parsers/jacoco.jq"),
+    },
+    BundledParser {
+        name: "clippy",
+        records: Records::Analysis,
+        format: "lines",
+        program: include_str!("parsers/clippy.jq"),
+    },
+    BundledParser {
+        name: "eslint",
+        records: Records::Analysis,
+        format: "json",
+        program: include_str!("parsers/eslint.jq"),
+    },
 ];
+
+/// The bundled parser `name`, if oxplow ships one.
+pub fn bundled_parser(name: &str) -> Option<&'static BundledParser> {
+    BUNDLED_PARSERS.iter().find(|p| p.name == name)
+}
 
 /// The prefix of a bundled parser's `entry`.
 pub const BUNDLED_ENTRY: &str = "oxplow:";
@@ -924,26 +972,31 @@ fn validate_report_collector(
             "needs an `entry`: a bundled parser (`{BUNDLED_ENTRY}<{}>`) or its own script",
             BUNDLED_PARSERS
                 .iter()
-                .map(|(n, _, _)| *n)
+                .map(|p| p.name)
                 .collect::<Vec<_>>()
                 .join("|")
         )));
     };
     let (runtime, format) = if let Some(name) = entry.strip_prefix(BUNDLED_ENTRY) {
-        let Some((_, parses, format)) = BUNDLED_PARSERS.iter().find(|(n, _, _)| *n == name) else {
+        let Some(&BundledParser {
+            records: parses,
+            format,
+            ..
+        }) = bundled_parser(name)
+        else {
             return Err(ctx(format!(
                 "`{entry}` isn't a bundled parser ({})",
                 BUNDLED_PARSERS
                     .iter()
-                    .map(|(n, _, _)| format!("{BUNDLED_ENTRY}{n}"))
+                    .map(|p| format!("{BUNDLED_ENTRY}{}", p.name))
                     .collect::<Vec<_>>()
                     .join(", ")
             )));
         };
-        if *parses != records {
+        if parses != records {
             return Err(ctx(format!(
                 "`{entry}` parses {}, not {}",
-                records_name(*parses),
+                records_name(parses),
                 records_name(records)
             )));
         }
@@ -1228,6 +1281,36 @@ mod tests {
         ));
         assert!(s.is_empty());
         assert!(e[0].contains("`input` is for"), "{e:?}");
+    }
+
+    /// tsk935: a report collector's report and its own parser are paths
+    /// inside the project — `..` or an absolute path is refused at load
+    /// (and a symlink out, when it is read: `in_checkout`).
+    #[test]
+    fn a_report_collectors_paths_stay_in_the_project() {
+        for (yaml, needle) in [
+            (
+                "- { id: t.a, records: tests, entry: oxplow:junit, report: { path: ../out.xml }, trigger: { on_run: test } }",
+                "report `../out.xml` must be a path inside the project",
+            ),
+            (
+                "- { id: t.a, records: tests, entry: oxplow:junit, report: { path: /tmp/out.xml }, trigger: { on_run: test } }",
+                "report `/tmp/out.xml` must be a path inside the project",
+            ),
+            (
+                "- { id: t.a, records: tests, runtime: jaq, entry: ../p.jq, report: { path: out.xml, format: xml }, trigger: { on_run: test } }",
+                "entry `../p.jq` must be a path inside the project",
+            ),
+            (
+                "- { id: t.a, records: tests, runtime: jaq, entry: /p.jq, report: { path: out.xml, format: xml }, trigger: { on_run: test } }",
+                "entry `/p.jq` must be a path inside the project",
+            ),
+        ] {
+            let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+            let (s, e) = parse_collectors(PROJECT, &value, &|_| true);
+            assert!(s.is_empty(), "{yaml}");
+            assert!(e.iter().any(|m| m.contains(needle)), "{yaml}: {e:?}");
+        }
     }
 
     /// A fact collector (what a gauge was) declares its measures; a

@@ -4492,6 +4492,7 @@ dependencies = [
  "jaq-std",
  "oxplow-code-dup",
  "oxplow-code-metrics",
+ "oxplow-config",
  "oxplow-coverage",
  "quick-xml 0.42.0",
  "regex",

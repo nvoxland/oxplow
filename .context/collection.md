@@ -73,12 +73,12 @@ section for the column.
   `TestReport { suites → cases }`; analysis = `AnalysisReport { findings }`,
   each finding `{ path, line?, column?, severity, rule?, message }`). The
   typed shapes live in `oxplow-coverage`. `entry: "oxplow:<name>"` names a
-  **bundled** parser (`Collector::bundled`, the `BUNDLED` table: `junit`,
-  `lcov`, `cobertura`, `jacoco`, `clippy`, `eslint` — jq programs in
-  `src/plugins/*.jq`); the config side names the same set with what each
-  records and how its report is pre-parsed (`BUNDLED_PARSERS`), and
-  `the_bundled_parsers_agree_with_what_config_accepts` holds the two
-  together. Any other `entry` is the project's own `jaq` / `starlark` /
+  **bundled** parser: `junit`, `lcov`, `cobertura`, `jacoco`, `clippy`,
+  `eslint`. **One table** holds them (`oxplow_config::collectors::
+  BUNDLED_PARSERS`, tsk935): each one's name, what it records, how its
+  report is pre-parsed and its jq program (`oxplow-config/src/parsers/
+  *.jq`). The config check and the runtime (`Collector::bundled`, which
+  reads it) can't disagree. Any other `entry` is the project's own `jaq` / `starlark` /
   `exec` parser (`runtime:`, `report.format` = the host pre-parse). There
   is no format registry: a collector names its parser. A parser writes
   paths as the report has them (`cargo llvm-cov` and eslint write absolute
