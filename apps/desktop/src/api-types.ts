@@ -1,47 +1,6 @@
-// Legacy Electron IPC contract — kept here to keep the existing UI
-// typechecking through the migration. The runtime side is dead;
-// `window.oxplowApi` doesn't exist under Tauri. Calls into
-// `desktopApi().*` will throw "not yet ported" until each method is
-// wired through the new `tauri-bridge`.
-//
-// New UI code should import from `./tauri-bridge/index.ts` directly,
-// which gives a typed surface backed by real Tauri commands.
-
-// (No bridge imports — the api-types module is self-contained for typecheck.)
-
-// ---- Stream / Thread / Task (kept inline for type compatibility
-// with the api.ts; new code should reach for the bridge's
-// types instead — they have the same names but with snake-cased fields
-// matching the Rust shape).
-
-// Stream and Thread types moved to bindings — api.ts re-exports
-// them directly from tauri-bridge/generated/bindings now. The
-// legacy nested `panes` / `resume` sub-objects on Stream and the
-// "active" | "queued" status restriction on Thread (which masked
-// the bindings "closed" variant) are gone.
-
-export interface ThreadState {
-  selectedThreadId: string | null;
-  activeThreadId: string | null;
-  threads: import("./tauri-bridge/index.js").Thread[];
-}
-
-export interface TaskNote {
-  id: string;
-  task_id: string | null;
-  thread_id: string | null;
-  body: string;
-  author: string;
-  created_at: string;
-}
-
-// ---- Snapshots ----
-
-// Snapshot interfaces (FileSnapshot, SnapshotSource, SnapshotEntry,
-// SnapshotEntryState, SnapshotFileRow) live in api.ts now — the
-// renderer-side aggregate surface is richer than the bindings
-// shape (label, source enum, created_at) and is the version every
-// consumer reads.
+// What's left of the legacy IPC types, until each moves to the generated
+// bindings or beside its one consumer (P11: C8 the snake-case shapes, C9
+// the git-ref types, then this file goes).
 
 // ---- Branches & git ----
 
@@ -108,23 +67,6 @@ export interface RefOption {
   [extra: string]: any;
 }
 
-export interface GitWorktreeEntry {
-  path: string;
-  branch: string;
-  head: string;
-  isMain?: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
-}
-
-export interface RemoteBranchEntry {
-  name: string;
-  ref: string;
-  lastCommitAt: string | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
-}
-
 export interface TextSearchHit {
   path: string;
   line: number;
@@ -132,76 +74,6 @@ export interface TextSearchHit {
   snippet?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [extra: string]: any;
-}
-
-// ---- Workspace ----
-
-export interface WorkspaceFile {
-  path: string;
-  content: string;
-}
-
-export interface WorkspacePathChange {
-  kind: "rename" | "delete" | "create" | "modify";
-  path: string;
-  toPath?: string;
-}
-
-export interface WorkspaceRenameResult {
-  fromPath: string;
-  toPath: string;
-}
-
-export interface WorkspaceWatchEvent {
-  kind: "change" | "remove" | "create";
-  path: string;
-}
-
-// ---- Agent statuses ----
-
-export type AgentStatus = "running" | "idle" | "stopped" | "error";
-
-// ---- MenuGroupSnapshot / CommandId placeholders ----
-
-export type CommandId = string;
-export interface MenuGroupSnapshot {
-  id: string;
-  label: string;
-  items: { id: CommandId; label: string; disabled?: boolean }[];
-}
-
-// ---- Page visit / usage ----
-
-export interface CountByDayRowApi {
-  day: string;
-  count: number;
-}
-
-export interface TopVisitedRowApi {
-  pageKind: string;
-  pageId: string;
-  visitCount: number;
-}
-
-export interface OxplowConfig {
-  agents: import("./tauri-bridge/generated/bindings.js").AgentKind[];
-  projectName: string;
-  agentPromptAppend: string;
-  snapshotRetentionDays: number;
-  snapshotMaxFileBytes: number;
-  /** Extra ignore (`exclude`) / force-track (`include`) paths layered on
-   *  top of `.gitignore`. `.git`/`.oxplow` and everything gitignored are
-   *  ignored automatically. */
-  generated: { exclude: string[]; include: string[] };
-  injectSessionContext: boolean;
-  /** The project's architectural zone table (`zones:` in
-   *  .oxplow/project.yaml), in evaluation order — first match wins.
-   *  Absent/empty means the project declared none, so every file
-   *  classifies as `other` (tsk251). */
-  zones?: import("./tauri-bridge/generated/bindings.js").ZoneRuleConfig[];
-  /** Per-agent launch model overrides (`agentModels:` in .oxplow/project.yaml).
-   *  Only opencode consumes its entry today. */
-  agentModels?: Partial<Record<import("./tauri-bridge/generated/bindings.js").AgentKind, string>>;
 }
 
 export interface BackgroundTask {
@@ -218,29 +90,3 @@ export interface BackgroundTask {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [extra: string]: any;
 }
-
-export interface FinishedEntry {
-  id: string;
-  kind: string;
-  finishedAt: string;
-}
-
-// ---- OxplowEvent (UI event-bus payloads) ----
-
-// Permissive OxplowEvent shape — the original was a discriminated
-// union; under Tauri we route events through the bridge with typed
-// payloads, so this exists only for UI event-bus subscriber call
-// sites. Each subscriber narrows on `type` and treats the rest of
-// the fields as freeform; that compiles cleanly with this shape.
-export interface OxplowEvent {
-  type: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [key: string]: any;
-}
-
-
-// DesktopApi (the legacy permissive index-signature interface) was
-// deleted: every renderer caller now reaches for either a typed
-// top-level wrapper in api.ts or the small DesktopBridge facade
-// returned by `desktopBridge()`. The window.oxplowApi global is
-// long gone.

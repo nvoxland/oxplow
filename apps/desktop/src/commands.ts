@@ -1,4 +1,8 @@
 import type { MenuGroup as SharedMenuGroup, MenuItem } from "./menu.js";
+import type {
+  MenuGroupSnapshot as NativeMenuGroupSnapshot,
+  MenuItemSnapshot as NativeMenuItemSnapshot,
+} from "./tauri-bridge/generated/bindings.js";
 
 export type CommandId =
   | "file.save"
@@ -221,25 +225,6 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
   }));
 }
 
-/// Native-menu snapshot item that may carry a nested submenu and a
-/// free-form id (the Open Recent children use `project.openRecent:<path>`
-/// ids that aren't part of the static `CommandId` union). Mirrors the
-/// Rust `MenuItemSnapshot` shape (with `submenu`).
-export interface NativeMenuItemSnapshot {
-  id: string;
-  label: string;
-  shortcut?: string;
-  enabled: boolean;
-  checked?: boolean;
-  submenu?: NativeMenuItemSnapshot[];
-}
-
-export interface NativeMenuGroupSnapshot {
-  id: string;
-  label: string;
-  items: NativeMenuItemSnapshot[];
-}
-
 /// Menu-command id prefix for a dynamic "Open Recent ▸ <project>" entry.
 /// The native `menu:command` dispatch matches this prefix and opens the
 /// trailing path in a new window.
@@ -254,22 +239,39 @@ export function buildNativeMenuSnapshots(
   recents: { path: string; title: string; exists: boolean }[],
 ): NativeMenuGroupSnapshot[] {
   return buildMenuGroupSnapshots(state).map((group) => {
-    if (group.id !== "file") return group;
-    const openRecent: NativeMenuItemSnapshot = {
-      id: "project.openRecent",
-      label: "Open Recent",
-      enabled: recents.length > 0,
-      submenu: recents.map((r) => ({
-        id: `${OPEN_RECENT_PREFIX}${r.path}`,
-        label: r.title,
-        enabled: r.exists,
-      })),
-    };
-    const items: NativeMenuItemSnapshot[] = [...group.items];
-    const afterIdx = items.findIndex((i) => i.id === "project.openNewWindow");
-    items.splice(afterIdx >= 0 ? afterIdx + 1 : items.length, 0, openRecent);
-    return { ...group, items };
+    const items = group.items.map(nativeItem);
+    if (group.id === "file") {
+      const openRecent: NativeMenuItemSnapshot = {
+        id: "project.openRecent",
+        label: "Open Recent",
+        shortcut: null,
+        enabled: recents.length > 0,
+        checked: null,
+        submenu: recents.map((r) => ({
+          id: `${OPEN_RECENT_PREFIX}${r.path}`,
+          label: r.title,
+          shortcut: null,
+          enabled: r.exists,
+          checked: null,
+        })),
+      };
+      const afterIdx = items.findIndex((i) => i.id === "project.openNewWindow");
+      items.splice(afterIdx >= 0 ? afterIdx + 1 : items.length, 0, openRecent);
+    }
+    return { id: group.id, label: group.label, items };
   });
+}
+
+/// A menu command as the shell's `MenuItemSnapshot`: what it draws, no
+/// more (a separator is told by its `native.separator.*` id).
+function nativeItem(item: MenuCommandSnapshot): NativeMenuItemSnapshot {
+  return {
+    id: item.id,
+    label: item.label,
+    shortcut: item.shortcut ?? null,
+    enabled: item.enabled,
+    checked: item.checked ?? null,
+  };
 }
 
 export function findCommandById(groups: MenuGroup[], id: CommandId): MenuCommand | undefined {

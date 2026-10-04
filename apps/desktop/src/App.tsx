@@ -171,7 +171,7 @@ import {
   writePersistedCenterActive,
   writePersistedFileSessionPaths,
 } from "./tabs/pageTabsPersistence.js";
-import { forgetPage, recordPageVisit, recordUserInterrupt, reportOpenPage } from "./api.js";
+import { forgetPage, generatedPaths, recordPageVisit, recordUserInterrupt, reportOpenPage } from "./api.js";
 import { openProject, createProject, listRecentProjects } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import { coalescedRefresh } from "./coalesced-refresh.js";
@@ -1174,7 +1174,7 @@ export function App() {
       : generated.exclude.filter((e) => e !== entry);
     try {
       const cfg = await setGenerated({ exclude, include: generated.include });
-      setGeneratedState(cfg.generated);
+      setGeneratedState(generatedPaths(cfg));
     } catch (err) {
       setError(`Failed to update generated paths: ${String(err)}`);
     }

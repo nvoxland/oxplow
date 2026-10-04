@@ -238,12 +238,18 @@ union. To add an event:
 4. Consume in the UI via
    `subscribeOxplowEvents((e) => { if (e.kind === "fooChanged") … })`.
 
-**Camelcase trap (mostly defused):** the wire shape is camelCase
-(`event.kind`, `event.streamId`, …). A subscriber that filters on
-`event.type === "foo.changed"` will silently never fire — the
-agent-status dot bug came from exactly this mismatch. The kind union
-is now generated, so the remaining trap is only in hand-written
-filter strings at subscriber call sites.
+**Camelcase trap (defused):** the wire shape is camelCase
+(`event.kind`, `event.streamId`, …). A subscriber that filtered on
+`event.type === "foo.changed"` silently never fired — the agent-status
+dot bug came from exactly this mismatch. `subscribeOxplowEvents` hands
+its listener the generated `OxplowEvent` union (P11, tsk963; the
+hand-written `{ type, …any }` shape in `api-types.ts` is gone), so a
+filter on a field or kind the union doesn't have fails typecheck.
+Config reads (`getConfig`, the `set*` writers) return the generated
+`OxplowConfig` and the native menu is built as the generated
+`MenuGroupSnapshot`, with no casts at the boundary; a list the daemon
+always sends but the bindings mark optional (a `serde(default)` field)
+is defaulted at one reader (`generatedPaths`).
 
 **Event channel names** live in one registry:
 `oxplow_app::event_channels` (`crates/oxplow-app/src/events.rs`) on

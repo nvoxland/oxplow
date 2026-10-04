@@ -5,6 +5,7 @@ import {
   type AgentStatus,
   type BacklogState,
   formatAgentStallAlert,
+  generatedPaths,
   getConfig,
   getThreadState,
   listAgentStatuses,
@@ -240,7 +241,7 @@ export function useBackendSubscriptions(
       void getConfig()
         .then((cfg) => {
           if (cancelled) return;
-          setGeneratedState(cfg.generated);
+          setGeneratedState(generatedPaths(cfg));
           setEnabledAgents(cfg.agents?.length ? cfg.agents : ["claude"]);
         })
         .catch((error) => {

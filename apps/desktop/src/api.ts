@@ -1,10 +1,9 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
-import type { BegunSignIn, ExtensionChange, OpOutcome, ProviderEffect, Reads, Scope, SignInCompletion, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
+import type { BegunSignIn, ExtensionChange, OpOutcome, OxplowConfig, OxplowEvent, ProviderEffect, Reads, Scope, SignInCompletion, SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
 import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
 export { onRemoteReconnect, triggerRemoteResync };
 import { EVENT_CHANNELS } from "./tauri-bridge/channels.js";
-import type { OxplowEvent } from "./api-types.js";
 import { latestWins } from "./latestWins.js";
 import {
   METRIC_CATALOG_SQL,
@@ -142,10 +141,10 @@ function adaptBackgroundTask(t: any): any {
 function buildBridge() {
   return {
     setNativeMenu: async (
-      groups: import("./api-types.js").MenuGroupSnapshot[],
+      groups: import("./tauri-bridge/generated/bindings.js").MenuGroupSnapshot[],
     ): Promise<void> => {
       try {
-        unwrap(await commands.setNativeMenu(groups as never));
+        unwrap(await commands.setNativeMenu(groups));
       } catch {
         // Don't break the UI if menu installation fails (e.g.
         // platform doesn't support a particular accelerator).
@@ -279,7 +278,7 @@ function buildBridge() {
 export type DesktopBridge = ReturnType<typeof buildBridge>;
 let cachedBridge: DesktopBridge | null = null;
 
-export type { OxplowEvent } from "./api-types.js";
+export type { OxplowConfig, OxplowEvent };
 // Use the tauri-specta-generated shapes directly for the
 // snake_case-native bindings (CommitDetail, GitLogCommit,
 // RemoteBranchEntry, BlameLine, …). The api-types
@@ -1070,22 +1069,28 @@ export async function renameCurrentStream(title: string): Promise<Stream> {
   return renameStream(cur.id, title);
 }
 
-export async function getConfig(): Promise<import("./api-types.js").OxplowConfig> {
-  return unwrap(await commands.getConfig()) as unknown as import("./api-types.js").OxplowConfig;
+/** The config's `generated` paths, both lists there: the bindings mark a
+ *  list the daemon always sends optional, since it has a default. */
+export function generatedPaths(cfg: OxplowConfig): { exclude: string[]; include: string[] } {
+  return { exclude: cfg.generated.exclude ?? [], include: cfg.generated.include ?? [] };
 }
 
-export async function setAgents(agents: AgentKind[]): Promise<import("./api-types.js").OxplowConfig> {
-  return unwrap(await commands.setAgents(agents)) as unknown as import("./api-types.js").OxplowConfig;
+export async function getConfig(): Promise<OxplowConfig> {
+  return unwrap(await commands.getConfig());
 }
 
-export async function setAgentPromptAppend(text: string): Promise<import("./api-types.js").OxplowConfig> {
-  return unwrap(await commands.setAgentPromptAppend(text)) as unknown as import("./api-types.js").OxplowConfig;
+export async function setAgents(agents: AgentKind[]): Promise<OxplowConfig> {
+  return unwrap(await commands.setAgents(agents));
+}
+
+export async function setAgentPromptAppend(text: string): Promise<OxplowConfig> {
+  return unwrap(await commands.setAgentPromptAppend(text));
 }
 
 export async function setGenerated(
   generated: { exclude: string[]; include: string[] },
-): Promise<import("./api-types.js").OxplowConfig> {
-  return unwrap(await commands.setGenerated(generated)) as unknown as import("./api-types.js").OxplowConfig;
+): Promise<OxplowConfig> {
+  return unwrap(await commands.setGenerated(generated));
 }
 
 /// Set (or clear, with null/blank) the launch-model override for one
@@ -1094,8 +1099,8 @@ export async function setGenerated(
 export async function setAgentModel(
   agent: AgentKind,
   model: string | null,
-): Promise<import("./api-types.js").OxplowConfig> {
-  return unwrap(await commands.setAgentModel(agent, model)) as unknown as import("./api-types.js").OxplowConfig;
+): Promise<OxplowConfig> {
+  return unwrap(await commands.setAgentModel(agent, model));
 }
 
 export type CommitRefLabel = import("./tauri-bridge/generated/bindings.js").CommitRefLabel;
