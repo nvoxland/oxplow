@@ -74,6 +74,31 @@ event_types:
       v: 1
       schema: event_types/changes_requested.v1.json
       summary: A person sent an effort's work back with changes requested. Subject — the effort and its work item.
+effects:
+  - id: verify-unchecked
+    summary: After an acceptance that left claims unverified or decisions inferred, file one item to verify them.
+    on: [oxplow_review.accepted]
+    entry: effects/verify_unchecked.star
+    # The acceptance's subject: the effort, its item, and each claim and
+    # decision accepted unchecked — still unverified or inferred now. None
+    # when an earlier forced acceptance of the effort came first: it was
+    # followed up then.
+    input: |
+      SELECT CAST(json_extract(e.subject, '$[0]') AS TEXT) AS effort,
+             CAST(json_extract(e.subject, '$[1]') AS TEXT) AS work_item,
+             (SELECT json_group_array(json_object('claim', s.value, 'statement', c.statement))
+                FROM json_each(e.subject) s JOIN v_claim c ON s.value = 'claim:' || c.id
+               WHERE c.verified = 0) AS claims,
+             (SELECT json_group_array(json_object('decision', s.value, 'question', d.question, 'choice', d.choice))
+                FROM json_each(e.subject) s JOIN v_decision d ON s.value = 'decision:' || d.id
+               WHERE d.provenance = 'inferred') AS decisions
+      FROM v_event e
+      WHERE e.id = :event_id
+        AND NOT EXISTS (
+          SELECT 1 FROM v_event p
+           WHERE p.type = 'oxplow_review.accepted' AND p.seq < :event_seq
+             AND json_extract(p.subject, '$[0]') = json_extract(e.subject, '$[0]')
+             AND (instr(p.subject, '"claim:') > 0 OR instr(p.subject, '"decision:') > 0))
 commands:
   - name: accept
     summary: Accept an effort's work — comment the review on its work item and mark it done. Refuses while a claim is unverified or an inferred decision unreviewed, unless forced.

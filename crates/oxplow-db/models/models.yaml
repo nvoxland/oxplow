@@ -793,7 +793,7 @@
     - { name: "sha", type: "TEXT", doc: "The commit it points at (v_commit.sha); annotated tags peeled." }
     - { name: "updated_at", type: "TEXT", doc: "When oxplow last read it (RFC 3339)." }
 - name: task
-  version: 1
+  version: 2
   description: "Tasks (work items), excluding deleted ones. `thread_id` NULL means the project-wide backlog."
   columns:
     - { name: "id", type: "INTEGER", doc: "Task id (shown as tsk<id>)." }
@@ -804,7 +804,7 @@
     - { name: "description", type: "TEXT", doc: "Markdown body." }
     - { name: "status", type: "TEXT", doc: "`ready`, `in_progress`, `blocked`, `done`, `canceled` or `archived`." }
     - { name: "priority", type: "TEXT", doc: "`low`, `medium`, `high` or `urgent`." }
-    - { name: "author", type: "TEXT", doc: "Who the task came from: `user` or `agent`." }
+    - { name: "author", type: "TEXT", doc: "Who the task came from: `user` (a person) or `agent`; NULL when neither wrote it (an effect, oxplow itself — its `work_item.created` names which)." }
     - { name: "sort_index", type: "INTEGER", doc: "Order within its list." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }

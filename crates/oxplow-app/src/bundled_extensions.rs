@@ -74,6 +74,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-review", "extension.yaml"),
             ext_file!("oxplow-review", "event_types/accepted.v1.json"),
             ext_file!("oxplow-review", "event_types/changes_requested.v1.json"),
+            ext_file!("oxplow-review", "effects/verify_unchecked.star"),
             ext_file!("oxplow-review", "handlers/accept.star"),
             ext_file!("oxplow-review", "handlers/request_changes.star"),
             ext_file!("oxplow-review", "models/deviation.sql"),
@@ -1046,6 +1047,212 @@ mod tests {
             task_notes(&f).await,
             vec![format!("Review accepted ({}).", effort_ref(&f))]
         );
+    }
+
+    const VERIFY: &str = "oxplow-review/verify-unchecked";
+
+    /// The latest `oxplow_review.accepted`, delivered to the effects as
+    /// the pump would.
+    async fn deliver_acceptance(f: &crate::test_fixtures::EffortFixture) {
+        let seq: i64 = f
+            .svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT max(seq) FROM event_log WHERE type = 'oxplow_review.accepted'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let ev = f
+            .svc
+            .event_log_store
+            .read_after(seq - 1, 1)
+            .await
+            .unwrap()
+            .remove(0);
+        use crate::event_pump::AsyncEventConsumer as _;
+        crate::effect_triggers::EffectTriggers::new(std::sync::Arc::downgrade(&f.svc))
+            .handle(&ev)
+            .await
+            .unwrap();
+    }
+
+    /// The follow-ups the effect filed: (title, body, author).
+    async fn follow_ups(
+        f: &crate::test_fixtures::EffortFixture,
+    ) -> Vec<(String, String, Option<String>)> {
+        f.svc
+            .db
+            .read(|c| {
+                let mut st = c
+                    .prepare(
+                        "SELECT title, description, author FROM task
+                          WHERE title LIKE 'Verify what the review of %' ORDER BY id",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = st
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<rusqlite::Result<_>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// A person approves the review follow-up as it is now: its bundled
+    /// files, and events from now on.
+    async fn approve_follow_up(f: &crate::test_fixtures::EffortFixture) {
+        let (ext, decl) = crate::effect_triggers::find_effect(&f.svc, VERIFY).expect("its effect");
+        let program = crate::effects::effect_program(&ext, &decl);
+        let root = f.svc.layout.project_dir.clone();
+        let config = f.svc.config.read().unwrap().clone();
+        crate::exec_consent::approve_program(
+            &f.svc.approvals,
+            &root,
+            &config,
+            std::slice::from_ref(&ext),
+            crate::exec_consent::ProgramKind::Effect,
+            &program.name,
+            &program.hash(&root).unwrap(),
+        )
+        .unwrap();
+        crate::effects::approved(&f.svc.db, VERIFY).await.unwrap();
+    }
+
+    /// P11 (tsk956): the review follow-up comes with oxplow, and runs only
+    /// once a person approves it: it is listed with a version to approve,
+    /// and until then a forced acceptance files nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_review_follow_up_waits_for_a_persons_approval() {
+        let f = review_fixture().await;
+        let config = f.svc.config.read().unwrap().clone();
+        let root = f.svc.layout.project_dir.clone();
+        let programs = crate::exec_consent::list(
+            &f.svc.approvals,
+            &root,
+            &config,
+            f.svc.extension_catalog.get(&root).as_ref(),
+        );
+        let follow_up = programs
+            .iter()
+            .find(|p| p.kind == crate::exec_consent::ProgramKind::Effect && p.name == VERIFY)
+            .expect("listed");
+        assert!(!follow_up.approved);
+        assert!(follow_up.version.is_some(), "it has a version to approve");
+        review(
+            &f,
+            &oxplow_domain::Actor::Human,
+            "oxplow_review.accept",
+            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+        )
+        .await
+        .unwrap();
+        deliver_acceptance(&f).await;
+        assert!(follow_ups(&f).await.is_empty());
+    }
+
+    /// P11 (tsk956): approved, a forced acceptance files one item to verify
+    /// what it left unchecked — on the reviewed item's provider, a checklist
+    /// naming each claim and decision, authored by no person — and a second
+    /// forced acceptance of the same effort files nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_forced_acceptance_files_one_verify_follow_up() {
+        let f = review_fixture().await;
+        approve_follow_up(&f).await;
+        let accept = || {
+            review(
+                &f,
+                &oxplow_domain::Actor::Human,
+                "oxplow_review.accept",
+                serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+            )
+        };
+        accept().await.unwrap();
+        deliver_acceptance(&f).await;
+        let filed = follow_ups(&f).await;
+        assert_eq!(filed.len(), 1, "{filed:?}");
+        let (title, body, author) = &filed[0];
+        assert_eq!(
+            title,
+            &format!(
+                "Verify what the review of {} accepted unchecked",
+                effort_ref(&f)
+            )
+        );
+        assert!(body.contains("no behavior change"), "{body}");
+        assert!(
+            body.contains("Which store?") && body.contains("SQLite"),
+            "{body}"
+        );
+        assert!(body.contains("- [ ] "), "a checklist: {body}");
+        assert_eq!(author, &None, "the effect's, not the person's");
+        // Accepted again, forced: it was followed up already.
+        accept().await.unwrap();
+        deliver_acceptance(&f).await;
+        assert_eq!(follow_ups(&f).await.len(), 1);
+    }
+
+    /// P11 (tsk956): an acceptance that left nothing unchecked files
+    /// nothing — the effect skips.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_clean_acceptance_files_nothing() {
+        let f = review_fixture().await;
+        approve_follow_up(&f).await;
+        let human = oxplow_domain::Actor::Human;
+        let ids: (i64, i64) = f
+            .svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT (SELECT max(id) FROM claim), (SELECT max(id) FROM decision)",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        review(
+            &f,
+            &human,
+            "effort.verify_claim",
+            serde_json::json!({ "claim": format!("claim:{}", ids.0) }),
+        )
+        .await
+        .unwrap();
+        review(
+            &f,
+            &human,
+            "effort.confirm_decision",
+            serde_json::json!({ "decision": format!("decision:{}", ids.1) }),
+        )
+        .await
+        .unwrap();
+        review(
+            &f,
+            &human,
+            "oxplow_review.accept",
+            serde_json::json!({ "ref": effort_ref(&f) }),
+        )
+        .await
+        .unwrap();
+        deliver_acceptance(&f).await;
+        assert!(follow_ups(&f).await.is_empty());
+        let state: String = f
+            .svc
+            .db
+            .read(|c| {
+                c.query_row("SELECT state FROM effect_run", [], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(state, "skipped");
     }
 
     /// Request Changes comments a checklist — each unverified claim, each

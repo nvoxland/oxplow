@@ -1601,7 +1601,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         // here (`subscriptions`).
         let declared = ext.event_types.types.clone();
         let subscribable = |t: &str| subscribes(name, &declared, t) != Subscribes::Unknown;
-        if let Some(v) = m.effects.as_ref().filter(|_| m.sharing == Sharing::Private) {
+        if let Some(v) = m.effects.as_ref() {
             let (effects, errors) = crate::effects::parse_effects(
                 name,
                 v,
@@ -4824,7 +4824,7 @@ empty: No tasks.
     #[test]
     fn a_shared_manifest_may_not_use_an_experimental_kind() {
         let dir = tempfile::tempdir().unwrap();
-        let manifest = "manifest: 2\nname: review\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects:\n  - id: ticket\n";
+        let manifest = "manifest: 2\nname: review\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nproviders:\n  - id: ticket\n";
         write(
             dir.path(),
             "oxplow/extensions/review/extension.yaml",
@@ -4834,7 +4834,7 @@ empty: No tasks.
         let err = e
             .errors
             .iter()
-            .find(|m| m.contains("`effects` is experimental"))
+            .find(|m| m.contains("`providers` is experimental"))
             .unwrap_or_else(|| panic!("{:?}", e.errors));
         assert!(
             err.starts_with("oxplow/extensions/review/extension.yaml:8:"),

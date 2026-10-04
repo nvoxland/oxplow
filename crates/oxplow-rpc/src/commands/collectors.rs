@@ -204,7 +204,12 @@ mod tests {
         let out = crate::dispatch("list_project_programs", serde_json::json!({}), &svc)
             .await
             .unwrap();
-        assert_eq!(out, serde_json::json!([]), "no exec programs configured");
+        // Only what comes with oxplow: oxplow-review's follow-up effect,
+        // waiting for a person's approval (tsk956).
+        let programs = out.as_array().unwrap();
+        assert_eq!(programs.len(), 1, "{out}");
+        assert_eq!(programs[0]["name"], "oxplow-review/verify-unchecked");
+        assert_eq!(programs[0]["approved"], false);
         let err = crate::dispatch(
             "approve_project_program",
             serde_json::json!({ "kind": "collector", "name": "repo.nope", "version": "x" }),

@@ -331,12 +331,7 @@ pub struct ManifestV2 {
 }
 
 /// The kinds a shared extension may not use, with the key each rides on.
-pub const EXPERIMENTAL_KINDS: &[&str] = &[
-    "providers",
-    "effects",
-    "custom_components",
-    "ui.replacements",
-];
+pub const EXPERIMENTAL_KINDS: &[&str] = &["providers", "custom_components", "ui.replacements"];
 
 /// The stable kinds (permanent API), by manifest key.
 pub const STABLE_KINDS: &[&str] = &[
@@ -357,6 +352,7 @@ pub const STABLE_KINDS: &[&str] = &[
     "config",
     "advisories",
     "event_types",
+    "effects",
 ];
 
 impl ManifestV2 {
@@ -366,9 +362,6 @@ impl ManifestV2 {
         let present = |v: &Option<Value>| v.is_some();
         if present(&self.providers) {
             out.push("providers");
-        }
-        if present(&self.effects) {
-            out.push("effects");
         }
         if present(&self.custom_components) {
             out.push("custom_components");
@@ -629,17 +622,17 @@ mod tests {
 
     #[test]
     fn shared_needs_engine_and_stable_kinds_only_with_file_line() {
-        let text = "manifest: 2\nname: acme\nsharing: shared\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects:\n  - id: ticket\n";
+        let text = "manifest: 2\nname: acme\nsharing: shared\nintent:\n  purpose: x\n  examples: [{ name: a }]\nproviders:\n  - id: ticket\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
         assert!(
             errors.iter().any(|e| e.contains("must declare `engine")),
             "{errors:?}"
         );
-        let effects = errors
+        let providers = errors
             .iter()
-            .find(|e| e.contains("`effects` is experimental"))
+            .find(|e| e.contains("`providers` is experimental"))
             .unwrap();
-        assert!(effects.starts_with("e/extension.yaml:7:"), "{effects}");
+        assert!(providers.starts_with("e/extension.yaml:7:"), "{providers}");
         let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
         let (errors, warnings) = check(&parse(text), "e/extension.yaml", text, true);
         assert!(
@@ -677,15 +670,29 @@ mod tests {
             "a kind is stable or experimental, not both"
         );
         // A manifest using every experimental kind uses exactly those.
-        let all = "manifest: 2\nname: acme\nintent: { purpose: x, examples: [{ name: a }] }\nproviders: []\neffects: []\nref_kinds: []\ncustom_components: []\nevent_types: { types: [] }\nui:\n  decorators: []\n  replacements: []\n";
+        let all = "manifest: 2\nname: acme\nintent: { purpose: x, examples: [{ name: a }] }\nproviders: []\nref_kinds: []\ncustom_components: []\nevent_types: { types: [] }\nui:\n  decorators: []\n  replacements: []\n";
         let mut used = parse(all).experimental_kinds_used();
         used.sort();
         let mut experimental = EXPERIMENTAL_KINDS.to_vec();
         experimental.sort();
         assert_eq!(used, experimental);
-        for kept in ["effects", "providers"] {
-            assert!(EXPERIMENTAL_KINDS.contains(&kept), "{kept}");
-        }
+        assert!(EXPERIMENTAL_KINDS.contains(&"providers"));
+    }
+
+    /// P11 (tsk956): `effects` is stable — oxplow-review's follow-up is its
+    /// bundled, shared use, approved like any effect — so a shared
+    /// extension may declare effects; the tables still partition the kinds.
+    #[test]
+    fn effects_is_stable_and_the_tables_partition_the_kinds() {
+        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects: []\n";
+        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(STABLE_KINDS.contains(&"effects"));
+        assert!(!EXPERIMENTAL_KINDS.contains(&"effects"));
+        assert!(
+            !STABLE_KINDS.iter().any(|k| EXPERIMENTAL_KINDS.contains(k)),
+            "a kind is stable or experimental, not both"
+        );
     }
 
     /// P10 (K1): `ui.decorators` is stable — oxplow-review's verdict

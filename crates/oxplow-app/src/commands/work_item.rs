@@ -655,6 +655,20 @@ pub fn create_spec() -> CommandSpec {
 /// `work_item.created`, and the effort when filed `in_progress`, caused
 /// by the run. An agent's task is authored `agent`. The result carries the
 /// body's `link_warnings` (tsk775).
+/// Who authored a task an actor files: a person (`user`), an agent
+/// (`agent`, a lens acting for one included), or neither — an effect or
+/// oxplow itself (P11, tsk956): the creating actor is on the run's audit
+/// and its `work_item.created`, and the task isn't shown as the person's.
+fn task_author(actor: &oxplow_domain::Actor) -> Option<oxplow_domain::TaskAuthor> {
+    use oxplow_domain::Actor;
+    match actor {
+        Actor::Human => Some(oxplow_domain::TaskAuthor::User),
+        Actor::Agent { .. } => Some(oxplow_domain::TaskAuthor::Agent),
+        Actor::Lens { on_behalf_of, .. } => task_author(on_behalf_of),
+        Actor::Effect { .. } | Actor::System => None,
+    }
+}
+
 fn tx_create(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WorkItemCreateInput = parse(input)?;
@@ -688,11 +702,7 @@ fn tx_create(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             completed_at: (status == TaskStatus::Done).then_some(now),
             deleted_at: None,
             note_count: 0,
-            author: Some(if ctx.actor.is_agent_driven() {
-                oxplow_domain::TaskAuthor::Agent
-            } else {
-                oxplow_domain::TaskAuthor::User
-            }),
+            author: task_author(ctx.actor),
         };
         let (id, effort) = oxplow_db::task_store::insert_logged_tx(ctx.conn, &ctx.events, &item)
             .map_err(CommandError::from)?;

@@ -1411,10 +1411,25 @@ promise is already built: a published `type@v` is a contract
 (`event_type_contract` refuses a changed schema — stronger than a
 model's drift warning), a new shape is a new version with an upcast, and
 a removed type's rows stay readable. `STABLE_KINDS` lists it;
-`EXPERIMENTAL_KINDS` keeps `effects` (its contract just changed —
-attempts, retry, backfill — and no first-party extension acts yet),
-`providers`, `custom_components` and `ui.replacements` (`ui.decorators`
-and `ref_kinds` were promoted in P10, "Decorators" and "Ref kinds").
+`EXPERIMENTAL_KINDS` keeps `providers`, `custom_components` and
+`ui.replacements` (`ui.decorators` and `ref_kinds` were promoted in P10,
+"Decorators" and "Ref kinds"; `effects` in P11, below).
+
+**`effects` is stable** (P11, tsk956), on the evidence rule: a bundled
+extension acts with one. oxplow-review's **`verify-unchecked`** reacts to
+`oxplow_review.accepted`: its `input` reads the acceptance's subject
+(`:event_id`, tsk955) — the effort, its item, and each claim and decision
+accepted unchecked, still unverified or inferred now — and is empty when
+an earlier forced acceptance of the same effort came first (read from
+`v_event`, always current, rather than the materialized verdict model).
+With nothing unchecked it skips; otherwise it files **one** item on the
+reviewed item's provider — "Verify what the review of <effort> accepted
+unchecked", a checklist naming each claim and decision. A bundled effect
+is approved like any (K1, tsk953: its embedded files are hashed alike),
+so it runs only once a person approves it. A task an effect (or oxplow
+itself) files has no `author` — it isn't the person's; its
+`work_item.created` and the run's audit name the effect (`v_task` v2
+says so). The loader no longer limits effects to private extensions.
 
 **Retention** (P8.D5) is the namespace's window for payloads and large
 content (data-model.md "event_log" retention): either omitted part is the

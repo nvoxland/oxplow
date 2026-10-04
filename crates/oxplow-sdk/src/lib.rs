@@ -833,7 +833,7 @@ mod tests {
         write(
             dir.path(),
             "oxplow/extensions/team/extension.yaml",
-            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects:\n  - id: ticket\n",
+            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nproviders:\n  - id: ticket\n",
         );
         let report = check(
             dir.path(),
@@ -849,7 +849,7 @@ mod tests {
         let text = render_findings(&report, Format::Text);
         assert!(
             text.contains(
-                "error: oxplow/extensions/team/extension.yaml:8: `effects` is experimental"
+                "error: oxplow/extensions/team/extension.yaml:8: `providers` is experimental"
             ),
             "{text}"
         );
