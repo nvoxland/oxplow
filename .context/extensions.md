@@ -1797,7 +1797,11 @@ a person approves it again. Approving (the RPC, a person's only) also
 sets `effect_state.start_after_seq` (V148) to the log's head
 (`effects::approved`): an effect never reacts to an event logged before
 its latest approval — not the backlog, not what happened while it waited
-to be re-approved. `effects::gate(approved, start_after, seq)` is the one
+to be re-approved. In the same transaction it drops the effect's scheduled
+automatic retries (`drop_retries_of_tx`, tsk990): what they would send
+was composed by the script as it was, and the approval is of the script
+as it is; those reactions stay failed, for a person's Retry, which
+composes afresh. `effects::gate(approved, start_after, seq)` is the one
 check: `Unapproved`, `BeforeApproval` or `Runs`. The consumer hashes an
 extension's folder once per catalog load (`FolderHashes`, keyed by the
 catalog's `Arc`), not per event: an edit reloads the catalog, so it's

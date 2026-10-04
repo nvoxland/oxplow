@@ -220,7 +220,8 @@ pub fn gate(approved: bool, start_after: Option<i64>, seq: i64) -> Gate {
     }
 }
 
-/// A person approved effect `name`: it starts after the log's head.
+/// A person approved effect `name`: it starts after the log's head, and
+/// its scheduled automatic retries are dropped (tsk990).
 pub async fn approved(
     db: &oxplow_db::Database,
     name: &str,
@@ -229,8 +230,13 @@ pub async fn approved(
         name.to_string(),
         oxplow_domain::Timestamp::now().to_string(),
     );
-    db.transaction(move |tx| oxplow_db::effect_state_store::start_at_head_tx(tx, &name, &now))
-        .await
+    db.transaction(move |tx| {
+        // What a scheduled retry would send was composed by the script as
+        // it was; this approval is of the script as it is (tsk990).
+        oxplow_db::effect_run_store::drop_retries_of_tx(tx, &name)?;
+        oxplow_db::effect_state_store::start_at_head_tx(tx, &name, &now)
+    })
+    .await
 }
 
 /// Where effect `name` starts reading the log; `None` before approval.
@@ -479,6 +485,52 @@ pub fn finished_tx(
 
 #[cfg(test)]
 pub(crate) mod tests {
+
+    /// tsk990: what a scheduled retry would send was composed by the
+    /// script as it was when it failed. A new approval is of the script as
+    /// it is now, so approving drops the effect's scheduled retries — the
+    /// reactions stay failed, for a person's Retry, which composes afresh.
+    #[tokio::test]
+    async fn a_new_approval_drops_the_effects_scheduled_retries() {
+        use oxplow_db::effect_run_store as runs;
+        let db = oxplow_db::Database::in_memory();
+        let key = runs::EffectRunKey::first("acme/notify", "e1", 3, runs::ReactionOrigin::Live);
+        let other = runs::EffectRunKey::first("acme/other", "e1", 3, runs::ReactionOrigin::Live);
+        db.transaction({
+            let (key, other) = (key.clone(), other.clone());
+            move |tx| {
+                for k in [&key, &other] {
+                    runs::claim_tx(tx, k, "2026-10-01T00:00:00Z", Some("{}"))?;
+                    runs::finish_tx(
+                        tx,
+                        k,
+                        &runs::Finished {
+                            state: runs::RunState::Failed,
+                            reason: Some("unavailable".into()),
+                            audit_id: None,
+                            proposal_id: None,
+                        },
+                        "2026-10-01T00:00:01Z",
+                    )?;
+                    runs::schedule_retry_tx(tx, k, "2026-10-01T00:00:10Z", "{}")?;
+                }
+                Ok(())
+            }
+        })
+        .await
+        .unwrap();
+        approved(&db, "acme/notify").await.unwrap();
+        let due = db
+            .read(|tx| runs::due_retries_tx(tx, "2026-10-02T00:00:00Z"))
+            .await
+            .unwrap();
+        assert_eq!(
+            due.into_iter().map(|(k, _)| k.effect).collect::<Vec<_>>(),
+            vec!["acme/other".to_string()],
+            "only the approved effect's retry is dropped"
+        );
+    }
+
     use super::*;
     use crate::extensions::load_extensions;
     use std::path::Path;

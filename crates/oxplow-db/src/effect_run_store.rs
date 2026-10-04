@@ -220,6 +220,18 @@ pub fn drop_retry_tx(conn: &Connection, key: &EffectRunKey) -> Result<(), Domain
     Ok(())
 }
 
+/// Drop every scheduled retry of `effect` (tsk990): what they would send
+/// was composed by the script as it was, and a new approval is of the
+/// script as it is now. The attempts stay failed, for a person's Retry.
+pub fn drop_retries_of_tx(conn: &Connection, effect: &str) -> Result<usize, DomainError> {
+    conn.execute(
+        "UPDATE effect_run SET retry_at = NULL, resend_json = NULL
+          WHERE effect = ?1 AND retry_at IS NOT NULL",
+        params![effect],
+    )
+    .map_err(map_sql_err)
+}
+
 /// The failed latest attempts due to be sent again by `now` (RFC 3339),
 /// oldest due first, each with when it was due.
 pub fn due_retries_tx(
