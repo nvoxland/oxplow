@@ -58,6 +58,9 @@
 //!   credential (a service that doesn't say which token it refused);
 //! - `lose-reply` — the next `invoke` lands but is never answered (a
 //!   reply lost on the way);
+//! - `started-file:<path>` — each `invoke` writes `<path>` as it begins
+//!   (before `slow`), so a test knows a call is under way without timing
+//!   it;
 //! - `forget-keys` — it declares `idempotent_writes` but does a write sent
 //!   again with its key a second time (what the kit must catch);
 //! - `plain-writes` (at start) — it doesn't declare `idempotent_writes`
@@ -117,6 +120,8 @@ pub struct Hooks {
     /// `plain-writes`: it doesn't declare `idempotent_writes`, and ignores
     /// keys.
     pub plain_writes: bool,
+    /// `started-file:<path>`: each `invoke` writes `<path>` as it begins.
+    pub started_file: Option<String>,
 }
 
 impl Hooks {
@@ -135,6 +140,7 @@ impl Hooks {
                 Some(("read-fail-after", n)) => self.read_fail_after = n.parse().ok(),
                 Some(("rate-limit", ms)) => self.rate_limit_ms = ms.parse().ok(),
                 Some(("needs", name)) => self.needs = Some(name.to_string()),
+                Some(("started-file", path)) => self.started_file = Some(path.to_string()),
                 Some(("accepts", pair)) => {
                     self.accepts = pair
                         .split_once('=')
@@ -607,6 +613,9 @@ async fn handle(
             refuse_auth(world).await?;
             let p: InvokeParams = parse(params)?;
             require_handle(&p.handle)?;
+            if let Some(path) = world.lock().await.hooks.started_file.clone() {
+                let _ = std::fs::write(path, p.command.as_bytes());
+            }
             slow(world).await;
             let hooks = world.lock().await.hooks.clone();
             // Under `plain-writes` a key means nothing; `forget-keys`

@@ -4383,7 +4383,12 @@ async fn a_call_cut_off_by_a_renewal_is_not_resent_without_a_key() {
         assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
         first_read(&fx).await;
         // One call under way (it waits before it writes) ...
-        set_hooks(&fx, "slow:500").await;
+        let started = fx.svc.layout.project_dir.join("invoke-started");
+        set_hooks(
+            &fx,
+            &format!("slow:5000,started-file:{}", started.display()),
+        )
+        .await;
         let svc = fx.svc.clone();
         let under_way = tokio::spawn(async move {
             svc.commands
@@ -4395,7 +4400,10 @@ async fn a_call_cut_off_by_a_renewal_is_not_resent_without_a_key() {
                 )
                 .await
         });
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        // The fake says when it has the call: no guess at timing.
+        while !started.exists() {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
         // ... when another is refused, and its renewal ends the process.
         set_hooks(&fx, "accepts:FAKE_TOKEN=at-3").await;
         create_on_fake(&fx).await.unwrap();
@@ -4750,6 +4758,65 @@ async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
     assert!(out.stopped.unwrap().contains("in a row"));
 }
 
+/// tsk935: a backfill's attempt whose reply was lost is sent again by
+/// itself, as a live one is, and lands once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backfill_attempt_whose_reply_was_lost_is_sent_again() {
+    use oxplow_domain::events::schema::{WorkItemTransitioned, WorkItemTransitionedV1};
+    let fx = with_effect("", FILE_ON_FAKE).await;
+    fx.svc
+        .event_log_store
+        .append(oxplow_domain::Envelope::typed::<WorkItemTransitioned>(
+            "human",
+            &WorkItemTransitionedV1 {
+                work_item: oxplow_domain::refs::build::work_item_ref(fx.task),
+                from: oxplow_domain::TaskStatus::InProgress,
+                to: oxplow_domain::TaskStatus::Done,
+                effort: None,
+            },
+        ))
+        .await
+        .unwrap();
+    crate::effects::approved(&fx.svc.db, &format!("{EXT}/file"))
+        .await
+        .unwrap();
+    set_hooks(&fx, "lose-reply").await;
+    let (ext, decl) =
+        crate::effect_triggers::find_effect(&fx.svc, &format!("{EXT}/file")).expect("its effect");
+    let out = crate::commands::effect::backfill(
+        &fx.svc,
+        &ext,
+        &decl,
+        &crate::commands::effect::Range {
+            from_seq: None,
+            since: None,
+            to_seq: None,
+        },
+        50,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.failed, 1, "{out:?}");
+    assert_eq!(
+        effect_runs(&fx).await,
+        json!([[1, "backfill", "failed", 1]])
+    );
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        effect_runs(&fx).await,
+        json!([[1, "backfill", "failed", 1], [2, "auto", "ok", 0]])
+    );
+    let probe = ServicesProbe(&fx.svc);
+    assert_eq!(probe.sync("fake").await, Ok(true));
+    probe.settle().await;
+    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
+}
+
 /// tsk915: a retry overdue by more than an hour (oxplow was closed
 /// meanwhile) isn't sent by itself — what it would send is from another
 /// time — and the failure it waited on counts.
@@ -4766,6 +4833,161 @@ async fn a_long_overdue_retry_is_a_persons() {
     );
     assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
     assert_eq!(effect_failures(&fx).await, 1);
+}
+
+/// tsk935: a reaction cut off midway — its first write landed, its reply
+/// lost, the second never sent — is sent again whole under the same keys:
+/// each write lands once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reaction_cut_off_midway_lands_each_step_once() {
+    let two = "def transform(x):\n    return {\"commands\": [{\"name\": \"work_item.create\", \"input\": {\"provider\": \"fake\", \"title\": \"first\"}}, {\"name\": \"work_item.create\", \"input\": {\"provider\": \"fake\", \"title\": \"second\"}}]}\n";
+    let fx = with_effect("lose-reply", two).await;
+    react(&fx).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
+            .await
+            .unwrap(),
+        1
+    );
+    let probe = ServicesProbe(&fx.svc);
+    assert_eq!(probe.sync("fake").await, Ok(true));
+    probe.settle().await;
+    for title in ["first", "second"] {
+        assert_eq!(probe.titled("fake", title).await.len(), 1, "{title}");
+    }
+}
+
+/// tsk935: a person's retry of a reaction whose automatic one is waiting
+/// takes its place: the reaction runs once more, and the scheduled retry
+/// sends nothing after it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_persons_retry_takes_the_place_of_a_scheduled_one() {
+    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
+    // The commands a person runs effects with, as boot registers them.
+    crate::effect_triggers::register(&fx.svc);
+    let ev = react(&fx).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    let out = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            crate::commands::effect::RETRY,
+            json!({ "effect": format!("{EXT}/file"), "event": format!("event:{}", ev.envelope.id) }),
+            true,
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.result["outcome"], "ok", "{}", out.result);
+    assert_eq!(
+        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
+            .await
+            .unwrap(),
+        0,
+        "nothing left to send by itself"
+    );
+    let probe = ServicesProbe(&fx.svc);
+    assert_eq!(probe.sync("fake").await, Ok(true));
+    probe.settle().await;
+    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
+}
+
+/// tsk935: the loop `spawn_auto_retry` starts (after the first reconcile)
+/// sends a due retry by itself.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_retry_loop_sends_a_due_retry() {
+    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
+    react(&fx).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    // Due now, rather than in ten seconds.
+    let past = in_secs(-1).to_string();
+    fx.svc
+        .db
+        .transaction(move |tx| {
+            tx.execute(
+                "UPDATE effect_run SET retry_at = ?1 WHERE retry_at IS NOT NULL",
+                [&past],
+            )
+            .map_err(oxplow_db::map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // The loop waits for the first reconcile; the config keeps the
+    // instance it enabled.
+    configure(&fx, true, json!({ "team": "core" }));
+    fx.svc.providers.reconcile().await;
+    crate::effect_triggers::spawn_auto_retry(&fx.svc);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let runs = effect_runs(&fx).await;
+        if runs.as_array().is_some_and(|r| r.len() == 2) {
+            assert_eq!(runs[1], json!([2, "auto", "ok", 0]));
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "never sent: {runs}");
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+/// tsk935: every way a scheduled retry can't run drops it, so the failure
+/// is a person's: the effect disabled (its failure counts), its program
+/// no longer approved as it is (counts), or the effect gone from its
+/// extension (nothing left to count it on).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_retry_that_cant_run_is_dropped() {
+    let key = oxplow_db::PluginKey {
+        plugin: EXT.into(),
+        contribution: "file".into(),
+        kind: "effect",
+    };
+    for (case, counted) in [("disabled", 1), ("changed", 1), ("gone", 0)] {
+        let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
+        react(&fx).await;
+        assert_eq!(
+            effect_runs(&fx).await,
+            json!([[1, "live", "failed", 1]]),
+            "{case}"
+        );
+        let dir = fx
+            .svc
+            .layout
+            .project_dir
+            .join("oxplow/extensions")
+            .join(EXT);
+        match case {
+            "disabled" => crate::plugin_health::PluginHealth::new(
+                fx.svc.db.clone(),
+                fx.svc.vocabulary.clone(),
+            )
+            .disable(&key, "a person turned it off")
+            .await
+            .unwrap(),
+            "changed" => {
+                std::fs::write(dir.join("file.star"), format!("{FILE_ON_FAKE}\n# edited\n"))
+                    .unwrap()
+            }
+            _ => {
+                let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
+                let cut = manifest.find("effects:").unwrap();
+                std::fs::write(dir.join("extension.yaml"), &manifest[..cut]).unwrap();
+            }
+        }
+        assert_eq!(
+            crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
+                .await
+                .unwrap(),
+            0,
+            "{case}"
+        );
+        assert_eq!(
+            effect_runs(&fx).await,
+            json!([[1, "live", "failed", 0]]),
+            "{case}"
+        );
+        assert_eq!(effect_failures(&fx).await, counted, "{case}");
+    }
 }
 
 /// tsk915: what waits for the providers the config names (the automatic

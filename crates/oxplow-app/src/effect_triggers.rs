@@ -1033,7 +1033,7 @@ mod tests {
     /// failed — interrupted — with what started it, so Delivery lists it
     /// and a person may retry it. A live one is the pump's to find.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_cut_off_backfill_attempt_is_recovered_at_start() {
+    async fn a_cut_off_backfill_or_automatic_attempt_is_recovered_at_start() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
@@ -1053,23 +1053,26 @@ mod tests {
         claim(&cut_off, ReactionOrigin::Backfill).await;
         let live = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
         claim(&live, ReactionOrigin::Live).await;
+        // tsk935: an automatic attempt cut off the same way is recovered too.
+        let auto = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        claim(&auto, ReactionOrigin::Auto).await;
 
-        assert_eq!(recover_interrupted(svc).await.unwrap(), 1);
+        assert_eq!(recover_interrupted(svc).await.unwrap(), 2);
         assert_eq!(
             rows(
                 svc,
                 "SELECT origin, state, reason LIKE 'interrupted%' FROM v_effect_run ORDER BY event_seq"
             )
             .await,
-            json!([["backfill", "failed", 1], ["live", "started", null]])
+            json!([["backfill", "failed", 1], ["live", "started", null], ["auto", "failed", 1]])
         );
         assert_eq!(
             rows(
                 svc,
-                "SELECT json_extract(payload, '$.origin'), json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result'"
+                "SELECT json_extract(payload, '$.origin'), json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result' ORDER BY seq"
             )
             .await,
-            json!([["backfill", "failed"]])
+            json!([["backfill", "failed"], ["auto", "failed"]])
         );
         let human = oxplow_domain::Actor::Human;
         let retried = retry(svc, &human, &cut_off, true).await.unwrap();

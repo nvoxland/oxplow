@@ -88,6 +88,8 @@ checkpoint (opaque to the host), then `{ records }`.
 **Script hooks** — `OXPLOW_FAKE_HOOKS` at spawn, or a `fake/hooks
 { hooks }` notification mid-session (comma-separated):
 `fail-next:<n>` (the next n check/invoke/read fail `Internal`),
+`started-file:<path>` (each invoke writes `<path>` as it begins, before
+`slow` — so a test knows a call is under way without timing it),
 `slow:<ms>` (invoke and read wait first; `$/cancel` interrupts them with
 `Cancelled`), `slow-check:<ms>` (check waits first), `crash` (the next request drops the connection; the binary
 exits 3) and `bad-declarations` (`initialize` answers something other
