@@ -90,6 +90,19 @@ struct RefKindFile {
     icon: String,
 }
 
+/// The registry's spec for `decl`: its id pattern and its `wikilink:`
+/// sugar — the one constructor the vocabulary reactor and `plugin test`
+/// register an extension's kinds with.
+pub fn kind_spec(
+    decl: &RefKindDecl,
+) -> Result<oxplow_domain::refs::kind::KindSpec, oxplow_domain::refs::kind::KindError> {
+    let spec = oxplow_domain::refs::kind::KindSpec::new(&decl.kind, &decl.id_pattern)?;
+    Ok(match &decl.wikilink {
+        Some(w) => spec.wikilink_prefix(w),
+        None => spec,
+    })
+}
+
 /// Parse a `ref_kinds:` block against the extension's models and pages:
 /// the valid kinds, and an error (`file:line: …`) for each broken one.
 /// Collisions with core and other extensions are the reactor's to find.

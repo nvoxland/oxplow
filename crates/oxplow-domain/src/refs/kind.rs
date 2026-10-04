@@ -1,9 +1,8 @@
 //! The kind registry (target-architecture §4.2): the one list of what a
 //! ref can name. Each kind says what its ids look like, whether it takes a
-//! `@rev`, whether its id is `<provider>:<native id>`, and its lifecycle.
-//! Core kinds are registered statically here; a plugin's `ref_kinds`
-//! (experimental) register into the same registry, and a collision is a
-//! load error.
+//! `@rev`, and whether its id is `<provider>:<native id>`. Core kinds are
+//! registered statically here; a plugin's `ref_kinds` register into the
+//! same registry, and a collision is a load error.
 //!
 //! The registry validates refs; it doesn't render them. What renders a
 //! kind (its page, title model, icon) is UI and asset configuration that
@@ -15,13 +14,6 @@ use regex::Regex;
 
 use super::grammar::{is_valid_kind, CanonicalRef};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KindLifecycle {
-    Stable,
-    Experimental,
-    Deprecated,
-}
-
 #[derive(Debug, Clone)]
 pub struct KindSpec {
     pub kind: String,
@@ -31,7 +23,6 @@ pub struct KindSpec {
     pub revisioned: bool,
     /// The id is `<provider>:<native id>`; the provider varies per project.
     pub provider_scoped: bool,
-    pub lifecycle: KindLifecycle,
     /// `[[prefix:…]]` sugar that means this kind, beyond `[[kind:…]]`
     /// itself (e.g. `git:` for `commit`).
     pub wikilink_prefixes: Vec<String>,
@@ -71,7 +62,6 @@ impl KindSpec {
             id_regex,
             revisioned: false,
             provider_scoped: false,
-            lifecycle: KindLifecycle::Stable,
             wikilink_prefixes: Vec::new(),
         })
     }
@@ -83,11 +73,6 @@ impl KindSpec {
 
     pub fn provider_scoped(mut self) -> Self {
         self.provider_scoped = true;
-        self
-    }
-
-    pub fn lifecycle(mut self, lifecycle: KindLifecycle) -> Self {
-        self.lifecycle = lifecycle;
         self
     }
 

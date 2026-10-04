@@ -465,15 +465,9 @@ fn event_type_example(
 /// What a `[[…]]` names with the extension's ref kinds beside core's
 /// (`input: { wikilink: "pr:12" }`): `expect: { ref: "acme_pr:12" | null }`.
 fn ref_kind_example(ext: &Extension, ex: &Example<'_>, link: &str, report: &mut TestReport) {
-    use oxplow_domain::refs::kind::{core_kinds, KindLifecycle, KindSpec};
-    let mut kinds = core_kinds();
+    let mut kinds = oxplow_domain::refs::kind::core_kinds();
     for k in &ext.ref_kinds {
-        if let Ok(spec) = KindSpec::new(&k.kind, &k.id_pattern) {
-            let spec = spec.lifecycle(KindLifecycle::Experimental);
-            let spec = match &k.wikilink {
-                Some(w) => spec.wikilink_prefix(w),
-                None => spec,
-            };
+        if let Ok(spec) = oxplow_app::extension_ref_kinds::kind_spec(k) {
             let _ = kinds.register(spec);
         }
     }

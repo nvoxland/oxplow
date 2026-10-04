@@ -56,7 +56,7 @@ never change an existing case's expectation without changing both parsers.
 ## The kind registry (built)
 
 `crates/oxplow-domain/src/refs/kind.rs`: `KindSpec { kind, id_regex,
-revisioned, provider_scoped, lifecycle, wikilink_prefixes }` and
+revisioned, provider_scoped, wikilink_prefixes }` and
 `KindRegistry` (`register` refuses a collision; `validate` checks a ref's
 kind, id shape and whether it may carry `@rev`). `core_kinds()` registers
 the §4.2 vocabulary plus `finding`, `task_note` and `run`. Only

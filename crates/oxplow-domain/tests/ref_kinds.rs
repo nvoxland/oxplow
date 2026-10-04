@@ -6,7 +6,7 @@
 //! `file:src/a.rs@git:HEAD#L42`.
 
 use oxplow_domain::refs::grammar::CanonicalRef;
-use oxplow_domain::refs::kind::{core_kinds, KindLifecycle, KindSpec};
+use oxplow_domain::refs::kind::{core_kinds, KindSpec};
 use oxplow_domain::refs::{canonical_wikilink, classify_wikilinks, Reference};
 
 fn canon(s: &str) -> CanonicalRef {
@@ -96,10 +96,8 @@ fn registering_a_colliding_kind_is_an_error() {
     let dup = KindSpec::new("commit", r"^[0-9a-f]{7,40}$").expect("spec");
     let err = reg.register(dup).unwrap_err();
     assert!(err.to_string().contains("commit"), "{err}");
-    // A plugin kind with a fresh name registers as experimental.
-    let acme = KindSpec::new("acme_widget", r"^\d+$")
-        .expect("spec")
-        .lifecycle(KindLifecycle::Experimental);
+    // A plugin kind with a fresh name registers.
+    let acme = KindSpec::new("acme_widget", r"^\d+$").expect("spec");
     reg.register(acme).unwrap();
     assert!(reg.validate(&canon("acme_widget:7")).is_ok());
 }

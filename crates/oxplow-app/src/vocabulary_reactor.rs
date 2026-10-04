@@ -33,7 +33,7 @@ use oxplow_db::event_type_store::{recorded_schema_tx, restate_tx, EventTypeRow};
 use oxplow_db::ref_kind_store::RefKindRow;
 use oxplow_db::Database;
 use oxplow_domain::events::schema::{plugin_namespace, EventSchemaRegistry};
-use oxplow_domain::refs::kind::{core_kinds, KindLifecycle, KindRegistry, KindSpec};
+use oxplow_domain::refs::kind::{core_kinds, KindRegistry};
 use oxplow_domain::vocabulary::{Vocabulary, VocabularyHandle};
 use oxplow_domain::DomainError;
 use tokio::sync::Mutex;
@@ -282,13 +282,17 @@ fn build_tx(
     Ok((Vocabulary::new(events, kinds), errors))
 }
 
-/// Core's kinds plus every extension's that doesn't collide: a kind or
-/// `wikilink:` prefix two extensions both use (one's kind as the other's
-/// prefix too) is an error on each, and neither registers it; one core
-/// holds is that extension's error.
+/// Core's kinds plus every extension's. A kind two extensions both
+/// declare is an error on each, and neither registers it; a `wikilink:`
+/// prefix another extension also uses (as its prefix, or as a kind) is an
+/// error on each and costs only the sugar — the namespaced kind still
+/// registers, so installing one extension never unlinks another's refs
+/// (P10, K2). A kind or prefix core holds is that extension's error.
 fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>>) -> KindRegistry {
     let mut kinds = core_kinds();
-    let mut users: HashMap<&str, BTreeSet<&str>> = HashMap::new();
+    // Who declares each name as a kind, and as a prefix.
+    let mut as_kind: HashMap<&str, BTreeSet<&str>> = HashMap::new();
+    let mut as_prefix: HashMap<&str, BTreeSet<&str>> = HashMap::new();
     for Declares {
         extension,
         kinds: decls,
@@ -296,11 +300,28 @@ fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>
     } in declared
     {
         for d in decls {
-            for name in std::iter::once(d.kind.as_str()).chain(d.wikilink.as_deref()) {
-                users.entry(name).or_default().insert(extension);
+            as_kind.entry(&d.kind).or_default().insert(extension);
+            if let Some(w) = &d.wikilink {
+                as_prefix.entry(w).or_default().insert(extension);
             }
         }
     }
+    let others = |name: &str, of: &str| -> BTreeSet<&str> {
+        as_kind
+            .get(name)
+            .into_iter()
+            .chain(as_prefix.get(name))
+            .flatten()
+            .copied()
+            .filter(|o| *o != of)
+            .collect()
+    };
+    let named = |set: &BTreeSet<&str>| {
+        set.iter()
+            .map(|o| format!("`{o}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     for Declares {
         extension,
         kinds: decls,
@@ -308,36 +329,50 @@ fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>
     } in declared
     {
         for d in decls {
-            let shared: BTreeSet<&str> = std::iter::once(d.kind.as_str())
-                .chain(d.wikilink.as_deref())
-                .flat_map(|name| users[name].iter().copied())
+            let mut problems = Vec::new();
+            let same_kind: BTreeSet<&str> = as_kind[d.kind.as_str()]
+                .iter()
+                .copied()
                 .filter(|o| o != extension)
                 .collect();
-            let refused = if !shared.is_empty() {
-                Some(format!(
-                    "{}: ref kind `{}` collides with {}'s ref kinds; rename one",
+            if !same_kind.is_empty() {
+                problems.push(format!(
+                    "{}: ref kind `{}` is also {}'s; rename one",
                     d.declared_at,
                     d.kind,
-                    shared
-                        .iter()
-                        .map(|o| format!("`{o}`"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ))
-            } else {
-                let spec = KindSpec::new(&d.kind, &d.id_pattern).map(|s| {
-                    let s = s.lifecycle(KindLifecycle::Experimental);
-                    match &d.wikilink {
-                        Some(w) => s.wikilink_prefix(w),
-                        None => s,
-                    }
-                });
-                spec.and_then(|s| kinds.register(s))
-                    .err()
-                    .map(|e| format!("{}: {e}", d.declared_at))
-            };
-            if let Some(e) = refused {
-                errors.entry(extension.clone()).or_default().push(e);
+                    named(&same_kind)
+                ));
+                errors
+                    .entry(extension.clone())
+                    .or_default()
+                    .extend(problems);
+                continue;
+            }
+            let mut decl = d.clone();
+            if let Some(w) = &d.wikilink {
+                let sharing = others(w, extension);
+                if !sharing.is_empty() {
+                    problems.push(format!(
+                        "{}: `wikilink: {w}` is also {}'s, so `[[{w}:…]]` links neither; ref \
+                         kind `{}` is still linked as `[[{}:…]]` — rename one prefix",
+                        d.declared_at,
+                        named(&sharing),
+                        d.kind,
+                        d.kind
+                    ));
+                    decl.wikilink = None;
+                }
+            }
+            if let Err(e) =
+                crate::extension_ref_kinds::kind_spec(&decl).and_then(|spec| kinds.register(spec))
+            {
+                problems.push(format!("{}: {e}", d.declared_at));
+            }
+            if !problems.is_empty() {
+                errors
+                    .entry(extension.clone())
+                    .or_default()
+                    .extend(problems);
             }
         }
     }
@@ -558,10 +593,12 @@ mod tests {
         assert_eq!(link(), None);
     }
 
-    /// Two extensions using one `wikilink:` prefix: an error on each, and
-    /// neither's kind registers.
+    /// P10 (K2): two extensions using one `wikilink:` prefix lose the
+    /// sugar — an error on each, and `[[pr:…]]` links neither — but each
+    /// namespaced kind still registers, so installing one extension never
+    /// unlinks another's refs.
     #[tokio::test]
-    async fn a_ref_kind_collision_is_an_error_on_both_extensions() {
+    async fn a_shared_wikilink_prefix_costs_the_sugar_not_the_kind() {
         use crate::extension_ref_kinds::tests::{write_acme, MANIFEST as ACME};
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
@@ -589,12 +626,17 @@ mod tests {
                 .errors
                 .join("\n");
             assert!(
-                errors.contains(&format!("collides with `{other}`")),
+                errors.contains("`wikilink: pr`") && errors.contains(&format!("`{other}`")),
                 "{name}: {errors}"
             );
         }
         let kinds = &svc.vocabulary.current().kinds;
-        assert!(kinds.get("acme_pr").is_none() && kinds.get("beta_pr").is_none());
+        assert!(kinds.get("acme_pr").is_some() && kinds.get("beta_pr").is_some());
+        let link =
+            |l: &str| oxplow_domain::refs::canonical_wikilink(kinds, l).map(|r| r.to_string());
+        assert_eq!(link("pr:12"), None, "the sugar links neither");
+        assert_eq!(link("acme_pr:12").as_deref(), Some("acme_pr:12"));
+        assert_eq!(link("beta_pr:12").as_deref(), Some("beta_pr:12"));
     }
 
     /// tsk796: a namesake that declares nothing (`acme_pr` beside

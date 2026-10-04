@@ -1530,11 +1530,16 @@ never matches an id over 256 characters; tsk797), a `resolve` that isn't one of 
 `REF_KIND_ICONS` (lucide names the desktop maps), a duplicate.
 
 **Registering** is the vocabulary reactor's: core kinds plus each
-extension's (`KindLifecycle::Experimental`), so `validate_ref`,
-`[[acme_pr:12]]` and `[[pr:12]]` know them while the extension is
-installed and not after. A kind or prefix two extensions both use — one's
-kind as the other's prefix too — is an error on each, and neither
-registers it; a kind core holds is that extension's error. The pass
+extension's, built by one constructor (`extension_ref_kinds::kind_spec`,
+which `plugin test` uses too), so `validate_ref`, `[[acme_pr:12]]` and
+`[[pr:12]]` know them while the extension is installed and not after. A
+kind two extensions both declare is an error on each, and neither
+registers it. A **`wikilink:` prefix** another extension also uses (as
+its prefix, or as its kind) is an error on each and **costs only the
+sugar** (P10): `[[pr:…]]` links neither, but each namespaced kind still
+registers and links as `[[acme_pr:…]]`, so installing one extension never
+unlinks another's refs. A kind or prefix core holds is that extension's
+error. The pass
 restates `ref_kind` (V146) whole, read as `v_ref_kind` (kind, extension,
 label, id pattern, revisioned, wikilinks, resolve, page, icon); unlike
 event types, a removed extension's kinds leave, and refs to them are
