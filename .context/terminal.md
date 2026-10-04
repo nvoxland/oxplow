@@ -169,8 +169,18 @@ independent calls they were separate HTTP requests in daemon mode, and a
 later keystroke could overtake an earlier one (the browser suite typed
 `$((6*7))` and the shell got `$((67*))`). Keystrokes made while a send is
 in flight wait together and go as one `input` message, so fast typing
-costs no extra round trips; a failed send is logged and the next still
-goes. Locked by `terminalInput.test.ts`.
+costs no extra round trips — except a bare Escape, which keeps its own
+message (merged with the next key it reads as an Alt sequence; `\x1b\r`
+is Shift+Enter). Waiting scrolls sum and a newer resize replaces a
+waiting one, so a trackpad's stream of scrolls doesn't queue up behind a
+slow link (tsk992). A failed send is logged and the next still goes; one
+that doesn't answer within `SEND_TIMEOUT_MS` (5 s) is reported and its
+session's waiting messages are **dropped** — never delivered later in a
+burst the person didn't see land (a stale prompt and Enter, into an
+agent's terminal). The sender lives as long as its pane (created and
+closed by an effect, read through a ref): an unmounted pane's waiting
+messages are dropped and nothing more is sent. Locked by
+`terminalInput.test.ts`.
 
 ## Multiple terminals (Terminal page)
 

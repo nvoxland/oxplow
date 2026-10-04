@@ -4,7 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import type { TerminalEvent } from "../editor-session.js";
 import { desktopBridge } from "../api.js";
 import { logUi } from "../logger.js";
-import { terminalSender } from "./terminalInput.js";
+import { terminalSender, type TerminalMessage, type TerminalSender } from "./terminalInput.js";
 import { TASK_DRAG_MIME } from "../dragMimes.js";
 import {
   shouldHandleTerminalPageKey,
@@ -159,13 +159,23 @@ export function TerminalPane({
   // the terminal is opened (and unmounts on dispose).
   const [term, setTerm] = useState<Terminal | null>(null);
   const sessionIdRef = useRef<string | null>(null);
-  // Every message to the session, in order (tsk979).
-  const [sendToTerminal] = useState(() =>
-    terminalSender(
+  // Every message to the session, in order (tsk979). The pane's sender
+  // lives as long as the pane: unmounted, what waits is dropped and
+  // nothing more is sent (tsk992). Read through a ref at call time, so a
+  // re-mount (React's dev double mount) sends through its own.
+  const senderRef = useRef<TerminalSender | null>(null);
+  useEffect(() => {
+    const sender = terminalSender(
       (sessionId, message) => desktopBridge().forwardTerminalInput(sessionId, message),
       (error) => logUi("warn", "terminal input failed", { error: String(error) }),
-    ),
-  );
+    );
+    senderRef.current = sender;
+    return () => {
+      sender.close();
+      if (senderRef.current === sender) senderRef.current = null;
+    };
+  }, []);
+  const sendToTerminal = (sessionId: string, message: TerminalMessage) => senderRef.current?.send(sessionId, message);
   const [mode, setMode] = useState<"live" | "history">("live");
   const modeRef = useRef<"live" | "history">("live");
   const [dragHovering, setDragHovering] = useState(false);
