@@ -55,6 +55,12 @@ describe("an extension's ref kind (P8.D7)", () => {
     expect(preprocessWikilinks("see [[pr:12]]")).toContain("oxplow-invalid:");
   });
 
+  test("a sugar is read before a kind's own name, as the backend reads it (tsk933)", () => {
+    const beta: RefKind = { ...ACME_PR, kind: "beta_pr", extension: "beta", wikilinks: [] };
+    setRefKinds([{ ...ACME_PR, wikilinks: ["beta_pr"] }, beta]);
+    expect(pluginWikilinkRef("beta_pr:1")).toBe("acme_pr:1");
+  });
+
   test("a long id matches as the backend's does (tsk917)", () => {
     setRefKinds([ACME_PR]);
     expect(pluginWikilinkRef(`pr:${"1".repeat(300)}`)).toBe(`acme_pr:${"1".repeat(300)}`);

@@ -154,6 +154,18 @@ pub fn parse_ref_kinds(
             Err(e) => errors.push(at(file, line, e)),
         }
     }
+    // A sugar that is another of its own kinds would make `[[x:…]]` name
+    // two refs (tsk933): both kinds stay, the sugar goes.
+    let kinds: Vec<String> = out.iter().map(|d| d.kind.clone()).collect();
+    for d in &mut out {
+        if let Some(w) = d.wikilink.as_ref().filter(|w| kinds.contains(w)) {
+            errors.push(format!(
+                "{}: ref kind `{}`: `wikilink: {w}` is its own kind `{w}`; choose another prefix",
+                d.declared_at, d.kind
+            ));
+            d.wikilink = None;
+        }
+    }
     (out, errors)
 }
 
@@ -671,6 +683,34 @@ ref_kinds:
                 "{to}: {errors}"
             );
         }
+    }
+
+    /// tsk933: a `wikilink:` that is another of the extension's own kinds
+    /// would make one link name two refs; it is refused at its line, and
+    /// costs only the sugar — both kinds load.
+    #[test]
+    fn a_wikilink_that_is_one_of_its_own_kinds_is_refused() {
+        let two = MANIFEST.replace("wikilink: pr", "wikilink: acme_issue")
+            + "  - kind: acme_issue
+    label: Issue
+    id: '^\\d+$'
+    resolve: prs
+    page: pr
+    icon: ticket
+";
+        let ext = acme(&two);
+        let errors = ext.errors.join("\n");
+        assert!(
+            errors.contains("`wikilink: acme_issue`") && errors.contains("its own kind"),
+            "{errors}"
+        );
+        assert_eq!(
+            ext.ref_kinds
+                .iter()
+                .map(|k| (k.kind.as_str(), k.wikilink.as_deref()))
+                .collect::<Vec<_>>(),
+            [("acme_pr", None), ("acme_issue", None)]
+        );
     }
 
     /// tsk917: an id pattern far past the cap is refused.

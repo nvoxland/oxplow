@@ -144,7 +144,10 @@ export function pluginWikilinkRef(interior: string): string | null {
   if (colon <= 0) return null;
   const head = interior.slice(0, colon).toLowerCase();
   const id = interior.slice(colon + 1).trim();
-  const kind = current.get(head) ?? [...current.values()].find((k) => k.wikilinks.includes(head));
+  // The backend's order (`canonical_wikilink`): a `wikilink:` sugar, then
+  // a kind's own name. Load keeps them apart (tsk933); one order keeps the
+  // UI and the backend naming the same ref regardless.
+  const kind = [...current.values()].find((k) => k.wikilinks.includes(head)) ?? current.get(head);
   // The pattern runs in JS's backtracking engine: the load check keeps it
   // in one explicit ASCII form both engines read alike, with no repeats
   // that could share characters unfenced, so no id makes it backtrack

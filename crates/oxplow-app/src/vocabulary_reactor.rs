@@ -290,6 +290,42 @@ fn build_tx(
 /// (P10, K2). A kind or prefix core holds is that extension's error.
 fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>>) -> KindRegistry {
     let mut kinds = core_kinds();
+    // Namespaces are string prefixes, so one may hold another (`acme_`
+    // holds `acme-pr`'s `acme_pr_`). A kind in two is the more specific
+    // one's (tsk933): the other extension's declaration of it is refused,
+    // naming whose it is, and only the owner's counts below.
+    let namespace = |e: &str| format!("{}_", oxplow_domain::events::schema::plugin_namespace(e));
+    let declaring: Vec<(&str, String)> = declared
+        .iter()
+        .map(|d| (d.extension.as_str(), namespace(&d.extension)))
+        .collect();
+    let owner_of = |kind: &str, of: &str| -> Option<&str> {
+        let mine = namespace(of).len();
+        declaring
+            .iter()
+            .filter(|(e, ns)| *e != of && ns.len() > mine && kind.starts_with(ns.as_str()))
+            .max_by_key(|(_, ns)| ns.len())
+            .map(|(e, _)| *e)
+    };
+    let mut refused: BTreeSet<(&str, &str)> = BTreeSet::new();
+    for Declares {
+        extension,
+        kinds: decls,
+        ..
+    } in declared
+    {
+        for d in decls {
+            if let Some(owner) = owner_of(&d.kind, extension) {
+                refused.insert((extension, &d.kind));
+                errors.entry(extension.clone()).or_default().push(format!(
+                    "{}: ref kind `{}` is in `{owner}`'s namespace (`{}`); rename it",
+                    d.declared_at,
+                    d.kind,
+                    namespace(owner)
+                ));
+            }
+        }
+    }
     // Who declares each name as a kind, and as a prefix.
     let mut as_kind: HashMap<&str, BTreeSet<&str>> = HashMap::new();
     let mut as_prefix: HashMap<&str, BTreeSet<&str>> = HashMap::new();
@@ -300,6 +336,9 @@ fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>
     } in declared
     {
         for d in decls {
+            if refused.contains(&(extension.as_str(), d.kind.as_str())) {
+                continue;
+            }
             as_kind.entry(&d.kind).or_default().insert(extension);
             if let Some(w) = &d.wikilink {
                 as_prefix.entry(w).or_default().insert(extension);
@@ -329,6 +368,9 @@ fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>
     } in declared
     {
         for d in decls {
+            if refused.contains(&(extension.as_str(), d.kind.as_str())) {
+                continue;
+            }
             let mut problems = Vec::new();
             let same_kind: BTreeSet<&str> = as_kind[d.kind.as_str()]
                 .iter()
@@ -637,6 +679,63 @@ mod tests {
         assert_eq!(link("pr:12"), None, "the sugar links neither");
         assert_eq!(link("acme_pr:12").as_deref(), Some("acme_pr:12"));
         assert_eq!(link("beta_pr:12").as_deref(), Some("beta_pr:12"));
+    }
+
+    /// tsk933: namespaces are string prefixes, so `acme`'s (`acme_`) holds
+    /// `acme-pr`'s (`acme_pr_`). A kind in both is the more specific
+    /// namespace's: `acme-pr` keeps `acme_pr_x`, and `acme`'s declaration of
+    /// it is refused, naming whose namespace it is — never both lost.
+    #[tokio::test]
+    async fn a_kind_in_another_extensions_namespace_is_theirs() {
+        use crate::extension_ref_kinds::tests::{write_acme, MANIFEST as ACME};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        write_acme(
+            &root,
+            &ACME
+                .replace("kind: acme_pr", "kind: acme_pr_x")
+                .replace("wikilink: pr", "wikilink: ax"),
+        );
+        let other = tempfile::tempdir().unwrap();
+        write_acme(
+            other.path(),
+            &ACME
+                .replace("name: acme", "name: acme-pr")
+                .replace("kind: acme_pr", "kind: acme_pr_x")
+                .replace("wikilink: pr", "wikilink: px"),
+        );
+        std::fs::rename(
+            other.path().join("oxplow/extensions/acme"),
+            root.join("oxplow/extensions/acme-pr"),
+        )
+        .unwrap();
+        svc.vocabulary_service.sync().await.unwrap();
+        let listed = svc.listed_extensions(&root).await;
+        let errors = |name: &str| {
+            listed
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap()
+                .errors
+                .join("\n")
+        };
+        assert!(
+            errors("acme").contains("`acme_pr_x`") && errors("acme").contains("`acme-pr`"),
+            "{}",
+            errors("acme")
+        );
+        assert!(
+            !errors("acme-pr").contains("acme_pr_x"),
+            "{}",
+            errors("acme-pr")
+        );
+        let kinds = &svc.vocabulary.current().kinds;
+        assert!(kinds.get("acme_pr_x").is_some(), "acme-pr keeps its kind");
+        let link =
+            |l: &str| oxplow_domain::refs::canonical_wikilink(kinds, l).map(|r| r.to_string());
+        assert_eq!(link("px:1").as_deref(), Some("acme_pr_x:1"));
+        assert_eq!(link("ax:1"), None, "acme's refused kind brings no sugar");
     }
 
     /// tsk796: a namesake that declares nothing (`acme_pr` beside

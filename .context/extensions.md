@@ -1572,8 +1572,15 @@ engine reads as syntax), a `resolve` that isn't one of its models with `ref` and
 extension's, built by one constructor (`extension_ref_kinds::kind_spec`,
 which `plugin test` uses too), so `validate_ref`, `[[acme_pr:12]]` and
 `[[pr:12]]` know them while the extension is installed and not after. A
-kind two extensions both declare is an error on each, and neither
-registers it. A **`wikilink:` prefix** another extension also uses (as
+kind's namespace is a string prefix, so one may hold another's (`acme`'s
+`acme_` holds `acme-pr`'s `acme_pr_`): a kind in both is **the more
+specific namespace's** (tsk933) — `acme-pr` keeps `acme_pr_x`, and
+`acme`'s declaration of it is an error naming whose namespace it is.
+Otherwise a kind two extensions both declare is an error on each, and
+neither registers it. A `wikilink:` that is one of the extension's own
+kinds is refused at load and costs only the sugar (both kinds load), so no name is both a
+kind and a sugar, and both resolvers read a sugar before a kind's own
+name (`canonical_wikilink`, `pluginWikilinkRef`). A **`wikilink:` prefix** another extension also uses (as
 its prefix, or as its kind) is an error on each and **costs only the
 sugar** (P10): `[[pr:…]]` links neither, but each namespaced kind still
 registers and links as `[[acme_pr:…]]`, so installing one extension never
