@@ -3,11 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   createStream,
   vcsListAdoptableWorkspaces,
-  type BranchRef,
   type Stream,
   type VcsWorkspace,
 } from "../api.js";
-import { branchRefOf, readBranches } from "../vcsHistory.js";
+import { branchRefOf, readBranches, type BranchRef } from "../vcsHistory.js";
 import { logUi } from "../logger.js";
 import { BranchPicker, type PickedRef } from "../components/BranchPicker.js";
 import { Page } from "../tabs/Page.js";

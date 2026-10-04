@@ -257,9 +257,8 @@ function buildBridge() {
         return { ok: false, reason: e instanceof Error ? e.message : String(e) };
       }
     },
-    /// `clipboardReadText` is read by `TerminalPane`'s legacy
-    /// Electron-paste path; on Tauri the native clipboard shim is
-    /// preferred so this can return null and the caller falls back.
+    /// `clipboardReadText` is read by `TerminalPane`'s Cmd+V paste: the
+    /// shell's clipboard, since a webview's own read may be refused.
     clipboardReadText: async (): Promise<string> =>
       unwrap(await commands.clipboardReadText()),
   };
@@ -272,9 +271,7 @@ let cachedBridge: DesktopBridge | null = null;
 // shape at the boundary (P11, tsk963–964).
 export type { BackgroundTask, ChangeScopes, OxplowConfig, OxplowEvent, TextSearchHit };
 export type { OpOutcome, RemoteBranchEntry, MergeReadiness } from "./tauri-bridge/index.js";
-// Renderer-side views over the refs (`vcsHistory.ts` builds them); C9
-// moves them beside it.
-export type { RefOption, GroupedGitRefs } from "./api-types.js";
+
 
 // Stream / Thread come straight from the Tauri bindings — the
 // renderer reads the flat shape (working_pane / talking_pane /
@@ -363,12 +360,6 @@ export type { ThreadFollowup };
 
 export const BACKLOG_SCOPE = "__backlog__";
 
-export interface BranchRef {
-  kind: "local" | "remote";
-  name: string;
-  ref: string;
-  remote?: string;
-}
 
 
 export interface WorkspaceFile {

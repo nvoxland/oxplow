@@ -1,6 +1,7 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { gitRebase, vcsDeleteBranch, vcsMerge, vcsRenameBranch, type BranchRef, type GroupedGitRefs } from "../api.js";
+import { gitRebase, vcsDeleteBranch, vcsMerge, vcsRenameBranch } from "../api.js";
+import type { BranchRef, GroupedGitRefs } from "../vcsHistory.js";
 import { readRefGroups } from "../vcsHistory.js";
 import { awaitGitOp, gitOpErrorMessage } from "../git-op.js";
 import { ContextMenu } from "./ContextMenu.js";

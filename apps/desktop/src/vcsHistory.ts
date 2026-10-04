@@ -6,8 +6,36 @@
  * returns what it read (`reads`) so a caller re-runs with
  * `useRerunOnChange` when a model changes.
  */
-import { querySql, type BranchRef, type GroupedGitRefs, type RefOption, type SqlCell } from "./api.js";
+import { querySql, type SqlCell } from "./api.js";
 import type { Reads, RevisionInfo } from "./tauri-bridge/generated/bindings.js";
+
+/** A branch as the pickers show it: a git ref name (`refs/heads/main`,
+ *  `refs/remotes/origin/main`) and, for a remote one, its remote. */
+export interface BranchRef {
+  kind: "local" | "remote";
+  name: string;
+  ref: string;
+  remote?: string;
+}
+
+/** The refs grouped as the branch picker shows them ([`readRefGroups`]). */
+export interface GroupedGitRefs {
+  local: BranchRef[];
+  remote: BranchRef[];
+  /** Per remote, its branches. */
+  remotes?: { remote: string; branches: BranchRef[] }[];
+  tags: { name: string; ref: string }[];
+  /** Names of the most recently checked-out local branches, latest first. */
+  recent?: string[];
+}
+
+/** One ref a compare picker offers ([`readRefOptions`]). */
+export interface RefOption {
+  ref: string;
+  label: string;
+  kind: "local" | "remote" | "tag";
+  name?: string;
+}
 
 /** A branch as `v_branch` holds it. */
 export interface BranchRow {

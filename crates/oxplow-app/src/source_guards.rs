@@ -487,16 +487,6 @@ const LEGACY_KEPT: &[(&str, &str, &str)] = &[
         "egacy",
         "comment selectors stored as a per-surface position object: rows already in the database",
     ),
-    (
-        "apps/desktop/src/api-types.ts",
-        "egacy",
-        "the hand-written IPC types the generated bindings replace: tsk880",
-    ),
-    (
-        "apps/desktop/src/api.ts",
-        "egacy",
-        "the types still read from api-types.ts: tsk880",
-    ),
 ];
 
 /// The desktop's own TypeScript, tests and generated bindings aside.

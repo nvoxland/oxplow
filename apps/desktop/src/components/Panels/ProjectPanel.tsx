@@ -22,7 +22,6 @@ import {
   type ChangeScopes,
   type RevisionInfo,
   type OpOutcome,
-  type RefOption,
   type Stream,
   type TextSearchHit,
   type WorkspaceEntry,
@@ -31,7 +30,7 @@ import {
 } from "../../api.js";
 import type { DiffRequest } from "../Diff/diff-request.js";
 import { WORKING, gitRevision } from "../../revision.js";
-import { readRefOptions } from "../../vcsHistory.js";
+import { readRefOptions, type RefOption } from "../../vcsHistory.js";
 import type { MenuItem } from "../../menu.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";

@@ -242,9 +242,13 @@ union. To add an event:
 (`event.kind`, `event.streamId`, …). A subscriber that filtered on
 `event.type === "foo.changed"` silently never fired — the agent-status
 dot bug came from exactly this mismatch. `subscribeOxplowEvents` hands
-its listener the generated `OxplowEvent` union (P11, tsk963; the
-hand-written `{ type, …any }` shape in `api-types.ts` is gone), so a
-filter on a field or kind the union doesn't have fails typecheck.
+its listener the generated `OxplowEvent` union (P11, tsk963), so a
+filter on a field or kind the union doesn't have fails typecheck. There
+are no hand-written IPC types any more: `api-types.ts` is gone (tsk965)
+— a renderer type for what crosses the wire is the generated one, and a
+renderer-side view over it lives beside what builds it (the branch
+pickers' `BranchRef` / `GroupedGitRefs` / `RefOption` in
+`vcsHistory.ts`).
 Config reads (`getConfig`, the `set*` writers) return the generated
 `OxplowConfig` and the native menu is built as the generated
 `MenuGroupSnapshot`, with no casts at the boundary; a list the daemon

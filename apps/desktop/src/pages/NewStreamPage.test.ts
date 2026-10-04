@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { pickDefaultBranchEntry, validateNewStreamInput } from "./NewStreamPage.js";
-import type { BranchRef } from "../tauri-bridge/index.js";
+import type { BranchRef } from "../vcsHistory.js";
 
 describe("validateNewStreamInput", () => {
   test("rejects an empty title regardless of mode", () => {
