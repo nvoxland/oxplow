@@ -650,16 +650,27 @@ fn log_tool_tx(
     } else {
         let exit_code =
             crate::collection::parse_bash_post_tool(&env.payload_json).and_then(|b| b.exit_code);
-        ev.typed::<AgentToolFinished>(&AgentToolFinishedV1 {
-            tool: parts.tool,
-            path: parts.path,
-            detail: parts.detail,
-            ok: parts.ok,
-            exit_code,
-            input: content("tool_input")?,
-            output: content("tool_response")?,
-        })
-        .with_dedupe_key_opt(dedupe("finished"))
+        let finished = ev
+            .typed::<AgentToolFinished>(&AgentToolFinishedV1 {
+                tool: parts.tool,
+                path: parts.path,
+                detail: parts.detail,
+                ok: parts.ok,
+                exit_code,
+                input: content("tool_input")?,
+                output: content("tool_response")?,
+            })
+            .with_dedupe_key_opt(dedupe("finished"));
+        // Caused by the call's start, so what reads the run knows when it
+        // began (tsk888: its reports are written after).
+        let requested = match dedupe("requested") {
+            Some(key) => oxplow_db::event_log_store::id_by_dedupe_tx(conn, &key)?,
+            None => None,
+        };
+        match requested {
+            Some(id) => finished.with_cause(id),
+            None => finished,
+        }
     };
     let envelope = envelope.with_anchors(anchors).with_subject([subject]);
     append_unique_tx(conn, ev.vocabulary, &envelope)?;
@@ -875,6 +886,31 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(of_type(&logged(&svc).await, "agent.tool.finished").len(), 1);
+    }
+
+    /// tsk888: a call's `agent.tool.finished` is caused by its
+    /// `agent.tool.requested` (one tool use id), so what reads the run
+    /// knows when it started.
+    #[tokio::test]
+    async fn a_finished_tool_call_is_caused_by_its_request() {
+        let (svc, tid) = fixture().await;
+        for kind in [HookKind::PreToolUse, HookKind::PostToolUse] {
+            svc.ingest(hook(
+                kind,
+                tid,
+                Some("s1"),
+                json!({"tool_name": "Bash", "tool_use_id": "tu9", "tool_input": {"command": "cargo test"}}),
+            ))
+            .await
+            .unwrap();
+        }
+        let events = logged(&svc).await;
+        let requested = of_type(&events, "agent.tool.requested");
+        let finished = of_type(&events, "agent.tool.finished");
+        assert_eq!(
+            finished[0].envelope.cause.as_ref(),
+            Some(&requested[0].envelope.id)
+        );
     }
 
     /// A PreToolUse the policy refused is logged with its decision.

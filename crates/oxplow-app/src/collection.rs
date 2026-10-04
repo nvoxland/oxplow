@@ -444,6 +444,10 @@ pub struct RunCause {
     /// When the run finished (the event's time): what report freshness is
     /// judged against, however late the event is delivered.
     pub at: oxplow_domain::Timestamp,
+    /// When it started (its `agent.tool.requested`, the finished event's
+    /// cause), when known: a report written before is an earlier run's
+    /// (tsk888).
+    pub started: Option<oxplow_domain::Timestamp>,
 }
 
 impl CollectionService {
@@ -2160,7 +2164,9 @@ impl CollectionService {
         // Reports this run could have written: judged at the run's own
         // time, so a redelivery (a crash before the checkpoint, a retried
         // dead letter, a pump backlog) sees what the first delivery saw.
-        let window = cause.map_or_else(FreshWindow::ending_now, |c| FreshWindow::around(c.at));
+        let window = cause.map_or_else(FreshWindow::ending_now, |c| {
+            FreshWindow::of_run(c.started, c.at)
+        });
 
         // Static-analysis ride-along (OBSERVE-ALWAYS): when an analyzer ran,
         // record a static-analysis observation — command-only (the ran-record)
@@ -3525,6 +3531,9 @@ fn anchored_effort(cause: Option<&RunCause>) -> Option<EffortId> {
 /// How far past a run's event a report's mtime may be and still be its
 /// report: filesystem timestamp granularity and clock skew.
 const REPORT_FRESH_SLACK_MS: i64 = 60 * 1000;
+/// How coarse a file's mtime may be against the clock: a report written
+/// in the run's first second still counts as the run's.
+const MTIME_GRANULARITY_MS: i64 = 1000;
 
 /// The report mtimes a run could have produced: after `from`, no later than
 /// `to`. A report outside it belongs to an earlier run (or a later one).
@@ -3656,12 +3665,21 @@ pub(crate) struct FreshWindow {
 }
 
 impl FreshWindow {
-    /// Around a run that finished at `at`.
-    fn around(at: oxplow_domain::Timestamp) -> Self {
+    /// A run's reports: written after it `started` (tsk888) — less a
+    /// second of mtime granularity — or, its start unknown, in the 10
+    /// minutes before it `ended`; and by a minute after it ended.
+    fn of_run(started: Option<oxplow_domain::Timestamp>, ended: oxplow_domain::Timestamp) -> Self {
         Self {
-            from_ms: at.unix_ms() - REPORT_FRESH_WINDOW_MS,
-            to_ms: at.unix_ms() + REPORT_FRESH_SLACK_MS,
+            from_ms: started.map_or(ended.unix_ms() - REPORT_FRESH_WINDOW_MS, |s| {
+                s.unix_ms() - MTIME_GRANULARITY_MS
+            }),
+            to_ms: ended.unix_ms() + REPORT_FRESH_SLACK_MS,
         }
+    }
+
+    /// Around a run that finished at `at`, its start unknown.
+    fn around(at: oxplow_domain::Timestamp) -> Self {
+        Self::of_run(None, at)
     }
 
     /// Around a run that finished just now (an explicit ingest).
@@ -4027,6 +4045,26 @@ mod tests {
         assert!(!FreshWindow::around(Timestamp::from_unix_ms(written - hour)).holds(f.path()));
     }
 
+    /// tsk888: a run's own reports are written after it started — one
+    /// written before is an earlier run's, however recent. With its start
+    /// unknown, the window reaches back 10 minutes.
+    #[test]
+    fn a_report_written_before_its_run_started_isnt_its() {
+        use oxplow_domain::Timestamp;
+        let f = tempfile::NamedTempFile::new().unwrap();
+        let now = Timestamp::now().unix_ms();
+        let written = now - 3 * 60 * 1000;
+        f.as_file()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_millis(written as u64))
+            .unwrap();
+        let ended = Timestamp::from_unix_ms(now);
+        let started = Timestamp::from_unix_ms(now - 60 * 1000);
+        assert!(!FreshWindow::of_run(Some(started), ended).holds(f.path()));
+        assert!(FreshWindow::of_run(None, ended).holds(f.path()));
+        let earlier = Timestamp::from_unix_ms(written - 1_000);
+        assert!(FreshWindow::of_run(Some(earlier), ended).holds(f.path()));
+    }
+
     /// End-to-end exercises of the orchestration: a real in-memory DB +
     /// tempdir project, with stream/thread/task/effort/snapshot/blob rows
     /// built through the public store APIs.
@@ -4378,6 +4416,7 @@ mod tests {
                 },
                 // The run ended before the harness's edit landed.
                 at: Timestamp::from_unix_ms(Timestamp::now().unix_ms() - 30_000),
+                started: None,
             };
             h.service
                 .on_post_tool_use(&h.thread, &bash_payload("bun test", 0), Some(&cause))
@@ -6128,6 +6167,7 @@ mod tests {
                     ..Default::default()
                 },
                 at: Timestamp::now(),
+                started: None,
             };
             h.efforts.finish(&eid, None, None).await.unwrap();
             h.service
@@ -6995,6 +7035,7 @@ mod tests {
                 seq: 42,
                 anchors: Default::default(),
                 at: Timestamp::now(),
+                started: None,
             };
             for _ in 0..2 {
                 h.service
@@ -7345,6 +7386,7 @@ mod tests {
                     ..Default::default()
                 },
                 at: old,
+                started: None,
             };
             let result = h
                 .service

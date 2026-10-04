@@ -215,6 +215,21 @@ pub fn read_after_tx(
         .map_err(map_sql_err)
 }
 
+/// The id of the event logged under `dedupe_key`, if any.
+pub fn id_by_dedupe_tx(
+    conn: &Connection,
+    dedupe_key: &str,
+) -> Result<Option<EventId>, DomainError> {
+    conn.query_row(
+        "SELECT id FROM event_log WHERE dedupe_key = ?1",
+        params![dedupe_key],
+        |r| r.get::<_, String>(0),
+    )
+    .optional()
+    .map(|id| id.map(EventId))
+    .map_err(map_sql_err)
+}
+
 /// One event by id.
 pub fn get_tx(conn: &Connection, id: &EventId) -> Result<Option<StoredEvent>, DomainError> {
     conn.query_row(

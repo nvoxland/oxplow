@@ -16,7 +16,7 @@
 
 use async_trait::async_trait;
 use oxplow_db::{event_content_store, Database};
-use oxplow_domain::events::schema::{AgentToolFinished, EventType};
+use oxplow_domain::events::schema::{AgentToolFinished, AgentToolRequested, EventType};
 use oxplow_domain::{DomainError, StoredEvent};
 
 use crate::advisories::AdvisoryDeps;
@@ -27,13 +27,24 @@ use crate::extensions::AdvisoryOn;
 pub const COLLECTION: &str = "collection";
 pub const POST_TOOL_ADVISORIES: &str = "advisories.post_tool";
 
-fn cause_of(event: &StoredEvent) -> RunCause {
-    RunCause {
+/// The run `event` finished, with when it started: its cause, the tool
+/// call's `agent.tool.requested` (tsk888), when there is one.
+async fn cause_of(db: &Database, event: &StoredEvent) -> Result<RunCause, DomainError> {
+    let started = match event.envelope.cause.clone() {
+        Some(id) => db
+            .read(move |tx| oxplow_db::event_log_store::get_tx(tx, &id))
+            .await?
+            .filter(|c| c.envelope.event_type == AgentToolRequested::TYPE)
+            .map(|c| c.envelope.at),
+        None => None,
+    };
+    Ok(RunCause {
         event_id: event.envelope.id.as_str().to_string(),
         seq: event.seq,
         anchors: event.envelope.anchors.clone(),
         at: event.envelope.at,
-    }
+        started,
+    })
 }
 
 /// A stored body as JSON (`Null` when retention removed it).
@@ -80,7 +91,11 @@ impl AsyncEventConsumer for CollectionConsumer {
             "tool_response": content(&self.db, event, "output").await?,
         });
         self.collection
-            .on_post_tool_use(&thread, &payload.to_string(), Some(&cause_of(event)))
+            .on_post_tool_use(
+                &thread,
+                &payload.to_string(),
+                Some(&cause_of(&self.db, event).await?),
+            )
             .await
             .map(|_| ())
     }
@@ -112,7 +127,7 @@ impl AsyncEventConsumer for PostToolAdvisories {
                 &self.deps,
                 &thread,
                 AdvisoryOn::PostToolUse,
-                Some(&cause_of(event)),
+                Some(&cause_of(&self.deps.db, event).await?),
             )
             .await;
         }

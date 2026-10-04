@@ -295,8 +295,13 @@ unified `"run"` ledger, never a precondition for recording. `on_post_tool_use`
 resolves a single open effort only for the effort-RELATIVE *advisories*
 (the report-less / coverage-target nudges), which legitimately
 no-op under 0/N efforts; every OBSERVE call runs unconditionally. Report freshness
-is a **window around the run** (`FreshWindow`): a report counts when its mtime is
-within 10 minutes before the run's event and at most a minute after it. It is
+is a **window around the run** (`FreshWindow::of_run`): a report counts when its
+mtime is after the run **started** and at most a minute after it ended (tsk888)
+— a report written before the run began is an earlier run's, however recent.
+The start is the call's `agent.tool.requested`, which hook ingest makes the
+`agent.tool.finished` event's `cause` (one tool use id); `RunCause.started`
+carries its time. With no start known (no tool use id), the window reaches
+10 minutes back from the run's event. It is
 judged at the event's own time (`RunCause.at`), not at delivery, so a redelivery
 (a crash before the checkpoint, a retried dead letter, a pump backlog) sees what
 the first delivery saw; a run delivered more than 10 minutes late is recorded
