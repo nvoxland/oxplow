@@ -3360,6 +3360,31 @@ async fn a_refused_token_is_renewed_and_the_call_tried_once_more() {
     );
 }
 
+/// tsk907: a read that starts the process itself, and is refused, renews
+/// the token — the process it started began after the read did, which
+/// isn't "started since" the refusal.
+#[tokio::test]
+async fn a_read_that_starts_the_process_renews_a_refused_token() {
+    // Its service takes only the renewed token; its `check` doesn't look.
+    let (fx, sim) = signing_in("accepts:FAKE_TOKEN=at-3,lax-check", "").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
+    // The process goes away, so the next read starts it.
+    set_hooks(&fx, "crash").await;
+    let _ = create_on_fake(&fx).await;
+    fx.svc
+        .commands
+        .run(
+            &Actor::Human,
+            sync::SYNC,
+            json!({ "instance": INSTANCE }),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(refreshes(&sim), 1, "{:?}", sim.grants());
+}
+
 /// Two credentials signed in at the stand-in, `FAKE_TOKEN` and
 /// `OTHER_TOKEN`, the instance ready on both.
 async fn signed_in_twice(hooks: &str) -> (EffortFixture, OAuthSim) {

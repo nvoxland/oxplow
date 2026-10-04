@@ -128,15 +128,19 @@ impl Instance {
         let mut retried = false;
         let mut reauthorized = false;
         let outcome = loop {
-            let called = Instant::now();
             // From the last checkpoint — a retry resumes where the
             // rate-limited read's last batch landed.
             let resume = store
                 .get(&self.name, collector)
                 .await?
                 .and_then(|s| s.state);
+            // When the read began, for "renewed since": taken once it has
+            // its process — one this read started began after it, which
+            // isn't a renewal under it (tsk907).
+            let mut called = Instant::now();
             let outcome = match self.connection().await {
                 Ok((peer, handle)) => {
+                    called = Instant::now();
                     let mut outcome = self.stream(actor, &peer, handle, &decl, resume).await;
                     // Ended under it to renew the sign-in for another
                     // caller: as refused, so it tries again on the renewal.

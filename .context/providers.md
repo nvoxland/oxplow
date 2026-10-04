@@ -101,7 +101,9 @@ read is refused `RateLimited`), `needs:<NAME>` (`check` reports
 `<NAME>` unless the credential the process holds is `<value>` — a
 service that takes one token and no other, for the sign-in tests) and
 `refuse-auth` (invoke and read answer an `Auth` that names no
-credential), `lose-reply` (the next invoke lands and is never answered),
+credential), `lax-check` (check doesn't look at credentials, so `accepts`
+shows only on invoke and read — a service whose check doesn't validate the
+token), `lose-reply` (the next invoke lands and is never answered),
 `forget-keys` (it declares `idempotent_writes` and does a re-sent write
 again — what the kit must catch) and, at start, `plain-writes` (it
 declares no `idempotent_writes` — `plain_declarations()` — and ignores
@@ -657,7 +659,8 @@ form; sign-in is a provider's.
   `invoke` or `read` that answers `Auth` renews, ends the process and
   tries the call once more on a fresh one (`Instance::reauthorize` — a
   process started since the refused call is left alone, so two callers
-  renew once). **Only the refused credential is renewed** (tsk821,
+  renew once; "since the call" counts from when the call had its process,
+  so a read that started the process itself still renews — tsk907). **Only the refused credential is renewed** (tsk821,
   `Instance::renewable`): the one the `Auth` names, when the instance
   signs in for it; with none named, its only signed-in credential — with
   two or more it can't know which and renews none, so the refusal is the

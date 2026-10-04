@@ -46,6 +46,9 @@
 //! - `accepts:<NAME>=<value>` — `check`, `invoke` and `read` answer `Auth`
 //!   naming `<NAME>` unless the credential `<NAME>` the process holds is
 //!   `<value>` (its service takes that token and no other).
+//! - `lax-check` — `check` doesn't look at its credentials (the
+//!   `accepts` hook then shows only on `invoke` and `read`, as with a
+//!   service whose check doesn't validate the token);
 //! - `refuse-auth` — `invoke` and `read` answer `Auth` naming no
 //!   credential (a service that doesn't say which token it refused);
 //! - `lose-reply` — the next `invoke` lands but is never answered (a
@@ -100,6 +103,8 @@ pub struct Hooks {
     /// `refuse-auth`: every `invoke` and `read` is refused `Auth` naming
     /// no credential.
     pub refuse_auth: bool,
+    /// `lax-check`: `check` doesn't look at its credentials.
+    pub lax_check: bool,
     /// `lose-reply`: the next `invoke` lands and is never answered.
     pub lose_reply: bool,
     /// `forget-keys`: a write sent again with its key is done again.
@@ -133,6 +138,7 @@ impl Hooks {
                 None if part == "fail-next" => self.fail_next = 1,
                 None if part == "crash" => self.crash = true,
                 None if part == "refuse-auth" => self.refuse_auth = true,
+                None if part == "lax-check" => self.lax_check = true,
                 None if part == "lose-reply" => self.lose_reply = true,
                 None if part == "forget-keys" => self.forget_keys = true,
                 None if part == "plain-writes" => self.plain_writes = true,
@@ -478,7 +484,9 @@ async fn handle(
         }
         method::CHECK => {
             take_failure(world).await?;
-            require_token(world).await?;
+            if !world.lock().await.hooks.lax_check {
+                require_token(world).await?;
+            }
             let ms = world.lock().await.hooks.slow_check_ms;
             if ms > 0 {
                 tokio::time::sleep(Duration::from_millis(ms)).await;
