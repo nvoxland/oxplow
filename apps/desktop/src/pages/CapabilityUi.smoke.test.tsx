@@ -204,7 +204,7 @@ test("the active provider's extension replaces the Board; another's doesn't", as
       slots: [],
       commands: [],
       decorators: [],
-      replacements: [{ id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", lensId: `${name}/board` }],
+      replacements: [{ id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", lensId: `${name}/board`, label: "board" }],
     },
     lenses: [{ id: `${name}/board`, params: ["scope", "thread_id"].map((p) => ({ name: p, label: null, default: null })) }],
   });
@@ -260,7 +260,7 @@ test("a work item's own provider's extension replaces its state control, not the
       commands: [],
       decorators: [],
       replacements: [
-        { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", lensId: `${name}/state` },
+        { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", lensId: `${name}/state`, label: "state control" },
       ],
     },
     lenses: [{ id: `${name}/state`, params: [{ name: "ref", label: null, default: null }] }],

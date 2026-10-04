@@ -682,16 +682,26 @@ mod tests {
 
     /// tsk468: the EFFORT REVIEW names an effort and its work item by the
     /// canonical ids `effort.amend` and `work_item.*` take, so an agent
-    /// can paste them straight back.
+    /// can paste them straight back — as the file review that fills them
+    /// writes them (tsk935), not as a test spells them.
     #[test]
     fn the_effort_review_prints_canonical_ids() {
+        let reviewed = crate::task_service::review_from_lists(
+            &oxplow_domain::EffortId::new(313),
+            &oxplow_domain::refs::build::work_item_ref(oxplow_domain::TaskId::new(42)),
+            &["src/a.rs".into()],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("a claimed file that didn't change");
         let review = PendingEffortReview {
-            effort_id: oxplow_domain::EffortId::new(313).to_string(),
-            work_item: oxplow_domain::refs::build::work_item_ref(oxplow_domain::TaskId::new(42)),
+            effort_id: reviewed.effort_id,
+            work_item: reviewed.work_item,
             task_title: "Fix the thing".into(),
-            claimed_but_not_changed: vec!["src/a.rs".into()],
-            changed_but_not_claimed: vec![],
-            unclaimed_overflow: None,
+            claimed_but_not_changed: reviewed.claimed_but_not_changed,
+            changed_but_not_claimed: reviewed.changed_but_not_claimed,
+            unclaimed_overflow: reviewed.unclaimed_overflow,
             unattributed_runs: vec![],
         };
         let text = build_effort_file_review_reason(&[review]);

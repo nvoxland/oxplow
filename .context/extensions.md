@@ -918,8 +918,9 @@ host state.
 
 The history graph and the conflict resolver §11.2 names wait for a
 provider that needs them. Every target has a label a person reads
-(`REPLACEABLE_LABELS` in `useReplacement.ts`: "board", "state control";
-`every_replaceable_target_has_a_label`). The Linear example replaces
+— its `label` in the same table ("board", "state control"), carried on
+each `UiReplacement` so the desktop names it from there (tsk935; no
+second list to keep in step). The Linear example replaces
 both: its Board by Linear's states, and the state control with its
 `state` lens — the Linear states a synced issue of the team is in (Linear
 publishes no list of them), each with **Move Here** (`work_item.transition`

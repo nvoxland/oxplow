@@ -90,7 +90,7 @@ const replacing = (name: string) => ({
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", lensId: `${name}/board` },
+      { id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", lensId: `${name}/board`, label: "board" },
     ],
   },
   lenses: [

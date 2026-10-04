@@ -34,6 +34,8 @@ pub struct UiReplacement {
     pub capability: String,
     /// The lens that renders instead, given the target's props.
     pub lens_id: String,
+    /// What a person calls the target (`board`), from its table.
+    pub label: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,6 +128,7 @@ pub fn parse_replacements(
             target: t.target.to_string(),
             capability: t.capability.to_string(),
             lens_id: l.id.clone(),
+            label: t.label.to_string(),
         });
     }
     (out, errors)
@@ -217,6 +220,7 @@ mod tests {
                 target: "work_item.board".into(),
                 capability: "work_items".into(),
                 lens_id: "tracker/board".into(),
+                label: "board".into(),
             }]
         );
         for (entry, says) in [
@@ -276,20 +280,16 @@ mod tests {
     /// Every replaceable target has a name a person reads (Settings →
     /// Integrations, the replaced badge): the desktop's
     /// `REPLACEABLE_LABELS` names each one.
+    /// Every target has a label a person reads, and no two share one.
     #[test]
-    fn every_replaceable_target_has_a_label() {
-        let labels = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../apps/desktop/src/lens/useReplacement.ts"),
-        )
-        .unwrap();
-        for r in oxplow_domain::replaceable::REPLACEABLE {
-            assert!(
-                labels.contains(&format!("\"{}\":", r.target)),
-                "`{}` has no label in REPLACEABLE_LABELS",
-                r.target
-            );
-        }
+    fn every_replaceable_target_has_its_own_label() {
+        let labels: Vec<&str> = oxplow_domain::replaceable::REPLACEABLE
+            .iter()
+            .map(|r| r.label)
+            .collect();
+        assert!(labels.iter().all(|l| !l.trim().is_empty()), "{labels:?}");
+        let distinct: std::collections::BTreeSet<_> = labels.iter().collect();
+        assert_eq!(distinct.len(), labels.len(), "{labels:?}");
     }
 
     #[test]

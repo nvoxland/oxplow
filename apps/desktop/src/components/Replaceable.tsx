@@ -2,7 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 
 import type { SqlCell } from "../api.js";
 import { LensResultView } from "../lens/LensResultView.js";
-import { REPLACEABLE_LABELS, useReplacement } from "../lens/useReplacement.js";
+import { useReplacement } from "../lens/useReplacement.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 /**
@@ -41,7 +41,7 @@ export function Replaceable({
   const failed = (message: string) => (
     <>
       <div data-testid="replacement-fallback" style={noteStyle}>
-        {`${extension}'s ${REPLACEABLE_LABELS[target] ?? target} couldn't load: ${message} Showing oxplow's.`}
+        {`${extension}'s ${r.replacement.label} couldn't load: ${message} Showing oxplow's.`}
       </div>
       {fallback}
     </>
@@ -52,7 +52,7 @@ export function Replaceable({
       <span
         data-testid="replacement-badge"
         style={badgeStyle}
-        title={`${extension} replaces oxplow's ${REPLACEABLE_LABELS[target] ?? target}; turn it off on Settings → Integrations`}
+        title={`${extension} replaces oxplow's ${r.replacement.label}; turn it off on Settings → Integrations`}
       >
         replaced by {extension}
       </span>

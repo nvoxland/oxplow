@@ -39,7 +39,6 @@ import {
   subscribeOxplowEvents,
   type ProviderInstanceView,
 } from "../api.js";
-import { REPLACEABLE_LABELS } from "../lens/useReplacement.js";
 import type { SignInCompletion, SignInState, UiReplacement } from "../tauri-bridge/generated/bindings.js";
 import { CredentialRow } from "./ExtensionsSection.js";
 import { InlineConfirm } from "./InlineConfirm.js";
@@ -198,7 +197,7 @@ function Replacements({
     <fieldset data-testid="integrations-replacements" style={fieldsetStyle}>
       <legend style={mutedStyle}>Replaced components — an extension's own, while its provider is the active one</legend>
       {targets.map((target) => {
-        const label = REPLACEABLE_LABELS[target] ?? target;
+        const label = replaced.find((r) => r.target === target)?.label ?? target;
         const by = replaced.filter((r) => r.target === target).map((r) => r.extension);
         return (
           <label

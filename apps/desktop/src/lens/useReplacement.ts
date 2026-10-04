@@ -39,12 +39,6 @@ export type Replacement =
   /** The replacement couldn't load: oxplow's own, and why. */
   | { state: "failed"; replacement: UiReplacement; message: string };
 
-/** What a person calls each replaceable component. */
-export const REPLACEABLE_LABELS: Readonly<Record<string, string>> = {
-  "work_item.board": "board",
-  "work_item.detail.state": "state control",
-};
-
 /** The targets the person turned replacements off for (`replacementsOff`). */
 async function readReplacementsOff(): Promise<string[]> {
   const settings = await effectiveConfig();

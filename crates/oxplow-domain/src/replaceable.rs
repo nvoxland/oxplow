@@ -20,6 +20,8 @@ pub struct Replaceable {
     pub capability: &'static str,
     /// What the replacement is given, by name; its lens declares each.
     pub props: &'static [&'static str],
+    /// What a person calls it ("board"): the one name the UI shows it by.
+    pub label: &'static str,
 }
 
 /// Every replaceable sub-component.
@@ -31,6 +33,7 @@ pub const REPLACEABLE: &[Replaceable] = &[
         target: "work_item.board",
         capability: "work_items",
         props: &["scope", "thread_id"],
+        label: "board",
     },
     // A work item's state control (`WorkItemPage`'s State; its Move To is
     // never replaced, so an item can always move — tsk919): `ref` is the
@@ -40,6 +43,7 @@ pub const REPLACEABLE: &[Replaceable] = &[
         target: "work_item.detail.state",
         capability: "work_items",
         props: &["ref"],
+        label: "state control",
     },
 ];
 

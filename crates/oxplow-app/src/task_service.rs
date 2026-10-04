@@ -1257,7 +1257,7 @@ pub async fn reconcile_unattributed_on_close(
 /// Build a file review from the claimed/changed/acknowledged/other-claimed sets
 /// via the kind-agnostic differ ([`crate::attribution::diff`]) — the file view
 /// onto the shared reconciliation core.
-fn review_from_lists(
+pub(crate) fn review_from_lists(
     effort_id: &EffortId,
     work_item: &str,
     claimed: &[String],

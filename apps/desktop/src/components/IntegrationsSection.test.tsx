@@ -201,7 +201,7 @@ test("a replaced component can be turned back to oxplow's own", async () => {
   cleanup();
 
   replacements = [
-    { id: "tracker/work_item.board", extension: "tracker", target: "work_item.board", capability: "work_items", lensId: "tracker/board" },
+    { id: "tracker/work_item.board", extension: "tracker", target: "work_item.board", capability: "work_items", lensId: "tracker/board", label: "board" },
   ];
   const view = render(<IntegrationsSection />);
   const row = await waitFor(() => view.getByTestId("integrations-replacement-work_item.board"));

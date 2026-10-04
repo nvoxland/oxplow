@@ -5257,6 +5257,8 @@ export type UiReplacement = {
 	capability: string,
 	// The lens that renders instead, given the target's props.
 	lensId: string,
+	// What a person calls the target (`board`), from its table.
+	label: string,
 };
 
 export type UsageEvent = {

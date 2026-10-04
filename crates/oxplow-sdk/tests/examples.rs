@@ -120,4 +120,28 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
     assert_eq!(run.result.rows.len(), 1);
     let shown = serde_json::to_string(&run.result.rows).unwrap();
     assert!(shown.contains("Fix the hover state"), "{shown}");
+
+    // tsk935: `searchable: pull_request` — site search finds the pull
+    // request by its title, under its kind, the ref a hit opens.
+    svc.assets.sync_search_kinds().await.unwrap();
+    svc.assets.all_changed();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let hits = loop {
+        let hits = svc
+            .search_store
+            .search("hover", None, &["github_pr".to_string()], 10)
+            .await
+            .unwrap();
+        if !hits.is_empty() || std::time::Instant::now() > deadline {
+            break hits;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+    assert_eq!(
+        hits.iter()
+            .map(|h| (h.kind.as_str(), h.ref_id.as_str()))
+            .collect::<Vec<_>>(),
+        [("github_pr", "12")],
+        "{hits:?}"
+    );
 }
